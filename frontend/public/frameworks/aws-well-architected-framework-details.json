@@ -1,0 +1,17 @@
+{
+  "Reliability": {
+    "description": "Reliability ensures workloads perform their intended function correctly and consistently when expected. WAF emphasizes designing for business requirements through resiliency patterns, availability targets, and recovery strategies while maintaining simplicity in architecture."
+  },
+  "Security": {
+    "description": "Security protects confidentiality, integrity, and availability through comprehensive defense-in-depth strategies. WAF focuses on data protection, threat detection and mitigation, and maintaining security throughout the application lifecycle with proactive risk assessments."
+  },
+  "Cost Optimization": {
+    "description": "Cost optimization emphasizes developing a cost-efficient mindset by optimizing usage patterns and rate utilization. WAF guides organizations to model costs, establish budgets, reduce waste through right-sizing, and continuously monitor spending against business value delivered."
+  },
+  "Operational Excellence": {
+    "description": "Operational excellence streamlines operations through established standards, comprehensive holistic observability, and DevOps practices. WAF emphasizes safe deployment practices, automated monitoring, incident response procedures, and continuous improvement of operational processes."
+  },
+  "Performance Efficiency": {
+    "description": "Performance efficiency uses IT and computing resources efficiently by scaling horizontally, testing early and often, and monitoring solution health. WAF guides workload optimization considering evolving needs, technological advancements, and maintaining responsiveness under varying loads."
+  }
+}

@@ -1,0 +1,253 @@
+{
+  "architectures": [
+    {
+      "id": "cost-management-pipeline",
+      "slug": "cost-management-pipeline",
+      "title": "Cost Management Pipeline",
+      "description": "End-to-end FinOps data flow from cloud providers through processing to BI insights and stakeholder delivery",
+      "image": "/finops/diagrams/cost-management-pipeline.png",
+      "components": [
+        {
+          "id": "public-cloud-cost",
+          "name": "Public Cloud Cost Data",
+          "icon": "Database",
+          "description": "Raw billing and usage data exported from cloud providers (AWS CUR, Azure Cost Management, GCP BigQuery exports)",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Foundation for cost visibility - enables chargeback, showback, and accurate cost allocation across business units"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Primary data source for understanding cloud spend patterns. FOCUS-formatted exports enable cross-cloud normalization."
+          }
+        },
+        {
+          "id": "third-party-tool",
+          "name": "3rd Party FinOps Tool",
+          "icon": "Box",
+          "description": "Centralized platform (CloudHealth, Apptio, Flexera, Spot.io) that aggregates and normalizes multi-cloud billing data",
+          "waf": {
+            "pillar": "Operational Excellence",
+            "color": "#8B5CF6",
+            "explanation": "Centralizes operational visibility across cloud providers, enabling standardized processes and consistent governance"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Aggregates disparate billing formats into unified view. Provides allocation rules, tagging governance, and anomaly detection."
+          }
+        },
+        {
+          "id": "cost-tagging",
+          "name": "Public Cost Tagging",
+          "icon": "Tag",
+          "description": "Metadata tags applied to cloud resources (cost center, environment, owner, project) for granular cost attribution",
+          "waf": {
+            "pillar": "Operational Excellence",
+            "color": "#8B5CF6",
+            "explanation": "Enables proper cost attribution and governance through consistent resource labeling standards"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Critical for accurate showback/chargeback. Tags map cloud resources to business dimensions like team, product, or environment."
+          }
+        },
+        {
+          "id": "cost-center-data",
+          "name": "Cost Center Data",
+          "icon": "Building2",
+          "description": "Enterprise financial hierarchy data (GL codes, departments, profit centers) from ERP/finance systems",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Bridges cloud costs to enterprise financial reporting, enabling accurate budgeting and variance analysis"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Maps cloud spend to organizational structure for accurate allocation and executive reporting."
+          }
+        },
+        {
+          "id": "final-cost-data",
+          "name": "Final Cost Data",
+          "icon": "Database",
+          "description": "Normalized, enriched cost data with allocations applied - the source of truth for all downstream analytics",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Single source of truth for cost data enables consistent optimization decisions across the organization"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Fully allocated dataset ready for analysis. Includes amortized commitments, shared costs, and custom allocations."
+          }
+        },
+        {
+          "id": "ml-ai",
+          "name": "ML/AI Processing",
+          "icon": "Brain",
+          "description": "Machine learning models for anomaly detection, spend forecasting, and optimization recommendations",
+          "waf": {
+            "pillar": "Performance Efficiency",
+            "color": "#F59E0B",
+            "explanation": "Uses intelligent analysis to identify performance optimization opportunities that also reduce costs"
+          },
+          "finops": {
+            "phase": "Optimize",
+            "color": "#10B981",
+            "explanation": "Automates identification of savings opportunities: rightsizing, reservations, spot instances, and waste detection."
+          }
+        },
+        {
+          "id": "kpi-processing",
+          "name": "KPI Processing",
+          "icon": "TrendingUp",
+          "description": "Calculation of unit economics and efficiency metrics (cost per transaction, cost per user, efficiency ratios)",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Metrics-driven approach ensures spend aligns with business value and identifies optimization opportunities"
+          },
+          "finops": {
+            "phase": "Operate",
+            "color": "#8B5CF6",
+            "explanation": "Translates raw costs into business-meaningful KPIs. Enables engineering to understand cost impact of decisions."
+          }
+        },
+        {
+          "id": "forecasting",
+          "name": "Forecasting",
+          "icon": "LineChart",
+          "description": "Predictive models for future spend based on historical trends, growth projections, and planned initiatives",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Proactive budgeting and capacity planning prevents cost overruns and ensures financial predictability"
+          },
+          "finops": {
+            "phase": "Operate",
+            "color": "#8B5CF6",
+            "explanation": "Provides 3-12 month spend projections for budgeting. Enables proactive commitment planning and budget alerts."
+          }
+        },
+        {
+          "id": "ops-data",
+          "name": "Ops Data",
+          "icon": "Activity",
+          "description": "Operational metrics (CPU/memory utilization, request counts, error rates) from monitoring systems",
+          "waf": {
+            "pillar": "Reliability",
+            "color": "#3B82F6",
+            "explanation": "Operational data ensures cost decisions don't negatively impact system reliability or performance"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Correlates cost with performance to identify underutilized resources and rightsizing opportunities."
+          }
+        },
+        {
+          "id": "cmdb",
+          "name": "CMDB",
+          "icon": "Server",
+          "description": "Configuration Management Database mapping cloud resources to applications, owners, and business services",
+          "waf": {
+            "pillar": "Operational Excellence",
+            "color": "#8B5CF6",
+            "explanation": "Provides operational context linking resources to applications and owners for accountability"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Enriches cost data with application and owner context. Critical for accurate showback to engineering teams."
+          }
+        },
+        {
+          "id": "budget",
+          "name": "Budget Data",
+          "icon": "Wallet",
+          "description": "Approved budget allocations by team, project, or cost center from finance planning systems",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Budget tracking ensures spending stays within approved limits and enables proactive management"
+          },
+          "finops": {
+            "phase": "Operate",
+            "color": "#8B5CF6",
+            "explanation": "Enables budget vs actual reporting and automated alerts when spend approaches thresholds."
+          }
+        },
+        {
+          "id": "kpi-storage",
+          "name": "KPI Storage",
+          "icon": "BarChart3",
+          "description": "Time-series database storing calculated KPIs for trend analysis and historical comparison",
+          "waf": {
+            "pillar": "Operational Excellence",
+            "color": "#8B5CF6",
+            "explanation": "Historical KPI data enables trend analysis and continuous improvement of operational practices"
+          },
+          "finops": {
+            "phase": "Operate",
+            "color": "#8B5CF6",
+            "explanation": "Historical metrics enable trend analysis, goal tracking, and efficiency improvements over time."
+          }
+        },
+        {
+          "id": "anomaly-storage",
+          "name": "Anomaly Detection",
+          "icon": "AlertTriangle",
+          "description": "Storage for detected cost anomalies, spikes, and unusual spending patterns requiring investigation",
+          "waf": {
+            "pillar": "Security",
+            "color": "#EF4444",
+            "explanation": "Anomaly detection can identify security incidents (cryptomining, data exfiltration) reflected in cost spikes"
+          },
+          "finops": {
+            "phase": "Operate",
+            "color": "#8B5CF6",
+            "explanation": "Early warning system for unexpected spend. Triggers alerts and workflows for investigation."
+          }
+        },
+        {
+          "id": "bi-platform",
+          "name": "BI Platform/Reports",
+          "icon": "PieChart",
+          "description": "Business intelligence dashboards (Power BI, Tableau, Looker) for executive and team-level cost visibility",
+          "waf": {
+            "pillar": "Operational Excellence",
+            "color": "#8B5CF6",
+            "explanation": "Dashboards provide operational visibility enabling data-driven decisions across the organization"
+          },
+          "finops": {
+            "phase": "Inform",
+            "color": "#3B82F6",
+            "explanation": "Delivers insights to stakeholders at all levels. Executive summaries, team dashboards, and detailed drill-downs."
+          }
+        },
+        {
+          "id": "stakeholders",
+          "name": "Stakeholders",
+          "icon": "Users",
+          "description": "Finance, Engineering, and Executive consumers of cost data who make decisions based on insights",
+          "waf": {
+            "pillar": "Cost Optimization",
+            "color": "#10B981",
+            "explanation": "Engaged stakeholders are essential for implementing optimization recommendations and maintaining cost culture"
+          },
+          "finops": {
+            "phase": "Operate",
+            "color": "#8B5CF6",
+            "explanation": "FinOps is a cultural practice. Success requires engaged stakeholders across finance, engineering, and business."
+          }
+        }
+      ]
+    }
+  ]
+}

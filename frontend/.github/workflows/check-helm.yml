@@ -1,0 +1,47 @@
+name: check-helm
+
+# Lint Helm charts if they exist
+# Runs on PRs and on-demand
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infrastructure/kubernetes/**'
+  workflow_dispatch: {}
+
+jobs:
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Check if charts exist
+        id: charts-exist
+        run: |
+          if [ -d "infrastructure/kubernetes/charts" ] && [ "$(ls -A infrastructure/kubernetes/charts)" ]; then
+            echo "charts_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "charts_exist=false" >> $GITHUB_OUTPUT
+            echo "⏭️ No Kubernetes charts found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Set up Helm
+        if: steps.charts-exist.outputs.charts_exist == 'true'
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: '3.12.0'
+
+      - name: Lint all charts
+        if: steps.charts-exist.outputs.charts_exist == 'true'
+        run: |
+          set -e
+          for chart in $(ls -1 infrastructure/kubernetes/charts); do
+            chart_path="infrastructure/kubernetes/charts/$chart"
+            if [ -f "$chart_path/Chart.yaml" ]; then
+              echo "Linting $chart_path"
+              helm lint "$chart_path"
+            fi
+          done

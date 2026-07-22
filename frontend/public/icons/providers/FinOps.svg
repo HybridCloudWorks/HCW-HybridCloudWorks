@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FinOps Foundation logo">
+  <circle cx="256" cy="256" r="248" fill="#314254"/>
+  <path d="M256 96L398 176 256 256 114 176 256 96Z" fill="#D9D9D6"/>
+  <path d="M126 208L250 282V414L126 340V208Z" fill="#28C3A2"/>
+  <path d="M386 208L262 282V414L386 340V208Z" fill="#D9D9D6"/>
+  <path d="M256 254L256 413" stroke="#314254" stroke-width="18" stroke-linecap="round"/>
+  <path d="M126 208L250 282" stroke="#314254" stroke-width="18" stroke-linecap="round"/>
+  <path d="M386 208L262 282" stroke="#314254" stroke-width="18" stroke-linecap="round"/>
+  <path d="M256 96L398 176" stroke="#314254" stroke-width="18" stroke-linecap="round"/>
+  <path d="M256 96L114 176" stroke="#314254" stroke-width="18" stroke-linecap="round"/>
+</svg>

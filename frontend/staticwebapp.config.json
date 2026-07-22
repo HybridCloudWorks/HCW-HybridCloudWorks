@@ -1,0 +1,54 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/assets/*.{js,css,map}",
+      "/images/*.{png,jpg,jpeg,gif,svg,webp,ico}",
+      "/data/*.json",
+      "/favicon.ico",
+      "/robots.txt",
+      "/sitemap.xml"
+    ]
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://static.cloudflareinsights.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://apis.google.com https://accounts.google.com https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.run.app https://*.azurewebsites.net https://*.documents.azure.com wss://*.firebaseio.com https://sessionize.com https://nominatim.openstreetmap.org; frame-src 'self' https://apis.google.com https://accounts.google.com https://*.firebaseapp.com; frame-ancestors 'none';"
+  },
+  "routes": [
+    {
+      "route": "/assets/*",
+      "headers": {
+        "Cache-Control": "max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/data/*",
+      "headers": {
+        "Cache-Control": "max-age=3600"
+      }
+    },
+    {
+      "route": "/*.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"
+      }
+    },
+    {
+      "route": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"
+      }
+    }
+  ],
+  "responseOverrides": {
+    "404": {
+      "rewrite": "/index.html",
+      "statusCode": 200
+    }
+  },
+  "trailingSlash": "never"
+}

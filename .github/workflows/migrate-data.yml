@@ -1,0 +1,55 @@
+name: DISABLED - Prototype Data Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (only count/export, no import)'
+        required: true
+        type: boolean
+        default: true
+      collections:
+        description: 'Comma separated list of collections to migrate (leave blank for all)'
+        required: false
+        type: string
+
+jobs:
+  migrate:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          
+      - name: Install dependencies
+        run: npm install firebase-admin @azure/cosmos
+        working-directory: scripts
+        
+      - name: Create Firebase credentials file
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > ./scripts/firebase-sa.json
+        
+      - name: Run Migration
+        working-directory: scripts
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ./firebase-sa.json
+          COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
+          COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
+          COSMOS_DATABASE: hybridcloudworks
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="--dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.collections }}" ]; then
+            ARGS="$ARGS --collections ${{ github.event.inputs.collections }}"
+          fi
+          
+          node migrate-firestore-to-cosmos.mjs $ARGS
+          
+      - name: Cleanup
+        if: always()
+        run: rm -f ./scripts/firebase-sa.json

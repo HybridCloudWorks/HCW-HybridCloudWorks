@@ -1,0 +1,96 @@
+{
+  "framework": "Azure Well-Architected Framework",
+  "description": "A set of guiding tenets that can be used to improve the quality of a workload. The framework consists of five pillars: Reliability, Security, Cost Optimization, Operational Excellence, and Performance Efficiency.",
+  "tradeoffs": {
+    "Reliability": {
+      "Security": {
+        "label": "Increased Attack Surface",
+        "explanation": "Building highly reliable systems often requires exposing multiple endpoints, redundant access paths, and distributed components across regions—each representing potential attack vectors that expand the overall security attack surface. For example, implementing active-active multi-region deployments for reliability means exposing database replication endpoints, cross-region VPN connections, and management interfaces in multiple geographic locations, each requiring security controls. Load balancers and health check endpoints necessary for reliability create additional surfaces that must be hardened against denial-of-service attacks and unauthorized access. Backup and disaster recovery systems require separate credentials, network paths, and storage access that introduce additional security considerations. Azure Site Recovery services, geo-replicated storage accounts, and Traffic Manager endpoints all enhance reliability but require careful security configuration to prevent exploitation."
+      },
+      "Cost": {
+        "label": "Increased Cost",
+        "explanation": "Achieving high reliability in Azure requires substantial financial investment in redundant infrastructure, premium service tiers, comprehensive monitoring, and disaster recovery capabilities that significantly increase overall cloud expenditure. Premium SKUs offering availability zone support, such as Premium storage accounts, Standard Load Balancers, and zone-redundant database tiers cost considerably more than basic offerings. Implementing multi-region active-active or active-passive deployments multiplies infrastructure costs across regions while adding cross-region data transfer charges. For instance, a business-critical SQL Database with zone redundancy and geo-replication to a secondary region costs several times more than a single-region basic tier database. Automated backup solutions with extended retention, Azure Site Recovery for VM protection, and comprehensive Application Insights monitoring all add ongoing costs."
+      },
+      "Operational": {
+        "label": "Increased Complexity",
+        "explanation": "Implementing reliability patterns in Azure substantially increases operational complexity through sophisticated orchestration, complex monitoring requirements, and elaborate incident response procedures that demand specialized expertise and detailed documentation. Managing availability zones, availability sets, and multi-region deployments requires understanding Azure's fault domains, update domains, and regional pairing concepts. Implementing automated failover using Azure Traffic Manager, Front Door, or Application Gateway demands complex health probe configuration, traffic routing rules, and failover testing procedures. For example, a geo-distributed application using Cosmos DB with multi-region writes requires operational teams to understand consistency levels, conflict resolution policies, partition key design, and regional failover procedures."
+      },
+      "Performance": {
+        "label": "Increased Latency",
+        "explanation": "Reliability mechanisms including synchronous replication, health monitoring, consensus protocols, and failover validation introduce measurable latency that directly impacts application response times and user experience. Zone-redundant storage in Azure performs synchronous replication across availability zones, adding milliseconds to write operations compared to locally-redundant storage. SQL Database with zone redundancy or geo-replication experiences increased write latency as transactions must commit across multiple replicas. Application Gateway health probes and load balancer health checks generate additional traffic and processing overhead. For example, implementing geo-replication for Azure Cosmos DB with strong consistency requires write operations to be acknowledged by multiple regions before returning success, significantly increasing latency compared to eventual consistency models."
+      }
+    },
+    "Security": {
+      "Reliability": {
+        "label": "Operational Friction",
+        "explanation": "Comprehensive security controls including network isolation, identity verification, encryption requirements, and compliance policies can impede rapid incident response and system recovery—creating operational friction that extends outage duration. Azure Private Endpoints and network security groups that isolate resources improve security but complicate emergency access during incidents when rapid troubleshooting is critical. Just-in-time (JIT) VM access policies, Privileged Identity Management (PIM) requiring approval workflows, and Azure Key Vault certificate validation add verification steps that delay emergency changes. For instance, during a critical database failure requiring immediate restoration from backup, security policies demanding multi-factor authentication from multiple approvers, conditional access policies requiring compliant devices, and Key Vault access policies requiring specific managed identities can add precious minutes to recovery time."
+      },
+      "Cost": {
+        "label": "Increased Cost",
+        "explanation": "Implementing comprehensive security in Azure demands significant investment in premium security services, advanced threat protection, compliance tools, and specialized personnel that substantially increase overall cloud expenditure beyond infrastructure costs. Azure Security Center Standard tier, Azure Defender across all resource types, Azure Sentinel for SIEM capabilities, and Key Vault Premium with HSM protection all require ongoing subscriptions. Implementing Azure DDoS Protection Standard adds significant monthly costs, while Azure Firewall Premium with intrusion detection costs more than basic network security groups. Compliance requirements may mandate specific certifications, audit logging, and data residency controls that necessitate premium tiers and specialized configurations."
+      },
+      "Operational": {
+        "label": "Reduced Velocity",
+        "explanation": "Security requirements including policy validation, vulnerability scanning, compliance checking, and approval workflows substantially slow deployment velocity and development iteration cycles—creating tension between security rigor and operational agility. Azure Policy enforcement that blocks non-compliant deployments, Azure Security Center recommendations requiring remediation before production promotion, and mandatory security reviews all extend deployment timelines. Implementing Infrastructure-as-Code with security validation requires integrating tools like Checkov, Terrascan, or Azure's own Policy-as-Code into CI/CD pipelines, adding pipeline execution time. For example, deploying a new microservice might require container image scanning for vulnerabilities, validation of network security group rules against organizational policies, approval from security teams for any new Key Vault access policies, verification of encryption settings, and documentation of data classification."
+      },
+      "Performance": {
+        "label": "Performance Overhead",
+        "explanation": "Security controls including encryption operations, network inspection, identity validation, and policy evaluation consume substantial compute and network resources that directly degrade application performance and increase infrastructure requirements. Azure Application Gateway with Web Application Firewall performs deep packet inspection that adds latency and limits throughput compared to basic load balancers. Enabling Transparent Data Encryption (TDE) for Azure SQL Database and disk encryption for VMs requires CPU cycles for encryption/decryption operations. Implementing Azure Private Link forces traffic through private endpoints that add network hops compared to direct public connectivity. For instance, a high-transaction microservices application where every service-to-service call requires Azure AD managed identity authentication, token validation, and encrypted communication experiences cumulative overhead that can reduce throughput by 20-30% compared to unprotected communication."
+      }
+    },
+    "Cost": {
+      "Reliability": {
+        "label": "Reduced Resiliency",
+        "explanation": "Cost optimization initiatives that eliminate redundancy, reduce backup frequency, or choose lower service tiers directly undermine system resilience and increase vulnerability to failures, data loss, and extended outages. Choosing locally-redundant storage instead of zone-redundant or geo-redundant storage cuts costs by 50-70% but eliminates protection against datacenter failures or regional disasters. Selecting Basic tier services like Basic App Service Plans, Basic SQL Databases, or Basic Load Balancers saves costs but lacks availability zone support, autoscaling capabilities, and SLA guarantees necessary for resilient operations. For example, reducing Azure Backup retention from 365 days to 30 days lowers storage costs but increases risk of being unable to recover from delayed data corruption discovery."
+      },
+      "Security": {
+        "label": "Reduced Controls",
+        "explanation": "Budget constraints that force use of basic security tiers, elimination of advanced threat protection, or reduction of security monitoring significantly weaken security posture and increase exposure to cyber threats and compliance violations. Choosing Azure Security Center Free tier instead of Defender for Cloud Premium eliminates advanced threat detection, vulnerability assessment, and adaptive application controls. Skipping Azure DDoS Protection Standard saves substantial costs but leaves applications vulnerable to distributed denial-of-service attacks without specialized mitigation. Eliminating Azure Sentinel or reducing log retention to minimum compliance requirements blinds security operations teams to threats and hampers incident investigation."
+      },
+      "Operational": {
+        "label": "Reduced Observability",
+        "explanation": "Limiting operational tooling budgets reduces logging, monitoring, and diagnostic capabilities that are essential for maintaining system health, troubleshooting issues efficiently, and ensuring optimal performance across Azure environments. Restricting Application Insights sampling rates or limiting Log Analytics data ingestion to reduce costs decreases visibility into application behavior and system performance. Eliminating distributed tracing, reducing metric resolution, or limiting alert rules to save costs extends mean time to detect and resolve incidents. For example, choosing not to implement full-stack monitoring with Application Insights, Log Analytics, and Azure Monitor means relying on basic metrics that provide insufficient detail for diagnosing complex distributed system issues."
+      },
+      "Performance": {
+        "label": "Underprovisioning",
+        "explanation": "Cost reduction strategies that involve selecting smaller VM sizes, limiting database DTUs/vCores, reducing storage IOPS, or restricting network bandwidth create performance bottlenecks that degrade user experience, especially during peak load periods. Choosing B-series burstable VMs instead of D-series compute-optimized instances saves 60-70% on costs but provides only baseline performance with burst credits that deplete during sustained load. Selecting Standard SSD instead of Premium SSD or Ultra Disk dramatically reduces costs but introduces latency and IOPS limits that impact database performance. For example, right-sizing an Azure SQL Database from 8 vCores to 2 vCores reduces costs by 75% but may cause query timeouts and degraded response times when concurrent users exceed the reduced capacity."
+      }
+    },
+    "Operational": {
+      "Reliability": {
+        "label": "Destabilization Risk",
+        "explanation": "Operational changes including deployments, configuration updates, scaling operations, and infrastructure modifications introduce risk of destabilizing reliable systems through misconfigurations, incompatibilities, or unexpected interactions that weren't apparent during testing. Rapid deployment cadences without adequate testing in staging environments can introduce bugs, resource leaks, or configuration errors that impact production stability. For instance, updating Azure Application Gateway backend pool configurations during deployment might inadvertently remove healthy backend servers, causing service disruption. Implementing infrastructure changes like network security group rule modifications, subnet changes, or virtual network peering updates can break application connectivity if dependencies aren't fully understood."
+      },
+      "Security": {
+        "label": "Increased Surface Area",
+        "explanation": "Operational expansion through deploying additional resources, enabling management tools, implementing automation pipelines, and increasing system complexity creates additional security attack vectors and potential vulnerabilities that must be protected and monitored. Each new Azure resource, service principal, managed identity, network connection, and integration point represents potential security risk that requires proper configuration and governance. Implementing CI/CD pipelines introduces security considerations around credential management, pipeline access control, artifact security, and deployment permissions. For example, Azure DevOps service connections with contributor access to production subscriptions represent high-risk credentials that attackers target."
+      },
+      "Cost": {
+        "label": "Increased Tooling Spend",
+        "explanation": "Building operational excellence in Azure requires substantial investment in monitoring tools, automation platforms, and operational personnel that increase overall cloud expenditure beyond basic infrastructure costs."
+      },
+      "Performance": {
+        "label": "Monitoring Overhead",
+        "explanation": "Comprehensive operational monitoring, logging, and diagnostic tools consume compute resources and network bandwidth that can impact application performance during high-load scenarios."
+      }
+    },
+    "Performance": {
+      "Reliability": {
+        "label": "Complexity Trade-off",
+        "explanation": "Performance optimizations like caching, CDN usage, and compute scaling can introduce additional failure points and complexity that may reduce overall system reliability."
+      },
+      "Security": {
+        "label": "Reduced Security",
+        "explanation": "Performance optimizations that bypass security controls, cache sensitive data, or reduce encryption strength can weaken security posture to achieve faster response times."
+      },
+      "Cost": {
+        "label": "Higher Costs",
+        "explanation": "Achieving optimal performance requires premium compute tiers, faster storage, increased bandwidth, and CDN services that substantially increase cloud expenditure."
+      },
+      "Operational": {
+        "label": "Increased Complexity",
+        "explanation": "Performance tuning requires sophisticated monitoring, profiling tools, and specialized expertise that increases operational complexity and maintenance burden."
+      }
+    }
+  }
+}

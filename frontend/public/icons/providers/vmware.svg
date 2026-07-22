@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 384" role="img" aria-label="VMware cloud logo">
+  <defs>
+    <clipPath id="cloud-clip">
+      <path d="M114 352c-48 0-86-35-86-79 0-40 29-74 68-80 19-52 70-88 130-88 55 0 102 27 124 73 13-6 29-9 45-9 62 0 112 47 112 104 0 43-27 78-66 94H114z"/>
+    </clipPath>
+  </defs>
+  <path d="M114 352c-48 0-86-35-86-79 0-40 29-74 68-80 19-52 70-88 130-88 55 0 102 27 124 73 13-6 29-9 45-9 62 0 112 47 112 104 0 43-27 78-66 94H114z" fill="#0B0F14"/>
+  <g clip-path="url(#cloud-clip)">
+    <polygon points="0,270 120,384 0,384" fill="#6DE3FF"/>
+    <polygon points="0,270 128,270 120,384" fill="#3CCEF7"/>
+    <polygon points="128,270 256,128 256,384 120,384" fill="#2AB7F6"/>
+    <polygon points="256,128 384,0 384,384 256,384" fill="#118C85"/>
+    <polygon points="384,0 512,0 512,236 384,236" fill="#0D5F5E"/>
+    <polygon points="384,236 512,236 512,384 384,384" fill="#16B34A"/>
+    <polygon points="0,270 96,160 128,270" fill="#C9F4FF"/>
+    <polygon points="96,160 180,92 256,128 128,270" fill="#49D6FF"/>
+    <polygon points="180,92 256,0 384,0 256,128" fill="#1BC7C7"/>
+    <polygon points="256,128 384,0 384,236" fill="#0C7F73"/>
+    <polygon points="384,236 512,236 512,384 384,384" fill="#0B5F31"/>
+    <polygon points="384,236 512,236 512,336" fill="#C2F000"/>
+    <polygon points="256,384 384,236 512,384" fill="#30D43E"/>
+    <polygon points="128,270 256,384 180,384" fill="#0F1E70"/>
+    <polygon points="0,270 128,270 180,384 0,384" fill="#5DD8F5"/>
+    <polygon points="180,384 256,384 128,270" fill="#1E7FCF"/>
+    <polygon points="256,384 384,236 384,384" fill="#14B7B2"/>
+  </g>
+</svg>

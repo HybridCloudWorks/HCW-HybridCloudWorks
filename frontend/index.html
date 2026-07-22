@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hybrid Cloud Works</title>
+    <!--
+      Declare the brand logo as the favicon so the browser doesn't auto-request
+      /favicon.ico (which 404s and surfaces as a Lighthouse "errors-in-console"
+      hit). Existing PNG is reused; no separate .ico file needed.
+    -->
+    <link rel="icon" type="image/png" href="/icons/hcw-logo.png" />
+    <link rel="apple-touch-icon" href="/icons/hcw-logo.png" />
+    <!--
+      Static fallback meta description for crawlers that don't execute JS.
+      Per-route descriptions are set dynamically via react-helmet-async; this
+      covers the homepage and any route a crawler hits before hydration.
+    -->
+    <meta
+      name="description"
+      content="Hybrid Cloud Works — practical hybrid- and multi-cloud architecture, FinOps, and platform engineering content across AWS, Azure, GCP, GitHub, and Terraform."
+    />
+
+    <!--
+      Theme bootstrap: external script keeps CSP free of 'unsafe-inline'.
+      Source: public/theme-init.js (must run before first paint to prevent FOUC).
+    -->
+    <script src="/theme-init.js"></script>
+
+    <link rel="canonical" href="https://hybridcloudworks.com" />
+
+    <!-- Resource hints: establish connections to critical origins before they are needed -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://us-central1-hybridcloudworks-61e8d.cloudfunctions.net" />
+
+    <!-- Google Fonts: only Material Symbols Outlined (variable icon font — too complex to self-host) -->
+    <!-- IBM Plex Mono is self-hosted via @fontsource/ibm-plex-mono imported in main.jsx -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

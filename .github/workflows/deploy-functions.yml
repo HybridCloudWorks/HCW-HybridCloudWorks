@@ -1,0 +1,58 @@
+name: DISABLED - Prototype Functions Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: ${{ false }}
+    name: Deploy to Azure Functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install dependencies
+        working-directory: functions
+        run: npm ci
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v2
+        with:
+          app-name: hcw-functions-prod
+          package: functions/
+          respect-funcignore: true
+
+      - name: Post-deploy smoke test
+        run: |
+          echo "## 🚀 Azure Functions Deploy Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Quick health check on the functions endpoint
+          FUNC_URL="https://hcw-functions-prod.azurewebsites.net"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FUNC_URL/api/health" || echo "000")
+
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Health check: **PASSED** (HTTP $STATUS)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Health check: **HTTP $STATUS** (may need warm-up on Consumption plan)" >> $GITHUB_STEP_SUMMARY
+          fi

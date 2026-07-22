@@ -1,0 +1,48 @@
+{
+  "extends": ["@commitlint/config-conventional"],
+  "rules": {
+    "type-enum": [
+      2,
+      "always",
+      ["feat", "fix", "docs", "style", "refactor", "test", "chore", "ci", "perf", "revert", "deploy"]
+    ],
+    "scope-enum": [
+      2,
+      "always",
+      [
+        "frontend",
+        "backend",
+        "infrastructure",
+        "python",
+        "workflows",
+        "docs",
+        "auth",
+        "api",
+        "deployment",
+        "firebase",
+        "vps",
+        "n8n",
+        "wikijs",
+        "traefik",
+        "monitoring",
+        "database",
+        "docker",
+        "secrets",
+        "azure",
+        "aws",
+        "gcp",
+        "github",
+        "terraform",
+        "finops"
+      ]
+    ],
+    "scope-case": [2, "always", "kebab-case"],
+    "subject-case": [2, "always", "sentence-case"],
+    "subject-empty": [2, "never"],
+    "subject-full-stop": [2, "never", "."],
+    "header-max-length": [2, "always", 100],
+    "body-leading-blank": [1, "always"],
+    "body-max-line-length": [2, "always", 100],
+    "footer-leading-blank": [1, "always"]
+  }
+}

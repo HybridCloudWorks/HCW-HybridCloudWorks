@@ -1,0 +1,89 @@
+name: deploy-frontend
+
+# Build → Deploy to Firebase Hosting
+# Lighthouse audits run separately via check-lighthouse.yml (PRs and on-demand).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch: {}
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  build-and-deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write GCP service-account credentials
+        run: |
+          mkdir -p $RUNNER_TEMP/gcp
+          echo '${{ secrets.GCP_SA_KEY }}' > $RUNNER_TEMP/gcp/sa-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp/sa-key.json" >> $GITHUB_ENV
+
+      - name: Generate static public-data snapshots
+        run: npm run build:data
+        env:
+          GCLOUD_PROJECT: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          NODE_ENV: production
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+          VITE_GCP_FUNCTIONS_URL: ${{ secrets.VITE_GCP_FUNCTIONS_URL }}
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@e2eda2e106cfa35cdbcf4ac9ddaf6c4756df2c8c # v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.GCP_SA_KEY }}
+          projectId: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          channelId: live
+
+      - name: Post-deployment health check
+        run: |
+          sleep 10
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://hybridcloudworks.com")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Health check: HTTP $HTTP_CODE" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Health check passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "Deployed to https://hybridcloudworks.com" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_STEP_SUMMARY

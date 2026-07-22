@@ -1,0 +1,196 @@
+import React, { useEffect, useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Loader2, Activity, Zap, DollarSign } from 'lucide-react';
+import { aiEngine } from '@/lib/aiEngine';
+
+function fmtCost(usd) {
+  if (!usd || usd < 0.000001) return '$0.00';
+  if (usd < 0.01) return `$${usd.toFixed(6)}`;
+  return `$${usd.toFixed(4)}`;
+}
+
+function fmtTokens(n) {
+  if (!n) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function timeAgo(ts) {
+  if (!ts) return 'Never';
+  const date = ts?.toDate ? ts.toDate() : new Date(ts);
+  const secs = Math.floor((Date.now() - date) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return date.toLocaleDateString();
+}
+
+export default function AIEngineUsageTab() {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    aiEngine.getUsageRecords(200).then((result) => {
+      setRecords(result);
+      setLoading(false);
+    });
+  }, []);
+
+  const agg = aiEngine.aggregateByProvider(records);
+  const chartData = Object.entries(agg).map(([provider, data]) => ({
+    provider,
+    tokens: data.tokens,
+    cost: parseFloat(data.costUsd.toFixed(6)),
+    calls: data.calls,
+  }));
+
+  const totalTokens = records.reduce((sum, record) => sum + (record.totalTokens || 0), 0);
+  const totalCost = records.reduce((sum, record) => sum + (record.estimatedCostUsd || 0), 0);
+  const totalCalls = records.length;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-semibold text-lg">Usage & Cost</h2>
+        <p className="text-sm text-slate-500 mt-0.5">Last 200 AI calls logged to Firestore.</p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'Total Calls', value: totalCalls.toLocaleString(), icon: Activity },
+          { label: 'Total Tokens', value: fmtTokens(totalTokens), icon: Zap },
+          { label: 'Est. Cost (USD)', value: `$${totalCost.toFixed(4)}`, icon: DollarSign },
+        ].map(({ label, value, icon: Icon }) => (
+          <Card key={label}>
+            <CardContent className="p-4 flex items-center gap-3">
+              <Icon className="h-5 w-5 text-indigo-500 shrink-0" />
+              <div>
+                <p className="text-xs text-slate-500">{label}</p>
+                <p className="text-lg font-bold">{value}</p>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {chartData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Tokens by Provider</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
+                <XAxis dataKey="provider" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(value) => fmtTokens(value)} />
+                <Tooltip
+                  formatter={(value, name) => [
+                    name === 'tokens' ? fmtTokens(value) : `$${value.toFixed(6)}`,
+                    name === 'tokens' ? 'Tokens' : 'Est. Cost',
+                  ]}
+                  contentStyle={{ fontSize: 11 }}
+                />
+                <Bar dataKey="tokens" fill="#6366f1" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {chartData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Breakdown by Provider</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-500 border-b">
+                  <th className="text-left pb-1 font-medium">Provider</th>
+                  <th className="text-right pb-1 font-medium">Calls</th>
+                  <th className="text-right pb-1 font-medium">Tokens</th>
+                  <th className="text-right pb-1 font-medium">Est. Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chartData
+                  .sort((a, b) => b.tokens - a.tokens)
+                  .map((row) => (
+                    <tr
+                      key={row.provider}
+                      className="border-b border-slate-100 dark:border-slate-800"
+                    >
+                      <td className="py-1.5 font-medium">{row.provider}</td>
+                      <td className="py-1.5 text-right text-slate-500">{row.calls}</td>
+                      <td className="py-1.5 text-right">{fmtTokens(row.tokens)}</td>
+                      <td className="py-1.5 text-right font-mono">{fmtCost(row.cost)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {records.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Recent Calls</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-500 border-b">
+                    <th className="text-left px-4 py-2 font-medium">Provider / Model</th>
+                    <th className="text-left px-4 py-2 font-medium">Source</th>
+                    <th className="text-right px-4 py-2 font-medium">Tokens</th>
+                    <th className="text-right px-4 py-2 font-medium">Cost</th>
+                    <th className="text-right px-4 py-2 font-medium">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.slice(0, 20).map((record) => (
+                    <tr
+                      key={record.id}
+                      className="border-b border-slate-50 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    >
+                      <td className="px-4 py-1.5 font-mono">
+                        {record.provider}/{record.model}
+                      </td>
+                      <td className="px-4 py-1.5 text-slate-500">{record.source}</td>
+                      <td className="px-4 py-1.5 text-right">
+                        {fmtTokens(record.totalTokens || 0)}
+                      </td>
+                      <td className="px-4 py-1.5 text-right font-mono">
+                        {fmtCost(record.estimatedCostUsd)}
+                      </td>
+                      <td className="px-4 py-1.5 text-right text-slate-400">
+                        {timeAgo(record.timestamp)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && records.length === 0 && (
+        <div className="text-center py-12 text-slate-400 text-sm">
+          No usage logged yet. Use the Playground to make your first call.
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+        </div>
+      )}
+    </div>
+  );
+}

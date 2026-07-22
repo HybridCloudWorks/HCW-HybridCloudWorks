@@ -1,0 +1,668 @@
+/* eslint-disable complexity, no-nested-ternary */
+import React, { useMemo } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { useParams, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import DOMPurify from 'dompurify';
+import { useFirestoreDocument, useFirestoreQuery } from '@/hooks/useFirestore';
+import { where } from 'firebase/firestore';
+import { Separator } from '@/components/ui/separator';
+import { Calendar, User, Clock, ArrowLeft, Tag } from 'lucide-react';
+import { Skeleton } from '@/components/performance/Skeleton';
+import { ModuleContainer } from '@/components/modules/InlineModules';
+import { parseModulesFromMarkdown } from '@/lib/moduleParser';
+import ShareVia from '@/components/shared/ShareVia';
+import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
+import NewsletterSignup from '@/components/shared/NewsletterSignup';
+import { normalizePublicImageUrl } from '@/lib/blogUtils';
+
+const ARTICLE_PROSE_CLASS =
+  'prose dark:prose-invert prose-lg max-w-none ' +
+  'prose-headings:text-slate-900 dark:prose-headings:text-white prose-headings:font-bold prose-headings:scroll-mt-28 ' +
+  'prose-h1:text-3xl prose-h2:text-2xl prose-h3:text-xl ' +
+  'prose-h2:border-b prose-h2:border-slate-300 dark:prose-h2:border-slate-700 prose-h2:pb-2 ' +
+  '!prose-p:text-slate-900 dark:prose-p:text-slate-300 prose-p:leading-[1.8] ' +
+  'prose-a:text-primary prose-a:no-underline hover:prose-a:underline ' +
+  'prose-strong:text-slate-900 dark:prose-strong:text-white ' +
+  'prose-em:text-slate-700 dark:prose-em:text-slate-200 ' +
+  'prose-code:bg-slate-100 dark:prose-code:bg-slate-800 prose-code:text-emerald-700 dark:prose-code:text-emerald-300 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:before:content-none prose-code:after:content-none ' +
+  'prose-pre:bg-slate-100 dark:prose-pre:bg-slate-900 prose-pre:border prose-pre:border-slate-300 dark:prose-pre:border-slate-700 prose-pre:rounded-xl ' +
+  'prose-blockquote:border-l-4 prose-blockquote:border-primary/60 !prose-blockquote:text-slate-900 dark:prose-blockquote:text-slate-300 prose-blockquote:bg-slate-100/80 dark:prose-blockquote:bg-card/30 prose-blockquote:py-1 prose-blockquote:px-4 prose-blockquote:rounded-r-lg prose-blockquote:not-italic ' +
+  '!prose-li:text-slate-900 dark:prose-li:text-slate-300 prose-li:leading-relaxed ' +
+  'prose-ul:my-4 prose-ol:my-4 ' +
+  'prose-table:text-sm prose-thead:text-slate-900 dark:prose-thead:text-white prose-th:border prose-th:border-slate-300 dark:prose-th:border-slate-700 prose-td:border prose-td:border-slate-300 dark:prose-td:border-slate-700';
+
+const HEADING_PROSE_CLASS =
+  'prose dark:prose-invert prose-lg max-w-none ' +
+  'prose-headings:text-slate-900 dark:prose-headings:text-white prose-headings:font-bold prose-headings:scroll-mt-28 ' +
+  'prose-h1:text-3xl prose-h2:text-2xl prose-h3:text-xl ' +
+  'prose-h2:border-b prose-h2:border-slate-300 dark:prose-h2:border-slate-700 prose-h2:pb-2';
+
+/**
+ * Blog/news article detail page.
+ * Resolution order:
+ * 1) Exact doc ID (blogs, then content)
+ * 2) Slug query (blogs, then content)
+ * Applies provider and visibility guards for public routes.
+ * - Displays: hero image, title, meta, AI summary, full content, source link.
+ */
+function _normalizeProvider(value = '') {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isPublicRecord(doc = {}) {
+  const status = String(doc.contentStatus || '');
+  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
+  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
+}
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  if (typeof value?.toDate === 'function') return value.toDate().getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getRecencyScore(item = {}) {
+  return Math.max(
+    toMillis(item.blogEditedAt),
+    toMillis(item.blogPublishedAt),
+    toMillis(item.publishedAt),
+    toMillis(item.updatedAt),
+    toMillis(item.createdAt),
+    toMillis(item['Published At'])
+  );
+}
+
+function getSlugIdHint(slug = '') {
+  const token =
+    String(slug || '')
+      .split('-')
+      .pop() || '';
+  return token.toLowerCase();
+}
+
+function isHeadingOnlyTextSegment(value = '') {
+  const normalized = String(value || '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+  if (!normalized) return false;
+  return (
+    /^#{1,6}\s+.+$/m.test(normalized) &&
+    normalized.split('\n').every((line) => !line.trim() || /^#{1,6}\s+.+$/.test(line.trim()))
+  );
+}
+
+function canPairModules(currentModule, nextModule) {
+  if (!currentModule || !nextModule) return false;
+  if (currentModule.type === 'spacer' || nextModule.type === 'spacer') return false;
+  if (currentModule.align === 'all' || nextModule.align === 'all') return false;
+  return (
+    (currentModule.align === 'left' && nextModule.align === 'right') ||
+    (currentModule.align === 'right' && nextModule.align === 'left')
+  );
+}
+
+export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' }) {
+  const backPath =
+    section === 'news'
+      ? `/${provider}/rss`
+      : section === 'code'
+        ? `/${provider}/code`
+        : section === 'coder-corner'
+          ? `/${provider}/coder-corner`
+          : `/${provider}/blog`;
+
+  const backLabel =
+    section === 'news'
+      ? 'Back to News'
+      : section === 'code'
+        ? 'Back to Code'
+        : section === 'coder-corner'
+          ? 'Back to Coder Corner'
+          : 'Back to Blog';
+
+  const { slug } = useParams();
+
+  const { data: contentById, loading: contentByIdLoading } = useFirestoreDocument(
+    `content/${slug}`
+  );
+  const { data: contentBySlug, loading: contentBySlugLoading } = useFirestoreQuery('content', [
+    where('slug', '==', slug),
+  ]);
+  const { data: contentBySlugLegacy, loading: contentBySlugLegacyLoading } = useFirestoreQuery(
+    'content',
+    [where('Slug', '==', slug)]
+  );
+
+  const contentArticle = useMemo(() => {
+    const idHint = getSlugIdHint(slug);
+    const mergedCandidates = [
+      contentById ? { ...contentById, __source: 'content' } : null,
+      ...(Array.isArray(contentBySlug)
+        ? contentBySlug.map((item) => ({ ...item, __source: 'content' }))
+        : []),
+      ...(Array.isArray(contentBySlugLegacy)
+        ? contentBySlugLegacy.map((item) => ({ ...item, __source: 'content' }))
+        : []),
+    ].filter(Boolean);
+
+    const deduped = [];
+    const seen = new Set();
+    for (const item of mergedCandidates) {
+      const key = `${item.__source}:${item.id || item.slug || item.Slug || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
+    }
+
+    const visible = deduped.filter((item) => isPublicRecord(item));
+    if (!visible.length) return null;
+
+    visible.sort((a, b) => {
+      const aSourceRank = a.__source === 'content' ? 0 : 1;
+      const bSourceRank = b.__source === 'content' ? 0 : 1;
+      if (aSourceRank !== bSourceRank) return aSourceRank - bSourceRank;
+
+      const aId = String(a.id || '').toLowerCase();
+      const bId = String(b.id || '').toLowerCase();
+      const aMatchesHint = idHint && aId.startsWith(idHint) ? 0 : 1;
+      const bMatchesHint = idHint && bId.startsWith(idHint) ? 0 : 1;
+      if (aMatchesHint !== bMatchesHint) return aMatchesHint - bMatchesHint;
+
+      return getRecencyScore(b) - getRecencyScore(a);
+    });
+
+    return visible[0] || null;
+  }, [contentById, contentBySlug, contentBySlugLegacy, slug]);
+
+  const shouldLoadLegacy =
+    !contentByIdLoading && !contentBySlugLoading && !contentBySlugLegacyLoading && !contentArticle;
+
+  const { data: blogsById, loading: blogsByIdLoading } = useFirestoreDocument(
+    shouldLoadLegacy ? `blogs/${slug}` : ''
+  );
+  const { data: blogsBySlug, loading: blogsBySlugLoading } = useFirestoreQuery(
+    shouldLoadLegacy ? 'blogs' : '',
+    [where('slug', '==', slug)]
+  );
+  const { data: blogsBySlugLegacy, loading: blogsBySlugLegacyLoading } = useFirestoreQuery(
+    shouldLoadLegacy ? 'blogs' : '',
+    [where('Slug', '==', slug)]
+  );
+
+  const loading =
+    contentByIdLoading ||
+    contentBySlugLoading ||
+    contentBySlugLegacyLoading ||
+    (shouldLoadLegacy && (blogsByIdLoading || blogsBySlugLoading || blogsBySlugLegacyLoading));
+
+  const article = useMemo(() => {
+    if (contentArticle) {
+      return contentArticle;
+    }
+
+    if (!shouldLoadLegacy) return null;
+    const idHint = getSlugIdHint(slug);
+
+    const mergedCandidates = [
+      blogsById ? { ...blogsById, __source: 'blogs' } : null,
+      ...(Array.isArray(blogsBySlug)
+        ? blogsBySlug.map((item) => ({ ...item, __source: 'blogs' }))
+        : []),
+      ...(Array.isArray(blogsBySlugLegacy)
+        ? blogsBySlugLegacy.map((item) => ({ ...item, __source: 'blogs' }))
+        : []),
+    ].filter(Boolean);
+
+    const deduped = [];
+    const seen = new Set();
+    for (const item of mergedCandidates) {
+      const key = `${item.__source}:${item.id || item.slug || item.Slug || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
+    }
+
+    const visible = deduped.filter((item) => isPublicRecord(item));
+    if (!visible.length) return null;
+
+    visible.sort((a, b) => {
+      const aSourceRank = a.__source === 'content' ? 0 : 1;
+      const bSourceRank = b.__source === 'content' ? 0 : 1;
+      if (aSourceRank !== bSourceRank) return aSourceRank - bSourceRank;
+
+      const aId = String(a.id || '').toLowerCase();
+      const bId = String(b.id || '').toLowerCase();
+      const aMatchesHint = idHint && aId.startsWith(idHint) ? 0 : 1;
+      const bMatchesHint = idHint && bId.startsWith(idHint) ? 0 : 1;
+      if (aMatchesHint !== bMatchesHint) return aMatchesHint - bMatchesHint;
+
+      return getRecencyScore(b) - getRecencyScore(a);
+    });
+
+    return visible[0] || null;
+  }, [blogsById, blogsBySlug, blogsBySlugLegacy, contentArticle, shouldLoadLegacy, slug]);
+
+  // Normalize field names across blogs/content documents
+  const post = useMemo(() => {
+    if (!article) return null;
+    const tags = article.Tags || article.tags || article.keyTopics || [];
+    const date = (() => {
+      const raw =
+        article.publishedDate ||
+        article.datePublished ||
+        article['Published At'] ||
+        article.blogPublishedAt ||
+        article.publishedAt;
+      if (!raw) return null;
+      try {
+        const d = raw?.toDate ? raw.toDate() : new Date(raw);
+        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      } catch {
+        return null;
+      }
+    })();
+    // Pick the imageUrl from the first non-empty source, then surface the
+    // matching responsive variants from the same source (F9 — see
+    // Firebase-GCP-Cost-Inventory.md). Falls back to null variants when
+    // the chosen source doesn't have them, in which case the consumer
+    // renders the plain PNG.
+    const resolvedImageUrl = normalizePublicImageUrl(
+      article.contentImageUrl ||
+        article.heroImageUrl ||
+        article.altCoverImage ||
+        article.imageUrl ||
+        null
+    );
+    let resolvedImageVariants = null;
+    if (resolvedImageUrl === article.altCoverImage && article.altCoverImageVariants) {
+      resolvedImageVariants = article.altCoverImageVariants;
+    } else if (article.aiImageVariants?.hero && resolvedImageUrl === article.aiImageUrls?.hero) {
+      resolvedImageVariants = article.aiImageVariants.hero;
+    }
+    return {
+      title: article.Title || article.title || 'Untitled',
+      summary: article.Summary || article.summary || article.description || article.excerpt || '',
+      // Body: prefer editor draft → raw content → summary fallback
+      body: article.blogDraft || article.Content || article.content || '',
+      imageUrl: resolvedImageUrl,
+      imageVariants: resolvedImageVariants,
+      category:
+        article.category || article.Category || (Array.isArray(tags) ? tags[0] : null) || 'General',
+      tags: Array.isArray(tags) ? tags : [],
+      author:
+        article.editorAuthor ||
+        article.siteAuthor ||
+        article.publishedByName ||
+        article.createdByName ||
+        'Hybrid Cloud Works',
+      date,
+      readTime: article.readTime || article.ReadTime || null,
+      sourceUrl:
+        article.sourceUrl || article.url || article['CD Url'] || article['Source URL'] || null,
+    };
+  }, [article]);
+
+  if (loading) {
+    return (
+      <div className="pt-28 pb-20 px-4 md:px-8 max-w-[1200px] mx-auto w-full">
+        <Skeleton variant="button" className="mb-8 w-32" />
+        <Skeleton variant="rect" className="mb-8 h-64 rounded-2xl" />
+        <Skeleton variant="heading" className="mb-4 w-3/4" />
+        <Skeleton variant="heading" className="mb-8 w-1/2" />
+        <div className="flex gap-6 mb-8">
+          <Skeleton variant="text" className="w-32" />
+          <Skeleton variant="text" className="w-24" />
+          <Skeleton variant="text" className="w-20" />
+        </div>
+        <div className="space-y-3">
+          <Skeleton variant="text" />
+          <Skeleton variant="text" />
+          <Skeleton variant="text" className="w-5/6" />
+          <Skeleton variant="text" />
+          <Skeleton variant="text" className="w-4/5" />
+          <Skeleton variant="text" />
+          <Skeleton variant="text" className="w-3/4" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!article || !post) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-20 text-center">
+        <span className="text-6xl material-symbols-outlined text-slate-600 block mb-4">
+          article
+        </span>
+        <h1 className="text-3xl font-bold mb-4 text-slate-900 dark:text-white">
+          Article Not Found
+        </h1>
+        <p className="text-slate-700 dark:text-slate-400 mb-6">
+          This article doesn&apos;t exist or hasn&apos;t been published yet.
+        </p>
+        <Link
+          to={backPath}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/80 text-white font-bold rounded-lg transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {backLabel}
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pt-28 pb-20 px-4 md:px-8 max-w-[1200px] mx-auto w-full">
+      <Helmet>
+        <title>{post.title} | HCW</title>
+        <meta name="description" content={post.summary} />
+        <link
+          rel="canonical"
+          href={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
+        />
+        {/* Open Graph */}
+        <meta property="og:type" content="article" />
+        <meta property="og:title" content={`${post.title} | HCW`} />
+        <meta property="og:description" content={post.summary} />
+        <meta
+          property="og:url"
+          content={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
+        />
+        {post.imageUrl && <meta property="og:image" content={post.imageUrl} />}
+        {/* Twitter Card */}
+        <meta name="twitter:card" content={post.imageUrl ? 'summary_large_image' : 'summary'} />
+        <meta name="twitter:title" content={`${post.title} | HCW`} />
+        <meta name="twitter:description" content={post.summary} />
+        {post.imageUrl && <meta name="twitter:image" content={post.imageUrl} />}
+      </Helmet>
+
+      {/* Back link */}
+      <Link
+        to={backPath}
+        className="inline-flex items-center gap-2 text-sm text-foreground hover:text-primary transition-colors mb-8 group"
+      >
+        <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
+        {backLabel}
+      </Link>
+
+      <article className="blog-detail-article">
+        {/* Hero Image */}
+        {post.imageUrl && (
+          <div className="relative w-full h-72 sm:h-96 rounded-2xl overflow-hidden mb-8 bg-card/40">
+            <ResponsiveCoverImage
+              src={post.imageUrl}
+              variants={post.imageVariants}
+              alt={post.title}
+              width="1200"
+              height="630"
+              fetchPriority="high"
+              loading="eager"
+              decoding="async"
+              sizes="(max-width: 768px) 100vw, 1200px"
+              className="absolute inset-0 w-full h-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent" />
+          </div>
+        )}
+
+        {/* Header */}
+        <header className="mb-12">
+          <div className="mb-6 flex justify-end">
+            <ShareVia title={post.title} summary={post.summary} />
+          </div>
+
+          {/* Title */}
+          <h1 className="text-5xl md:text-6xl font-bold text-slate-900 dark:text-white mb-8 leading-tight">
+            {post.title}
+          </h1>
+
+          {/* Metadata Row: Author (left) + Date/ReadTime (right) */}
+          <div className="blog-detail-meta flex items-baseline justify-between gap-6 mb-8 text-sm">
+            <div className="blog-detail-author flex items-center gap-2 !text-slate-900 dark:text-slate-400">
+              <User className="h-4 w-4 text-primary" />
+              <span className="!text-slate-900 dark:text-white font-medium">
+                {post.author || 'HCW Team'}
+              </span>
+            </div>
+            <div className="blog-detail-date flex items-center gap-4 !text-slate-900 dark:text-slate-400 ml-auto">
+              {post.date && (
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="h-4 w-4 text-primary" />
+                  <span>{post.date}</span>
+                </div>
+              )}
+              {post.readTime && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-primary" />
+                  <span>{post.readTime}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Spacer Bar */}
+          <div className="w-16 h-1 bg-gradient-to-r from-primary via-primary/60 to-transparent rounded-full mb-8" />
+        </header>
+
+        {/* Body content with inline modules */}
+        {post.body ? (
+          <div className="mb-12">
+            {(() => {
+              const { text: bodyWithPlaceholders, modules } = parseModulesFromMarkdown(post.body);
+              const contentToRender = bodyWithPlaceholders
+                .replace(/<!-- MODULE_\d+ -->/g, '\n\n')
+                .trim();
+              // Only treat as raw HTML if the stripped content has actual block-level HTML tags.
+              // This prevents <module> tags in blogDraft from wrongly triggering the HTML path
+              // and rendering markdown as plain text.
+              const bodyIsHtml =
+                /<\s*(p|div|span|ul|ol|li|table|thead|tbody|tr|td|th|h[1-6]|section|article|blockquote)\b[^>]*>/i.test(
+                  contentToRender
+                );
+              const orderedItems = bodyWithPlaceholders
+                .split(/(<!-- MODULE_\d+ -->)/g)
+                .map((segment, index) => {
+                  const placeholderMatch = segment.match(/^<!-- MODULE_(\d+) -->$/);
+                  if (placeholderMatch) {
+                    const moduleIndex = Number.parseInt(placeholderMatch[1], 10);
+                    const moduleData = modules[moduleIndex];
+                    if (!moduleData) return null;
+                    return {
+                      kind: 'module',
+                      key: `module-${moduleIndex}-${index}`,
+                      moduleData,
+                    };
+                  }
+
+                  if (!segment.trim()) return null;
+                  return {
+                    kind: 'text',
+                    key: `text-${index}`,
+                    text: segment,
+                  };
+                })
+                .filter(Boolean);
+
+              return (
+                <div className="relative">
+                  {orderedItems.length ? (
+                    (() => {
+                      const rows = [];
+                      for (let index = 0; index < orderedItems.length; index += 1) {
+                        const item = orderedItems[index];
+                        if (item.kind === 'text') {
+                          rows.push(
+                            bodyIsHtml ? (
+                              <div
+                                key={item.key}
+                                className={ARTICLE_PROSE_CLASS}
+                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.text) }}
+                              />
+                            ) : (
+                              <div key={item.key} className={ARTICLE_PROSE_CLASS}>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {item.text}
+                                </ReactMarkdown>
+                              </div>
+                            )
+                          );
+                          continue;
+                        }
+
+                        const nextItem = orderedItems[index + 1];
+                        const textBetweenItem = orderedItems[index + 1];
+                        const moduleAfterTextItem = orderedItems[index + 2];
+                        const canPairWithNext =
+                          nextItem?.kind === 'module' &&
+                          canPairModules(item.moduleData, nextItem.moduleData);
+                        const canPairAcrossHeading =
+                          textBetweenItem?.kind === 'text' &&
+                          isHeadingOnlyTextSegment(textBetweenItem.text) &&
+                          moduleAfterTextItem?.kind === 'module' &&
+                          canPairModules(item.moduleData, moduleAfterTextItem.moduleData);
+
+                        if (canPairWithNext) {
+                          rows.push(
+                            <div
+                              key={`${item.key}-${nextItem.key}-pair`}
+                              className="grid gap-4 md:grid-cols-2 md:items-start"
+                            >
+                              <div className="min-w-0">
+                                <ModuleContainer
+                                  type={item.moduleData.type}
+                                  data={item.moduleData}
+                                  align={item.moduleData.align}
+                                  paired
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <ModuleContainer
+                                  type={nextItem.moduleData.type}
+                                  data={nextItem.moduleData}
+                                  align={nextItem.moduleData.align}
+                                  paired
+                                />
+                              </div>
+                            </div>
+                          );
+                          index += 1;
+                          continue;
+                        }
+
+                        if (canPairAcrossHeading) {
+                          rows.push(
+                            <div
+                              key={`${item.key}-${textBetweenItem.key}-${moduleAfterTextItem.key}-heading`}
+                              className={HEADING_PROSE_CLASS}
+                            >
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {textBetweenItem.text}
+                              </ReactMarkdown>
+                            </div>
+                          );
+                          rows.push(
+                            <div
+                              key={`${item.key}-${moduleAfterTextItem.key}-pair`}
+                              className="grid gap-4 md:grid-cols-2 md:items-start"
+                            >
+                              <div className="min-w-0">
+                                <ModuleContainer
+                                  type={item.moduleData.type}
+                                  data={item.moduleData}
+                                  align={item.moduleData.align}
+                                  paired
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <ModuleContainer
+                                  type={moduleAfterTextItem.moduleData.type}
+                                  data={moduleAfterTextItem.moduleData}
+                                  align={moduleAfterTextItem.moduleData.align}
+                                  paired
+                                />
+                              </div>
+                            </div>
+                          );
+                          index += 2;
+                          continue;
+                        }
+
+                        rows.push(
+                          <div key={item.key} className="clear-both w-full">
+                            <ModuleContainer
+                              type={item.moduleData.type}
+                              data={item.moduleData}
+                              align={item.moduleData.align}
+                            />
+                          </div>
+                        );
+                      }
+                      return rows;
+                    })()
+                  ) : bodyIsHtml ? (
+                    <div
+                      className={ARTICLE_PROSE_CLASS}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(contentToRender) }}
+                    />
+                  ) : (
+                    <div className={ARTICLE_PROSE_CLASS}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{contentToRender}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        ) : (
+          <div className="mb-12 py-10 text-center border border-dashed border-slate-700 rounded-xl">
+            <span className="text-4xl material-symbols-outlined text-slate-600 block mb-3">
+              draft
+            </span>
+            <p className="text-slate-700 dark:text-slate-400">
+              Full article content will appear here once the pipeline processes this article.
+            </p>
+          </div>
+        )}
+
+        {/* Tags row */}
+        {post.tags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-8">
+            <Tag className="h-4 w-4 text-slate-500" />
+            {post.tags.map((tag, i) => (
+              <span
+                key={i}
+                className="px-3 py-1 bg-card/50 border border-card/80 text-slate-800 dark:text-slate-300 text-xs rounded-full"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <Separator className="my-8 border-slate-700" />
+
+        {/* Footer: back link only */}
+        <div className="flex items-center gap-4">
+          <Link
+            to={backPath}
+            className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-400 hover:text-primary transition-colors group"
+          >
+            <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
+            {backLabel}
+          </Link>
+        </div>
+        <div className="mt-10">
+          <NewsletterSignup source="blog-post" />
+        </div>
+      </article>
+    </div>
+  );
+}

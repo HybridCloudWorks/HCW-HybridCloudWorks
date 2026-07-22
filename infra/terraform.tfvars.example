@@ -1,0 +1,3 @@
+azure_subscription_id = "your-azure-subscription-id"
+cloudflare_api_token  = "your-cloudflare-api-token"
+cloudflare_zone_id    = "your-cloudflare-zone-id"

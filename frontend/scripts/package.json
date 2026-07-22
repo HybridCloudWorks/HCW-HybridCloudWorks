@@ -1,0 +1,16 @@
+{
+  "name": "hcw-secrets-scripts",
+  "version": "1.0.0",
+  "description": "Scripts for managing secrets with Notion and SOPS",
+  "private": true,
+  "scripts": {
+    "notion-to-yaml": "node notion-to-yaml.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15",
+    "yargs": "^17.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

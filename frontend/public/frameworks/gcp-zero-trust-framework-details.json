@@ -1,0 +1,17 @@
+{
+  "Reliability": {
+    "description": "Reliability in Zero Trust focuses on maintaining system availability while enforcing continuous verification and identity validation. Every access request undergoes authentication checks, which can introduce friction during failover and recovery operations."
+  },
+  "Security": {
+    "description": "Security adopts an 'assume breach' mentality and 'never trust, always verify' principle. Unlike traditional perimeter-based security, Zero Trust treats every access attempt\u2014internal or external\u2014as potentially malicious, requiring explicit verification through continuous authentication and device health checks."
+  },
+  "Cost Optimization": {
+    "description": "Cost optimization must account for additional infrastructure required for identity verification, policy enforcement, and network segmentation. Zero Trust architectures demand investment in identity platforms, device monitoring tools, and granular access controls that increase operational expenses."
+  },
+  "Operational Excellence": {
+    "description": "Operational excellence requires comprehensive visibility and control over every access point and resource. Teams must manage complex policy engines, automate continuous verification workflows, and maintain detailed audit logs while balancing security requirements with operational velocity."
+  },
+  "Performance Efficiency": {
+    "description": "Performance efficiency faces challenges from continuous authentication, device compliance checks, and network micro-segmentation. Every transaction includes security validation overhead, requiring careful optimization to minimize latency while maintaining strict security posture."
+  }
+}

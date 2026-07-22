@@ -1,0 +1,599 @@
+import React, { useState } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { Link } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
+import {
+  CheckCircle2,
+  Send,
+  Layers,
+  Code,
+  ExternalLink,
+  ArrowRight,
+  Loader2,
+  CheckCircle,
+  Shield,
+  TrendingUp,
+  Network,
+  Eye,
+} from 'lucide-react';
+import { db } from '@/lib/firebaseConfig';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+const REFERENCE_BLUEPRINTS = [
+  {
+    name: 'AWS Multi-Region Web App',
+    components: ['CloudFront', 'ALB', 'ECS', 'RDS Aurora Global'],
+    complexity: 'Advanced',
+    icon: '🏗️',
+    provider: 'aws',
+    category: 'Compute',
+  },
+  {
+    name: 'Azure Landing Zone',
+    components: ['Management Groups', 'Policy', 'Networking', 'Identity'],
+    complexity: 'Foundation',
+    icon: '🔵',
+    provider: 'azure',
+    category: 'Governance',
+  },
+  {
+    name: 'GCP Data Analytics Platform',
+    components: ['BigQuery', 'Dataflow', 'Pub/Sub', 'Looker'],
+    complexity: 'Intermediate',
+    icon: '🔴',
+    provider: 'gcp',
+    category: 'Data & Analytics',
+  },
+  {
+    name: 'FinOps Cost Governance',
+    components: ['Tagging Policy', 'Budget Alerts', 'Rightsizing', 'Reports'],
+    complexity: 'Foundation',
+    icon: '💰',
+    provider: 'finops',
+    category: 'FinOps',
+  },
+  {
+    name: 'Serverless Event Platform',
+    components: ['API Gateway', 'Lambda/Functions', 'Event Bus', 'DynamoDB'],
+    complexity: 'Intermediate',
+    icon: '⚡',
+    provider: 'aws',
+    category: 'Serverless',
+  },
+  {
+    name: 'Zero Trust Network',
+    components: ['Identity Provider', 'Micro-segmentation', 'WAF', 'SIEM'],
+    complexity: 'Advanced',
+    icon: '🔒',
+    provider: 'azure',
+    category: 'Security',
+  },
+];
+
+const PROVIDER_OPTIONS = ['AWS', 'Azure', 'GCP', 'FinOps'];
+const COMPLEXITY_OPTIONS = ['Foundation', 'Intermediate', 'Advanced'];
+const CATEGORY_OPTIONS = [
+  'Compute',
+  'Networking',
+  'Security',
+  'FinOps',
+  'Serverless',
+  'Containers',
+  'Data & Analytics',
+  'Governance',
+  'Migration',
+  'AI/ML',
+];
+
+const EMPTY_FORM = {
+  title: '',
+  summary: '',
+  cloudProvider: 'AWS',
+  category: 'Compute',
+  complexity: 'Foundation',
+  tags: '',
+  diagramUrl: '',
+  overviewHtml: '',
+  technicalComponents: '',
+  estimatedMonthlyCost: '',
+  terraformCode: '',
+};
+
+export default function ArchitectureSubmissionPage() {
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.title.trim()) {
+      setError('Title is required.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const slug = slugify(form.title);
+      await addDoc(collection(db, 'content'), {
+        type: 'architecture',
+        contentStatus: 'ingested',
+        storageCollection: 'content',
+        publishTarget: 'architecture',
+        Live: false,
+        approvedForBlog: false,
+        slug,
+        title: form.title.trim(),
+        Title: form.title.trim(),
+        summary: form.summary.trim(),
+        Summary: form.summary.trim(),
+        cloudProvider: form.cloudProvider,
+        'Cloud Provider': form.cloudProvider,
+        category: form.category,
+        complexity: form.complexity,
+        tags: form.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean),
+        diagramUrl: form.diagramUrl.trim(),
+        overviewHtml: form.overviewHtml.trim(),
+        technicalSpecs: {
+          components: form.technicalComponents
+            .split('\n')
+            .map((c) => c.trim())
+            .filter(Boolean),
+          patterns: [],
+        },
+        costAnalysis: {
+          estimatedMonthly: form.estimatedMonthlyCost.trim(),
+          breakdown: [],
+        },
+        terraformCode: form.terraformCode.trim(),
+        featured: false,
+        source: 'template-form',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setSubmitted(true);
+      setForm(EMPTY_FORM);
+    } catch (err) {
+      setError(err.message || 'Submission failed. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <Helmet>
+        <title>Architecture Templates | HCW</title>
+        <meta
+          name="description"
+          content="Reusable architecture patterns and templates for cloud design. Browse blueprints and submit your own."
+        />
+      </Helmet>
+
+      {/* PAGE HEADER */}
+      <div className="mb-12">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-foreground mb-4">
+          Architecture Template Patterns
+        </h1>
+        <p className="text-muted-foreground text-base sm:text-lg max-w-3xl">
+          Reference architectures and design patterns for common cloud scenarios. Browse blueprints
+          below, then submit your own via the form.
+        </p>
+      </div>
+
+      {/* REFERENCE GALLERY */}
+      <section className="mb-16">
+        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+          <span className="w-1 h-5 rounded-full bg-primary inline-block" />
+          Reference Architecture Blueprints
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          {REFERENCE_BLUEPRINTS.map((bp, i) => (
+            <Card key={i} className="bg-card/40 hover:bg-card/60 transition-colors group">
+              <CardHeader>
+                <div className="flex items-start justify-between mb-2">
+                  <span className="text-3xl">{bp.icon}</span>
+                  <Badge variant="outline" className="ml-auto">
+                    {bp.complexity}
+                  </Badge>
+                </div>
+                <CardTitle className="text-lg">{bp.name}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 mb-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Components:
+                  </p>
+                  <ul className="text-sm space-y-1">
+                    {bp.components.map((comp, j) => (
+                      <li key={j} className="flex items-center gap-2">
+                        <Layers className="h-3 w-3 text-primary" />
+                        <span>{comp}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                  <div className="flex items-center gap-2 text-sm text-primary">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>{bp.category}</span>
+                  </div>
+                  {bp.provider !== 'finops' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      asChild
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Link to={`/${bp.provider}/architecture-designs`}>
+                        View All <ArrowRight className="h-3 w-3 ml-1" />
+                      </Link>
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="bg-card/30">
+            <CardHeader>
+              <Code className="h-8 w-8 text-primary mb-2" />
+              <CardTitle className="text-lg">Infrastructure as Code</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground text-sm">
+                CloudFormation, Terraform, and ARM templates for rapid architecture deployment.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="bg-card/30">
+            <CardHeader>
+              <Shield className="h-8 w-8 text-primary mb-2" />
+              <CardTitle className="text-lg">Security Patterns</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground text-sm">
+                Network isolation, encryption, and zero-trust architecture patterns.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="bg-card/30">
+            <CardHeader>
+              <TrendingUp className="h-8 w-8 text-primary mb-2" />
+              <CardTitle className="text-lg">Scalability Design</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground text-sm">
+                Auto-scaling, load balancing, and distributed architecture patterns.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="bg-card/30">
+            <CardHeader>
+              <Network className="h-8 w-8 text-primary mb-2" />
+              <CardTitle className="text-lg">Resilience & DR</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground text-sm">
+                Disaster recovery and business continuity patterns for high availability.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <Separator className="mb-16" />
+
+      {/* SUBMISSION FORM */}
+      <section>
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
+            <Send className="h-5 w-5 text-primary" />
+            Submit an Architecture Blueprint
+          </h2>
+          <p className="text-muted-foreground text-sm max-w-2xl">
+            Create your own cloud architecture blueprint. Once submitted it enters the admin review
+            queue before being published to the provider&apos;s Architecture Designs page.
+          </p>
+        </div>
+
+        {submitted ? (
+          <Card className="bg-card/40 border-green-500/30 max-w-lg">
+            <CardContent className="pt-8 pb-8 text-center space-y-4">
+              <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
+              <h3 className="text-xl font-bold">Blueprint Submitted!</h3>
+              <p className="text-muted-foreground text-sm">
+                Your architecture blueprint has been added to the review queue. An admin will review
+                and publish it shortly.
+              </p>
+              <div className="flex gap-3 justify-center pt-2">
+                <Button onClick={() => setSubmitted(false)} variant="outline">
+                  Submit Another
+                </Button>
+                <Button asChild>
+                  <Link to="/admin/queue">View Queue</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <form onSubmit={handleSubmit} className="max-w-4xl space-y-6">
+            {/* Basic Info */}
+            <Card className="bg-card/40">
+              <CardHeader>
+                <CardTitle className="text-base">Basic Information</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      htmlFor="arch-title"
+                      className="text-xs font-medium text-muted-foreground mb-1 block"
+                    >
+                      Blueprint Title *
+                    </label>
+                    <Input
+                      id="arch-title"
+                      value={form.title}
+                      onChange={(e) => handleChange('title', e.target.value)}
+                      placeholder="AWS Multi-Region Web Application"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="arch-provider"
+                      className="text-xs font-medium text-muted-foreground mb-1 block"
+                    >
+                      Cloud Provider *
+                    </label>
+                    <select
+                      id="arch-provider"
+                      value={form.cloudProvider}
+                      onChange={(e) => handleChange('cloudProvider', e.target.value)}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      {PROVIDER_OPTIONS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label
+                    htmlFor="arch-summary"
+                    className="text-xs font-medium text-muted-foreground mb-1 block"
+                  >
+                    Short Description / Summary *
+                  </label>
+                  <Textarea
+                    id="arch-summary"
+                    value={form.summary}
+                    onChange={(e) => handleChange('summary', e.target.value)}
+                    placeholder="A highly available, multi-region web application architecture using..."
+                    className="min-h-[80px]"
+                    required
+                  />
+                </div>
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <label
+                      htmlFor="arch-category"
+                      className="text-xs font-medium text-muted-foreground mb-1 block"
+                    >
+                      Category
+                    </label>
+                    <select
+                      id="arch-category"
+                      value={form.category}
+                      onChange={(e) => handleChange('category', e.target.value)}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      {CATEGORY_OPTIONS.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="arch-complexity"
+                      className="text-xs font-medium text-muted-foreground mb-1 block"
+                    >
+                      Complexity
+                    </label>
+                    <select
+                      id="arch-complexity"
+                      value={form.complexity}
+                      onChange={(e) => handleChange('complexity', e.target.value)}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      {COMPLEXITY_OPTIONS.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="arch-tags"
+                      className="text-xs font-medium text-muted-foreground mb-1 block"
+                    >
+                      Tags (comma-separated)
+                    </label>
+                    <Input
+                      id="arch-tags"
+                      value={form.tags}
+                      onChange={(e) => handleChange('tags', e.target.value)}
+                      placeholder="HA, Multi-Region, Auto-Scaling"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label
+                    htmlFor="arch-diagram"
+                    className="text-xs font-medium text-muted-foreground mb-1 block"
+                  >
+                    Architecture Diagram URL
+                  </label>
+                  <Input
+                    id="arch-diagram"
+                    value={form.diagramUrl}
+                    onChange={(e) => handleChange('diagramUrl', e.target.value)}
+                    placeholder="https://..."
+                    type="url"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Content Tabs */}
+            <Card className="bg-card/40">
+              <CardHeader>
+                <CardTitle className="text-base">Blueprint Content</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                  <TabsList className="grid w-full grid-cols-4 mb-4">
+                    <TabsTrigger value="overview">
+                      <Eye className="h-3 w-3 mr-1" /> Overview
+                    </TabsTrigger>
+                    <TabsTrigger value="technical">
+                      <Layers className="h-3 w-3 mr-1" /> Technical
+                    </TabsTrigger>
+                    <TabsTrigger value="iac">
+                      <Code className="h-3 w-3 mr-1" /> IaC
+                    </TabsTrigger>
+                    <TabsTrigger value="finops">
+                      <ExternalLink className="h-3 w-3 mr-1" /> FinOps
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="overview">
+                    <Textarea
+                      value={form.overviewHtml}
+                      onChange={(e) => handleChange('overviewHtml', e.target.value)}
+                      className="min-h-[200px] font-mono text-sm"
+                      placeholder="<p>HTML overview content describing the architecture...</p>"
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Supports HTML. Renders in the Overview tab on the detail page.
+                    </p>
+                  </TabsContent>
+                  <TabsContent value="technical" className="space-y-4">
+                    <div>
+                      <label
+                        htmlFor="arch-components"
+                        className="text-xs font-medium text-muted-foreground mb-1 block"
+                      >
+                        Technical Components (one per line)
+                      </label>
+                      <Textarea
+                        id="arch-components"
+                        value={form.technicalComponents}
+                        onChange={(e) => handleChange('technicalComponents', e.target.value)}
+                        className="min-h-[140px] font-mono text-sm"
+                        placeholder="Amazon CloudFront&#10;Application Load Balancer&#10;ECS Fargate&#10;RDS Aurora Global&#10;ElastiCache Redis"
+                      />
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="iac" className="space-y-4">
+                    <div>
+                      <label
+                        htmlFor="arch-iac"
+                        className="text-xs font-medium text-muted-foreground mb-1 block"
+                      >
+                        Terraform / CloudFormation / Bicep Example
+                      </label>
+                      <Textarea
+                        id="arch-iac"
+                        value={form.terraformCode}
+                        onChange={(e) => handleChange('terraformCode', e.target.value)}
+                        className="min-h-[200px] font-mono text-sm bg-slate-950 text-slate-50"
+                        placeholder="# terraform block..."
+                        spellCheck={false}
+                      />
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="finops" className="space-y-4">
+                    <div>
+                      <label
+                        htmlFor="arch-cost"
+                        className="text-xs font-medium text-muted-foreground mb-1 block"
+                      >
+                        Estimated Monthly Cost
+                      </label>
+                      <Input
+                        id="arch-cost"
+                        value={form.estimatedMonthlyCost}
+                        onChange={(e) => handleChange('estimatedMonthlyCost', e.target.value)}
+                        placeholder="$2,400 / month"
+                        className="max-w-xs"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Rough cost estimate for this architecture. Detailed cost breakdown can be
+                      added after review in the admin board.
+                    </p>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            {error && (
+              <p className="text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-md px-4 py-3">
+                {error}
+              </p>
+            )}
+
+            <div className="flex items-center gap-4">
+              <Button type="submit" disabled={submitting} size="lg">
+                {submitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Submit for Review
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Submits to the admin review queue with status <code>ingested</code>.
+              </p>
+            </div>
+          </form>
+        )}
+      </section>
+    </div>
+  );
+}

@@ -1,0 +1,112 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // ========================================================================
+    // ContentForge (Phase 1) - Image Management
+    // ========================================================================
+
+    // Helper functions
+    function isValidImage() {
+      return request.resource.contentType.matches('image/.*') &&
+             request.resource.size < 10 * 1024 * 1024;  // Max 10MB
+    }
+
+    // Admin check via Custom Claims — mirrors firestore.rules isAdmin().
+    // Storage rules cannot call Firestore, so claims are the only safe mechanism.
+    function isAdmin() {
+      return request.auth != null &&
+             request.auth.token.adminRole != null &&
+             request.auth.token.adminRole != '';
+    }
+
+    // Draft Images — admin-only writes (FINDING-09 / HIGH).
+    // Stage-2 correction: pageId is a ContentForge content-doc ID (auto-generated),
+    // NOT a UID, so "uid == pageId" would always fail. ContentForge is an admin-only
+    // tool; restricting to isAdmin() achieves the intent without the logic error.
+    match /draft-images/{pageId}/{allPaths=**} {
+      allow write: if isAdmin() && isValidImage();
+      allow read: if isAdmin();
+    }
+
+    // Published Images - Public read
+    match /published-images/{pageId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if false; // Cloud Functions only
+    }
+
+    // AI-generated covers used on public live pages
+    match /covers/{allPaths=**} {
+      allow read: if true;
+      allow write: if false; // Cloud Functions only
+    }
+
+    // Legacy blog image paths still referenced by public content
+    match /blogs/{blogId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if false; // Cloud Functions only
+    }
+
+    // Thumbnails - Public read (auto-generated)
+    match /thumbnails/{allPaths=**} {
+      allow read: if true;
+      allow write: if false; // Cloud Functions only
+    }
+
+    // User uploads - Temporary
+    match /uploads/{userId}/{allPaths=**} {
+      allow write: if
+        request.auth != null &&
+        request.auth.uid == userId &&
+        isValidImage();
+      allow read: if
+        request.auth != null &&
+        request.auth.uid == userId;
+    }
+
+    // ========================================================================
+    // Speaking Events - BuildShip Uploads & Public Display
+    // ========================================================================
+
+    match /speakerevents/{eventId}/{allPaths=**} {
+      allow read: if true;  // Public read for event images
+      // BuildShip service account uses a custom token (sign_in_provider == 'custom').
+      // Requiring auth != null prevents anonymous/unauthenticated uploads.
+      allow write: if request.auth != null &&
+                      request.auth.token.firebase.sign_in_provider == 'custom';
+    }
+
+    // ========================================================================
+    // Certifications - Public read for badge images
+    // ========================================================================
+
+    // Certification badge images — admin-only writes (FINDING-09 / HIGH).
+    // Any authenticated user could previously overwrite certification badges.
+    match /certifications/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    match /database/certifications/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // ========================================================================
+    // Image Gallery - Admin Manual Uploads
+    // ========================================================================
+
+    // Image gallery — admin-only writes (FINDING-09 / HIGH).
+    // Any authenticated user could previously upload to the public gallery.
+    match /image-gallery/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // Default deny — no path not matched above is accessible.
+    // This replaces the previous catch-all that granted any authenticated
+    // user read/write to every storage path, overriding all specific rules.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "Reliability": {
+    "description": "Reliability in CAF emphasizes building resilient cloud foundations through proper landing zone design, disaster recovery planning, and business continuity strategies. It aligns reliability requirements with organizational readiness and adoption stages across the cloud journey."
+  },
+  "Security": {
+    "description": "Security follows governance-driven policies with centralized enforcement through Azure Policy and role-based access controls. CAF integrates security into every adoption stage\u2014from strategy through management\u2014ensuring compliance and risk management align with business objectives."
+  },
+  "Cost Optimization": {
+    "description": "Cost optimization leverages the FinOps framework principles, focusing on financial governance, budget accountability, and cost allocation across cloud resources. CAF emphasizes establishing cost management disciplines early in adoption to avoid waste and maximize cloud investment value."
+  },
+  "Operational Excellence": {
+    "description": "Operational excellence centers on establishing consistent processes, standards, and tooling across the cloud adoption lifecycle. It emphasizes organizational readiness, skills development, change management, and building operational capabilities that scale with cloud maturity."
+  },
+  "Performance Efficiency": {
+    "description": "Performance efficiency focuses on selecting appropriate cloud services and architectures that match workload requirements. CAF guides organizations through capacity planning, workload assessment, and migration strategies that optimize performance while managing complexity and technical debt."
+  }
+}

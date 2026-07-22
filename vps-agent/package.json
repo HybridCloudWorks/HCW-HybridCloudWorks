@@ -1,0 +1,12 @@
+{
+  "name": "hcw-vps-agent",
+  "version": "2.0.0",
+  "description": "VPS agent migrated to Cosmos DB",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@azure/cosmos": "^4.3.0"
+  }
+}

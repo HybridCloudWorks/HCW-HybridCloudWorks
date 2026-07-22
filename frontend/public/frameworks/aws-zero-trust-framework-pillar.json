@@ -1,0 +1,92 @@
+{
+  "Reliability": {
+    "Security": {
+      "label": "Operational Friction",
+      "why": "Zero Trust mandates continuous identity and device re-verification, causing delays during incident response and system recovery; this friction can impede reliability, as responders must complete additional verification steps even during emergencies."
+    },
+    "Cost": {
+      "label": "Increased Cost",
+      "why": "Ensuring reliable systems under Zero Trust incurs extra costs—redundancy, failover, advanced identity providers, network segmentation, and audit systems all add significant expense beyond traditional reliability spend."
+    },
+    "Operational": {
+      "label": "Increased Complexity",
+      "why": "Implementing resilient systems with Zero Trust creates complex operational workflows including continual trust verification post-recovery, elaborate runbooks, and incident diagnosis that is masked by security logging."
+    },
+    "Performance": {
+      "label": "Increased Latency",
+      "why": "Zero Trust’s added health checks, authentication, and segmentation increase network and compute overhead, introducing latency during failover events, API calls, and segmented traffic inspection."
+    }
+  },
+  "Security": {
+    "Reliability": {
+      "label": "Operational Friction",
+      "why": "Security controls slow rapid remediation since every system action must comply with authentication and authorization; swift restoration of reliability faces delays due to ongoing access policies."
+    },
+    "Cost": {
+      "label": "Increased Cost",
+      "why": "Zero Trust demands investment in multifactor authentication, device monitoring, policy-driven access controls, raising operational costs for secure cloud environments and expanding licensing and support requirements."
+    },
+    "Operational": {
+      "label": "Reduced Velocity",
+      "why": "Continuous verification required by Zero Trust slows down deployment and automation pipelines; every resource, workload, and user needs registration and compliance checks, hindering rapid operational changes and releases."
+    },
+    "Performance": {
+      "label": "Performance Overhead",
+      "why": "Frequent security checks and segmentation require additional CPU, memory, and network resources, detracting from workload performance and increasing latency and throughput losses."
+    }
+  },
+  "Cost": {
+    "Reliability": {
+      "label": "Reduced Resiliency",
+      "why": "Reducing spend typically cuts redundancy and monitoring, undermining resilience and increasing risk of extended outages or catastrophic failure."
+    },
+    "Security": {
+      "label": "Reduced Controls",
+      "why": "Limiting budget for security leads to fewer technical safeguards—less thorough device management, weaker identity verification, and shorter audit logs, raising risk exposure."
+    },
+    "Operational": {
+      "label": "Reduced Observability",
+      "why": "Cutting cost on operational tooling results in diminished diagnostics, observability, and automation, leaving teams with reduced insight into system health for troubleshooting and compliance."
+    },
+    "Performance": {
+      "label": "Underprovisioning",
+      "why": "Efforts to minimize cost lead to under-provisioned resources, causing slow response times and higher latency during high traffic or computational spikes."
+    }
+  },
+  "Operational": {
+    "Reliability": {
+      "label": "Destabilization Risk",
+      "why": "Rapid operational changes such as deployments and reconfigurations can destabilize resilient architectures without proper failover and backup alignment."
+    },
+    "Security": {
+      "label": "Increased Surface Area",
+      "why": "Operational expansions, automated resource vending, and opening new environments increase network and workload attack surface unless tightly governed, leading to new security gaps."
+    },
+    "Cost": {
+      "label": "Increased Tooling Spend",
+      "why": "Enhancing operational excellence requires costly investments in automation platforms, observability tools, and orchestration solutions, driving up cloud tooling budgets."
+    },
+    "Performance": {
+      "label": "Resource Utilization",
+      "why": "Operational efficiency may maximize resource utilization for savings, occasionally throttling peak performance as resources are pooled and decommissioned."
+    }
+  },
+  "Performance": {
+    "Reliability": {
+      "label": "Increased Density Risk",
+      "why": "Maximizing resource density for peak performance raises the risk that a single hardware failure will cascade across tightly packed critical workloads."
+    },
+    "Security": {
+      "label": "Reduced Segmentation",
+      "why": "Eliminating network segmentation to optimize speed makes lateral threat movement possible, exposing workloads to increased risk in exchange for performance gains."
+    },
+    "Cost": {
+      "label": "Overprovisioning Cost",
+      "why": "Maintaining surplus compute, memory, or bandwidth to guarantee low latency demands excess spend, with costs rising as capacity is reserved for rare peaks."
+    },
+    "Operational": {
+      "label": "Increased Complexity",
+      "why": "Performance optimization involves specialized operational tuning, frequent adjustments, and custom scaling rules, demanding additional expertise and time from operations teams."
+    }
+  }
+}

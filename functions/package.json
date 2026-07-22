@@ -1,0 +1,38 @@
+{
+  "name": "hybridcloudworks-functions-azure",
+  "description": "Azure Functions for HybridCloudWorks (migrated from Firebase Cloud Functions)",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/functions/index.js",
+  "scripts": {
+    "start": "func start",
+    "build": "echo 'No build step required'",
+    "test": "vitest run",
+    "deploy": "func azure functionapp publish hcw-functions-prod"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@azure/cosmos": "^4.3.0",
+    "@azure/functions": "^4.7.0",
+    "@azure/identity": "^4.8.0",
+    "@azure/keyvault-secrets": "^4.9.0",
+    "@azure/openai": "^2.0.0",
+    "@azure/storage-blob": "^12.27.0",
+    "@mendable/firecrawl-js": "^4.30.1",
+    "@notionhq/client": "^5.21.0",
+    "axios": "^1.18.0",
+    "cheerio": "^1.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^4.0.1",
+    "replicate": "^1.4.0",
+    "rss-parser": "^3.13.0",
+    "sharp": "^0.35.3",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  },
+  "private": true
+}

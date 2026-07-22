@@ -1,0 +1,92 @@
+{
+  "Reliability": {
+    "Security": {
+      "label": "Access Delay",
+      "why": "Identity and access controls in cloud adoption slow recovery by adding time-intensive verification steps during failover or migration, reducing rapid reliability improvements."
+    },
+    "Cost": {
+      "label": "Higher Cloud Spend",
+      "why": "Ensuring reliability typically requires duplicating cloud resources across regions with backups and snapshots, which raises operational costs."
+    },
+    "Operational": {
+      "label": "More Complex Processes",
+      "why": "Adding failover and health monitoring expands operational workflows, demanding extra stages in deployment and maintenance."
+    },
+    "Performance": {
+      "label": "Slight Latency Increase",
+      "why": "Data replication and health checks introduce marginal latency, slightly reducing application responsiveness under reliability measures."
+    }
+  },
+  "Security": {
+    "Reliability": {
+      "label": "Access Delay",
+      "why": "Security verification steps slow down remediation and service restoration, limiting rapid gains in system reliability."
+    },
+    "Cost": {
+      "label": "Security Tooling Cost",
+      "why": "Deploying identity management, encryption, and threat detection tools elevates cloud expenditure."
+    },
+    "Operational": {
+      "label": "Slower Deployment",
+      "why": "Security validations add stages and approvals, reducing operational speed and agility."
+    },
+    "Performance": {
+      "label": "Processing Overhead",
+      "why": "Encryption and authorization consume compute, impacting overall application throughput."
+    }
+  },
+  "Cost": {
+    "Reliability": {
+      "label": "Fewer Backups",
+      "why": "Budget cuts can reduce backups and snapshots, increasing failure impact."
+    },
+    "Security": {
+      "label": "Limited Security Features",
+      "why": "Cost constraints may limit advanced security safeguard deployment."
+    },
+    "Operational": {
+      "label": "Minimal Tooling",
+      "why": "Lower budgets reduce monitoring and automation tool availability."
+    },
+    "Performance": {
+      "label": "Resource Constraints",
+      "why": "Restricting resources impairs performance under demand spikes."
+    }
+  },
+  "Operational": {
+    "Reliability": {
+      "label": "Increased Failure Recovery Time",
+      "why": "More dependencies and complex processes extend time to recover from failures."
+    },
+    "Security": {
+      "label": "Expanded Attack Surface",
+      "why": "Operational growth creates more potential vectors needing protection."
+    },
+    "Cost": {
+      "label": "Increased Tooling Cost",
+      "why": "Automation and monitoring tools add to operational costs."
+    },
+    "Performance": {
+      "label": "Resource Optimization Effort",
+      "why": "Continuous tuning for efficiency adds operational overhead."
+    }
+  },
+  "Performance": {
+    "Reliability": {
+      "label": "Risk of Overloaded Systems",
+      "why": "Maximizing throughput risks system overload without adequate reliability safeguards."
+    },
+    "Security": {
+      "label": "Weakened Network Segmentation",
+      "why": "Reduced segmentation for speed opens up lateral attack paths."
+    },
+    "Cost": {
+      "label": "Extra Scaling Costs",
+      "why": "Scaling for peak performance causes elevated cloud expenditures."
+    },
+    "Operational": {
+      "label": "Increased System Tuning",
+      "why": "Higher performance demands frequent operational adjustments and monitoring."
+    }
+  }
+}

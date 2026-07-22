@@ -1,0 +1,97 @@
+# Service account keys - never commit
+firebase-service-account.json
+*-service-account.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+build
+public/llms.txt
+public/data/
+*.local
+
+# Test coverage reports
+coverage
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Secrets folder - DO NOT COMMIT
+# Contains: .env files, kubeconfig, credentials, encryption config
+# .sops.yaml is safe (only public key + config), but keep folder private
+/secrets/
+
+# Environment variables (now in /secrets/env/)
+.env
+.env.local
+.env.*.local
+
+functions/node_modules
+
+# Vite/Turbo caches
+node_modules/.vite
+.turbo
+.firebase/
+.lighthouseci/
+
+# Infrastructure secrets and runtime data
+infrastructure/secrets/secrets.yaml
+infrastructure/secrets/.secrets.yaml
+infrastructure/traefik_users/password_plaintext.txt
+infrastructure/ansible/vars/secrets.yml
+infrastructure/terraform/terraform.tfvars
+infrastructure/terraform/secrets.auto.tfvars
+platform/terraform/terraform.tfvars
+.terraform/
+infrastructure/terraform/*.tfstate*
+infrastructure/letsencrypt/
+infrastructure/n8n_data/
+infrastructure/traefik_logs/
+dockerbuild/.env
+infrastructure/rowy/service-account.json
+infrastructure/terraform/gcp-secrets/.terraform/
+infrastructure/terraform/gcp-secrets/terraform.tfstate
+infrastructure/terraform/gcp-secrets/terraform.tfstate.backup
+playwright-report/
+test-results/
+
+# Local recovery artifacts
+.env.recovered
+*.recovered
+
+# Local smoke artifacts and browser debug profiles (legacy paths kept in case
+# any tooling still writes here — root reports/ folder removed May 10, 2026)
+reports/
+reports/live-smoke/
+
+# Local user settings (keep local only)
+.claude/
+
+## Ensure infrastructure secrets folder is never committed
+infrastructure/secrets/
+
+# Ignore local temp secrets file
+scripts/temp-check.yaml
+
+# Generated smoke-script output artifacts
+scripts/*-output.json
+
+# Ignore infrastructure secrets
+infrastructure/secrets/

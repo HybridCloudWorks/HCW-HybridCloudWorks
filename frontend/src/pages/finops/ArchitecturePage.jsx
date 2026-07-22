@@ -1,0 +1,401 @@
+import React, { useState } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { useNavigate } from 'react-router-dom';
+import { useFirestoreQuery } from '@/hooks/useFirestore';
+import { where } from 'firebase/firestore';
+
+function isPublicDocument(doc = {}) {
+  const status = String(doc.contentStatus || '');
+  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
+}
+
+function firstPresent(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') {
+      return value;
+    }
+  }
+  return null;
+}
+
+function mapDynamicBlueprint(doc, index, normalizeCategory) {
+  const category = normalizeCategory(firstPresent(doc.category, doc.Category, 'Cost Analysis'));
+  return {
+    id: firstPresent(doc.id, doc.slug, doc.Slug, `dynamic-${index}`),
+    icon: firstPresent(doc.icon, 'trending_down'),
+    category,
+    categoryColor: 'text-emerald-400',
+    title: firstPresent(doc.title, doc.Title, 'Untitled Blueprint'),
+    description: firstPresent(doc.summary, doc.Summary, doc.description, ''),
+    rpo: firstPresent(doc.rpo, doc.RPO, 'N/A'),
+    rto: firstPresent(doc.rto, doc.RTO, 'N/A'),
+    level: firstPresent(doc.level, doc.complexity, 'Production'),
+    cost: firstPresent(doc.costAnalysis?.estimatedMonthly, doc.cost, 'TBD'),
+    costColor: firstPresent(doc.costColor, 'text-green-400'),
+    featured: doc.featured === true || doc.Featured === true,
+    waf: firstPresent(doc.waf, doc.wellArchitectedScore, 90),
+    slug: firstPresent(doc.slug, doc.Slug),
+  };
+}
+
+export default function ArchitecturePage() {
+  const navigate = useNavigate();
+  const staticBlueprints = [
+    {
+      id: 1,
+      icon: 'trending_down',
+      category: 'Cost Analysis',
+      categoryColor: 'text-emerald-400',
+      title: 'Multi-Cloud Cost Optimization',
+      description:
+        'Cross-cloud optimization architecture with shared tagging taxonomy, cost telemetry normalization, and rightsizing recommendation pipelines.',
+      rpo: '1h',
+      rto: '30m',
+      level: 'Production',
+      cost: '$1,800/mo',
+      costColor: 'text-green-400',
+      featured: true,
+      waf: 94,
+    },
+    {
+      id: 2,
+      icon: 'analytics',
+      category: 'Reporting',
+      categoryColor: 'text-blue-400',
+      title: 'Real-time Cost Dashboard',
+      description:
+        'Streaming dashboard pattern for near real-time cloud spend visibility across business units, products, and environments.',
+      rpo: '15m',
+      rto: '5m',
+      level: 'Production',
+      cost: '$1,200/mo',
+      costColor: 'text-green-400',
+      waf: 92,
+    },
+    {
+      id: 3,
+      icon: 'calculate',
+      category: 'Billing',
+      categoryColor: 'text-purple-400',
+      title: 'Chargeback & Allocation',
+      description:
+        'Allocation framework for unit-economics reporting with cost ownership, shared resource split rules, and monthly chargeback automation.',
+      rpo: '1d',
+      rto: '4h',
+      level: 'Standard',
+      cost: '$900/mo',
+      costColor: 'text-green-400',
+      waf: 89,
+    },
+    {
+      id: 4,
+      icon: 'optimization',
+      category: 'Automation',
+      categoryColor: 'text-yellow-400',
+      title: 'RI & Savings Plan Automation',
+      description:
+        'Automation workflow for committed-use planning, purchase simulation, and policy-based guardrails to reduce avoidable spend.',
+      rpo: '6h',
+      rto: '2h',
+      level: 'Production',
+      cost: '$2,100/mo',
+      costColor: 'text-orange-400',
+      waf: 95,
+    },
+    {
+      id: 5,
+      icon: 'policy',
+      category: 'Governance',
+      categoryColor: 'text-red-400',
+      title: 'Budget & Policy Framework',
+      description:
+        'Governance architecture tying budget thresholds to policy enforcement, alert routing, and escalation workflows by cost center.',
+      rpo: '24h',
+      rto: '1h',
+      level: 'Mission Critical',
+      cost: '$1,600/mo',
+      costColor: 'text-orange-400',
+      waf: 97,
+    },
+    {
+      id: 6,
+      icon: 'lightbulb',
+      category: 'Optimization',
+      categoryColor: 'text-pink-400',
+      title: 'Waste Identification & Alerts',
+      description:
+        'Continuous anomaly and idle-resource detection pipeline with actionable alerts for compute, storage, and network waste classes.',
+      rpo: '30m',
+      rto: '15m',
+      level: 'Production',
+      cost: '$1,400/mo',
+      costColor: 'text-green-400',
+      waf: 93,
+    },
+  ];
+
+  const categories = [
+    'Cost Analysis',
+    'Reporting',
+    'Billing',
+    'Automation',
+    'Governance',
+    'Optimization',
+  ];
+  const [selectedCategories, setSelectedCategories] = useState([]);
+
+  const normalizeCategory = (value) => (categories.includes(value) ? value : categories[0]);
+
+  const { data: dynamicDocs } = useFirestoreQuery('content', [where('type', '==', 'architecture')]);
+  const dynamicBlueprints = (dynamicDocs || [])
+    .filter(
+      (doc) =>
+        isPublicDocument(doc) &&
+        (doc.cloudProvider || doc['Cloud Provider'] || 'finops').toLowerCase() === 'finops'
+    )
+    .map((doc, index) => mapDynamicBlueprint(doc, index, normalizeCategory));
+
+  const blueprints = [...dynamicBlueprints, ...staticBlueprints];
+
+  const toggleCategory = (category) => {
+    setSelectedCategories((prev) =>
+      prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category]
+    );
+  };
+
+  const resetFilters = () => setSelectedCategories([]);
+
+  const filteredArchitectures =
+    selectedCategories.length === 0
+      ? blueprints
+      : blueprints.filter((bp) => selectedCategories.includes(bp.category));
+
+  const featuredArch = filteredArchitectures.find((bp) => bp.featured) || filteredArchitectures[0];
+
+  const categoryGradients = {
+    'Cost Analysis': 'bg-gradient-to-br from-emerald-900/20 to-emerald-900/5 border-emerald-500/20',
+    Reporting: 'bg-gradient-to-br from-blue-900/20 to-blue-900/5 border-blue-500/20',
+    Billing: 'bg-gradient-to-br from-purple-900/20 to-purple-900/5 border-purple-500/20',
+    Automation: 'bg-gradient-to-br from-yellow-900/20 to-yellow-900/5 border-yellow-500/20',
+    Governance: 'bg-gradient-to-br from-red-900/20 to-red-900/5 border-red-500/20',
+    Optimization: 'bg-gradient-to-br from-pink-900/20 to-pink-900/5 border-pink-500/20',
+  };
+
+  const categoryBadgeGradients = {
+    'Cost Analysis': 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+    Reporting: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
+    Billing: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
+    Automation: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+    Governance: 'bg-red-500/20 text-red-300 border border-red-500/30',
+    Optimization: 'bg-pink-500/20 text-pink-300 border border-pink-500/30',
+  };
+
+  const categoryColors = {
+    'Cost Analysis': 'text-emerald-400',
+    Reporting: 'text-blue-400',
+    Billing: 'text-purple-400',
+    Automation: 'text-yellow-400',
+    Governance: 'text-red-400',
+    Optimization: 'text-pink-400',
+  };
+
+  return (
+    <>
+      <Helmet>
+        <title>FinOps Reference Architectures | Hybrid Cloud Works</title>
+        <meta
+          name="description"
+          content="Explore production-ready FinOps and cost optimization architectures"
+        />
+      </Helmet>
+      <main className="flex-grow max-w-[1440px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 xl:grid-cols-12 gap-8">
+        {/* Left Sidebar - Filters (Mobile: Bottom) */}
+        <aside className="xl:col-span-3 order-2 xl:order-1 h-fit xl:sticky xl:top-28">
+          <div className="bg-slate-800/40 backdrop-blur-md border border-slate-700 rounded-2xl p-6 hover:shadow-[0_0_25px_rgba(var(--primary-rgb,52,211,153),0.15)] hover:border-primary/50 transition-all duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <span className="text-primary text-[20px] material-symbols-outlined">
+                  filter_alt
+                </span>
+                Filters
+              </h3>
+            </div>
+
+            {/* Category Checkboxes */}
+            <div className="space-y-3 mb-6">
+              {categories.map((category) => (
+                <label key={category} className="flex items-center gap-3 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={selectedCategories.includes(category)}
+                    onChange={() => toggleCategory(category)}
+                    className="w-4 h-4 rounded border border-slate-600 bg-slate-700 checked:bg-primary checked:border-primary cursor-pointer"
+                  />
+                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors">
+                    {category}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {/* Reset Button */}
+            {selectedCategories.length > 0 && (
+              <button
+                onClick={resetFilters}
+                className="w-full py-2 px-4 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 hover:text-white rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center justify-center gap-2"
+              >
+                <span className="text-[18px] material-symbols-outlined">restart_alt</span>
+                Reset Filters
+              </button>
+            )}
+          </div>
+        </aside>
+
+        {/* Right Content - Featured + Gallery (Mobile: Top) */}
+        <div className="xl:col-span-9 order-1 xl:order-2">
+          {/* Featured Architecture */}
+          {featuredArch && (
+            <article
+              className={`group mb-12 ${categoryGradients[featuredArch.category]} backdrop-blur-md border rounded-2xl overflow-hidden hover:shadow-[0_0_25px_rgba(var(--primary-rgb,52,211,153),0.15)] hover:border-primary/50 transition-all duration-300`}
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 p-8">
+                {/* Left: Text Content */}
+                <div className="flex flex-col justify-center">
+                  <div className="mb-4">
+                    <span
+                      className={`px-3 py-1 rounded text-xs font-medium ${categoryBadgeGradients[featuredArch.category]}`}
+                    >
+                      {featuredArch.category} • Featured
+                    </span>
+                  </div>
+                  <h2 className="text-3xl font-bold text-white mb-4">{featuredArch.title}</h2>
+                  <p className="text-slate-300 mb-6">{featuredArch.description}</p>
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="bg-slate-900/50 rounded-lg p-3">
+                      <span className="text-[10px] text-foreground uppercase font-bold">SLA</span>
+                      <p className="text-xl font-bold text-white">{featuredArch.waf}%</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-3">
+                      <span className="text-[10px] text-foreground uppercase font-bold">RPO</span>
+                      <p className="text-xl font-bold text-white">{featuredArch.rpo}</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-3">
+                      <span className="text-[10px] text-foreground uppercase font-bold">RTO</span>
+                      <p className="text-xl font-bold text-white">{featuredArch.rto}</p>
+                    </div>
+                  </div>
+                  {featuredArch.slug && (
+                    <button
+                      onClick={() => navigate(`/finops/architecture-designs/${featuredArch.slug}`)}
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-emerald-600 text-slate-900 font-bold rounded-lg transition-colors w-fit"
+                    >
+                      <span className="text-[18px] material-symbols-outlined">arrow_forward</span>
+                      Read Full Blueprint
+                    </button>
+                  )}
+                </div>
+
+                {/* Right: Image/Metrics */}
+                <div className="flex flex-col items-center justify-center">
+                  <div className="w-full h-64 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-slate-600 flex items-center justify-center overflow-hidden group-hover:scale-105 transition-transform duration-300">
+                    <span
+                      className={`text-6xl material-symbols-outlined ${categoryColors[featuredArch.category]}/40`}
+                    >
+                      {featuredArch.icon}
+                    </span>
+                  </div>
+                  <div className="mt-6 w-full flex items-center gap-2 text-sm text-slate-400">
+                    <span className="text-primary text-[16px] material-symbols-outlined">
+                      verified
+                    </span>
+                    <span>Well-Architected Review: {featuredArch.waf}% Baseline</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          )}
+
+          {/* Architecture Gallery Grid */}
+          <section>
+            <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+              <span className="text-primary text-[24px] material-symbols-outlined">
+                dashboard_customize
+              </span>
+              More Architectures
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredArchitectures
+                .filter((arch) => !arch.featured)
+                .map((arch) => (
+                  <article
+                    key={arch.id}
+                    className={`group ${categoryGradients[arch.category]} backdrop-blur-md border rounded-2xl overflow-hidden hover:shadow-[0_0_25px_rgba(var(--primary-rgb,52,211,153),0.15)] hover:border-primary/50 transition-all duration-300 flex flex-col`}
+                  >
+                    {/* Image Section */}
+                    <div className="relative h-48 overflow-hidden bg-gradient-to-br from-slate-700 to-slate-900">
+                      <div className="absolute inset-0 flex items-center justify-center opacity-50 group-hover:opacity-75 transition-opacity duration-300">
+                        <span
+                          className={`text-5xl material-symbols-outlined ${categoryColors[arch.category]}`}
+                        >
+                          {arch.icon}
+                        </span>
+                      </div>
+                      <div className="absolute inset-0 group-hover:bg-gradient-to-t group-hover:from-slate-900 group-hover:via-transparent transition-all duration-300"></div>
+                    </div>
+
+                    {/* Content Section */}
+                    <div className="p-6 flex-grow flex flex-col">
+                      <div className="mb-3">
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${categoryBadgeGradients[arch.category]}`}
+                        >
+                          {arch.category}
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-bold text-white mb-2 line-clamp-2 group-hover:text-primary transition-colors">
+                        {arch.title}
+                      </h3>
+                      <p className="text-sm text-slate-400 mb-4 line-clamp-2 flex-grow">
+                        {arch.description}
+                      </p>
+
+                      {/* Metrics */}
+                      <div className="border-t border-slate-700/50 pt-4 mb-4 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1 text-slate-400">
+                          <span className="text-[14px] material-symbols-outlined">
+                            check_circle
+                          </span>
+                          <span>WAF: {arch.waf}%</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-slate-400">
+                          <span className="text-[14px] material-symbols-outlined">schedule</span>
+                          <span>RTO: {arch.rto}</span>
+                        </div>
+                      </div>
+
+                      {/* Action Button */}
+                      {arch.slug ? (
+                        <button
+                          onClick={() => navigate(`/finops/architecture-designs/${arch.slug}`)}
+                          className="w-full py-2 px-4 bg-slate-700/50 hover:bg-primary hover:text-slate-900 text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center justify-center gap-2 group/btn"
+                        >
+                          <span className="text-[16px] material-symbols-outlined">
+                            arrow_forward
+                          </span>
+                          View Details
+                        </button>
+                      ) : (
+                        <span className="w-full py-2 px-4 bg-slate-700/30 text-slate-500 rounded-lg text-sm font-medium border border-slate-700 flex items-center justify-center gap-2">
+                          Reference Blueprint
+                        </span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+            </div>
+          </section>
+        </div>
+      </main>
+    </>
+  );
+}

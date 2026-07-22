@@ -1,0 +1,1465 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@source './**/*.{js,jsx,ts,tsx}';
+@source '../index.html';
+@plugin '@tailwindcss/typography';
+
+@font-face {
+  font-family: 'Goldman';
+  src: url('/fonts/other/goldman/Goldman-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Goldman';
+  src: url('/fonts/other/goldman/Goldman-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Turret Road';
+  src: url('/fonts/other/turret_road/TurretRoad-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Turret Road';
+  src: url('/fonts/other/turret_road/TurretRoad-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Amazon Fonts */
+@font-face {
+  font-family: 'Amazon Ember';
+  src: url('/fonts/amazon/Ember/AmazonEmber_Rg.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Amazon Ember';
+  src: url('/fonts/amazon/Ember/AmazonEmber_Bd.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Bookerly';
+  src: url('/fonts/amazon/Bookerly/Bookerly-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Bookerly';
+  src: url('/fonts/amazon/Bookerly/Bookerly-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Google (Google Sans Flex) */
+@font-face {
+  font-family: 'Google Sans';
+  src: url('/fonts/google/static/GoogleSansFlex_120pt-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Google Sans';
+  src: url('/fonts/google/static/GoogleSansFlex_120pt-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* GitHub (Mona Sans) - using webfont variable/static sets if available */
+@font-face {
+  font-family: 'Mona Sans';
+  src:
+    url('/fonts/github/mona-sans/webfonts/static/MonaSans-Regular.woff2') format('woff2'),
+    url('/fonts/github/mona-sans/webfonts/static/MonaSans-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Mona Sans';
+  src:
+    url('/fonts/github/mona-sans/webfonts/static/MonaSans-Bold.woff2') format('woff2'),
+    url('/fonts/github/mona-sans/webfonts/static/MonaSans-Bold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * Tailwind 4 dark-mode strategy: enable class-based dark mode equivalent
+ * to v3's `darkMode: ['class']`. The custom variant lets `dark:` utilities
+ * fire when the `.dark` class is present anywhere up the tree.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Tailwind 4 changed the default border color from gray-200 to currentColor.
+ * To preserve our existing v3 visual baseline (where `class="border"` without
+ * an explicit color rendered as gray-200), restore the v3 fallback here.
+ */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+
+/*
+ * Theme tokens — translated from the previous `tailwind.config.js` extend
+ * block. v4 reads these as CSS custom properties; values here become
+ * available as utility class colors (e.g. `bg-aws-primary`, `text-card`).
+ *
+ * `@theme inline` is critical: it makes Tailwind generate utilities like
+ * `bg-primary { background-color: hsl(var(--primary)) }` with the var()
+ * call preserved at runtime. Without `inline`, Tailwind would eagerly
+ * resolve `hsl(var(--primary))` once at :root scope and bake the resulting
+ * color into the utility, breaking provider-theme overrides like
+ * `.theme-azure { --primary: ... }` that depend on cascade re-evaluation
+ * per element. See https://tailwindcss.com/docs/theme#inline.
+ */
+@theme inline {
+  /* Designer color tokens from Stitch HTML baseline */
+  --color-background-dark: #0f172a;
+  --color-surface-dark: #1e293b;
+  --color-surface-lighter: #334155;
+  --color-glass-border: rgba(148, 163, 184, 0.15);
+  --color-neutral-glow: #64748b;
+
+  /* Provider accent colors */
+  --color-aws-primary: #ff9900;
+  --color-azure-primary: #0078d4;
+  --color-gcp-primary: #db4437;
+  --color-github-primary: #e6edf3;
+  --color-terraform-primary: #844fba;
+  --color-finops-primary: #34d399;
+  --color-vmware-primary: #0091da;
+  --color-ansible-primary: #ee0000;
+
+  /* Short provider color aliases */
+  --color-azure: hsl(var(--azure-blue));
+  --color-aws: hsl(var(--aws-orange));
+  --color-gcp: #db4437;
+  --color-github: hsl(var(--github-gray));
+  --color-terraform: hsl(var(--terraform-purple));
+  --color-finops: hsl(var(--finops-green));
+  --color-vmware: hsl(var(--vmware-blue));
+  --color-ansible: hsl(var(--ansible-red));
+
+  /* Radix/shadcn semantic tokens (resolve via the HSL components defined
+   * in the :root / .dark blocks below) */
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  /* Font families (Tailwind 4 reads --font-* as utility families) */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Turret Road', ui-monospace, monospace;
+  --font-display: 'Goldman', 'Turret Road', 'IBM Plex Mono', monospace;
+  --font-ember: 'Amazon Ember', sans-serif;
+  --font-bookerly: 'Bookerly', serif;
+  --font-aptos: 'Aptos', 'Genos', sans-serif;
+  --font-googlesans: 'Google Sans', 'Genos', sans-serif;
+  --font-monasans: 'Mona Sans', 'Genos', sans-serif;
+  --font-terraform: 'Terraform', 'Genos', sans-serif;
+
+  /* Border radius scale tied to the runtime --radius CSS variable */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Container defaults — v4 needs these explicitly via --container-* */
+  --container-2xl: 1400px;
+}
+
+/* Container plugin replacement (v4 dropped the `container` core plugin). */
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+}
+
+/* Accordion animation keyframes (used by Radix tabs/accordion). */
+@theme {
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+@layer base {
+  :root {
+    /* Light mode: use approved shared white + dark text for high contrast */
+    --background: 0 0% 100%; /* #FFFFFF */
+    --foreground: 222 20% 12%; /* #111827 - approved dark-gray */
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 20% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 20% 12%;
+
+    /* Primary defaults to readable text color on light backgrounds */
+    --primary: 222 20% 12%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Neutral/secondary surfaces use very light grays derived from approved palette */
+    --secondary: 220 14% 95%; /* approx #f3f4f6 */
+    --secondary-foreground: 222 20% 12%;
+
+    --muted: 210 20% 96%;
+    --muted-foreground: 220 12% 38%;
+
+    /* Accent left neutral here — provider theme classes should override with brand colors */
+    --accent: 220 14% 95%;
+    --accent-foreground: 222 20% 12%;
+
+    --destructive: 0 72% 54%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 14% 95%;
+    --input: 220 14% 95%;
+    --ring: 222 20% 18%;
+
+    --radius: 0.5rem;
+    /* Provider brand colors (HSL components) - used by SVGs and inline styles */
+    --azure-blue: 199 100% 47%; /* #00A4EF */
+    --aws-orange: 36 100% 50%; /* #FF9900 */
+    --gcp-red: 4 68% 53%; /* #DB4437 */
+    --github-gray: 210 6% 12%; /* #101411 */
+    --terraform-purple: 267 42% 50%; /* #7B42BC */
+    --finops-green: 159 74% 38%; /* #1EA482 */
+    --vmware-blue: 200 100% 43%; /* #0091DA */
+    --ansible-red: 0 100% 47%; /* #EE0000 */
+  }
+
+  .dark {
+    /* Dark-luxe (Hyoga) base: near-black charcoal with warm ambient glow.
+     * White foreground keeps AAA contrast on the darker base. */
+    --background: 240 9% 4%; /* approx #0a0a0c charcoal */
+    --foreground: 0 0% 100%; /* #FFFFFF */
+
+    --card: 240 6% 7%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 240 6% 7%;
+    --popover-foreground: 0 0% 100%;
+
+    /* Primary in dark mode is light (text) — brand accents set via theme- classes */
+    --primary: 0 0% 100%;
+    --primary-foreground: 222 20% 12%;
+
+    --secondary: 240 6% 14%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 240 6% 11%;
+    /*
+     * --muted-foreground must keep >=4.5:1 contrast against both --background
+     * (#0f172a) and --card (#0a0f1c). Previous value (60% L) sat at ~4.6:1 —
+     * borderline AA and visibly washed out for small text. 80% L lands at
+     * ~10:1, AAA-compliant. Do not lower without re-running the contrast
+     * scan: `npm run a11y:contrast`.
+     */
+    --muted-foreground: 215 16% 80%;
+
+    --accent: 240 6% 14%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 6% 15%;
+    --input: 240 6% 15%;
+    --ring: 240 6% 18%;
+  }
+}
+
+.icon-solid {
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+.icon-outline {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+@layer base {
+  html {
+    scroll-padding-top: 80px;
+    overflow-y: scroll;
+    color-scheme: dark;
+  }
+
+  html[data-theme='light'] {
+    color-scheme: light;
+  }
+
+  html[data-theme='dark'] {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    overflow-x: hidden;
+  }
+}
+
+/* Legacy variables support */
+:root {
+  --dark-gray: #111827;
+  --medium-gray: #374151;
+  --subtitle-gray: #6b7280;
+  --light-gray: #f3f4f6;
+  --slate-blue: #4f46e5;
+  --slate-blue-light: #eef2ff;
+  --background-gray: #f9fafb;
+  --border-gray: #e5e7eb;
+  --border-border-gray: #e5e7eb;
+  --accent-color: #6366f1;
+  --gradient-start: #f0f4ff;
+  --gradient-end: #ffffff;
+  --shared-white: #ffffff;
+  --shared-black: #000000;
+  --shared-gray: #f5fbff;
+
+  /* Glass system tokens (consumed by .glass base + aliases below) */
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.7);
+  --glass-bg-hover: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(130, 113, 110, 0.18);
+  --glass-border-hover: rgba(130, 113, 110, 0.28);
+  --glass-blur: 10px;
+
+  /* Glow utility tokens (paired with per-theme --primary-rgb) */
+  --glow-opacity: 0.1;
+
+  /* Header/footer chrome tokens (overridden per .theme-{provider}) */
+  --header-bg: rgba(255, 255, 255, 0.8);
+  --header-blur: 12px;
+
+  /* Shadow scale */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 8px 24px rgba(31, 38, 135, 0.07);
+  --shadow-lg: 0 16px 40px rgba(31, 38, 135, 0.1);
+}
+
+.dark {
+  --dark-gray: #f9fafb;
+  --medium-gray: #e5e7eb;
+  --subtitle-gray: #9ca3af;
+  --light-gray: #cbd5e1;
+  --slate-blue: #818cf8;
+  --slate-blue-light: #312e81;
+  --background-gray: #0a0a0c;
+  --border-gray: #374151;
+  --border-border-gray: #374151;
+  /* Keep accent same or slight adjust if needed */
+  --accent-color: #818cf8;
+  --gradient-start: #131316;
+  --gradient-end: #0a0a0c;
+  --shared-white: #0b0b0e;
+  --shared-black: #f8fafc;
+  --shared-gray: #101014;
+
+  /* Glass system tokens — dark-luxe */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-bg-strong: rgba(18, 18, 24, 0.7);
+  --glass-bg-hover: rgba(255, 255, 255, 0.09);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.18);
+  --glass-blur: 12px;
+
+  --glow-opacity: 0.15;
+
+  --header-bg: rgba(10, 10, 14, 0.82);
+  --header-blur: 20px;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Azure themed overrides applied when wrapped in .theme-azure */
+.theme-azure {
+  --dark-gray: #0f2942;
+  --medium-gray: #103d60;
+  --subtitle-gray: #1d5f8f;
+  --light-gray: #e6f4ff;
+  --slate-blue: #00a4ef;
+  --slate-blue-light: #e1f3ff;
+  --background-gray: var(--shared-gray);
+  --border-gray: #c8e6f9;
+  --accent-color: #00a4ef;
+  --gradient-start: #e1f3ff;
+  --gradient-end: #ffffff;
+  --azure-blue: #00a4ef;
+  --accent-light: #26baff;
+  --accent-dark: #0083bf;
+  --azure-gray: #737373;
+  --shared-white: #ffffff;
+  --shared-black: #000000;
+  /* set Tailwind primary tokens from approved brand color (Azure)
+      Use a slightly darker primary for UI surfaces to meet WCAG contrast */
+  --primary: 199 100% 36%; /* darker hsl(#007DB7) for better contrast */
+  --primary-rgb: 0, 164, 239;
+  --primary-foreground: 0 0% 100%;
+  --link-hover: #006cbf;
+  --header-bg: #f0f9ffcc;
+  --header-blur: 6px;
+}
+
+/* AWS Theme */
+.theme-aws {
+  --dark-gray: #232f3e;
+  --medium-gray: #2f3f52;
+  --subtitle-gray: #42566e;
+  --light-gray: #fff7eb;
+  --slate-blue: #ff9900;
+  --slate-blue-light: #ffe4c2;
+  --background-gray: var(--shared-gray);
+  --border-gray: #ffd7a1;
+  --accent-color: #ff9900;
+  --gradient-start: #fff2df;
+  --gradient-end: #ffffff;
+  --accent-light: #ffad32;
+  --accent-dark: #cc7a00;
+  /* set Tailwind primary tokens from approved AWS brand color
+      Use a slightly darker primary for UI surfaces to meet WCAG contrast */
+  --primary: 36 100% 32%; /* slightly darker hsl for improved contrast */
+  --primary-rgb: 255, 153, 0;
+  --primary-foreground: 0 0% 0%;
+  --link-hover: #e68000;
+  --header-bg: #fff4e0cc;
+  --header-blur: 6px;
+}
+
+/* GCP Theme */
+.theme-gcp {
+  --dark-gray: #202124;
+  --medium-gray: #3c4043;
+  --subtitle-gray: #5f6368;
+  --light-gray: #fdecea;
+  --slate-blue: #db4437; /* keep legacy variable name but map primary below */
+  --slate-blue-light: #fbeae7;
+  --background-gray: var(--shared-gray);
+  --border-gray: #f8c1ba;
+  --accent-color: #db4437;
+  --gradient-start: #fdecea;
+  --gradient-end: #ffffff;
+  --gcp-red: 4 68% 53%; /* numeric HSL for #DB4437 */
+  --accent-light: #e2695e;
+  --accent-dark: #b92d21;
+  /* Primary should match provider's chosen primary (GCP red in this setup)
+      Darken slightly for UI surfaces to meet WCAG contrast */
+  --primary: 4 72% 32%; /* darker GCP red for better contrast */
+  --primary-rgb: 219, 68, 55;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 4 68% 43%; /* darker red for borders/hover */
+  --secondary-foreground: 0 0% 100%;
+  --link-hover: #b92d21;
+  --header-bg: #fff1efcc;
+  --header-blur: 6px;
+}
+
+/* Github Theme - 25% clearer grey */
+.theme-github {
+  --dark-gray: #101411;
+  /* Darkest Secondary */
+  --medium-gray: #232925;
+  /* Darker Secondary */
+  --subtitle-gray: #6e7681;
+  --light-gray: #f6f8fa;
+  --slate-blue: #909692;
+  /* New Primary */
+  --slate-blue-light: #eaeef2;
+  --background-gray: var(--shared-gray);
+  --border-gray: #d0d7de;
+  --accent-color: #909692;
+  --gradient-start: #f6f8fa;
+  --gradient-end: #ffffff;
+  --accent-light: #232925;
+  --accent-dark: #101411;
+  /* set Tailwind primary tokens for Github theme (neutral gray as primary) */
+  --primary: 210 6% 12%; /* approx hsl(#101411) */
+  --primary-rgb: 110, 118, 129;
+  --primary-foreground: 0 0% 100%;
+  --link-hover: #1c2128;
+  --header-bg: #f6f8facc;
+  --header-blur: 6px;
+}
+
+/* Terraform Theme */
+.theme-terraform {
+  --dark-gray: #2d1e3d;
+  /* Dark Purple */
+  --medium-gray: #3e3252;
+  --subtitle-gray: #5c477e;
+  --light-gray: #f4f0ff;
+  --slate-blue: #7b42bc;
+  /* Official Terraform Purple */
+  --slate-blue-light: #eaddff;
+  --background-gray: var(--shared-gray);
+  --border-gray: #dcc7f5;
+  --accent-color: #7b42bc;
+  --gradient-start: #f4f0ff;
+  --gradient-end: #ffffff;
+  --accent-light: #9567c9;
+  --accent-dark: #623496;
+  /* set Tailwind primary tokens for Terraform */
+  --primary: 267 46% 34%; /* darker Terraform purple for better contrast */
+  --primary-rgb: 123, 66, 188;
+  --primary-foreground: 0 0% 100%;
+  --link-hover: #5c2f8f;
+  --header-bg: #faf8ffcc;
+  --header-blur: 6px;
+}
+
+/* FinOps Theme */
+.theme-finops {
+  --dark-gray: #064e3b;
+  --medium-gray: #065f46;
+  --subtitle-gray: #047857;
+  --light-gray: #ecfdf5;
+  --slate-blue: #10b981;
+  --slate-blue-light: #d1fae5;
+  --background-gray: var(--shared-gray);
+  --border-gray: #a7f3d0;
+  --accent-color: #10b981;
+  --gradient-start: #ecfdf5;
+  --gradient-end: #ffffff;
+  --accent-light: #34d399;
+  --accent-dark: #059669;
+  --primary: 159 74% 38%;
+  --primary-rgb: 30, 164, 130;
+  --primary-foreground: 0 0% 100%;
+  --link-hover: #047857;
+  --header-bg: #ecfdf5cc;
+  --header-blur: 6px;
+}
+
+/* VMware Theme */
+.theme-vmware {
+  --dark-gray: #0c2d44;
+  --medium-gray: #114060;
+  --subtitle-gray: #1c5e8c;
+  --light-gray: #e8f6fe;
+  --slate-blue: #0091da;
+  --slate-blue-light: #d2eefc;
+  --background-gray: var(--shared-gray);
+  --border-gray: #b6e2f8;
+  --accent-color: #0091da;
+  --gradient-start: #e3f4fd;
+  --gradient-end: #ffffff;
+  --accent-light: #33a7e1;
+  --accent-dark: #006da3;
+  /* VMware blue #0091DA, darkened for WCAG contrast on UI surfaces */
+  --primary: 200 100% 34%;
+  --primary-rgb: 0, 145, 218;
+  --primary-foreground: 0 0% 100%;
+  --link-hover: #00689f;
+  --header-bg: #eef8fecc;
+  --header-blur: 6px;
+}
+
+/* Ansible Theme */
+.theme-ansible {
+  --dark-gray: #3d0a0a;
+  --medium-gray: #571212;
+  --subtitle-gray: #7e1c1c;
+  --light-gray: #feecec;
+  --slate-blue: #ee0000;
+  --slate-blue-light: #fcd6d6;
+  --background-gray: var(--shared-gray);
+  --border-gray: #f8b9b9;
+  --accent-color: #ee0000;
+  --gradient-start: #fdeaea;
+  --gradient-end: #ffffff;
+  --accent-light: #f23333;
+  --accent-dark: #b80000;
+  /* Ansible red #EE0000, darkened for WCAG contrast on UI surfaces */
+  --primary: 0 100% 36%;
+  --primary-rgb: 238, 0, 0;
+  --primary-foreground: 0 0% 100%;
+  --link-hover: #a00000;
+  --header-bg: #fef1f1cc;
+  --header-blur: 6px;
+}
+
+/* Common utility overrides so theme variable updates affect Tailwind static classes */
+.theme-azure .text-dark-gray,
+.theme-aws .text-dark-gray,
+.theme-gcp .text-dark-gray,
+.theme-github .text-dark-gray,
+.theme-terraform .text-dark-gray,
+.theme-vmware .text-dark-gray,
+.theme-ansible .text-dark-gray {
+  color: var(--dark-gray) !important;
+}
+
+.theme-azure .text-medium-gray,
+.theme-aws .text-medium-gray,
+.theme-gcp .text-medium-gray,
+.theme-github .text-medium-gray,
+.theme-terraform .text-medium-gray,
+.theme-vmware .text-medium-gray,
+.theme-ansible .text-medium-gray {
+  color: var(--medium-gray) !important;
+}
+
+.theme-azure .bg-background-gray,
+.theme-aws .bg-background-gray,
+.theme-gcp .bg-background-gray,
+.theme-github .bg-background-gray,
+.theme-terraform .bg-background-gray,
+.theme-vmware .bg-background-gray,
+.theme-ansible .bg-background-gray {
+  background-color: var(--background-gray) !important;
+}
+
+/* On-air glow effect for authenticated links - 30% stronger */
+.on-air-glow {
+  text-shadow:
+    0 0 10px rgba(239, 68, 68, 0.65),
+    0 0 20px rgba(239, 68, 68, 0.39);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    text-shadow:
+      0 0 10px rgba(239, 68, 68, 0.65),
+      0 0 20px rgba(239, 68, 68, 0.39);
+  }
+
+  50% {
+    text-shadow:
+      0 0 15px rgba(239, 68, 68, 0.91),
+      0 0 25px rgba(239, 68, 68, 0.65);
+  }
+}
+
+/* ============================================================
+   Glass system (tokenized).
+   One `.glass` base driven by --glass-bg / --glass-blur /
+   --glass-border (+ hover variants). Legacy class names —
+   .glass-card, .glass-panel, .dashboard-card, .glass-button,
+   .certification-technical-card — are kept as thin aliases of
+   this base so existing pages keep working unmodified.
+   ============================================================ */
+.glass,
+.glass-card,
+.glass-panel,
+.dashboard-card,
+.glass-button,
+.certification-technical-card {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Hover variant (opt-in via .glass-hover; aliases keep their old hover) */
+.glass-hover:hover,
+.glass-card:hover,
+.dashboard-card:hover,
+.glass-button:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+/* Variant: stronger / more opaque panel */
+.glass-strong,
+.glass-panel {
+  background: var(--glass-bg-strong);
+}
+
+/* Variant tweaks for the legacy aliases */
+.glass-card {
+  border-radius: 12px;
+}
+
+.dashboard-card {
+  transition: all 0.2s ease;
+}
+
+.glass-button {
+  border-radius: 9999px;
+  padding: 0.65rem 1.5rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.glass-button:hover {
+  transform: translateY(-1px);
+}
+
+.certification-technical-card {
+  box-shadow:
+    var(--shadow-md),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .certification-technical-card {
+  box-shadow:
+    var(--shadow-md),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.certification-technical-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+
+.certification-technical-card:hover::before {
+  transform: translateX(100%);
+}
+
+.cert-retired {
+  background: rgba(100, 116, 139, 0.2) !important;
+  border-color: rgba(100, 116, 139, 0.3) !important;
+}
+
+.dark .cert-retired {
+  background: rgba(15, 23, 42, 0.6) !important;
+  border-color: rgba(148, 163, 184, 0.1) !important;
+}
+
+.cert-expired {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+.dark .cert-expired {
+  background: rgba(127, 29, 29, 0.2) !important;
+  border-color: rgba(239, 68, 68, 0.1) !important;
+}
+
+.cert-watermark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-25deg);
+  font-size: 2.5rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  opacity: 0.12;
+  pointer-events: none;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  z-index: 0;
+}
+
+.cert-badge-container {
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.4));
+  box-shadow: var(--shadow-sm);
+}
+
+.dark .cert-badge-container {
+  background: radial-gradient(circle at center, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.4));
+  box-shadow: var(--shadow-sm);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.85);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(130, 113, 110, 0.2);
+  color: #1f2937;
+}
+
+.dark .glass-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.graph-paper-background {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ============================================================
+   Stitch Design System Utilities
+   Ported from /documentation/stitch_hcw_baseline HTML files
+   ============================================================ */
+
+/* .glass-panel / .dashboard-card are aliases of the .glass base above. */
+
+/* Grid dot pattern — used in background of Main Landing */
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Hero mesh dot pattern — used on FinOps and other landings */
+.hero-mesh {
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(148, 163, 184, 0.1) 0%,
+    rgba(15, 23, 42, 0) 70%
+  );
+}
+
+/* FinOps hero-mesh (green dot grid) */
+.hero-mesh-green {
+  background-image: radial-gradient(
+    circle at 2px 2px,
+    rgba(var(--primary-rgb, 52, 211, 153), 0.1) 1px,
+    transparent 0
+  );
+  background-size: 32px 32px;
+}
+
+/* ============================================================
+   Glow utility (tokenized).
+   One radial glow driven by the active theme's --primary-rgb and
+   --glow-opacity. Old per-color names (.orange-glow,
+   .glow-effect-green/blue/purple) are kept as aliases.
+   ============================================================ */
+.glow-primary,
+.orange-glow,
+.glow-effect-green,
+.glow-effect-blue,
+.glow-effect-purple {
+  background: radial-gradient(
+    circle at center,
+    rgba(var(--primary-rgb, 100, 116, 139), var(--glow-opacity, 0.12)) 0%,
+    transparent 70%
+  );
+}
+
+/* Warm ambient wash for the dark-luxe hero (Hyoga look) */
+.ambient-glow {
+  background: radial-gradient(60% 50% at 50% 0%, rgba(214, 178, 120, 0.05), transparent 70%);
+}
+
+.dark .ambient-glow {
+  background: radial-gradient(60% 50% at 50% 0%, rgba(214, 178, 120, 0.08), transparent 70%);
+}
+
+/* Material Symbols Outlined sizing utility */
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Code block dark background */
+.code-bg {
+  background: #010409;
+}
+
+/* Hub icon button transition */
+.hub-icon-btn {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hub-icon-btn:hover {
+  background: rgba(51, 65, 85, 0.8);
+}
+
+/* Azure WAR / Frameworks Pillars utilities */
+.grid-bg {
+  background-image:
+    linear-gradient(hsl(var(--primary) / 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--primary) / 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.matrix-cell {
+  transition: all 0.2s ease;
+}
+
+.matrix-cell:hover {
+  background: hsl(var(--primary) / 0.1);
+  border-color: hsl(var(--primary) / 0.5);
+  transform: translateY(-1px);
+}
+
+.pillar-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pillar-card:hover {
+  transform: scale(1.02);
+  border-color: hsl(var(--primary) / 0.6);
+  background: hsl(var(--primary) / 0.05);
+}
+
+.code-block {
+  font-family: 'Consolas', 'Monaco', monospace;
+  background: #0d1117;
+  border: 1px solid #30363d;
+}
+
+/* Rosetta Stone / comparison table utilities */
+.feature-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Feed/blog card hover border */
+.feed-card:hover {
+  border-left: 4px solid rgba(148, 163, 184, 0.5);
+}
+
+.theme-azure .border-border-gray,
+.theme-aws .border-border-gray,
+.theme-gcp .border-border-gray,
+.theme-github .border-border-gray,
+.theme-terraform .border-border-gray,
+.theme-vmware .border-border-gray,
+.theme-ansible .border-border-gray {
+  border-color: var(--border-gray) !important;
+}
+
+/* ============================================================
+   Unified provider theming (parameterized).
+   Replaces ~530 lines of duplicated per-provider rules with one
+   set of rules driven by per-theme CSS variables: --slate-blue,
+   --accent-dark, --link-hover, --header-bg, --header-blur,
+   --light-gray, --border-gray, --gradient-start/end, --primary-rgb.
+   Each .theme-{provider} block above defines these variables.
+   ============================================================ */
+.theme-azure,
+.theme-aws,
+.theme-gcp,
+.theme-github,
+.theme-terraform,
+.theme-finops,
+.theme-vmware,
+.theme-ansible {
+  background: linear-gradient(180deg, var(--gradient-start) 0%, var(--gradient-end) 70%);
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  :is(.bg-white, .bg-gray-50, .bg-gray-100) {
+  background-color: var(--light-gray) !important;
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  :is(.border-gray-200, .border-gray-100) {
+  border-color: var(--border-gray) !important;
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  .divide-gray-300
+  > :not([hidden])
+  ~ :not([hidden]) {
+  border-color: var(--border-gray) !important;
+}
+
+/* Header/footer chrome — per-theme background via --header-bg/--header-blur */
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  :is(header, footer) {
+  background-color: var(--header-bg);
+  -webkit-backdrop-filter: blur(var(--header-blur));
+  backdrop-filter: blur(var(--header-blur));
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible) header {
+  border-bottom: 2px solid var(--border-gray);
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible) footer {
+  border-top: 2px solid var(--border-gray);
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  .blueprint-card {
+  background-color: #ffffff;
+  border-color: var(--border-gray);
+  box-shadow:
+    0 2px 6px -1px rgba(var(--primary-rgb, 100, 116, 139), 0.25),
+    0 1px 3px -2px rgba(var(--primary-rgb, 100, 116, 139), 0.3);
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  :is(.accent-line, .blueprint-line) {
+  background-color: var(--slate-blue);
+  height: 4px;
+  border-radius: 2px;
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  .btn-primary {
+  background-color: var(--slate-blue);
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  .btn-primary:hover {
+  background-color: var(--accent-dark);
+}
+
+/*
+ * Provider-themed inline-link colors. Scoped via :where(:not(...)) so they
+ * don't override button-styled <a> elements that explicitly set their own
+ * text color via Tailwind utilities (e.g. `text-white` on a `bg-primary`
+ * button). Without this scope the cascade tinted button text the provider
+ * accent color and dropped contrast below WCAG AA. See GH #174.
+ * The exclusion list is the superset of all previous per-provider lists.
+ */
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  a:where(
+    :not([class*='-primary']):not([class*='bg-blue-']):not([class*='bg-slate-']):not(
+        [class*='bg-card']
+      ):not([class*='bg-amber-']):not([class*='bg-orange-']):not([class*='bg-purple-']):not(
+        [class*='bg-emerald-']
+      ):not([class*='bg-teal-'])
+  ),
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  .link-style {
+  color: var(--slate-blue);
+}
+
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  a:where(
+    :not([class*='-primary']):not([class*='bg-blue-']):not([class*='bg-slate-']):not(
+        [class*='bg-card']
+      ):not([class*='bg-amber-']):not([class*='bg-orange-']):not([class*='bg-purple-']):not(
+        [class*='bg-emerald-']
+      ):not([class*='bg-teal-'])
+  ):hover,
+:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+  .link-style:hover {
+  color: var(--link-hover, var(--accent-dark));
+}
+
+/* FinOps legacy variable overrides — these values intentionally win over
+   the earlier .theme-finops block (preserved from the previous cascade). */
+.theme-finops {
+  --dark-gray: #064e3b;
+  --medium-gray: #065f46;
+  --subtitle-gray: #047857;
+  --light-gray: #d1fae5;
+  --slate-blue: #1ea482;
+  --slate-blue-light: #a7f3d0;
+  --background-gray: var(--shared-gray);
+  --border-gray: #6ee7b7;
+  --accent-color: #1ea482;
+  --gradient-start: #d1fae5;
+  --gradient-end: #ffffff;
+  --accent-light: #29d7ab;
+  --accent-dark: #188368;
+}
+
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  color: var(--medium-gray);
+  line-height: 1.7;
+  background-color: var(--background-gray);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme-specific primary fonts: when a section is wrapped in a provider theme class,
+   override the body font to the provider's main font as requested. */
+.theme-azure {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.theme-aws {
+  font-family: 'Amazon Ember', system-ui, sans-serif;
+}
+
+.theme-gcp {
+  font-family: 'Google Sans', system-ui, sans-serif;
+}
+
+.theme-github {
+  font-family: 'Mona Sans', system-ui, sans-serif;
+}
+
+.theme-terraform,
+.theme-finops,
+.theme-vmware,
+.theme-ansible {
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+.theme-microsoft {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Provider-specific font utility classes - DEPRECATED
+   Use theme classes (.theme-azure, .theme-gcp, etc.) instead
+   These utilities are maintained for backwards compatibility only */
+.font-aptos {
+  font-family: 'Aptos', system-ui, sans-serif;
+}
+
+.font-googlesans {
+  font-family: 'Google Sans', system-ui, sans-serif;
+}
+
+.font-monasans {
+  font-family: 'Mona Sans', system-ui, sans-serif;
+}
+
+/* Base Typography
+ * Headings inherit color and weight only — size, line-height, and margin
+ * are controlled per-component via Tailwind utilities. Setting global
+ * heading sizes here previously caused every <h1>-<h6> on the site to
+ * render oversized regardless of context (card titles, sidebar panels,
+ * feed items all blew past their containers). Tailwind's preflight
+ * intentionally strips heading sizes for this reason; do not add them
+ * back globally. If a heading looks too small, add a `text-*` utility
+ * on that specific element.
+ */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--dark-gray);
+  font-weight: 600;
+}
+
+/* Body text improvements */
+p {
+  line-height: 1.7;
+  margin-bottom: 1rem;
+}
+
+/* V2 Dark Glassmorphism Design System */
+:root {
+  --hcw-bg-primary: #0a0f1a;
+  --hcw-bg-secondary: #1a1f2e;
+  --hcw-bg-tertiary: #252d3d;
+  --hcw-accent: #137fec;
+  --hcw-accent-hover: #1a8eeb;
+  --hcw-text-primary: #ffffff;
+  --hcw-text-secondary: #b0b8c8;
+  --hcw-text-tertiary: #7a8399;
+  --hcw-border-light: rgba(255, 255, 255, 0.1);
+  --hcw-border-medium: rgba(255, 255, 255, 0.15);
+  /* Aliased to the tokenized shadow scale (see :root / .dark above) */
+  --hcw-shadow-sm: var(--shadow-sm);
+  --hcw-shadow-md: var(--shadow-md);
+  --hcw-shadow-lg: var(--shadow-lg);
+}
+
+/* V2 .glass-card / .glass-button definitions removed — both are now
+   aliases of the tokenized .glass base defined earlier in this file. */
+
+/* Graph paper background pattern */
+.graph-paper-background {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: 0 0;
+}
+
+/* Glassmorphic header/footer — tokenized via --header-bg/--header-blur,
+   overridden per .theme-{provider} and per color scheme. */
+header,
+footer {
+  background: var(--header-bg);
+  -webkit-backdrop-filter: blur(var(--header-blur));
+  backdrop-filter: blur(var(--header-blur));
+  border-bottom: 1px solid var(--hcw-border-light);
+}
+
+footer {
+  border-top: 1px solid var(--hcw-border-light);
+  border-bottom: none;
+}
+
+/* ============================================================
+   Hyoga typography & section utilities
+   ============================================================ */
+
+/* Large light-weight two-line display headline */
+.display-heading {
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--dark-gray);
+}
+
+.display-heading strong,
+.display-heading .display-accent {
+  font-weight: 600;
+  color: hsl(var(--primary));
+}
+
+.dark .display-heading .display-accent {
+  color: var(--slate-blue);
+}
+
+/* Small uppercase eyebrow label (see Eyebrow.jsx) */
+.eyebrow-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+}
+
+/* Numbered section marker (01, 02, ...) — see NumberedSection.jsx */
+.section-number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 300;
+  letter-spacing: 0.04em;
+}
+
+/* Accent line for visual hierarchy */
+.accent-line-hcw {
+  height: 3px;
+  background: linear-gradient(90deg, var(--hcw-accent), transparent);
+  border-radius: 2px;
+}
+
+/* Aspect ratio helpers for media containers */
+.ratio-16-9 {
+  height: 0;
+  padding-top: 56.25%;
+}
+
+.ratio-4-3 {
+  height: 0;
+  padding-top: 75%;
+}
+
+.ratio-1-1 {
+  height: 0;
+  padding-top: 100%;
+}
+
+.ratio-3-4 {
+  height: 0;
+  padding-top: 133.3333%;
+}
+
+/* ============================================================
+   Dark Mode Provider Overrides
+   ============================================================ */
+.dark .theme-azure,
+.dark .theme-aws,
+.dark .theme-gcp,
+.dark .theme-github,
+.dark .theme-terraform,
+.dark .theme-finops,
+.dark .theme-vmware,
+.dark .theme-ansible {
+  --dark-gray: #f9fafb;
+  --medium-gray: #e5e7eb;
+  --subtitle-gray: #9ca3af;
+  --light-gray: #1f2937;
+  --border-gray: #374151;
+  --background-gray: #0a0a0c;
+  --gradient-start: #131316;
+  --gradient-end: #0a0a0c;
+  --shared-white: #0b0b0e;
+  --shared-black: #f8fafc;
+  /* Header chrome flips to the dark-luxe charcoal in dark mode */
+  --header-bg: rgba(12, 12, 16, 0.88);
+  --header-blur: 14px;
+}
+
+/* Specific Dark Mode Adjustments per Provider */
+/* Azure Dark Accents */
+.dark .theme-azure {
+  --slate-blue: #26baff;
+  /* Use lighter accent */
+  --accent-color: #26baff;
+}
+
+/* AWS Dark Accents */
+.dark .theme-aws {
+  --slate-blue: #ff9900;
+  --accent-color: #ff9900;
+}
+
+/* GCP Dark Accents */
+.dark .theme-gcp {
+  --slate-blue: #e2695e;
+  --accent-color: #e2695e;
+}
+
+/* GitHub Dark Accents */
+.dark .theme-github {
+  --slate-blue: #f0f6fc;
+  --accent-color: #f0f6fc;
+}
+
+/* Terraform Dark Accents */
+.dark .theme-terraform {
+  --slate-blue: #9567c9;
+  --accent-color: #9567c9;
+}
+
+/* FinOps Dark Accents */
+.dark .theme-finops {
+  --slate-blue: #29d7ab;
+  --accent-color: #29d7ab;
+}
+
+/* VMware Dark Accents */
+.dark .theme-vmware {
+  --slate-blue: #33a7e1;
+  --accent-color: #33a7e1;
+}
+
+/* Ansible Dark Accents */
+.dark .theme-ansible {
+  --slate-blue: #f25c5c;
+  --accent-color: #f25c5c;
+}
+
+/* Dark header/footer chrome handled by the --header-bg override above;
+   border color tracks the dark --border-gray automatically. */
+
+/* ============================================================
+ * Card-thumbnail gradients (decorative). Used in provider
+ * landing pages as filler imagery on architecture/workflow card
+ * thumbnails. Defined here so they can later acquire a `.dark`
+ * variant if needed and so the theming-guard ESLint rule stays
+ * green (no inline `style={{ background: '...' }}`).
+ * ============================================================ */
+.card-thumb-azure-networking {
+  background: linear-gradient(135deg, #0078d4 0%, #005ba1 100%);
+}
+.card-thumb-azure-containers {
+  background: linear-gradient(135deg, #003087 0%, #0078d4 100%);
+}
+.card-thumb-finops-allocation {
+  background: linear-gradient(135deg, #064e3b 0%, #10b981 100%);
+}
+.card-thumb-finops-anomaly {
+  background: linear-gradient(135deg, #134e4a 0%, #0d9488 100%);
+}
+.card-thumb-github-workflows {
+  background: linear-gradient(135deg, #1b1f23 0%, #24292f 100%);
+}
+.card-thumb-github-security {
+  background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+}
+.card-thumb-terraform-modules {
+  background: linear-gradient(135deg, #4c1d95 0%, #7c3aed 100%);
+}
+.card-thumb-terraform-sentinel {
+  background: linear-gradient(135deg, #312e81 0%, #4338ca 100%);
+}
+
+/* Hero radial-glow backdrop on the Terraform landing page. */
+.hero-glow-terraform {
+  background: radial-gradient(ellipse at 60% 50%, rgba(167, 139, 250, 0.15) 0%, transparent 70%);
+}
+
+/*
+ * Blog detail light-mode readability lock:
+ * force dark author/meta/body text even if inherited prose/theme styles drift.
+ */
+html[data-theme='light'] .blog-detail-article .blog-detail-author,
+html[data-theme='light'] .blog-detail-article .blog-detail-author span,
+html[data-theme='light'] .blog-detail-article .blog-detail-date,
+html[data-theme='light'] .blog-detail-article .blog-detail-date span,
+html[data-theme='light'] .blog-detail-article .prose,
+html[data-theme='light'] .blog-detail-article .prose p,
+html[data-theme='light'] .blog-detail-article .prose li,
+html[data-theme='light'] .blog-detail-article .prose blockquote {
+  color: #1f2937 !important;
+}

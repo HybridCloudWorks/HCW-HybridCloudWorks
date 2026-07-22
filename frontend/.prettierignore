@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+
+# Build outputs
+build/
+dist/
+.firebase/
+coverage/
+
+# Lock files (should be committed as-is)
+package-lock.json
+yarn.lock
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Legacy
+legacy/
+old-code/
+REVIEW/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testing
+playwright-report/
+.nyc_output/
+
+# Documentation (preserve formatting)
+docs/
+CHANGELOG.md
+
+# Infrastructure
+infrastructure/
+.github/
+terraform/
+
+# Temporary
+*.tmp
+.cache/
