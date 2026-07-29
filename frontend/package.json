@@ -127,7 +127,7 @@
     "vitest": "^4.0.18"
   },
   "overrides": {
-    "@hono/node-server": "2.0.5",
+    "@hono/node-server": "2.0.10",
     "@opentelemetry/core": "2.8.0",
     "uuid": "^11.0.0",
     "node-domexception": "^2.0.2",
