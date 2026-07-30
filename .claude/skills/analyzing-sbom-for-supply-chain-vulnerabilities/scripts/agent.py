@@ -14,6 +14,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from urllib.parse import urlparse
 
 try:
     import requests
@@ -307,7 +308,7 @@ def extract_cve_info(vuln_entry):
     # Check for known exploited (CISA KEV indicator)
     is_kev = False
     for ref in cve_data.get("references", []):
-        if "cisa.gov" in ref.get("url", "").lower():
+        if urlparse(ref.get("url", "")).netloc.endswith("cisa.gov"):
             is_kev = True
             break
 

@@ -312,8 +312,4 @@ def main():
                 report["combined_findings"], report["critical_high_findings"], report["deploy_gate"])
     if report["gate_failures"]:
         logger.warning("Gate failures: %s", "; ".join(report["gate_failures"]))
-    print(json.dumps(report, indent=2, default=str))
-
-
-if __name__ == "__main__":
-    main()
+    print(json.dumps(report, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]

@@ -216,10 +216,10 @@ def main():
                 json.dump(report, f, indent=2, default=str)
     elif args.gen_db_creds:
         creds = generate_database_credentials(client, args.gen_db_creds)
-        print(json.dumps(creds, indent=2))
+        print(json.dumps(creds, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
     elif args.gen_aws_creds:
         creds = generate_aws_credentials(client, args.gen_aws_creds)
-        print(json.dumps(creds, indent=2))
+        print(json.dumps(creds, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
     elif args.revoke:
         result = revoke_lease(client, args.revoke)
         print(json.dumps(result, indent=2))

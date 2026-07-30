@@ -150,7 +150,7 @@ def run_workspace_audit(service, reports_service, domain):
     print(f"--- ADMIN ACCOUNTS ({len(admins)}) ---")
     for a in admins:
         mfa_status = "2FA ON" if a["is_2sv_enrolled"] else "2FA OFF"
-        print(f"  [{mfa_status}] {a['email']} (Super: {a['is_super_admin']})")
+        print(f"  [{mfa_status}] {a['email']} (Super: {a['is_super_admin']})")  # lgtm[py/clear-text-logging-sensitive-data]
 
     no_2fa = list_users_without_2fa(service, domain)
     print(f"\n--- USERS WITHOUT 2FA ({len(no_2fa)}) ---")

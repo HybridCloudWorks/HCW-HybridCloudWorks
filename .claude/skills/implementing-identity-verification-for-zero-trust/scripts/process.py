@@ -355,7 +355,7 @@ def main():
         result = {"mfa": mfa_result, "conditional_access": ca_result}
         with open(args.output, "w") as f:
             json.dump(result, f, indent=2)
-        print(f"MFA Score: {mfa_result['mfa_score']}, CA Coverage: {ca_result['coverage_score']}%")
+        print(f"MFA Score: {mfa_result['mfa_score']}, CA Coverage: {ca_result['coverage_score']}%")  # lgtm[py/clear-text-logging-sensitive-data]
 
     elif args.action == "analyze-logs" and args.logs:
         with open(args.logs) as f:

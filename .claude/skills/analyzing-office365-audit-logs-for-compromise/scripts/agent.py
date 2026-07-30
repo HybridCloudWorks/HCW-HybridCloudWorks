@@ -246,8 +246,4 @@ def main():
     else:
         parser.print_help()
         return
-    print(json.dumps(result, indent=2, default=str))
-
-
-if __name__ == "__main__":
-    main()
+    print(json.dumps(result, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]

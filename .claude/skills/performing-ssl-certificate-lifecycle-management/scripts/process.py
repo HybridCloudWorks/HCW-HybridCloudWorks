@@ -167,6 +167,7 @@ def check_remote_certificate(host: str, port: int = 443, timeout: int = 10) -> D
 
     try:
         ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as ssock:
                 cert_der = ssock.getpeercert(binary_form=True)

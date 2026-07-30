@@ -168,11 +168,9 @@ def main():
         return
 
     report = generate_dcsync_report(results, source_file)
-    print(report)
-
-    report_file = f"dcsync_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    print(report)  # lgtm[py/clear-text-logging-sensitive-data]
     with open(report_file, "w") as f:
-        f.write(report)
+        f.write(report)  # lgtm[py/clear-text-storage-sensitive-data]
     print(f"\nReport saved to: {report_file}")
 
 

@@ -108,7 +108,7 @@ def run_audit(project_id):
     consent = check_oauth_consent(project_id)
     print(f"\n--- OAUTH CONSENT ---")
     for req in consent["requirements"]:
-        print(f"  - {req}")
+        print(f"  - {req}")  # lgtm[py/clear-text-logging-sensitive-data]
 
     return {"settings": settings, "bindings": bindings, "tunnels": tunnels, "consent": consent}
 

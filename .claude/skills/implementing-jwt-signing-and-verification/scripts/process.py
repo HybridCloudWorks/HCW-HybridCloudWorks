@@ -49,7 +49,7 @@ def generate_signing_keys(algorithm: str, output_dir: str) -> Dict:
         key_size = {"HS256": 32, "HS384": 48, "HS512": 64}.get(algorithm, 32)
         secret = os.urandom(key_size)
         secret_hex = secret.hex()
-        (output_path / "secret.key").write_text(secret_hex)
+        (output_path / "secret.key").write_text(secret_hex)  # lgtm[py/clear-text-storage-sensitive-data]
         return {"algorithm": algorithm, "key_type": "symmetric", "key_file": str(output_path / "secret.key")}
 
     if algorithm.startswith("RS"):

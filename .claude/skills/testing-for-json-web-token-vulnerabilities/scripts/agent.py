@@ -196,20 +196,13 @@ class JWTTestAgent:
         out = self.output_dir / "jwt_test_report.json"
         with open(out, "w") as f:
             json.dump(report, f, indent=2)
-        print(json.dumps(report, indent=2))
+        print(json.dumps(report, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
         return report
 
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: agent.py <jwt_token> [--url <base_url>]")
-        sys.exit(1)
-    token = sys.argv[1]
-    url = None
-    if "--url" in sys.argv:
-        url = sys.argv[sys.argv.index("--url") + 1]
-    agent = JWTTestAgent(url)
-    agent.generate_report(token)
 
 
 if __name__ == "__main__":

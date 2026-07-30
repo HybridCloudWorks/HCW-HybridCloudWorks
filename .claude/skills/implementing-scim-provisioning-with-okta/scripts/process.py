@@ -146,9 +146,11 @@ def require_auth(f):
 
 def parse_scim_filter(filter_str):
     """Parse simple SCIM filter expressions like: userName eq 'value'"""
-    match = re.match(r'(\w+)\s+eq\s+"([^"]*)"', filter_str)
+    if len(filter_str) > 500:
+        return None, None
+    match = re.match(r'(\w+) eq "([^"]*)"', filter_str)
     if not match:
-        match = re.match(r"(\w+)\s+eq\s+'([^']*)'", filter_str)
+        match = re.match(r"(\w+) eq '([^']*)'", filter_str)
     if match:
         return match.group(1), match.group(2)
     return None, None

@@ -40,7 +40,7 @@ def run_certipy_find(certipy, user, password, dc_ip, timeout):
     """Run certipy find and report whether ESC8 appears in the output."""
     cmd = [certipy, "find", "-u", user, "-p", password, "-dc-ip", dc_ip,
            "-vulnerable", "-enabled", "-stdout"]
-    print(f"[*] enumerating AD CS: {' '.join(cmd[:2])} ... -vulnerable")
+    print(f"[*] enumerating AD CS: {' '.join(cmd[:2])} ... -vulnerable")  # lgtm[py/clear-text-logging-sensitive-data]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:

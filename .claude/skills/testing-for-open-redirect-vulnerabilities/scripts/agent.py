@@ -10,6 +10,7 @@ domain confusion, and parameter pollution.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -74,7 +75,7 @@ class OpenRedirectTestAgent:
                 resp = self._get(test_url)
                 if resp and resp.status_code in (301, 302, 303, 307, 308):
                     location = resp.headers.get("Location", "")
-                    if "example.com" in location:
+                    if urlparse(location).netloc.endswith("example.com"):
                         found.append({"path": path, "param": param, "location": location})
         return found
 
@@ -92,7 +93,7 @@ class OpenRedirectTestAgent:
             if resp.status_code in (301, 302, 303, 307, 308):
                 parsed = urlparse(location)
                 if parsed.netloc and parsed.netloc != urlparse(self.target_url).netloc:
-                    if "evil.com" in parsed.netloc or "evil" in location:
+                    if parsed.netloc.endswith("evil.com"):
                         redirected = True
 
             if redirected:
@@ -122,7 +123,8 @@ class OpenRedirectTestAgent:
         """Check for JavaScript-based redirects using meta refresh or JS."""
         test_url = f"{self.target_url}{path}?{param}=https://evil.com"
         resp = self._get(test_url, allow_redirects=True)
-        if resp and "evil.com" in resp.text:
+        if resp and any(urlparse(u).netloc.endswith("evil.com")
+                        for u in re.findall(r'https?://[^\s"\'<>]+', resp.text)):
             js_patterns = ["window.location", "document.location", "meta http-equiv"]
             for pattern in js_patterns:
                 if pattern in resp.text:

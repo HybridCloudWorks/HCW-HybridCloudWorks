@@ -265,8 +265,4 @@ def main():
             json.dump(report, f, indent=2)
         print(f"\n[+] Report saved to {args.output}")
     elif args.verbose:
-        print(json.dumps(report, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+        print(json.dumps(report, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]

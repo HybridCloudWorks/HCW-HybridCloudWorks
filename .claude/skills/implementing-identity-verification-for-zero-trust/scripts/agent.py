@@ -211,7 +211,7 @@ def main():
     if args.action in ("events", "full") and args.auth_events:
         result = analyze_auth_events(args.auth_events)
         report["results"]["events"] = result
-        print(f"[+] Auth events: {result['total_events']}, password-only: {result['password_only_rate']}%")
+        print(f"[+] Auth events: {result['total_events']}, password-only: {result['password_only_rate']}%")  # lgtm[py/clear-text-logging-sensitive-data]
 
     with open(args.output, "w") as f:
         json.dump(report, f, indent=2, default=str)

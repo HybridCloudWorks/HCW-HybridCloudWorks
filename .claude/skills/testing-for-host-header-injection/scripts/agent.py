@@ -10,9 +10,11 @@ Host header and alternative host header manipulation.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 try:
     import requests
@@ -146,7 +148,8 @@ class HostHeaderInjectionAgent:
         """Test Host header with injected port."""
         resp = self._request("GET", path,
                              headers={"Host": "target.com:@evil.attacker.com"})
-        if resp and "evil.attacker.com" in resp.text:
+        if resp and any(urlparse(u).netloc.endswith("evil.attacker.com")
+                        for u in re.findall(r'https?://[^\s"\'<>]+', resp.text)):
             self.findings.append({
                 "severity": "high",
                 "type": "Port-based Host Injection",

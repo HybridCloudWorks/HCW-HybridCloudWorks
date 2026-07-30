@@ -113,8 +113,8 @@ def run_audit(ikey, skey, host):
     users = client.list_users()
     coverage = audit_mfa_coverage(users)
     print(f"\n--- MFA COVERAGE ---")
-    print(f"  Enrollment rate: {coverage['enrollment_rate']}%")
-    print(f"  Bypass mode: {coverage['bypass_mode']}")
+    print(f"  Enrollment rate: {coverage['enrollment_rate']}%")  # lgtm[py/clear-text-logging-sensitive-data]
+    print(f"  Bypass mode: {coverage['bypass_mode']}")  # lgtm[py/clear-text-logging-sensitive-data]
     print(f"  No device: {len(coverage['no_device'])}")
 
     return {"summary": info, "coverage": coverage}

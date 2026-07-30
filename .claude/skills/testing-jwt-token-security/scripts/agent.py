@@ -16,6 +16,14 @@ from urllib.parse import urljoin
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+def _mask(value, visible=4):
+    """Mask a sensitive value for safe logging."""
+    s = str(value)
+    if len(s) <= visible:
+        return "***"
+    return s[:visible] + "***"
+
+
 def decode_jwt(token):
     """Decode and display JWT header and payload without verification."""
     parts = token.split(".")
@@ -106,7 +114,7 @@ def test_hmac_brute_force(token, wordlist_path):
                     continue
                 computed = hmac.new(secret.encode(), signing_input, hash_func).digest()
                 if hmac.compare_digest(computed, signature):
-                    print(f"  [!] SECRET FOUND: '{secret}' (attempt {i+1})")
+                    print(f"  [!] SECRET FOUND: '{_mask(secret)}' (attempt {i+1})")
                     return secret
                 if (i + 1) % 10000 == 0:
                     print(f"  [*] Tried {i+1} secrets...")

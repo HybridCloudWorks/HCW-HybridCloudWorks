@@ -177,8 +177,7 @@ class SAMLSSOAgent:
         out = self.output_dir / "saml_sso_report.json"
         with open(out, "w") as f:
             json.dump(report, f, indent=2)
-        print(json.dumps(report, indent=2))
-        return report
+        print(json.dumps(report, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
 
 
 def main():

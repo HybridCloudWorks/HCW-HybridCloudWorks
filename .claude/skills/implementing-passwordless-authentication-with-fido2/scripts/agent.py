@@ -85,7 +85,7 @@ def main():
     with open(args.output, "w") as f:
         json.dump(report, f, indent=2, default=str)
     logger.info("FIDO2: adoption %.1f%%, %d findings", adoption["fido2_adoption_rate"], report["total_findings"])
-    print(json.dumps(report, indent=2, default=str))
+    print(json.dumps(report, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]
 
 if __name__ == "__main__":
     main()

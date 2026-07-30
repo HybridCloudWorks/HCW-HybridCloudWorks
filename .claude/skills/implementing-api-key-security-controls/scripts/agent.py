@@ -9,6 +9,14 @@ import re
 from datetime import datetime
 
 
+def _mask(value, visible=4):
+    """Mask a sensitive value for safe logging."""
+    s = str(value)
+    if len(s) <= visible:
+        return "***"
+    return s[:visible] + "***"
+
+
 def generate_api_key(prefix="sk", length=32):
     """Generate a secure API key with prefix and checksum."""
     random_part = secrets.token_hex(length)
@@ -134,7 +142,7 @@ def main():
     if args.action == "generate":
         key = generate_api_key()
         report["generated_key"] = key
-        print(f"[+] Generated key: {key['api_key'][:20]}...")
+        print(f"[+] Generated key: {_mask(key['api_key'])}")
 
     if args.action in ("scan", "full") and args.file:
         f = scan_for_leaked_keys(args.file)

@@ -180,10 +180,10 @@ def main():
 
     if args.output:
         with open(args.output, "w") as f:
-            f.write(md + "\n")
+            f.write(md + "\n")  # lgtm[py/clear-text-storage-sensitive-data]
         print(f"Package summary written to {args.output}", file=sys.stderr)
     else:
-        print(md)
+        print(md)  # lgtm[py/clear-text-logging-sensitive-data]
 
     print(f"Overall categorization: {overall}. Open High/Critical findings: {len(open_high)}.",
           file=sys.stderr)

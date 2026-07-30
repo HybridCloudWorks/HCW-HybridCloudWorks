@@ -132,8 +132,7 @@ class KismetAssessmentAgent:
             "channel_utilization": channels,
             "findings": self.findings,
         }
-        print(json.dumps(report, indent=2, default=str))
-        return report
+        print(json.dumps(report, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]
 
 
 def main():

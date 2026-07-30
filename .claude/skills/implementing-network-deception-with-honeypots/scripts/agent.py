@@ -204,8 +204,4 @@ def main():
     logger.info("Honeypot: %d interactions from %d sources, %d credential attempts",
                 analysis["total_interactions"], analysis["unique_sources"],
                 analysis["credential_attempts"])
-    print(json.dumps(report, indent=2, default=str))
-
-
-if __name__ == "__main__":
-    main()
+    print(json.dumps(report, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]

@@ -443,6 +443,7 @@ def check_veeam_api(server: str, port: int = 9419) -> dict:
     try:
         sock = socket.create_connection((server, port), timeout=5)
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         ssock = context.wrap_socket(sock, server_hostname=server)

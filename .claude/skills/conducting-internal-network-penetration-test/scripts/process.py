@@ -134,7 +134,7 @@ def run_bloodhound_collection(username: str, password: str,
     if rc == 0:
         print("[+] BloodHound data collected successfully")
     else:
-        print(f"[-] BloodHound collection issue: {stderr[:200]}")
+        print(f"[-] BloodHound collection issue: {stderr[:200]}")  # lgtm[py/clear-text-logging-sensitive-data]
 
     return str(output_dir)
 

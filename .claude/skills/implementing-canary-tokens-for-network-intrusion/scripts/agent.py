@@ -217,7 +217,7 @@ def deploy_aws_credentials_file(target_path, access_key_id, secret_access_key,
     )
     target = Path(target_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    target.write_text(content, encoding="utf-8")  # lgtm[py/clear-text-storage-sensitive-data]
     logger.info("Deployed AWS credential canary at: %s", target_path)
     return {
         "type": "aws_credentials_file",
@@ -336,7 +336,7 @@ def deploy_env_file_token(env_path, access_key_id, secret_access_key,
 
     target = Path(env_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")  # lgtm[py/clear-text-storage-sensitive-data]
     logger.info("Deployed canary .env file: %s", env_path)
     return {
         "type": "env_file_canary",

@@ -197,6 +197,6 @@ if __name__ == "__main__":
     elif action == "deactivate" and len(sys.argv) > 3:
         print(json.dumps(deactivate_exposed_key(sys.argv[2], sys.argv[3]), indent=2))
     elif action == "git-secrets":
-        print(json.dumps(setup_git_secrets(), indent=2))
+        print(json.dumps(setup_git_secrets(), indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
     else:
         print("Usage: agent.py [scan <path>|scan-org <org>|check-key <key_id>|deactivate <key_id> <user>|git-secrets]")

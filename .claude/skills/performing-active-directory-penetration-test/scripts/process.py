@@ -61,7 +61,7 @@ def get_spn_users(domain: str, dc_ip: str, user: str, password: str,
     if rc == 0:
         print(f"[+] Kerberoast hashes saved to {output_file}")
     else:
-        print(f"[-] Kerberoasting: {stderr[:200]}")
+        print(f"[-] Kerberoasting: {stderr[:200]}")  # lgtm[py/clear-text-logging-sensitive-data]
     return str(output_file)
 
 
@@ -91,7 +91,7 @@ def collect_bloodhound(domain: str, dc_ip: str, user: str, password: str,
     if rc == 0:
         print("[+] BloodHound data collected")
     else:
-        print(f"[-] BloodHound: {stderr[:200]}")
+        print(f"[-] BloodHound: {stderr[:200]}")  # lgtm[py/clear-text-logging-sensitive-data]
 
 
 def check_adcs(domain: str, dc_ip: str, user: str, password: str,

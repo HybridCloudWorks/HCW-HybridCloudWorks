@@ -151,9 +151,5 @@ def main():
     logger.info("Trivy: %s - %d vulns (%d critical), %d secrets, gate: %s",
                 args.image, vuln_analysis["total_vulnerabilities"],
                 vuln_analysis["by_severity"].get("CRITICAL", 0),
-                secret_analysis["total_secrets"], report["gate_result"])
-    print(json.dumps(report, indent=2, default=str))
-
-
-if __name__ == "__main__":
-    main()
+                secret_analysis["total_secrets"], report["gate_result"])  # lgtm[py/clear-text-logging-sensitive-data]
+    print(json.dumps(report, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]

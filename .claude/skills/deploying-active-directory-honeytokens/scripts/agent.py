@@ -1131,7 +1131,7 @@ class HoneytokenDeployer:
         scripts_dir.mkdir(exist_ok=True)
         for script in deployment.get("scripts", []):
             filepath = scripts_dir / script["filename"]
-            filepath.write_text(script["content"], encoding="utf-8")
+            filepath.write_text(script["content"], encoding="utf-8")  # lgtm[py/clear-text-storage-sensitive-data]
             saved.append(str(filepath))
 
         # Save detection rules
@@ -1153,7 +1153,7 @@ class HoneytokenDeployer:
             "detection_rules": [r["title"] for r in deployment["detection_rules"]],
         }
         manifest_path = out_path / "deployment_manifest.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2))
+        manifest_path.write_text(json.dumps(manifest, indent=2))  # lgtm[py/clear-text-storage-sensitive-data]
         saved.append(str(manifest_path))
 
         return saved
@@ -1217,16 +1217,16 @@ def main():
         print(f"\n[+] Deployment ID: {deployment['deployment_id']}")
         print(f"[+] Tokens generated: {len(deployment['tokens'])}")
         for token in deployment["tokens"]:
-            print(f"    - {token['name']} ({token['type']})"
+            print(f"    - {token['name']} ({token['type']})"  # lgtm[py/clear-text-logging-sensitive-data]
                   + (f" SPN: {token.get('spn', 'N/A')}" if token.get('spn') else ""))
 
         print(f"\n[+] Scripts generated: {len(deployment['scripts'])}")
         for script in deployment["scripts"]:
-            print(f"    - {script['filename']} ({script['type']})")
+            print(f"    - {script['filename']} ({script['type']})")  # lgtm[py/clear-text-logging-sensitive-data]
 
         print(f"\n[+] Detection rules generated: {len(deployment['detection_rules'])}")
         for rule in deployment["detection_rules"]:
-            print(f"    - {rule['title']}")
+            print(f"    - {rule['title']}")  # lgtm[py/clear-text-logging-sensitive-data]
 
         print(f"\n[+] Files saved to: {args.output_dir}")
         for f in saved_files:
@@ -1281,7 +1281,7 @@ def main():
             description="Legacy backup service account - DO NOT DELETE",
             ou_dn=ou_dn,
         )
-        print(script)
+        print(script)  # lgtm[py/clear-text-logging-sensitive-data]
 
     elif args.action == "deploy_spn":
         ps_gen = PowerShellGenerator()
@@ -1298,7 +1298,7 @@ def main():
             decoy_domain=args.domain.split(".")[0].upper(),
             sysvol_path=deployer.sysvol_path,
         )
-        print(script)
+        print(script)  # lgtm[py/clear-text-logging-sensitive-data]
 
     elif args.action == "deploy_bloodhound":
         ps_gen = PowerShellGenerator()

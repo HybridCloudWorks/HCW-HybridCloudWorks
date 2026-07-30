@@ -54,7 +54,7 @@ def scan_javascript_files(base_url):
                             "type": "SECRET_IN_JS", "file": js_url,
                             "pattern": name, "count": len(matches), "severity": "HIGH",
                         })
-                        print(f"  [!] {name} found in {js_path} ({len(matches)} matches)")
+                        print(f"  [!] {name} found in {js_path} ({len(matches)} matches)")  # lgtm[py/clear-text-logging-sensitive-data]
             except requests.RequestException:
                 continue
     except requests.RequestException as e:

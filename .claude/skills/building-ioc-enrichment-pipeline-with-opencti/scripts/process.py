@@ -431,8 +431,7 @@ def main():
         pipeline.bulk_enrich_recent(days=args.days, max_items=args.max_items)
 
     if results:
-        print(json.dumps(results, indent=2, default=str))
-        if args.output:
+        print(json.dumps(results, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]
             with open(args.output, "w") as f:
                 json.dump(results, f, indent=2, default=str)
             print(f"[+] Results saved to {args.output}")

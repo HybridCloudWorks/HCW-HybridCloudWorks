@@ -128,7 +128,7 @@ def test_tls_connection(host: str, port: int = 443, timeout: int = 10) -> Dict:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             with socket.create_connection((host, port), timeout=timeout) as sock:
-                with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                with ctx.wrap_socket(sock, server_hostname=host) as ssock:  # Intentionally testing for deprecated protocol support - security scanner
                     results["issues"].append(
                         f"VULNERABLE: {version_name} is still enabled (should be disabled)"
                     )
@@ -151,7 +151,7 @@ def check_cipher_suites(host: str, port: int = 443, timeout: int = 10) -> Dict:
 
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
-            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:  # Intentionally testing for deprecated protocol support - security scanner
                 cipher = ssock.cipher()
                 results["negotiated_cipher"] = {
                     "name": cipher[0],

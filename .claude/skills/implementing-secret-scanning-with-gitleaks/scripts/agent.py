@@ -13,6 +13,14 @@ import sys
 from datetime import datetime, timezone
 
 
+def _mask(value, visible=4):
+    """Mask a sensitive value for safe logging."""
+    s = str(value)
+    if len(s) <= visible:
+        return "***"
+    return s[:visible] + "***"
+
+
 def find_gitleaks_binary():
     """Locate the gitleaks binary on the system."""
     custom_path = os.environ.get("GITLEAKS_PATH")
@@ -146,7 +154,7 @@ def format_summary(findings, target):
     print(f"\n  Top Findings:")
     for f in findings[:15]:
         print(f"    [{f['rule_id']:30s}] {f['file']}:{f['line']} "
-              f"(commit: {f['commit']}, secret: {f['secret']})")
+              f"(commit: {f['commit']}, secret: {_mask(f['secret'])})")
 
 
 def main():

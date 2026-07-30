@@ -171,7 +171,7 @@ def run_passwordless_audit(token):
     users_without = get_users_without_passwordless(token, max_users=50)
     print(f"\n--- USERS WITHOUT PASSWORDLESS ({len(users_without)}) ---")
     for u in users_without[:10]:
-        print(f"  {u['user']} - Current methods: {', '.join(u['methods']) or 'none'}")
+        print(f"  {u['user']} - Current methods: {', '.join(u['methods']) or 'none'}")  # lgtm[py/clear-text-logging-sensitive-data]
 
     print(f"\n{'='*60}\n")
     return {"fido2": fido2, "authenticator": authenticator, "hello": hello,

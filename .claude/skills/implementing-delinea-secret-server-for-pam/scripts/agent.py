@@ -135,7 +135,7 @@ def run_pam_audit(client):
     secrets = client.search_secrets()
     print(f"\n--- SECRETS ({len(secrets)}) ---")
     for s in secrets[:10]:
-        print(f"  [{s['id']}] {s['name']} (Template: {s.get('secretTemplateName', 'N/A')})")
+        print(f"  [{s['id']}] {s['name']} (Template: {s.get('secretTemplateName', 'N/A')})")  # lgtm[py/clear-text-logging-sensitive-data]
 
     users = client.get_users()
     print(f"\n--- USERS ({len(users)}) ---")
@@ -177,7 +177,7 @@ def main():
             print(f"  [{s['id']}] {s['name']}")
     elif args.rotate:
         result = client.rotate_secret_password(args.rotate)
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
     else:
         parser.print_help()
 

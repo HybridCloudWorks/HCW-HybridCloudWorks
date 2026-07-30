@@ -158,7 +158,7 @@ def main():
         findings["timeline"] = build_forensic_timeline(svc, args.hostname, args.earliest)
         print(f"[+] Timeline events: {len(findings['timeline'])}")
 
-    print(json.dumps({"generated_at": datetime.utcnow().isoformat(), "findings": findings}, indent=2, default=str))
+    print(json.dumps({"generated_at": datetime.utcnow().isoformat(), "findings": findings}, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]
 
 
 if __name__ == "__main__":

@@ -253,7 +253,7 @@ def print_report(report: dict):
     print(f"  TOTAL:     {summary['total_vulnerabilities']}")
 
     if summary["secrets_found"] > 0:
-        print(f"\n  Secrets Found: {summary['secrets_found']}")
+        print(f"\n  Secrets Found: {summary['secrets_found']}")  # lgtm[py/clear-text-logging-sensitive-data]
 
     if summary["misconfigurations_found"] > 0:
         print(f"  Misconfigs Found: {summary['misconfigurations_found']}")

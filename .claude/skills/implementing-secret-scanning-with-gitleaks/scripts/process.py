@@ -21,6 +21,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
+def _mask(value, visible=4):
+    """Mask a sensitive value for safe logging."""
+    s = str(value)
+    if len(s) <= visible:
+        return "***"
+    return s[:visible] + "***"
+
+
 @dataclass
 class SecretFinding:
     rule_id: str
@@ -284,7 +292,7 @@ def main():
         print("\n[!] New secrets detected:")
         for f in scan_result.new_findings:
             print(f"  [{f.rule_id}] {f.file}:{f.line} (commit: {f.commit}, author: {f.author})")
-            print(f"    Secret: {f.secret}")
+            print(f"    Secret: {_mask(f.secret)}")
 
     if report["quality_gate"]["passed"]:
         print("\n[PASS] No new secrets detected.")

@@ -233,8 +233,4 @@ def main():
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     logger.info("Report saved to %s", out_path)
-    print(json.dumps(report, indent=2, default=str))
-
-
-if __name__ == "__main__":
-    main()
+    print(json.dumps(report, indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]

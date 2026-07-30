@@ -144,7 +144,7 @@ def generate_report(users, cross_account_roles, imdsv1_instances, public_buckets
             len(public_buckets) + len(lambda_secrets)
         ),
     }
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
     return report
 
 

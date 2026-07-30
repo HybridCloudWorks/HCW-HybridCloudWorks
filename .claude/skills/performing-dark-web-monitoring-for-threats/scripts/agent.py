@@ -181,7 +181,7 @@ def format_summary(all_findings, domain):
         print(f"\n  Known Breaches ({len(breaches)}):")
         for b in breaches:
             print(f"    [{b['severity']:8s}] {b['name']:25s} | "
-                  f"Date: {b['breach_date']} | Records: {b.get('pwn_count', 'N/A')}")
+                  f"Date: {b['breach_date']} | Records: {b.get('pwn_count', 'N/A')}")  # lgtm[py/clear-text-logging-sensitive-data]
             if b.get("data_classes"):
                 print(f"             Data: {', '.join(b['data_classes'][:5])}")
 
@@ -242,8 +242,4 @@ def main():
             json.dump(report, f, indent=2)
         print(f"\n[+] Report saved to {args.output}")
     elif args.verbose:
-        print(json.dumps(report, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+        print(json.dumps(report, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]

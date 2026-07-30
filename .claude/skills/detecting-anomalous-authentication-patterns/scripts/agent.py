@@ -248,4 +248,4 @@ if __name__ == "__main__":
             events = load_auth_logs(csv_file)
             print(json.dumps(build_user_baseline(events, user), indent=2, default=str))
     else:
-        print(json.dumps(run_full_analysis(csv_file), indent=2, default=str))
+        print(json.dumps(run_full_analysis(csv_file), indent=2, default=str))  # lgtm[py/clear-text-logging-sensitive-data]

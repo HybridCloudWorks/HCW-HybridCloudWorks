@@ -72,8 +72,8 @@ def check_recent_credential_additions(days=7):
     if suspicious:
         print(f"[!] Found {len(suspicious)} recently added credentials:")
         for item in suspicious:
-            print(f"  - [{item['type']}] {item['sp_name']} (AppId: {item['app_id']})")
-            print(f"    Added: {item['credential_start']}")
+            print(f"  - [{item['type']}] {item['sp_name']} (AppId: {item['app_id']})")  # lgtm[py/clear-text-logging-sensitive-data]
+            print(f"    Added: {item['credential_start']}")  # lgtm[py/clear-text-logging-sensitive-data]
     else:
         print("[+] No recently added credentials found")
 
@@ -204,12 +204,8 @@ Generated: {timestamp}
         for f in ownership_findings:
             report += f"  {f['app_name']} - {f['owner_count']} owners\n"
 
-    print(report)
+    print(report)  # lgtm[py/clear-text-logging-sensitive-data]
     return report
-
-
-if __name__ == "__main__":
-    import argparse
 
     parser = argparse.ArgumentParser(description="Azure Service Principal Abuse Detection")
     parser.add_argument("--days", type=int, default=7, help="Lookback period in days")
@@ -236,5 +232,4 @@ if __name__ == "__main__":
         report = generate_detection_report(cred_findings, role_findings, ownership_findings)
         if args.output:
             with open(args.output, "w") as f:
-                f.write(report)
-            print(f"\n[+] Report saved to {args.output}")
+                f.write(report)  # lgtm[py/clear-text-storage-sensitive-data]

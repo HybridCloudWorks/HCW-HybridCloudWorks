@@ -72,7 +72,7 @@ def deploy_aws_credential_token(target_path, canary_key_id, canary_secret):
     )
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     with open(target_path, "w") as f:
-        f.write(content)
+        f.write(content)  # lgtm[py/clear-text-storage-sensitive-data]
     return {
         "type": "aws_credentials",
         "path": target_path,

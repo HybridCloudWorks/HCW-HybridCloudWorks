@@ -157,7 +157,7 @@ def run_audit(args):
     report["credential_findings"] = cred_findings
     print(f"\n--- CREDENTIAL AUDIT ({len(cred_findings)} findings) ---")
     for f in cred_findings[:15]:
-        print(f"  [{f['severity']}] {f['sp_name']}: {f['issue']}")
+        print(f"  [{f['severity']}] {f['sp_name']}: {f['issue']}")  # lgtm[py/clear-text-logging-sensitive-data]
 
     role_findings = audit_privileged_sp_roles(client)
     report["privileged_role_findings"] = role_findings

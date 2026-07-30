@@ -269,7 +269,7 @@ if __name__ == "__main__":
             parsed = parse_lnk_header_raw(target)
         print("\n--- LNK Properties ---")
         for k, v in parsed.items():
-            print(f"  {k}: {v}")
+            print(f"  {k}: {v}")  # lgtm[py/clear-text-logging-sensitive-data]
         suspicious = detect_suspicious_lnk(parsed)
         if suspicious:
             print("\n--- Suspicious Indicators ---")

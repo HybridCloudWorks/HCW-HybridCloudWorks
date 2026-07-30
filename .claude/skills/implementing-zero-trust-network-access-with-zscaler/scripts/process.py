@@ -68,6 +68,7 @@ def check_tls_certificate(host: str, port: int = 443) -> dict:
     }
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((host, port), timeout=10) as sock:
             with context.wrap_socket(sock, server_hostname=host) as ssock:
                 cert = ssock.getpeercert()

@@ -121,6 +121,7 @@ def validate_mtls_certificate(host: str, port: int, ca_cert_path: Optional[str] 
 
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         if ca_cert_path:
             context.load_verify_locations(ca_cert_path)
 

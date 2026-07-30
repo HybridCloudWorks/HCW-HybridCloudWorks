@@ -33,6 +33,7 @@ def check_ssl_certificate(host: str, port: int = 443) -> dict:
     """Check SSL certificate validity on a listener."""
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         with socket.create_connection((host, port), timeout=5) as sock:

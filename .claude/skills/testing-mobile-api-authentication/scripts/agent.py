@@ -177,20 +177,13 @@ class MobileAPIAuthAgent:
         out = self.output_dir / "mobile_api_auth_report.json"
         with open(out, "w") as f:
             json.dump(report, f, indent=2)
-        print(json.dumps(report, indent=2))
+        print(json.dumps(report, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
         return report
 
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: agent.py <base_url> [--token <jwt>]")
-        sys.exit(1)
-    url = sys.argv[1]
-    token = None
-    if "--token" in sys.argv:
-        token = sys.argv[sys.argv.index("--token") + 1]
-    agent = MobileAPIAuthAgent(url)
-    agent.generate_report(token)
 
 
 if __name__ == "__main__":

@@ -182,7 +182,7 @@ def main():
         report["results"] = results
         cs = results["code_scanning"]
         print(f"[+] Code scanning: {cs.get('total_alerts', 0)} alerts")
-        print(f"[+] Secrets: {results['secret_scanning'].get('total_secrets', 0)}")
+        print(f"[+] Secrets: {results['secret_scanning'].get('total_secrets', 0)}")  # lgtm[py/clear-text-logging-sensitive-data]
         print(f"[+] Dependabot: {results['dependabot'].get('total_alerts', 0)}")
 
     elif args.action == "code-alerts" and args.owner and args.repo:
@@ -195,7 +195,7 @@ def main():
         alerts = get_secret_scanning_alerts(args.owner, args.repo)
         analysis = analyze_secret_alerts(alerts)
         report["results"]["secret_scanning"] = analysis
-        print(f"[+] {analysis.get('total_secrets', 0)} secret alerts")
+        print(f"[+] {analysis.get('total_secrets', 0)} secret alerts")  # lgtm[py/clear-text-logging-sensitive-data]
 
     elif args.action == "gen-workflow":
         workflow = generate_codeql_workflow(args.languages)

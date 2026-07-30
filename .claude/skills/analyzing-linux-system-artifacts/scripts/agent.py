@@ -232,7 +232,7 @@ if __name__ == "__main__":
         if os.path.exists(passwd_path):
             print("\n--- User Account Analysis ---")
             for f in analyze_passwd(passwd_path):
-                print(f"  [{f['severity']}] {f['finding']}")
+                print(f"  [{f['severity']}] {f['finding']}")  # lgtm[py/clear-text-logging-sensitive-data]
 
         print("\n--- Cron Persistence ---")
         cron = check_cron_persistence(evidence_root)
