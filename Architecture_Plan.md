@@ -105,32 +105,39 @@ Keep them separate **only** if the labs runner genuinely needs a different netwo
 longer timeout ceiling than the rest. That is a real possibility given the self-hosted agent; decide
 it on that basis, not on cost.
 
-### 3.3 Defer Private Endpoints and the VNet to a later hardening phase
+### 3.3 Defer Private Endpoints — **ACCEPTED DECISION (ADR-001, 2026-07-30)**
 
-This is the largest single saving and the most consequential recommendation, so the trade-off must
-be explicit.
+**Decision:** Service firewalls + managed identity is the permanent network security model for this workload. Private Endpoints will not be provisioned unless the threat model changes materially (second operator joining, regulated data arriving, or a corporate network peering requirement).
 
-**What you give up:** data-plane traffic to Cosmos, Storage and Key Vault traverses the Azure
-backbone with public endpoints rather than private IPs.
+**What was removed from the plan:**
+- `snet-private-endpoints` subnet (10.40.1.0/24)
+- 4 Private Endpoints (Cosmos, Blob, Queue, Key Vault) — saves **$29.20/month**
+- 4 Private DNS Zones — saves **$2.00/month**
+- Total saving: **$31.20/month**
 
-**What you keep instead, and should implement on day one:** service firewalls restricted to the
-Functions outbound IPs, Entra ID authentication with **managed identity and no connection strings or
-keys anywhere**, RBAC data-plane roles on Cosmos and Storage, and Key Vault firewall plus RBAC.
+**What replaces them:**
+- Cosmos DB: service firewall scoped to `snet-functions-integration` CIDR
+- Storage (Blob + Queue): storage firewall scoped to `snet-functions-integration` CIDR
+- Key Vault: Key Vault firewall scoped to `snet-functions-integration` CIDR + trusted-services bypass for Azure Monitor
+- Authentication boundary: managed identity + Entra RBAC — unchanged
 
-**Why this is defensible here:** the threat model is a single-operator content site whose admin
-shell the approved plan already designates as _publicly downloadable_. Private endpoints defend
-against network-adjacent attackers inside a corporate estate. There is no corporate estate. Spending
-a third of the ceiling on that control, while the plan simultaneously accepts a publicly reachable
-origin, is incoherent — and the plan's own tradeoff note already concedes origin-bypass risk is
-"documented for later hardening."
+**Why this is defensible:**
+Traffic from Functions still travels the Azure backbone via VNet integration — it never touches the public internet. The difference between service firewalls and Private Endpoints is whether the PaaS service has a private IP on the VNet. Private IP isolation defends against attackers who already have network adjacency inside a corporate estate. This workload has no corporate estate, no peered networks, and no network-adjacent threat to defend against.
 
-**Revisit when:** a second operator joins, any regulated data arrives, or the budget rises.
+The plan's own tradeoff note already conceded origin-bypass risk is "documented for later hardening." Spending $31/month — 21% of the total budget — on a control whose threat doesn't exist here is incoherent.
+
+**Revisit if:** a second operator joins and corporate VPN/peering is required, any regulated data (PII, PCI, HIPAA) arrives in the system, or the workload's budget grows to the point where the cost is immaterial.
 
 ### 3.4 Cosmos DB in **serverless** mode, single region, session consistency
 
 1,395 documents. Serverless bills per request-unit consumed with no hourly floor. Provisioned
 throughput — even the 400 RU/s minimum — is a permanent charge for capacity this workload will never
 use. Multi-region write (the `100 Multi-master RU/s` meter above) must not be enabled.
+
+**Note:** Cosmos DB Serverless does **not** support availability zones. The plan previously had
+`availabilityZones: true` on a serverless account — this has been corrected to `false`. Zone
+redundancy requires provisioned or autoscale throughput, which adds a minimum monthly floor (~$6–8).
+For a single-operator content site on serverless, the cost is not justified.
 
 **Watch:** serverless has a per-container storage ceiling and lower burst limits. Both are far above
 this workload. Re-evaluate only if a collection passes roughly 50 GB or sustained heavy traffic

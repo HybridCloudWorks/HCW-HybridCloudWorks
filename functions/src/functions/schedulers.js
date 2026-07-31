@@ -2,52 +2,60 @@ import { app } from '@azure/functions';
 
 /**
  * schedulers.js
- * 
- * Timer triggers to replace Firebase Cloud Scheduler / scheduled functions.
- * 
- * TODO: Port the business logic from Personal-Site_HCW/functions/index.js (the pubsub.schedule blocks)
+ *
+ * Timer triggers replacing Firebase Cloud Scheduler / scheduled functions.
+ *
+ * All handlers are gated by FEATURE_FLAG_SCHEDULERS="true" (app setting set by
+ * Terraform). Set to "false" until business logic is ported from the source repo.
+ * Timers fire on schedule regardless — the flag makes them safe no-ops until ready.
  */
 
-// ---------------------------------------------------------------------------
-// RSS Sync (Runs every hour)
-// ---------------------------------------------------------------------------
+const schedulersEnabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'true';
+
 app.timer('syncRssFeeds', {
-  schedule: '0 0 * * * *',
+  schedule: '0 0 * * * *', // every hour
   handler: async (myTimer, context) => {
-    context.log('Running RSS Feed sync task...');
-    // TODO: Fetch feeds from Cosmos DB config, parse, and upsert content docs.
+    if (!schedulersEnabled()) {
+      context.log('[syncRssFeeds] FEATURE_FLAG_SCHEDULERS=false — skipping');
+      return;
+    }
+    context.log('Running RSS feed sync...');
+    // TODO: Fetch feed URLs from Cosmos DB config, parse, upsert content docs
   }
 });
 
-// ---------------------------------------------------------------------------
-// Content Publishing (Runs every 15 minutes)
-// ---------------------------------------------------------------------------
 app.timer('publishScheduledContent', {
-  schedule: '0 */15 * * * *',
+  schedule: '0 */15 * * * *', // every 15 minutes
   handler: async (myTimer, context) => {
-    context.log('Running scheduled content publish task...');
-    // TODO: Query Cosmos DB for 'draft' content with publishedAt <= now, change to 'published'
+    if (!schedulersEnabled()) {
+      context.log('[publishScheduledContent] FEATURE_FLAG_SCHEDULERS=false — skipping');
+      return;
+    }
+    context.log('Running scheduled content publish...');
+    // TODO: Query Cosmos DB for draft content with publishedAt <= now, set to published
   }
 });
 
-// ---------------------------------------------------------------------------
-// Storage Cleanup (Runs daily at midnight)
-// ---------------------------------------------------------------------------
 app.timer('cleanupTempStorage', {
-  schedule: '0 0 0 * * *',
+  schedule: '0 0 0 * * *', // daily at midnight UTC
   handler: async (myTimer, context) => {
-    context.log('Running storage cleanup task...');
+    if (!schedulersEnabled()) {
+      context.log('[cleanupTempStorage] FEATURE_FLAG_SCHEDULERS=false — skipping');
+      return;
+    }
+    context.log('Running storage cleanup...');
     // TODO: Identify and delete orphaned blobs using blob-storage.js
   }
 });
 
-// ---------------------------------------------------------------------------
-// Agent Health Check (Runs every 5 minutes)
-// ---------------------------------------------------------------------------
 app.timer('checkAgentHealth', {
-  schedule: '0 */5 * * * *',
+  schedule: '0 */5 * * * *', // every 5 minutes
   handler: async (myTimer, context) => {
-    context.log('Running agent health check task...');
+    if (!schedulersEnabled()) {
+      context.log('[checkAgentHealth] FEATURE_FLAG_SCHEDULERS=false — skipping');
+      return;
+    }
+    context.log('Running agent health check...');
     // TODO: Query lab_agents in Cosmos DB, mark offline if lastPing > 5 mins ago
   }
 });

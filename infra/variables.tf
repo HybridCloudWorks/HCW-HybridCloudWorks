@@ -4,6 +4,7 @@
 # Org: HybridCloudWorks | Workspace: hybridcloudworks-azure
 #
 # Variable names here MUST match TF Cloud workspace variable keys exactly.
+# See Variables.md at the repository root for the full variables/secrets catalog.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -16,9 +17,9 @@ variable "azure_subscription_id" {
 }
 
 variable "azure_location" {
-  description = "Azure region for all resources (East US 2 for best latency to central US audience)"
+  description = "Azure region for all resources"
   type        = string
-  default     = "eastus2"
+  default     = "southcentralus"
 }
 
 variable "environment" {
@@ -40,6 +41,21 @@ variable "resource_group_name" {
   description = "Azure resource group name"
   type        = string
   default     = "rg-hybridcloudworks-prod"
+}
+
+# -----------------------------------------------------------------------------
+# Networking
+# -----------------------------------------------------------------------------
+variable "vnet_address_space" {
+  description = "Address space for the workload VNet"
+  type        = string
+  default     = "10.40.0.0/16"
+}
+
+variable "functions_subnet_prefix" {
+  description = "Address prefix for the Functions Flex integration subnet"
+  type        = string
+  default     = "10.40.0.0/24"
 }
 
 # -----------------------------------------------------------------------------
@@ -78,17 +94,66 @@ variable "key_vault_name" {
   default     = "hcw-keyvault-prod"
 }
 
+variable "purge_protection_enabled" {
+  description = "Enable Key Vault purge protection. Set false only during initial dev; must be true before production secrets are written."
+  type        = bool
+  default     = false
+}
+
 # -----------------------------------------------------------------------------
-# Cloudflare (DNS management — shared with root terraform)
+# Budget
+# -----------------------------------------------------------------------------
+variable "budget_amount_usd" {
+  description = "Monthly budget ceiling in USD"
+  type        = number
+  default     = 150
+}
+
+variable "budget_alert_email" {
+  description = "Email address for budget alert notifications"
+  type        = string
+}
+
+# -----------------------------------------------------------------------------
+# Auth / Entra ID
+# -----------------------------------------------------------------------------
+variable "entra_tenant_id" {
+  description = "Entra ID tenant ID for JWT validation and OIDC deployment"
+  type        = string
+  sensitive   = true
+}
+
+variable "entra_client_id" {
+  description = "Entra ID application (client) ID registered for this workload"
+  type        = string
+}
+
+# -----------------------------------------------------------------------------
+# GitHub OIDC deployment identities (used for federated credential setup)
+# -----------------------------------------------------------------------------
+variable "github_org" {
+  description = "GitHub organisation or user name owning the repository"
+  type        = string
+  default     = "saulpatinojr"
+}
+
+variable "github_repo" {
+  description = "GitHub repository name (without org prefix)"
+  type        = string
+  default     = "HCW-HybridCloudWorks"
+}
+
+# -----------------------------------------------------------------------------
+# Cloudflare (DNS management)
 # -----------------------------------------------------------------------------
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token — Zone:Read + DNS:Edit scoped to hybridcloudworks.com"
+  description = "Cloudflare API token — Zone:Read + DNS:Edit scoped to the domain"
   type        = string
   sensitive   = true
 }
 
 variable "cloudflare_zone_id" {
-  description = "Cloudflare Zone ID for hybridcloudworks.com"
+  description = "Cloudflare Zone ID for the domain"
   type        = string
 }
 
@@ -108,9 +173,12 @@ variable "tags" {
   description = "Default tags applied to all Azure resources"
   type        = map(string)
   default = {
-    project     = "hybridcloudworks"
-    environment = "prod"
-    managed_by  = "terraform"
-    migrated_from = "firebase"
+    workload        = "hybridcloudworks"
+    environment     = "prod"
+    owner           = "platform"
+    costCenter      = "content-platform"
+    managedBy       = "terraform"
+    criticality     = "high"
+    dataClassification = "internal"
   }
 }

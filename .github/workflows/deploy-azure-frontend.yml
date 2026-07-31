@@ -35,31 +35,23 @@ jobs:
       - name: Generate public data (certifications, speakerevents)
         run: npm run build:data
         env:
-          # Use Azure Cosmos DB for build-time data generation
-          COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
-          COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
-          COSMOS_DATABASE: hybridcloudworks
+          # Data generation reads from the API — no direct Cosmos access from CI
+          AZURE_FUNCTIONS_URL: ${{ secrets.AZURE_FUNCTIONS_URL }}
 
       - name: Build
         run: npm run build
         env:
-          # Backend provider toggle — set to 'azure' post-migration
           VITE_BACKEND_PROVIDER: azure
-          # Azure configuration
           VITE_AZURE_FUNCTIONS_URL: ${{ secrets.AZURE_FUNCTIONS_URL }}
-          VITE_COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
-          VITE_COSMOS_READ_KEY: ${{ secrets.COSMOS_READ_KEY }}
-          VITE_COSMOS_DATABASE: hybridcloudworks
-          # Entra ID Auth
-          VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
-          VITE_ENTRA_TENANT_ID: ${{ secrets.VITE_ENTRA_TENANT_ID }}
-          # Admin identity
-          VITE_OWNER_ADMIN_EMAIL: ${{ secrets.VITE_OWNER_ADMIN_EMAIL }}
-          VITE_OWNER_ADMIN_UID: ${{ secrets.VITE_OWNER_ADMIN_UID }}
-          # Social URLs
+          # Entra ID — public client registration values (not secrets)
+          VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}
+          # Social URLs — public, non-sensitive
           VITE_SOCIAL_X_URL: ${{ vars.VITE_SOCIAL_X_URL }}
           VITE_SOCIAL_LINKEDIN_URL: ${{ vars.VITE_SOCIAL_LINKEDIN_URL }}
           VITE_SOCIAL_GITHUB_URL: ${{ vars.VITE_SOCIAL_GITHUB_URL }}
+          # NOTE: VITE_COSMOS_* vars are intentionally absent.
+          # The frontend never accesses Cosmos directly — all data goes through the API.
 
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1

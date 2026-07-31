@@ -313,6 +313,8 @@ resource "azurerm_storage_account" "hcw" {
   account_replication_type = "LRS"
   account_kind             = "StorageV2"
   access_tier              = "Hot"
+  min_tls_version          = "TLS1_2"
+  allow_nested_items_to_be_public = false # account-level public access off; containers opt-in below
 
   blob_properties {
     cors_rule {
@@ -328,38 +330,45 @@ resource "azurerm_storage_account" "hcw" {
     }
   }
 
+  network_rules {
+    default_action             = "Deny"
+    bypass                     = ["AzureServices"]
+    virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
+  }
+
   tags = var.tags
 }
 
-# Blob containers matching Firebase Storage paths
+# Blob containers — account-level public access is OFF (set above)
+# Only media containers explicitly serving public assets have container_access_type = "blob"
 resource "azurerm_storage_container" "blogs" {
   name                  = "blogs"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob" # public read for blog covers
+  container_access_type = "blob" # public read: blog cover images served directly
 }
 
 resource "azurerm_storage_container" "covers" {
   name                  = "covers"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob"
+  container_access_type = "blob" # public read: content cover images
 }
 
 resource "azurerm_storage_container" "certifications" {
   name                  = "certifications"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob"
+  container_access_type = "blob" # public read: certification badge images
 }
 
 resource "azurerm_storage_container" "speakerevents" {
   name                  = "speakerevents"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob"
+  container_access_type = "private" # private: event assets served via API
 }
 
 resource "azurerm_storage_container" "content" {
   name                  = "content"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob"
+  container_access_type = "private" # private: raw content assets, not public
 }
 
 # Storage lifecycle management (replaces platform/firebase/storage-lifecycle.json)
@@ -384,20 +393,44 @@ resource "azurerm_storage_management_policy" "cleanup" {
 }
 
 # =============================================================================
-# Azure Function App — Consumption plan (replaces Cloud Functions v2)
+# Workload VNet + Flex Consumption integration subnet
 #
-# Linux, Node.js 22 runtime.
-# Consumption plan: pay per execution, 1M free invocations/month.
-# Uses the same Storage Account for function app state.
+# Flex Consumption requires a /27 minimum subnet delegated to
+# Microsoft.App/environments. /24 leaves room for growth.
+# Service firewalls on Cosmos, Storage, and Key Vault are scoped
+# to this subnet's CIDR (ADR-001, 2026-07-30).
 # =============================================================================
+resource "azurerm_virtual_network" "hcw" {
+  name                = "${var.project_name}-vnet-${var.environment}"
+  location            = azurerm_resource_group.hcw.location
+  resource_group_name = azurerm_resource_group.hcw.name
+  address_space       = [var.vnet_address_space]
+  tags                = var.tags
+}
 
-# Dedicated storage account for function app (required by Azure)
+resource "azurerm_subnet" "functions_integration" {
+  name                 = "snet-functions-integration"
+  resource_group_name  = azurerm_resource_group.hcw.name
+  virtual_network_name = azurerm_virtual_network.hcw.name
+  address_prefixes     = [var.functions_subnet_prefix]
+
+  delegation {
+    name = "flex-consumption"
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+
 resource "azurerm_storage_account" "functions" {
   name                     = "${replace(var.project_name, "-", "")}funcsa"
   resource_group_name      = azurerm_resource_group.hcw.name
   location                 = azurerm_resource_group.hcw.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
+  min_tls_version          = "TLS1_2"
   tags                     = var.tags
 }
 
@@ -406,17 +439,19 @@ resource "azurerm_service_plan" "hcw" {
   location            = azurerm_resource_group.hcw.location
   resource_group_name = azurerm_resource_group.hcw.name
   os_type             = "Linux"
-  sku_name            = "Y1" # Consumption plan
+  sku_name            = "FC1" # Flex Consumption — VNet integration, scales to zero
   tags                = var.tags
 }
 
 resource "azurerm_linux_function_app" "hcw" {
-  name                       = var.function_app_name
-  location                   = azurerm_resource_group.hcw.location
-  resource_group_name        = azurerm_resource_group.hcw.name
-  service_plan_id            = azurerm_service_plan.hcw.id
-  storage_account_name       = azurerm_storage_account.functions.name
-  storage_account_access_key = azurerm_storage_account.functions.primary_access_key
+  name                          = var.function_app_name
+  location                      = azurerm_resource_group.hcw.location
+  resource_group_name           = azurerm_resource_group.hcw.name
+  service_plan_id               = azurerm_service_plan.hcw.id
+  storage_account_name          = azurerm_storage_account.functions.name
+  storage_uses_managed_identity = true # no static storage key
+
+  virtual_network_subnet_id = azurerm_subnet.functions_integration.id
 
   site_config {
     application_stack {
@@ -427,8 +462,8 @@ resource "azurerm_linux_function_app" "hcw" {
       allowed_origins = [
         "https://${var.domain}",
         "https://www.${var.domain}",
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:4173",  # Vite preview
+        "http://localhost:5173",
+        "http://localhost:4173",
       ]
       support_credentials = true
     }
@@ -438,17 +473,27 @@ resource "azurerm_linux_function_app" "hcw" {
   }
 
   app_settings = {
-    "COSMOS_ENDPOINT"                = azurerm_cosmosdb_account.hcw.endpoint
-    "COSMOS_DATABASE"                = azurerm_cosmosdb_sql_database.hcw.name
-    "COSMOS_KEY"                     = azurerm_cosmosdb_account.hcw.primary_key
-    "STORAGE_CONNECTION_STRING"      = azurerm_storage_account.hcw.primary_connection_string
-    "STORAGE_ACCOUNT_NAME"           = azurerm_storage_account.hcw.name
-    "KEY_VAULT_URI"                  = azurerm_key_vault.hcw.vault_uri
-    "WEBSITE_RUN_FROM_PACKAGE"       = "1"
-    "FUNCTIONS_WORKER_RUNTIME"       = "node"
-    "NODE_ENV"                       = "production"
-    # Firebase Auth (Option A — kept for token validation)
-    "FIREBASE_PROJECT_ID"            = "hybridcloudworks-61e8d"
+    # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
+    "COSMOS_ENDPOINT"          = azurerm_cosmosdb_account.hcw.endpoint
+    "COSMOS_DATABASE"          = azurerm_cosmosdb_sql_database.hcw.name
+    # COSMOS_CONNECTION_STRING is required by the Cosmos DB change-feed trigger binding
+    # See: https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
+    "COSMOS_CONNECTION_STRING" = azurerm_cosmosdb_account.hcw.primary_sql_connection_string
+
+    "STORAGE_ACCOUNT_NAME"     = azurerm_storage_account.hcw.name
+    "STORAGE_BLOB_ENDPOINT"    = azurerm_storage_account.hcw.primary_blob_endpoint
+    "STORAGE_QUEUE_ENDPOINT"   = azurerm_storage_account.hcw.primary_queue_endpoint
+    "KEY_VAULT_URI"            = azurerm_key_vault.hcw.vault_uri
+
+    "ENTRA_TENANT_ID"          = var.entra_tenant_id
+    "ENTRA_CLIENT_ID"          = var.entra_client_id
+
+    "WEBSITE_RUN_FROM_PACKAGE" = "1"
+    "FUNCTIONS_WORKER_RUNTIME" = "node"
+    "NODE_ENV"                 = "production"
+
+    # Feature flags — set to "true" in TF Cloud vars once business logic is ported
+    "FEATURE_FLAG_SCHEDULERS"  = "false"
   }
 
   identity {
@@ -458,21 +503,41 @@ resource "azurerm_linux_function_app" "hcw" {
   tags = var.tags
 }
 
-# Grant Function App access to Key Vault secrets
-resource "azurerm_key_vault_access_policy" "function_app" {
-  key_vault_id = azurerm_key_vault.hcw.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = azurerm_linux_function_app.hcw.identity[0].principal_id
+# ---------------------------------------------------------------------------
+# RBAC — Function App managed identity data-plane roles (no static keys)
+# ---------------------------------------------------------------------------
 
-  secret_permissions = ["Get", "List"]
+resource "azurerm_role_assignment" "func_cosmos" {
+  scope                = azurerm_cosmosdb_account.hcw.id
+  role_definition_name = "Cosmos DB Built-in Data Contributor"
+  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "func_blob" {
+  scope                = azurerm_storage_account.hcw.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "func_queue" {
+  scope                = azurerm_storage_account.hcw.id
+  role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+}
+
+# Host storage access for Flex Consumption managed-identity mode
+resource "azurerm_role_assignment" "func_host_storage" {
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = "Storage Blob Data Owner"
+  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
 }
 
 # =============================================================================
-# Azure Key Vault (replaces GCP Secret Manager)
+# Azure Key Vault — RBAC mode (access policies removed)
 #
-# Stores: AI API keys, social integration secrets, service credentials.
-# Soft-delete enabled (7-day retention for accidental deletion).
-# RBAC: Function App gets read-only; CI/CD service principal gets read-write.
+# enable_rbac_authorization = true replaces access policies.
+# Roles: Key Vault Secrets User (read) for Function App MI,
+#        Key Vault Secrets Officer (write) for Terraform executor.
 # =============================================================================
 resource "azurerm_key_vault" "hcw" {
   name                       = var.key_vault_name
@@ -480,19 +545,31 @@ resource "azurerm_key_vault" "hcw" {
   resource_group_name        = azurerm_resource_group.hcw.name
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = "standard"
-  soft_delete_retention_days = 7
-  purge_protection_enabled   = false # allow destroy during development
+  soft_delete_retention_days = 90
+  purge_protection_enabled   = var.purge_protection_enabled
+  enable_rbac_authorization  = true
+
+  network_acls {
+    default_action             = "Deny"
+    bypass                     = "AzureServices"
+    virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
+  }
 
   tags = var.tags
 }
 
-# Grant the Terraform executor (CI/CD service principal) full secret access
-resource "azurerm_key_vault_access_policy" "terraform" {
-  key_vault_id = azurerm_key_vault.hcw.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = data.azurerm_client_config.current.object_id
+# Key Vault Secrets User — Function App managed identity (read-only at runtime)
+resource "azurerm_role_assignment" "func_kv_secrets" {
+  scope                = azurerm_key_vault.hcw.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+}
 
-  secret_permissions = ["Get", "List", "Set", "Delete", "Purge", "Recover"]
+# Key Vault Secrets Officer — Terraform executor (write during CI/CD secret seeding)
+resource "azurerm_role_assignment" "terraform_kv_secrets" {
+  scope                = azurerm_key_vault.hcw.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
 }
 
 # =============================================================================
@@ -501,7 +578,7 @@ resource "azurerm_key_vault_access_policy" "terraform" {
 resource "azurerm_consumption_budget_resource_group" "hcw" {
   name              = "${var.project_name}-monthly-budget"
   resource_group_id = azurerm_resource_group.hcw.id
-  amount            = 250
+  amount            = var.budget_amount_usd
   time_grain        = "Monthly"
 
   time_period {
@@ -512,21 +589,36 @@ resource "azurerm_consumption_budget_resource_group" "hcw" {
     enabled        = true
     threshold      = 50
     operator       = "GreaterThanOrEqualTo"
-    contact_emails = ["saulpatinojr@gmail.com"]
+    contact_emails = [var.budget_alert_email]
   }
 
   notification {
     enabled        = true
     threshold      = 80
     operator       = "GreaterThanOrEqualTo"
-    contact_emails = ["saulpatinojr@gmail.com"]
+    contact_emails = [var.budget_alert_email]
   }
 
   notification {
     enabled        = true
     threshold      = 100
     operator       = "GreaterThanOrEqualTo"
-    contact_emails = ["saulpatinojr@gmail.com"]
+    contact_emails = [var.budget_alert_email]
+  }
+}
+
+# Change feed lease container — explicit so it has a controlled partition key
+# and is tracked in state (not auto-created by the SDK at runtime)
+resource "azurerm_cosmosdb_sql_container" "leases" {
+  name                = "leases"
+  resource_group_name = azurerm_resource_group.hcw.name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  database_name       = azurerm_cosmosdb_sql_database.hcw.name
+  partition_key_paths = ["/id"]
+
+  indexing_policy {
+    indexing_mode = "consistent"
+    included_path { path = "/*" }
   }
 }
 

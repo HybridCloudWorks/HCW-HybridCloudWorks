@@ -1,32 +1,37 @@
 /**
  * Cosmos DB data access layer for Azure Functions.
  *
- * Replaces firebase-admin/firestore with @azure/cosmos.
- * Provides the same query patterns used in cms-functions.js.
+ * Uses DefaultAzureCredential (managed identity in production, az login locally).
+ * No static key — COSMOS_KEY must NOT be set. Auth is RBAC via managed identity.
+ *
+ * Required app settings: COSMOS_ENDPOINT, COSMOS_DATABASE
+ * Required RBAC role on the Function App MI: Cosmos DB Built-in Data Contributor
  */
 
 import { CosmosClient } from '@azure/cosmos';
+import { DefaultAzureCredential } from '@azure/identity';
 
 let client = null;
 let database = null;
 
 /**
  * Initialize or return the singleton Cosmos DB client.
- * Connection details come from Azure Function App Settings
- * (set by Terraform in the azurerm_linux_function_app resource).
+ * Uses managed identity (DefaultAzureCredential) — no key required.
  */
 export function getCosmosDb() {
   if (database) return database;
 
   const endpoint = process.env.COSMOS_ENDPOINT;
-  const key = process.env.COSMOS_KEY;
   const databaseId = process.env.COSMOS_DATABASE || 'hybridcloudworks';
 
-  if (!endpoint || !key) {
-    throw new Error('Missing COSMOS_ENDPOINT or COSMOS_KEY environment variables');
+  if (!endpoint) {
+    throw new Error('Missing COSMOS_ENDPOINT environment variable');
   }
 
-  client = new CosmosClient({ endpoint, key });
+  client = new CosmosClient({
+    endpoint,
+    aadCredentials: new DefaultAzureCredential(),
+  });
   database = client.database(databaseId);
 
   return database;

@@ -2,7 +2,8 @@
  * Authentication middleware for Azure Functions (Entra ID).
  *
  * Validates Entra ID JWT tokens using JWKS from Microsoft.
- * Checks for roles or custom claims (e.g. "Admin") via the token payload.
+ * Supports both v1 (sts.windows.net) and v2 (login.microsoftonline.com) issuers
+ * to avoid silent failures during MSAL version transitions.
  */
 
 import jwt from 'jsonwebtoken';
@@ -11,9 +12,16 @@ import jwksClient from 'jwks-rsa';
 const TENANT_ID = process.env.ENTRA_TENANT_ID || 'common';
 const CLIENT_ID = process.env.ENTRA_CLIENT_ID;
 
-// Create the JWKS client to fetch Microsoft public keys
+const VALID_ISSUERS = [
+  `https://login.microsoftonline.com/${TENANT_ID}/v2.0`,
+  `https://sts.windows.net/${TENANT_ID}/`,
+];
+
 const client = jwksClient({
-  jwksUri: `https://login.microsoftonline.com/${TENANT_ID}/discovery/v2.0/keys`
+  jwksUri: `https://login.microsoftonline.com/${TENANT_ID}/discovery/v2.0/keys`,
+  cache: true,
+  cacheMaxEntries: 5,
+  cacheMaxAge: 600000, // 10 minutes
 });
 
 function getKey(header, callback) {
@@ -45,7 +53,7 @@ export async function verifyAuthToken(request) {
   return new Promise((resolve) => {
     jwt.verify(token, getKey, {
       audience: CLIENT_ID,
-      issuer: `https://sts.windows.net/${TENANT_ID}/`
+      issuer: VALID_ISSUERS,
     }, (err, decoded) => {
       if (err) {
         console.error('[auth] Token verification failed:', err.message);

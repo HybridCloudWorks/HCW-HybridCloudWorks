@@ -1,6 +1,10 @@
 # =============================================================================
 # outputs.tf — Azure infrastructure outputs
 # Used by CI/CD workflows and application configuration.
+#
+# SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
+# omitted. All runtime access uses managed identity + RBAC; no static key
+# is passed to application code. See Variables.md for the full secrets catalog.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -21,26 +25,17 @@ output "static_web_app_api_key" {
 # Cosmos DB
 # -----------------------------------------------------------------------------
 output "cosmos_db_endpoint" {
-  description = "Cosmos DB account endpoint URL"
+  description = "Cosmos DB account endpoint URL (no key — Function App uses managed identity)"
   value       = azurerm_cosmosdb_account.hcw.endpoint
-}
-
-output "cosmos_db_primary_key" {
-  description = "Cosmos DB primary key"
-  value       = azurerm_cosmosdb_account.hcw.primary_key
-  sensitive   = true
-}
-
-output "cosmos_db_connection_string" {
-  description = "Cosmos DB primary connection string"
-  value       = azurerm_cosmosdb_account.hcw.primary_sql_connection_string
-  sensitive   = true
 }
 
 output "cosmos_db_database_name" {
   description = "Cosmos DB database name"
   value       = azurerm_cosmosdb_sql_database.hcw.name
 }
+
+# cosmos_db_primary_key intentionally removed — use managed identity
+# cosmos_db_connection_string intentionally removed — use managed identity
 
 # -----------------------------------------------------------------------------
 # Storage
@@ -51,15 +46,11 @@ output "storage_account_name" {
 }
 
 output "storage_primary_blob_endpoint" {
-  description = "Primary blob endpoint for constructing asset URLs"
+  description = "Primary blob endpoint for constructing public asset URLs"
   value       = azurerm_storage_account.hcw.primary_blob_endpoint
 }
 
-output "storage_connection_string" {
-  description = "Storage account primary connection string"
-  value       = azurerm_storage_account.hcw.primary_connection_string
-  sensitive   = true
-}
+# storage_connection_string intentionally removed — use managed identity
 
 # -----------------------------------------------------------------------------
 # Function App
@@ -75,7 +66,7 @@ output "function_app_url" {
 }
 
 output "function_app_principal_id" {
-  description = "Managed identity principal ID for the Function App"
+  description = "Managed identity principal ID — use this when granting additional RBAC roles"
   value       = azurerm_linux_function_app.hcw.identity[0].principal_id
 }
 
@@ -95,14 +86,8 @@ output "key_vault_name" {
 # -----------------------------------------------------------------------------
 # Observability
 # -----------------------------------------------------------------------------
-output "app_insights_instrumentation_key" {
-  description = "Application Insights instrumentation key"
-  value       = azurerm_application_insights.hcw.instrumentation_key
-  sensitive   = true
-}
-
 output "app_insights_connection_string" {
-  description = "Application Insights connection string"
+  description = "Application Insights connection string (used for local development only — wired via Terraform in production)"
   value       = azurerm_application_insights.hcw.connection_string
   sensitive   = true
 }
@@ -113,14 +98,22 @@ output "log_analytics_workspace_id" {
 }
 
 # -----------------------------------------------------------------------------
-# DNS / Domains
+# Networking
 # -----------------------------------------------------------------------------
-output "azure_functions_cname" {
-  description = "Azure Functions CNAME record value for Cloudflare"
-  value       = "${azurerm_linux_function_app.hcw.default_hostname}"
+output "functions_subnet_id" {
+  description = "Functions Flex integration subnet ID — use for additional service firewall rules"
+  value       = azurerm_subnet.functions_integration.id
 }
 
-output "azure_swa_cname" {
-  description = "Azure Static Web App CNAME record value for Cloudflare"
+# -----------------------------------------------------------------------------
+# DNS / Domains
+# -----------------------------------------------------------------------------
+output "azure_functions_hostname" {
+  description = "Azure Functions hostname for Cloudflare CNAME"
+  value       = azurerm_linux_function_app.hcw.default_hostname
+}
+
+output "azure_swa_hostname" {
+  description = "Azure Static Web App hostname for Cloudflare CNAME"
   value       = azurerm_static_web_app.hcw.default_host_name
 }
