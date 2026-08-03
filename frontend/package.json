@@ -118,7 +118,7 @@
     "firebase-tools": "^15.24.0",
     "globals": "^17.6.0",
     "husky": "^9.1.7",
-    "jsdom": "^28.1.0",
+    "jsdom": "^30.0.1",
     "pdf-parse": "^1.1.1",
     "postcss": "^8.4.49",
     "prettier": "^3.8.3",
