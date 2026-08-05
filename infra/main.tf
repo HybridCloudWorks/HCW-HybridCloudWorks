@@ -126,7 +126,7 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # key, so a container partitioned on anything else 404s on every point read.
 # At ~1,100 small documents there is nothing to spread across partitions, and
 # the Firestore composite indexes that describe the real query load do not
-# filter on a provider or an owner. See docs/data-migration/README.md.
+# filter on a provider or an owner. Full rationale in the manifest header.
 #
 # A partition key path is IMMUTABLE. Changing one on a container that already
 # holds data means destroying the container and re-importing.

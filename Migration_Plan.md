@@ -165,7 +165,8 @@ with managed identity. No connection strings, no keys in app settings.
 > **Updated 2026-08-05 after reviewing Site-Main @ `07f3123`.** The tooling and the collection
 > inventory below were checked against the source repository for the first time. The headline
 > numbers survived; the collection list did not. Full findings, decisions and runbook:
-> **[docs/data-migration/README.md](docs/data-migration/README.md)**.
+> **[Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)**
+> in the Wiki.
 >
 > Four corrections matter enough to state here:
 >
@@ -230,8 +231,10 @@ recursive and covers `Timestamp`, `GeoPoint`, `DocumentReference` and `Bytes` at
 container is now partitioned on `/id`. `functions/src/lib/cosmos-client.js` already defaults the
 partition key to the document id and no caller overrides it, so the previous keys (`/cloudProvider`,
 `/issuer`, `/status`, `/userId`, …) would have returned 404 on every point read. A partition key
-path cannot be changed once the container holds data. Rationale in
-[docs/data-migration/README.md §2.2](docs/data-migration/README.md).
+path cannot be changed once the container holds data. Rationale in the header of
+`scripts/lib/migration-manifest.mjs`, and in full on the
+[Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
+Wiki page.
 
 ---
 

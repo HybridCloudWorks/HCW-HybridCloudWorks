@@ -28,6 +28,7 @@ All human-facing documentation is maintained in the
 - [Architecture decisions](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Architecture-Decision-Records)
 - [Well-Architected assessment](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Well-Architected-Assessment)
 - [Migration runbook](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Migration-Runbook)
+- [Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
 - [Cost analysis](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Cost-Analysis)
 
 The root README must be updated whenever repository structure, documentation authority, architecture
@@ -43,7 +44,7 @@ to that tooling; general documentation belongs only in the Wiki.
 | `frontend/` | Imported React application and source-system compatibility code | Requires reconciliation with the old repository |
 | `functions/` | Azure Functions application scaffold | Prototype; must be aligned to approved boundaries |
 | `infra/` | Terraform Azure infrastructure | Prototype; do not apply as the approved architecture |
-| `scripts/` | Data and media migration tooling | Incomplete; dry-run and reconciliation required |
+| `scripts/` | Data and media migration tooling | Firestore data migration prepared against Site-Main and not yet executed; read-only preflight, dry-run and reconciliation implemented. Media migration still incomplete |
 | `vps-agent/` | Azure-oriented labs agent scaffold | Incomplete; source agent contract still requires migration |
 
 Temporary duplicate implementation paths under `frontend/` are retained until Phase 1 reconciliation

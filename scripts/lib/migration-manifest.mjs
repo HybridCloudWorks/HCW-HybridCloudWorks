@@ -50,8 +50,10 @@
  *      fan out on the list queries *and* on the point reads.
  *
  * A partition key path is immutable once the container exists. Changing one
- * later means recreating the container and re-importing. See
- * `docs/data-migration/README.md` for the full rationale.
+ * later means recreating the container and re-importing, so this needs sign-off
+ * before the first Terraform apply. The full write-up — the Site-Main review
+ * findings, the decision log and the runbook — lives on the
+ * `Phase-4-Data-Migration` Wiki page, per the repository's documentation policy.
  */
 
 /**

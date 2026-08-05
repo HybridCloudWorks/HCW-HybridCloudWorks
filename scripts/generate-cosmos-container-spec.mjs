@@ -40,7 +40,7 @@ try {
  * `functions/src/lib/cosmos-client.js` defaults the partition key to the
  * document id in `readDoc()` and `deleteDoc()`, and no caller overrides it.
  * A container partitioned on anything else returns 404 for every point read.
- * See `docs/data-migration/README.md` for the full argument.
+ * See the partition-key note in lib/migration-manifest.mjs for the argument.
  */
 const PARTITION_KEY_PATH = '/id';
 

@@ -3,7 +3,7 @@
 # Enabling it is a deliberate decision, not a side effect of editing this file:
 # it reads the whole production Firestore database and writes to a Cosmos DB
 # account. Enable it only once the open questions in
-# docs/data-migration/README.md §3 are resolved, and run `preflight` and
+# the Phase-4-Data-Migration Wiki page are resolved, and run `preflight` and
 # `export` before ever running `import`.
 
 name: DISABLED - Firestore to Cosmos DB data migration
