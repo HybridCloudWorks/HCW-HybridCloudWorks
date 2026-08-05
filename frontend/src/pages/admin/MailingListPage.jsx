@@ -273,7 +273,11 @@ function ConnectionTab({ onStatusChange }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <Button onClick={handleTest} disabled={testing} className="gap-2">
-            {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {testing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
             Test Connection
           </Button>
           {result && (

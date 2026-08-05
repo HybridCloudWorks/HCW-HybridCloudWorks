@@ -15,14 +15,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  collection,
-  doc,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-} from 'firebase/firestore';
+import { collection, doc, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '@/lib/firebaseConfig';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { postJSON } from '@/lib/api';
@@ -33,16 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import {
-  FlaskConical,
-  Loader2,
-  Server,
-  Send,
-  Ban,
-  Terminal,
-  Cpu,
-  ListOrdered,
-} from 'lucide-react';
+import { FlaskConical, Loader2, Server, Send, Ban, Terminal, Cpu, ListOrdered } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -60,8 +44,14 @@ const STALE_AFTER_MS = 90 * 1000;
 // usable if that call fails. The server re-validates on enqueue either way.
 const FALLBACK_JOB_TYPES = [
   { type: 'shell-echo', description: 'Smoke test — echoes the payload back from the sandbox.' },
-  { type: 'terraform-validate', description: 'terraform init -backend=false && terraform validate on the payload HCL.' },
-  { type: 'ansible-check', description: 'ansible-playbook --syntax-check on the payload playbook YAML.' },
+  {
+    type: 'terraform-validate',
+    description: 'terraform init -backend=false && terraform validate on the payload HCL.',
+  },
+  {
+    type: 'ansible-check',
+    description: 'ansible-playbook --syntax-check on the payload playbook YAML.',
+  },
 ];
 
 const STATUS_STYLES = {
@@ -99,7 +89,9 @@ function formatDuration(job) {
   const end = toMillis(job.finishedAt);
   if (!start || !end || end < start) return '—';
   const seconds = (end - start) / 1000;
-  return seconds < 60 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  return seconds < 60
+    ? `${seconds.toFixed(1)}s`
+    : `${Math.round(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
 function formatTime(ts) {
@@ -145,7 +137,9 @@ function AgentCard({ agent, now }) {
   return (
     <Card className="p-4">
       <div className="flex items-start gap-3">
-        <Server className={`h-5 w-5 shrink-0 mt-0.5 ${online ? 'text-emerald-500' : 'text-muted-foreground'}`} />
+        <Server
+          className={`h-5 w-5 shrink-0 mt-0.5 ${online ? 'text-emerald-500' : 'text-muted-foreground'}`}
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold truncate">{agent.agentId || agent.id}</p>
@@ -160,7 +154,9 @@ function AgentCard({ agent, now }) {
               {online ? 'Online' : 'Offline'}
             </Badge>
             {agent.version && (
-              <Badge variant="outline" className="text-[10px]">v{agent.version}</Badge>
+              <Badge variant="outline" className="text-[10px]">
+                v{agent.version}
+              </Badge>
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-1">
@@ -188,9 +184,7 @@ function DashboardTab({ agents, jobs, now, error }) {
 
   return (
     <div className="space-y-6">
-      {error && (
-        <p className="text-xs text-destructive">Live subscription error: {error}</p>
-      )}
+      {error && <p className="text-xs text-destructive">Live subscription error: {error}</p>}
 
       {/* Summary stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -261,7 +255,9 @@ function DashboardTab({ agents, jobs, now, error }) {
                 {jobs.map((job) => (
                   <tr key={job.id} className="border-b border-border/50 last:border-0">
                     <td className="px-3 py-2 font-mono">{job.type}</td>
-                    <td className="px-3 py-2"><StatusBadge status={job.status} /></td>
+                    <td className="px-3 py-2">
+                      <StatusBadge status={job.status} />
+                    </td>
                     <td className="px-3 py-2 font-mono">{job.agentId || '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{formatTime(job.createdAt)}</td>
                     <td className="px-3 py-2">{formatDuration(job)}</td>
@@ -288,7 +284,9 @@ function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel }) {
   const isTerminal = ['succeeded', 'failed', 'timeout', 'cancelled'].includes(activeJob?.status);
   if (!activeJobId) {
     return (
-      <p className="text-sm text-muted-foreground py-8 text-center">Submit a job to watch it run.</p>
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        Submit a job to watch it run.
+      </p>
     );
   }
   return (
@@ -296,7 +294,9 @@ function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel }) {
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span className="font-mono text-muted-foreground">{activeJobId}</span>
         <StatusBadge status={activeJob?.status || 'queued'} />
-        {activeJob?.agentId && <span className="text-muted-foreground">on {activeJob.agentId}</span>}
+        {activeJob?.agentId && (
+          <span className="text-muted-foreground">on {activeJob.agentId}</span>
+        )}
         {activeJob?.exitCode !== null && activeJob?.exitCode !== undefined && (
           <span className="font-mono text-muted-foreground">exit {activeJob.exitCode}</span>
         )}
@@ -308,13 +308,18 @@ function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel }) {
             disabled={cancelling}
             className="gap-1 ml-auto"
           >
-            {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}
+            {cancelling ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Ban className="h-3 w-3" />
+            )}
             Cancel
           </Button>
         )}
       </div>
       <pre className="bg-muted/60 border border-border rounded-md p-3 text-xs font-mono whitespace-pre-wrap break-words min-h-[200px] max-h-[400px] overflow-auto">
-        {activeJob?.output ?? (isTerminal ? '(no output)' : 'Waiting for the agent to pick this up…')}
+        {activeJob?.output ??
+          (isTerminal ? '(no output)' : 'Waiting for the agent to pick this up…')}
       </pre>
       {isTerminal && (
         <p className="text-xs text-muted-foreground">
@@ -345,7 +350,12 @@ function ConsoleTab({ jobTypes }) {
     const unsub = onSnapshot(
       doc(db, 'lab_jobs', activeJobId),
       (snap) => setActiveJob(snap.exists() ? { id: snap.id, ...snap.data() } : null),
-      (err) => setActiveJob({ id: activeJobId, status: 'failed', output: `subscription error: ${err.message}` })
+      (err) =>
+        setActiveJob({
+          id: activeJobId,
+          status: 'failed',
+          output: `subscription error: ${err.message}`,
+        })
     );
     return unsub;
   }, [activeJobId]);
@@ -386,8 +396,8 @@ function ConsoleTab({ jobTypes }) {
         <CardHeader>
           <CardTitle className="text-base">Submit a job</CardTitle>
           <CardDescription>
-            Job types come from a server-side allowlist; the agent only ever runs fixed,
-            sandboxed commands — the payload is mounted as a read-only file.
+            Job types come from a server-side allowlist; the agent only ever runs fixed, sandboxed
+            commands — the payload is mounted as a read-only file.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -424,7 +434,11 @@ function ConsoleTab({ jobTypes }) {
             )}
           </div>
           <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
             Submit job
           </Button>
         </CardContent>

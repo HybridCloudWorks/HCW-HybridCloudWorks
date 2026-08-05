@@ -220,18 +220,21 @@ function App() {
   const [, firstSegment] = location.pathname.split('/');
   const provider = VALID_PROVIDERS.includes(firstSegment) ? firstSegment : null;
   const isAdminRoute = firstSegment === 'admin';
-  const [showDeferredUi, setShowDeferredUi] = useState(isAdminRoute);
+  // Derived rather than synced from the effect below. Admin routes need the
+  // deferred chrome immediately, and once idle time has been reached we keep it
+  // on; expressing that as `isAdminRoute || idleReached` avoids calling setState
+  // synchronously inside the effect, which triggers a cascading render.
+  const [idleReached, setIdleReached] = useState(isAdminRoute);
+  const showDeferredUi = isAdminRoute || idleReached;
 
   useEffect(() => {
-    if (isAdminRoute) {
-      setShowDeferredUi(true);
-      return undefined;
-    }
+    // Nothing to schedule on admin routes — showDeferredUi is already true.
+    if (isAdminRoute) return undefined;
 
     let cancelled = false;
     let timeoutId = null;
     const activate = () => {
-      if (!cancelled) setShowDeferredUi(true);
+      if (!cancelled) setIdleReached(true);
     };
 
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
@@ -509,7 +512,11 @@ function ProviderCodeDispatcher() {
     );
   }
   if (provider === 'ansible') {
-    return isDetail ? <BlogDetailTemplate provider="ansible" section="code" /> : <AnsibleCodePage />;
+    return isDetail ? (
+      <BlogDetailTemplate provider="ansible" section="code" />
+    ) : (
+      <AnsibleCodePage />
+    );
   }
 
   return <NotFoundPage />;
