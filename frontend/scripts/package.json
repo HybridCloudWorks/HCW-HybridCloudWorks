@@ -7,7 +7,7 @@
     "notion-to-yaml": "node notion-to-yaml.js"
   },
   "dependencies": {
-    "@notionhq/client": "^2.2.15",
+    "@notionhq/client": "^5.23.3",
     "yargs": "^18.1.0"
   },
   "engines": {
