@@ -162,6 +162,29 @@ with managed identity. No connection strings, no keys in app settings.
 
 ## 5. Phase 4 — data migration
 
+> **Updated 2026-08-05 after reviewing Site-Main @ `07f3123`.** The tooling and the collection
+> inventory below were checked against the source repository for the first time. The headline
+> numbers survived; the collection list did not. Full findings, decisions and runbook:
+> **[Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)**
+> in the Wiki.
+>
+> Four corrections matter enough to state here:
+>
+> - **16 populated collections was an undercount of what has to move.** `firestore.rules` declares
+>   **65** top-level collections plus **5 subcollections**. The migration tooling mapped 14, three
+>   of which (`config`, `dashboard_stats`, `users`) do not exist in Site-Main at all.
+> - **`admins` was not being migrated.** It is the collection `firestore.rules` `isAdmin()` reads —
+>   the root of the authorisation model. So were `admin_config` and `site_settings`.
+> - **`config` holds no documents of its own.** Its data lives in `config/providers/*`,
+>   `config/tags/*` and `config/settings/*`. A top-level read returns zero, and a count check
+>   compares 0 against 0 and passes.
+> - **No subcollection was being migrated**, including `content/{id}/versions` — the editor's
+>   version history.
+>
+> The document counts in the table below are still the 2026-07-30 measurements.
+> `node scripts/preflight-firestore-inventory.mjs` replaces them with current ones and is
+> read-only; run it before planning the cutover.
+
 **1,395 documents across 16 populated collections.** This is the easy part; resist over-engineering
 it.
 
@@ -185,9 +208,60 @@ Requirements: a dry-run mode, a reconciliation report (source count vs target co
 spot checks), and idempotent re-runnability. At this volume a single script run is minutes, so **run
 it many times against a scratch Cosmos account before the real one.**
 
+All four are now implemented. Export and import are separate commands so one read-only export
+against production can feed unlimited rehearsal imports:
+
+```bash
+node scripts/preflight-firestore-inventory.mjs                        # measure, read-only
+node scripts/migrate-firestore-to-cosmos.mjs --export --out export/   # read-only
+node scripts/migrate-firestore-to-cosmos.mjs --import --from export/ --dry-run
+node scripts/migrate-firestore-to-cosmos.mjs --import --from export/
+node scripts/verify-migration.mjs --from export/                      # counts + ids + fields
+```
+
 Timestamps and any Firestore `Timestamp` fields need explicit conversion — silent coercion to
 strings is the classic defect here, and this codebase already has date fields in three different
 shapes (`Timestamp`, ISO string, epoch ms) as of the Cloud Tools work.
+
+The conversion the tooling had was one level deep, so a `Timestamp` nested inside an object or an
+array still went across as `{_seconds, _nanoseconds}` — the same defect, one level down. It is now
+recursive and covers `Timestamp`, `GeoPoint`, `DocumentReference` and `Bytes` at any depth.
+
+**Three interlocking irreversible decisions need sign-off before the first Terraform apply.** They
+are usually presented separately; they should be read together, because each one constrains the
+others:
+
+1. **Serverless capacity mode.** Converting to provisioned throughput is one-way, and the conversion
+   formula is `RU/s = partitions × 5000` — at 66 containers that is ~330,000 RU/s provisioned at
+   once, with a hand-scaled floor of 400 RU/s per container. Serverless is also single-region for
+   life; regions cannot be added later.
+2. **One container per Firestore collection.** Reversing it means a re-import. It is the right call
+   *because* the account is serverless — idle containers are free, and it preserves the
+   per-container indexing policies and the 1:1 verification the tooling is built on. If the capacity
+   mode ever changes, consolidation must happen first, in the same project.
+3. **Partition keys.** 62 containers on `/id`; four flattened subcollections keyed by their parent.
+
+The partition key choice for those four is a **correctness** matter, not tuning: `content_versions`,
+`image_prompts_sets`, `image_prompt_sets_prompts` and `listen_and_learn_episodes` each assign
+document ids that are unique only within their parent — a set name, a prompt name, an exam-area
+slug. `listen_and_learn/publish.js:97` says so in its own comment: *"the doc id is the area slug."*
+Flattened into one container under `/id`, those documents silently overwrite each other on upsert —
+no error, no 409, no log line.
+
+The previous keys were not merely suboptimal, they were wrong: `generated_content_images` used
+`/contentId` on a field written as the empty string on every document (`cms-functions.js:3139`),
+`lab_jobs` used `/status` — a *mutable* field, and a partition key value cannot be changed in place —
+and `lab_agents` used `/agentId`, which `vps-agent/index.js:33-34` writes identically to `id`.
+Meanwhile the real query load groups by nothing: of ~40 `content` query sites, exactly one filters
+on a provider.
+
+`content_versions` is the exception because every read is scoped to one parent content document
+(`VersionHistoryDialog.jsx:33`), the delete is a per-parent cascade (`cms-functions.js:2832`), and it
+is the only container that grows without bound — one document per content save.
+
+Full evidence with citations in the header of `scripts/lib/migration-manifest.mjs`, and on the
+[Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
+Wiki page.
 
 ---
 
@@ -239,6 +313,7 @@ Add for the migration:
 | Repo divergence during the overlap                 | **High** | §0. Shorten the window; reconcile weekly                            |
 | Authorisation rules not faithfully re-implemented  | **High** | Port `firestore.rules` tests to API tests before removing the rules |
 | Cost overrun from hourly resources                 | **High** | Architecture_Plan §3; cost gate before decommission                 |
+| Collections missed by the migration inventory      | **High** | §5. One manifest drives migrator, verifier and Terraform; preflight fails on anything unmanifested |
 | Change-feed semantics lose delete-driven behaviour | Medium   | §3.5 audit before estimating                                        |
 | 47 browser-direct reads discovered late            | Medium   | §3.1 done first, in this repo                                       |
 | Cron syntax differences silently disable a job     | Medium   | §7 scheduled-job proof                                              |

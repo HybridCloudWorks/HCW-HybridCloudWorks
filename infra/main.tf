@@ -86,6 +86,29 @@ resource "azurerm_cosmosdb_account" "hcw" {
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
 
+  # Serverless is NOT only a cost choice here — it is what makes the
+  # container-per-collection shape below viable. Read this before changing it.
+  #
+  # Converting serverless -> provisioned throughput is IRREVERSIBLE, and the
+  # documented conversion formula is `RU/s = number of partitions * 5000`. At
+  # 66 containers that lands ~330,000 RU/s of manual throughput at once, and
+  # even after scaling every container down by hand the floor is 400 RU/s each.
+  # A consolidated design (a handful of containers with a type discriminator)
+  # would floor roughly an order of magnitude lower.
+  #
+  # Serverless is also single-region for life: regions cannot be added after
+  # account creation, and there is no autoscale.
+  #
+  # So three irreversible decisions are load-bearing on each other: serverless
+  # capacity mode, one container per Firestore collection, and the per-container
+  # partition keys. On serverless, empty and idle containers cost nothing, so
+  # 66 containers is genuinely free today and keeps the per-container indexing
+  # policies and the 1:1 verification story that scripts/verify-migration.mjs
+  # is built on.
+  #
+  # Trigger condition: if multi-region, autoscale, or provisioned throughput is
+  # ever required, container consolidation happens in the SAME project, before
+  # the capacity-mode change — not after it.
   capabilities {
     name = "EnableServerless"
   }
@@ -110,193 +133,159 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 }
 
 # -----------------------------------------------------------------------------
-# Cosmos DB Containers (1:1 mapping from Firestore collections)
-# Partition keys chosen for query efficiency based on existing access patterns.
+# Cosmos DB Containers
+#
+# The container list is GENERATED from scripts/lib/migration-manifest.mjs, the
+# same manifest the migration and verification scripts read. Regenerate with:
+#
+#     node scripts/generate-cosmos-container-spec.mjs
+#
+# Do not add containers here by hand — add the collection to the manifest and
+# regenerate, or Terraform, the migrator and the verifier drift apart again.
+#
+# Partition keys come from the manifest: 62 on /id, and four flattened
+# subcollections keyed by their parent (content_versions on /contentId,
+# image_prompts_sets on /pageId, image_prompt_sets_prompts on /setName,
+# listen_and_learn_episodes on /setId).
+#
+# /id is right for the rest because the Site-Main query load does not group by
+# anything — one of ~40 content query sites filters on a provider — and the
+# previous "natural" keys were wrong on their own merits: /contentId was written
+# as the empty string on every document, /status on lab_jobs is mutable and a
+# partition key value cannot be changed in place, and /agentId on lab_agents is
+# identical to /id by construction.
+#
+# The four exceptions are a CORRECTNESS matter, not a tuning one. Each assigns
+# document ids that are unique only within their parent (a set name, a prompt
+# name, an exam-area slug), so flattening them into one container under /id
+# would silently overwrite documents on upsert.
+#
+# Full evidence, with file:line citations, in the manifest header.
+#
+# A partition key path is IMMUTABLE. Changing one on a container that already
+# holds data means destroying the container and re-importing.
 # -----------------------------------------------------------------------------
 
-resource "azurerm_cosmosdb_sql_container" "content" {
-  name                = "content"
+locals {
+  cosmos_container_spec = jsondecode(file("${path.module}/cosmos-containers.json"))
+  cosmos_containers     = { for c in local.cosmos_container_spec.containers : c.name => c }
+}
+
+resource "azurerm_cosmosdb_sql_container" "hcw" {
+  for_each = local.cosmos_containers
+
+  name                = each.value.name
   resource_group_name = azurerm_resource_group.hcw.name
   account_name        = azurerm_cosmosdb_account.hcw.name
   database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/cloudProvider"]
+  partition_key_paths = [each.value.partition_key_path]
+
+  # null = retain forever. Set on the rate-limit counters and caches, which are
+  # worthless after their window and would otherwise be retained and indexed
+  # indefinitely. Unlike partition_key_paths this is mutable after creation.
+  default_ttl = each.value.default_ttl
 
   indexing_policy {
     indexing_mode = "consistent"
 
-    included_path { path = "/contentStatus/?" }
-    included_path { path = "/cloudProvider/?" }
-    included_path { path = "/fetchedAt/?" }
-    included_path { path = "/updatedAt/?" }
-    included_path { path = "/publishedAt/?" }
-    included_path { path = "/contentType/?" }
+    dynamic "included_path" {
+      for_each = each.value.included_paths
+      content {
+        path = included_path.value
+      }
+    }
 
-    excluded_path { path = "/contentMarkdown/*" }
-    excluded_path { path = "/contentHtml/*" }
-    excluded_path { path = "/contentPlainText/*" }
-    excluded_path { path = "/scraped/*" }
+    dynamic "excluded_path" {
+      for_each = each.value.excluded_paths
+      content {
+        path = excluded_path.value
+      }
+    }
+
+    # Transcribed from Site-Main's firestore.indexes.json. Cosmos REQUIRES a
+    # composite index for an ORDER BY over two or more properties — without one
+    # the query fails rather than running slowly.
+    dynamic "composite_index" {
+      for_each = each.value.composite_indexes
+      content {
+        dynamic "index" {
+          for_each = composite_index.value
+          content {
+            path  = index.value.path
+            order = index.value.order
+          }
+        }
+      }
+    }
   }
 }
 
-resource "azurerm_cosmosdb_sql_container" "blogs" {
-  name                = "blogs"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/cloudProvider"]
+# -----------------------------------------------------------------------------
+# State moves for the containers that were previously declared individually.
+#
+# These keep Terraform from reading the for_each block as thirteen deletions
+# plus seventy-one creations. Note that `content`, `blogs`, `certifications`,
+# `lab_jobs`, `lab_agents`, `generated_content_images` and `audits` also change
+# partition key, which forces replacement after the move — safe only while the
+# containers are empty. Run this BEFORE importing any data.
+#
+# `dashboard_stats` and `users` are intentionally absent: neither collection
+# exists in Site-Main, so both are destroyed rather than moved.
+# -----------------------------------------------------------------------------
 
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.content
+  to   = azurerm_cosmosdb_sql_container.hcw["content"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "certifications" {
-  name                = "certifications"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/issuer"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.blogs
+  to   = azurerm_cosmosdb_sql_container.hcw["blogs"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "speakerevents" {
-  name                = "speakerevents"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.certifications
+  to   = azurerm_cosmosdb_sql_container.hcw["certifications"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "lab_jobs" {
-  name                = "lab_jobs"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/status"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/status/?" }
-    included_path { path = "/type/?" }
-    included_path { path = "/createdAt/?" }
-    included_path { path = "/agentId/?" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.speakerevents
+  to   = azurerm_cosmosdb_sql_container.hcw["speakerevents"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "lab_agents" {
-  name                = "lab_agents"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/agentId"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.lab_jobs
+  to   = azurerm_cosmosdb_sql_container.hcw["lab_jobs"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "config" {
-  name                = "config"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.lab_agents
+  to   = azurerm_cosmosdb_sql_container.hcw["lab_agents"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "dashboard_stats" {
-  name                = "dashboard_stats"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.config
+  to   = azurerm_cosmosdb_sql_container.hcw["config"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "image_prompts" {
-  name                = "image_prompts"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.image_prompts
+  to   = azurerm_cosmosdb_sql_container.hcw["image_prompts"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "generated_content_images" {
-  name                = "generated_content_images"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/contentId"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.generated_content_images
+  to   = azurerm_cosmosdb_sql_container.hcw["generated_content_images"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "workflow_digests" {
-  name                = "workflow_digests"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.workflow_digests
+  to   = azurerm_cosmosdb_sql_container.hcw["workflow_digests"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "users" {
-  name                = "users"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
-}
-
-resource "azurerm_cosmosdb_sql_container" "audits" {
-  name                = "audits"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/userId"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/action/?" }
-    included_path { path = "/timestamp/?" }
-    included_path { path = "/userId/?" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.audits
+  to   = azurerm_cosmosdb_sql_container.hcw["audits"]
 }
 
 # =============================================================================
@@ -306,14 +295,14 @@ resource "azurerm_cosmosdb_sql_container" "audits" {
 # LRS (locally redundant) — sufficient for a single-region deployment.
 # =============================================================================
 resource "azurerm_storage_account" "hcw" {
-  name                     = var.storage_account_name
-  resource_group_name      = azurerm_resource_group.hcw.name
-  location                 = azurerm_resource_group.hcw.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  account_kind             = "StorageV2"
-  access_tier              = "Hot"
-  min_tls_version          = "TLS1_2"
+  name                            = var.storage_account_name
+  resource_group_name             = azurerm_resource_group.hcw.name
+  location                        = azurerm_resource_group.hcw.location
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  account_kind                    = "StorageV2"
+  access_tier                     = "Hot"
+  min_tls_version                 = "TLS1_2"
   allow_nested_items_to_be_public = false # account-level public access off; containers opt-in below
 
   blob_properties {
@@ -474,26 +463,26 @@ resource "azurerm_linux_function_app" "hcw" {
 
   app_settings = {
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
-    "COSMOS_ENDPOINT"          = azurerm_cosmosdb_account.hcw.endpoint
-    "COSMOS_DATABASE"          = azurerm_cosmosdb_sql_database.hcw.name
+    "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
+    "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
     # COSMOS_CONNECTION_STRING is required by the Cosmos DB change-feed trigger binding
     # See: https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
     "COSMOS_CONNECTION_STRING" = azurerm_cosmosdb_account.hcw.primary_sql_connection_string
 
-    "STORAGE_ACCOUNT_NAME"     = azurerm_storage_account.hcw.name
-    "STORAGE_BLOB_ENDPOINT"    = azurerm_storage_account.hcw.primary_blob_endpoint
-    "STORAGE_QUEUE_ENDPOINT"   = azurerm_storage_account.hcw.primary_queue_endpoint
-    "KEY_VAULT_URI"            = azurerm_key_vault.hcw.vault_uri
+    "STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.hcw.name
+    "STORAGE_BLOB_ENDPOINT"  = azurerm_storage_account.hcw.primary_blob_endpoint
+    "STORAGE_QUEUE_ENDPOINT" = azurerm_storage_account.hcw.primary_queue_endpoint
+    "KEY_VAULT_URI"          = azurerm_key_vault.hcw.vault_uri
 
-    "ENTRA_TENANT_ID"          = var.entra_tenant_id
-    "ENTRA_CLIENT_ID"          = var.entra_client_id
+    "ENTRA_TENANT_ID" = var.entra_tenant_id
+    "ENTRA_CLIENT_ID" = var.entra_client_id
 
     "WEBSITE_RUN_FROM_PACKAGE" = "1"
     "FUNCTIONS_WORKER_RUNTIME" = "node"
     "NODE_ENV"                 = "production"
 
     # Feature flags — set to "true" in TF Cloud vars once business logic is ported
-    "FEATURE_FLAG_SCHEDULERS"  = "false"
+    "FEATURE_FLAG_SCHEDULERS" = "false"
   }
 
   identity {
@@ -507,10 +496,32 @@ resource "azurerm_linux_function_app" "hcw" {
 # RBAC — Function App managed identity data-plane roles (no static keys)
 # ---------------------------------------------------------------------------
 
-resource "azurerm_role_assignment" "func_cosmos" {
-  scope                = azurerm_cosmosdb_account.hcw.id
-  role_definition_name = "Cosmos DB Built-in Data Contributor"
-  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+# Cosmos DB data-plane access is NOT Azure RBAC. "Cosmos DB Built-in Data
+# Contributor" lives in the account's own sqlRoleDefinitions namespace, not in
+# Microsoft.Authorization/roleDefinitions, so `azurerm_role_assignment` cannot
+# resolve it by name — the apply fails with "role definition not found", and
+# even if it resolved it would not grant data-plane access.
+#
+# functions/src/lib/cosmos-client.js authenticates with DefaultAzureCredential
+# and no key, so without this assignment every Cosmos operation returns 403.
+# That is currently masked by COSMOS_CONNECTION_STRING in app settings, which
+# carries the primary key and keeps the trigger binding working while the
+# client would not.
+#
+# 00000000-0000-0000-0000-000000000002 is the built-in Data Contributor role.
+#
+# `name` is deliberately omitted — the provider generates a GUID and keeps it
+# stable in state. Hardcoding one is ForceNew, occupies an address we do not
+# own, and invites the copy-paste failure when a second identity (the VPS
+# agent) needs an assignment: ARM treats a PUT on an existing assignment name
+# as a replace, so a duplicated name silently REMOVES the Function App's
+# access rather than erroring.
+resource "azurerm_cosmosdb_sql_role_assignment" "func_cosmos" {
+  resource_group_name = azurerm_resource_group.hcw.name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = azurerm_linux_function_app.hcw.identity[0].principal_id
+  scope               = azurerm_cosmosdb_account.hcw.id
 }
 
 resource "azurerm_role_assignment" "func_blob" {
@@ -547,7 +558,7 @@ resource "azurerm_key_vault" "hcw" {
   sku_name                   = "standard"
   soft_delete_retention_days = 90
   purge_protection_enabled   = var.purge_protection_enabled
-  enable_rbac_authorization  = true
+  rbac_authorization_enabled = true
 
   network_acls {
     default_action             = "Deny"

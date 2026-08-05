@@ -2,8 +2,23 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $errors = [System.Collections.Generic.List[string]]::new()
-$allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent')
-$allowedRootFiles = @('.gitignore', 'README.md')
+
+# `.agents` and `.claude` are the agent harness — agent definitions, skills and
+# playbooks that drive tooling against this repository. They are deliberately
+# source-controlled, but they are not the site and they are not human-facing
+# project documentation, so the documentation policy below does not apply to
+# them and they are excluded from the Markdown scan entirely.
+$harnessDirectories = @('.agents', '.claude')
+
+$allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent') + $harnessDirectories
+
+# The engineering plan documents are companions to the approved architecture and
+# are referenced from README.md and from each other; they stay at the root.
+$allowedRootFiles = @('.gitignore', 'README.md', 'Architecture_Plan.md', 'Migration_Plan.md', 'Variables.md')
+
+# Directory names never walked by the Markdown scan, at any depth.
+$unscannedDirectories = @('.git', 'node_modules') + $harnessDirectories
+$unscannedPattern = '(^|/)(' + (($unscannedDirectories | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')/'
 
 $actualDirectories = Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |
   Where-Object Name -ne '.git' |
@@ -40,11 +55,26 @@ foreach ($relativePath in $prohibitedDocumentationPaths) {
   }
 }
 
-$markdownFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -Filter '*.md' -File -Force |
-  Where-Object { $_.FullName -NotLike '*\.git\*' -and $_.FullName -NotLike '*\node_modules\*' }
+# Prune the harness (and .git / node_modules) from the walk rather than
+# filtering afterwards, so the scan does not descend thousands of agent files.
+# The previous filter compared against '*\.git\*' with Windows separators and
+# therefore matched nothing on the Linux CI runner.
+$scanRoots = Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |
+  Where-Object { $_.Name -notin $unscannedDirectories }
+
+$markdownFiles = @(Get-ChildItem -LiteralPath $repositoryRoot -Filter '*.md' -File -Force)
+foreach ($scanRoot in $scanRoots) {
+  $markdownFiles += Get-ChildItem -LiteralPath $scanRoot.FullName -Recurse -Filter '*.md' -File -Force |
+    Where-Object {
+      $rel = [System.IO.Path]::GetRelativePath($repositoryRoot, $_.FullName).Replace('\', '/')
+      $rel -notmatch $unscannedPattern
+    }
+}
+
 foreach ($markdownFile in $markdownFiles) {
   $relativePath = [System.IO.Path]::GetRelativePath($repositoryRoot, $markdownFile.FullName).Replace('\', '/')
   $isAllowed = $relativePath -eq 'README.md' -or
+    $relativePath -in $allowedRootFiles -or
     $relativePath.StartsWith('frontend/.copilot/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
