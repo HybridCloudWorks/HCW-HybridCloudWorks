@@ -3,224 +3,325 @@
 /**
  * migrate-firestore-to-cosmos.mjs
  *
- * Exports all Firestore collections from the Firebase project and imports
- * them into Azure Cosmos DB containers.
+ * Copies the Site-Main Firestore data into Azure Cosmos DB.
+ *
+ * The migration is split into two halves that can run independently:
+ *
+ *   export   Firestore → JSONL on disk. Read-only against production.
+ *   import   JSONL on disk → Cosmos DB. Never touches Firestore.
+ *
+ * Migration_Plan §5 asks for a dry run, a reconciliation report and idempotent
+ * re-runnability, and for the whole thing to be exercised many times against a
+ * scratch Cosmos account first. Splitting export from import is what makes
+ * that cheap: one export, many imports, each one reproducible from a file you
+ * can diff, and no repeated production reads while a partition-key or
+ * transform decision is still being argued over.
+ *
+ * Idempotency: documents are upserted under a stable id derived from the
+ * Firestore document id, so re-running converges rather than duplicating.
  *
  * Prerequisites:
- *   - GOOGLE_APPLICATION_CREDENTIALS env var pointing to a Firebase SA key
- *   - COSMOS_ENDPOINT and COSMOS_KEY env vars for the target Cosmos DB account
- *   - npm install firebase-admin @azure/cosmos in this script's context
+ *   GOOGLE_APPLICATION_CREDENTIALS   Firebase service-account key path (export)
+ *   COSMOS_ENDPOINT                  target account (import)
+ *   COSMOS_DATABASE                  defaults to "hybridcloudworks"
+ *   COSMOS_KEY                       optional; omit to use Entra/managed identity
  *
  * Usage:
- *   node scripts/migrate-firestore-to-cosmos.mjs [--dry-run] [--collections content,blogs]
+ *   # 1. measure the source first
+ *   node scripts/preflight-firestore-inventory.mjs
+ *
+ *   # 2. export to disk (read-only)
+ *   node scripts/migrate-firestore-to-cosmos.mjs --export --out export/
+ *
+ *   # 3. rehearse against a scratch account, as many times as you like
+ *   node scripts/migrate-firestore-to-cosmos.mjs --import --from export/ --dry-run
+ *   node scripts/migrate-firestore-to-cosmos.mjs --import --from export/
+ *
+ *   # 4. reconcile
+ *   node scripts/verify-migration.mjs --from export/
  *
  * Options:
- *   --dry-run         Export from Firestore but don't write to Cosmos DB
- *   --collections     Comma-separated list of collections to migrate (default: all)
- *   --verify-only     Skip migration, just compare doc counts
+ *   --export               Read Firestore and write JSONL to --out
+ *   --import               Read JSONL from --from and upsert into Cosmos DB
+ *   --dry-run              With --import: transform and validate, write nothing
+ *   --out <dir>            Export directory (default: export/)
+ *   --from <dir>           Import directory (default: export/)
+ *   --collections a,b      Restrict to these containers
+ *   --concurrency <n>      Parallel Cosmos writes (default: 8)
+ *   --report <path>        Reconciliation report path (default: reports/migration-<mode>.json)
+ *
+ * Passing neither --export nor --import is an error. There is deliberately no
+ * "do everything in one shot against production" default.
  */
 
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { CosmosClient } from '@azure/cosmos';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, createWriteStream } from 'node:fs';
+import { dirname, join } from 'node:path';
+
+import { flattenManifest } from './lib/migration-manifest.mjs';
+import { transformDocument } from './lib/firestore-transform.mjs';
+import { parseArgs, splitList, log, connectCosmos, withRetry, mapWithConcurrency, FIRESTORE_PROJECT_ID } from './lib/cli.mjs';
 
 // ---------------------------------------------------------------------------
-// Configuration
+// Arguments
 // ---------------------------------------------------------------------------
 
-const FIRESTORE_PROJECT_ID = 'hybridcloudworks-61e8d';
-
-// All Firestore collections to migrate, with their Cosmos DB partition key
-const COLLECTION_MAP = [
-  { name: 'content', partitionKey: '/cloudProvider', defaultPartition: 'unknown' },
-  { name: 'blogs', partitionKey: '/cloudProvider', defaultPartition: 'unknown' },
-  { name: 'certifications', partitionKey: '/issuer', defaultPartition: 'Other' },
-  { name: 'speakerevents', partitionKey: '/id', defaultPartition: null },
-  { name: 'lab_jobs', partitionKey: '/status', defaultPartition: 'unknown' },
-  { name: 'lab_agents', partitionKey: '/agentId', defaultPartition: null },
-  { name: 'config', partitionKey: '/id', defaultPartition: null },
-  { name: 'dashboard_stats', partitionKey: '/id', defaultPartition: null },
-  { name: 'image_prompts', partitionKey: '/id', defaultPartition: null },
-  { name: 'image_prompt_sets', partitionKey: '/id', defaultPartition: null },
-  { name: 'generated_content_images', partitionKey: '/contentId', defaultPartition: 'unknown' },
-  { name: 'workflow_digests', partitionKey: '/id', defaultPartition: null },
-  { name: 'users', partitionKey: '/id', defaultPartition: null },
-  { name: 'audits', partitionKey: '/userId', defaultPartition: 'system' },
-];
-
-// ---------------------------------------------------------------------------
-// CLI Argument Parsing
-// ---------------------------------------------------------------------------
-
-const args = process.argv.slice(2);
-const isDryRun = args.includes('--dry-run');
-const verifyOnly = args.includes('--verify-only');
-
-const collectionsArg = args.find((a) => a.startsWith('--collections'));
-const collectionsArgValue = collectionsArg
-  ? args[args.indexOf(collectionsArg) + 1]
-  : null;
-const targetCollections = collectionsArgValue
-  ? collectionsArgValue.split(',').map((c) => c.trim())
-  : null;
-
-// ---------------------------------------------------------------------------
-// Initialize Firebase Admin
-// ---------------------------------------------------------------------------
-
-const saKeyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-if (!saKeyPath) {
-  console.error('❌ Set GOOGLE_APPLICATION_CREDENTIALS to the Firebase SA key JSON path');
+let args;
+try {
+  args = parseArgs(process.argv.slice(2), {
+    flags: ['export', 'import', 'dry-run'],
+    options: ['out', 'from', 'collections', 'concurrency', 'report'],
+  });
+} catch (err) {
+  log.error(err.message);
   process.exit(1);
 }
 
-const saKey = JSON.parse(readFileSync(saKeyPath, 'utf8'));
-initializeApp({ credential: cert(saKey), projectId: FIRESTORE_PROJECT_ID });
-const firestore = getFirestore();
+const doExport = args.flags.export;
+const doImport = args.flags.import;
+const isDryRun = args.flags['dry-run'];
 
-// ---------------------------------------------------------------------------
-// Initialize Cosmos DB
-// ---------------------------------------------------------------------------
-
-const cosmosEndpoint = process.env.COSMOS_ENDPOINT;
-const cosmosKey = process.env.COSMOS_KEY;
-const cosmosDatabase = process.env.COSMOS_DATABASE || 'hybridcloudworks';
-
-if (!cosmosEndpoint || !cosmosKey) {
-  console.error('❌ Set COSMOS_ENDPOINT and COSMOS_KEY environment variables');
+if (!doExport && !doImport) {
+  log.error('Specify --export and/or --import. See the header of this file for the intended sequence.');
   process.exit(1);
 }
 
-const cosmosClient = new CosmosClient({ endpoint: cosmosEndpoint, key: cosmosKey });
-const database = cosmosClient.database(cosmosDatabase);
+const exportDir = args.options.out ?? 'export';
+const importDir = args.options.from ?? exportDir;
+const only = splitList(args.options.collections);
+const concurrency = Number(args.options.concurrency ?? 8);
+const reportPath = args.options.report ?? `reports/migration-${doExport && !doImport ? 'export' : 'import'}.json`;
+
+const targets = flattenManifest().filter((t) => !only || only.includes(t.container));
+
+if (targets.length === 0) {
+  log.error(only ? `No manifest entries match: ${only.join(', ')}` : 'Manifest selected no collections');
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Export: Firestore → JSONL
 // ---------------------------------------------------------------------------
 
 /**
- * Convert Firestore Timestamp fields to ISO 8601 strings.
- * Cosmos DB stores dates as strings; we use ISO 8601 for consistency.
+ * Read every document for one manifest target.
+ *
+ * Subcollections are read with a collection-group query rather than by walking
+ * parent documents, because Firestore lets a subcollection hold documents when
+ * its parent document does not exist. `config/providers/{providerId}` is
+ * exactly that shape in Site-Main, and walking parents finds none of it.
+ *
+ * The collection-group query is filtered back down to the manifest's parent so
+ * that, for example, `image_prompts/{id}/sets` does not sweep up an unrelated
+ * `sets` subcollection from somewhere else in the tree.
  */
-function transformDocument(doc, collectionConfig) {
-  const data = { ...doc };
-
-  // Ensure 'id' field exists (Cosmos DB requires it)
-  if (!data.id) {
-    data.id = doc._firestoreId || `auto-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+async function readTarget(firestore, target) {
+  if (!target.isSubcollection) {
+    const snap = await firestore.collection(target.collectionId).get();
+    return snap.docs.map((d) => ({ id: d.id, data: d.data(), parentPath: null }));
   }
 
-  // Ensure partition key field exists
-  const pkField = collectionConfig.partitionKey.replace('/', '');
-  if (!data[pkField] && collectionConfig.defaultPartition) {
-    data[pkField] = collectionConfig.defaultPartition;
-  } else if (!data[pkField] && collectionConfig.partitionKey === '/id') {
-    // For /id partitions, ensure the partition key matches the id
-    data[pkField] = data.id;
-  }
+  const snap = await firestore.collectionGroup(target.collectionId).get();
+  const prefix = `${target.parent}/`;
 
-  // Convert all Firestore Timestamp objects to ISO strings
-  for (const [key, value] of Object.entries(data)) {
-    if (value && typeof value === 'object') {
-      if (typeof value.toDate === 'function') {
-        // Firestore Timestamp → ISO string
-        data[key] = value.toDate().toISOString();
-      } else if (value._seconds !== undefined && value._nanoseconds !== undefined) {
-        // Serialized Firestore Timestamp
-        data[key] = new Date(value._seconds * 1000 + value._nanoseconds / 1e6).toISOString();
-      } else if (value instanceof Date) {
-        data[key] = value.toISOString();
-      }
-    }
-  }
-
-  // Remove Firestore internal fields
-  delete data._firestoreId;
-
-  return data;
+  return snap.docs
+    .filter((d) => {
+      const parentPath = d.ref.parent.parent?.path ?? '';
+      if (!parentPath.startsWith(prefix)) return false;
+      // `config` declares an explicit parent document per subcollection.
+      if (target.parentDoc) return parentPath === `${target.parent}/${target.parentDoc}`;
+      return true;
+    })
+    .map((d) => ({
+      id: d.id,
+      data: d.data(),
+      parentPath: d.ref.parent.parent?.path ?? null,
+    }));
 }
 
-// ---------------------------------------------------------------------------
-// Migration Functions
-// ---------------------------------------------------------------------------
+async function runExport() {
+  const saKeyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (!saKeyPath) {
+    log.error('Set GOOGLE_APPLICATION_CREDENTIALS to the Firebase service-account key path');
+    process.exit(1);
+  }
 
-async function exportCollection(collectionName) {
-  console.log(`📥 Exporting Firestore collection: ${collectionName}`);
-
-  const snapshot = await firestore.collection(collectionName).get();
-  const docs = [];
-
-  snapshot.forEach((doc) => {
-    docs.push({
-      _firestoreId: doc.id,
-      id: doc.id,
-      ...doc.data(),
-    });
+  initializeApp({
+    credential: cert(JSON.parse(readFileSync(saKeyPath, 'utf8'))),
+    projectId: FIRESTORE_PROJECT_ID,
   });
+  const firestore = getFirestore();
 
-  console.log(`   → ${docs.length} documents exported`);
-  return docs;
-}
+  log.banner('Export — Firestore → disk', [
+    `Source: Firestore project ${FIRESTORE_PROJECT_ID}`,
+    `Target: ${exportDir}/`,
+    `Collections: ${targets.length}`,
+    'Firestore access: READ ONLY',
+  ]);
 
-async function importToCosmosDB(collectionConfig, documents) {
-  const containerName = collectionConfig.name;
-  console.log(`📤 Importing ${documents.length} documents to Cosmos DB container: ${containerName}`);
+  mkdirSync(exportDir, { recursive: true });
 
-  const container = database.container(containerName);
-  let successCount = 0;
-  let errorCount = 0;
-  const errors = [];
+  const summary = [];
+  const allWarnings = [];
 
-  for (const rawDoc of documents) {
-    const doc = transformDocument(rawDoc, collectionConfig);
+  for (const target of targets) {
+    const docs = await readTarget(firestore, target);
 
-    try {
-      await container.items.upsert(doc);
-      successCount++;
+    const outFile = join(exportDir, `${target.container}.jsonl`);
+    const stream = createWriteStream(outFile);
+    const seen = new Map();
+    let warned = 0;
 
-      if (successCount % 50 === 0) {
-        console.log(`   → ${successCount}/${documents.length} imported...`);
+    for (const source of docs) {
+      const { doc, warnings } = transformDocument(source);
+
+      // A flattened subcollection partitioned by its parent needs that parent's
+      // id as a real field on the document — Cosmos partitions on a document
+      // property, and `content/{id}/versions` carries no such field of its own.
+      //
+      // There is no safe fallback here. A synthesised partition key would put
+      // every affected document into one logical partition, which collapses id
+      // uniqueness back to global within it and recreates exactly the
+      // hot-partition shape the manifest exists to avoid — silently, with a
+      // zero exit code. Fail the export instead; the source is still there to
+      // re-read, so failing costs nothing and shipping a wrong key costs a
+      // container recreate.
+      if (target.partitionKeyFromParent) {
+        const parentId = source.parentPath?.split('/').pop();
+        if (!parentId) {
+          throw new Error(
+            `${target.container}: document ${source.id} has no parent path, so partition key ` +
+              `${target.partitionKeyFromParent} cannot be derived. ` +
+              `partitionKeyFromParent is only valid on a subcollection target.`
+          );
+        }
+        doc[target.partitionKeyFromParent] = parentId;
       }
-    } catch (err) {
-      errorCount++;
-      errors.push({ id: doc.id, error: err.message });
-      console.error(`   ❌ Failed to import ${doc.id}: ${err.message}`);
+
+      // Two source documents that sanitise to the same Cosmos id would silently
+      // overwrite each other on upsert. Catch it here, at export time, where
+      // the source is still available to disambiguate.
+      //
+      // Cosmos requires ids to be unique per *logical partition*, not per
+      // container, so the uniqueness key includes the partition value. Under
+      // `/id` that reduces to the id itself; under `/contentId` two version
+      // documents with the same id under different parents are legitimate and
+      // must not be reported.
+      const partitionValue = target.partitionKeyFromParent
+        ? doc[target.partitionKeyFromParent]
+        : doc.id;
+      const uniquenessKey = `${partitionValue}\u0000${doc.id}`;
+
+      if (seen.has(uniquenessKey)) {
+        allWarnings.push({
+          container: target.container,
+          code: 'id-collision',
+          detail:
+            `${source.id} and ${seen.get(uniquenessKey)} both map to Cosmos id "${doc.id}"` +
+            (target.partitionKeyFromParent ? ` in partition "${partitionValue}"` : ''),
+        });
+        warned += 1;
+      }
+      seen.set(uniquenessKey, source.id);
+
+      for (const w of warnings) {
+        allWarnings.push({ container: target.container, ...w });
+        warned += 1;
+      }
+
+      stream.write(`${JSON.stringify(doc)}\n`);
     }
+
+    await new Promise((resolve, reject) => {
+      stream.on('error', reject);
+      stream.end(resolve);
+    });
+
+    summary.push({ container: target.container, sourcePath: target.sourcePath, exported: docs.length, warnings: warned });
+    log.info(`  ${target.container.padEnd(32)} ${String(docs.length).padStart(5)} docs → ${outFile}`);
   }
 
-  console.log(`   ✅ ${successCount} imported, ${errorCount} errors`);
-
-  if (errors.length > 0) {
-    console.log(`   Errors:`, JSON.stringify(errors, null, 2));
-  }
-
-  return { successCount, errorCount, errors };
+  return { summary, warnings: allWarnings };
 }
 
-async function verifyCollection(collectionConfig) {
-  const containerName = collectionConfig.name;
+// ---------------------------------------------------------------------------
+// Import: JSONL → Cosmos DB
+// ---------------------------------------------------------------------------
 
-  // Count Firestore docs
-  const firestoreSnapshot = await firestore.collection(containerName).get();
-  const firestoreCount = firestoreSnapshot.size;
+function readJsonl(path) {
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+    .map((l) => JSON.parse(l));
+}
 
-  // Count Cosmos DB docs
-  const container = database.container(containerName);
-  const { resources } = await container.items
-    .query('SELECT VALUE COUNT(1) FROM c')
-    .fetchAll();
-  const cosmosCount = resources[0] || 0;
+async function runImport() {
+  if (!existsSync(importDir)) {
+    log.error(`Export directory not found: ${importDir} — run with --export first`);
+    process.exit(1);
+  }
 
-  const match = firestoreCount === cosmosCount;
-  const symbol = match ? '✅' : '❌';
+  const cosmos = connectCosmos();
 
-  console.log(
-    `${symbol} ${containerName}: Firestore=${firestoreCount}, CosmosDB=${cosmosCount}` +
-      (match ? '' : ' ⚠️  MISMATCH')
-  );
+  log.banner(isDryRun ? 'Import — DRY RUN' : 'Import — writing to Cosmos DB', [
+    `Source: ${importDir}/`,
+    `Target: ${cosmos.endpoint}`,
+    `Database: ${cosmos.databaseId}`,
+    `Auth: ${cosmos.auth}`,
+    `Concurrency: ${concurrency}`,
+    isDryRun ? 'Mode: DRY RUN — nothing will be written' : 'Mode: LIVE — documents will be upserted',
+  ]);
 
-  return { collection: containerName, firestoreCount, cosmosCount, match };
+  const available = new Set(readdirSync(importDir).filter((f) => f.endsWith('.jsonl')).map((f) => f.replace(/\.jsonl$/, '')));
+  const missing = targets.filter((t) => !available.has(t.container));
+  if (missing.length) {
+    log.warn(`No export file for: ${missing.map((m) => m.container).join(', ')} — these will be skipped`);
+  }
+
+  const summary = [];
+  const allWarnings = [];
+
+  for (const target of targets) {
+    if (!available.has(target.container)) continue;
+
+    const docs = readJsonl(join(importDir, `${target.container}.jsonl`));
+
+    if (isDryRun) {
+      log.info(`  ${target.container.padEnd(32)} ${String(docs.length).padStart(5)} docs would be upserted`);
+      if (docs.length > 0) {
+        const preview = JSON.stringify(docs[0]).slice(0, 240);
+        log.info(`  ${' '.repeat(32)} sample: ${preview}${preview.length === 240 ? '…' : ''}`);
+      }
+      summary.push({ container: target.container, read: docs.length, imported: 0, failed: 0 });
+      continue;
+    }
+
+    const container = cosmos.database.container(target.container);
+    let imported = 0;
+    let failed = 0;
+
+    const results = await mapWithConcurrency(docs, concurrency, async (doc) => {
+      try {
+        await withRetry(() => container.items.upsert(doc), { label: `${target.container}/${doc.id}` });
+        imported += 1;
+        return null;
+      } catch (err) {
+        failed += 1;
+        return { container: target.container, code: 'upsert-failed', detail: `${doc.id}: ${err.message}` };
+      }
+    });
+
+    for (const r of results) if (r) allWarnings.push(r);
+
+    summary.push({ container: target.container, read: docs.length, imported, failed });
+    log.info(
+      `  ${target.container.padEnd(32)} ${String(imported).padStart(5)} imported` +
+        (failed ? `, ${failed} FAILED` : '')
+    );
+  }
+
+  return { summary, warnings: allWarnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,107 +329,61 @@ async function verifyCollection(collectionConfig) {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log('  HCW Firestore → Cosmos DB Migration');
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log(`  Mode: ${verifyOnly ? 'VERIFY ONLY' : isDryRun ? 'DRY RUN' : '🔴 LIVE MIGRATION'}`);
-  console.log(`  Source: Firestore project ${FIRESTORE_PROJECT_ID}`);
-  console.log(`  Target: Cosmos DB ${cosmosEndpoint}`);
-  console.log(`  Database: ${cosmosDatabase}`);
-  console.log('═══════════════════════════════════════════════════════════\n');
+  const report = {
+    generatedAt: new Date().toISOString(),
+    mode: { export: doExport, import: doImport, dryRun: isDryRun },
+    collectionsSelected: targets.map((t) => t.container),
+    export: null,
+    import: null,
+  };
 
-  const collections = targetCollections
-    ? COLLECTION_MAP.filter((c) => targetCollections.includes(c.name))
-    : COLLECTION_MAP;
+  if (doExport) report.export = await runExport();
+  if (doImport) report.import = await runImport();
 
-  if (collections.length === 0) {
-    console.error('❌ No matching collections found');
+  // --- Summary -------------------------------------------------------------
+  log.section('Summary');
+
+  const warnings = [...(report.export?.warnings ?? []), ...(report.import?.warnings ?? [])];
+  const failures = warnings.filter((w) => w.code === 'upsert-failed' || w.code === 'id-collision');
+
+  if (report.export) {
+    const total = report.export.summary.reduce((n, s) => n + s.exported, 0);
+    log.info(`Exported ${total} documents across ${report.export.summary.length} collections`);
+  }
+  if (report.import) {
+    const read = report.import.summary.reduce((n, s) => n + s.read, 0);
+    const imported = report.import.summary.reduce((n, s) => n + s.imported, 0);
+    const failed = report.import.summary.reduce((n, s) => n + s.failed, 0);
+    log.info(
+      isDryRun
+        ? `Dry run: ${read} documents would be upserted across ${report.import.summary.length} containers`
+        : `Imported ${imported}/${read} documents, ${failed} failed`
+    );
+  }
+
+  if (warnings.length) {
+    log.section(`Warnings (${warnings.length})`);
+    for (const w of warnings.slice(0, 40)) log.warn(`[${w.container}] ${w.code}: ${w.detail}`);
+    if (warnings.length > 40) log.warn(`… and ${warnings.length - 40} more — see ${reportPath}`);
+  } else {
+    log.ok('No warnings');
+  }
+
+  mkdirSync(dirname(reportPath), { recursive: true });
+  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  log.ok(`Report written to ${reportPath}`);
+
+  if (failures.length) {
+    log.error(`${failures.length} document(s) collided or failed to import — the migration is NOT complete`);
     process.exit(1);
   }
 
-  console.log(`Migrating ${collections.length} collections: ${collections.map((c) => c.name).join(', ')}\n`);
-
-  if (verifyOnly) {
-    console.log('--- Verification ---\n');
-    const results = [];
-    for (const config of collections) {
-      const result = await verifyCollection(config);
-      results.push(result);
-    }
-
-    console.log('\n--- Summary ---');
-    const mismatches = results.filter((r) => !r.match);
-    if (mismatches.length === 0) {
-      console.log('✅ All collections match!');
-    } else {
-      console.log(`❌ ${mismatches.length} collection(s) have mismatches:`);
-      mismatches.forEach((m) =>
-        console.log(`   - ${m.collection}: Firestore=${m.firestoreCount}, Cosmos=${m.cosmosCount}`)
-      );
-    }
-    return;
-  }
-
-  // Run migration
-  const summary = [];
-
-  for (const config of collections) {
-    console.log(`\n--- ${config.name} ---\n`);
-
-    const docs = await exportCollection(config.name);
-
-    if (isDryRun) {
-      console.log(`   [DRY RUN] Would import ${docs.length} documents to Cosmos DB`);
-      // Show a sample transformed doc
-      if (docs.length > 0) {
-        const sample = transformDocument(docs[0], config);
-        console.log(`   Sample transformed document:`, JSON.stringify(sample, null, 2).slice(0, 500));
-      }
-      summary.push({ collection: config.name, exported: docs.length, imported: 0, errors: 0 });
-    } else {
-      const result = await importToCosmosDB(config, docs);
-      summary.push({
-        collection: config.name,
-        exported: docs.length,
-        imported: result.successCount,
-        errors: result.errorCount,
-      });
-    }
-  }
-
-  // Print summary
-  console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('  Migration Summary');
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log('');
-
-  let totalExported = 0;
-  let totalImported = 0;
-  let totalErrors = 0;
-
-  for (const s of summary) {
-    const status = s.errors > 0 ? '⚠️' : '✅';
-    console.log(`  ${status} ${s.collection}: ${s.exported} exported, ${s.imported} imported, ${s.errors} errors`);
-    totalExported += s.exported;
-    totalImported += s.imported;
-    totalErrors += s.errors;
-  }
-
-  console.log('');
-  console.log(`  Total: ${totalExported} exported, ${totalImported} imported, ${totalErrors} errors`);
-  console.log('═══════════════════════════════════════════════════════════');
-
-  if (totalErrors > 0) {
-    console.log('\n⚠️  Some documents failed to import. Review errors above.');
-    process.exit(1);
-  }
-
-  if (!isDryRun) {
-    console.log('\n✅ Migration complete! Run with --verify-only to confirm counts match.');
+  if (doImport && !isDryRun) {
+    log.info('\nNext: node scripts/verify-migration.mjs --from ' + importDir);
   }
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err);
+  log.error(err.stack ?? String(err));
   process.exit(1);
 });

@@ -1,55 +1,119 @@
-name: DISABLED - Prototype Data Migration
+# This workflow is DISABLED — the job is guarded by `if: ${{ false }}`.
+#
+# Enabling it is a deliberate decision, not a side effect of editing this file:
+# it reads the whole production Firestore database and writes to a Cosmos DB
+# account. Enable it only once the open questions in
+# the Phase-4-Data-Migration Wiki page are resolved, and run `preflight` and
+# `export` before ever running `import`.
+
+name: DISABLED - Firestore to Cosmos DB data migration
 
 on:
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Dry run (only count/export, no import)'
+      mode:
+        description: 'What to run'
         required: true
-        type: boolean
-        default: true
+        type: choice
+        default: preflight
+        options:
+          - preflight # read-only inventory of the Firestore source
+          - export # read-only dump of Firestore to a build artifact
+          - import-dry-run # transform and validate the export, write nothing
+          - import # write to Cosmos DB, then reconcile
       collections:
-        description: 'Comma separated list of collections to migrate (leave blank for all)'
+        description: 'Comma-separated containers to restrict to (blank = all)'
         required: false
         type: string
 
+# The export artifact is a full copy of the production database. Keep it short
+# lived and never let two runs write to the same Cosmos account at once.
+concurrency:
+  group: data-migration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   migrate:
-    if: ${{ false }}
+    if: ${{ false }} # see the note at the top of this file
     runs-on: ubuntu-latest
+    environment: data-migration
+
     steps:
       - uses: actions/checkout@v7
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: '22'
-          
+
       - name: Install dependencies
-        run: npm install firebase-admin @azure/cosmos
+        run: npm ci || npm install
         working-directory: scripts
-        
-      - name: Create Firebase credentials file
-        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > ./scripts/firebase-sa.json
-        
-      - name: Run Migration
+
+      - name: Check the generated container spec is current
+        working-directory: scripts
+        run: node generate-cosmos-container-spec.mjs --check
+
+      - name: Run the migration tooling
         working-directory: scripts
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ./firebase-sa.json
+          # Inputs go through the environment, never through string
+          # interpolation into `run:` — an input interpolated directly into a
+          # shell command is a script-injection vector.
+          MODE: ${{ inputs.mode }}
+          COLLECTIONS: ${{ inputs.collections }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
           COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
           COSMOS_DATABASE: hybridcloudworks
         run: |
-          ARGS=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            ARGS="--dry-run"
+          set -euo pipefail
+
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > ./firebase-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=./firebase-sa.json
+
+          scope=()
+          if [ -n "$COLLECTIONS" ]; then
+            scope=(--collections "$COLLECTIONS")
           fi
-          if [ -n "${{ github.event.inputs.collections }}" ]; then
-            ARGS="$ARGS --collections ${{ github.event.inputs.collections }}"
-          fi
-          
-          node migrate-firestore-to-cosmos.mjs $ARGS
-          
-      - name: Cleanup
+
+          case "$MODE" in
+            preflight)
+              node preflight-firestore-inventory.mjs
+              ;;
+            export)
+              node migrate-firestore-to-cosmos.mjs --export --out export "${scope[@]}"
+              ;;
+            import-dry-run)
+              node migrate-firestore-to-cosmos.mjs --export --out export "${scope[@]}"
+              node migrate-firestore-to-cosmos.mjs --import --from export --dry-run "${scope[@]}"
+              ;;
+            import)
+              node migrate-firestore-to-cosmos.mjs --export --out export "${scope[@]}"
+              node migrate-firestore-to-cosmos.mjs --import --from export "${scope[@]}"
+              node verify-migration.mjs --from export "${scope[@]}"
+              ;;
+            *)
+              echo "Unknown mode: $MODE" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Remove credentials
         if: always()
         run: rm -f ./scripts/firebase-sa.json
+
+      # Reports carry document ids and sampled field values; the export carries
+      # the data itself. Both are retained briefly for reconciliation and are
+      # not committed to the repository.
+      - name: Upload reconciliation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-reports-${{ github.run_id }}
+          path: scripts/reports/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -18,6 +18,15 @@ local.settings.json
 *.auto.tfvars
 *.auto.tfvars.json
 .terraform/
-.terraform.lock.hcl
+# .terraform.lock.hcl is deliberately NOT ignored. The azurerm pin is `~> 4.0`,
+# so without a committed lock CI resolves a different provider version than a
+# developer does, and a provider minor release changes the plan under you.
 *.enc.yaml
 keys.txt
+
+# Data migration (Phase 4) — see docs/data-migration/README.md
+# export/ is a full dump of the production Firestore database and must never
+# be committed. reports/ contains document ids and field values from it.
+export/
+reports/
+**/firebase-service-account.json

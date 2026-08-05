@@ -1,0 +1,26 @@
+{
+  "name": "hybridcloudworks-migration-scripts",
+  "description": "Firestore → Cosmos DB data migration tooling for the Site-Main migration",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "preflight": "node preflight-firestore-inventory.mjs",
+    "export": "node migrate-firestore-to-cosmos.mjs --export",
+    "import:dry": "node migrate-firestore-to-cosmos.mjs --import --dry-run",
+    "import": "node migrate-firestore-to-cosmos.mjs --import",
+    "verify": "node verify-migration.mjs",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@azure/cosmos": "^4.3.0",
+    "@azure/identity": "^4.8.0",
+    "firebase-admin": "^13.6.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  }
+}
