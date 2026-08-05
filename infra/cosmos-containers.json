@@ -10,6 +10,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -24,6 +25,7 @@
         "/*"
       ],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -34,6 +36,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -44,6 +47,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -54,6 +58,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -79,6 +84,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -89,6 +95,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -99,6 +106,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -113,6 +121,7 @@
         "/*"
       ],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -123,6 +132,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "seed data — re-seeded on the far side, not migrated"
     },
     {
@@ -138,6 +148,7 @@
         "/scraped/*"
       ],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -169,6 +180,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -179,6 +191,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -189,6 +202,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -199,6 +213,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -209,6 +224,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -219,6 +235,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -229,6 +246,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -239,6 +257,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of config"
     },
     {
@@ -249,6 +268,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of config"
     },
     {
@@ -259,6 +279,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of config"
     },
     {
@@ -377,6 +398,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -387,6 +409,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -402,6 +425,7 @@
         "/scraped/*"
       ],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of content — Editor version history. Written server-side on every save; read by VersionHistoryDialog.jsx scoped to one parent. Not covered by an explicit rules match."
     },
     {
@@ -412,6 +436,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -422,6 +447,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -443,6 +469,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -453,6 +480,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -463,6 +491,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -473,6 +502,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "cache — refilled by a scheduled job, not migrated"
     },
     {
@@ -483,6 +513,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -493,6 +524,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -503,6 +535,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of image_prompt_sets — Ids are prompt names, unique only within a set."
     },
     {
@@ -513,6 +546,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -523,6 +557,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of image_prompts — Deliberately NOT `image_prompt_sets` — that name is already a distinct top-level collection. Ids are set names, unique only within a page."
     },
     {
@@ -533,6 +568,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -563,6 +599,7 @@
           }
         ]
       ],
+      "default_ttl": 2592000,
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -573,6 +610,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": 7200,
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -583,6 +621,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -593,6 +632,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "subcollection of listen_and_learn — Ids are exam-area slugs, unique only within a set."
     },
     {
@@ -603,6 +643,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -613,6 +654,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -623,6 +665,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -633,6 +676,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -643,6 +687,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -664,6 +709,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -674,6 +720,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -684,6 +731,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -694,6 +742,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -704,6 +753,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -725,6 +775,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -746,6 +797,7 @@
           }
         ]
       ],
+      "default_ttl": 604800,
       "note": "cache — refilled by a scheduled job, not migrated"
     },
     {
@@ -756,6 +808,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -777,6 +830,7 @@
           }
         ]
       ],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -787,6 +841,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -797,6 +852,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -807,6 +863,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -817,6 +874,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": 7200,
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -827,6 +885,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -837,6 +896,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -847,6 +907,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": 7200,
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -857,6 +918,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -867,6 +929,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -877,6 +940,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": 604800,
       "note": "cache — refilled by a scheduled job, not migrated"
     },
     {
@@ -887,6 +951,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": "seed data — re-seeded on the far side, not migrated"
     },
     {
@@ -897,6 +962,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -907,6 +973,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -917,6 +984,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -927,6 +995,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     },
     {
@@ -937,6 +1006,7 @@
       ],
       "excluded_paths": [],
       "composite_indexes": [],
+      "default_ttl": null,
       "note": null
     }
   ]

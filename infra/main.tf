@@ -180,6 +180,11 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
   database_name       = azurerm_cosmosdb_sql_database.hcw.name
   partition_key_paths = [each.value.partition_key_path]
 
+  # null = retain forever. Set on the rate-limit counters and caches, which are
+  # worthless after their window and would otherwise be retained and indexed
+  # indefinitely. Unlike partition_key_paths this is mutable after creation.
+  default_ttl = each.value.default_ttl
+
   indexing_policy {
     indexing_mode = "consistent"
 

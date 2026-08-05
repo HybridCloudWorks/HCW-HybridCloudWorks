@@ -103,6 +103,34 @@
 export const DEFAULT_PARTITION_KEY = '/id';
 
 /**
+ * Container TTLs, in seconds, for data that is worthless after a window.
+ *
+ * A container with no `default_ttl` retains everything forever, and every
+ * document stays indexed. The rate-limit counters are the clearest case: a
+ * one-hour tumbling window holding a hashed IP and an integer, which nothing
+ * reads after the window closes. Two hours of TTL covers the window plus clock
+ * skew, and lets the limiter drop its window arithmetic entirely — an expired
+ * document simply is not there.
+ *
+ * A TTL requires `indexingMode: consistent`, which every container here uses.
+ * Unlike a partition key, `default_ttl` IS mutable after creation, so these are
+ * safe to tune later. They are set now because the containers do not exist yet
+ * and the cost of getting it right is zero today.
+ */
+export const CONTAINER_TTL_SECONDS = Object.freeze({
+  tool_export_quota: 7200, // 1h window + skew
+  tool_ai_plan_quota: 7200,
+  lab_public_quota: 7200,
+  // Caches, which the scheduled refresh repopulates. Generous: the TTL is a
+  // floor against unbounded growth, not the freshness mechanism — freshness is
+  // cacheFreshness() and it is deliberately independent of this.
+  tool_service_cache: 604800, // 7 days
+  rss_cache: 604800,
+  // Transient job records. Long enough to debug a failure after the weekend.
+  lab_jobs: 2592000, // 30 days
+});
+
+/**
  * Top-level collections.
  *
  * `partitionKey` defaults to DEFAULT_PARTITION_KEY. `partitionKeyFromParent`
@@ -204,7 +232,44 @@ export const COLLECTIONS = [
   {
     name: 'admins',
     disposition: 'migrate',
-    note: 'AUTHORISATION-CRITICAL. firestore.rules isAdmin() reads this collection; client access is explicitly denied. Losing it locks every admin out of the Azure deployment. Was absent from the previous COLLECTION_MAP.',
+    note:
+      'AUTHORISATION-CRITICAL. firestore.rules isAdmin() reads this collection; client access is ' +
+      'explicitly denied. Losing it locks every admin out of the Azure deployment. Was absent ' +
+      'from the previous COLLECTION_MAP.',
+    // ---------------------------------------------------------------------
+    // DECISION 2 — re-key from Firebase uid to Entra oid, BEFORE cutover
+    // ---------------------------------------------------------------------
+    // These documents are keyed by FIREBASE UID (admin-auth.js:219-220).
+    // Nothing in the Azure runtime can resolve a Firebase uid: the role guard
+    // looks up `admins/{oid}` using the Entra object id from the token
+    // (functions/src/lib/auth/require-role.js). Migrating these documents
+    // faithfully therefore produces a container the API cannot read — every
+    // admin request 403s with "no admin record", which reads as a broken
+    // deployment rather than a data problem.
+    //
+    // Straight migration is NOT sufficient here, and this is the one place in
+    // the manifest where fidelity is the wrong goal.
+    //
+    // Required before cutover:
+    //   1. Produce a uid -> oid mapping. The only reliable join key is the
+    //      verified email: Firebase Auth's user export carries uid + email +
+    //      emailVerified; Entra carries oid + mail/userPrincipalName.
+    //   2. Have a human review it. This collection is the authorisation root
+    //      and it is small (a handful of admins), so a reviewed, committed
+    //      mapping is proportionate — do NOT trust-on-first-use by email, which
+    //      would let anyone who controls a matching mailbox claim an admin row.
+    //   3. Re-key on import, keeping the Firebase uid on the document as
+    //      `firebaseUid` for the audit trail.
+    //
+    // Until that mapping exists this collection should NOT be imported to the
+    // production account — an admins container keyed on uid is worse than an
+    // empty one, because it looks populated.
+    requiresIdentityRemap: {
+      from: 'firebaseUid',
+      to: 'entraOid',
+      joinOn: 'verified email',
+      blocks: 'cutover',
+    },
   },
   { name: 'admin_config', disposition: 'migrate', note: 'ContentForge config (forge_profile, forge_prompts).' },
   { name: 'admin_settings', disposition: 'migrate' },

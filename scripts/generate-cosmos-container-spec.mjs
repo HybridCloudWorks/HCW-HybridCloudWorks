@@ -20,7 +20,12 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { COLLECTIONS, PROVISIONED_DISPOSITIONS, DEFAULT_PARTITION_KEY } from './lib/migration-manifest.mjs';
+import {
+  COLLECTIONS,
+  PROVISIONED_DISPOSITIONS,
+  DEFAULT_PARTITION_KEY,
+  CONTAINER_TTL_SECONDS,
+} from './lib/migration-manifest.mjs';
 import { parseArgs, log } from './lib/cli.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -126,6 +131,8 @@ function build() {
       composite_indexes: (COMPOSITE_INDEXES[name] ?? []).map((index) =>
         index.map(([path, order]) => ({ path: `/${path}`, order }))
       ),
+      // null means "retain forever". Terraform omits default_ttl when null.
+      default_ttl: CONTAINER_TTL_SECONDS[name] ?? null,
       note: note ?? null,
     });
   };
