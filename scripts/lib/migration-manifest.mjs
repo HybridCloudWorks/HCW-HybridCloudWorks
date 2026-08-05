@@ -157,7 +157,11 @@ export const COLLECTIONS = [
   { name: 'episodes', disposition: 'migrate', note: 'Top-level `episodes`. Distinct from listen_and_learn/{setId}/episodes.' },
   { name: 'youtubevideos', disposition: 'migrate' },
   { name: 'recordings', disposition: 'migrate' },
-  { name: 'newsletters', disposition: 'probe', note: 'One call site, no rules match.' },
+  {
+    name: 'newsletters',
+    disposition: 'migrate',
+    note: 'Real production writer: cms-functions.js:9483 `.add()` with title/content/status/timestamps from the weekly-digest flow. Was `probe` until the source was checked.',
+  },
   { name: 'roadmap_items', disposition: 'migrate' },
   { name: 'wiki_pages', disposition: 'migrate' },
   {
@@ -185,8 +189,16 @@ export const COLLECTIONS = [
   { name: 'frameworks', disposition: 'migrate' },
   { name: 'pillar_details', disposition: 'migrate' },
   { name: 'pillar_items', disposition: 'migrate' },
-  { name: 'azure_landing_content', disposition: 'probe', note: 'One call site, no rules match.' },
-  { name: 'articles', disposition: 'probe', note: 'One call site, no rules match. Possibly superseded by `content`.' },
+  {
+    name: 'azure_landing_content',
+    disposition: 'reseed',
+    note: 'Seed data. scripts/seed_azure_data.js:139 writes one document, `main`, from a LANDING_PAGE_DATA constant held in the repo — so the source of truth is version control, not the database.',
+  },
+  {
+    name: 'articles',
+    disposition: 'probe',
+    note: 'Only writer is scripts/populate-firestore.cjs:178, a seed script — likely superseded by `content`. The apparent second hit at functions/index.js:4347 is a false positive: a JSON-schema `required: [\'articles\']` field for an AI extraction tool, not a collection reference.',
+  },
 
   // --- Identity and configuration ------------------------------------------
   {
@@ -198,11 +210,15 @@ export const COLLECTIONS = [
   { name: 'admin_settings', disposition: 'migrate' },
   { name: 'site_settings', disposition: 'migrate' },
   { name: 'system', disposition: 'migrate' },
-  { name: 'metadata', disposition: 'probe', note: 'One call site, no rules match.' },
+  {
+    name: 'metadata',
+    disposition: 'probe',
+    note: 'Only writer is scripts/populate-firestore.cjs:203, a seed script. The src/ hits are false positives — an HTML preload attribute and a tab value.',
+  },
   {
     name: 'users',
     disposition: 'probe',
-    note: 'Has a rules match but zero collection() call sites in Site-Main. The previous COLLECTION_MAP migrated it unconditionally. Preflight decides.',
+    note: 'Has a rules match but ZERO references of any kind in Site-Main — not a collection() call, not a string literal, nothing. Nothing reads or writes it. The previous COLLECTION_MAP migrated it unconditionally. Only the preflight can say whether it holds legacy rows; if it is empty, drop it.',
   },
   {
     name: 'config',
@@ -238,7 +254,11 @@ export const COLLECTIONS = [
   { name: 'social_schedule_slots', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
   { name: 'social_analytics', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
   { name: 'telegram_bot_activity', disposition: 'migrate' },
-  { name: 'plaud_ingest', disposition: 'probe', note: 'One call site, no rules match.' },
+  {
+    name: 'plaud_ingest',
+    disposition: 'migrate',
+    note: 'Real production writer: cms-functions.js:8820 `admin.firestore().collection(...).add()`. Was `probe` until the source was checked.',
+  },
 
   // --- AI / prompts / images -----------------------------------------------
   { name: 'ai_providers', disposition: 'migrate' },
@@ -292,7 +312,11 @@ export const COLLECTIONS = [
   { name: 'character_modules', disposition: 'migrate' },
   { name: 'character_images', disposition: 'migrate' },
   { name: 'character_tag_adjectives', disposition: 'migrate' },
-  { name: 'homepage_feeds', disposition: 'probe', note: 'One call site, no rules match.' },
+  {
+    name: 'homepage_feeds',
+    disposition: 'regenerate',
+    note: 'Derived cache, not source data. functions/index.js:1378 writes exactly one document, `latest`, holding {items, generatedAt, itemCount} assembled from the provider feeds. Rebuild it on the far side rather than importing a stale snapshot.',
+  },
 
   // --- Workflow ------------------------------------------------------------
   { name: 'workflow_digests', disposition: 'migrate' },

@@ -116,6 +116,16 @@
       "note": null
     },
     {
+      "name": "azure_landing_content",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "note": "seed data — re-seeded on the far side, not migrated"
+    },
+    {
       "name": "blogs",
       "partition_key_path": "/id",
       "included_paths": [
@@ -456,6 +466,16 @@
       "note": null
     },
     {
+      "name": "homepage_feeds",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "note": "cache — refilled by a scheduled job, not migrated"
+    },
+    {
       "name": "image_prompt_pages",
       "partition_key_path": "/id",
       "included_paths": [
@@ -586,6 +606,16 @@
       "note": null
     },
     {
+      "name": "newsletters",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "note": null
+    },
+    {
       "name": "pillar_details",
       "partition_key_path": "/id",
       "included_paths": [
@@ -597,6 +627,16 @@
     },
     {
       "name": "pillar_items",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "note": null
+    },
+    {
+      "name": "plaud_ingest",
       "partition_key_path": "/id",
       "included_paths": [
         "/*"
