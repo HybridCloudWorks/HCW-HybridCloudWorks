@@ -18,7 +18,7 @@
   "dependencies": {
     "@azure/cosmos": "^4.3.0",
     "@azure/identity": "^4.8.0",
-    "firebase-admin": "^13.6.0"
+    "firebase-admin": "^14.2.0"
   },
   "devDependencies": {
     "vitest": "^4.0.18"
