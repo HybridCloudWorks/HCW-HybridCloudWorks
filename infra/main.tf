@@ -110,193 +110,127 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 }
 
 # -----------------------------------------------------------------------------
-# Cosmos DB Containers (1:1 mapping from Firestore collections)
-# Partition keys chosen for query efficiency based on existing access patterns.
+# Cosmos DB Containers
+#
+# The container list is GENERATED from scripts/lib/migration-manifest.mjs, the
+# same manifest the migration and verification scripts read. Regenerate with:
+#
+#     node scripts/generate-cosmos-container-spec.mjs
+#
+# Do not add containers here by hand — add the collection to the manifest and
+# regenerate, or Terraform, the migrator and the verifier drift apart again.
+#
+# Partition key: every container uses /id. functions/src/lib/cosmos-client.js
+# defaults the partition key to the document id in readDoc() and deleteDoc()
+# (`container.item(id, partitionKey || id)`) and no caller passes an explicit
+# key, so a container partitioned on anything else 404s on every point read.
+# At ~1,100 small documents there is nothing to spread across partitions, and
+# the Firestore composite indexes that describe the real query load do not
+# filter on a provider or an owner. See docs/data-migration/README.md.
+#
+# A partition key path is IMMUTABLE. Changing one on a container that already
+# holds data means destroying the container and re-importing.
 # -----------------------------------------------------------------------------
 
-resource "azurerm_cosmosdb_sql_container" "content" {
-  name                = "content"
+locals {
+  cosmos_container_spec = jsondecode(file("${path.module}/cosmos-containers.json"))
+  cosmos_containers     = { for c in local.cosmos_container_spec.containers : c.name => c }
+}
+
+resource "azurerm_cosmosdb_sql_container" "hcw" {
+  for_each = local.cosmos_containers
+
+  name                = each.value.name
   resource_group_name = azurerm_resource_group.hcw.name
   account_name        = azurerm_cosmosdb_account.hcw.name
   database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/cloudProvider"]
+  partition_key_paths = [each.value.partition_key_path]
 
   indexing_policy {
     indexing_mode = "consistent"
 
-    included_path { path = "/contentStatus/?" }
-    included_path { path = "/cloudProvider/?" }
-    included_path { path = "/fetchedAt/?" }
-    included_path { path = "/updatedAt/?" }
-    included_path { path = "/publishedAt/?" }
-    included_path { path = "/contentType/?" }
+    dynamic "included_path" {
+      for_each = each.value.included_paths
+      content {
+        path = included_path.value
+      }
+    }
 
-    excluded_path { path = "/contentMarkdown/*" }
-    excluded_path { path = "/contentHtml/*" }
-    excluded_path { path = "/contentPlainText/*" }
-    excluded_path { path = "/scraped/*" }
+    dynamic "excluded_path" {
+      for_each = each.value.excluded_paths
+      content {
+        path = excluded_path.value
+      }
+    }
   }
 }
 
-resource "azurerm_cosmosdb_sql_container" "blogs" {
-  name                = "blogs"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/cloudProvider"]
+# -----------------------------------------------------------------------------
+# State moves for the containers that were previously declared individually.
+#
+# These keep Terraform from reading the for_each block as thirteen deletions
+# plus seventy-one creations. Note that `content`, `blogs`, `certifications`,
+# `lab_jobs`, `lab_agents`, `generated_content_images` and `audits` also change
+# partition key, which forces replacement after the move — safe only while the
+# containers are empty. Run this BEFORE importing any data.
+#
+# `dashboard_stats` and `users` are intentionally absent: neither collection
+# exists in Site-Main, so both are destroyed rather than moved.
+# -----------------------------------------------------------------------------
 
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.content
+  to   = azurerm_cosmosdb_sql_container.hcw["content"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "certifications" {
-  name                = "certifications"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/issuer"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.blogs
+  to   = azurerm_cosmosdb_sql_container.hcw["blogs"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "speakerevents" {
-  name                = "speakerevents"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.certifications
+  to   = azurerm_cosmosdb_sql_container.hcw["certifications"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "lab_jobs" {
-  name                = "lab_jobs"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/status"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/status/?" }
-    included_path { path = "/type/?" }
-    included_path { path = "/createdAt/?" }
-    included_path { path = "/agentId/?" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.speakerevents
+  to   = azurerm_cosmosdb_sql_container.hcw["speakerevents"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "lab_agents" {
-  name                = "lab_agents"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/agentId"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.lab_jobs
+  to   = azurerm_cosmosdb_sql_container.hcw["lab_jobs"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "config" {
-  name                = "config"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.lab_agents
+  to   = azurerm_cosmosdb_sql_container.hcw["lab_agents"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "dashboard_stats" {
-  name                = "dashboard_stats"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.config
+  to   = azurerm_cosmosdb_sql_container.hcw["config"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "image_prompts" {
-  name                = "image_prompts"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.image_prompts
+  to   = azurerm_cosmosdb_sql_container.hcw["image_prompts"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "generated_content_images" {
-  name                = "generated_content_images"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/contentId"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.generated_content_images
+  to   = azurerm_cosmosdb_sql_container.hcw["generated_content_images"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "workflow_digests" {
-  name                = "workflow_digests"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.workflow_digests
+  to   = azurerm_cosmosdb_sql_container.hcw["workflow_digests"]
 }
 
-resource "azurerm_cosmosdb_sql_container" "users" {
-  name                = "users"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/id"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/*" }
-  }
-}
-
-resource "azurerm_cosmosdb_sql_container" "audits" {
-  name                = "audits"
-  resource_group_name = azurerm_resource_group.hcw.name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  database_name       = azurerm_cosmosdb_sql_database.hcw.name
-  partition_key_paths = ["/userId"]
-
-  indexing_policy {
-    indexing_mode = "consistent"
-    included_path { path = "/action/?" }
-    included_path { path = "/timestamp/?" }
-    included_path { path = "/userId/?" }
-  }
+moved {
+  from = azurerm_cosmosdb_sql_container.audits
+  to   = azurerm_cosmosdb_sql_container.hcw["audits"]
 }
 
 # =============================================================================

@@ -21,3 +21,10 @@ local.settings.json
 .terraform.lock.hcl
 *.enc.yaml
 keys.txt
+
+# Data migration (Phase 4) — see docs/data-migration/README.md
+# export/ is a full dump of the production Firestore database and must never
+# be committed. reports/ contains document ids and field values from it.
+export/
+reports/
+**/firebase-service-account.json

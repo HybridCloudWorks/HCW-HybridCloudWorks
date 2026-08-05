@@ -1,0 +1,673 @@
+{
+  "_comment": "GENERATED FILE — do not edit. Run `node scripts/generate-cosmos-container-spec.mjs` after changing scripts/lib/migration-manifest.mjs. Read by infra/main.tf.",
+  "_source": "scripts/lib/migration-manifest.mjs",
+  "containers": [
+    {
+      "name": "_snapshots",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "admin_audit_logs",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/action/?",
+        "/timestamp/?",
+        "/userId/?"
+      ],
+      "excluded_paths": [
+        "/*"
+      ],
+      "note": null
+    },
+    {
+      "name": "admin_config",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "admin_settings",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "admins",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "ai_insights",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "ai_providers",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "ai_usage",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "audits",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/action/?",
+        "/timestamp/?",
+        "/userId/?"
+      ],
+      "excluded_paths": [
+        "/*"
+      ],
+      "note": null
+    },
+    {
+      "name": "blogs",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [
+        "/contentMarkdown/*",
+        "/contentHtml/*",
+        "/contentPlainText/*",
+        "/scraped/*"
+      ],
+      "note": null
+    },
+    {
+      "name": "certEvents",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "certifications",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "character_images",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "character_modules",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "character_profiles",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "character_tag_adjectives",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "config",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "config_providers",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "subcollection of config"
+    },
+    {
+      "name": "config_settings",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "subcollection of config"
+    },
+    {
+      "name": "config_tags",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "subcollection of config"
+    },
+    {
+      "name": "content",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [
+        "/contentMarkdown/*",
+        "/contentHtml/*",
+        "/contentPlainText/*",
+        "/scraped/*"
+      ],
+      "note": null
+    },
+    {
+      "name": "content_templates",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "content_versions",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [
+        "/contentMarkdown/*",
+        "/contentHtml/*",
+        "/contentPlainText/*",
+        "/scraped/*"
+      ],
+      "note": "subcollection of content"
+    },
+    {
+      "name": "curated_article_images",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "designs",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "episodes",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "frameworks",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "generated_content_images",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "image_prompt_pages",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "image_prompt_sets",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "image_prompt_sets_prompts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "subcollection of image_prompt_sets"
+    },
+    {
+      "name": "image_prompts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "image_prompts_sets",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "subcollection of image_prompts"
+    },
+    {
+      "name": "lab_agents",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "lab_jobs",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/status/?",
+        "/type/?",
+        "/createdAt/?",
+        "/agentId/?"
+      ],
+      "excluded_paths": [
+        "/*"
+      ],
+      "note": "transient runtime state — written at runtime, not migrated"
+    },
+    {
+      "name": "lab_public_quota",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "transient runtime state — written at runtime, not migrated"
+    },
+    {
+      "name": "listen_and_learn",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "listen_and_learn_episodes",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "subcollection of listen_and_learn"
+    },
+    {
+      "name": "mcp_servers",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "pillar_details",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "pillar_items",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "podcasts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "prompt_keyword_augmentations",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "prompt_keyword_synonyms",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "prompts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "recordings",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "roadmap_items",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "rss_cache",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "cache — refilled by a scheduled job, not migrated"
+    },
+    {
+      "name": "site_settings",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "social_analytics",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "social_libraries",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "social_library_items",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "social_posts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "social_schedule_slots",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "social_workspaces",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "speakerevents",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "system",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "telegram_bot_activity",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "tool_ai_plan_quota",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "transient runtime state — written at runtime, not migrated"
+    },
+    {
+      "name": "tool_architecture_plans",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "tool_assessment_sessions",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "tool_export_quota",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "transient runtime state — written at runtime, not migrated"
+    },
+    {
+      "name": "tool_exports",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "tool_migration_workspaces",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "tool_service_cache",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "cache — refilled by a scheduled job, not migrated"
+    },
+    {
+      "name": "tool_service_catalog",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": "seed data — re-seeded on the far side, not migrated"
+    },
+    {
+      "name": "tool_workspaces",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "wiki_pages",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "workflow_alerts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "workflow_digests",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    },
+    {
+      "name": "youtubevideos",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "note": null
+    }
+  ]
+}
