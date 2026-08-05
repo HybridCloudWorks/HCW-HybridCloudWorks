@@ -173,12 +173,12 @@ variable "tags" {
   description = "Default tags applied to all Azure resources"
   type        = map(string)
   default = {
-    workload        = "hybridcloudworks"
-    environment     = "prod"
-    owner           = "platform"
-    costCenter      = "content-platform"
-    managedBy       = "terraform"
-    criticality     = "high"
+    workload           = "hybridcloudworks"
+    environment        = "prod"
+    owner              = "platform"
+    costCenter         = "content-platform"
+    managedBy          = "terraform"
+    criticality        = "high"
     dataClassification = "internal"
   }
 }

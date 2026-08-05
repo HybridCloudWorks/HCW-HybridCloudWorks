@@ -10,7 +10,7 @@ resource "azurerm_cognitive_account" "openai" {
   resource_group_name = azurerm_resource_group.hcw.name
   kind                = "OpenAI"
   sku_name            = "S0"
-  
+
   tags = var.tags
 }
 
@@ -24,8 +24,8 @@ resource "azurerm_cognitive_deployment" "gpt4o" {
     version = "2024-05-13" # Or whatever latest version is available in eastus2
   }
 
-  scale {
-    type     = "Standard"
+  sku {
+    name     = "Standard"
     capacity = 10
   }
 }
@@ -40,8 +40,8 @@ resource "azurerm_cognitive_deployment" "dalle3" {
     version = "3.0"
   }
 
-  scale {
-    type     = "Standard"
+  sku {
+    name     = "Standard"
     capacity = 1
   }
 }

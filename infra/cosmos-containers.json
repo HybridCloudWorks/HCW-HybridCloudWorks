@@ -220,7 +220,7 @@
     },
     {
       "name": "content_versions",
-      "partition_key_path": "/id",
+      "partition_key_path": "/contentId",
       "included_paths": [
         "/*"
       ],

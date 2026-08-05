@@ -120,13 +120,18 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Do not add containers here by hand — add the collection to the manifest and
 # regenerate, or Terraform, the migrator and the verifier drift apart again.
 #
-# Partition key: every container uses /id. functions/src/lib/cosmos-client.js
-# defaults the partition key to the document id in readDoc() and deleteDoc()
-# (`container.item(id, partitionKey || id)`) and no caller passes an explicit
-# key, so a container partitioned on anything else 404s on every point read.
-# At ~1,100 small documents there is nothing to spread across partitions, and
-# the Firestore composite indexes that describe the real query load do not
-# filter on a provider or an owner. Full rationale in the manifest header.
+# Partition keys come from the manifest and are 70x /id plus content_versions
+# on /contentId. The short version: the Site-Main query load does not group by
+# anything (one of ~40 content query sites filters on a provider), the whole
+# dataset is ~1,100 small documents in one physical partition per container, and
+# the previous "natural" keys were wrong on their own merits — /contentId was
+# written as the empty string on every document, /status on lab_jobs is mutable
+# and a partition key value cannot be changed in place, and /agentId on
+# lab_agents is identical to /id by construction. content_versions is the
+# exception because every read is scoped to one parent content document and it
+# is the only container that grows without bound.
+#
+# Full evidence, with file:line citations, in the manifest header.
 #
 # A partition key path is IMMUTABLE. Changing one on a container that already
 # holds data means destroying the container and re-importing.
@@ -240,14 +245,14 @@ moved {
 # LRS (locally redundant) — sufficient for a single-region deployment.
 # =============================================================================
 resource "azurerm_storage_account" "hcw" {
-  name                     = var.storage_account_name
-  resource_group_name      = azurerm_resource_group.hcw.name
-  location                 = azurerm_resource_group.hcw.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  account_kind             = "StorageV2"
-  access_tier              = "Hot"
-  min_tls_version          = "TLS1_2"
+  name                            = var.storage_account_name
+  resource_group_name             = azurerm_resource_group.hcw.name
+  location                        = azurerm_resource_group.hcw.location
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  account_kind                    = "StorageV2"
+  access_tier                     = "Hot"
+  min_tls_version                 = "TLS1_2"
   allow_nested_items_to_be_public = false # account-level public access off; containers opt-in below
 
   blob_properties {
@@ -408,26 +413,26 @@ resource "azurerm_linux_function_app" "hcw" {
 
   app_settings = {
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
-    "COSMOS_ENDPOINT"          = azurerm_cosmosdb_account.hcw.endpoint
-    "COSMOS_DATABASE"          = azurerm_cosmosdb_sql_database.hcw.name
+    "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
+    "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
     # COSMOS_CONNECTION_STRING is required by the Cosmos DB change-feed trigger binding
     # See: https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
     "COSMOS_CONNECTION_STRING" = azurerm_cosmosdb_account.hcw.primary_sql_connection_string
 
-    "STORAGE_ACCOUNT_NAME"     = azurerm_storage_account.hcw.name
-    "STORAGE_BLOB_ENDPOINT"    = azurerm_storage_account.hcw.primary_blob_endpoint
-    "STORAGE_QUEUE_ENDPOINT"   = azurerm_storage_account.hcw.primary_queue_endpoint
-    "KEY_VAULT_URI"            = azurerm_key_vault.hcw.vault_uri
+    "STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.hcw.name
+    "STORAGE_BLOB_ENDPOINT"  = azurerm_storage_account.hcw.primary_blob_endpoint
+    "STORAGE_QUEUE_ENDPOINT" = azurerm_storage_account.hcw.primary_queue_endpoint
+    "KEY_VAULT_URI"          = azurerm_key_vault.hcw.vault_uri
 
-    "ENTRA_TENANT_ID"          = var.entra_tenant_id
-    "ENTRA_CLIENT_ID"          = var.entra_client_id
+    "ENTRA_TENANT_ID" = var.entra_tenant_id
+    "ENTRA_CLIENT_ID" = var.entra_client_id
 
     "WEBSITE_RUN_FROM_PACKAGE" = "1"
     "FUNCTIONS_WORKER_RUNTIME" = "node"
     "NODE_ENV"                 = "production"
 
     # Feature flags — set to "true" in TF Cloud vars once business logic is ported
-    "FEATURE_FLAG_SCHEDULERS"  = "false"
+    "FEATURE_FLAG_SCHEDULERS" = "false"
   }
 
   identity {
@@ -441,10 +446,26 @@ resource "azurerm_linux_function_app" "hcw" {
 # RBAC — Function App managed identity data-plane roles (no static keys)
 # ---------------------------------------------------------------------------
 
-resource "azurerm_role_assignment" "func_cosmos" {
-  scope                = azurerm_cosmosdb_account.hcw.id
-  role_definition_name = "Cosmos DB Built-in Data Contributor"
-  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+# Cosmos DB data-plane access is NOT Azure RBAC. "Cosmos DB Built-in Data
+# Contributor" lives in the account's own sqlRoleDefinitions namespace, not in
+# Microsoft.Authorization/roleDefinitions, so `azurerm_role_assignment` cannot
+# resolve it by name — the apply fails with "role definition not found", and
+# even if it resolved it would not grant data-plane access.
+#
+# functions/src/lib/cosmos-client.js authenticates with DefaultAzureCredential
+# and no key, so without this assignment every Cosmos operation returns 403.
+# That is currently masked by COSMOS_CONNECTION_STRING in app settings, which
+# carries the primary key and keeps the trigger binding working while the
+# client would not.
+#
+# 00000000-0000-0000-0000-000000000002 is the built-in Data Contributor role.
+resource "azurerm_cosmosdb_sql_role_assignment" "func_cosmos" {
+  name                = "00000000-0000-0000-0000-000000000101"
+  resource_group_name = azurerm_resource_group.hcw.name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = azurerm_linux_function_app.hcw.identity[0].principal_id
+  scope               = azurerm_cosmosdb_account.hcw.id
 }
 
 resource "azurerm_role_assignment" "func_blob" {
@@ -481,7 +502,7 @@ resource "azurerm_key_vault" "hcw" {
   sku_name                   = "standard"
   soft_delete_retention_days = 90
   purge_protection_enabled   = var.purge_protection_enabled
-  enable_rbac_authorization  = true
+  rbac_authorization_enabled = true
 
   network_acls {
     default_action             = "Deny"

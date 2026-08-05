@@ -176,18 +176,47 @@ async function runExport() {
     for (const source of docs) {
       const { doc, warnings } = transformDocument(source);
 
+      // A flattened subcollection partitioned by its parent needs that parent's
+      // id as a real field on the document — Cosmos partitions on a document
+      // property, and `content/{id}/versions` carries no such field of its own.
+      if (target.partitionKeyFromParent) {
+        const parentId = source.parentPath?.split('/').pop();
+        if (!parentId) {
+          allWarnings.push({
+            container: target.container,
+            code: 'missing-parent',
+            detail: `${source.id} has no parent path; cannot populate partition key ${target.partitionKeyFromParent}`,
+          });
+          warned += 1;
+        }
+        doc[target.partitionKeyFromParent] = parentId ?? 'orphaned';
+      }
+
       // Two source documents that sanitise to the same Cosmos id would silently
       // overwrite each other on upsert. Catch it here, at export time, where
       // the source is still available to disambiguate.
-      if (seen.has(doc.id)) {
+      //
+      // Cosmos requires ids to be unique per *logical partition*, not per
+      // container, so the uniqueness key includes the partition value. Under
+      // `/id` that reduces to the id itself; under `/contentId` two version
+      // documents with the same id under different parents are legitimate and
+      // must not be reported.
+      const partitionValue = target.partitionKeyFromParent
+        ? doc[target.partitionKeyFromParent]
+        : doc.id;
+      const uniquenessKey = `${partitionValue} ${doc.id}`;
+
+      if (seen.has(uniquenessKey)) {
         allWarnings.push({
           container: target.container,
           code: 'id-collision',
-          detail: `${source.id} and ${seen.get(doc.id)} both map to Cosmos id "${doc.id}"`,
+          detail:
+            `${source.id} and ${seen.get(uniquenessKey)} both map to Cosmos id "${doc.id}"` +
+            (target.partitionKeyFromParent ? ` in partition "${partitionValue}"` : ''),
         });
         warned += 1;
       }
-      seen.set(doc.id, source.id);
+      seen.set(uniquenessKey, source.id);
 
       for (const w of warnings) {
         allWarnings.push({ container: target.container, ...w });

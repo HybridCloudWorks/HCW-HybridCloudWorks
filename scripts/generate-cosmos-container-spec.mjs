@@ -20,7 +20,7 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { COLLECTIONS, PROVISIONED_DISPOSITIONS } from './lib/migration-manifest.mjs';
+import { COLLECTIONS, PROVISIONED_DISPOSITIONS, DEFAULT_PARTITION_KEY } from './lib/migration-manifest.mjs';
 import { parseArgs, log } from './lib/cli.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,15 +34,9 @@ try {
   process.exit(1);
 }
 
-/**
- * Every container is partitioned on `/id`.
- *
- * `functions/src/lib/cosmos-client.js` defaults the partition key to the
- * document id in `readDoc()` and `deleteDoc()`, and no caller overrides it.
- * A container partitioned on anything else returns 404 for every point read.
- * See the partition-key note in lib/migration-manifest.mjs for the argument.
- */
-const PARTITION_KEY_PATH = '/id';
+// Partition keys come from the manifest, which carries the evidence for each
+// choice. Containers default to /id; content_versions overrides to /contentId
+// because every access to version history is scoped to one parent document.
 
 /**
  * Large free-text fields, excluded from indexing so they do not inflate RU
@@ -75,11 +69,11 @@ const DISPOSITION_NOTE = {
 function build() {
   const containers = [];
 
-  const add = (name, note) => {
+  const add = (name, partitionKey, note) => {
     const override = INDEXING_OVERRIDES[name] ?? { included: ['/*'], excluded: [] };
     containers.push({
       name,
-      partition_key_path: PARTITION_KEY_PATH,
+      partition_key_path: partitionKey,
       included_paths: override.included,
       excluded_paths: override.excluded,
       note: note ?? null,
@@ -88,9 +82,13 @@ function build() {
 
   for (const entry of COLLECTIONS) {
     if (!PROVISIONED_DISPOSITIONS.has(entry.disposition)) continue;
-    add(entry.name, DISPOSITION_NOTE[entry.disposition] ?? null);
+    add(entry.name, entry.partitionKey ?? DEFAULT_PARTITION_KEY, DISPOSITION_NOTE[entry.disposition] ?? null);
     for (const sub of entry.subcollections ?? []) {
-      add(sub.container, `subcollection of ${entry.name}`);
+      add(
+        sub.container,
+        sub.partitionKey ?? DEFAULT_PARTITION_KEY,
+        `subcollection of ${entry.name}`
+      );
     }
   }
 

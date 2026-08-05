@@ -34,20 +34,63 @@
  * ---------------------------------------------------------------------------
  * Partition keys
  * ---------------------------------------------------------------------------
- * Every container is partitioned on `/id`, deliberately:
+ * Every container is partitioned on `/id` except `content_versions`. The
+ * evidence, from the Site-Main source rather than from the shape of the target:
  *
- *   1. `functions/src/lib/cosmos-client.js` defaults the partition key to the
- *      document id in both `readDoc()` and `deleteDoc()`
- *      (`container.item(id, partitionKey || id)`). Any container partitioned
- *      on something else silently 404s on every point read that does not pass
- *      an explicit key — and no caller passes one today.
- *   2. The whole dataset is ~1,100 small documents. There is no partition to
- *      spread; the only thing a partition key buys us at this size is cheap
- *      point reads, which `/id` gives us and a low-cardinality key does not.
- *   3. The Firestore composite indexes that describe the real query load
- *      (`(Live, scheduledPublishDate)`, `(type, Live, publishedAt)`) do not
- *      filter on a provider or an owner, so a "natural" partition key would
- *      fan out on the list queries *and* on the point reads.
+ *   1. The query load does not group by anything. All 18 Firestore composite
+ *      indexes plus every `where()` in Site-Main show `content` filtered on
+ *      `contentStatus`, `Live`, `type`, `slug`, `sourceUrl`, `normalizedUrl`,
+ *      `source` and `fetchedAt`. Exactly one call site filters on a provider.
+ *      A `/cloudProvider` key would have been 4–5 distinct values serving well
+ *      under 1% of queries, fanning out on everything else.
+ *   2. The previous "natural" keys were wrong on their own merits, not merely
+ *      suboptimal:
+ *        - `generated_content_images./contentId` — `cms-functions.js:3139` and
+ *          `:5573` write `contentId: ''` on every document, which would have
+ *          put the whole container in one logical partition keyed on the empty
+ *          string, converging on the 20 GB logical-partition cap.
+ *        - `lab_jobs./status` — a *mutable* field. A partition key value cannot
+ *          be changed in place; Cosmos requires delete-and-recreate. Job
+ *          documents transition queued → running → completed. This was a latent
+ *          data-loss bug.
+ *        - `lab_agents./agentId` — `vps-agent/index.js:33-34` writes
+ *          `id: AGENT_ID, agentId: AGENT_ID`. Identical to `/id` by construction.
+ *        - `certifications./issuer`, `audits./userId` — low cardinality, and
+ *          `audits` is never queried at all.
+ *   3. ~1,100 small documents across every container, well under 1 GB total.
+ *      RU cost for a cross-partition query is driven by the number of *physical*
+ *      partitions, not logical ones, and a container does not split until ~50 GB
+ *      or sustained demand above 5,000 RU/s. Every container here is one
+ *      physical partition, so "cross-partition" list queries are single-backend
+ *      index scans. That stays true at 10x.
+ *   4. `/id` makes the 20 GB logical-partition cap structurally unreachable, and
+ *      `id` stays indexed even in the opt-in index policies below, because
+ *      Cosmos always indexes `id` and `_ts` under `indexingMode: consistent`.
+ *
+ * `functions/src/lib/cosmos-client.js:60` also defaults the partition key to the
+ * document id (`container.item(id, partitionKey || id)`), which agrees with the
+ * above — but note this is a weak argument on its own: there are no `readDoc()`
+ * callers at all, and the only affected line today is the `deleteDoc('content')`
+ * at `functions/src/functions/cms-http.js:85`.
+ *
+ * THE EXCEPTION — `content_versions` is partitioned on `/contentId`:
+ *
+ *   Every access to version history is scoped to one parent content document —
+ *   `VersionHistoryDialog.jsx:33` reads `content/{blogId}/versions`, and
+ *   `cms-functions.js:2832` does `recursiveDelete(ref.collection('versions'))`,
+ *   a delete-all-versions-for-one-parent cascade. A new version document is
+ *   written on every content save (`cms-functions.js:1822, 3810, 3903, 4607,
+ *   4874`), so this is the one container with unbounded growth. `/contentId`
+ *   makes both the read and the cascade single-partition; `/id` would fan out
+ *   on both, forever.
+ *
+ *   There is a second reason specific to flattened subcollections: document ids
+ *   are unique *per logical partition*, so under `/id` they must be globally
+ *   unique across the container, and two version documents under different
+ *   parents that share an id collide. Under `/contentId` they land in different
+ *   logical partitions and coexist. The migrator detects such collisions at
+ *   export time, but that is a permanent runtime constraint, not just a
+ *   migration one.
  *
  * A partition key path is immutable once the container exists. Changing one
  * later means recreating the container and re-importing, so this needs sign-off
@@ -56,14 +99,29 @@
  * `Phase-4-Data-Migration` Wiki page, per the repository's documentation policy.
  */
 
+/** Partition key path used by every container that does not override it. */
+export const DEFAULT_PARTITION_KEY = '/id';
+
 /**
  * Top-level collections.
+ *
+ * `partitionKey` defaults to DEFAULT_PARTITION_KEY. `partitionKeyFromParent`
+ * names a field the migrator populates with the parent document's id, so a
+ * flattened subcollection can be partitioned by its parent.
  *
  * @type {Array<{
  *   name: string,
  *   disposition: 'migrate'|'reseed'|'regenerate'|'transient'|'probe',
  *   note?: string,
- *   subcollections?: Array<{ name: string, container: string, note?: string }>
+ *   partitionKey?: string,
+ *   subcollections?: Array<{
+ *     name: string,
+ *     container: string,
+ *     note?: string,
+ *     parentDoc?: string,
+ *     partitionKey?: string,
+ *     partitionKeyFromParent?: string
+ *   }>
  * }>}
  */
 export const COLLECTIONS = [
@@ -76,7 +134,13 @@ export const COLLECTIONS = [
       {
         name: 'versions',
         container: 'content_versions',
-        note: 'Editor version history. Written server-side; read by VersionHistoryDialog.jsx. Not covered by an explicit rules match.',
+        // Partitioned by parent, not by /id — see the partition-key note above.
+        // Every read is scoped to one content document and the delete is a
+        // per-parent cascade, and this is the only container that grows without
+        // bound (one document per content save).
+        partitionKey: '/contentId',
+        partitionKeyFromParent: 'contentId',
+        note: 'Editor version history. Written server-side on every save; read by VersionHistoryDialog.jsx scoped to one parent. Not covered by an explicit rules match.',
       },
     ],
   },
@@ -256,6 +320,8 @@ export const PROVISIONED_DISPOSITIONS = new Set(['migrate', 'reseed', 'regenerat
  *   isSubcollection: boolean,
  *   parent: string|null,
  *   disposition: string,
+ *   partitionKey: string,
+ *   partitionKeyFromParent: string|null,
  *   note?: string
  * }>}
  */
@@ -273,6 +339,8 @@ export function flattenManifest({ includeNonMigrated = false } = {}) {
         isSubcollection: false,
         parent: null,
         disposition: entry.disposition,
+        partitionKey: entry.partitionKey ?? DEFAULT_PARTITION_KEY,
+        partitionKeyFromParent: null,
         note: entry.note,
       });
     }
@@ -289,6 +357,8 @@ export function flattenManifest({ includeNonMigrated = false } = {}) {
         parent: entry.name,
         parentDoc: sub.parentDoc ?? null,
         disposition: entry.disposition,
+        partitionKey: sub.partitionKey ?? DEFAULT_PARTITION_KEY,
+        partitionKeyFromParent: sub.partitionKeyFromParent ?? null,
         note: sub.note,
       });
     }

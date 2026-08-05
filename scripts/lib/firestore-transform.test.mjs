@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 
 import { sanitizeId, convertValue, transformDocument } from './firestore-transform.mjs';
-import { flattenManifest, provisionedContainers, COLLECTIONS } from './migration-manifest.mjs';
+import {
+  flattenManifest,
+  provisionedContainers,
+  COLLECTIONS,
+  DEFAULT_PARTITION_KEY,
+} from './migration-manifest.mjs';
 import { parseArgs, splitList } from './cli.mjs';
 
 /** Minimal stand-in for a live Firestore Timestamp. */
@@ -190,6 +195,20 @@ describe('migration manifest', () => {
   it('only migrates collections with the migrate disposition', () => {
     const dispositions = new Set(flattenManifest().map((t) => t.disposition));
     expect([...dispositions]).toEqual(['migrate']);
+  });
+
+  it('partitions content_versions by its parent, not by /id', () => {
+    // Every read of version history is scoped to one content document, and it
+    // is the only container that grows without bound.
+    const versions = flattenManifest().find((t) => t.container === 'content_versions');
+    expect(versions.partitionKey).toBe('/contentId');
+    expect(versions.partitionKeyFromParent).toBe('contentId');
+  });
+
+  it('partitions everything else on /id', () => {
+    const others = flattenManifest().filter((t) => t.container !== 'content_versions');
+    expect([...new Set(others.map((t) => t.partitionKey))]).toEqual([DEFAULT_PARTITION_KEY]);
+    expect(others.every((t) => t.partitionKeyFromParent === null)).toBe(true);
   });
 });
 

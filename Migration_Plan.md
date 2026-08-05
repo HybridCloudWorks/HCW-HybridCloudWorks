@@ -227,12 +227,22 @@ The conversion the tooling had was one level deep, so a `Timestamp` nested insid
 array still went across as `{_seconds, _nanoseconds}` — the same defect, one level down. It is now
 recursive and covers `Timestamp`, `GeoPoint`, `DocumentReference` and `Bytes` at any depth.
 
-**One irreversible decision needs sign-off before the first Terraform apply:** every Cosmos
-container is now partitioned on `/id`. `functions/src/lib/cosmos-client.js` already defaults the
-partition key to the document id and no caller overrides it, so the previous keys (`/cloudProvider`,
-`/issuer`, `/status`, `/userId`, …) would have returned 404 on every point read. A partition key
-path cannot be changed once the container holds data. Rationale in the header of
-`scripts/lib/migration-manifest.mjs`, and in full on the
+**One irreversible decision needs sign-off before the first Terraform apply:** 70 Cosmos containers
+are partitioned on `/id`, and `content_versions` on `/contentId`. A partition key path cannot be
+changed once the container holds data.
+
+The previous keys were not merely suboptimal, they were wrong: `generated_content_images` used
+`/contentId` on a field written as the empty string on every document (`cms-functions.js:3139`),
+`lab_jobs` used `/status` — a *mutable* field, and a partition key value cannot be changed in place —
+and `lab_agents` used `/agentId`, which `vps-agent/index.js:33-34` writes identically to `id`.
+Meanwhile the real query load groups by nothing: of ~40 `content` query sites, exactly one filters
+on a provider.
+
+`content_versions` is the exception because every read is scoped to one parent content document
+(`VersionHistoryDialog.jsx:33`), the delete is a per-parent cascade (`cms-functions.js:2832`), and it
+is the only container that grows without bound — one document per content save.
+
+Full evidence with citations in the header of `scripts/lib/migration-manifest.mjs`, and on the
 [Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
 Wiki page.
 
