@@ -1,0 +1,81 @@
+# Build-and-test gate for pull requests.
+#
+# This is deliberately NOT a delivery workflow: it uses no secrets, no cloud
+# credentials, and no OIDC. It only installs, builds, and runs unit tests, so
+# it is safe to run on every pull request while the prototype delivery jobs
+# stay disabled pending baseline hardening.
+#
+# It exists because dependency pull requests previously had nothing validating
+# them — `npm ci` alone catches the most common failure mode, a package.json
+# and package-lock.json that disagree.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One package failing should not mask the state of the others.
+      fail-fast: false
+      matrix:
+        include:
+          - name: frontend
+            dir: frontend
+            build: npm run build
+            test: npm run test:admin
+          - name: functions (azure)
+            dir: functions
+            test: npm test
+          - name: scripts (migration)
+            dir: scripts
+            test: npm test
+          - name: frontend/functions (legacy)
+            dir: frontend/functions
+          - name: frontend/scripts
+            dir: frontend/scripts
+          - name: frontend/labs/vps-agent
+            dir: frontend/labs/vps-agent
+          - name: vps-agent
+            dir: vps-agent
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ matrix.dir }}/package-lock.json
+
+      # `npm ci` is the point of this job for packages with no tests: it fails
+      # when the lockfile is out of sync with package.json, which is exactly
+      # how a bad dependency bump shows up.
+      - name: Install (lockfile-strict)
+        run: npm ci
+
+      - name: Build
+        if: matrix.build != ''
+        run: ${{ matrix.build }}
+
+      - name: Test
+        if: matrix.test != ''
+        run: ${{ matrix.test }}
