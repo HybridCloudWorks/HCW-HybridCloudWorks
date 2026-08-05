@@ -20,7 +20,8 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
 const COLLECTIONS = [
   {
@@ -187,8 +188,8 @@ async function main() {
     return 0;
   }
 
-  admin.initializeApp({ projectId: PROJECT_ID });
-  const db = admin.firestore();
+  initializeApp({ projectId: PROJECT_ID });
+  const db = getFirestore();
 
   const results = [];
   for (const col of COLLECTIONS) {

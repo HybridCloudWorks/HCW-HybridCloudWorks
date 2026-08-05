@@ -3,9 +3,10 @@
 // inspectTrigger:true, wait for inspectAndPopulateContent to process, then read
 // back imageAltTexts. Requires CONTENTFORGE_ALT_TEXT_ENABLED=true on the
 // production function (toggled via `gcloud run services update`).
-const admin = require('firebase-admin');
-admin.initializeApp({ projectId: 'hybridcloudworks-61e8d' });
-const db = admin.firestore();
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+initializeApp({ projectId: 'hybridcloudworks-61e8d' });
+const db = getFirestore();
 
 const id = `stage7-alttext-test-${Date.now()}`;
 const articleUrl = 'https://aws.amazon.com/blogs/aws/category/artificial-intelligence/';
@@ -15,7 +16,7 @@ const articleUrl = 'https://aws.amazon.com/blogs/aws/category/artificial-intelli
   await db.collection('content').doc(id).set({
     sourceUrl: articleUrl,
     inspectTrigger: true,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
     contentType: 'article',
     title: 'Stage 7 alt-text test',
   });

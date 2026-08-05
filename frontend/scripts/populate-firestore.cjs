@@ -9,7 +9,8 @@
  * - Education resources
  */
 
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const path = require('path');
 
 // Initialize Firebase Admin
@@ -19,8 +20,8 @@ const serviceAccountPath =
 
 try {
   const serviceAccount = require(serviceAccountPath);
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+  initializeApp({
+    credential: cert(serviceAccount),
   });
   console.log('✓ Firebase Admin initialized');
 } catch (error) {
@@ -32,7 +33,7 @@ try {
   process.exit(1);
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 
 // Sample content data
 const contentData = {
@@ -51,7 +52,7 @@ const contentData = {
         tags: ['Multi-Region', 'High Availability', 'DR'],
         readTime: 12,
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
       {
         slug: 'aws-cost-optimization-2026',
@@ -66,7 +67,7 @@ const contentData = {
         tags: ['FinOps', 'Savings', 'Best Practices'],
         readTime: 15,
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
     ],
     architectures: [
@@ -84,7 +85,7 @@ const contentData = {
         terraformCode:
           'resource "aws_lb" "main" {\n  name = "web-alb"\n  load_balancer_type = "application"\n}',
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
     ],
   },
@@ -103,7 +104,7 @@ const contentData = {
         tags: ['Landing Zones', 'Governance', 'Enterprise'],
         readTime: 18,
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
     ],
     architectures: [
@@ -119,7 +120,7 @@ const contentData = {
         tags: ['Networking', 'Firewall', 'Hub-Spoke'],
         estimatedCost: '$1,200-$3,500/month',
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
     ],
   },
@@ -138,7 +139,7 @@ const contentData = {
         tags: ['Vertex AI', 'ML Pipelines', 'AutoML'],
         readTime: 20,
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
     ],
     architectures: [
@@ -154,7 +155,7 @@ const contentData = {
         tags: ['Data Lake', 'BigQuery', 'Cloud Storage'],
         estimatedCost: '$500-$2,000/month',
         published: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       },
     ],
   },
@@ -204,7 +205,7 @@ async function populateFirestore() {
       .doc('stats')
       .set({
         totalArticles: totalDocs,
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        lastUpdated: FieldValue.serverTimestamp(),
         providers: ['aws', 'azure', 'gcp'],
       });
 

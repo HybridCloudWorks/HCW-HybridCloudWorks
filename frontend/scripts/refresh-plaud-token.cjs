@@ -5,15 +5,16 @@
  * scheduled refreshPlaudToken Cloud Function. Useful for one-shot rotation
  * before the schedule fires for the first time.
  */
-const admin = require('firebase-admin');
+const { initializeApp, getApps } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 const projectId = process.env.FIREBASE_PROJECT_ID || 'hybridcloudworks-61e8d';
 const URL = 'https://platform.plaud.ai/developer/api/oauth/third-party/access-token/refresh';
 
-if (!admin.apps.length) admin.initializeApp({ projectId });
+if (!getApps().length) initializeApp({ projectId });
 
 (async () => {
-  const ref = admin.firestore().collection('mcp_servers').doc('plaud');
+  const ref = getFirestore().collection('mcp_servers').doc('plaud');
   const snap = await ref.get();
   const data = snap.data() || {};
   const rt = data.oauthRefreshToken;
@@ -39,7 +40,7 @@ if (!admin.apps.length) admin.initializeApp({ projectId });
       oauthRefreshToken: parsed.refresh_token || rt,
       oauthExpiresAt: Date.now() + expiresInSec * 1000,
       status: 'connected',
-      lastTokenRefresh: admin.firestore.FieldValue.serverTimestamp(),
+      lastTokenRefresh: FieldValue.serverTimestamp(),
     },
     { merge: true }
   );

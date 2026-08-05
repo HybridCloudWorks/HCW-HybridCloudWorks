@@ -15,13 +15,14 @@
 
 'use strict';
 
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { GoogleAuth } = require('google-auth-library');
 
 const PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || 'hybridcloudworks-61e8d';
 
 // Init Firebase Admin via ADC — no serviceAccountKey.json required
-admin.initializeApp({ projectId: PROJECT_ID });
+initializeApp({ projectId: PROJECT_ID });
 
 // ── 1. Check GCP Secret Manager via REST + google-auth-library ───────────────
 async function checkSecretManager() {
@@ -87,7 +88,7 @@ async function checkAdminClaims() {
   const adminEmail = 'saulpatinojr@gmail.com';
 
   try {
-    const user = await admin.auth().getUserByEmail(adminEmail);
+    const user = await getAuth().getUserByEmail(adminEmail);
     const claims = user.customClaims || {};
 
     console.log(`  User UID:     ${user.uid}`);
