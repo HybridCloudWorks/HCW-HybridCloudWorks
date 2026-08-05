@@ -38,6 +38,8 @@ jobs:
             # firebase-functions from the sibling frontend/functions package.
             # Without its node_modules the suite fails on a missing module.
             extra_install: frontend/functions
+            lint: npm run lint
+            format: npm run format:check
             build: npm run build
             test: npm run test:admin
           - name: functions (azure)
@@ -80,6 +82,17 @@ jobs:
         if: matrix.extra_install != ''
         working-directory: ${{ matrix.extra_install }}
         run: npm ci
+
+      # Lint and format run before the build so style feedback arrives fast.
+      # `npm run lint` exits non-zero only on errors, not warnings, so the 19
+      # pre-existing warnings do not fail the job.
+      - name: Lint
+        if: matrix.lint != ''
+        run: ${{ matrix.lint }}
+
+      - name: Format check
+        if: matrix.format != ''
+        run: ${{ matrix.format }}
 
       - name: Build
         if: matrix.build != ''
