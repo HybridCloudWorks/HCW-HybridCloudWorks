@@ -10,7 +10,8 @@
  */
 
 const os = require('os');
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { CAPABILITIES } = require('./lib/capabilities');
 const { runInDocker, OUTPUT_CAP_BYTES } = require('./lib/docker-runner');
 
@@ -45,10 +46,10 @@ if (config.capabilities.length === 0) {
   process.exit(1);
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(require(require('path').resolve(config.serviceAccountPath))),
+initializeApp({
+  credential: cert(require(require('path').resolve(config.serviceAccountPath))),
 });
-const db = admin.firestore();
+const db = getFirestore();
 
 const log = (...args) => console.log(new Date().toISOString(), `[${config.agentId}]`, ...args);
 
@@ -67,7 +68,7 @@ async function sendHeartbeat(status = 'idle') {
         capabilities: config.capabilities,
         status: activeJobs > 0 ? 'busy' : status,
         activeJobs,
-        lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSeenAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
@@ -87,7 +88,7 @@ async function claimJob(jobRef) {
       tx.update(jobRef, {
         status: 'claimed',
         agentId: config.agentId,
-        claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+        claimedAt: FieldValue.serverTimestamp(),
       });
       return { id: snap.id, ...snap.data() };
     });
@@ -114,7 +115,7 @@ async function executeJob(job) {
       status: finalStatus,
       exitCode: result.exitCode,
       output: String(result.output || '').slice(0, OUTPUT_CAP_BYTES),
-      finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      finishedAt: FieldValue.serverTimestamp(),
     });
     log(`job ${job.id} -> ${finalStatus} (exit ${result.exitCode})`);
   } catch (err) {
@@ -124,7 +125,7 @@ async function executeJob(job) {
         status: 'failed',
         exitCode: -1,
         output: `agent error: ${err.message}`.slice(0, OUTPUT_CAP_BYTES),
-        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        finishedAt: FieldValue.serverTimestamp(),
       })
       .catch(() => {});
   } finally {
@@ -193,7 +194,7 @@ async function shutdown(signal) {
   await db
     .collection('lab_agents')
     .doc(config.agentId)
-    .set({ status: 'offline', lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+    .set({ status: 'offline', lastSeenAt: FieldValue.serverTimestamp() }, { merge: true })
     .catch(() => {});
   process.exit(0);
 }

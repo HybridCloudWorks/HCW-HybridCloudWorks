@@ -19,7 +19,9 @@
  * fresh ID token containing the restored custom claims.
  */
 
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
 const path = require('path');
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ const serviceAccountPath =
 
 try {
   const serviceAccount = require(serviceAccountPath);
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+  initializeApp({ credential: cert(serviceAccount) });
   console.log('✓ Firebase Admin initialized');
 } catch (err) {
   console.error('❌ Error initializing Firebase Admin:', err.message);
@@ -53,8 +55,8 @@ try {
 }
 
 async function run() {
-  const db = admin.firestore();
-  const auth = admin.auth();
+  const db = getFirestore();
+  const auth = getAuth();
 
   // Verify the user exists in Firebase Auth
   let userRecord;

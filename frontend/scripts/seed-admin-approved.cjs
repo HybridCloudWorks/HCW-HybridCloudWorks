@@ -10,7 +10,8 @@
  * populate-firestore.cjs). Never commit that file.
  */
 
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 const path = require('path');
 
 const serviceAccountPath =
@@ -19,7 +20,7 @@ const serviceAccountPath =
 
 try {
   const serviceAccount = require(serviceAccountPath);
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+  initializeApp({ credential: cert(serviceAccount) });
   console.log('✓ Firebase Admin initialized');
 } catch (error) {
   console.error('❌ Error initializing Firebase Admin:', error.message);
@@ -32,7 +33,7 @@ const ADMIN_UIDS = [
 ];
 
 async function run() {
-  const db = admin.firestore();
+  const db = getFirestore();
   const ref = db.collection('admins').doc('approved');
 
   const existing = await ref.get();

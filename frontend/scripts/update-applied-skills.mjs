@@ -1,10 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+import { PDFParse } from 'pdf-parse';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -258,8 +255,17 @@ async function fetchCredentialBrowseResults(filter) {
 async function fetchPdfText(url) {
   const response = await fetch(url, { headers: browserHeaders, redirect: 'follow' });
   if (!response.ok) throw new Error(`PDF fetch failed for ${url}: ${response.status}`);
-  const parsed = await pdfParse(Buffer.from(await response.arrayBuffer()));
-  return parsed.text || '';
+  const parser = new PDFParse({ data: new Uint8Array(await response.arrayBuffer()) });
+  try {
+    // pageJoiner: '' suppresses the default '-- page_number of total_number --'
+    // marker pdf-parse v2 appends to every page. extractCertificationPosterEntries
+    // walks backwards from a certification code to build its title, so a marker
+    // left in the text would be absorbed into that title.
+    const parsed = await parser.getText({ pageJoiner: '' });
+    return parsed.text || '';
+  } finally {
+    await parser.destroy();
+  }
 }
 
 function extractAppliedPosterTitles(text) {
