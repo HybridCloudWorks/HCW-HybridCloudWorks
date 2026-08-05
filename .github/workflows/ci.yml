@@ -34,6 +34,10 @@ jobs:
         include:
           - name: frontend
             dir: frontend
+            # test:admin includes functions/cms-functions.test.js, which imports
+            # firebase-functions from the sibling frontend/functions package.
+            # Without its node_modules the suite fails on a missing module.
+            extra_install: frontend/functions
             build: npm run build
             test: npm run test:admin
           - name: functions (azure)
@@ -70,6 +74,11 @@ jobs:
       # when the lockfile is out of sync with package.json, which is exactly
       # how a bad dependency bump shows up.
       - name: Install (lockfile-strict)
+        run: npm ci
+
+      - name: Install sibling package required by tests
+        if: matrix.extra_install != ''
+        working-directory: ${{ matrix.extra_install }}
         run: npm ci
 
       - name: Build
