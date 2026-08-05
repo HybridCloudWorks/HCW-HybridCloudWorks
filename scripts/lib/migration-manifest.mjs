@@ -163,7 +163,21 @@ export const COLLECTIONS = [
   {
     name: 'listen_and_learn',
     disposition: 'migrate',
-    subcollections: [{ name: 'episodes', container: 'listen_and_learn_episodes' }],
+    subcollections: [
+      {
+        name: 'episodes',
+        container: 'listen_and_learn_episodes',
+        // The exam-area SLUG is the document id, scoped per set, and
+        // listen-and-learn/publish.js:97-98 says so in its own comment:
+        // "Regeneration is idempotent because the doc id is the area slug."
+        // Sets are `${provider}_${examCode}` (publish.js:27-29), so there are
+        // many, and area slugs recur across certifications constantly
+        // (monitor-and-optimize, implement-workloads, …).
+        partitionKey: '/setId',
+        partitionKeyFromParent: 'setId',
+        note: 'Ids are exam-area slugs, unique only within a set.',
+      },
+    ],
   },
 
   // --- Architecture / frameworks -------------------------------------------
@@ -213,12 +227,16 @@ export const COLLECTIONS = [
   { name: '_snapshots', disposition: 'migrate', note: 'Leading underscore is legal in Cosmos container names.' },
 
   // --- Social --------------------------------------------------------------
-  { name: 'social_posts', disposition: 'migrate', note: '~15 docs.' },
-  { name: 'social_workspaces', disposition: 'migrate' },
-  { name: 'social_libraries', disposition: 'migrate' },
-  { name: 'social_library_items', disposition: 'migrate' },
-  { name: 'social_schedule_slots', disposition: 'migrate' },
-  { name: 'social_analytics', disposition: 'migrate' },
+  { name: 'social_posts', disposition: 'migrate', note: '~15 docs. 5 call sites — the only live one of the social_* set.' },
+  // The remaining social_* collections have a firestore.rules match
+  // (rules:105-135) but ZERO collection() call sites anywhere in Site-Main's
+  // src/ or functions/. That is the definition of `probe` — provisioning and
+  // migrating five containers nothing touches. The preflight decides.
+  { name: 'social_workspaces', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
+  { name: 'social_libraries', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
+  { name: 'social_library_items', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
+  { name: 'social_schedule_slots', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
+  { name: 'social_analytics', disposition: 'probe', note: 'No call sites in Site-Main; rules match only.' },
   { name: 'telegram_bot_activity', disposition: 'migrate' },
   { name: 'plaud_ingest', disposition: 'probe', note: 'One call site, no rules match.' },
 
@@ -237,14 +255,35 @@ export const COLLECTIONS = [
       {
         name: 'sets',
         container: 'image_prompts_sets',
-        note: 'Deliberately NOT `image_prompt_sets` — that name is already a distinct top-level collection.',
+        // The set NAME is the document id, scoped per page:
+        // `doc(db, 'image_prompts', pageDocId, 'sets', normalizedSetName)`
+        // (useImagePrompts.js:94). The same set name recurs under many pages —
+        // findLegacySetByName (useImagePrompts.js:121-175) exists precisely
+        // because it does. Under /id those would overwrite each other.
+        partitionKey: '/pageId',
+        partitionKeyFromParent: 'pageId',
+        note: 'Deliberately NOT `image_prompt_sets` — that name is already a distinct top-level collection. Ids are set names, unique only within a page.',
       },
     ],
   },
   {
     name: 'image_prompt_sets',
     disposition: 'migrate',
-    subcollections: [{ name: 'prompts', container: 'image_prompt_sets_prompts' }],
+    subcollections: [
+      {
+        name: 'prompts',
+        container: 'image_prompt_sets_prompts',
+        // The prompt NAME is the document id, scoped per set:
+        // `.collection('image_prompt_sets').doc(normalizedSetName)
+        //  .collection('prompts').doc(normalizedPromptName)`
+        // (cms-functions.js:5684-5688). The whole point of a set is to hold the
+        // same named prompt roles — hero, cover, thumbnail — so collisions
+        // across sets are the expected steady state, not an edge case.
+        partitionKey: '/setName',
+        partitionKeyFromParent: 'setName',
+        note: 'Ids are prompt names, unique only within a set.',
+      },
+    ],
   },
   { name: 'image_prompt_pages', disposition: 'migrate' },
   { name: 'generated_content_images', disposition: 'migrate' },

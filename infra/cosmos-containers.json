@@ -9,6 +9,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -22,6 +23,7 @@
       "excluded_paths": [
         "/*"
       ],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -31,6 +33,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -40,6 +43,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -49,6 +53,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -58,6 +63,22 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [
+        [
+          {
+            "path": "/provider",
+            "order": "ascending"
+          },
+          {
+            "path": "/active",
+            "order": "ascending"
+          },
+          {
+            "path": "/generatedAt",
+            "order": "descending"
+          }
+        ]
+      ],
       "note": null
     },
     {
@@ -67,6 +88,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -76,6 +98,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -89,6 +112,7 @@
       "excluded_paths": [
         "/*"
       ],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -103,6 +127,7 @@
         "/contentPlainText/*",
         "/scraped/*"
       ],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -112,6 +137,28 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [
+        [
+          {
+            "path": "/type",
+            "order": "ascending"
+          },
+          {
+            "path": "/pubDate",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/source",
+            "order": "ascending"
+          },
+          {
+            "path": "/pubDate",
+            "order": "descending"
+          }
+        ]
+      ],
       "note": null
     },
     {
@@ -121,6 +168,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -130,6 +178,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -139,6 +188,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -148,6 +198,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -157,6 +208,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -166,6 +218,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -175,6 +228,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "subcollection of config"
     },
     {
@@ -184,6 +238,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "subcollection of config"
     },
     {
@@ -193,6 +248,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "subcollection of config"
     },
     {
@@ -207,6 +263,110 @@
         "/contentPlainText/*",
         "/scraped/*"
       ],
+      "composite_indexes": [
+        [
+          {
+            "path": "/Live",
+            "order": "ascending"
+          },
+          {
+            "path": "/scheduledPublishDate",
+            "order": "ascending"
+          }
+        ],
+        [
+          {
+            "path": "/type",
+            "order": "ascending"
+          },
+          {
+            "path": "/Live",
+            "order": "ascending"
+          },
+          {
+            "path": "/publishedAt",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/source",
+            "order": "ascending"
+          },
+          {
+            "path": "/fetchedAt",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/contentStatus",
+            "order": "ascending"
+          },
+          {
+            "path": "/updatedAt",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/contentStatus",
+            "order": "ascending"
+          },
+          {
+            "path": "/fetchedAt",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/contentStatus",
+            "order": "ascending"
+          },
+          {
+            "path": "/fetchedAt",
+            "order": "ascending"
+          }
+        ],
+        [
+          {
+            "path": "/Live",
+            "order": "ascending"
+          },
+          {
+            "path": "/contentStatus",
+            "order": "ascending"
+          },
+          {
+            "path": "/blogPublishedAt",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/Live",
+            "order": "ascending"
+          },
+          {
+            "path": "/contentStatus",
+            "order": "ascending"
+          },
+          {
+            "path": "/updatedAt",
+            "order": "descending"
+          }
+        ],
+        [
+          {
+            "path": "/Live",
+            "order": "ascending"
+          },
+          {
+            "path": "/publishedAt",
+            "order": "descending"
+          }
+        ]
+      ],
       "note": null
     },
     {
@@ -216,6 +376,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -230,7 +391,8 @@
         "/contentPlainText/*",
         "/scraped/*"
       ],
-      "note": "subcollection of content"
+      "composite_indexes": [],
+      "note": "subcollection of content — Editor version history. Written server-side on every save; read by VersionHistoryDialog.jsx scoped to one parent. Not covered by an explicit rules match."
     },
     {
       "name": "curated_article_images",
@@ -239,6 +401,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -248,6 +411,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -257,6 +421,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [
+        [
+          {
+            "path": "/status",
+            "order": "ascending"
+          },
+          {
+            "path": "/order",
+            "order": "ascending"
+          }
+        ]
+      ],
       "note": null
     },
     {
@@ -266,6 +442,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -275,6 +452,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -284,6 +462,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -293,16 +472,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
       "name": "image_prompt_sets_prompts",
-      "partition_key_path": "/id",
+      "partition_key_path": "/setName",
       "included_paths": [
         "/*"
       ],
       "excluded_paths": [],
-      "note": "subcollection of image_prompt_sets"
+      "composite_indexes": [],
+      "note": "subcollection of image_prompt_sets — Ids are prompt names, unique only within a set."
     },
     {
       "name": "image_prompts",
@@ -311,16 +492,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
       "name": "image_prompts_sets",
-      "partition_key_path": "/id",
+      "partition_key_path": "/pageId",
       "included_paths": [
         "/*"
       ],
       "excluded_paths": [],
-      "note": "subcollection of image_prompts"
+      "composite_indexes": [],
+      "note": "subcollection of image_prompts — Deliberately NOT `image_prompt_sets` — that name is already a distinct top-level collection. Ids are set names, unique only within a page."
     },
     {
       "name": "lab_agents",
@@ -329,6 +512,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -343,6 +527,22 @@
       "excluded_paths": [
         "/*"
       ],
+      "composite_indexes": [
+        [
+          {
+            "path": "/status",
+            "order": "ascending"
+          },
+          {
+            "path": "/type",
+            "order": "ascending"
+          },
+          {
+            "path": "/createdAt",
+            "order": "ascending"
+          }
+        ]
+      ],
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -352,6 +552,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -361,16 +562,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
       "name": "listen_and_learn_episodes",
-      "partition_key_path": "/id",
+      "partition_key_path": "/setId",
       "included_paths": [
         "/*"
       ],
       "excluded_paths": [],
-      "note": "subcollection of listen_and_learn"
+      "composite_indexes": [],
+      "note": "subcollection of listen_and_learn — Ids are exam-area slugs, unique only within a set."
     },
     {
       "name": "mcp_servers",
@@ -379,6 +582,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -388,6 +592,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -397,6 +602,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -406,6 +612,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [
+        [
+          {
+            "path": "/provider",
+            "order": "ascending"
+          },
+          {
+            "path": "/publishedAt",
+            "order": "descending"
+          }
+        ]
+      ],
       "note": null
     },
     {
@@ -415,6 +633,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -424,6 +643,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -433,6 +653,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -442,6 +663,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -451,6 +673,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [
+        [
+          {
+            "path": "/archived",
+            "order": "ascending"
+          },
+          {
+            "path": "/sortOrder",
+            "order": "ascending"
+          }
+        ]
+      ],
       "note": null
     },
     {
@@ -460,6 +694,18 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [
+        [
+          {
+            "path": "/provider",
+            "order": "ascending"
+          },
+          {
+            "path": "/lastFetched",
+            "order": "descending"
+          }
+        ]
+      ],
       "note": "cache — refilled by a scheduled job, not migrated"
     },
     {
@@ -469,33 +715,7 @@
         "/*"
       ],
       "excluded_paths": [],
-      "note": null
-    },
-    {
-      "name": "social_analytics",
-      "partition_key_path": "/id",
-      "included_paths": [
-        "/*"
-      ],
-      "excluded_paths": [],
-      "note": null
-    },
-    {
-      "name": "social_libraries",
-      "partition_key_path": "/id",
-      "included_paths": [
-        "/*"
-      ],
-      "excluded_paths": [],
-      "note": null
-    },
-    {
-      "name": "social_library_items",
-      "partition_key_path": "/id",
-      "included_paths": [
-        "/*"
-      ],
-      "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -505,24 +725,18 @@
         "/*"
       ],
       "excluded_paths": [],
-      "note": null
-    },
-    {
-      "name": "social_schedule_slots",
-      "partition_key_path": "/id",
-      "included_paths": [
-        "/*"
+      "composite_indexes": [
+        [
+          {
+            "path": "/status",
+            "order": "ascending"
+          },
+          {
+            "path": "/createdAt",
+            "order": "descending"
+          }
+        ]
       ],
-      "excluded_paths": [],
-      "note": null
-    },
-    {
-      "name": "social_workspaces",
-      "partition_key_path": "/id",
-      "included_paths": [
-        "/*"
-      ],
-      "excluded_paths": [],
       "note": null
     },
     {
@@ -532,6 +746,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -541,6 +756,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -550,6 +766,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -559,6 +776,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -568,6 +786,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -577,6 +796,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -586,6 +806,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "transient runtime state — written at runtime, not migrated"
     },
     {
@@ -595,6 +816,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -604,6 +826,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -613,6 +836,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "cache — refilled by a scheduled job, not migrated"
     },
     {
@@ -622,6 +846,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": "seed data — re-seeded on the far side, not migrated"
     },
     {
@@ -631,6 +856,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -640,6 +866,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -649,6 +876,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -658,6 +886,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     },
     {
@@ -667,6 +896,7 @@
         "/*"
       ],
       "excluded_paths": [],
+      "composite_indexes": [],
       "note": null
     }
   ]

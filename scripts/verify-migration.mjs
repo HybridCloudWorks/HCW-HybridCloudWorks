@@ -126,43 +126,80 @@ function pickSample(docs, n) {
 // Main
 // ---------------------------------------------------------------------------
 
+/**
+ * A document's identity in Cosmos is (partition key value, id) — `id` alone is
+ * only unique within a logical partition.
+ *
+ * This matters for the containers partitioned by a parent. `content_versions`,
+ * `image_prompts_sets`, `image_prompt_sets_prompts` and
+ * `listen_and_learn_episodes` all carry ids that are unique only within their
+ * parent — a set name, a prompt name, an exam-area slug — and coexisting under
+ * different parents is the whole reason they are partitioned that way. Keying
+ * this comparison on `id` alone would collapse those into one entry, so
+ * existence parity would silently stop meaning anything while still reporting
+ * a pass.
+ */
+function identityOf(doc, target) {
+  const partitionValue = target.partitionKeyFromParent ? doc[target.partitionKeyFromParent] : doc.id;
+  return { partitionValue, key: `${partitionValue}\u0000${doc.id}` };
+}
+
 async function verifyContainer(cosmos, target, sourceDocs) {
   const container = cosmos.database.container(target.container);
+  const pkField = target.partitionKeyFromParent;
 
   const { resources: countRows } = await withRetry(() =>
     container.items.query('SELECT VALUE COUNT(1) FROM c').fetchAll()
   );
   const targetCount = countRows[0] ?? 0;
 
-  const { resources: targetIds } = await withRetry(() =>
-    container.items.query('SELECT VALUE c.id FROM c').fetchAll()
-  );
-  const targetIdSet = new Set(targetIds);
-  const sourceIdSet = new Set(sourceDocs.map((d) => d.id));
+  // Project the partition key alongside the id so identity can be compared as
+  // the pair Cosmos actually enforces.
+  const projection = pkField ? `SELECT c.id, c.${pkField} FROM c` : 'SELECT c.id FROM c';
+  const { resources: targetRows } = await withRetry(() => container.items.query(projection).fetchAll());
 
-  const missing = [...sourceIdSet].filter((id) => !targetIdSet.has(id));
-  const extra = [...targetIdSet].filter((id) => !sourceIdSet.has(id));
+  const targetKeys = new Map(
+    targetRows.map((row) => {
+      const { key } = identityOf(row, target);
+      return [key, row];
+    })
+  );
+  const sourceKeys = new Map(sourceDocs.map((d) => [identityOf(d, target).key, d]));
+
+  const describe = (doc) => (pkField ? `${doc[pkField]}/${doc.id}` : doc.id);
+
+  const missing = [...sourceKeys.values()].filter((d) => !targetKeys.has(identityOf(d, target).key)).map(describe);
+  const extra = [...targetKeys.values()].filter((r) => !sourceKeys.has(identityOf(r, target).key)).map(describe);
 
   // Field-level spot checks.
   const sample = pickSample(sourceDocs, sampleSize);
   const fieldMismatches = [];
 
   for (const expected of sample) {
-    if (!targetIdSet.has(expected.id)) continue;
+    const { partitionValue, key } = identityOf(expected, target);
+    if (!targetKeys.has(key)) continue;
 
-    const { resources } = await withRetry(() =>
-      container.items
-        .query({ query: 'SELECT * FROM c WHERE c.id = @id', parameters: [{ name: '@id', value: expected.id }] })
-        .fetchAll()
-    );
+    // Point read rather than a query. Under /id this is 1 RU instead of a
+    // cross-partition scan; under a parent key it is also the only way to read
+    // the right document, since `WHERE c.id = @id` can now match several.
+    let actual = null;
+    try {
+      const { resource } = await withRetry(() => container.item(expected.id, partitionValue).read());
+      actual = resource ?? null;
+    } catch (err) {
+      if (err.code !== 404 && err.statusCode !== 404) throw err;
+    }
 
-    if (resources.length === 0) {
-      fieldMismatches.push({ id: expected.id, differences: [{ path: '(document)', expected: 'present', actual: 'not readable' }] });
+    if (!actual) {
+      fieldMismatches.push({
+        id: describe(expected),
+        differences: [{ path: '(document)', expected: 'present', actual: 'not readable' }],
+      });
       continue;
     }
 
-    const differences = diffPaths(expected, stripSystem(resources[0]));
-    if (differences.length) fieldMismatches.push({ id: expected.id, differences });
+    const differences = diffPaths(expected, stripSystem(actual));
+    if (differences.length) fieldMismatches.push({ id: describe(expected), differences });
   }
 
   return {

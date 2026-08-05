@@ -179,17 +179,24 @@ async function runExport() {
       // A flattened subcollection partitioned by its parent needs that parent's
       // id as a real field on the document — Cosmos partitions on a document
       // property, and `content/{id}/versions` carries no such field of its own.
+      //
+      // There is no safe fallback here. A synthesised partition key would put
+      // every affected document into one logical partition, which collapses id
+      // uniqueness back to global within it and recreates exactly the
+      // hot-partition shape the manifest exists to avoid — silently, with a
+      // zero exit code. Fail the export instead; the source is still there to
+      // re-read, so failing costs nothing and shipping a wrong key costs a
+      // container recreate.
       if (target.partitionKeyFromParent) {
         const parentId = source.parentPath?.split('/').pop();
         if (!parentId) {
-          allWarnings.push({
-            container: target.container,
-            code: 'missing-parent',
-            detail: `${source.id} has no parent path; cannot populate partition key ${target.partitionKeyFromParent}`,
-          });
-          warned += 1;
+          throw new Error(
+            `${target.container}: document ${source.id} has no parent path, so partition key ` +
+              `${target.partitionKeyFromParent} cannot be derived. ` +
+              `partitionKeyFromParent is only valid on a subcollection target.`
+          );
         }
-        doc[target.partitionKeyFromParent] = parentId ?? 'orphaned';
+        doc[target.partitionKeyFromParent] = parentId;
       }
 
       // Two source documents that sanitise to the same Cosmos id would silently
@@ -204,7 +211,7 @@ async function runExport() {
       const partitionValue = target.partitionKeyFromParent
         ? doc[target.partitionKeyFromParent]
         : doc.id;
-      const uniquenessKey = `${partitionValue} ${doc.id}`;
+      const uniquenessKey = `${partitionValue}\u0000${doc.id}`;
 
       if (seen.has(uniquenessKey)) {
         allWarnings.push({

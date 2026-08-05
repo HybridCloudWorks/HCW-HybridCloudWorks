@@ -227,9 +227,26 @@ The conversion the tooling had was one level deep, so a `Timestamp` nested insid
 array still went across as `{_seconds, _nanoseconds}` — the same defect, one level down. It is now
 recursive and covers `Timestamp`, `GeoPoint`, `DocumentReference` and `Bytes` at any depth.
 
-**One irreversible decision needs sign-off before the first Terraform apply:** 70 Cosmos containers
-are partitioned on `/id`, and `content_versions` on `/contentId`. A partition key path cannot be
-changed once the container holds data.
+**Three interlocking irreversible decisions need sign-off before the first Terraform apply.** They
+are usually presented separately; they should be read together, because each one constrains the
+others:
+
+1. **Serverless capacity mode.** Converting to provisioned throughput is one-way, and the conversion
+   formula is `RU/s = partitions × 5000` — at 66 containers that is ~330,000 RU/s provisioned at
+   once, with a hand-scaled floor of 400 RU/s per container. Serverless is also single-region for
+   life; regions cannot be added later.
+2. **One container per Firestore collection.** Reversing it means a re-import. It is the right call
+   *because* the account is serverless — idle containers are free, and it preserves the
+   per-container indexing policies and the 1:1 verification the tooling is built on. If the capacity
+   mode ever changes, consolidation must happen first, in the same project.
+3. **Partition keys.** 62 containers on `/id`; four flattened subcollections keyed by their parent.
+
+The partition key choice for those four is a **correctness** matter, not tuning: `content_versions`,
+`image_prompts_sets`, `image_prompt_sets_prompts` and `listen_and_learn_episodes` each assign
+document ids that are unique only within their parent — a set name, a prompt name, an exam-area
+slug. `listen_and_learn/publish.js:97` says so in its own comment: *"the doc id is the area slug."*
+Flattened into one container under `/id`, those documents silently overwrite each other on upsert —
+no error, no 409, no log line.
 
 The previous keys were not merely suboptimal, they were wrong: `generated_content_images` used
 `/contentId` on a field written as the empty string on every document (`cms-functions.js:3139`),

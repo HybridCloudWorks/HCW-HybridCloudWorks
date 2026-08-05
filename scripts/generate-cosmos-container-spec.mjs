@@ -59,6 +59,53 @@ const INDEXING_OVERRIDES = {
   lab_jobs: { included: ['/status/?', '/type/?', '/createdAt/?', '/agentId/?'], excluded: ['/*'] },
 };
 
+/**
+ * Composite indexes, transcribed 1:1 from Site-Main's
+ * `platform/firebase/firestore.indexes.json` (18 composites, read at commit
+ * 07f3123). That file is a specification of exactly which multi-property sorts
+ * the application performs, so it is the right source for these.
+ *
+ * This is not an optimisation. Cosmos requires a composite index for an
+ * ORDER BY over two or more properties — without one the query does not run
+ * slowly, it fails. Declaring them up front avoids discovering each missing
+ * index as a production error during the API port.
+ *
+ * Firestore ASCENDING/DESCENDING map to Cosmos ascending/descending. Cosmos
+ * also needs the mirrored form for a reversed sort, but the SDK handles the
+ * full reversal automatically, so only the declared direction is listed.
+ *
+ * Note `episodes` here is the TOP-LEVEL episodes collection, which is what the
+ * Firestore index targets; `listen_and_learn_episodes` is a different thing.
+ */
+const COMPOSITE_INDEXES = {
+  content: [
+    [['Live', 'ascending'], ['scheduledPublishDate', 'ascending']],
+    [['type', 'ascending'], ['Live', 'ascending'], ['publishedAt', 'descending']],
+    [['source', 'ascending'], ['fetchedAt', 'descending']],
+    [['contentStatus', 'ascending'], ['updatedAt', 'descending']],
+    [['contentStatus', 'ascending'], ['fetchedAt', 'descending']],
+    [['contentStatus', 'ascending'], ['fetchedAt', 'ascending']],
+    [['Live', 'ascending'], ['contentStatus', 'ascending'], ['blogPublishedAt', 'descending']],
+    [['Live', 'ascending'], ['contentStatus', 'ascending'], ['updatedAt', 'descending']],
+    [['Live', 'ascending'], ['publishedAt', 'descending']],
+  ],
+  episodes: [[['status', 'ascending'], ['order', 'ascending']]],
+  rss_cache: [[['provider', 'ascending'], ['lastFetched', 'descending']]],
+  ai_insights: [
+    [['provider', 'ascending'], ['active', 'ascending'], ['generatedAt', 'descending']],
+  ],
+  podcasts: [[['provider', 'ascending'], ['publishedAt', 'descending']]],
+  certEvents: [
+    [['type', 'ascending'], ['pubDate', 'descending']],
+    [['source', 'ascending'], ['pubDate', 'descending']],
+  ],
+  social_posts: [[['status', 'ascending'], ['createdAt', 'descending']]],
+  roadmap_items: [[['archived', 'ascending'], ['sortOrder', 'ascending']]],
+  lab_jobs: [
+    [['status', 'ascending'], ['type', 'ascending'], ['createdAt', 'ascending']],
+  ],
+};
+
 /** Why a container exists when no documents are migrated into it. */
 const DISPOSITION_NOTE = {
   reseed: 'seed data — re-seeded on the far side, not migrated',
@@ -76,6 +123,9 @@ function build() {
       partition_key_path: partitionKey,
       included_paths: override.included,
       excluded_paths: override.excluded,
+      composite_indexes: (COMPOSITE_INDEXES[name] ?? []).map((index) =>
+        index.map(([path, order]) => ({ path: `/${path}`, order }))
+      ),
       note: note ?? null,
     });
   };
@@ -84,10 +134,13 @@ function build() {
     if (!PROVISIONED_DISPOSITIONS.has(entry.disposition)) continue;
     add(entry.name, entry.partitionKey ?? DEFAULT_PARTITION_KEY, DISPOSITION_NOTE[entry.disposition] ?? null);
     for (const sub of entry.subcollections ?? []) {
+      // Carry the manifest's own note through — infra/cosmos-containers.json is
+      // the file an operator reads, and for a container with a non-default
+      // partition key "subcollection of content" alone explains nothing.
       add(
         sub.container,
         sub.partitionKey ?? DEFAULT_PARTITION_KEY,
-        `subcollection of ${entry.name}`
+        [`subcollection of ${entry.name}`, sub.note].filter(Boolean).join(' — ')
       );
     }
   }

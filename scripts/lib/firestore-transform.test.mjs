@@ -197,18 +197,58 @@ describe('migration manifest', () => {
     expect([...dispositions]).toEqual(['migrate']);
   });
 
-  it('partitions content_versions by its parent, not by /id', () => {
-    // Every read of version history is scoped to one content document, and it
-    // is the only container that grows without bound.
-    const versions = flattenManifest().find((t) => t.container === 'content_versions');
-    expect(versions.partitionKey).toBe('/contentId');
-    expect(versions.partitionKeyFromParent).toBe('contentId');
+  // Flattening a subcollection into its own container makes document ids
+  // globally scoped, but these four collections assign ids that are unique only
+  // within their parent — a set name, a prompt name, an exam-area slug. Under
+  // /id they would silently overwrite each other on upsert.
+  it.each([
+    ['content_versions', '/contentId', 'contentId'],
+    ['image_prompts_sets', '/pageId', 'pageId'],
+    ['image_prompt_sets_prompts', '/setName', 'setName'],
+    ['listen_and_learn_episodes', '/setId', 'setId'],
+  ])('partitions %s by its parent', (container, partitionKey, field) => {
+    const target = flattenManifest().find((t) => t.container === container);
+    expect(target.partitionKey).toBe(partitionKey);
+    expect(target.partitionKeyFromParent).toBe(field);
+  });
+
+  it('keeps the config_* subcollections on /id — one parent means no collision', () => {
+    // Each config_* container has a single fixed parentDoc, so no two documents
+    // can share an id across parents. /id is correct there.
+    for (const container of ['config_providers', 'config_tags', 'config_settings']) {
+      const target = flattenManifest().find((t) => t.container === container);
+      expect(target.partitionKey).toBe(DEFAULT_PARTITION_KEY);
+      expect(target.partitionKeyFromParent).toBeNull();
+    }
   });
 
   it('partitions everything else on /id', () => {
-    const others = flattenManifest().filter((t) => t.container !== 'content_versions');
+    const parentKeyed = new Set([
+      'content_versions',
+      'image_prompts_sets',
+      'image_prompt_sets_prompts',
+      'listen_and_learn_episodes',
+    ]);
+    const others = flattenManifest().filter((t) => !parentKeyed.has(t.container));
     expect([...new Set(others.map((t) => t.partitionKey))]).toEqual([DEFAULT_PARTITION_KEY]);
     expect(others.every((t) => t.partitionKeyFromParent === null)).toBe(true);
+  });
+
+  it('does not migrate the social_* collections that have no writer', () => {
+    // firestore.rules matches them, but Site-Main has zero collection() call
+    // sites for any of them. social_posts, which has five, stays.
+    const migrated = flattenManifest().map((t) => t.container);
+    for (const dead of [
+      'social_workspaces',
+      'social_libraries',
+      'social_library_items',
+      'social_schedule_slots',
+      'social_analytics',
+    ]) {
+      expect(migrated).not.toContain(dead);
+      expect(provisionedContainers()).not.toContain(dead);
+    }
+    expect(migrated).toContain('social_posts');
   });
 });
 

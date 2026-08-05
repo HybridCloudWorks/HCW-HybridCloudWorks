@@ -86,6 +86,29 @@ resource "azurerm_cosmosdb_account" "hcw" {
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
 
+  # Serverless is NOT only a cost choice here — it is what makes the
+  # container-per-collection shape below viable. Read this before changing it.
+  #
+  # Converting serverless -> provisioned throughput is IRREVERSIBLE, and the
+  # documented conversion formula is `RU/s = number of partitions * 5000`. At
+  # 66 containers that lands ~330,000 RU/s of manual throughput at once, and
+  # even after scaling every container down by hand the floor is 400 RU/s each.
+  # A consolidated design (a handful of containers with a type discriminator)
+  # would floor roughly an order of magnitude lower.
+  #
+  # Serverless is also single-region for life: regions cannot be added after
+  # account creation, and there is no autoscale.
+  #
+  # So three irreversible decisions are load-bearing on each other: serverless
+  # capacity mode, one container per Firestore collection, and the per-container
+  # partition keys. On serverless, empty and idle containers cost nothing, so
+  # 66 containers is genuinely free today and keeps the per-container indexing
+  # policies and the 1:1 verification story that scripts/verify-migration.mjs
+  # is built on.
+  #
+  # Trigger condition: if multi-region, autoscale, or provisioned throughput is
+  # ever required, container consolidation happens in the SAME project, before
+  # the capacity-mode change — not after it.
   capabilities {
     name = "EnableServerless"
   }
@@ -120,16 +143,22 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Do not add containers here by hand — add the collection to the manifest and
 # regenerate, or Terraform, the migrator and the verifier drift apart again.
 #
-# Partition keys come from the manifest and are 70x /id plus content_versions
-# on /contentId. The short version: the Site-Main query load does not group by
-# anything (one of ~40 content query sites filters on a provider), the whole
-# dataset is ~1,100 small documents in one physical partition per container, and
-# the previous "natural" keys were wrong on their own merits — /contentId was
-# written as the empty string on every document, /status on lab_jobs is mutable
-# and a partition key value cannot be changed in place, and /agentId on
-# lab_agents is identical to /id by construction. content_versions is the
-# exception because every read is scoped to one parent content document and it
-# is the only container that grows without bound.
+# Partition keys come from the manifest: 62 on /id, and four flattened
+# subcollections keyed by their parent (content_versions on /contentId,
+# image_prompts_sets on /pageId, image_prompt_sets_prompts on /setName,
+# listen_and_learn_episodes on /setId).
+#
+# /id is right for the rest because the Site-Main query load does not group by
+# anything — one of ~40 content query sites filters on a provider — and the
+# previous "natural" keys were wrong on their own merits: /contentId was written
+# as the empty string on every document, /status on lab_jobs is mutable and a
+# partition key value cannot be changed in place, and /agentId on lab_agents is
+# identical to /id by construction.
+#
+# The four exceptions are a CORRECTNESS matter, not a tuning one. Each assigns
+# document ids that are unique only within their parent (a set name, a prompt
+# name, an exam-area slug), so flattening them into one container under /id
+# would silently overwrite documents on upsert.
 #
 # Full evidence, with file:line citations, in the manifest header.
 #
@@ -165,6 +194,22 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
       for_each = each.value.excluded_paths
       content {
         path = excluded_path.value
+      }
+    }
+
+    # Transcribed from Site-Main's firestore.indexes.json. Cosmos REQUIRES a
+    # composite index for an ORDER BY over two or more properties — without one
+    # the query fails rather than running slowly.
+    dynamic "composite_index" {
+      for_each = each.value.composite_indexes
+      content {
+        dynamic "index" {
+          for_each = composite_index.value
+          content {
+            path  = index.value.path
+            order = index.value.order
+          }
+        }
       }
     }
   }
@@ -459,8 +504,14 @@ resource "azurerm_linux_function_app" "hcw" {
 # client would not.
 #
 # 00000000-0000-0000-0000-000000000002 is the built-in Data Contributor role.
+#
+# `name` is deliberately omitted — the provider generates a GUID and keeps it
+# stable in state. Hardcoding one is ForceNew, occupies an address we do not
+# own, and invites the copy-paste failure when a second identity (the VPS
+# agent) needs an assignment: ARM treats a PUT on an existing assignment name
+# as a replace, so a duplicated name silently REMOVES the Function App's
+# access rather than erroring.
 resource "azurerm_cosmosdb_sql_role_assignment" "func_cosmos" {
-  name                = "00000000-0000-0000-0000-000000000101"
   resource_group_name = azurerm_resource_group.hcw.name
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
