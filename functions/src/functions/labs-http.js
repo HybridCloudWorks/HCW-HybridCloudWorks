@@ -1,43 +1,48 @@
+/**
+ * labs-http.js — HTTP routes for the Labs portal (VPS agent management).
+ *
+ * Rewired from the stub-era auth-middleware (dead audience config, see
+ * cms-http.js) onto the two-gate role guard. Handler bodies unchanged pending
+ * the labs-functions.js port: job-type validation against agent capabilities
+ * is still TODO and tracked in .azure/api-surface.json.
+ */
 import { app } from '@azure/functions';
-import { requireAdminClaims, jsonResponse, errorResponse } from '../lib/auth-middleware.js';
+import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, upsertDoc } from '../lib/cosmos-client.js';
 
-/**
- * labs-http.js
- * 
- * HTTP triggers for the Labs portal (managing the VPS agent).
- * Ported from Firebase Cloud Functions.
- * 
- * TODO: Port the business logic from Personal-Site_HCW/functions/labs-functions.js
- */
+const json = (status, body) => ({
+  status,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
 
 app.http('labsSubmitJob', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'labs/jobs',
   handler: async (request, context) => {
-    try {
-      const auth = await requireAdminClaims(request, ['editor']);
-      if (auth.error) return auth.error;
+    const auth = await getDefaultGuard().requireRole(request, 'editor');
+    if (auth.error) return auth.error;
 
-      const body = await request.json();
-      // TODO: Validate job type against capabilities
-      
+    try {
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== 'object') return json(400, { error: 'Body must be a JSON object' });
+      // TODO: Validate job type against capabilities (labs-functions.js port)
+
       const newJob = {
         id: `job-${Date.now()}`,
         status: 'pending',
         createdAt: new Date().toISOString(),
-        ...body
+        ...body,
       };
-      
+
       const savedJob = await upsertDoc('lab_jobs', newJob);
-      return jsonResponse({ success: true, job: savedJob });
-      
+      return json(200, { success: true, job: savedJob });
     } catch (err) {
       context.error('labsSubmitJob error:', err);
-      return errorResponse('Failed to submit job', 500);
+      return json(500, { error: 'Failed to submit job' });
     }
-  }
+  },
 });
 
 app.http('labsGetAgents', {
@@ -45,16 +50,15 @@ app.http('labsGetAgents', {
   authLevel: 'anonymous',
   route: 'labs/agents',
   handler: async (request, context) => {
-    try {
-      const auth = await requireAdminClaims(request, ['editor']);
-      if (auth.error) return auth.error;
+    const auth = await getDefaultGuard().requireRole(request, 'editor');
+    if (auth.error) return auth.error;
 
+    try {
       const docs = await queryDocs('lab_agents', 'SELECT * FROM c');
-      return jsonResponse({ agents: docs });
-      
+      return json(200, { agents: docs });
     } catch (err) {
       context.error('labsGetAgents error:', err);
-      return errorResponse('Failed to get agents', 500);
+      return json(500, { error: 'Failed to get agents' });
     }
-  }
+  },
 });

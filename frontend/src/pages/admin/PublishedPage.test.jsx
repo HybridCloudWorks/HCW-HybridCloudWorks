@@ -81,7 +81,7 @@ describe('PublishedPage', () => {
         return sampleSnapshot;
       }
 
-      if (endpoint === 'publishContentToBlogs') {
+      if (endpoint === 'publishContent') {
         return {
           success: true,
           mappings: [
@@ -115,7 +115,7 @@ describe('PublishedPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Publish' })[0]);
 
     await waitFor(() =>
-      expect(postJSON).toHaveBeenCalledWith('publishContentToBlogs', {
+      expect(postJSON).toHaveBeenCalledWith('publishContent', {
         contentIds: ['content-1'],
         publishTarget: 'blog',
         cloudProvider: 'Azure',
@@ -158,7 +158,7 @@ describe('PublishedPage', () => {
         return sampleSnapshot;
       }
 
-      if (endpoint === 'publishContentToBlogs') {
+      if (endpoint === 'publishContent') {
         return {
           success: true,
           mappings: [

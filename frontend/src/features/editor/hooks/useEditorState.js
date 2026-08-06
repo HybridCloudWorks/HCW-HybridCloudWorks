@@ -400,7 +400,7 @@ export function useEditorState(blogId, navigate) {
 
       async function handleLiveRepublish() {
         const publishTarget = blog?.publishTarget || blog?.type || null;
-        const republishResult = await postJSON('publishContentToBlogs', {
+        const republishResult = await postJSON('publishContent', {
           contentIds: [blogId],
           publishTarget,
           cloudProvider: resolveBlogProvider(blog),

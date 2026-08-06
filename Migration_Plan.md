@@ -165,6 +165,17 @@ Everything learned there applies to the other groups.
 **Carry the secrets model across deliberately:** `defineSecret` bindings become Key Vault references
 with managed identity. No connection strings, no keys in app settings.
 
+**The port is bounded by `.azure/api-surface.json`, not by the export count.** That contract was
+derived by static extraction from `frontend/src`: the frontend invokes **50 named RPC functions**
+through `lib/api.js` (49 exist in the source; `publishContentToBlogs` is a naming drift against
+`publishContent` and must be reconciled, not carried), and **34 files touch 22 Firestore collections
+directly** — including the public architecture pages and all four submission forms. Every direct
+touch needs a REST endpoint before the frontend can be rewired, because the browser must never hold
+a Cosmos client or key. The contract lists the endpoints, what each replaces, the realtime→polling
+decision, and the auth (Firebase→MSAL) and storage (Firebase→SAS) migration file lists. Port to the
+contract; anything in the 105 exports that no frontend call reaches is dead weight until proven
+otherwise.
+
 ---
 
 ## 5. Phase 4 — data migration

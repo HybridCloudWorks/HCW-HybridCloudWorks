@@ -1,0 +1,88 @@
+/**
+ * POST /api/public/submissions — the anonymous submission endpoint.
+ *
+ * Replaces the four pages/submissions/*.jsx browser writes into Firestore.
+ * See lib/submissions.js for the contract; this file is transport only:
+ * CORS, method, identity, quota, then compose-and-store.
+ *
+ * Identity fails CLOSED in production (client-identity.js): without the
+ * Cloudflare origin secret the request is rejected rather than rate-limited
+ * on a spoofable header. That is DECISION 6 doing its job — do not soften it
+ * here.
+ */
+import { app } from '@azure/functions';
+import { createCors } from '../lib/auth/cors.js';
+import { createClientIdentity } from '../lib/auth/client-identity.js';
+import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
+import { validateSubmission, composeSubmissionDoc, enforceSubmissionQuota } from '../lib/submissions.js';
+
+const json = (status, body, headers = {}) => ({
+  status,
+  headers: { 'Content-Type': 'application/json', ...headers },
+  body: JSON.stringify(body),
+});
+
+/**
+ * @param {object} [deps] test seam; production uses the real modules
+ */
+export function createSubmissionsHandler({
+  cors = createCors(),
+  identity = createClientIdentity(),
+  store = { readDoc, upsertDoc },
+  now = Date.now,
+} = {}) {
+  return async function handleSubmission(request, context) {
+    const cv = cors.evaluate(request);
+    if (cv.response) return { ...cv.response };
+
+    if (String(request.method).toUpperCase() !== 'POST') {
+      return json(405, { ok: false, error: 'POST only' }, cv.headers);
+    }
+
+    let clientKey;
+    try {
+      clientKey = identity.anonymousKey(request).key;
+    } catch {
+      // Origin not verifiably Cloudflare and not in dev: refuse, and say why
+      // in the log but not to the caller.
+      context.warn('submission rejected: unverified origin');
+      return json(403, { ok: false, error: 'Forbidden' }, cv.headers);
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { ok: false, error: 'Body must be valid JSON' }, cv.headers);
+    }
+
+    const validated = validateSubmission(body);
+    if (validated.error) {
+      return json(400, { ok: false, error: validated.error }, cv.headers);
+    }
+
+    try {
+      await enforceSubmissionQuota(store, clientKey, { now: now() });
+    } catch (err) {
+      if (err.code === 'SUBMISSION_RATE_LIMIT') {
+        return json(429, { ok: false, error: err.message }, { ...cv.headers, 'Retry-After': '3600' });
+      }
+      throw err;
+    }
+
+    const doc = composeSubmissionDoc(validated.value, {
+      nowIso: new Date(now()).toISOString(),
+    });
+    await store.upsertDoc('content', doc);
+
+    context.log(`submission accepted: type=${doc.type} id=${doc.id}`);
+    return json(201, { ok: true, id: doc.id }, cv.headers);
+  };
+}
+
+app.http('publicSubmitContent', {
+  methods: ['POST', 'OPTIONS'],
+  authLevel: 'anonymous',
+  route: 'public/submissions',
+  handler: createSubmissionsHandler(),
+});
