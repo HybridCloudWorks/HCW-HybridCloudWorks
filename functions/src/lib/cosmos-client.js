@@ -66,8 +66,18 @@ export async function readDoc(containerName, id, partitionKey) {
 }
 
 /**
- * Write or replace a document (upsert).
- * Equivalent to: admin.firestore().collection(name).doc(id).set(data, { merge: true })
+ * Write or REPLACE a document.
+ *
+ * NOT equivalent to `.set(data, { merge: true })` — this comment used to say it
+ * was, and that was wrong in the most expensive direction. `items.upsert()`
+ * replaces the whole document: every field absent from `document` is deleted.
+ *
+ * Site-Main has 48 partial-write call sites (31 `.update()`, 17
+ * `set(..., { merge: true })`). Porting any of them onto this function the way
+ * the old comment invited silently wipes every field the payload omits, with no
+ * error and no test failure. Use `patchDoc` for those.
+ *
+ * Equivalent to: admin.firestore().collection(name).doc(id).set(data)
  *
  * @param {string} containerName
  * @param {object} document - must include 'id' field
@@ -77,6 +87,175 @@ export async function upsertDoc(containerName, document) {
   const container = getContainer(containerName);
   const { resource } = await container.items.upsert(document);
   return resource;
+}
+
+/**
+ * Cosmos rejects a patch specification with more than ten operations:
+ * "The number of patch operations can't exceed 10."
+ * https://learn.microsoft.com/azure/cosmos-db/partial-document-update-faq
+ */
+export const MAX_PATCH_OPERATIONS = 10;
+
+/** Cosmos refuses to patch these, and Firestore never exposed them. */
+const SYSTEM_PROPERTIES = new Set(['id', '_id', '_ts', '_etag', '_rid', '_self', '_attachments']);
+
+/**
+ * Convert a Firestore field path to a JSON Pointer.
+ *
+ * Firestore addresses nested fields with dots — `.update({ 'a.b': 1 })` — while
+ * Cosmos wants `/a/b`. Per RFC 6902, `~` and `/` inside a property NAME escape
+ * to `~0` and `~1`; the escaping must happen per segment, after the split, or a
+ * legitimate dotted path would escape its own separators.
+ */
+export function toJsonPointer(fieldPath) {
+  return `/${String(fieldPath)
+    .split('.')
+    .map((segment) => segment.replace(/~/g, '~0').replace(/\//g, '~1'))
+    .join('/')}`;
+}
+
+/**
+ * Partially update a document, leaving absent fields untouched.
+ *
+ * Equivalent to: admin.firestore().collection(name).doc(id).update(updates)
+ *
+ * Two execution paths, because Cosmos's patch API cannot express Firestore's
+ * update semantics in every case:
+ *
+ *  - **Patch** (<= 10 operations, no deletions). One round trip, and
+ *    conflict-resolved per PATH across regions rather than per document, so two
+ *    writers touching different fields do not clobber each other.
+ *  - **Read-modify-write with ETag** otherwise. Used when the update exceeds the
+ *    ten-operation ceiling, or deletes a field. Deletion needs this because
+ *    Cosmos `remove` FAILS on an absent path ("Node(PATH) to be removed is
+ *    absent") while Firestore's `FieldValue.delete()` on a missing field is a
+ *    no-op — routing deletions through RMW keeps the Firestore behaviour that 48
+ *    call sites already depend on.
+ *
+ * The RMW path is guarded by `_etag` (`ifMatch`), so a concurrent write loses
+ * with a 412 rather than silently overwriting. It retries once, because the
+ * common case is two handlers touching the same document in the same second.
+ *
+ * Chunking a >10-operation update into several patch calls is deliberately NOT
+ * done: it would drop atomicity silently, which is the same class of bug as the
+ * upsert-as-merge comment above.
+ *
+ * @param {string} containerName
+ * @param {string} id
+ * @param {Record<string, any>} updates - field path -> value. `undefined` deletes.
+ * @param {object} [options]
+ * @param {string} [options.partitionKey] - defaults to id
+ * @returns {Promise<object>} the document after the write
+ */
+export async function patchDoc(containerName, id, updates, options = {}) {
+  const plan = planPatch(updates);
+  if (plan.strategy === 'noop') {
+    return readDoc(containerName, id, options.partitionKey);
+  }
+
+  const container = getContainer(containerName);
+  const pk = options.partitionKey ?? id;
+
+  if (plan.strategy === 'patch') {
+    const { resource } = await container.item(id, pk).patch(plan.operations);
+    return resource;
+  }
+
+  return readModifyWrite(container, id, pk, plan.entries);
+}
+
+/**
+ * Decide how a set of updates must be written, and build the operations.
+ *
+ * Split out from `patchDoc` and exported because it is the part with the rules
+ * in it — the ten-operation ceiling, the deletion carve-out, the system-property
+ * refusal — and it is pure, so it is testable without a Cosmos account. The
+ * house style in this directory is dependency injection over mocking
+ * (`createRoleGuard`), and this follows it.
+ *
+ * @param {Record<string, any>} updates
+ * @returns {{strategy: 'noop'} | {strategy: 'patch', operations: object[], entries: [string, any][]} | {strategy: 'rmw', entries: [string, any][], reason: string}}
+ */
+export function planPatch(updates) {
+  const entries = Object.entries(updates ?? {});
+  if (entries.length === 0) return { strategy: 'noop' };
+
+  for (const [field] of entries) {
+    const root = String(field).split('.')[0];
+    if (SYSTEM_PROPERTIES.has(root)) {
+      throw new Error(`patchDoc: refusing to modify system property ${JSON.stringify(root)}`);
+    }
+  }
+
+  const hasDeletion = entries.some(([, value]) => value === undefined);
+  if (hasDeletion) {
+    return { strategy: 'rmw', entries, reason: 'deletion' };
+  }
+  if (entries.length > MAX_PATCH_OPERATIONS) {
+    return { strategy: 'rmw', entries, reason: 'exceeds-operation-limit' };
+  }
+
+  return {
+    strategy: 'patch',
+    entries,
+    operations: entries.map(([field, value]) => ({
+      op: 'set',
+      path: toJsonPointer(field),
+      value,
+    })),
+  };
+}
+
+/**
+ * ETag-guarded read-modify-write, applying dotted field paths onto a copy.
+ * One retry: a 412 means someone else wrote between our read and our replace,
+ * and re-reading resolves it unless the document is genuinely hot.
+ */
+async function readModifyWrite(container, id, pk, entries, attempt = 0) {
+  const { resource: current } = await container.item(id, pk).read();
+  if (!current) {
+    throw new Error(`patchDoc: document ${id} does not exist`);
+  }
+
+  const next = structuredClone(current);
+  for (const [field, value] of entries) {
+    applyFieldPath(next, String(field).split('.'), value);
+  }
+
+  try {
+    const { resource } = await container
+      .item(id, pk)
+      .replace(next, { accessCondition: { type: 'IfMatch', condition: current._etag } });
+    return resource;
+  } catch (err) {
+    if (err.code === 412 && attempt === 0) {
+      return readModifyWrite(container, id, pk, entries, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Set or delete a dotted path on a plain object, creating intermediates.
+ * Exported for tests — it is the half of the read-modify-write path that can be
+ * checked without a Cosmos account.
+ */
+export function applyFieldPath(target, segments, value) {
+  const last = segments[segments.length - 1];
+  let cursor = target;
+
+  for (const segment of segments.slice(0, -1)) {
+    if (cursor[segment] === null || typeof cursor[segment] !== 'object') {
+      cursor[segment] = {};
+    }
+    cursor = cursor[segment];
+  }
+
+  if (value === undefined) {
+    delete cursor[last];
+  } else {
+    cursor[last] = value;
+  }
 }
 
 /**

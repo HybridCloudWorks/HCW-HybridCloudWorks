@@ -211,9 +211,16 @@ would accept any Microsoft-signed token in the tenant.
 
 ### 4.2 Key Vault seeding runbook
 
-Five secrets, seeded **by hand as Azure Owner**. Deliberately not managed by Terraform: the values
-would otherwise live in both Terraform Cloud and Terraform state, and two of them (an AWS secret key
-and a GCP service-account JSON) do not warrant that blast radius.
+**Twenty-one secrets**, seeded **by hand as Azure Owner**. Deliberately not managed by Terraform: the
+values would otherwise live in both Terraform Cloud and Terraform state, and several of them (an AWS
+secret key, a GCP service-account JSON, a GitHub App RSA key) do not warrant that blast radius.
+
+_Was five. The other sixteen are Firebase `defineSecret` bindings that Site-Main's `functions/`
+declares and this repository had no home for: it declares 18, and before this change exactly two —
+the AWS pair — existed here. A handler reaching for an unbound secret deploys green and dies on
+first invocation in production, and no test reproduces it because no test binds secrets._
+
+**Platform secrets** — needed before the Function App is useful at all:
 
 | Secret | Consumed by |
 | --- | --- |
@@ -223,6 +230,29 @@ and a GCP service-account JSON) do not warrant that blast radius.
 | `CLIENT-IP-SALT` | `client-identity.js`, rate-limit key derivation |
 | `GCP-SERVICE-ACCOUNT-JSON` | `gcp.js`, read at runtime via `getSecret()` |
 
+**Ported CMS secrets** — needed before `FEATURE_FLAG_SCHEDULERS` goes true or any CMS handler is
+ported. All reach the app as app-setting Key Vault references except the last, which is read at
+runtime:
+
+| Secret | Consumed by |
+| --- | --- |
+| `ANTHROPIC-API-KEY` | AI drafting, WAF scoring, architecture generation |
+| `OPENAI-API-KEY` | AI generation fallback |
+| `PERPLEXITY-API-KEY` | research/enrichment |
+| `REPLICATE-API-KEY` | image generation |
+| `FIRECRAWL-API-KEY` | URL ingestion and scraping |
+| `LINKIE-API-KEY` | Linkie proxy |
+| `YOUTUBE-API-KEY` | `youtubeChannelStats` |
+| `PUBLER-API-KEY` | social scheduling proxy and calendar sync |
+| `PUBLER-WORKSPACE-ID` | same — identifier, travels with the key |
+| `KLAVIYO-PRIVATE-KEY` | newsletter subscribe, weekly digest |
+| `KLAVIYO-LIST-ID` | same — identifier, travels with the key |
+| `TELEGRAM-BOT-TOKEN` | notifications; webhook secret derives as `sha256(token)` |
+| `TELEGRAM-CHAT-ID` | same |
+| `GITHUB-APP-INSTALLATION-ID` | site-rebuild trigger |
+| `HOSTINGER-API-TOKEN` | VPS control |
+| `GITHUB-APP-PRIVATE-KEY` | **runtime read only** — multi-line RSA PEM signed into a JWT, so it is kept out of app settings for the same reason as the GCP JSON |
+
 The vault denies by default and Terraform Cloud runners cannot reach it, so seeding needs a
 temporary network opening:
 
@@ -230,11 +260,33 @@ temporary network opening:
 2. Seed each secret. Note the names use hyphens — Key Vault secret names cannot contain underscores:
 
    ```bash
-   az keyvault secret set --vault-name hcw-keyvault-prod --name AWS-ACCESS-KEY-ID      --value '...'
-   az keyvault secret set --vault-name hcw-keyvault-prod --name AWS-SECRET-ACCESS-KEY  --value '...'
-   az keyvault secret set --vault-name hcw-keyvault-prod --name CF-ORIGIN-SECRET       --value "$(openssl rand -hex 32)"
-   az keyvault secret set --vault-name hcw-keyvault-prod --name CLIENT-IP-SALT         --value "$(openssl rand -hex 32)"
-   az keyvault secret set --vault-name hcw-keyvault-prod --name GCP-SERVICE-ACCOUNT-JSON --file ./gcp-sa.json
+   V=hcw-keyvault-prod
+
+   # Platform
+   az keyvault secret set --vault-name $V --name AWS-ACCESS-KEY-ID        --value '...'
+   az keyvault secret set --vault-name $V --name AWS-SECRET-ACCESS-KEY    --value '...'
+   az keyvault secret set --vault-name $V --name CF-ORIGIN-SECRET         --value "$(openssl rand -hex 32)"
+   az keyvault secret set --vault-name $V --name CLIENT-IP-SALT           --value "$(openssl rand -hex 32)"
+   az keyvault secret set --vault-name $V --name GCP-SERVICE-ACCOUNT-JSON --file ./gcp-sa.json
+
+   # Ported CMS secrets
+   az keyvault secret set --vault-name $V --name ANTHROPIC-API-KEY          --value '...'
+   az keyvault secret set --vault-name $V --name OPENAI-API-KEY             --value '...'
+   az keyvault secret set --vault-name $V --name PERPLEXITY-API-KEY         --value '...'
+   az keyvault secret set --vault-name $V --name REPLICATE-API-KEY          --value '...'
+   az keyvault secret set --vault-name $V --name FIRECRAWL-API-KEY          --value '...'
+   az keyvault secret set --vault-name $V --name LINKIE-API-KEY             --value '...'
+   az keyvault secret set --vault-name $V --name YOUTUBE-API-KEY            --value '...'
+   az keyvault secret set --vault-name $V --name PUBLER-API-KEY             --value '...'
+   az keyvault secret set --vault-name $V --name PUBLER-WORKSPACE-ID        --value '...'
+   az keyvault secret set --vault-name $V --name KLAVIYO-PRIVATE-KEY        --value '...'
+   az keyvault secret set --vault-name $V --name KLAVIYO-LIST-ID            --value '...'
+   az keyvault secret set --vault-name $V --name TELEGRAM-BOT-TOKEN         --value '...'
+   az keyvault secret set --vault-name $V --name TELEGRAM-CHAT-ID           --value '...'
+   az keyvault secret set --vault-name $V --name GITHUB-APP-INSTALLATION-ID --value '...'
+   az keyvault secret set --vault-name $V --name HOSTINGER-API-TOKEN        --value '...'
+   # Multi-line PEM — use --file, not --value.
+   az keyvault secret set --vault-name $V --name GITHUB-APP-PRIVATE-KEY     --file ./github-app.pem
    ```
 
 3. Confirm the app can read them — `KEY_VAULT_URI` resolves and `getSecret` returns a value.

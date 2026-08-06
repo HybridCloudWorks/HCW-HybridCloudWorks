@@ -584,6 +584,59 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "CF_ORIGIN_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CF-ORIGIN-SECRET)"
     "CLIENT_IP_SALT"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CLIENT-IP-SALT)"
 
+    # -------------------------------------------------------------------------
+    # Ported Firebase defineSecret bindings.
+    #
+    # Site-Main's functions/ declares 18 defineSecret bindings; before this block
+    # exactly two of them (the AWS pair above) existed here. The other sixteen
+    # had nowhere to land, which is a failure that deploys green: a handler
+    # reaching for an unbound secret dies on first invocation in production, and
+    # no test reproduces it because no test binds secrets.
+    #
+    # Names follow the established pattern — the app setting keeps the
+    # underscored name so `process.env.X` reads port unchanged, and the Key Vault
+    # secret uses hyphens because Key Vault names cannot contain underscores.
+    #
+    # These resolve to empty until the vault is seeded (Review.md §4.2). That is
+    # safe today because the handlers are still stubs; it must be done before
+    # FEATURE_FLAG_SCHEDULERS goes true or any CMS handler is ported.
+    # -------------------------------------------------------------------------
+
+    # AI generation — content drafting, scoring and image pipelines.
+    "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
+    "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
+    "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
+    "REPLICATE_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/REPLICATE-API-KEY)"
+
+    # Ingestion and enrichment.
+    "FIRECRAWL_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/FIRECRAWL-API-KEY)"
+    "LINKIE_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/LINKIE-API-KEY)"
+    "YOUTUBE_API_KEY"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/YOUTUBE-API-KEY)"
+
+    # Social scheduling (Publer) and newsletter (Klaviyo). The WORKSPACE_ID and
+    # LIST_ID are identifiers rather than credentials, but they travel with their
+    # key and are pointless to split across two storage mechanisms.
+    "PUBLER_API_KEY"      = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PUBLER-API-KEY)"
+    "PUBLER_WORKSPACE_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PUBLER-WORKSPACE-ID)"
+    "KLAVIYO_PRIVATE_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/KLAVIYO-PRIVATE-KEY)"
+    "KLAVIYO_LIST_ID"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/KLAVIYO-LIST-ID)"
+
+    # Telegram notifications.
+    "TELEGRAM_BOT_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-BOT-TOKEN)"
+    "TELEGRAM_CHAT_ID"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-CHAT-ID)"
+
+    # Site rebuild trigger (GitHub App) and VPS control (Hostinger).
+    "GITHUB_APP_INSTALLATION_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GITHUB-APP-INSTALLATION-ID)"
+    "HOSTINGER_API_TOKEN"        = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/HOSTINGER-API-TOKEN)"
+
+    # GITHUB_APP_PRIVATE_KEY is deliberately NOT here, for the same reason as the
+    # GCP service-account JSON above: it is a multi-line RSA PEM, and app
+    # settings are visible in the portal and in
+    # `az webapp config appsettings list`. It is signed into a JWT
+    # (Site-Main cms-functions.js:3880 → getGithubAppInstallationToken), so it
+    # must be read from Key Vault at runtime via src/lib/key-vault.js under the
+    # name GITHUB-APP-PRIVATE-KEY.
+
     "NODE_ENV" = "production"
 
     # Feature flags — set to "true" in TF Cloud vars once business logic is ported
