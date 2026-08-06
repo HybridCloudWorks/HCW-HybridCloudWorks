@@ -3,6 +3,7 @@ import { app } from '@azure/functions';
 // Import all triggers so they are registered with the Azure Functions framework
 import './cms-http.js';
 import './labs-http.js';
+import './public-submissions.js';
 import './schedulers.js';
 import './cosmos-triggers.js';
 

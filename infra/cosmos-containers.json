@@ -845,6 +845,17 @@
       "note": null
     },
     {
+      "name": "submission_quota",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "default_ttl": 7200,
+      "note": "transient runtime state — written at runtime, not migrated"
+    },
+    {
       "name": "system",
       "partition_key_path": "/id",
       "included_paths": [

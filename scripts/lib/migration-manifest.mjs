@@ -121,6 +121,7 @@ export const CONTAINER_TTL_SECONDS = Object.freeze({
   tool_export_quota: 7200, // 1h window + skew
   tool_ai_plan_quota: 7200,
   lab_public_quota: 7200,
+  submission_quota: 7200,
   // Caches, which the scheduled refresh repopulates. Generous: the TTL is a
   // floor against unbounded growth, not the freshness mechanism — freshness is
   // cacheFreshness() and it is deliberately independent of this.
@@ -408,6 +409,7 @@ export const COLLECTIONS = [
 
   // --- Labs ----------------------------------------------------------------
   { name: 'lab_jobs', disposition: 'transient', note: '~11 in-flight job records. Worthless after cutover.' },
+  { name: 'submission_quota', disposition: 'transient', note: 'Anonymous public-submission rate-limit counters, keyed by hashed client identity. Azure-only: no Firestore source, created by public-submissions.js.' },
   { name: 'lab_public_quota', disposition: 'transient', note: 'Per-uid rate-limit counters.' },
   { name: 'lab_agents', disposition: 'migrate', note: 'Agent registrations — coordinate with vps-agent before cutover.' },
 
