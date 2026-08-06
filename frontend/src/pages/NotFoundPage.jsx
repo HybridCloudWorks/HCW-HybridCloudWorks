@@ -10,8 +10,7 @@ export default function NotFoundPage() {
           This page does not exist.
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-muted-foreground md:text-base">
-          The link may be outdated, the page may have moved, or the URL might be off by a
-          character.
+          The link may be outdated, the page may have moved, or the URL might be off by a character.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link

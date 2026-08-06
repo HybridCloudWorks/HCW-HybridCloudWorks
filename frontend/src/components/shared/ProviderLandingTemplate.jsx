@@ -83,7 +83,12 @@ function LandingHero({ hero, displayName, cta }) {
         {Array.isArray(hero?.stats) && hero.stats.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6 max-w-lg">
             {hero.stats.map((stat) => (
-              <StatBlock key={stat.label} value={stat.value} suffix={stat.suffix} label={stat.label} />
+              <StatBlock
+                key={stat.label}
+                value={stat.value}
+                suffix={stat.suffix}
+                label={stat.label}
+              />
             ))}
           </div>
         )}
@@ -105,7 +110,10 @@ export default function ProviderLandingTemplate({
 }) {
   const config = useProviderConfig();
   const displayName = config?.displayName || config?.name || provider;
-  const cta = hero?.cta || { label: `Explore ${config?.name || provider}`, to: routes.blog(provider) };
+  const cta = hero?.cta || {
+    label: `Explore ${config?.name || provider}`,
+    to: routes.blog(provider),
+  };
 
   return (
     <>

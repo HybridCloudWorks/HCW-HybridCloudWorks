@@ -265,8 +265,8 @@ export default function ConnectionsPage() {
           Connections
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          One place to check every 3rd-party integration. API keys live in Google Secret Manager
-          and are only used server-side.
+          One place to check every 3rd-party integration. API keys live in Google Secret Manager and
+          are only used server-side.
         </p>
       </div>
 

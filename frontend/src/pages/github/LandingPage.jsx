@@ -206,7 +206,11 @@ function LearningList() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {LEARNING.map(({ code, title, difficulty, duration, skills, to }) => (
-        <Link key={code} to={to} className="glass glass-hover rounded-xl flex items-start gap-3 p-4">
+        <Link
+          key={code}
+          to={to}
+          className="glass glass-hover rounded-xl flex items-start gap-3 p-4"
+        >
           <div className="size-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
             <span className="material-symbols-outlined text-primary text-base" aria-hidden="true">
               workspace_premium

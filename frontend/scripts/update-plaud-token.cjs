@@ -9,7 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const admin = require('firebase-admin');
+const { initializeApp, getApps } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 const projectId = process.env.FIREBASE_PROJECT_ID || 'hybridcloudworks-61e8d';
 const tokenPath = path.join(os.homedir(), '.plaud', 'tokens-mcp.json');
@@ -25,8 +26,8 @@ if (!tokens.access_token) {
   process.exit(1);
 }
 
-if (!admin.apps.length) admin.initializeApp({ projectId });
-const db = admin.firestore();
+if (!getApps().length) initializeApp({ projectId });
+const db = getFirestore();
 
 (async () => {
   const ref = db.collection('mcp_servers').doc('plaud');
@@ -36,7 +37,7 @@ const db = admin.firestore();
       oauthRefreshToken: tokens.refresh_token || null,
       oauthExpiresAt: tokens.expires_at || null,
       status: 'untested',
-      lastTokenUpdate: admin.firestore.FieldValue.serverTimestamp(),
+      lastTokenUpdate: FieldValue.serverTimestamp(),
     },
     { merge: true }
   );

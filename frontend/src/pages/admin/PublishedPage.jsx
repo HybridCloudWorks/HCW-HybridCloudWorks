@@ -45,8 +45,7 @@ export function getPrePublishFailures(item) {
     failures.push(`Body is too short (needs more than ${MIN_BODY_CHARS} characters).`);
   }
   const slug =
-    String(item.slug || item.Slug || '').trim() ||
-    String(item.curatedSubpagePath || '').trim();
+    String(item.slug || item.Slug || '').trim() || String(item.curatedSubpagePath || '').trim();
   if (!slug) {
     failures.push('Slug is missing.');
   }

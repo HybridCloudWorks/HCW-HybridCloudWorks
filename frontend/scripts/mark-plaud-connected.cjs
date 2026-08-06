@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-const admin = require('firebase-admin');
+const { initializeApp, getApps } = require('firebase-admin/app');
+const { FieldValue } = require('firebase-admin/firestore');
 const projectId = process.env.FIREBASE_PROJECT_ID || 'hybridcloudworks-61e8d';
-if (!admin.apps.length) admin.initializeApp({ projectId });
+if (!getApps().length) initializeApp({ projectId });
 admin
   .firestore()
   .collection('mcp_servers')
   .doc('plaud')
   .set(
-    { status: 'connected', lastConnectedAt: admin.firestore.FieldValue.serverTimestamp() },
+    { status: 'connected', lastConnectedAt: FieldValue.serverTimestamp() },
     { merge: true }
   )
   .then(() => {
