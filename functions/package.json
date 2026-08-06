@@ -25,6 +25,7 @@
     "@notionhq/client": "^5.21.0",
     "axios": "^1.18.0",
     "cheerio": "^1.2.0",
+    "google-auth-library": "^11.0.0",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.0.1",
     "replicate": "^1.4.0",
