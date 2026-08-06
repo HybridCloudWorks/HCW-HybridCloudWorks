@@ -50,13 +50,6 @@ updates:
           - patch
 
   - package-ecosystem: npm
-    directory: /frontend/scripts
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: npm
     directory: /frontend/labs/vps-agent
     schedule:
       interval: weekly
