@@ -261,6 +261,39 @@ production Firestore database.
 
 ## 5. Not started — the remaining migration itself
 
+### 5.0 The frontend is still a Firebase client — this is the Go-Live blocker
+
+Measured against `Site-Main` @ `4560130` and `main` @ `a10ee9d`. **Porting the backend handlers alone
+does not produce a working Azure site**, because the browser does not call the backend for most
+content — it talks to Firestore directly.
+
+| Coupling | Count |
+| --- | --- |
+| Frontend files importing `firebase/firestore` | **34** |
+| Frontend files importing `firebase/auth` | 5 |
+| Frontend files importing `firebase/storage` | 4 |
+| Direct Firestore data calls in `frontend/src` | ~115 (`getDocs` 26, `collection` 39, `getDoc` 13, `onSnapshot` 7, `setDoc` 8, `addDoc` 8, `updateDoc` 7, `deleteDoc` 7) |
+| Frontend files referencing the Azure backend | **1** (`azureConfig.js`, 24 lines, two helpers) |
+
+The coupling is not confined to admin screens. **Public pages read Firestore in the browser**:
+`pages/{aws,azure,gcp,finops,vmware}/ArchitecturePage.jsx`, `pages/shared/AboutPage.jsx`, the blog /
+architecture / framework detail templates, and all four `pages/submissions/*` forms.
+
+The static-projection path that would avoid this — `publicData.js` reading `build:data` output —
+currently covers **two collections** (`certifications`, `speakerevents`) consumed by **two files**.
+
+`azureConfig.js` states the constraint plainly: *"The browser must not instantiate a Cosmos DB
+data-plane client or receive a Cosmos access key."* So every one of those 34 files needs an API
+endpoint to call instead. That makes the backend port a **prerequisite** for the frontend port, not
+an alternative to it.
+
+**Consequence for cutover:** pointing DNS at an Azure-hosted frontend today yields a site that either
+still depends on Firebase, or breaks. Firebase cannot be decommissioned at Go Live; it has to stay
+warm until the frontend is ported.
+
+**Unblocked by:** nothing external. This is scope, and it is much larger than the TODO count in §5.1
+suggests — the TODOs mark where the backend logic goes, not the frontend rewiring that has to follow.
+
 ### 5.1 Fourteen TODOs across four handler files
 
 The Azure Functions scaffold exposes routes whose bodies are stubs:
