@@ -57,7 +57,7 @@ const json = (status, body) => ({
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard role guard (default-guard.js in prod)
- * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, deleteDoc: Function }} deps.store
+ * @param {{ queryDocs: Function, readDoc: Function, deleteDoc: Function }} deps.store
  */
 export function createCmsContentHandlers({ guard, store }) {
   return {
@@ -109,26 +109,9 @@ export function createCmsContentHandlers({ guard, store }) {
       }
     },
 
-    /**
-     * POST /api/cms/content — placeholder pending the createContentItem /
-     * updateContentItem port (validation, dedup fields, AI hooks — see the
-     * contract). Auth-hardened now so the route never ships behind the dead
-     * middleware.
-     */
-    async save(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-
-      try {
-        const body = await request.json().catch(() => null);
-        if (!body || typeof body !== 'object') return json(400, { error: 'Body must be a JSON object' });
-        const saved = await store.upsertDoc('content', body);
-        return json(200, { success: true, id: saved.id, doc: saved });
-      } catch (error) {
-        context.error('cmsSaveContent failed:', error);
-        return json(500, { error: 'Failed to save content', message: error?.message || 'Unknown error' });
-      }
-    },
+    // Creation lives in cms/content-create.js (full source semantics: dedup,
+    // quality gate). The interim raw-upsert `save` placeholder is retired —
+    // a validation-free write path must not coexist with the real one.
 
     /** DELETE /api/cms/content/{id} — blob cleanup still pending, as before. */
     async remove(request, context) {

@@ -8,20 +8,33 @@
  * Flex Consumption rewrite, so every request through it would have failed —
  * or worse, skipped audience validation entirely (verify-token.js FIX A1).
  *
- * Remaining ports tracked in .azure/api-surface.json: createContentItem /
- * updateContentItem semantics for save, blob cleanup for delete, and the
- * cmsGenerateContent AI pipeline (route intentionally NOT registered until it
- * exists — a stub returning "TODO: AI output" is not an endpoint).
+ * Routes follow the frontend's RPC convention where one exists: postJSON()
+ * builds `${base}/${fnName}`, so createContentItem is registered under that
+ * literal route.
+ *
+ * Remaining ports tracked in .azure/api-surface.json: updateContentItem
+ * (must use patchDoc — partial write, not replace), blob cleanup for delete,
+ * and the cmsGenerateContent AI pipeline (route intentionally NOT registered
+ * until it exists — a stub returning "TODO: AI output" is not an endpoint).
  */
 import { app } from '@azure/functions';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createCmsContentHandlers } from '../lib/cms-content.js';
+import { createContentCreateHandler } from '../lib/cms/content-create.js';
 
 const handlers = () =>
   createCmsContentHandlers({
     guard: getDefaultGuard(),
-    store: { queryDocs, readDoc, upsertDoc, deleteDoc },
+    store: { queryDocs, readDoc, deleteDoc },
+  });
+
+// critiqueDraft is not injected: the default null critique is the specified
+// behavior until the AI model-router slice lands (see content-create.js).
+const createHandler = () =>
+  createContentCreateHandler({
+    guard: getDefaultGuard(),
+    store: { queryDocs, upsertDoc },
   });
 
 app.http('cmsListContent', {
@@ -38,11 +51,14 @@ app.http('cmsGetContentItem', {
   handler: (request, context) => handlers().get(request, context),
 });
 
-app.http('cmsSaveContent', {
+// Replaces the interim raw-upsert save placeholder: creation now goes through
+// the full source semantics (dedup 409, quality gate 422) at the RPC route the
+// frontend actually calls (SubmitUrlsPage → postJSON('createContentItem')).
+app.http('createContentItem', {
   methods: ['POST'],
   authLevel: 'anonymous',
-  route: 'cms/content',
-  handler: (request, context) => handlers().save(request, context),
+  route: 'createContentItem',
+  handler: (request, context) => createHandler()(request, context),
 });
 
 app.http('cmsDeleteContent', {

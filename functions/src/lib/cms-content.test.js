@@ -40,13 +40,12 @@ describe('cms content list', () => {
     for (const call of [
       h.list(makeRequest(), context),
       h.get(makeRequest({ query: { contentId: 'a' } }), context),
-      h.save(makeRequest({ method: 'POST', body: {} }), context),
       h.remove(makeRequest({ method: 'DELETE', params: { id: 'a' } }), context),
     ]) {
       expect((await call).status).toBe(403);
     }
     expect(store.queryDocs).not.toHaveBeenCalled();
-    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.deleteDoc).not.toHaveBeenCalled();
   });
 
   it('projects the admin snapshot fields, never SELECT *', async () => {
@@ -110,22 +109,16 @@ describe('cms content get', () => {
   });
 });
 
-describe('cms content save/remove', () => {
-  it('rejects a non-object save body', async () => {
-    const h = createCmsContentHandlers({ guard: allowGuard, store: makeStore() });
-    expect((await h.save(makeRequest({ method: 'POST' }), context)).status).toBe(400);
-  });
-
-  it('saves and deletes through the store', async () => {
+describe('cms content remove', () => {
+  it('deletes through the store and 400s without an id', async () => {
     const store = makeStore();
     const h = createCmsContentHandlers({ guard: allowGuard, store });
-    const saved = await h.save(makeRequest({ method: 'POST', body: { id: 'n1', Title: 'X' } }), context);
-    expect(saved.status).toBe(200);
-    expect(store.upsertDoc).toHaveBeenCalledWith('content', { id: 'n1', Title: 'X' });
 
     const removed = await h.remove(makeRequest({ method: 'DELETE', params: { id: 'n1' } }), context);
     expect(removed.status).toBe(200);
     expect(store.deleteDoc).toHaveBeenCalledWith('content', 'n1');
+
+    expect((await h.remove(makeRequest({ method: 'DELETE' }), context)).status).toBe(400);
   });
 });
 
