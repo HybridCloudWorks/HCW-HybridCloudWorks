@@ -24,7 +24,7 @@ import { db } from '@/lib/firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
 
 // ── Pre-publish validation ────────────────────────────────────────────────────
-// Client-side checklist run before publishContentToBlogs is invoked. `item` is
+// Client-side checklist run before publishContent is invoked. `item` is
 // the snapshot row merged with the full Firestore doc (for body length).
 
 const MIN_BODY_CHARS = 200;
@@ -194,7 +194,7 @@ function usePublishWorkflow({ navigate, withImageOverride, setLocalLiveOverrides
     setPublishingId(item.id);
     try {
       const publishTarget = getPublishTargetForItem(item);
-      const result = await postJSON('publishContentToBlogs', {
+      const result = await postJSON('publishContent', {
         contentIds: [item.id],
         publishTarget,
         cloudProvider: selectedProvider,
