@@ -57,17 +57,17 @@ output "storage_primary_blob_endpoint" {
 # -----------------------------------------------------------------------------
 output "function_app_default_hostname" {
   description = "Default hostname of the Azure Function App"
-  value       = azurerm_linux_function_app.hcw.default_hostname
+  value       = azurerm_function_app_flex_consumption.hcw.default_hostname
 }
 
 output "function_app_url" {
   description = "Full HTTPS URL for the Function App"
-  value       = "https://${azurerm_linux_function_app.hcw.default_hostname}"
+  value       = "https://${azurerm_function_app_flex_consumption.hcw.default_hostname}"
 }
 
 output "function_app_principal_id" {
   description = "Managed identity principal ID — use this when granting additional RBAC roles"
-  value       = azurerm_linux_function_app.hcw.identity[0].principal_id
+  value       = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 # -----------------------------------------------------------------------------
@@ -110,7 +110,7 @@ output "functions_subnet_id" {
 # -----------------------------------------------------------------------------
 output "azure_functions_hostname" {
   description = "Azure Functions hostname for Cloudflare CNAME"
-  value       = azurerm_linux_function_app.hcw.default_hostname
+  value       = azurerm_function_app_flex_consumption.hcw.default_hostname
 }
 
 output "azure_swa_hostname" {

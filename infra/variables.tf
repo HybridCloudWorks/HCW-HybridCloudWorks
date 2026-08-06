@@ -123,9 +123,34 @@ variable "entra_tenant_id" {
   sensitive   = true
 }
 
-variable "entra_client_id" {
-  description = "Entra ID application (client) ID registered for this workload"
+# NOTE: `entra_client_id` was removed here. It fed the ENTRA_CLIENT_ID app
+# setting, which the API used as its JWT audience — the single-registration
+# model DECISION 3 replaces. Nothing in this configuration consumed it
+# afterwards, and leaving a required variable with no consumer forces operators
+# to supply a value for nothing. The SPA client id is still needed, but by the
+# frontend build, not by this Terraform.
+
+# DECISION 3 — two app registrations: a public-client SPA, and a separate API
+# exposing api://<api-client-id>. The API validates `aud` against its OWN
+# identifier.
+#
+# With a single registration an ID token minted for the SPA carries
+# aud = <client-id>, indistinguishable from an access token for the API — so a
+# token the browser was never meant to send to an API would be accepted by it.
+#
+# No default, and functions/src/lib/auth/verify-token.js refuses to start
+# without it. That is deliberate: jsonwebtoken only applies the audience check
+# when `audience` is truthy, so an unset value does not fail — it SKIPS audience
+# validation and successfully verifies any Microsoft-signed token for the
+# tenant, including a Graph token.
+variable "entra_api_audience" {
+  description = "Application ID URI of the API registration (e.g. api://<guid>) — validated as the JWT audience"
   type        = string
+
+  validation {
+    condition     = length(trimspace(var.entra_api_audience)) > 0
+    error_message = "entra_api_audience must not be empty; an empty audience silently disables audience validation."
+  }
 }
 
 # -----------------------------------------------------------------------------

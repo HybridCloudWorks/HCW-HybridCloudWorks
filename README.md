@@ -17,7 +17,9 @@ mutation, GCP decommission, or archival of the old repository.
   findings remain. The two residual highs are the react-router RSC-mode advisory
   (GHSA-qwww-vcr4-c8h2), assessed as not applicable to this Vite SPA and with no fixed version above
   the current one
-- Dependency automation: root Dependabot coverage for all npm packages and GitHub Actions
+- Dependency automation: root Dependabot coverage for GitHub Actions and for the six npm packages
+  that declare dependencies. The seventh, `frontend/scripts`, is excluded deliberately: its
+  package.json declares none and exists only to mark that directory as CommonJS
 - Repository history: re-rooted after credential rotation; replace clones made before 2026-07-22
 
 ## Engineering Wiki
