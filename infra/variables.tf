@@ -156,16 +156,51 @@ variable "entra_api_audience" {
 # -----------------------------------------------------------------------------
 # GitHub OIDC deployment identities (used for federated credential setup)
 # -----------------------------------------------------------------------------
+# These two are not cosmetic. They compose the federated credential `subject`
+# in oidc.tf, which GitHub's OIDC token must match EXACTLY. A stale value does
+# not warn — the token is issued, Azure declines it, and azure/login fails with
+# a generic AADSTS70021 "no matching federated identity record found".
+#
+# Both were stale until now: the repository moved to the HybridCloudWorks org,
+# and nothing consumed these variables, so nothing surfaced the drift.
 variable "github_org" {
-  description = "GitHub organisation or user name owning the repository"
+  description = "GitHub organisation owning the repository — must match the OIDC token issuer claim"
   type        = string
-  default     = "saulpatinojr"
+  default     = "HybridCloudWorks"
 }
 
 variable "github_repo" {
-  description = "GitHub repository name (without org prefix)"
+  description = "GitHub repository name (without org prefix) — must match the OIDC token subject claim"
   type        = string
   default     = "HCW-HybridCloudWorks"
+}
+
+variable "github_deploy_ref" {
+  description = "Git ref allowed to assume the deployment identity. Deploys are gated to this branch."
+  type        = string
+  default     = "refs/heads/main"
+}
+
+# -----------------------------------------------------------------------------
+# Key Vault seeding access
+# -----------------------------------------------------------------------------
+variable "admin_ip_rules" {
+  description = <<-EOT
+    Public IPv4 addresses or CIDRs permitted to reach Key Vault, for seeding
+    secrets by hand as Azure Owner. Empty is the correct steady state: the vault
+    is then reachable only by the Function App over its subnet.
+
+    Populate for the seeding window, apply, run the `az keyvault secret set`
+    commands, then empty it and apply again. Secret values are never managed by
+    Terraform, so they do not enter state or Terraform Cloud.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.admin_ip_rules : can(cidrnetmask("${ip}/32")) || can(cidrnetmask(ip))])
+    error_message = "admin_ip_rules entries must be IPv4 addresses or CIDR ranges."
+  }
 }
 
 # -----------------------------------------------------------------------------

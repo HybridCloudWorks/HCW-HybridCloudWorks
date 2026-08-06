@@ -403,6 +403,20 @@ resource "azurerm_subnet" "functions_integration" {
   virtual_network_name = azurerm_virtual_network.hcw.name
   address_prefixes     = [var.functions_subnet_prefix]
 
+  # REQUIRED for the Key Vault network rule below to have any effect.
+  #
+  # azurerm_key_vault.hcw sets network_acls.default_action = "Deny" and allows
+  # this subnet via virtual_network_subnet_ids. A Key Vault VNet rule only
+  # grants access when the subnet carries the Microsoft.KeyVault service
+  # endpoint — without it the rule is inert and the vault denies the Function
+  # App as well as everyone else.
+  #
+  # The failure mode is quiet: the app deploys clean, then its
+  # @Microsoft.KeyVault(...) app-setting references fail to resolve and
+  # getSecret() returns nothing, so a missing credential looks like missing
+  # data rather than a network denial.
+  service_endpoints = ["Microsoft.KeyVault"]
+
   delegation {
     name = "flex-consumption"
     service_delegation {
@@ -658,10 +672,21 @@ resource "azurerm_key_vault" "hcw" {
   purge_protection_enabled   = var.purge_protection_enabled
   rbac_authorization_enabled = true
 
+  # The Function App reaches the vault over the subnet rule above. Nothing else
+  # can — Terraform Cloud's runners are neither in this VNet nor a trusted Azure
+  # service, so the Secrets Officer assignment below cannot actually write from
+  # a TFC run.
+  #
+  # admin_ip_rules is how a human seeds the five secrets. Leave it empty and the
+  # vault is unreachable by anyone except the app, which is the correct steady
+  # state — populate it only for the seeding window. Secret VALUES are
+  # deliberately not managed by Terraform, so they never enter state or TFC.
+  # See Review.md §4.2 for the runbook.
   network_acls {
     default_action             = "Deny"
     bypass                     = "AzureServices"
     virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
+    ip_rules                   = var.admin_ip_rules
   }
 
   tags = var.tags

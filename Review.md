@@ -209,12 +209,44 @@ separate from the SPA. `verify-token.js` refuses to start without it — deliber
 `jsonwebtoken` *skips* audience validation when the audience is unset rather than failing, which
 would accept any Microsoft-signed token in the tenant.
 
-### 4.2 Key Vault secrets that must be seeded
+### 4.2 Key Vault seeding runbook
 
-Nothing seeds them today — no `azurerm_key_vault_secret` resources exist.
+Five secrets, seeded **by hand as Azure Owner**. Deliberately not managed by Terraform: the values
+would otherwise live in both Terraform Cloud and Terraform state, and two of them (an AWS secret key
+and a GCP service-account JSON) do not warrant that blast radius.
 
-`AWS-ACCESS-KEY-ID`, `AWS-SECRET-ACCESS-KEY`, `CF-ORIGIN-SECRET`, `CLIENT-IP-SALT`,
-`GCP-SERVICE-ACCOUNT-JSON`.
+| Secret | Consumed by |
+| --- | --- |
+| `AWS-ACCESS-KEY-ID` | AWS pricing, via app-setting Key Vault reference |
+| `AWS-SECRET-ACCESS-KEY` | same — scope the IAM policy to `pricing:GetProducts` only |
+| `CF-ORIGIN-SECRET` | `client-identity.js`, fails closed in production without it |
+| `CLIENT-IP-SALT` | `client-identity.js`, rate-limit key derivation |
+| `GCP-SERVICE-ACCOUNT-JSON` | `gcp.js`, read at runtime via `getSecret()` |
+
+The vault denies by default and Terraform Cloud runners cannot reach it, so seeding needs a
+temporary network opening:
+
+1. Set `admin_ip_rules = ["<your.public.ip>"]` in the Terraform Cloud workspace and apply.
+2. Seed each secret. Note the names use hyphens — Key Vault secret names cannot contain underscores:
+
+   ```bash
+   az keyvault secret set --vault-name hcw-keyvault-prod --name AWS-ACCESS-KEY-ID      --value '...'
+   az keyvault secret set --vault-name hcw-keyvault-prod --name AWS-SECRET-ACCESS-KEY  --value '...'
+   az keyvault secret set --vault-name hcw-keyvault-prod --name CF-ORIGIN-SECRET       --value "$(openssl rand -hex 32)"
+   az keyvault secret set --vault-name hcw-keyvault-prod --name CLIENT-IP-SALT         --value "$(openssl rand -hex 32)"
+   az keyvault secret set --vault-name hcw-keyvault-prod --name GCP-SERVICE-ACCOUNT-JSON --file ./gcp-sa.json
+   ```
+
+3. Confirm the app can read them — `KEY_VAULT_URI` resolves and `getSecret` returns a value.
+4. Reset `admin_ip_rules = []` and apply again. Steady state is: reachable only by the Function App
+   over its subnet.
+
+**This only works because the subnet now carries the `Microsoft.KeyVault` service endpoint.** Without
+it the VNet rule is inert and the vault denies the Function App too — see §6.
+
+`secret-sync-keyvault.yml` was removed rather than finished. It was disabled, its mapping was a
+literal `TODO`, it held the last static `AZURE_CREDENTIALS` reference, and pushing GitHub secrets
+into Key Vault would duplicate every value into a second store. This runbook replaces it.
 
 ### 4.3 All four deployment workflows are disabled
 
@@ -265,3 +297,34 @@ Recorded because a stale assessment is worse than no assessment.
   `node_modules` in the repository first.
 - **`frontend/scripts/package.json` was described as an empty, vestigial package.** Its contents are
   empty; its function is not. See §2.6.
+
+---
+
+## 7. Fixed since this file was written
+
+Kept rather than deleted, so the reasoning survives.
+
+### 7.1 Key Vault was unreachable by everyone, including the app
+
+The vault set `default_action = "Deny"` and allowed the Functions subnet — but that subnet carried
+**no `Microsoft.KeyVault` service endpoint**, and a Key Vault VNet rule is inert without one. So the
+app's own `@Microsoft.KeyVault(...)` references and `getSecret()` calls would have been denied.
+
+Silent by construction: the app deploys clean, then a missing credential presents as missing data.
+Nothing in CI could catch it, and `terraform validate` would have passed.
+
+Fixed by adding the service endpoint, plus `admin_ip_rules` for the seeding path in §4.2.
+
+### 7.2 Deploys used a static service principal against the repo's own guardrail
+
+`deploy-functions.yml` authenticated with `secrets.AZURE_CREDENTIALS` — a long-lived
+service-principal JSON — while the README requires OIDC and forbids committed static cloud
+credentials.
+
+Replaced with a **user-assigned managed identity** and federated credentials, deliberately rather
+than the usual Entra app registration: app registrations need Entra directory permissions, which
+Azure **Owner** does not confer. A UAMI is an ordinary Azure resource, so the whole thing is
+creatable with the permissions this deployment actually runs under.
+
+`github_org` and `github_repo` were stale (`saulpatinojr`) and consumed by nothing. They now compose
+the federated `subject`, so the drift would have surfaced as an opaque `AADSTS70021` at first deploy.
