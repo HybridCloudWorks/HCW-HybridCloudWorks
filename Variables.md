@@ -77,22 +77,66 @@ These are set automatically by `infra/main.tf`. Listed here for reference and lo
 
 ---
 
-## Azure Key Vault Secrets (seeded via `secret-sync-keyvault.yml`)
+## Azure Key Vault Secrets
 
-Secrets stored in Key Vault and accessed at runtime by the Function App via managed identity.
-The workflow `secret-sync-keyvault.yml` must be implemented and run before Phase 3 begins.
+Secrets stored in Key Vault and accessed by the Function App via managed identity — as app-setting
+`@Microsoft.KeyVault(SecretUri=…)` references, except where marked runtime-read.
+
+**Seeded by hand as Azure Owner. The runbook is [Review.md §4.2](Review.md).** There is no
+`secret-sync-keyvault.yml` — it was removed rather than finished (disabled, mapping was a literal
+`TODO`, held the last static `AZURE_CREDENTIALS` reference, and pushing GitHub secrets into Key
+Vault would have duplicated every value into a second store). Earlier revisions of this section
+described that workflow as a prerequisite for Phase 3; it is not, and never will be.
+
+**Platform**
 
 | Secret Name | Description |
 |-------------|-------------|
-| `TELEGRAM-BOT-TOKEN` | Telegram Bot API token (also used to derive webhook secret: `sha256(token)`) |
-| `OPENAI-API-KEY` | OpenAI API key (if using external OpenAI rather than Azure OpenAI) |
-| `PUBLER-API-KEY` | Publer social scheduling API key |
-| `KLAVIYO-API-KEY` | Klaviyo mailing list API key |
-| `PLAUD-API-KEY` | Plaud recording service API key |
-| `GITHUB-APP-TOKEN` | GitHub App token for content pipeline integrations |
-| `SESSIONIZE-API-KEY` | Sessionize speaker events API key |
+| `AWS-ACCESS-KEY-ID` | AWS pricing API; scope the IAM policy to `pricing:GetProducts` only |
+| `AWS-SECRET-ACCESS-KEY` | as above |
+| `CF-ORIGIN-SECRET` | proves a request arrived via Cloudflare; `client-identity.js` fails closed without it |
+| `CLIENT-IP-SALT` | rate-limit key derivation |
+| `GCP-SERVICE-ACCOUNT-JSON` | **runtime read** — multi-line JSON blob, kept out of app settings |
 
-> Add new secrets here before adding them to Key Vault. This list is the authoritative index.
+**Ported from Site-Main's `defineSecret` bindings**
+
+| Secret Name | Description |
+|-------------|-------------|
+| `ANTHROPIC-API-KEY` | AI drafting, WAF scoring, architecture section generation |
+| `OPENAI-API-KEY` | AI generation fallback |
+| `PERPLEXITY-API-KEY` | research and enrichment |
+| `REPLICATE-API-KEY` | image generation |
+| `FIRECRAWL-API-KEY` | URL ingestion and scraping |
+| `LINKIE-API-KEY` | Linkie proxy |
+| `YOUTUBE-API-KEY` | `youtubeChannelStats` |
+| `PUBLER-API-KEY` | Publer social scheduling proxy and calendar sync |
+| `PUBLER-WORKSPACE-ID` | identifier; travels with the key rather than splitting across two stores |
+| `KLAVIYO-PRIVATE-KEY` | newsletter subscribe and weekly digest |
+| `KLAVIYO-LIST-ID` | identifier; as above |
+| `TELEGRAM-BOT-TOKEN` | notifications; webhook secret derives as `sha256(token)` |
+| `TELEGRAM-CHAT-ID` | notification target |
+| `GITHUB-APP-INSTALLATION-ID` | site-rebuild trigger |
+| `GITHUB-APP-PRIVATE-KEY` | **runtime read** — multi-line RSA PEM signed into a JWT, kept out of app settings for the same reason as the GCP JSON |
+| `HOSTINGER-API-TOKEN` | VPS control |
+
+**Corrections applied to this table** — it previously called itself authoritative while disagreeing
+with both the code and `Review.md`:
+
+- `KLAVIYO-API-KEY` does not exist. Site-Main declares `KLAVIYO_PRIVATE_KEY` **and** `KLAVIYO_LIST_ID`.
+- `GITHUB-APP-TOKEN` does not exist. Site-Main declares `GITHUB_APP_INSTALLATION_ID` **and**
+  `GITHUB_APP_PRIVATE_KEY`; there is no single "app token."
+- `PLAUD-API-KEY` removed. Plaud is an **MCP server entry** (`src/lib/aiEngine.js:110`,
+  `https://mcp.plaud.ai/mcp`); its credentials live in the `mcp_servers` collection as
+  admin-configured data and migrate as data, not as a deploy secret.
+- `SESSIONIZE-API-KEY` removed. Sessionize is a **public profile URL** in site settings
+  (`settingsSchema.js:109`, `type: 'url'`). There is no API key.
+- Nine real bindings were missing entirely: Anthropic, Perplexity, Replicate, Firecrawl, Linkie,
+  YouTube, Hostinger, `PUBLER_WORKSPACE_ID`, `TELEGRAM_CHAT_ID`.
+
+> Add new secrets here **and** to `infra/main.tf`'s `app_settings` before adding them to Key Vault.
+> This list is the authoritative index; verify it against
+> `grep -rhoE "defineSecret\(['\"][A-Z0-9_]+" functions/` in Site-Main, which is the ground truth
+> until that repository is retired.
 
 ---
 
