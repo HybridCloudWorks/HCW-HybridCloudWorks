@@ -50,8 +50,9 @@ jobs:
             test: npm test
           - name: frontend/functions (legacy)
             dir: frontend/functions
-          - name: frontend/scripts
-            dir: frontend/scripts
+          # frontend/scripts is intentionally absent: its package.json is a
+          # CommonJS boundary marker with no dependencies, so there is no
+          # lockfile to keep honest and nothing to install.
           - name: frontend/labs/vps-agent
             dir: frontend/labs/vps-agent
           - name: vps-agent

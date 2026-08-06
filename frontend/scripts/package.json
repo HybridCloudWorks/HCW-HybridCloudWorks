@@ -1,10 +1,8 @@
 {
-  "name": "hcw-secrets-scripts",
+  "name": "hcw-frontend-scripts",
   "version": "1.0.0",
-  "description": "Helper scripts for the frontend workspace",
+  "description": "CommonJS boundary marker for frontend/scripts. Not a real package: it carries no dependencies and no scripts, and exists only because the parent frontend/package.json sets \"type\": \"module\". Without this file, the nine .js helpers here that use require() would be loaded as ESM and fail with \"require is not defined\". Do not delete it without first converting those files to ESM or renaming them to .cjs.",
   "private": true,
-  "scripts": {},
-  "dependencies": {},
   "engines": {
     "node": ">=18.0.0"
   }
