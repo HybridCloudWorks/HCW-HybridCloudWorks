@@ -13,23 +13,25 @@ mutation, GCP decommission, or archival of the old repository.
 - Administrator identity: Microsoft Entra ID
 - Infrastructure implementation: not started from the approved plan
 - Production deployment: not authorized
-- Dependency audit: zero critical/high findings across six npm package boundaries; eleven moderate
-  Firebase-tooling findings remain under upstream monitoring
+- Dependency audit: across seven npm package boundaries, 10 of 12 findings remediated; zero moderate
+  findings remain. The two residual highs are the react-router RSC-mode advisory
+  (GHSA-qwww-vcr4-c8h2), assessed as not applicable to this Vite SPA and with no fixed version above
+  the current one
 - Dependency automation: root Dependabot coverage for all npm packages and GitHub Actions
 - Repository history: re-rooted after credential rotation; replace clones made before 2026-07-22
 
 ## Engineering Wiki
 
 All human-facing documentation is maintained in the
-[GitHub Wiki](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki).
+[GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki).
 
-- [Implementation TODO](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Implementation-TODO)
-- [Approved architecture](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Architecture)
-- [Architecture decisions](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Architecture-Decision-Records)
-- [Well-Architected assessment](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Well-Architected-Assessment)
-- [Migration runbook](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Migration-Runbook)
-- [Phase 4 data migration](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
-- [Cost analysis](https://github.com/saulpatinojr/HCW-HybridCloudWorks/wiki/Cost-Analysis)
+- [Implementation TODO](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Implementation-TODO)
+- [Approved architecture](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Architecture)
+- [Architecture decisions](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Architecture-Decision-Records)
+- [Well-Architected assessment](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Well-Architected-Assessment)
+- [Migration runbook](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Migration-Runbook)
+- [Phase 4 data migration](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
+- [Cost analysis](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Cost-Analysis)
 
 The root README must be updated whenever repository structure, documentation authority, architecture
 status, or delivery status changes. Markdown consumed by GitHub or development tooling may remain next

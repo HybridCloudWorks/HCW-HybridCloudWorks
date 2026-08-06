@@ -50,6 +50,13 @@ deployed to Azure.
 
 Phases 1 and 2 are independent and should run in parallel by different people.
 
+> **These are not the same numbers as the Wiki's.** The [Implementation
+> TODO](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Implementation-TODO) numbers
+> _delivery_ phases 0–8; this table numbers _migration_ phases 0–6. Only Phase 4 means roughly the
+> same thing in both. Phase 3 is the worst collision — it is "Port the API and workers" here and
+> "Empty platform and observability" there. Cite this document's phases as **"Migration_Plan §N"**
+> and the Wiki's as **"Phase N"**. The Implementation TODO carries the full mapping table.
+
 ---
 
 ## 3. Phase 1 — the refactors worth doing here, first
