@@ -1,6 +1,7 @@
 import { app } from '@azure/functions';
 
 // Import all triggers so they are registered with the Azure Functions framework
+import './admin-crud-http.js';
 import './cms-http.js';
 import './labs-http.js';
 import './public-reads.js';
