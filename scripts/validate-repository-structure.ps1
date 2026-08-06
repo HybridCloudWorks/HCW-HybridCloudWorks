@@ -14,7 +14,7 @@ $allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', '
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
-$allowedRootFiles = @('.gitignore', 'README.md', 'Architecture_Plan.md', 'Migration_Plan.md', 'Variables.md')
+$allowedRootFiles = @('.gitignore', 'README.md', 'Architecture_Plan.md', 'Migration_Plan.md', 'Variables.md', 'Review.md')
 
 # Directory names never walked by the Markdown scan, at any depth.
 $unscannedDirectories = @('.git', 'node_modules') + $harnessDirectories
