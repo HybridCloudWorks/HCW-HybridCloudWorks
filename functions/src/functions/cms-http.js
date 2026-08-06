@@ -19,9 +19,13 @@
  */
 import { app } from '@azure/functions';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { queryDocs, readDoc, upsertDoc, deleteDoc } from '../lib/cosmos-client.js';
+import { queryDocs, readDoc, upsertDoc, deleteDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createCmsContentHandlers } from '../lib/cms-content.js';
 import { createContentCreateHandler } from '../lib/cms/content-create.js';
+import {
+  createContentUpdateHandler,
+  createContentTransitionHandler,
+} from '../lib/cms/content-update.js';
 
 const handlers = () =>
   createCmsContentHandlers({
@@ -59,6 +63,30 @@ app.http('createContentItem', {
   authLevel: 'anonymous',
   route: 'createContentItem',
   handler: (request, context) => createHandler()(request, context),
+});
+
+// Partial writes on content go through patchDoc — an upsert would replace the
+// whole document (see #42). Same RPC-route convention as createContentItem.
+app.http('updateContentItem', {
+  methods: ['POST', 'PATCH'],
+  authLevel: 'anonymous',
+  route: 'updateContentItem',
+  handler: (request, context) =>
+    createContentUpdateHandler({
+      guard: getDefaultGuard(),
+      store: { readDoc, patchDoc, upsertDoc },
+    })(request, context),
+});
+
+app.http('transitionContentStatus', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'transitionContentStatus',
+  handler: (request, context) =>
+    createContentTransitionHandler({
+      guard: getDefaultGuard(),
+      store: { readDoc, patchDoc, upsertDoc, queryDocs },
+    })(request, context),
 });
 
 app.http('cmsDeleteContent', {
