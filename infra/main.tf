@@ -432,33 +432,100 @@ resource "azurerm_service_plan" "hcw" {
   tags                = var.tags
 }
 
-resource "azurerm_linux_function_app" "hcw" {
-  name                          = var.function_app_name
-  location                      = azurerm_resource_group.hcw.location
-  resource_group_name           = azurerm_resource_group.hcw.name
-  service_plan_id               = azurerm_service_plan.hcw.id
-  storage_account_name          = azurerm_storage_account.functions.name
-  storage_uses_managed_identity = true # no static storage key
+# Deployment container for Flex Consumption.
+#
+# Flex does not use WEBSITE_RUN_FROM_PACKAGE; the platform pulls the deployment
+# package from a blob container named in functionAppConfig.deployment. Nothing
+# else in this file provided one — the containers above are CONTENT containers
+# on the other storage account.
+resource "azurerm_storage_container" "function_releases" {
+  name                  = "function-releases"
+  storage_account_id    = azurerm_storage_account.functions.id
+  container_access_type = "private"
+}
+
+# =============================================================================
+# Function App — Flex Consumption
+#
+# This MUST be azurerm_function_app_flex_consumption, not
+# azurerm_linux_function_app. Flex is configured through
+# properties.functionAppConfig (runtime, deployment storage, scaleAndConcurrency)
+# and azurerm_linux_function_app does not emit that block, so pairing it with an
+# FC1 plan fails at apply with:
+#
+#   Site.FunctionAppConfig is invalid. The FunctionAppConfig section was not
+#   specified in the request, which is required for Flex Consumption sites.
+#
+# `terraform validate` does NOT catch this — it checks schema, not provider/API
+# compatibility — so the previous config validated cleanly while being
+# undeployable.
+#
+# Deliberately absent, all unsupported on Flex:
+#   - site_config.application_stack.node_version  (maps to LinuxFxVersion)
+#   - WEBSITE_RUN_FROM_PACKAGE                    (Flex uses the deployment container)
+#   - FUNCTIONS_WORKER_RUNTIME                    (replaced by runtime_name)
+#   - the platform `cors` block                   (see DECISION 7 below)
+# =============================================================================
+resource "azurerm_function_app_flex_consumption" "hcw" {
+  name                = var.function_app_name
+  location            = azurerm_resource_group.hcw.location
+  resource_group_name = azurerm_resource_group.hcw.name
+  service_plan_id     = azurerm_service_plan.hcw.id
+
+  storage_container_type      = "blobContainer"
+  storage_container_endpoint  = "${azurerm_storage_account.functions.primary_blob_endpoint}${azurerm_storage_container.function_releases.name}"
+  storage_authentication_type = "SystemAssignedIdentity" # no static storage key
+
+  runtime_name    = "node"
+  runtime_version = "22"
 
   virtual_network_subnet_id = azurerm_subnet.functions_integration.id
 
+  # DECISION 6 — bearer tokens must not traverse plaintext, and the origin has
+  # to be unreachable except through Cloudflare before CF-Connecting-IP means
+  # anything. functions/src/lib/auth/client-identity.js fails closed in
+  # production until CF_ORIGIN_SECRET is set, precisely so rate limiting cannot
+  # silently degrade to trusting a spoofable header.
+  https_only = true
+
+  # ---------------------------------------------------------------------------
+  # Scale — every one of these was a silent platform default before.
+  # ---------------------------------------------------------------------------
+
+  # 2048 MB, down from the 4 GiB the Firebase functions declared. That pin
+  # existed solely to survive JSON.parse of a 458 MiB AWS offer document; the
+  # Price List Query API returns ~1 KB, and the full eight-service sweep across
+  # all three providers now runs in 18.8 MB. Instance memory on Flex is
+  # per-APP, not per-function, so this applies to every function here.
+  instance_memory_in_mb = 2048
+
+  # Bounded deliberately. getToolComparisonData is public and unauthenticated,
+  # so an unbounded default turns a traffic spike into unbounded GB-seconds.
+  maximum_instance_count = 20
+
+  # Always-ready is deliberately NOT configured, which means zero — the default.
+  # It is the single largest cost line available on this plan: one always-ready
+  # 2048 MB instance is roughly $20/month whether or not anything executes,
+  # against a USD 150 ceiling for the whole platform. Enabling zone redundancy
+  # later forces a minimum of two, so revisit both together and only after
+  # cold-start latency on getToolComparisonData has actually been measured.
+
   site_config {
-    application_stack {
-      node_version = "22"
-    }
-
-    cors {
-      allowed_origins = [
-        "https://${var.domain}",
-        "https://www.${var.domain}",
-        "http://localhost:5173",
-        "http://localhost:4173",
-      ]
-      support_credentials = true
-    }
-
     application_insights_connection_string = azurerm_application_insights.hcw.connection_string
     application_insights_key               = azurerm_application_insights.hcw.instrumentation_key
+
+    # DECISION 7 — CORS is handled in code
+    # (functions/src/lib/auth/cors.js), not here.
+    #
+    # Two allowlists drift, and when a request is rejected you cannot tell which
+    # one did it. The in-code version also returns 403 on a disallowed origin
+    # (matching Site-Main's applyCors) rather than silently omitting the header,
+    # and can express any localhost port rather than the two hardcoded here.
+    #
+    # support_credentials = true was additionally wrong on its own merits: it
+    # makes the platform intercept OPTIONS preflights itself, so the in-code
+    # preflight would never run — and this is a bearer-token API, not a cookie
+    # API.
   }
 
   app_settings = {
@@ -467,6 +534,12 @@ resource "azurerm_linux_function_app" "hcw" {
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
     # COSMOS_CONNECTION_STRING is required by the Cosmos DB change-feed trigger binding
     # See: https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
+    #
+    # NOTE: this carries the account PRIMARY KEY. It is retained only because the
+    # trigger binding needs it today; the identity-based form
+    # (COSMOS_CONNECTION__accountEndpoint + __credential=managedidentity) should
+    # replace it once azurerm_cosmosdb_sql_role_assignment.func_cosmos is
+    # confirmed working, after which local_authentication_disabled can go on.
     "COSMOS_CONNECTION_STRING" = azurerm_cosmosdb_account.hcw.primary_sql_connection_string
 
     "STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.hcw.name
@@ -475,11 +548,29 @@ resource "azurerm_linux_function_app" "hcw" {
     "KEY_VAULT_URI"          = azurerm_key_vault.hcw.vault_uri
 
     "ENTRA_TENANT_ID" = var.entra_tenant_id
-    "ENTRA_CLIENT_ID" = var.entra_client_id
+    # The API's OWN audience, not the SPA's client id. verify-token.js refuses to
+    # start without it — an unset audience makes jsonwebtoken SKIP the audience
+    # check entirely rather than fail, which accepts any token in the tenant.
+    "ENTRA_API_AUDIENCE" = var.entra_api_audience
 
-    "WEBSITE_RUN_FROM_PACKAGE" = "1"
-    "FUNCTIONS_WORKER_RUNTIME" = "node"
-    "NODE_ENV"                 = "production"
+    # AWS pricing — Key Vault references, so process.env reads stay identical to
+    # the Firebase defineSecret originals. Key Vault secret names cannot contain
+    # underscores. Scope the IAM policy to pricing:GetProducts only.
+    "AWS_ACCESS_KEY_ID"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AWS-ACCESS-KEY-ID)"
+    "AWS_SECRET_ACCESS_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AWS-SECRET-ACCESS-KEY)"
+
+    # GCP's service-account JSON is deliberately NOT here — it is a ~2.3 KB
+    # multi-line blob and app settings are visible in the portal and in
+    # `az webapp config appsettings list`. gcp.js reads it from Key Vault at
+    # runtime via src/lib/key-vault.js.
+
+    # DECISION 6 — proves a request arrived through Cloudflare rather than
+    # directly at the origin. Without it client-identity.js refuses to derive a
+    # rate-limit key in production.
+    "CF_ORIGIN_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CF-ORIGIN-SECRET)"
+    "CLIENT_IP_SALT"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CLIENT-IP-SALT)"
+
+    "NODE_ENV" = "production"
 
     # Feature flags — set to "true" in TF Cloud vars once business logic is ported
     "FEATURE_FLAG_SCHEDULERS" = "false"
@@ -491,6 +582,13 @@ resource "azurerm_linux_function_app" "hcw" {
 
   tags = var.tags
 }
+
+# NOTE: there is deliberately NO `moved` block from
+# azurerm_linux_function_app.hcw. A moved block requires the two addresses to be
+# the same resource TYPE, and these are different types. If the old resource is
+# ever in state it must be removed with `terraform state rm` before applying —
+# but it cannot be, because that configuration could never have applied against
+# an FC1 plan in the first place.
 
 # ---------------------------------------------------------------------------
 # RBAC — Function App managed identity data-plane roles (no static keys)
@@ -520,27 +618,27 @@ resource "azurerm_cosmosdb_sql_role_assignment" "func_cosmos" {
   resource_group_name = azurerm_resource_group.hcw.name
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
-  principal_id        = azurerm_linux_function_app.hcw.identity[0].principal_id
+  principal_id        = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
   scope               = azurerm_cosmosdb_account.hcw.id
 }
 
 resource "azurerm_role_assignment" "func_blob" {
   scope                = azurerm_storage_account.hcw.id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 resource "azurerm_role_assignment" "func_queue" {
   scope                = azurerm_storage_account.hcw.id
   role_definition_name = "Storage Queue Data Contributor"
-  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 # Host storage access for Flex Consumption managed-identity mode
 resource "azurerm_role_assignment" "func_host_storage" {
   scope                = azurerm_storage_account.functions.id
   role_definition_name = "Storage Blob Data Owner"
-  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 # =============================================================================
@@ -573,7 +671,7 @@ resource "azurerm_key_vault" "hcw" {
 resource "azurerm_role_assignment" "func_kv_secrets" {
   scope                = azurerm_key_vault.hcw.id
   role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_linux_function_app.hcw.identity[0].principal_id
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 # Key Vault Secrets Officer — Terraform executor (write during CI/CD secret seeding)
