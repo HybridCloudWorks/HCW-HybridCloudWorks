@@ -63,24 +63,43 @@ export function moneyToNumber(value) {
  * Normalise the wildly different unit strings the three providers return into
  * the vocabulary the frontend renders.
  *
- * The ordering of these replacements matters — 'GB/Month' must be tried before
- * the bare '/Month' rule would mangle it — so this is transcribed in the
- * original order rather than tidied into a lookup table.
+ * ORDERING IS LOAD-BEARING. Two notes:
+ *
+ * 1. The `'1 Hour'` / `'1 GB'` literals are hoisted ABOVE the `/^1\s+/` strip.
+ *    In the source they came after it, which made them unreachable: the strip
+ *    had already turned '1 Hour' into 'Hour', so the literal could never match
+ *    and the function returned a capitalised 'Hour'. '1/Hour' has no
+ *    whitespace, so its rule did fire — which is presumably why the asymmetry
+ *    went unnoticed.
+ *
+ *    This is currently a latent bug rather than a live one: all eight Azure
+ *    service configs set `unit` explicitly, so the
+ *    `config.unit || normalizeUnit(item.unitOfMeasure)` fallback is unreachable
+ *    for every service that exists today. It was fixed precisely BECAUSE that
+ *    makes it a no-op now — the accompanying test pins every unit string the
+ *    current providers actually emit as byte-identical across this change.
+ *    Azure's `unitOfMeasure` really is formatted '1 Hour', '1 GB/Month', '10K',
+ *    so the first service added without an explicit unit would have hit it.
+ *
+ * 2. '/Month' before 'GB/Month' means the latter never matches either, but both
+ *    produce 'GB-month' so it is harmless. Left as-is rather than tidied —
+ *    there is no behaviour to gain and the transcription stays diffable against
+ *    the source.
  *
  * @param {unknown} unit
  * @returns {string}
  */
 export function normalizeUnit(unit) {
   return String(unit || '')
+    .replace('1/Hour', 'hour')
+    .replace('1 Hour', 'hour')
+    .replace('1 GB', 'GB')
     .replace(/^1\s+/i, '')
     .replace('/Month', '-month')
     .replace('GB/Month', 'GB-month')
     .replace('GB-Mo', 'GB-month')
     .replace('GiBy.mo', 'GB-month')
     .replace('GiBy.h', 'GB-hour')
-    .replace('1/Hour', 'hour')
-    .replace('1 Hour', 'hour')
-    .replace('1 GB', 'GB')
     .replace('10K', '10K operations')
     .replace(/^h$/i, 'hour')
     .replace('TiBy', 'TB')

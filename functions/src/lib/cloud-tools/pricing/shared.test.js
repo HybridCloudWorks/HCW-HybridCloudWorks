@@ -94,19 +94,58 @@ describe('normalizeUnit', () => {
     expect(normalizeUnit('1 GB')).toBe('GB');
   });
 
-  it('leaves "1 Hour" capitalised — the source has a dead rule here', () => {
-    // Behaviour pinned as-is, deliberately NOT corrected.
-    //
-    // normalizeUnit strips /^1\s+/ first, so by the time the
-    // .replace('1 Hour', 'hour') rule runs the string is already 'Hour' and it
-    // can never match. '1/Hour' has no whitespace, so its rule DOES fire —
-    // which is presumably why nobody noticed.
-    //
-    // Changing this would alter a rendered unit string and the value the three
-    // provider columns are compared on, so it is a product decision, not a
-    // cleanup. Flagged rather than fixed.
-    expect(normalizeUnit('1 Hour')).toBe('Hour');
+  it('handles "1 Hour" — the dead rule, now reachable', () => {
+    // In the source the /^1\s+/ strip ran first, so .replace('1 Hour','hour')
+    // could never match and the result was a capitalised 'Hour'. '1/Hour' has
+    // no whitespace so its rule did fire, which is why the asymmetry survived.
+    expect(normalizeUnit('1 Hour')).toBe('hour');
     expect(normalizeUnit('1/Hour')).toBe('hour');
+  });
+
+  it('changes NOTHING that any current provider actually emits', () => {
+    // The no-op proof for hoisting those literals above the strip. This corpus
+    // is every unit string the three providers realistically return plus the
+    // eight configured service units; all 28 were captured from the code
+    // BEFORE the reorder, and only '1 Hour' was allowed to move.
+    //
+    // Without this, the reorder is a behaviour change to a rendered value and
+    // to the basis of the cross-provider comparison. With it, it is a fix to
+    // unreachable code.
+    const unchanged = {
+      Hrs: 'hour',
+      Hours: 'hour',
+      h: 'hour',
+      H: 'hour',
+      'GB-Mo': 'GB-month',
+      GB: 'GB',
+      'GB/Month': 'GB-month',
+      'GiBy.mo': 'GB-month',
+      'GiBy.h': 'GB-hour',
+      TiBy: 'TB',
+      Requests: 'operations',
+      ReadRequestUnits: 'operations',
+      WriteRequestUnits: 'operations',
+      seconds: 'seconds',
+      Quantity: 'Quantity',
+      '1 GB': 'GB',
+      '1 GB/Month': 'GB-month',
+      '1/Hour': 'hour',
+      '10K': '10K operations',
+      '1 Month': 'Month',
+      '1M': '1M',
+      '': '',
+      // The eight units the service configs set explicitly — these must survive
+      // a round-trip untouched or a live row stops matching its baseline row.
+      hour: 'hour',
+      'GB-month': 'GB-month',
+      'GB egress': 'GB egress',
+      'million operations': 'million operations',
+      'normalized request workload': 'normalized request workload',
+    };
+
+    for (const [input, expected] of Object.entries(unchanged)) {
+      expect(normalizeUnit(input), `normalizeUnit(${JSON.stringify(input)})`).toBe(expected);
+    }
   });
 
   it('is total for empty input', () => {
