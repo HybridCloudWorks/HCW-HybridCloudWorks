@@ -48,8 +48,7 @@ const TABS = [
 
 // ── Linkie proxy wrappers ─────────────────────────────────────────────────────
 
-const linkieFetch = (path, method = 'GET', body) =>
-  postJSON('linkieProxy', { path, method, body });
+const linkieFetch = (path, method = 'GET', body) => postJSON('linkieProxy', { path, method, body });
 
 const ltGetProfile = () => linkieFetch('/profiles');
 const ltListLinks = () => linkieFetch('/links');
@@ -162,9 +161,7 @@ function LinksTab({ recentContent }) {
     setBusyId(link.id);
     try {
       await ltUpdateLink(link.id, { disabled: !isHidden });
-      setLinks((prev) =>
-        prev.map((l) => (l.id === link.id ? { ...l, disabled: !isHidden } : l))
-      );
+      setLinks((prev) => prev.map((l) => (l.id === link.id ? { ...l, disabled: !isHidden } : l)));
     } catch (err) {
       toast({ title: 'Toggle failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -214,9 +211,7 @@ function LinksTab({ recentContent }) {
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">
-              {editingId ? 'Edit Link' : 'Add a Link'}
-            </CardTitle>
+            <CardTitle className="text-base">{editingId ? 'Edit Link' : 'Add a Link'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
@@ -236,7 +231,12 @@ function LinksTab({ recentContent }) {
               />
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={handleSubmit} disabled={busyId !== null} className="gap-1.5">
+              <Button
+                size="sm"
+                onClick={handleSubmit}
+                disabled={busyId !== null}
+                className="gap-1.5"
+              >
                 {busyId === (editingId || 'new') ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -335,7 +335,11 @@ function LinksTab({ recentContent }) {
                     title={isHidden ? 'Show link' : 'Hide link'}
                     onClick={() => handleToggle(link)}
                   >
-                    {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    {isHidden ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
                   </Button>
                   <Button
                     variant="ghost"
@@ -540,7 +544,11 @@ function ConnectionTab({ onStatusChange }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <Button onClick={handleTest} disabled={testing} className="gap-2">
-            {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {testing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
             Test Connection
           </Button>
           {result && (

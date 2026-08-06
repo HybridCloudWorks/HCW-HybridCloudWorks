@@ -13,11 +13,16 @@ export const PIPELINE_STAGES = ['Submit', 'Inspect', 'Review', 'Edit', 'Publish'
 
 /** Map a content item / status string to the current stage index (0-5). */
 export function getPipelineStageIndex(itemOrStatus) {
-  const item = typeof itemOrStatus === 'string' ? { contentStatus: itemOrStatus } : itemOrStatus || {};
+  const item =
+    typeof itemOrStatus === 'string' ? { contentStatus: itemOrStatus } : itemOrStatus || {};
   const status = String(item.contentStatus || '').toLowerCase();
 
   if (item.Live === true || item.Status === 'Live' || status === 'published_live') return 5;
-  if (status.startsWith('published_') || status.includes('approved') || status === 'ready_to_publish')
+  if (
+    status.startsWith('published_') ||
+    status.includes('approved') ||
+    status === 'ready_to_publish'
+  )
     return 4;
   if (status === 'editing' || status.startsWith('edit')) return 3;
   if (status.includes('review') || status === 'inspected') return 2;
@@ -27,9 +32,7 @@ export function getPipelineStageIndex(itemOrStatus) {
 
 export function isPipelineRejected(itemOrStatus) {
   const status =
-    typeof itemOrStatus === 'string'
-      ? itemOrStatus
-      : String(itemOrStatus?.contentStatus || '');
+    typeof itemOrStatus === 'string' ? itemOrStatus : String(itemOrStatus?.contentStatus || '');
   return status.toLowerCase() === 'rejected';
 }
 

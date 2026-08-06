@@ -12,14 +12,7 @@
  * Supported cloud provider types
  */
 export type ProviderType =
-  | 'aws'
-  | 'azure'
-  | 'gcp'
-  | 'github'
-  | 'terraform'
-  | 'finops'
-  | 'vmware'
-  | 'ansible';
+  'aws' | 'azure' | 'gcp' | 'github' | 'terraform' | 'finops' | 'vmware' | 'ansible';
 
 /**
  * All available page routes in the application

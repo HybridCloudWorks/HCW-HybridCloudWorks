@@ -710,8 +710,8 @@ export default function CalendarPage() {
                   {schedulingDate && getItemsForDay(schedulingDate).length >= 3 && (
                     <div className="rounded-lg border border-amber-500/50 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
                       <strong>{getItemsForDay(schedulingDate).length} items</strong> are already
-                      scheduled on this day. Adding more than 3 posts to a single day can crowd
-                      your audience — consider spreading them out.
+                      scheduled on this day. Adding more than 3 posts to a single day can crowd your
+                      audience — consider spreading them out.
                     </div>
                   )}
 
