@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { useFirestoreCollection } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 import { formatPostDate } from '@/lib/blogUtils';
 import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
 
@@ -82,12 +83,6 @@ function inferProviderFromDoc(doc = {}) {
   );
 }
 
-function isLiveDocument(doc = {}) {
-  const status = String(doc.contentStatus || '');
-  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
-  return doc.Live === true || doc.Status === 'Live' || status.startsWith('published_');
-}
-
 function getPublicUrl(doc = {}) {
   const explicitUrl =
     doc.slugPageUrl ||
@@ -166,16 +161,18 @@ function normalizeItem(doc = {}) {
 
 export function useProviderLandingContent(provider) {
   const providerKey = canonicalizeProvider(provider);
-  const { data: contentDocs, loading: contentLoading } = useFirestoreCollection('content', {
-    limit: 250,
-  });
+  // Visibility is enforced server-side — the public API only returns
+  // published documents — so the client filters are scoped to provider/type.
+  const { data: contentDocs, loading: contentLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 250 }),
+    'landing:content'
+  );
 
   const contentItems = useMemo(() => {
     const seen = new Set();
     const merged = [];
 
     (contentDocs || []).forEach((doc) => {
-      if (!isLiveDocument(doc)) return;
       if (inferProviderFromDoc(doc) !== providerKey) return;
 
       const contentType = getCanonicalContentType(doc);
@@ -194,11 +191,9 @@ export function useProviderLandingContent(provider) {
   }, [contentDocs, providerKey]);
 
   const shouldLoadLegacy = !contentLoading && contentItems.length === 0;
-  const { data: blogDocs, loading: blogLoading } = useFirestoreCollection(
-    shouldLoadLegacy ? 'blogs' : '',
-    {
-      limit: 250,
-    }
+  const { data: blogDocs, loading: blogLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 250, source: 'blogs' }),
+    shouldLoadLegacy ? 'landing:legacy' : ''
   );
 
   const blogItems = useMemo(() => {
@@ -206,7 +201,6 @@ export function useProviderLandingContent(provider) {
     const merged = [];
 
     (blogDocs || []).forEach((doc) => {
-      if (!isLiveDocument(doc)) return;
       if (inferProviderFromDoc(doc) !== providerKey) return;
 
       const contentType = getCanonicalContentType(doc);

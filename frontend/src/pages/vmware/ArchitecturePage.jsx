@@ -1,13 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { where } from 'firebase/firestore';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
-import { useFirestoreQuery } from '@/hooks/useFirestore';
-
-function isPublicDocument(doc = {}) {
-  const status = String(doc.contentStatus || '');
-  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
-}
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 
 function isVMware(doc = {}) {
   const provider = String(doc.cloudProvider || doc['Cloud Provider'] || '').toLowerCase();
@@ -16,21 +11,21 @@ function isVMware(doc = {}) {
 
 export default function VMwareArchitecturePage() {
   const navigate = useNavigate();
-  const { data: docs, loading } = useFirestoreQuery('content', [
-    where('type', '==', 'architecture'),
-  ]);
+  // Published-only is enforced server-side by the public API.
+  const { data: docs, loading } = usePublicData(
+    () => fetchPublicContentList({ type: 'architecture', limit: 250 }),
+    'architecture:content'
+  );
 
-  const items = (docs || [])
-    .filter((doc) => isPublicDocument(doc) && isVMware(doc))
-    .map((doc) => ({
-      id: doc.id,
-      title: doc.title || doc.Title || 'Untitled Blueprint',
-      description: doc.summary || doc.Summary || doc.description || '',
-      category: doc.category || doc.Category || 'Architecture',
-      complexity: doc.complexity || doc.level,
-      tags: Array.isArray(doc.tags) ? doc.tags : [],
-      slug: doc.slug || doc.Slug || null,
-    }));
+  const items = (docs || []).filter(isVMware).map((doc) => ({
+    id: doc.id,
+    title: doc.title || doc.Title || 'Untitled Blueprint',
+    description: doc.summary || doc.Summary || doc.description || '',
+    category: doc.category || doc.Category || 'Architecture',
+    complexity: doc.complexity || doc.level,
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    slug: doc.slug || doc.Slug || null,
+  }));
 
   const categories = [...new Set(items.map((item) => item.category).filter(Boolean))];
 

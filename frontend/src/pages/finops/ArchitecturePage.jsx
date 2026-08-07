@@ -1,13 +1,8 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useNavigate } from 'react-router-dom';
-import { useFirestoreQuery } from '@/hooks/useFirestore';
-import { where } from 'firebase/firestore';
-
-function isPublicDocument(doc = {}) {
-  const status = String(doc.contentStatus || '');
-  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
-}
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 
 function firstPresent(...values) {
   for (const value of values) {
@@ -146,12 +141,14 @@ export default function ArchitecturePage() {
 
   const normalizeCategory = (value) => (categories.includes(value) ? value : categories[0]);
 
-  const { data: dynamicDocs } = useFirestoreQuery('content', [where('type', '==', 'architecture')]);
+  // Published-only is enforced server-side by the public API.
+  const { data: dynamicDocs } = usePublicData(
+    () => fetchPublicContentList({ type: 'architecture', limit: 250 }),
+    'architecture:content'
+  );
   const dynamicBlueprints = (dynamicDocs || [])
     .filter(
-      (doc) =>
-        isPublicDocument(doc) &&
-        (doc.cloudProvider || doc['Cloud Provider'] || 'finops').toLowerCase() === 'finops'
+      (doc) => (doc.cloudProvider || doc['Cloud Provider'] || 'finops').toLowerCase() === 'finops'
     )
     .map((doc, index) => mapDynamicBlueprint(doc, index, normalizeCategory));
 

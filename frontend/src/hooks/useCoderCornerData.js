@@ -1,29 +1,11 @@
 import { useMemo } from 'react';
-import { limit, where } from 'firebase/firestore';
-import { useFirestoreQuery } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 import { formatPostDate } from '@/lib/blogUtils';
 
-const PROVIDER_ALIASES = {
-  aws: ['AWS', 'Aws', 'aws'],
-  azure: ['Azure', 'azure'],
-  gcp: ['GCP', 'Gcp', 'gcp', 'Google Cloud'],
-  finops: ['FinOps', 'Finops', 'finops'],
-  github: ['Github', 'GitHub', 'github'],
-  terraform: ['Terraform', 'terraform'],
-  vmware: ['VMware', 'Vmware', 'vmware'],
-  ansible: ['Ansible', 'ansible'],
-};
-
-const PUBLISHED_STATUSES = new Set(['published_blog']);
-
-function isPublicDocument(doc = {}) {
-  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
-  return (
-    doc.Live === true ||
-    doc.Status === 'Live' ||
-    PUBLISHED_STATUSES.has(String(doc.contentStatus || ''))
-  );
-}
+// Provider alias expansion ('gcp' → 'Google Cloud', casing variants) and the
+// public-visibility filter both live server-side now — see
+// functions/src/lib/public-reads.js.
 
 function normalizeTags(doc = {}) {
   if (Array.isArray(doc.tags)) return doc.tags;
@@ -81,28 +63,31 @@ function normalizeItem(doc = {}) {
 
 export function useCoderCornerData(provider) {
   const normalizedProvider = String(provider || '').toLowerCase();
-  const providerLabels = PROVIDER_ALIASES[normalizedProvider] || [
-    normalizedProvider,
-    normalizedProvider.toUpperCase(),
-  ];
 
-  const { data: contentRecords, loading: contentLoading } = useFirestoreQuery(
-    providerLabels.length > 0 ? 'content' : '',
-    [where('Cloud Provider', 'in', providerLabels), where('type', '==', 'coder_corner'), limit(60)]
+  const { data: contentRecords, loading: contentLoading } = usePublicData(
+    () =>
+      fetchPublicContentList({
+        type: 'coder_corner',
+        provider: normalizedProvider,
+        limit: 60,
+      }),
+    normalizedProvider ? `coder-corner:${normalizedProvider}` : ''
   );
 
   const contentItems = useMemo(
-    () =>
-      (contentRecords || [])
-        .filter(isPublicDocument)
-        .map(normalizeItem)
-        .filter((item) => item.title && item.slug),
+    () => (contentRecords || []).map(normalizeItem).filter((item) => item.title && item.slug),
     [contentRecords]
   );
   const shouldLoadLegacy = !contentLoading && contentItems.length === 0;
-  const { data: legacyBlogRecords, loading: blogsLoading } = useFirestoreQuery(
-    shouldLoadLegacy ? 'blogs' : '',
-    [where('Cloud Provider', 'in', providerLabels), where('type', '==', 'coder_corner'), limit(30)]
+  const { data: legacyBlogRecords, loading: blogsLoading } = usePublicData(
+    () =>
+      fetchPublicContentList({
+        type: 'coder_corner',
+        provider: normalizedProvider,
+        limit: 30,
+        source: 'blogs',
+      }),
+    shouldLoadLegacy && normalizedProvider ? `coder-corner:${normalizedProvider}:legacy` : ''
   );
 
   const items = useMemo(() => {
@@ -110,10 +95,7 @@ export function useCoderCornerData(provider) {
       return contentItems;
     }
 
-    return (legacyBlogRecords || [])
-      .filter(isPublicDocument)
-      .map(normalizeItem)
-      .filter((item) => item.title && item.slug);
+    return (legacyBlogRecords || []).map(normalizeItem).filter((item) => item.title && item.slug);
   }, [contentItems, legacyBlogRecords]);
 
   return {

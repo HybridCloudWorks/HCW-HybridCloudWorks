@@ -5,8 +5,8 @@ import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import DOMPurify from 'dompurify';
-import { useFirestoreDocument, useFirestoreQuery } from '@/hooks/useFirestore';
-import { where } from 'firebase/firestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentItem } from '@/lib/publicApi';
 import { Separator } from '@/components/ui/separator';
 import { Calendar, User, Clock, ArrowLeft, Tag } from 'lucide-react';
 import { Skeleton } from '@/components/performance/Skeleton';
@@ -41,51 +41,11 @@ const HEADING_PROSE_CLASS =
 
 /**
  * Blog/news article detail page.
- * Resolution order:
- * 1) Exact doc ID (blogs, then content)
- * 2) Slug query (blogs, then content)
- * Applies provider and visibility guards for public routes.
+ * Resolution (id → slug → Slug, content then legacy blogs, public-only) is
+ * folded into GET public/content/{slugOrId} server-side — one fetch replaces
+ * the six Firestore lookups and candidate-ranking this component carried.
  * - Displays: hero image, title, meta, AI summary, full content, source link.
  */
-function _normalizeProvider(value = '') {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function isPublicRecord(doc = {}) {
-  const status = String(doc.contentStatus || '');
-  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
-  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
-}
-
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  if (typeof value?.toDate === 'function') return value.toDate().getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function getRecencyScore(item = {}) {
-  return Math.max(
-    toMillis(item.blogEditedAt),
-    toMillis(item.blogPublishedAt),
-    toMillis(item.publishedAt),
-    toMillis(item.updatedAt),
-    toMillis(item.createdAt),
-    toMillis(item['Published At'])
-  );
-}
-
-function getSlugIdHint(slug = '') {
-  const token =
-    String(slug || '')
-      .split('-')
-      .pop() || '';
-  return token.toLowerCase();
-}
-
 function isHeadingOnlyTextSegment(value = '') {
   const normalized = String(value || '')
     .replace(/\r\n/g, '\n')
@@ -128,125 +88,10 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
 
   const { slug } = useParams();
 
-  const { data: contentById, loading: contentByIdLoading } = useFirestoreDocument(
-    `content/${slug}`
+  const { data: article, loading } = usePublicData(
+    () => fetchPublicContentItem(slug),
+    slug ? `article:${slug}` : ''
   );
-  const { data: contentBySlug, loading: contentBySlugLoading } = useFirestoreQuery('content', [
-    where('slug', '==', slug),
-  ]);
-  const { data: contentBySlugLegacy, loading: contentBySlugLegacyLoading } = useFirestoreQuery(
-    'content',
-    [where('Slug', '==', slug)]
-  );
-
-  const contentArticle = useMemo(() => {
-    const idHint = getSlugIdHint(slug);
-    const mergedCandidates = [
-      contentById ? { ...contentById, __source: 'content' } : null,
-      ...(Array.isArray(contentBySlug)
-        ? contentBySlug.map((item) => ({ ...item, __source: 'content' }))
-        : []),
-      ...(Array.isArray(contentBySlugLegacy)
-        ? contentBySlugLegacy.map((item) => ({ ...item, __source: 'content' }))
-        : []),
-    ].filter(Boolean);
-
-    const deduped = [];
-    const seen = new Set();
-    for (const item of mergedCandidates) {
-      const key = `${item.__source}:${item.id || item.slug || item.Slug || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(item);
-    }
-
-    const visible = deduped.filter((item) => isPublicRecord(item));
-    if (!visible.length) return null;
-
-    visible.sort((a, b) => {
-      const aSourceRank = a.__source === 'content' ? 0 : 1;
-      const bSourceRank = b.__source === 'content' ? 0 : 1;
-      if (aSourceRank !== bSourceRank) return aSourceRank - bSourceRank;
-
-      const aId = String(a.id || '').toLowerCase();
-      const bId = String(b.id || '').toLowerCase();
-      const aMatchesHint = idHint && aId.startsWith(idHint) ? 0 : 1;
-      const bMatchesHint = idHint && bId.startsWith(idHint) ? 0 : 1;
-      if (aMatchesHint !== bMatchesHint) return aMatchesHint - bMatchesHint;
-
-      return getRecencyScore(b) - getRecencyScore(a);
-    });
-
-    return visible[0] || null;
-  }, [contentById, contentBySlug, contentBySlugLegacy, slug]);
-
-  const shouldLoadLegacy =
-    !contentByIdLoading && !contentBySlugLoading && !contentBySlugLegacyLoading && !contentArticle;
-
-  const { data: blogsById, loading: blogsByIdLoading } = useFirestoreDocument(
-    shouldLoadLegacy ? `blogs/${slug}` : ''
-  );
-  const { data: blogsBySlug, loading: blogsBySlugLoading } = useFirestoreQuery(
-    shouldLoadLegacy ? 'blogs' : '',
-    [where('slug', '==', slug)]
-  );
-  const { data: blogsBySlugLegacy, loading: blogsBySlugLegacyLoading } = useFirestoreQuery(
-    shouldLoadLegacy ? 'blogs' : '',
-    [where('Slug', '==', slug)]
-  );
-
-  const loading =
-    contentByIdLoading ||
-    contentBySlugLoading ||
-    contentBySlugLegacyLoading ||
-    (shouldLoadLegacy && (blogsByIdLoading || blogsBySlugLoading || blogsBySlugLegacyLoading));
-
-  const article = useMemo(() => {
-    if (contentArticle) {
-      return contentArticle;
-    }
-
-    if (!shouldLoadLegacy) return null;
-    const idHint = getSlugIdHint(slug);
-
-    const mergedCandidates = [
-      blogsById ? { ...blogsById, __source: 'blogs' } : null,
-      ...(Array.isArray(blogsBySlug)
-        ? blogsBySlug.map((item) => ({ ...item, __source: 'blogs' }))
-        : []),
-      ...(Array.isArray(blogsBySlugLegacy)
-        ? blogsBySlugLegacy.map((item) => ({ ...item, __source: 'blogs' }))
-        : []),
-    ].filter(Boolean);
-
-    const deduped = [];
-    const seen = new Set();
-    for (const item of mergedCandidates) {
-      const key = `${item.__source}:${item.id || item.slug || item.Slug || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(item);
-    }
-
-    const visible = deduped.filter((item) => isPublicRecord(item));
-    if (!visible.length) return null;
-
-    visible.sort((a, b) => {
-      const aSourceRank = a.__source === 'content' ? 0 : 1;
-      const bSourceRank = b.__source === 'content' ? 0 : 1;
-      if (aSourceRank !== bSourceRank) return aSourceRank - bSourceRank;
-
-      const aId = String(a.id || '').toLowerCase();
-      const bId = String(b.id || '').toLowerCase();
-      const aMatchesHint = idHint && aId.startsWith(idHint) ? 0 : 1;
-      const bMatchesHint = idHint && bId.startsWith(idHint) ? 0 : 1;
-      if (aMatchesHint !== bMatchesHint) return aMatchesHint - bMatchesHint;
-
-      return getRecencyScore(b) - getRecencyScore(a);
-    });
-
-    return visible[0] || null;
-  }, [blogsById, blogsBySlug, blogsBySlugLegacy, contentArticle, shouldLoadLegacy, slug]);
 
   // Normalize field names across blogs/content documents
   const post = useMemo(() => {

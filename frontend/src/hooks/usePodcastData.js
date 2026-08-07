@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { useFirestoreCollection } from './useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicPodcasts } from '@/lib/publicApi';
 
 export function usePodcastData(provider, options = {}) {
   const limit = options.limit || 50;
@@ -8,20 +9,23 @@ export function usePodcastData(provider, options = {}) {
     data: raw,
     loading,
     error,
-  } = useFirestoreCollection('podcasts', {
-    where: ['provider', '==', provider],
-    orderBy: ['publishedAt', 'desc'],
-    limit,
-  });
+  } = usePublicData(
+    () => fetchPublicPodcasts({ provider, limit }),
+    provider ? `podcasts:${provider}:${limit}` : ''
+  );
 
   const episodes = useMemo(() => {
     if (!raw || raw.length === 0) return [];
     return raw
       .map((doc) => {
-        const item = { id: doc.id, ...doc };
-        if (item.publishedAt && item.publishedAt.toDate) {
-          item.publishedAtISO = item.publishedAt.toDate().toISOString();
-          item.publishedAtString = new Date(item.publishedAt.toDate()).toLocaleDateString();
+        const item = { ...doc };
+        // publishedAt arrives as an ISO string from the API (it was a
+        // Firestore Timestamp before) — derive the display fields from either.
+        const rawDate = item.publishedAt?.toDate ? item.publishedAt.toDate() : item.publishedAt;
+        const parsed = rawDate ? new Date(rawDate) : null;
+        if (parsed && !Number.isNaN(parsed.getTime())) {
+          item.publishedAtISO = parsed.toISOString();
+          item.publishedAtString = parsed.toLocaleDateString();
         }
         return item;
       })

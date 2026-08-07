@@ -101,9 +101,46 @@ describe('listContent', () => {
     expect(container).toBe('content');
     expect(query).toContain('LOWER(c.type) = @type');
     expect(query).toContain('ARRAY_CONTAINS(@providers');
-    expect(query).not.toContain('SELECT *');
     expect(params).toContainEqual({ name: '@type', value: 'coder_corner' });
     expect(params.find((p) => p.name === '@providers').value).toContain('Google Cloud');
+  });
+
+  it('returns full documents with internal fields stripped', async () => {
+    const store = {
+      queryDocs: vi.fn(async () => [
+        publicDoc({
+          frameworkConcepts: [{ label: 'Pillar' }],
+          featured: true,
+          reviewNotes: 'internal',
+          _rid: 'abc',
+        }),
+      ]),
+      readDoc: vi.fn(),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.listContent(makeRequest(), context);
+    const [item] = JSON.parse(res.body).items;
+    // Fields outside any card projection survive — the list consumers
+    // (useFrameworkData, useProviderLandingContent) read them.
+    expect(item.frameworkConcepts).toEqual([{ label: 'Pillar' }]);
+    expect(item.featured).toBe(true);
+    expect(item).not.toHaveProperty('reviewNotes');
+    expect(item).not.toHaveProperty('_rid');
+  });
+
+  it('serves the legacy blogs container only via the source allowlist', async () => {
+    const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
+    const h = createPublicReadHandlers({ store });
+
+    await h.listContent(makeRequest({ query: { source: 'blogs' } }), context);
+    expect(store.queryDocs.mock.calls[0][0]).toBe('blogs');
+
+    const denied = await h.listContent(
+      makeRequest({ query: { source: 'admin_settings' } }),
+      context
+    );
+    expect(denied.status).toBe(400);
+    expect(store.queryDocs).toHaveBeenCalledTimes(1); // rejected before any read
   });
 
   it('applies offset/limit after the sort and clamps the limit', async () => {
