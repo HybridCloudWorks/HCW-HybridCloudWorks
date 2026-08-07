@@ -1,64 +1,42 @@
 /**
- * labs-http.js — HTTP routes for the Labs portal (VPS agent management).
+ * labs-http.js — Labs platform RPCs at the frontend's route names.
+ * Semantics in lib/labs.js (the labs-functions.js port).
  *
- * Rewired from the stub-era auth-middleware (dead audience config, see
- * cms-http.js) onto the two-gate role guard. Handler bodies unchanged pending
- * the labs-functions.js port: job-type validation against agent capabilities
- * is still TODO and tracked in .azure/api-surface.json.
+ * The stub-era labs/jobs + labs/agents scaffolding routes are retired: the
+ * stub accepted arbitrary job bodies with no type allowlist or payload cap —
+ * a validation-free write path must not coexist with the real one (the same
+ * rule as the retired cms/content raw-upsert save). submitPublicLabJob is
+ * deliberately not registered — it authenticates plain (non-admin) users and
+ * belongs to the frontend auth-swap phase; see lib/labs.js.
  */
 import { app } from '@azure/functions';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { queryDocs, upsertDoc } from '../lib/cosmos-client.js';
+import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import { createLabHandlers } from '../lib/labs.js';
 
-const json = (status, body) => ({
-  status,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
+const handlers = () =>
+  createLabHandlers({
+    guard: getDefaultGuard(),
+    store: { queryDocs, readDoc, upsertDoc, patchDoc },
+  });
 
-app.http('labsSubmitJob', {
+app.http('enqueueLabJob', {
   methods: ['POST'],
   authLevel: 'anonymous',
-  route: 'labs/jobs',
-  handler: async (request, context) => {
-    const auth = await getDefaultGuard().requireRole(request, 'editor');
-    if (auth.error) return auth.error;
-
-    try {
-      const body = await request.json().catch(() => null);
-      if (!body || typeof body !== 'object') return json(400, { error: 'Body must be a JSON object' });
-      // TODO: Validate job type against capabilities (labs-functions.js port)
-
-      const newJob = {
-        id: `job-${Date.now()}`,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        ...body,
-      };
-
-      const savedJob = await upsertDoc('lab_jobs', newJob);
-      return json(200, { success: true, job: savedJob });
-    } catch (err) {
-      context.error('labsSubmitJob error:', err);
-      return json(500, { error: 'Failed to submit job' });
-    }
-  },
+  route: 'enqueueLabJob',
+  handler: (request, context) => handlers().enqueueLabJob(request, context),
 });
 
-app.http('labsGetAgents', {
-  methods: ['GET'],
+app.http('getLabsSnapshot', {
+  methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  route: 'labs/agents',
-  handler: async (request, context) => {
-    const auth = await getDefaultGuard().requireRole(request, 'editor');
-    if (auth.error) return auth.error;
+  route: 'getLabsSnapshot',
+  handler: (request, context) => handlers().getLabsSnapshot(request, context),
+});
 
-    try {
-      const docs = await queryDocs('lab_agents', 'SELECT * FROM c');
-      return json(200, { agents: docs });
-    } catch (err) {
-      context.error('labsGetAgents error:', err);
-      return json(500, { error: 'Failed to get agents' });
-    }
-  },
+app.http('cancelLabJob', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cancelLabJob',
+  handler: (request, context) => handlers().cancelLabJob(request, context),
 });
