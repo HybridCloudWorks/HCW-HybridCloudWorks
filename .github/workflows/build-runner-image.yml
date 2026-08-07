@@ -1,0 +1,87 @@
+# Builds and pushes the self-hosted runner image (infra/runner-image/).
+#
+# Runs on GitHub-hosted runners DELIBERATELY: a broken runner image must never
+# be able to brick its own rebuild pipeline. Weekly cron keeps the image
+# current with apt/Node patches; the push trigger rebuilds when the Dockerfile
+# changes (including Dependabot's FROM bumps when a new actions/runner ships —
+# GitHub enforces minimum runner versions, and ephemeral runners run with
+# auto-update disabled, so a stale image eventually means refused jobs).
+#
+# Registry of record: Docker Hub (authenticated — Captain/Pro account).
+# A GHCR mirror tag is pushed as break-glass so the outage-fallback runner
+# does not itself depend on a single external registry being up.
+#
+# Required repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
+# (a read/write access token scoped to the hcw-runner repository).
+name: Build runner image
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # weekly, Monday 06:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - 'infra/runner-image/**'
+      - '.github/workflows/build-runner-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # GHCR mirror
+
+env:
+  IMAGE_NAME: hcw-runner
+  # Keep in sync with the FROM tag in infra/runner-image/Dockerfile —
+  # Dependabot bumps both via its docker ecosystem entry.
+  RUNNER_VERSION: 2.328.0
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR (mirror)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (load locally for the scan gate)
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/runner-image
+          load: true
+          tags: local/scan-candidate:latest
+
+      # Scan BEFORE push — a CVE-ridden image never reaches the registry.
+      # compare-to-latest is deliberately absent: this gate is absolute
+      # (critical/high vulns fail), not relative to the previous build.
+      - name: Docker Scout CVE gate
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: local/scan-candidate:latest
+          only-severities: critical,high
+          exit-code: true
+
+      - name: Push to Docker Hub + GHCR mirror
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/runner-image
+          push: true
+          tags: |
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.RUNNER_VERSION }}
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest-stable
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.RUNNER_VERSION }}

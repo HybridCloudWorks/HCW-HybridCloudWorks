@@ -11,7 +11,8 @@ permissions:
 jobs:
   validate-structure:
     name: Validate root and documentation policy
-    runs-on: ubuntu-latest
+    # Same failover switch as ci.yml — see Review.md §4.4.
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
