@@ -155,6 +155,21 @@ describe('images', () => {
     expect(body.curated[0].id).toBe('curated_article_images-new');
     expect(body.generated[0].id).toBe('generated_content_images-new');
   });
+
+  it('single curated lookup answers 200 with item:null when missing', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async (_c, id) => (id === 'hit' ? { id: 'hit', imageUrl: 'u' } : null)),
+    });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+
+    const hit = await h.getCuratedImage(makeRequest({ params: { id: 'hit' } }), context);
+    expect(JSON.parse(hit.body).item.imageUrl).toBe('u');
+    expect(store.readDoc.mock.calls[0][0]).toBe('curated_article_images');
+
+    const miss = await h.getCuratedImage(makeRequest({ params: { id: 'miss' } }), context);
+    expect(miss.status).toBe(200);
+    expect(JSON.parse(miss.body).item).toBeNull();
+  });
 });
 
 describe('config collections (ai-providers / mcp-servers)', () => {

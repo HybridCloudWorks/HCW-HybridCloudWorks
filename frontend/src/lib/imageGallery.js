@@ -1,14 +1,13 @@
-import { collection, getDocs, limit, orderBy, query as buildQuery } from 'firebase/firestore';
-import { db } from '@/lib/firebaseConfig';
+import { getJSON } from '@/lib/api';
 
 const PAGE_SIZE = 200;
 
-export function normalizeGalleryItem(docSnap, sourceCollection) {
-  const data = docSnap.data() || {};
-  const articleId = String(data.articleId || data.contentId || docSnap.id);
+export function normalizeGalleryItem(item, sourceCollection) {
+  const data = item || {};
+  const articleId = String(data.articleId || data.contentId || data.id);
   const normalizedSourceCollection = String(data.sourceCollection || '').trim() || sourceCollection;
   return {
-    id: docSnap.id,
+    id: data.id,
     articleId,
     imageUrl: data.imageUrl || '',
     provider: data.provider || '',
@@ -36,36 +35,22 @@ export function getSourceLabel(sourceCollection) {
   return 'Generated';
 }
 
-export async function loadGalleryItems({ max = PAGE_SIZE } = {}) {
-  const curatedQuery = buildQuery(
-    collection(db, 'curated_article_images'),
-    orderBy('createdAt', 'desc'),
-    limit(max)
-  );
-  const contentQuery = buildQuery(
-    collection(db, 'generated_content_images'),
-    orderBy('createdAt', 'desc'),
-    limit(max)
-  );
+const createdAtMillis = (value) => {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-  const [curatedSnapshot, contentSnapshot] = await Promise.all([
-    getDocs(curatedQuery),
-    getDocs(contentQuery),
-  ]);
+export async function loadGalleryItems({ max = PAGE_SIZE } = {}) {
+  // GET cms/images returns both galleries, newest first each, capped at max.
+  const res = await getJSON(`cms/images?limit=${max}`);
 
   return [
-    ...curatedSnapshot.docs.map((docSnap) =>
-      normalizeGalleryItem(docSnap, 'curated_article_images')
-    ),
-    ...contentSnapshot.docs.map((docSnap) =>
-      normalizeGalleryItem(docSnap, 'generated_content_images')
-    ),
+    ...(res.curated || []).map((item) => normalizeGalleryItem(item, 'curated_article_images')),
+    ...(res.generated || []).map((item) => normalizeGalleryItem(item, 'generated_content_images')),
   ]
-    .sort((a, b) => {
-      const aTime = a.createdAt?.toMillis?.() || 0;
-      const bTime = b.createdAt?.toMillis?.() || 0;
-      return bTime - aTime;
-    })
+    .sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt))
     .reduce(
       (acc, item) => {
         // Dedupe by imageUrl — multiple rows for the same generated asset

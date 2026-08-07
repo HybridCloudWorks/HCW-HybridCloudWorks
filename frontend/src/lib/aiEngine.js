@@ -2,11 +2,14 @@
  * AI Engine — browser client library
  *
  * Provides a unified interface for:
- *   • Calling any configured AI provider (via aiProxy Cloud Function)
- *   • Calling MCP server tools (via mcpProxy Cloud Function)
- *   • Reading/writing provider and server configs from Firestore
+ *   • Calling any configured AI provider (via the aiProxy RPC)
+ *   • Calling MCP server tools (via the mcpProxy RPC)
+ *   • Reading/writing provider and server configs via cms/config/*
  *
- * All calls are authenticated with the current user's Firebase ID token.
+ * All calls are authenticated with the current user's Entra access token.
+ *
+ * Config reads note: mcp_servers documents carry hasOauthToken (boolean)
+ * instead of the token itself — the value is write-only on the API.
  *
  * Usage:
  *   import { aiEngine } from '@/lib/aiEngine';
@@ -14,26 +17,11 @@
  *   const result    = await aiEngine.mcpTool('brave-search', 'brave_web_search', { query: 'test' });
  */
 
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  orderBy,
-  limit,
-  where,
-  serverTimestamp,
-  onSnapshot,
-} from 'firebase/firestore';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON, sendJSON } from '@/lib/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Default provider & MCP server seed data
-// Written to Firestore on first admin page load if collections are empty.
+// Written through the config API on first admin page load if empty.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const DEFAULT_PROVIDERS = [
@@ -247,13 +235,77 @@ export const DEFAULT_MCP_SERVERS = [
 // Core API helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Seed Firestore if either collection is empty.
+/**
+ * Route keys for the config API. Callers historically pass the container
+ * names ('ai_providers'/'mcp_servers'), so both spellings resolve.
+ */
+const CONFIG_ROUTES = {
+  ai_providers: 'ai-providers',
+  'ai-providers': 'ai-providers',
+  mcp_servers: 'mcp-servers',
+  'mcp-servers': 'mcp-servers',
+};
+
+function configRoute(colName) {
+  const route = CONFIG_ROUTES[colName];
+  if (!route) throw new Error(`Unknown config collection: ${colName}`);
+  return route;
+}
+
+async function fetchConfig(route) {
+  const res = await getJSON(`cms/config/${route}`);
+  return res.items || [];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Config subscriptions
+//
+// The Firestore onSnapshot listeners are replaced with fetch-plus-notify:
+// every subscriber gets the current list on subscribe, and every write helper
+// in this module re-fetches and re-notifies after it lands. Same reactive UX
+// on the admin pages, no polling.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const configSubscribers = {
+  'ai-providers': new Set(),
+  'mcp-servers': new Set(),
+};
+
+async function notifyConfigSubscribers(route) {
+  if (configSubscribers[route].size === 0) return;
+  try {
+    const items = await fetchConfig(route);
+    configSubscribers[route].forEach((callback) => callback(items));
+  } catch (err) {
+    console.error(`[aiEngine] refresh of ${route} failed:`, err);
+  }
+}
+
+function subscribeConfig(route, callback) {
+  configSubscribers[route].add(callback);
+  fetchConfig(route)
+    .then((items) => {
+      if (configSubscribers[route].has(callback)) callback(items);
+    })
+    .catch((err) => console.error(`[aiEngine] load of ${route} failed:`, err));
+  return () => configSubscribers[route].delete(callback);
+}
+
+/** Listener on ai_providers, sorted by order (server-sorted). */
+export function subscribeProviders(callback) {
+  return subscribeConfig('ai-providers', callback);
+}
+
+/** Listener on mcp_servers, sorted by order (server-sorted). */
+export function subscribeMcpServers(callback) {
+  return subscribeConfig('mcp-servers', callback);
+}
+
+/** Seed the config collections if empty.
  *  Also deletes deprecated provider/server docs and patches stale URLs.
  *  Called once on admin page load.
  */
 export async function seedAiEngineIfEmpty() {
-  const db = getFirestore();
-
   // Providers and servers that have been permanently removed from defaults.
   const DEPRECATED_PROVIDERS = ['openai'];
   const DEPRECATED_MCP_SERVERS = ['anthropic-mcp', 'openai-mcp', 'perplexity-mcp'];
@@ -269,137 +321,103 @@ export async function seedAiEngineIfEmpty() {
     'replicate-mcp': 'sse',
   };
 
-  const [providersSnap, serversSnap] = await Promise.all([
-    getDocs(collection(db, 'ai_providers')),
-    getDocs(collection(db, 'mcp_servers')),
+  const [providers, servers] = await Promise.all([
+    fetchConfig('ai-providers'),
+    fetchConfig('mcp-servers'),
   ]);
 
   const writes = [];
+  const putConfig = (route, id, data) => sendJSON(`cms/config/${route}/${id}`, 'PUT', data);
+  const patchConfig = (route, id, patch) => sendJSON(`cms/config/${route}/${id}`, 'PATCH', patch);
+  const deleteConfig = (route, id) => sendJSON(`cms/config/${route}/${id}`, 'DELETE');
 
   // ─ AI Providers ───────────────────────────────────────────────
-  if (providersSnap.empty) {
-    DEFAULT_PROVIDERS.forEach((p) => {
-      writes.push(setDoc(doc(db, 'ai_providers', p.id), { ...p, createdAt: serverTimestamp() }));
-    });
-  } else {
-    const existingIds = new Set(providersSnap.docs.map((d) => d.id));
-    // Delete deprecated providers
-    for (const id of DEPRECATED_PROVIDERS) {
-      if (existingIds.has(id)) {
-        writes.push(deleteDoc(doc(db, 'ai_providers', id)));
-      }
-    }
-    // Seed any new providers that don't exist yet
-    DEFAULT_PROVIDERS.forEach((p) => {
-      if (!existingIds.has(p.id)) {
-        writes.push(setDoc(doc(db, 'ai_providers', p.id), { ...p, createdAt: serverTimestamp() }));
-      }
-    });
+  const providerIds = new Set(providers.map((p) => p.id));
+  for (const id of DEPRECATED_PROVIDERS) {
+    if (providerIds.has(id)) writes.push(deleteConfig('ai-providers', id));
   }
+  DEFAULT_PROVIDERS.forEach((p) => {
+    if (providers.length === 0 || !providerIds.has(p.id)) {
+      writes.push(putConfig('ai-providers', p.id, p));
+    }
+  });
 
   // ─ MCP Servers ───────────────────────────────────────────────
-  if (serversSnap.empty) {
-    DEFAULT_MCP_SERVERS.forEach((s) => {
-      writes.push(setDoc(doc(db, 'mcp_servers', s.id), { ...s, createdAt: serverTimestamp() }));
-    });
-  } else {
-    const existingIds = new Set(serversSnap.docs.map((d) => d.id));
-    // Delete deprecated servers
-    for (const id of DEPRECATED_MCP_SERVERS) {
-      if (existingIds.has(id)) {
-        writes.push(deleteDoc(doc(db, 'mcp_servers', id)));
-      }
+  const serverIds = new Set(servers.map((srv) => srv.id));
+  for (const id of DEPRECATED_MCP_SERVERS) {
+    if (serverIds.has(id)) writes.push(deleteConfig('mcp-servers', id));
+  }
+  DEFAULT_MCP_SERVERS.forEach((srv) => {
+    if (servers.length === 0 || !serverIds.has(srv.id)) {
+      writes.push(putConfig('mcp-servers', srv.id, srv));
     }
-    // Seed any new servers that don't exist yet
-    DEFAULT_MCP_SERVERS.forEach((s) => {
-      if (!existingIds.has(s.id)) {
-        writes.push(setDoc(doc(db, 'mcp_servers', s.id), { ...s, createdAt: serverTimestamp() }));
-      }
-    });
-    // Patch stale URLs in existing docs
-    for (const serverDoc of serversSnap.docs) {
-      const { id } = serverDoc;
-      const data = serverDoc.data();
-      const patch = {};
-      if (MCP_URL_PATCHES[id] && data.url !== MCP_URL_PATCHES[id]) {
-        patch.url = MCP_URL_PATCHES[id];
-      }
-      if (MCP_TRANSPORT_PATCHES[id] && data.transport !== MCP_TRANSPORT_PATCHES[id]) {
-        patch.transport = MCP_TRANSPORT_PATCHES[id];
-      }
-      if (Object.keys(patch).length > 0) {
-        writes.push(updateDoc(doc(db, 'mcp_servers', id), patch));
-      }
+  });
+  // Patch stale URLs in existing docs
+  for (const server of servers) {
+    const patch = {};
+    if (MCP_URL_PATCHES[server.id] && server.url !== MCP_URL_PATCHES[server.id]) {
+      patch.url = MCP_URL_PATCHES[server.id];
+    }
+    if (MCP_TRANSPORT_PATCHES[server.id] && server.transport !== MCP_TRANSPORT_PATCHES[server.id]) {
+      patch.transport = MCP_TRANSPORT_PATCHES[server.id];
+    }
+    if (Object.keys(patch).length > 0) {
+      writes.push(patchConfig('mcp-servers', server.id, patch));
     }
   }
 
-  if (writes.length > 0) await Promise.all(writes);
-}
-
-/** Real-time listener on ai_providers, sorted by order. */
-export function subscribeProviders(callback) {
-  const db = getFirestore();
-  return onSnapshot(query(collection(db, 'ai_providers'), orderBy('order', 'asc')), (snap) =>
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-  );
-}
-
-/** Real-time listener on mcp_servers, sorted by order. */
-export function subscribeMcpServers(callback) {
-  const db = getFirestore();
-  return onSnapshot(query(collection(db, 'mcp_servers'), orderBy('order', 'asc')), (snap) =>
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-  );
+  if (writes.length > 0) {
+    await Promise.all(writes);
+    await Promise.all([
+      notifyConfigSubscribers('ai-providers'),
+      notifyConfigSubscribers('mcp-servers'),
+    ]);
+  }
 }
 
 /** Toggle enable flag on a provider or MCP server. */
 export async function setEnabled(colName, docId, enabled) {
-  const db = getFirestore();
-  await updateDoc(doc(db, colName, docId), { enabled, updatedAt: serverTimestamp() });
+  const route = configRoute(colName);
+  await sendJSON(`cms/config/${route}/${docId}`, 'PATCH', { enabled });
+  await notifyConfigSubscribers(route);
 }
 
 /** Update the default model for a provider. */
 export async function setProviderModel(providerId, model) {
-  const db = getFirestore();
-  await updateDoc(doc(db, 'ai_providers', providerId), {
-    defaultModel: model,
-    updatedAt: serverTimestamp(),
-  });
+  await sendJSON(`cms/config/ai-providers/${providerId}`, 'PATCH', { defaultModel: model });
+  await notifyConfigSubscribers('ai-providers');
 }
 
 /** Add a custom MCP server. */
 export async function addMcpServer(data) {
-  const db = getFirestore();
-  const ref = doc(collection(db, 'mcp_servers'));
-  await setDoc(ref, {
+  const id = crypto.randomUUID();
+  await sendJSON(`cms/config/mcp-servers/${id}`, 'PUT', {
     ...data,
-    id: ref.id,
     tools: [],
     status: 'untested',
-    createdAt: serverTimestamp(),
   });
-  return ref.id;
+  await notifyConfigSubscribers('mcp-servers');
+  return id;
 }
 
 /**
  * Store an OAuth access token for an MCP server (e.g. Plaud).
- * Written to the mcp_servers document — only readable server-side by mcpProxy.
- * The browser never reads this field back (Firestore rules block it if you set them up
- * to deny `oauthToken` field reads; for now it's admin-write only).
+ * The API accepts the write but never returns the value on any read —
+ * reads carry hasOauthToken (boolean) instead. Only mcpProxy uses the token
+ * server-side.
  */
 export async function setMcpOAuthToken(serverId, oauthToken) {
-  const db = getFirestore();
-  await updateDoc(doc(db, 'mcp_servers', serverId), {
+  await sendJSON(`cms/config/mcp-servers/${serverId}`, 'PATCH', {
     oauthToken,
     status: 'untested', // force re-test after token update
-    updatedAt: serverTimestamp(),
   });
+  await notifyConfigSubscribers('mcp-servers');
 }
 
 /** Delete a custom MCP server (only non-seed servers). */
 export async function removeMcpServer(serverId) {
-  const db = getFirestore();
-  await deleteDoc(doc(db, 'mcp_servers', serverId));
+  await sendJSON(`cms/config/mcp-servers/${serverId}`, 'DELETE');
+  await notifyConfigSubscribers('mcp-servers');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -424,7 +442,7 @@ export async function chat(
 
 /**
  * Test a provider's connectivity via testAiProvider.
- * Writes result directly to Firestore; returns { ok, latencyMs, status, error? }
+ * Writes result server-side; returns { ok, latencyMs, status, error? }
  */
 export async function testProvider(providerId) {
   return postJSON('testAiProvider', { providerId });
@@ -432,7 +450,7 @@ export async function testProvider(providerId) {
 
 /**
  * Sync tools from an MCP server via syncMcpTools.
- * Writes tool list to Firestore; returns { ok, tools }
+ * Writes tool list server-side; returns { ok, tools }
  */
 export async function syncMcpTools(serverId) {
   return postJSON('syncMcpTools', { serverId });
@@ -452,11 +470,13 @@ export async function mcpTool(serverId, tool, toolArguments = {}) {
 
 /** Fetch usage records. Returns last `limitN` records ordered by timestamp desc. */
 export async function getUsageRecords(limitN = 100, startAfterDate = null) {
-  const db = getFirestore();
-  const constraints = [orderBy('timestamp', 'desc'), limit(limitN)];
-  if (startAfterDate) constraints.push(where('timestamp', '>=', startAfterDate));
-  const snap = await getDocs(query(collection(db, 'ai_usage'), ...constraints));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const params = new URLSearchParams({ limit: String(limitN) });
+  if (startAfterDate) {
+    const since = startAfterDate instanceof Date ? startAfterDate.toISOString() : startAfterDate;
+    params.set('since', since);
+  }
+  const res = await getJSON(`cms/ai-usage?${params.toString()}`);
+  return res.items || [];
 }
 
 /** Aggregate usage by provider. Returns { provider: { tokens, costUsd, calls } } */

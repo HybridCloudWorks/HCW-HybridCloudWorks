@@ -60,6 +60,13 @@ app.http('cmsPutSettings', {
   handler: (request, context) => handlers().putSettings(request, context),
 });
 
+app.http('cmsGetCuratedImage', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/images/curated/{id}',
+  handler: (request, context) => handlers().getCuratedImage(request, context),
+});
+
 app.http('cmsListImages', {
   methods: ['GET'],
   authLevel: 'anonymous',

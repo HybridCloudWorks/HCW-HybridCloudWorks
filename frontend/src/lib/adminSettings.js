@@ -1,14 +1,12 @@
 /**
- * Admin integration settings — small Firestore-backed settings doc so values
- * like the Sessionize speaker ID are editable from the Connections page
- * instead of being hard-coded.
+ * Admin integration settings — small API-backed settings doc so values like
+ * the Sessionize speaker ID are editable from the Connections page instead of
+ * being hard-coded.
  *
- * Doc: admin_settings/integrations
+ * Backed by GET/PUT /api/cms/settings (the admin_settings/integrations doc);
+ * PUT is a merge-save and the server stamps updatedAt.
  */
-import { db } from '@/lib/firebaseConfig';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-
-export const ADMIN_SETTINGS_DOC_PATH = ['admin_settings', 'integrations'];
+import { getJSON, sendJSON } from '@/lib/api';
 
 /** Fallback used when the settings doc is missing or unreadable. */
 export const DEFAULT_SESSIONIZE_SPEAKER_ID = 'c6yicoezls';
@@ -19,8 +17,8 @@ let cachedSettings = null;
 export async function getIntegrationSettings({ force = false } = {}) {
   if (cachedSettings && !force) return cachedSettings;
   try {
-    const snap = await getDoc(doc(db, ...ADMIN_SETTINGS_DOC_PATH));
-    cachedSettings = snap.exists() ? snap.data() : {};
+    const res = await getJSON('cms/settings');
+    cachedSettings = res.settings || {};
   } catch {
     cachedSettings = {};
   }
@@ -29,11 +27,7 @@ export async function getIntegrationSettings({ force = false } = {}) {
 
 /** Merge-save settings fields. */
 export async function saveIntegrationSettings(updates) {
-  await setDoc(
-    doc(db, ...ADMIN_SETTINGS_DOC_PATH),
-    { ...updates, updatedAt: serverTimestamp() },
-    { merge: true }
-  );
+  await sendJSON('cms/settings', 'PUT', updates);
   cachedSettings = { ...(cachedSettings || {}), ...updates };
   return cachedSettings;
 }
