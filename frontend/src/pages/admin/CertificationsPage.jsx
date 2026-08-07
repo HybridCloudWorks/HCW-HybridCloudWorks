@@ -1,21 +1,10 @@
 /**
- * Certifications Admin — CRUD for the `certifications` Firestore collection that
- * powers the About page. Lets me curate the showcase: stats, search, filters,
+ * Certifications Admin — CRUD for the `certifications` container (via the
+ * cms/certifications API) that powers the About page. Lets me curate the showcase: stats, search, filters,
  * featured highlight, bulk display toggle, expiring-soon view, and edit/delete.
  */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import {
-  collection,
-  getDocs,
-  doc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
-import { db } from '@/lib/firebaseConfig';
-import { getStorage } from '@/lib/firebaseStorage';
+import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -406,11 +395,19 @@ function CertEditor({ cert, allCerts, onClose, onSaved }) {
     try {
       const ext = (file.name.split('.').pop() || 'png').toLowerCase();
       const id = cert._docId || `new-${Date.now()}`;
-      const path = `certifications/${id}/images/badge-${Date.now()}.${ext}`;
-      const ref = storageRef(getStorage(), path);
-      await uploadBytes(ref, file, { contentType: file.type || 'image/png' });
-      const url = await getDownloadURL(ref);
-      set('imageUrl', url);
+      const path = `${id}/images/badge-${Date.now()}.${ext}`;
+      const dataBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
+      const uploaded = await postJSON('cms/uploads/certifications', {
+        path,
+        contentType: file.type || 'image/png',
+        dataBase64,
+      });
+      set('imageUrl', uploaded.url);
       toast({ title: 'Image uploaded' });
     } catch (err) {
       console.error('[Certifications] upload failed', err);
@@ -444,16 +441,13 @@ function CertEditor({ cert, allCerts, onClose, onSaved }) {
         certState: Boolean(form.certState),
         featured: Boolean(form.featured),
         display_order: Number(form.display_order) || 999,
-        _updatedAt: serverTimestamp(),
       };
+      // The server stamps _createdAt/_updatedAt.
       if (isNew) {
-        const ref = await addDoc(collection(db, COLLECTION), {
-          ...payload,
-          _createdAt: serverTimestamp(),
-        });
-        onSaved({ _docId: ref.id, ...payload });
+        const created = await postJSON(`cms/${COLLECTION}`, payload);
+        onSaved({ _docId: created.id, ...payload });
       } else {
-        await updateDoc(doc(db, COLLECTION, cert._docId), payload);
+        await sendJSON(`cms/${COLLECTION}/${cert._docId}`, 'PATCH', payload);
         onSaved({ ...cert, ...payload });
       }
       toast({ title: isNew ? 'Certification added' : 'Saved' });
@@ -827,8 +821,8 @@ export default function CertificationsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const snap = await getDocs(collection(db, COLLECTION));
-      const rows = snap.docs.map((d) => ({ _docId: d.id, ...d.data() }));
+      const res = await getJSON(`cms/${COLLECTION}`);
+      const rows = (res.items || []).map((item) => ({ _docId: item.id, ...item }));
       rows.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999));
       setItems(rows);
     } catch (err) {
@@ -910,10 +904,7 @@ export default function CertificationsPage() {
 
   const patchCert = async (cert, patch) => {
     try {
-      await updateDoc(doc(db, COLLECTION, cert._docId), {
-        ...patch,
-        _updatedAt: serverTimestamp(),
-      });
+      await sendJSON(`cms/${COLLECTION}/${cert._docId}`, 'PATCH', patch);
       setItems((p) => p.map((c) => (c._docId === cert._docId ? { ...c, ...patch } : c)));
     } catch (err) {
       toast({ title: 'Update failed', description: err.message, variant: 'destructive' });
@@ -922,7 +913,7 @@ export default function CertificationsPage() {
 
   const handleDelete = async (cert) => {
     try {
-      await deleteDoc(doc(db, COLLECTION, cert._docId));
+      await sendJSON(`cms/${COLLECTION}/${cert._docId}`, 'DELETE');
       setItems((p) => p.filter((c) => c._docId !== cert._docId));
       toast({ title: 'Deleted' });
     } catch (err) {

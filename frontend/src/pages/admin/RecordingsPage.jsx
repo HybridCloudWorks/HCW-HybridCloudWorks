@@ -24,16 +24,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthReady } from '@/hooks/useAuthReady';
-import { db } from '@/lib/firebaseConfig';
-import {
-  collection,
-  query,
-  getDocs,
-  addDoc,
-  updateDoc,
-  doc,
-  serverTimestamp,
-} from 'firebase/firestore';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,7 +50,7 @@ import {
   ChevronRight,
   CalendarDays,
 } from 'lucide-react';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON, sendJSON } from '@/lib/api';
 import { aiEngine, setMcpOAuthToken } from '@/lib/aiEngine';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -158,8 +148,9 @@ function PlaudRecordingCard({ recording, onCreateContent }) {
         tx = res.result;
         setTranscript(tx);
       }
-      // Save to local recordings collection then route to pipeline
-      const localRef = await addDoc(collection(db, 'recordings'), {
+      // Save to the recordings container then route to pipeline
+      // (the server stamps createdAt).
+      const created = await postJSON('cms/recordings', {
         title: recording.name,
         transcript: tx,
         duration: recording.duration,
@@ -167,9 +158,8 @@ function PlaudRecordingCard({ recording, onCreateContent }) {
         source: 'plaud_mcp',
         plaudId: recording.id,
         status: 'new',
-        createdAt: serverTimestamp(),
       });
-      onCreateContent({ id: localRef.id, title: recording.name, transcript: tx });
+      onCreateContent({ id: created.id, title: recording.name, transcript: tx });
     } catch (err) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -290,7 +280,7 @@ function RouteModal({ recording, onClose, onRouted }) {
         provider: 'vertex',
       });
       if (result?.contentId) {
-        await updateDoc(doc(db, 'recordings', recording.id), {
+        await sendJSON(`cms/recordings/${recording.id}`, 'PATCH', {
           status: 'routed',
           contentId: result.contentId,
         });
@@ -572,12 +562,11 @@ function UploadTab() {
     }
     setSaving(true);
     try {
-      await addDoc(collection(db, 'recordings'), {
+      await postJSON('cms/recordings', {
         title,
         transcript,
         source: 'manual_upload',
         status: 'new',
-        createdAt: serverTimestamp(),
       });
       setSaved(true);
       setTitle('');
@@ -877,10 +866,11 @@ export default function RecordingsPage() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        // If the Plaud MCP server doc has a status of 'connected' in Firestore, show as connected
-        const snap = await getDocs(query(collection(db, 'mcp_servers')));
-        const plaud = snap.docs.find((d) => d.id === 'plaud')?.data();
-        setIsConnected(plaud?.status === 'connected' && Boolean(plaud?.oauthToken));
+        // If the Plaud MCP server doc reports connected and a stored token
+        // (the API returns hasOauthToken; the value itself is write-only).
+        const res = await getJSON('cms/config/mcp-servers');
+        const plaud = (res.items || []).find((d) => d.id === 'plaud');
+        setIsConnected(plaud?.status === 'connected' && plaud?.hasOauthToken === true);
       } catch {
         setIsConnected(false);
       } finally {

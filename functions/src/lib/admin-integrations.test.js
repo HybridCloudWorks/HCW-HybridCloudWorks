@@ -178,6 +178,9 @@ describe('config collections (ai-providers / mcp-servers)', () => {
     const body = JSON.parse(res.body);
     expect(body.items.map((i) => i.id)).toEqual(['a', 'b']);
     expect(res.body).not.toContain('SECRET');
+    // Presence indicator instead of the value — RecordingsPage renders
+    // connection state from it.
+    expect(body.items.every((i) => i.hasOauthToken === true)).toBe(true);
   });
 
   it('PUT upserts at the client-chosen route id, preserving createdAt', async () => {
