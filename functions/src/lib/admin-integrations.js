@@ -52,7 +52,13 @@ const CONFIG_COLLECTIONS = {
   'mcp-servers': 'mcp_servers',
 };
 
-const stripOAuthToken = ({ oauthToken: _hidden, ...rest }) => rest;
+// The token value is write-only, but consumers need to know whether one is
+// stored (RecordingsPage renders 'connected' from status + token presence) —
+// so reads carry a boolean in its place.
+const stripOAuthToken = ({ oauthToken, ...rest }) => ({
+  ...rest,
+  hasOauthToken: Boolean(oauthToken),
+});
 
 const SETTINGS_CONTAINER = 'admin_settings';
 const SETTINGS_DOC_ID = 'integrations';

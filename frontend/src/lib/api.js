@@ -135,3 +135,29 @@ export async function postJSON(fnName, body) {
   });
   return res.json();
 }
+
+/**
+ * GET an authenticated REST route (e.g. 'cms/certifications').
+ * @param {string} fnName - route path after the API base
+ * @returns {Promise<object>} Parsed JSON response
+ */
+export async function getJSON(fnName) {
+  const res = await authedFetch(fnName, { method: 'GET' });
+  return res.json();
+}
+
+/**
+ * Send JSON to an authenticated REST route with an explicit method
+ * (PATCH/PUT/DELETE). Omit body for body-less requests.
+ * @param {string} fnName - route path after the API base
+ * @param {string} method - HTTP method
+ * @param {object} [body] - JSON payload
+ * @returns {Promise<object>} Parsed JSON response
+ */
+export async function sendJSON(fnName, method, body) {
+  const res = await authedFetch(fnName, {
+    method,
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  return res.json();
+}

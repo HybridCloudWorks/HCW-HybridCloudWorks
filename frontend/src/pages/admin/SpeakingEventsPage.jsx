@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuthReady } from '@/hooks/useAuthReady';
-import { db } from '@/lib/firebaseConfig';
-import { collection, getDocs } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,7 +17,7 @@ import {
   X,
   Download,
 } from 'lucide-react';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 import PublishSnapshotButton from '@/components/admin/PublishSnapshotButton';
 import { getSessionizeSpeakerId } from '@/lib/adminSettings';
 
@@ -201,8 +199,8 @@ export default function SpeakingEventsPage() {
   const loadFirestore = useCallback(async () => {
     setLoadingFirestore(true);
     try {
-      const snap = await getDocs(collection(db, 'speakerevents'));
-      setFirestoreDocs(snap.docs.map((d) => ({ _docId: d.id, ...d.data() })));
+      const res = await getJSON('cms/speakerevents');
+      setFirestoreDocs((res.items || []).map((item) => ({ _docId: item.id, ...item })));
     } catch (err) {
       setError(`Failed to load Firestore events: ${err.message}`);
     } finally {

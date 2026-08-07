@@ -44,20 +44,8 @@ import {
   Send,
   Trash2,
 } from 'lucide-react';
-import { postJSON } from '@/lib/api';
-import { db } from '@/lib/firebaseConfig';
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  addDoc,
-  deleteDoc,
-  doc,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { postJSON, getJSON, sendJSON } from '@/lib/api';
+import { fetchPublicContentList } from '@/lib/publicApi';
 
 // ── YouTube brand icon (no lucide equivalent) ─────────────────────────────────
 
@@ -267,14 +255,21 @@ async function publerPollJob(jobId) {
   throw new Error('Timed out waiting for Publer job');
 }
 
-// ── Firestore helpers ─────────────────────────────────────────────────────────
+// ── Social-post API helpers (cms/social-posts; the server stamps createdAt) ───
 
 async function saveSocialPost(data) {
-  return addDoc(collection(db, 'social_posts'), { ...data, createdAt: serverTimestamp() });
+  return postJSON('cms/social-posts', data);
 }
 
 async function deleteSocialPostDoc(id) {
-  return deleteDoc(doc(db, 'social_posts', id));
+  return sendJSON(`cms/social-posts/${id}`, 'DELETE');
+}
+
+/** Default-status list (scheduled+published), newest first, capped at 50. */
+async function listSocialPosts(statuses) {
+  const qs = statuses ? `?status=${statuses.join(',')}` : '';
+  const res = await getJSON(`cms/social-posts${qs}`);
+  return res.items || [];
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -627,17 +622,10 @@ function QueueTab() {
         ready
           ? publerListPosts('scheduled').catch(() => ({ data: [] }))
           : Promise.resolve({ data: [] }),
-        getDocs(
-          query(
-            collection(db, 'social_posts'),
-            where('status', 'in', ['scheduled', 'published']),
-            orderBy('createdAt', 'desc'),
-            limit(50)
-          )
-        ),
+        listSocialPosts(),
       ]);
       setPublerPosts(publerRes?.data || []);
-      setLocalPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLocalPosts(snap);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -650,18 +638,11 @@ function QueueTab() {
       ready
         ? publerListPosts('scheduled').catch(() => ({ data: [] }))
         : Promise.resolve({ data: [] }),
-      getDocs(
-        query(
-          collection(db, 'social_posts'),
-          where('status', 'in', ['scheduled', 'published']),
-          orderBy('createdAt', 'desc'),
-          limit(50)
-        )
-      ),
+      listSocialPosts(),
     ])
       .then(([publerRes, snap]) => {
         setPublerPosts(publerRes?.data || []);
-        setLocalPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLocalPosts(snap);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -888,17 +869,10 @@ function PublishedTab({ recentContent }) {
               return { data: [] };
             })
           : Promise.resolve({ data: [] }),
-        getDocs(
-          query(
-            collection(db, 'social_posts'),
-            where('status', '==', 'published'),
-            orderBy('createdAt', 'desc'),
-            limit(50)
-          )
-        ).catch(() => ({ docs: [] })),
+        listSocialPosts(['published']).catch(() => []),
       ]);
       setPublerPosts(Array.isArray(publerRes?.data) ? publerRes.data : []);
-      setHubPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setHubPosts(snap);
     } finally {
       setLoading(false);
     }
@@ -1251,27 +1225,22 @@ export default function SocialHubPage() {
     let cancelled = false;
     async function load() {
       try {
-        const contentSnap = await getDocs(query(collection(db, 'content'), limit(500))).catch(
-          () => ({ docs: [] })
+        const contentMerged = (await fetchPublicContentList({ limit: 250 }).catch(() => [])).map(
+          (item) => ({ __source: 'content', ...item })
         );
-        const contentMerged = contentSnap.docs.map((d) => ({
-          id: d.id,
-          __source: 'content',
-          ...d.data(),
-        }));
         const shouldLoadLegacy = contentMerged.length === 0;
-        const blogsSnap = shouldLoadLegacy
-          ? await getDocs(query(collection(db, 'blogs'), limit(500))).catch(() => ({ docs: [] }))
-          : { docs: [] };
+        const legacyItems = shouldLoadLegacy
+          ? await fetchPublicContentList({ limit: 250, source: 'blogs' }).catch(() => [])
+          : [];
         if (shouldLoadLegacy) {
           recordLegacyBlogsRead({
             source: 'SocialHubPage',
-            details: { collectionPath: 'blogs', limit: 500 },
+            details: { collectionPath: 'blogs', limit: 250 },
           });
         }
         const merged = [
           ...contentMerged,
-          ...blogsSnap.docs.map((d) => ({ id: d.id, __source: 'blogs', ...d.data() })),
+          ...legacyItems.map((item) => ({ __source: 'blogs', ...item })),
         ];
         const seen = new Set();
         const live = [];
