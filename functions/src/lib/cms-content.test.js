@@ -86,6 +86,27 @@ describe('cms content list', () => {
     expect(query).not.toContain('OR 1=1');
     expect(params).toContainEqual({ name: '@status', value: "x' OR 1=1" });
   });
+
+  it('supports multi-status and live filters for the workflow pages', async () => {
+    const store = makeStore();
+    const h = createCmsContentHandlers({ guard: allowGuard, store });
+
+    await h.list(makeRequest({ query: { status: 'editing,approved_blog' } }), context);
+    const [, multiQuery, multiParams] = store.queryDocs.mock.calls[0];
+    expect(multiQuery).toContain('ARRAY_CONTAINS(@statuses, c.contentStatus)');
+    expect(multiParams).toContainEqual({
+      name: '@statuses',
+      value: ['editing', 'approved_blog'],
+    });
+
+    await h.list(makeRequest({ query: { live: 'true' } }), context);
+    expect(store.queryDocs.mock.calls[1][1]).toContain('c.Live = true');
+
+    // Workflow-page fields ride in the projection.
+    for (const f of ['scheduledPublishDate', 'softDeletedAt', 'blogEditedAt']) {
+      expect(store.queryDocs.mock.calls[0][1]).toContain(`c["${f}"]`);
+    }
+  });
 });
 
 describe('cms content get', () => {

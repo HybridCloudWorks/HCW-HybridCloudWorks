@@ -147,6 +147,15 @@ describe('social posts', () => {
     expect(store.queryDocs.mock.calls[0][2][0].value).toEqual(['draft', 'failed']);
   });
 
+  it('status=all lists without a status clause (CalendarPage)', async () => {
+    const store = makeStore();
+    const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });
+    await h.listSocialPosts(makeRequest({ query: { status: 'all' } }), context);
+    const [, query, params] = store.queryDocs.mock.calls[0];
+    expect(query).not.toContain('WHERE');
+    expect(params).toEqual([]);
+  });
+
   it('create stamps createdAt and a fresh id; delete targets the container', async () => {
     const store = makeStore();
     const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });

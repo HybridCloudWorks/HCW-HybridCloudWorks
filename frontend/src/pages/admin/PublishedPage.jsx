@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
 import { PenSquare, Loader2, Calendar, Images } from 'lucide-react';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { unpublishToInspected } from '@/lib/contentWorkflow';
 import { ADMIN_ROUTES } from '@/config/admin';
@@ -20,8 +20,6 @@ import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { getOrderedContentImages } from '@/lib/contentImages';
 import PipelineStepper from '@/components/admin/PipelineStepper';
-import { db } from '@/lib/firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
 
 // ── Pre-publish validation ────────────────────────────────────────────────────
 // Client-side checklist run before publishContent is invoked. `item` is
@@ -174,8 +172,8 @@ function usePublishWorkflow({ navigate, withImageOverride, setLocalLiveOverrides
     try {
       let merged = withImageOverride(item);
       try {
-        const snap = await getDoc(doc(db, 'content', item.id));
-        if (snap.exists()) merged = { ...snap.data(), ...merged };
+        const res = await getJSON(`cms/content/item?contentId=${encodeURIComponent(item.id)}`);
+        if (res.item) merged = { ...res.item, ...merged };
       } catch {
         // Snapshot data only — body check may report a false negative, which
         // the admin can override from the modal.

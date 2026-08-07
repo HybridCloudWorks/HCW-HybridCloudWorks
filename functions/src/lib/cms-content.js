@@ -38,12 +38,20 @@ export const ADMIN_CONTENT_SNAPSHOT_FIELDS = [
   'contentImageUrl', 'secondaryImageUrls', 'aiImageUrls',
   'slugPageUrl', 'publishedUrl', 'publicUrl', 'curatedSubpagePath',
   'format',
+  // Workflow-page fields (EditorList/LivePages/Calendar/Published read these
+  // from list rows; they came for free when the pages fetched whole docs):
+  'Status', 'scheduledPublishDate', 'softDeletedAt', 'softDeleteExpiresAt',
+  'archivedAt', 'blogEditedAt', 'blogPublishedAt', 'blogUrl',
+  'publishedContentId', 'sourceContentId', 'provider',
   'critiqueVerdict', 'critiqueGenericityScore', 'critiqueSpecificityScore',
   'critiqueIssues', 'draftRevised',
 ];
 
 export const LIST_DEFAULT_LIMIT = 25;
-export const LIST_MAX_LIMIT = 100;
+// 500 matches the workflow pages' fetch windows (EditorList/LivePages/
+// Calendar asked Firestore for 500-doc windows); RPC callers pass no limit
+// and keep the source default of 25.
+export const LIST_MAX_LIMIT = 500;
 
 /** `c["Cover Image"]` quoting handles the spaced/cased field names. */
 const PROJECTION = ['c.id', ...ADMIN_CONTENT_SNAPSHOT_FIELDS.map((f) => `c["${f}"]`)].join(', ');
@@ -61,21 +69,37 @@ const json = (status, body) => ({
  */
 export function createCmsContentHandlers({ guard, store }) {
   return {
-    /** GET /api/cms/content — source: listContentItems */
+    /**
+     * GET /api/cms/content — source: listContentItems.
+     * status accepts a comma-separated list (the workflow pages query
+     * multi-status windows); live=true filters to c.Live = true.
+     */
     async list(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
 
       try {
-        const status = request.query.get('status') || '';
+        const statusParam = String(request.query.get('status') || '').trim();
+        const statuses = statusParam
+          ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
+          : [];
+        const liveOnly = request.query.get('live') === 'true';
         const max = Math.min(Number(request.query.get('limit') || LIST_DEFAULT_LIMIT), LIST_MAX_LIMIT);
 
         let query = `SELECT TOP @limit ${PROJECTION} FROM c`;
         const parameters = [{ name: '@limit', value: max }];
-        if (status) {
-          query += ' WHERE c.contentStatus = @status';
-          parameters.push({ name: '@status', value: status });
+        const clauses = [];
+        if (statuses.length === 1) {
+          clauses.push('c.contentStatus = @status');
+          parameters.push({ name: '@status', value: statuses[0] });
+        } else if (statuses.length > 1) {
+          clauses.push('ARRAY_CONTAINS(@statuses, c.contentStatus)');
+          parameters.push({ name: '@statuses', value: statuses });
         }
+        if (liveOnly) {
+          clauses.push('c.Live = true');
+        }
+        if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
 
         const items = await store.queryDocs('content', query, parameters);
         return json(200, { success: true, items, total: items.length });

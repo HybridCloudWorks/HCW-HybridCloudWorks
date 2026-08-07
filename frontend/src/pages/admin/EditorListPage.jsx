@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useFirestoreCollection, useFirestoreQuery } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { unpublishToInspected } from '@/lib/contentWorkflow';
 import {
@@ -16,7 +16,6 @@ import {
   getContentPublicPath,
   getPublishTargetForItem,
 } from '@/lib/contentModel';
-import { where, limit } from 'firebase/firestore';
 import {
   PenLine,
   ExternalLink,
@@ -377,17 +376,18 @@ export default function EditorListPage() {
   const navigate = useNavigate();
   const { authReady } = useAuthReady();
 
-  const { data: liveItems, loading: liveLoading } = useFirestoreCollection(
-    authReady ? 'content' : '',
-    { where: ['Live', '==', true], limit: 500 }
+  const listContent = (qs) => getJSON(`cms/content?${qs}`).then((res) => res.items || []);
+  const { data: liveItems, loading: liveLoading } = usePublicData(
+    () => listContent('live=true&limit=500'),
+    authReady ? 'editor:live' : ''
   );
-  const { data: archivedItems, loading: archiveLoading } = useFirestoreCollection(
-    authReady ? 'content' : '',
-    { where: ['contentStatus', '==', 'archived'], limit: 500 }
+  const { data: archivedItems, loading: archiveLoading } = usePublicData(
+    () => listContent('status=archived&limit=500'),
+    authReady ? 'editor:archived' : ''
   );
-  const { data: draftItems, loading: draftLoading } = useFirestoreQuery(
-    authReady ? 'content' : '',
-    [where('contentStatus', 'in', ['editing', 'approved_blog']), limit(500)]
+  const { data: draftItems, loading: draftLoading } = usePublicData(
+    () => listContent('status=editing,approved_blog&limit=500'),
+    authReady ? 'editor:drafts' : ''
   );
 
   const loading = liveLoading || archiveLoading || draftLoading;

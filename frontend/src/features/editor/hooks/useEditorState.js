@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { db } from '@/lib/firebaseConfig';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { useFirestoreCollection } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
 import { getCoverImageUrl } from '@/lib/blogUtils';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { useSections, joinSectionsToDraft } from './useSections';
 import { useModules } from './useModules';
@@ -30,7 +28,12 @@ function normalizeProvider(value = '') {
 }
 
 function getEditedAtMs(data = {}) {
-  return data.blogEditedAt?.toMillis?.() || data.blogEditedAt?.toDate?.()?.getTime?.() || 0;
+  const value = data.blogEditedAt;
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  if (typeof value?.toDate === 'function') return value.toDate().getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function getEditorAuthor(data = {}) {
@@ -220,15 +223,13 @@ export function useEditorState(blogId, navigate) {
     [setDraft]
   );
 
-  // ── Curated images ─────────────────────────────────────────────────────────
-  const { data: curatedImages } = useFirestoreCollection('curated_article_images', {
-    orderBy: ['createdAt', 'desc'],
-    limit: 120,
-  });
-  const { data: generatedGalleryImages } = useFirestoreCollection('generated_content_images', {
-    orderBy: ['createdAt', 'desc'],
-    limit: 120,
-  });
+  // ── Curated images (one call returns both galleries, newest first) ────────
+  const { data: galleries } = usePublicData(
+    () => getJSON('cms/images?limit=120'),
+    'editor:galleries'
+  );
+  const curatedImages = galleries?.curated;
+  const generatedGalleryImages = galleries?.generated;
 
   const imageCandidates = useMemo(() => {
     const curated = (curatedImages || []).map((item) => ({
@@ -258,70 +259,90 @@ export function useEditorState(blogId, navigate) {
     return [...scraped, ...generated, ...curated].filter((item) => item.imageUrl).slice(0, 36);
   }, [blog, curatedImages, generatedGalleryImages]);
 
-  // ── Firestore subscription ─────────────────────────────────────────────────
+  // ── Remote document watch ──────────────────────────────────────────────────
+  // The Firestore onSnapshot listener becomes fetch-plus-poll: an immediate
+  // load, then a periodic re-fetch. The same handler drives both, so the
+  // external-edit-conflict detection (remote blogEditedAt newer than our load
+  // time) works exactly as it did with realtime pushes — just with up to one
+  // poll interval of latency.
   useEffect(() => {
     initializedRef.current = false;
     loadTimeRef.current = new Date();
+    let cancelled = false;
 
-    const contentRef = doc(db, 'content', blogId);
-    const unsubscribe = onSnapshot(
-      contentRef,
-      (snap) => {
-        if (!snap.exists()) {
-          setLoading(false);
-          return;
-        }
+    const applyRemoteDoc = (data) => {
+      if (cancelled) return;
+      setLoadError(null);
+      const remoteEditedAtMs = getEditedAtMs(data);
+      lastSeenEditedAtMsRef.current = remoteEditedAtMs;
 
-        setLoadError(null);
-        const data = { id: snap.id, ...snap.data() };
-        const remoteEditedAtMs = getEditedAtMs(data);
-        lastSeenEditedAtMsRef.current = remoteEditedAtMs;
-
-        if (!initializedRef.current) {
-          initializedRef.current = true;
-          setBlog(data);
-          setFields(fieldsFromDoc(data));
-          setBaselineDraft(getBaselineDraftFromDoc(data));
-          setOrderedImageUrls(getOrderedContentImageUrls(data));
-          if (remoteEditedAtMs > 0) loadTimeRef.current = new Date(remoteEditedAtMs);
-          setExternallyModified(false);
-          setLoading(false);
-          return;
-        }
-
-        const hasLocalSavePending = pendingLocalSaveRef.current && remoteEditedAtMs > 0;
-        if (hasLocalSavePending) {
-          pendingLocalSaveRef.current = false;
-          loadTimeRef.current = new Date(remoteEditedAtMs);
-          setExternallyModified(false);
-          setBlog(data);
-          setOrderedImageUrls(getOrderedContentImageUrls(data));
-          return;
-        }
-
-        const wasRemoteUpdateAfterLoad =
-          remoteEditedAtMs > 0 &&
-          loadTimeRef.current &&
-          remoteEditedAtMs > loadTimeRef.current.getTime();
-
-        if (wasRemoteUpdateAfterLoad) setExternallyModified(true);
+      if (!initializedRef.current) {
+        initializedRef.current = true;
         setBlog(data);
-        if (!wasRemoteUpdateAfterLoad) {
-          setOrderedImageUrls(getOrderedContentImageUrls(data));
-        }
-      },
-      (err) => {
-        console.error('Error listening to document:', err);
-        setLoadError(
-          err?.code === 'permission-denied'
-            ? 'Missing or insufficient permissions. Please sign in with an admin account.'
-            : 'Unable to load this document right now. Please try again.'
-        );
+        setFields(fieldsFromDoc(data));
+        setBaselineDraft(getBaselineDraftFromDoc(data));
+        setOrderedImageUrls(getOrderedContentImageUrls(data));
+        if (remoteEditedAtMs > 0) loadTimeRef.current = new Date(remoteEditedAtMs);
+        setExternallyModified(false);
         setLoading(false);
+        return;
       }
-    );
 
-    return unsubscribe;
+      const hasLocalSavePending = pendingLocalSaveRef.current && remoteEditedAtMs > 0;
+      if (hasLocalSavePending) {
+        pendingLocalSaveRef.current = false;
+        loadTimeRef.current = new Date(remoteEditedAtMs);
+        setExternallyModified(false);
+        setBlog(data);
+        setOrderedImageUrls(getOrderedContentImageUrls(data));
+        return;
+      }
+
+      const wasRemoteUpdateAfterLoad =
+        remoteEditedAtMs > 0 &&
+        loadTimeRef.current &&
+        remoteEditedAtMs > loadTimeRef.current.getTime();
+
+      if (wasRemoteUpdateAfterLoad) setExternallyModified(true);
+      setBlog(data);
+      if (!wasRemoteUpdateAfterLoad) {
+        setOrderedImageUrls(getOrderedContentImageUrls(data));
+      }
+    };
+
+    const fetchRemoteDoc = async () => {
+      try {
+        const res = await getJSON(`cms/content/item?contentId=${encodeURIComponent(blogId)}`);
+        if (res.item) applyRemoteDoc(res.item);
+      } catch (err) {
+        if (cancelled) return;
+        const message = String(err?.message || '');
+        if (message.includes('not found')) {
+          // Missing doc mirrors the !snap.exists() path: stop loading quietly.
+          setLoading(false);
+          return;
+        }
+        console.error('Error loading document:', err);
+        // Only surface the error before first load — a failed background
+        // poll on an already-open editor shouldn't blank the page.
+        if (!initializedRef.current) {
+          setLoadError(
+            message.includes('Forbidden') || message.includes('401') || message.includes('403')
+              ? 'Missing or insufficient permissions. Please sign in with an admin account.'
+              : 'Unable to load this document right now. Please try again.'
+          );
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchRemoteDoc();
+    const pollId = setInterval(fetchRemoteDoc, 20_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollId);
+    };
   }, [blogId]);
 
   // ── Reload from remote ─────────────────────────────────────────────────────

@@ -2,14 +2,15 @@ import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Search, Trash2 } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
-import { useFirestoreCollection } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 
 function getProvider(item) {
   return item['Cloud Provider'] || item.cloudProvider || item.provider || 'Unknown';
@@ -79,17 +80,15 @@ function getLiveUrl(item) {
 export default function LivePagesPage() {
   const { authReady } = useAuthReady();
   const [includeLegacyPages, setIncludeLegacyPages] = useState(false);
-  const { data: contentItems, loading: contentLoading } = useFirestoreCollection(
-    authReady ? 'content' : '',
-    {
-      limit: 500,
-    }
+  const { data: contentItems, loading: contentLoading } = usePublicData(
+    () => getJSON('cms/content?limit=500').then((res) => res.items || []),
+    authReady ? 'live-pages:content' : ''
   );
-  const { data: blogItems, loading: blogsLoading } = useFirestoreCollection(
-    authReady && includeLegacyPages ? 'blogs' : '',
-    {
-      limit: 500,
-    }
+  // Legacy blogs via the public list — this page only renders live records,
+  // which is exactly the server-side public filter.
+  const { data: blogItems, loading: blogsLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 250, source: 'blogs' }),
+    authReady && includeLegacyPages ? 'live-pages:legacy' : ''
   );
   const [query, setQuery] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
