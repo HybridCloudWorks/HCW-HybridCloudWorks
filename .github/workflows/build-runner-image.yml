@@ -59,7 +59,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build (load locally for the scan gate)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: infra/runner-image
           load: true
@@ -77,7 +77,7 @@ jobs:
           exit-code: true
 
       - name: Push to Docker Hub + GHCR mirror
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: infra/runner-image
           push: true
