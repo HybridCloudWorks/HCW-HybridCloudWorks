@@ -12,6 +12,7 @@ import './image-prompts-http.js';
 import './labs-http.js';
 import './ops-health-http.js';
 import './public-reads.js';
+import './publish-http.js';
 import './public-submissions.js';
 import './schedulers.js';
 import './cosmos-triggers.js';
