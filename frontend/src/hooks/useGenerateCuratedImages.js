@@ -1,9 +1,7 @@
 import { useState, useCallback } from 'react';
 import { getFunctionsBase } from '@/lib/functionsBase';
 import { useImagePrompts } from './useImagePrompts';
-import { db } from '@/lib/firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
-import { postJSON } from '@/lib/api'; // Stage-2 fix: authed call required after requireAdmin gate added
+import { postJSON, getJSON } from '@/lib/api'; // Stage-2 fix: authed call required after requireAdmin gate added
 
 const DEFAULT_PROMPT_BY_PROVIDER = {
   AWS: 'Cinematic AWS cloud architecture illustration with modern enterprise infrastructure, warm amber accents, clean geometric composition, no text overlay, high-detail digital art',
@@ -46,16 +44,13 @@ export function useGenerateCuratedImages(pagePath, provider) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Get cached image URL from Firestore
+  // Get cached image URL from the curated-image cache endpoint
   const getCachedImageUrl = useCallback(async (articleId) => {
     try {
-      const cacheDocRef = doc(db, 'curated_article_images', articleId);
-      const cacheDoc = await getDoc(cacheDocRef);
-
-      if (cacheDoc.exists()) {
-        const cached = cacheDoc.data();
+      const res = await getJSON(`cms/images/curated/${encodeURIComponent(articleId)}`);
+      if (res.item?.imageUrl) {
         console.warn(`[generateCuratedImages] Found cached image for ${articleId}`);
-        return cached.imageUrl;
+        return res.item.imageUrl;
       }
       return null;
     } catch (err) {

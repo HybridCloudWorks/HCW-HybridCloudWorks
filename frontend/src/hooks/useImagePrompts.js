@@ -1,15 +1,22 @@
 import { useState, useCallback } from 'react';
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  deleteDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON, sendJSON } from '@/lib/api';
+
+/**
+ * Image prompt configuration hook.
+ *
+ * Reads come from GET cms/image-prompts — the whole config tree (pages, sets,
+ * prompts, plus the two legacy collections) in one response; the legacy-merge
+ * logic that used to run over direct Firestore reads runs over that tree
+ * unchanged. Writes go through the manageImagePromptConfig RPC (sets/prompts/
+ * assignments) and cms/keyword-config (synonym/augmentation collections).
+ *
+ * Tree shapes (see functions/src/lib/cms/image-prompts.js):
+ *   sets[]        id = set name, { primaryPrompt }
+ *   prompts[]     id = prompt name, { setName, additionalParameters, slotTemplates }
+ *   pages[]       id = page doc id, { pagePath, setName, promptName }
+ *   legacyPages[] id = page doc id, may carry { title, primaryPrompt, secondaryPrompt }
+ *   legacySets[]  id = set name, { pageId, title?, primaryPrompt, secondaryPrompt }
+ */
 
 function pathToDocId(pagePath) {
   return String(pagePath || '')
@@ -68,124 +75,172 @@ function normalizeSlotTemplates(slotTemplates = {}) {
   }, {});
 }
 
+/** One round trip for the whole config tree; every read derives from it. */
+async function loadConfigTree() {
+  const res = await getJSON('cms/image-prompts');
+  return {
+    pages: res.pages || [],
+    sets: res.sets || [],
+    prompts: res.prompts || [],
+    legacyPages: res.legacyPages || [],
+    legacySets: res.legacySets || [],
+  };
+}
+
+const legacyPageEntries = (tree) =>
+  tree.legacyPages.map((page) => ({
+    pageDocId: page.id,
+    pagePath: docIdToPath(page.id),
+    data: page,
+  }));
+
+const legacySetsForPage = (tree, pageDocId) =>
+  tree.legacySets.filter((entry) => entry.pageId === pageDocId);
+
+function findLegacySetByNameInTree(tree, setName) {
+  const normalizedSetName = normalizeKey(setName);
+  if (!normalizedSetName) return null;
+
+  for (const { pageDocId, data } of legacyPageEntries(tree)) {
+    const setDoc = legacySetsForPage(tree, pageDocId).find(
+      (entry) => entry.id === normalizedSetName
+    );
+    if (setDoc) {
+      return mapLegacySetData(pageDocId, normalizedSetName, setDoc);
+    }
+
+    if (
+      hasLegacyPromptFields(data) &&
+      normalizeKey(data.title || normalizedSetName) === normalizedSetName
+    ) {
+      return mapLegacySetData(pageDocId, normalizedSetName, data);
+    }
+  }
+  return null;
+}
+
+function findLegacyPromptForPageInTree(tree, pagePath) {
+  const pageDocId = pathToDocId(pagePath);
+  if (!pageDocId) return null;
+
+  const legacySets = legacySetsForPage(tree, pageDocId)
+    .map((entry) => mapLegacySetData(pageDocId, entry.id, entry))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (legacySets.length > 0) {
+    const [firstSet] = legacySets;
+    const firstSetDoc = legacySetsForPage(tree, pageDocId).find(
+      (entry) => entry.id === firstSet.name
+    );
+    return {
+      setName: firstSet.name,
+      promptName: firstSet.legacyPromptName,
+      primaryPrompt: firstSet.primaryPrompt,
+      additionalParameters: String(firstSetDoc?.secondaryPrompt || '').trim(),
+      legacy: true,
+      legacyPagePath: firstSet.legacyPagePath,
+    };
+  }
+
+  const legacyPage = tree.legacyPages.find((page) => page.id === pageDocId);
+  if (!legacyPage || !hasLegacyPromptFields(legacyPage)) return null;
+
+  const syntheticSetName = normalizeKey(legacyPage.title) || LEGACY_DEFAULT_PROMPT_NAME;
+  return {
+    setName: syntheticSetName,
+    promptName: getLegacyPromptName(legacyPage),
+    primaryPrompt: String(legacyPage.primaryPrompt || '').trim(),
+    additionalParameters: String(legacyPage.secondaryPrompt || '').trim(),
+    legacy: true,
+    legacyPagePath: pagePath,
+  };
+}
+
+function findAssignmentInTree(tree, pagePath) {
+  const pageDocId = pathToDocId(pagePath);
+  const pageDoc = tree.pages.find((entry) => entry.id === pageDocId);
+  if (pageDoc) return pageDoc;
+
+  const legacyPrompt = findLegacyPromptForPageInTree(tree, pagePath);
+  return legacyPrompt
+    ? {
+        pagePath,
+        setName: legacyPrompt.setName,
+        promptName: legacyPrompt.promptName,
+        legacy: true,
+      }
+    : null;
+}
+
+function findLegacyPromptDataInTree(tree, setData, setName) {
+  const legacySetDoc = legacySetsForPage(tree, setData.legacyPageDocId).find(
+    (entry) => entry.id === setName
+  );
+  if (legacySetDoc) return mapLegacyPromptData(legacySetDoc);
+
+  const legacyPage = tree.legacyPages.find((page) => page.id === setData.legacyPageDocId);
+  if (legacyPage && hasLegacyPromptFields(legacyPage)) {
+    return mapLegacyPromptData(legacyPage);
+  }
+  return null;
+}
+
+function resolvePromptFromTree(tree, pagePath) {
+  const assignment = findAssignmentInTree(tree, pagePath);
+  const assignedSetName = normalizeKey(assignment?.setName);
+  const assignedPromptName = normalizeKey(assignment?.promptName);
+
+  if (!assignedSetName) {
+    return findLegacyPromptForPageInTree(tree, pagePath);
+  }
+
+  const setData =
+    tree.sets.find((entry) => entry.id === assignedSetName) ||
+    findLegacySetByNameInTree(tree, assignedSetName);
+  if (!setData) {
+    return findLegacyPromptForPageInTree(tree, pagePath);
+  }
+
+  let promptData = null;
+  if (assignedPromptName) {
+    promptData =
+      tree.prompts.find(
+        (entry) => entry.setName === assignedSetName && entry.id === assignedPromptName
+      ) || null;
+    if (!promptData && setData.legacy && assignedPromptName === setData.legacyPromptName) {
+      promptData = findLegacyPromptDataInTree(tree, setData, assignedSetName);
+    }
+  }
+
+  return {
+    setName: assignedSetName,
+    promptName: assignedPromptName,
+    primaryPrompt: setData.primaryPrompt || '',
+    additionalParameters: promptData?.additionalParameters || '',
+    slotTemplates: normalizeSlotTemplates(promptData?.slotTemplates),
+    legacy: Boolean(setData.legacy || promptData?.legacy || assignment?.legacy),
+  };
+}
+
 export function useImagePrompts() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-
-  const db = getFirestore();
-
-  const listLegacyPageEntries = useCallback(async () => {
-    const pageSnapshot = await getDocs(collection(db, 'image_prompts'));
-    return pageSnapshot.docs.map((entry) => ({
-      pageDocId: entry.id,
-      pagePath: docIdToPath(entry.id),
-      data: entry.data() || {},
-    }));
-  }, [db]);
-
-  const findLegacySetByName = useCallback(
-    async (setName) => {
-      const normalizedSetName = normalizeKey(setName);
-      if (!normalizedSetName) return null;
-
-      const legacyPages = await listLegacyPageEntries();
-      const legacyMatches = await Promise.all(
-        legacyPages.map(async ({ pageDocId, data }) => {
-          const setRef = doc(db, 'image_prompts', pageDocId, 'sets', normalizedSetName);
-          const setSnap = await getDoc(setRef);
-          if (setSnap.exists()) {
-            return mapLegacySetData(pageDocId, normalizedSetName, setSnap.data());
-          }
-
-          if (
-            hasLegacyPromptFields(data) &&
-            normalizeKey(data.title || normalizedSetName) === normalizedSetName
-          ) {
-            return mapLegacySetData(pageDocId, normalizedSetName, data);
-          }
-
-          return null;
-        })
-      );
-
-      return legacyMatches.find(Boolean) || null;
-    },
-    [db, listLegacyPageEntries]
-  );
-
-  const findLegacyPromptForPage = useCallback(
-    async (pagePath) => {
-      const pageDocId = pathToDocId(pagePath);
-      if (!pageDocId) return null;
-
-      const legacySetsSnapshot = await getDocs(collection(db, 'image_prompts', pageDocId, 'sets'));
-      const legacySets = legacySetsSnapshot.docs
-        .map((entry) => mapLegacySetData(pageDocId, entry.id, entry.data()))
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      if (legacySets.length > 0) {
-        const [firstSet] = legacySets;
-        return {
-          setName: firstSet.name,
-          promptName: firstSet.legacyPromptName,
-          primaryPrompt: firstSet.primaryPrompt,
-          additionalParameters: String(
-            legacySetsSnapshot.docs.find((entry) => entry.id === firstSet.name)?.data()
-              ?.secondaryPrompt || ''
-          ).trim(),
-          legacy: true,
-          legacyPagePath: firstSet.legacyPagePath,
-        };
-      }
-
-      const legacyPageRef = doc(db, 'image_prompts', pageDocId);
-      const legacyPageSnap = await getDoc(legacyPageRef);
-      if (!legacyPageSnap.exists()) return null;
-
-      const legacyPageData = legacyPageSnap.data() || {};
-      if (!hasLegacyPromptFields(legacyPageData)) return null;
-
-      const syntheticSetName = normalizeKey(legacyPageData.title) || LEGACY_DEFAULT_PROMPT_NAME;
-      return {
-        setName: syntheticSetName,
-        promptName: getLegacyPromptName(legacyPageData),
-        primaryPrompt: String(legacyPageData.primaryPrompt || '').trim(),
-        additionalParameters: String(legacyPageData.secondaryPrompt || '').trim(),
-        legacy: true,
-        legacyPagePath: pagePath,
-      };
-    },
-    [db]
-  );
 
   const fetchPromptSets = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const setsRef = collection(db, 'image_prompt_sets');
-      const [querySnapshot, legacyPages] = await Promise.all([
-        getDocs(setsRef),
-        listLegacyPageEntries(),
-      ]);
+      const tree = await loadConfigTree();
+      const globalSetNames = tree.sets.map((entry) => entry.id);
+      const legacySetNames = legacyPageEntries(tree).flatMap(({ pageDocId, data }) => {
+        const names = legacySetsForPage(tree, pageDocId).map((entry) => entry.id);
+        if (names.length > 0) return names;
+        return hasLegacyPromptFields(data)
+          ? [normalizeKey(data.title) || LEGACY_DEFAULT_PROMPT_NAME]
+          : [];
+      });
 
-      const globalSetNames = querySnapshot.docs.map((entry) => entry.id);
-      const legacySetNameLists = await Promise.all(
-        legacyPages.map(async ({ pageDocId, data }) => {
-          const legacySetsRef = collection(db, 'image_prompts', pageDocId, 'sets');
-          const legacySetsSnapshot = await getDocs(legacySetsRef);
-          const legacyNames = legacySetsSnapshot.docs.map((entry) => entry.id);
-
-          if (legacyNames.length > 0) {
-            return legacyNames;
-          }
-
-          return hasLegacyPromptFields(data)
-            ? [normalizeKey(data.title) || LEGACY_DEFAULT_PROMPT_NAME]
-            : [];
-        })
-      );
-
-      return [...new Set([...globalSetNames, ...legacySetNameLists.flat()])].sort();
+      return [...new Set([...globalSetNames, ...legacySetNames])].sort();
     } catch (err) {
       const errorMsg = err?.message || 'Unknown error';
       const errorCode = err?.code || 'UNKNOWN';
@@ -195,37 +250,30 @@ export function useImagePrompts() {
     } finally {
       setLoading(false);
     }
-  }, [db, listLegacyPageEntries]);
+  }, []);
 
-  const fetchPromptSet = useCallback(
-    async (setName) => {
-      const normalizedSetName = normalizeKey(setName);
-      if (!normalizedSetName) return null;
+  const fetchPromptSet = useCallback(async (setName) => {
+    const normalizedSetName = normalizeKey(setName);
+    if (!normalizedSetName) return null;
 
-      setLoading(true);
-      setError(null);
-      try {
-        const setRef = doc(db, 'image_prompt_sets', normalizedSetName);
-        const docSnap = await getDoc(setRef);
-        if (docSnap.exists()) {
-          return docSnap.data();
-        }
+    setLoading(true);
+    setError(null);
+    try {
+      const tree = await loadConfigTree();
+      const setDoc = tree.sets.find((entry) => entry.id === normalizedSetName);
+      if (setDoc) return setDoc;
 
-        const legacySet = await findLegacySetByName(normalizedSetName);
-        if (!legacySet) return null;
-        return legacySet;
-      } catch (err) {
-        const errorMsg = err?.message || 'Unknown error';
-        const errorCode = err?.code || 'UNKNOWN';
-        setError(`${errorCode}: ${errorMsg}`);
-        console.error('Error fetching prompt set:', err);
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [db, findLegacySetByName]
-  );
+      return findLegacySetByNameInTree(tree, normalizedSetName);
+    } catch (err) {
+      const errorMsg = err?.message || 'Unknown error';
+      const errorCode = err?.code || 'UNKNOWN';
+      setError(`${errorCode}: ${errorMsg}`);
+      console.error('Error fetching prompt set:', err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const savePromptSet = useCallback(async (setName, primaryPrompt) => {
     const normalizedSetName = normalizeKey(setName);
@@ -270,98 +318,79 @@ export function useImagePrompts() {
     }
   }, []);
 
-  const fetchPromptNames = useCallback(
-    async (setName) => {
-      const normalizedSetName = normalizeKey(setName);
-      if (!normalizedSetName) return [];
+  const fetchPromptNames = useCallback(async (setName) => {
+    const normalizedSetName = normalizeKey(setName);
+    if (!normalizedSetName) return [];
 
-      setLoading(true);
-      setError(null);
-      try {
-        const promptsRef = collection(db, 'image_prompt_sets', normalizedSetName, 'prompts');
-        const querySnapshot = await getDocs(promptsRef);
-        const promptNames = querySnapshot.docs.map((entry) => entry.id).sort();
-        if (promptNames.length > 0) {
-          return promptNames;
-        }
-
-        const legacySet = await findLegacySetByName(normalizedSetName);
-        return legacySet ? [legacySet.legacyPromptName] : [];
-      } catch (err) {
-        const errorMsg = err?.message || 'Unknown error';
-        const errorCode = err?.code || 'UNKNOWN';
-        setError(`${errorCode}: ${errorMsg}`);
-        console.error('Error fetching prompt names:', err);
-        return [];
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const tree = await loadConfigTree();
+      const promptNames = tree.prompts
+        .filter((entry) => entry.setName === normalizedSetName)
+        .map((entry) => entry.id)
+        .sort();
+      if (promptNames.length > 0) {
+        return promptNames;
       }
-    },
-    [db, findLegacySetByName]
-  );
 
-  const fetchPrompt = useCallback(
-    async (setName, promptName) => {
-      const normalizedSetName = normalizeKey(setName);
-      const normalizedPromptName = normalizeKey(promptName);
-      if (!normalizedSetName || !normalizedPromptName) return null;
+      const legacySet = findLegacySetByNameInTree(tree, normalizedSetName);
+      return legacySet ? [legacySet.legacyPromptName] : [];
+    } catch (err) {
+      const errorMsg = err?.message || 'Unknown error';
+      const errorCode = err?.code || 'UNKNOWN';
+      setError(`${errorCode}: ${errorMsg}`);
+      console.error('Error fetching prompt names:', err);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-      setLoading(true);
-      setError(null);
-      try {
-        const promptRef = doc(
-          db,
-          'image_prompt_sets',
-          normalizedSetName,
-          'prompts',
-          normalizedPromptName
-        );
-        const docSnap = await getDoc(promptRef);
-        if (docSnap.exists()) {
-          return docSnap.data();
-        }
+  const fetchPrompt = useCallback(async (setName, promptName) => {
+    const normalizedSetName = normalizeKey(setName);
+    const normalizedPromptName = normalizeKey(promptName);
+    if (!normalizedSetName || !normalizedPromptName) return null;
 
-        const legacySet = await findLegacySetByName(normalizedSetName);
-        if (!legacySet) return null;
+    setLoading(true);
+    setError(null);
+    try {
+      const tree = await loadConfigTree();
+      const promptDoc = tree.prompts.find(
+        (entry) => entry.setName === normalizedSetName && entry.id === normalizedPromptName
+      );
+      if (promptDoc) return promptDoc;
 
-        if (normalizedPromptName !== legacySet.legacyPromptName) {
-          return null;
-        }
+      const legacySet = findLegacySetByNameInTree(tree, normalizedSetName);
+      if (!legacySet) return null;
 
-        const legacyPageRef = doc(db, 'image_prompts', legacySet.legacyPageDocId);
-        const legacySetRef = doc(
-          db,
-          'image_prompts',
-          legacySet.legacyPageDocId,
-          'sets',
-          normalizedSetName
-        );
-        const [legacyPageSnap, legacySetSnap] = await Promise.all([
-          getDoc(legacyPageRef),
-          getDoc(legacySetRef),
-        ]);
-
-        if (legacySetSnap.exists()) {
-          return mapLegacyPromptData(legacySetSnap.data());
-        }
-
-        if (legacyPageSnap.exists() && hasLegacyPromptFields(legacyPageSnap.data())) {
-          return mapLegacyPromptData(legacyPageSnap.data());
-        }
-
+      if (normalizedPromptName !== legacySet.legacyPromptName) {
         return null;
-      } catch (err) {
-        const errorMsg = err?.message || 'Unknown error';
-        const errorCode = err?.code || 'UNKNOWN';
-        setError(`${errorCode}: ${errorMsg}`);
-        console.error('Error fetching prompt:', err);
-        return null;
-      } finally {
-        setLoading(false);
       }
-    },
-    [db, findLegacySetByName]
-  );
+
+      const legacySetDoc = legacySetsForPage(tree, legacySet.legacyPageDocId).find(
+        (entry) => entry.id === normalizedSetName
+      );
+      if (legacySetDoc) {
+        return mapLegacyPromptData(legacySetDoc);
+      }
+
+      const legacyPage = tree.legacyPages.find((page) => page.id === legacySet.legacyPageDocId);
+      if (legacyPage && hasLegacyPromptFields(legacyPage)) {
+        return mapLegacyPromptData(legacyPage);
+      }
+
+      return null;
+    } catch (err) {
+      const errorMsg = err?.message || 'Unknown error';
+      const errorCode = err?.code || 'UNKNOWN';
+      setError(`${errorCode}: ${errorMsg}`);
+      console.error('Error fetching prompt:', err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const savePrompt = useCallback(
     async (setName, promptName, additionalParameters, slotTemplates = {}) => {
@@ -414,41 +443,36 @@ export function useImagePrompts() {
     }
   }, []);
 
-  const fetchPageAssignment = useCallback(
-    async (pagePath) => {
-      const pageDocId = pathToDocId(pagePath);
-      if (!pageDocId) return null;
+  const fetchPageAssignment = useCallback(async (pagePath) => {
+    const pageDocId = pathToDocId(pagePath);
+    if (!pageDocId) return null;
 
-      setLoading(true);
-      setError(null);
-      try {
-        const pageRef = doc(db, 'image_prompt_pages', pageDocId);
-        const docSnap = await getDoc(pageRef);
-        if (docSnap.exists()) {
-          return docSnap.data();
-        }
+    setLoading(true);
+    setError(null);
+    try {
+      const tree = await loadConfigTree();
+      const pageDoc = tree.pages.find((entry) => entry.id === pageDocId);
+      if (pageDoc) return pageDoc;
 
-        const legacyPrompt = await findLegacyPromptForPage(pagePath);
-        if (!legacyPrompt) return null;
+      const legacyPrompt = findLegacyPromptForPageInTree(tree, pagePath);
+      if (!legacyPrompt) return null;
 
-        return {
-          pagePath,
-          setName: legacyPrompt.setName,
-          promptName: legacyPrompt.promptName,
-          legacy: true,
-        };
-      } catch (err) {
-        const errorMsg = err?.message || 'Unknown error';
-        const errorCode = err?.code || 'UNKNOWN';
-        setError(`${errorCode}: ${errorMsg}`);
-        console.error('Error fetching page assignment:', err);
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [db, findLegacyPromptForPage]
-  );
+      return {
+        pagePath,
+        setName: legacyPrompt.setName,
+        promptName: legacyPrompt.promptName,
+        legacy: true,
+      };
+    } catch (err) {
+      const errorMsg = err?.message || 'Unknown error';
+      const errorCode = err?.code || 'UNKNOWN';
+      setError(`${errorCode}: ${errorMsg}`);
+      console.error('Error fetching page assignment:', err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const savePageAssignment = useCallback(async (pagePath, setName, promptName) => {
     const pageDocId = pathToDocId(pagePath);
@@ -478,156 +502,116 @@ export function useImagePrompts() {
     }
   }, []);
 
-  const resolvePromptForPage = useCallback(
-    async (pagePath) => {
-      const assignment = await fetchPageAssignment(pagePath);
-      const assignedSetName = normalizeKey(assignment?.setName);
-      const assignedPromptName = normalizeKey(assignment?.promptName);
-
-      if (!assignedSetName) {
-        return findLegacyPromptForPage(pagePath);
-      }
-
-      const setData = await fetchPromptSet(assignedSetName);
-      if (!setData) {
-        return findLegacyPromptForPage(pagePath);
-      }
-
-      let promptData = null;
-      if (assignedPromptName) {
-        promptData = await fetchPrompt(assignedSetName, assignedPromptName);
-      }
-
-      return {
-        setName: assignedSetName,
-        promptName: assignedPromptName,
-        primaryPrompt: setData.primaryPrompt || '',
-        additionalParameters: promptData?.additionalParameters || '',
-        slotTemplates: normalizeSlotTemplates(promptData?.slotTemplates),
-        legacy: Boolean(setData.legacy || promptData?.legacy || assignment?.legacy),
-      };
-    },
-    [fetchPageAssignment, fetchPrompt, fetchPromptSet, findLegacyPromptForPage]
-  );
+  const resolvePromptForPage = useCallback(async (pagePath) => {
+    setLoading(true);
+    setError(null);
+    try {
+      // One tree fetch resolves assignment + set + prompt (was four reads).
+      const tree = await loadConfigTree();
+      return resolvePromptFromTree(tree, pagePath);
+    } catch (err) {
+      const errorMsg = err?.message || 'Unknown error';
+      const errorCode = err?.code || 'UNKNOWN';
+      setError(`${errorCode}: ${errorMsg}`);
+      console.error('Error resolving prompt for page:', err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // --------------------------------------------------------------------------
-  // Keyword Matrix CRUD
+  // Keyword Matrix CRUD (cms/keyword-config)
   // --------------------------------------------------------------------------
-  //   prompt_keyword_synonyms/{id}      { canonical, patterns:[string] }
-  //   prompt_keyword_augmentations/{id} { label, patterns:[string], directive }
+  //   synonyms/{id}      { canonical, patterns:[string] }
+  //   augmentations/{id} { label, patterns:[string], directive }
   // --------------------------------------------------------------------------
 
   const fetchKeywordSynonyms = useCallback(async () => {
     try {
       setError(null);
-      const snap = await getDocs(collection(db, 'prompt_keyword_synonyms'));
-      return snap.docs
-        .map((d) => ({
-          id: d.id,
-          canonical: String(d.data()?.canonical || '').trim(),
-          patterns: Array.isArray(d.data()?.patterns) ? d.data().patterns : [],
-        }))
-        .sort((a, b) => a.canonical.localeCompare(b.canonical));
+      const res = await getJSON('cms/keyword-config');
+      return (res.synonyms || []).map((d) => ({
+        id: d.id,
+        canonical: String(d.canonical || '').trim(),
+        patterns: Array.isArray(d.patterns) ? d.patterns : [],
+      }));
     } catch (err) {
       setError(err.message || 'Failed to load synonyms.');
       return [];
     }
-  }, [db]);
+  }, []);
 
-  const saveKeywordSynonym = useCallback(
-    async (id, { canonical, patterns }) => {
-      try {
-        setError(null);
-        const docId = normalizeKey(id) || normalizeKey(canonical);
-        if (!docId) throw new Error('Canonical tag required.');
-        await setDoc(
-          doc(db, 'prompt_keyword_synonyms', docId),
-          {
-            canonical: normalizeKey(canonical),
-            patterns: (patterns || []).map((p) => String(p || '').trim()).filter(Boolean),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-        return true;
-      } catch (err) {
-        setError(err.message || 'Failed to save synonym group.');
-        return false;
-      }
-    },
-    [db]
-  );
+  const saveKeywordSynonym = useCallback(async (id, { canonical, patterns }) => {
+    try {
+      setError(null);
+      const docId = normalizeKey(id) || normalizeKey(canonical);
+      if (!docId) throw new Error('Canonical tag required.');
+      await sendJSON(`cms/keyword-config/synonyms/${encodeURIComponent(docId)}`, 'PUT', {
+        canonical: normalizeKey(canonical),
+        patterns: (patterns || []).map((p) => String(p || '').trim()).filter(Boolean),
+      });
+      return true;
+    } catch (err) {
+      setError(err.message || 'Failed to save synonym group.');
+      return false;
+    }
+  }, []);
 
-  const deleteKeywordSynonym = useCallback(
-    async (id) => {
-      try {
-        setError(null);
-        await deleteDoc(doc(db, 'prompt_keyword_synonyms', id));
-        return true;
-      } catch (err) {
-        setError(err.message || 'Failed to delete synonym group.');
-        return false;
-      }
-    },
-    [db]
-  );
+  const deleteKeywordSynonym = useCallback(async (id) => {
+    try {
+      setError(null);
+      await sendJSON(`cms/keyword-config/synonyms/${encodeURIComponent(id)}`, 'DELETE');
+      return true;
+    } catch (err) {
+      setError(err.message || 'Failed to delete synonym group.');
+      return false;
+    }
+  }, []);
 
   const fetchKeywordAugmentations = useCallback(async () => {
     try {
       setError(null);
-      const snap = await getDocs(collection(db, 'prompt_keyword_augmentations'));
-      return snap.docs
-        .map((d) => ({
-          id: d.id,
-          label: String(d.data()?.label || '').trim(),
-          patterns: Array.isArray(d.data()?.patterns) ? d.data().patterns : [],
-          directive: String(d.data()?.directive || '').trim(),
-        }))
-        .sort((a, b) => a.label.localeCompare(b.label));
+      const res = await getJSON('cms/keyword-config');
+      return (res.augmentations || []).map((d) => ({
+        id: d.id,
+        label: String(d.label || '').trim(),
+        patterns: Array.isArray(d.patterns) ? d.patterns : [],
+        directive: String(d.directive || '').trim(),
+      }));
     } catch (err) {
       setError(err.message || 'Failed to load augmentations.');
       return [];
     }
-  }, [db]);
+  }, []);
 
-  const saveKeywordAugmentation = useCallback(
-    async (id, { label, patterns, directive }) => {
-      try {
-        setError(null);
-        const docId = normalizeKey(id) || normalizeKey(label);
-        if (!docId) throw new Error('Label required.');
-        await setDoc(
-          doc(db, 'prompt_keyword_augmentations', docId),
-          {
-            label: normalizeKey(label),
-            patterns: (patterns || []).map((p) => String(p || '').trim()).filter(Boolean),
-            directive: String(directive || '').trim(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-        return true;
-      } catch (err) {
-        setError(err.message || 'Failed to save augmentation.');
-        return false;
-      }
-    },
-    [db]
-  );
+  const saveKeywordAugmentation = useCallback(async (id, { label, patterns, directive }) => {
+    try {
+      setError(null);
+      const docId = normalizeKey(id) || normalizeKey(label);
+      if (!docId) throw new Error('Label required.');
+      await sendJSON(`cms/keyword-config/augmentations/${encodeURIComponent(docId)}`, 'PUT', {
+        label: normalizeKey(label),
+        patterns: (patterns || []).map((p) => String(p || '').trim()).filter(Boolean),
+        directive: String(directive || '').trim(),
+      });
+      return true;
+    } catch (err) {
+      setError(err.message || 'Failed to save augmentation.');
+      return false;
+    }
+  }, []);
 
-  const deleteKeywordAugmentation = useCallback(
-    async (id) => {
-      try {
-        setError(null);
-        await deleteDoc(doc(db, 'prompt_keyword_augmentations', id));
-        return true;
-      } catch (err) {
-        setError(err.message || 'Failed to delete augmentation.');
-        return false;
-      }
-    },
-    [db]
-  );
+  const deleteKeywordAugmentation = useCallback(async (id) => {
+    try {
+      setError(null);
+      await sendJSON(`cms/keyword-config/augmentations/${encodeURIComponent(id)}`, 'DELETE');
+      return true;
+    } catch (err) {
+      setError(err.message || 'Failed to delete augmentation.');
+      return false;
+    }
+  }, []);
 
   return {
     loading,

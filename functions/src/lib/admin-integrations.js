@@ -229,6 +229,26 @@ export function createAdminIntegrationHandlers({
       }
     },
 
+    /**
+     * GET /api/cms/images/curated/{id} — single cache lookup for
+     * useGenerateCuratedImages (was a direct curated_article_images getDoc).
+     * Missing docs answer 200 with item:null — the hook treats absence as
+     * "generate a new one", not an error.
+     */
+    async getCuratedImage(request, context) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      try {
+        const id = String(request.params.id || '').trim();
+        if (!id) return json(400, { error: 'id required' });
+        const doc = await store.readDoc('curated_article_images', id, id);
+        return json(200, { success: true, item: doc || null });
+      } catch (error) {
+        context.error('getCuratedImage failed:', error);
+        return json(500, { error: 'Failed to get curated image' });
+      }
+    },
+
     // ── AI providers / MCP servers (lib/aiEngine.js) ───────────────────────
 
     /** GET /api/cms/{ai-providers|mcp-servers} — order asc; tokens stripped. */
