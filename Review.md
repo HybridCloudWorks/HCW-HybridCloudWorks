@@ -372,6 +372,32 @@ header): no managed identity on the runner job, no VNet, JIT ephemeral runners v
 `generate-jitconfig`, secrets out-of-band of Terraform state, `runner-image` rebuilt weekly on
 GitHub-hosted runners so a broken runner image cannot brick its own rebuild.
 
+### 4.5 Frontend auth swap (MSAL) — SPA app registration runbook
+
+The admin frontend now authenticates with Entra ID via MSAL (`lib/entraAuth.js`); firebase/auth is
+gone from the admin surface. Before an admin can sign in, an operator must create the SPA side of
+the single-registration model:
+
+1. **Expose an API scope on the API app registration** (the one whose id/URI is
+   `ENTRA_API_AUDIENCE` on the Function App): *Expose an API → Add a scope*, e.g.
+   `access_as_admin`. Full scope value: `api://<api-app-client-id>/access_as_admin`.
+2. **SPA app registration** (or a SPA platform on the same registration): *Authentication → Add
+   platform → Single-page application*, redirect URIs = the site origin(s) (prod + `http://localhost:5173`
+   for dev). Grant it delegated permission to the scope from step 1 (+ openid/profile/email) and
+   admin-consent it.
+3. **Static Web App build env vars**: `VITE_ENTRA_CLIENT_ID` (SPA registration client id),
+   `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE` (the full scope value from step 1). Without
+   `VITE_ENTRA_API_SCOPE` the SPA requests a token the backend rejects on audience.
+4. **App Roles + assignment**: the API registration carries the `Admin` app role (guard gate 1) —
+   assign it to each admin user in *Enterprise applications → Users and groups*. Gate 2 is the
+   `admins/{oid}` registry, seeded via the bootstrap flow (allowlist env vars on the Function App:
+   `CMS_BOOTSTRAP_ALLOWED_UIDS` = Entra object ids, or `CMS_BOOTSTRAP_ALLOWED_EMAILS`).
+5. **MFA** is an Entra Conditional Access policy, not app code — the Firebase phone-MFA/reCAPTCHA
+   flow was deleted with nothing to configure in the SPA.
+
+Not yet swapped (still Firebase): the PUBLIC site's sign-in (`submitPublicLabJob` / LabRunner) and
+the 34 files reading Firestore directly — those are the frontend rewiring phase.
+
 ---
 
 ## 5. Not started — the remaining migration itself

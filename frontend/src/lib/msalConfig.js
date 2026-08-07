@@ -1,31 +1,41 @@
 /**
- * MSAL (Microsoft Authentication Library) Configuration
+ * MSAL configuration — values only, no instance and no window access at
+ * module scope (the singleton lives in entraAuth.js so importing this file
+ * stays safe in tests and SSR-ish tooling).
  *
- * Replaces firebaseConfig.js. Uses Azure Entra ID for Single Sign-On.
+ * Env (see Variables.md / Review.md §4):
+ *   VITE_ENTRA_CLIENT_ID  — the SPA app registration's client id
+ *   VITE_ENTRA_TENANT_ID  — directory (tenant) id
+ *   VITE_ENTRA_API_SCOPE  — the API scope to request for backend calls,
+ *     e.g. "api://<api-app-id>/access_as_admin". This is what makes the
+ *     token's audience match ENTRA_API_AUDIENCE on the Functions side —
+ *     a Graph scope like User.Read produces a token the backend rejects.
  */
-
-import { PublicClientApplication } from '@azure/msal-browser';
 
 export const msalConfig = {
   auth: {
     clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || '',
     authority: `https://login.microsoftonline.com/${import.meta.env.VITE_ENTRA_TENANT_ID || 'common'}`,
-    redirectUri: window.location.origin,
+    redirectUri: typeof window !== 'undefined' ? window.location.origin : '/',
   },
   cache: {
-    cacheLocation: 'sessionStorage', // or "localStorage"
+    // localStorage so redirect flows survive the round-trip in strict
+    // browsers — the old Firebase guard had a whole error path for state
+    // lost in sessionStorage.
+    cacheLocation: 'localStorage',
     storeAuthStateInCookie: false,
   },
 };
 
-// Add scopes here for id token to be used at MS Identity Platform endpoints.
+/** The scope the backend audience-checks. Empty until the env var is set. */
+export const API_SCOPE = import.meta.env.VITE_ENTRA_API_SCOPE || '';
+
+/** Interactive sign-in request: identity claims + the API scope. */
 export const loginRequest = {
-  scopes: ['User.Read'],
+  scopes: ['openid', 'profile', 'email', ...(API_SCOPE ? [API_SCOPE] : [])],
 };
 
-// Singleton instance
-export const msalInstance = new PublicClientApplication(msalConfig);
-
-export async function initializeMsal() {
-  await msalInstance.initialize();
-}
+/** Silent token request for backend calls — the API scope only. */
+export const apiTokenRequest = {
+  scopes: API_SCOPE ? [API_SCOPE] : ['openid'],
+};

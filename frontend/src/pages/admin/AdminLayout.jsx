@@ -27,8 +27,7 @@ import {
   Plug,
   FlaskConical,
 } from 'lucide-react';
-import { getAuth, signOut } from 'firebase/auth';
-import { app } from '@/lib/firebaseConfig';
+import { signOutUser } from '@/lib/entraAuth';
 
 // ── Nav Groups ────────────────────────────────────────────────────────────────
 // Each group has a label, icon, and items. Items can have a badge key
@@ -194,7 +193,7 @@ export default function AdminLayout() {
 
   const handleSignOut = async () => {
     try {
-      await signOut(getAuth(app));
+      await signOutUser();
       navigate('/');
     } catch (err) {
       console.error('Sign-out error:', err);
