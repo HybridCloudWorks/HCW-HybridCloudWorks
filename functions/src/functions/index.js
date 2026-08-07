@@ -4,6 +4,7 @@ import { app } from '@azure/functions';
 import './admin-crud-http.js';
 import './admin-identity-http.js';
 import './admin-integrations-http.js';
+import './admin-snapshots-http.js';
 import './cms-http.js';
 import './image-prompts-http.js';
 import './labs-http.js';
