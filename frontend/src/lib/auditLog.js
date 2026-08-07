@@ -6,9 +6,8 @@
  *   import { logAdminAction } from '@/lib/auditLog';
  *   await logAdminAction('draft_saved', { contentId: blogId });
  */
-import { getAuth } from 'firebase/auth';
 import { postJSON } from '@/lib/api';
-import { app } from '@/lib/firebaseConfig';
+import { getCurrentUser } from '@/lib/entraAuth';
 
 const SENSITIVE_KEY_PATTERN = /(token|secret|password|credential|api[_-]?key|private[_-]?key)/i;
 const MAX_STRING_LENGTH = 2000;
@@ -55,7 +54,7 @@ function sanitizeDetails(value, depth = 0) {
 }
 
 /**
- * Log an admin action to Firestore
+ * Log an admin action via the recordAdminAudit RPC
  * @param {string} action - Action name (e.g., 'draft_saved', 'content_scheduled')
  * @param {Object} details - Additional context for the action
  * @returns {Promise<void>}
@@ -68,8 +67,7 @@ function sanitizeDetails(value, depth = 0) {
  * });
  */
 export async function logAdminAction(action, details = {}) {
-  const auth = getAuth(app);
-  const user = auth.currentUser;
+  const user = await getCurrentUser();
 
   if (!user) {
     console.warn('Audit log skipped: No authenticated user');

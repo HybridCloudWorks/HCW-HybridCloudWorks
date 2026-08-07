@@ -1,9 +1,9 @@
 /**
  * Shared authenticated API utility for CMS admin calls.
- * Injects Firebase Auth ID token into all requests.
+ * Injects an Entra ID access token (audience = the Functions API) into all
+ * requests via MSAL — see lib/entraAuth.js.
  */
-import { getAuth } from 'firebase/auth';
-import { app } from '@/lib/firebaseConfig';
+import { acquireApiToken } from '@/lib/entraAuth';
 
 const GCP_FUNCTIONS_BASE = import.meta.env.VITE_GCP_FUNCTIONS_URL || '';
 
@@ -71,8 +71,8 @@ async function fetchWithTimeout(url, options, timeoutMs, fnName) {
 
 /**
  * Authenticated fetch wrapper.
- * Automatically injects Firebase Auth Bearer token.
- * Admin status forces a token refresh so newly assigned custom claims are visible immediately.
+ * Automatically injects an Entra Bearer token.
+ * Admin status forces a token refresh so a newly granted role is visible immediately.
  * Retries once on transient 429/5xx failures with a 2-second backoff.
  *
  * @param {string} fnName - Cloud Function name
@@ -80,14 +80,10 @@ async function fetchWithTimeout(url, options, timeoutMs, fnName) {
  * @returns {Promise<Response>}
  */
 export async function authedFetch(fnName, options = {}) {
-  const auth = getAuth(app);
-  const user = auth.currentUser;
-
-  if (!user) {
-    throw new Error('Not authenticated. Please sign in.');
-  }
-
-  const token = await user.getIdToken(fnName === 'getCurrentAdminStatus');
+  // Throws 'Not authenticated. Please sign in.' with no active account —
+  // same contract as the Firebase version. getCurrentAdminStatus keeps its
+  // forced refresh so a just-granted role is visible immediately.
+  const token = await acquireApiToken({ forceRefresh: fnName === 'getCurrentAdminStatus' });
   const url = getEndpoint(fnName);
 
   const headers = {

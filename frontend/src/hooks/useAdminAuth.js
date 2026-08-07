@@ -3,8 +3,8 @@
  *
  * Replaces the old hardcoded environment variable approach.
  * This hook:
- * 1. Gets current user from Firebase Auth
- * 2. Calls backend API to fetch admin status (uses Custom Claims)
+ * 1. Gets the current user from Entra ID (MSAL)
+ * 2. Calls the backend for admin status (the admins/{oid} registry)
  * 3. Caches result and syncs with admin config
  * 4. Returns admin status for UI gating
  *
@@ -13,10 +13,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { setCachedAdminStatus } from '@/config/admin-v2';
 import { authedFetch } from '@/lib/api';
-import { app } from '@/lib/firebaseConfig';
+import { onAuthStateChanged } from '@/lib/entraAuth';
 
 // Cache admin status per-uid to prevent leaking one user's status to another
 // after a sign-out/sign-in within the same tab (OWASP A01 — broken access control).
@@ -25,7 +24,7 @@ const ADMIN_STATUS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Fetch admin status from backend.
- * Backend authorizes this via Firebase Custom Claims.
+ * The backend answers from the authoritative admins/{oid} registry.
  *
  * @returns {Promise<Object>} Admin status object or null
  */
@@ -90,9 +89,9 @@ export function clearAdminStatusCache(uid) {
  * Hook to get current user's admin status.
  *
  * @returns {Object} {
- *   authReady: boolean - True when Firebase Auth state has been resolved
+ *   authReady: boolean - True when the auth state has been resolved
  *   isLoading: boolean - True while fetching admin status
- *   user: Object|null - Current Firebase user
+ *   user: Object|null - Current user ({uid, email, displayName})
  *   adminStatus: Object|null - Admin status (isAdmin, role, permissions, etc)
  *   error: string|null - Error message if fetch failed
  *   hasPermission: (permission) => boolean - Check if user has permission
@@ -106,14 +105,13 @@ export function useAdminAuth() {
   const [adminStatus, setAdminStatus] = useState(null);
   const [error, setError] = useState(null);
 
-  // Listen for Firebase Auth state changes
+  // Listen for Entra (MSAL) auth state changes
   useEffect(() => {
-    const auth = getAuth(app);
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
+    const unsubscribe = onAuthStateChanged(async (entraUser) => {
+      setUser(entraUser);
       setError(null);
 
-      if (!firebaseUser) {
+      if (!entraUser) {
         // User logged out
         setAdminStatus(null);
         setCachedAdminStatus({ isAdmin: false });
@@ -125,7 +123,7 @@ export function useAdminAuth() {
       // User logged in, fetch their admin status
       setIsLoading(true);
       try {
-        const status = await getAdminStatus(firebaseUser.uid);
+        const status = await getAdminStatus(entraUser.uid);
         setAdminStatus(status);
         setCachedAdminStatus(status);
       } catch (err) {
