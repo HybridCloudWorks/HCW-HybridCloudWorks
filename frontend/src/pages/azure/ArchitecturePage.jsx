@@ -1,12 +1,7 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
-import { useFirestoreQuery } from '@/hooks/useFirestore';
-import { where } from 'firebase/firestore';
-
-function isPublicDocument(doc = {}) {
-  const status = String(doc.contentStatus || '');
-  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
-}
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 
 function mapComplexityToLevel(complexity) {
   if (complexity === 'High') return '400';
@@ -15,15 +10,15 @@ function mapComplexityToLevel(complexity) {
 }
 
 export default function ArchitecturePage() {
-  const { data: contentDocs, loading: contentLoading } = useFirestoreQuery('content', [
-    where('type', '==', 'architecture'),
-  ]);
+  // Published-only is enforced server-side by the public API.
+  const { data: contentDocs, loading: contentLoading } = usePublicData(
+    () => fetchPublicContentList({ type: 'architecture', limit: 250 }),
+    'architecture:content'
+  );
 
   const contentBlueprints = (contentDocs || [])
     .filter(
-      (doc) =>
-        isPublicDocument(doc) &&
-        (doc.cloudProvider || doc['Cloud Provider'] || 'azure').toLowerCase() === 'azure'
+      (doc) => (doc.cloudProvider || doc['Cloud Provider'] || 'azure').toLowerCase() === 'azure'
     )
     .map((doc) => ({
       icon: doc.icon || 'architecture',
@@ -39,9 +34,10 @@ export default function ArchitecturePage() {
     }));
 
   const shouldLoadLegacy = !contentLoading && contentBlueprints.length === 0;
-  const { data: dynamicDocs } = useFirestoreQuery(shouldLoadLegacy ? 'blogs' : '', [
-    where('type', '==', 'architecture'),
-  ]);
+  const { data: dynamicDocs } = usePublicData(
+    () => fetchPublicContentList({ type: 'architecture', limit: 250, source: 'blogs' }),
+    shouldLoadLegacy ? 'architecture:legacy' : ''
+  );
 
   const staticBlueprints = [
     {
@@ -128,7 +124,6 @@ export default function ArchitecturePage() {
       : (dynamicDocs || [])
           .filter(
             (doc) =>
-              isPublicDocument(doc) &&
               (doc.cloudProvider || doc['Cloud Provider'] || 'azure').toLowerCase() === 'azure'
           )
           .map((doc) => ({

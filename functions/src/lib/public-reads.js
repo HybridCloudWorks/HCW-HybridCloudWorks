@@ -108,31 +108,19 @@ export function stripInternalFields(doc) {
 }
 
 const LIST_DEFAULT_LIMIT = 60;
-const LIST_MAX_LIMIT = 100;
+// Ceiling matches the widest client fetch window (useFrameworkData and
+// useProviderLandingContent ask for 250 and filter by provider client-side —
+// a smaller cap would silently hide older provider-specific documents).
+const LIST_MAX_LIMIT = 250;
 // The in-memory sort window. Content is ~1k docs total; the published subset
 // is well inside this. Bounded so a runaway container can't OOM the handler.
 const FETCH_WINDOW = 1000;
 
-/**
- * Fields a public list card renders — the union of what the list consumers
- * (useCoderCornerData normalizeItem, archive/list pages) actually read.
- * Bracket-quoted at query time; detail pages fetch the full document.
- */
-const PUBLIC_LIST_FIELDS = [
-  'Title', 'title', 'Summary', 'summary', 'explanation', 'description',
-  'type', 'contentType', 'publishTarget',
-  'Cloud Provider', 'cloudProvider',
-  'contentStatus', 'Live', 'Status',
-  'softDeletedAt', 'softDeleteExpiresAt',
-  'publishedAt', 'Published At', 'publishedDate', 'datePublished', 'blogPublishedAt',
-  'slug', 'Slug', 'category', 'Category', 'complexity', 'Complexity',
-  'tags', 'Tags', 'keyTopics',
-  'language', 'stack', 'repoUrl', 'sourceUrl', 'url',
-  'heroImageUrl', 'altCoverImage', 'coverImage', 'Cover Image', 'contentImageUrl',
-  'readTime', 'wordCount', 'createdByName',
-];
-
-const LIST_PROJECTION = ['c.id', ...PUBLIC_LIST_FIELDS.map((f) => `c["${f}"]`)].join(', ');
+// Containers the list endpoint may serve. 'blogs' is the legacy fallback the
+// list hooks query when 'content' comes back empty — the browser read it
+// directly under the old Firestore rules, so exposing it (public-filtered,
+// internal fields stripped) grants nothing new.
+const LIST_SOURCES = new Set(['content', 'blogs']);
 
 /**
  * @param {object} deps
@@ -140,18 +128,28 @@ const LIST_PROJECTION = ['c.id', ...PUBLIC_LIST_FIELDS.map((f) => `c["${f}"]`)].
  */
 export function createPublicReadHandlers({ store }) {
   return {
-    /** GET /api/public/content?type=&provider=&limit=&offset= */
+    /**
+     * GET /api/public/content?type=&provider=&limit=&offset=&source=
+     * Returns full documents (internal fields stripped) — the list consumers
+     * read far more than card fields (frameworkConcepts, featured,
+     * altCoverImageVariants, curatedSubpagePath, costAnalysis, …), exactly as
+     * they did when Firestore handed them whole documents.
+     */
     async listContent(request, context) {
       try {
         const type = String(request.query.get('type') || '').trim().toLowerCase();
         const provider = String(request.query.get('provider') || '').trim().toLowerCase();
+        const requestedSource = String(request.query.get('source') || 'content').trim();
+        if (!LIST_SOURCES.has(requestedSource)) {
+          return json(400, { error: 'Invalid source' });
+        }
         const limit = Math.min(
           Math.max(Number(request.query.get('limit')) || LIST_DEFAULT_LIMIT, 1),
           LIST_MAX_LIMIT
         );
         const offset = Math.max(Number(request.query.get('offset')) || 0, 0);
 
-        let query = `SELECT TOP ${FETCH_WINDOW} ${LIST_PROJECTION} FROM c`;
+        let query = `SELECT TOP ${FETCH_WINDOW} * FROM c`;
         const clauses = [];
         const parameters = [];
         if (type) {
@@ -165,7 +163,7 @@ export function createPublicReadHandlers({ store }) {
         }
         if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
 
-        const rows = await store.queryDocs('content', query, parameters);
+        const rows = await store.queryDocs(requestedSource, query, parameters);
         const items = rows
           .filter(isPublicDocument)
           .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a))

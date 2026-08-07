@@ -3,13 +3,8 @@ import { Helmet } from 'react-helmet-async';
 import { ScrollTrigger, StaggerList } from '@/components/animations';
 import { AccessibleButton } from '@/components/accessibility';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useFirestoreQuery } from '@/hooks/useFirestore';
-import { where } from 'firebase/firestore';
-
-function isPublicDocument(doc = {}) {
-  const status = String(doc.contentStatus || '');
-  return doc.Live === true || status.startsWith('published_') || doc.Status === 'Live';
-}
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 
 function mapComplexityToLevel(complexity) {
   if (complexity === 'High') return '400';
@@ -21,17 +16,17 @@ export default function ArchitecturePage() {
   const navigate = useNavigate();
   const { provider = 'aws' } = useParams();
 
-  // Fetch dynamic blueprints from Content Forge
-  const { data: contentDocs, loading: contentLoading } = useFirestoreQuery('content', [
-    where('type', '==', 'architecture'),
-  ]);
+  // Fetch dynamic blueprints from Content Forge — published-only server-side
+  const { data: contentDocs, loading: contentLoading } = usePublicData(
+    () => fetchPublicContentList({ type: 'architecture', limit: 250 }),
+    'architecture:content'
+  );
 
   const contentBlueprints = (contentDocs || [])
     .filter(
       (doc) =>
-        isPublicDocument(doc) &&
         (doc.cloudProvider || doc['Cloud Provider'] || 'aws').toLowerCase() ===
-          provider.toLowerCase()
+        provider.toLowerCase()
     )
     .map((doc) => ({
       icon: 'architecture', // default icon
@@ -48,9 +43,10 @@ export default function ArchitecturePage() {
     }));
 
   const shouldLoadLegacy = !contentLoading && contentBlueprints.length === 0;
-  const { data: dynamicDocs } = useFirestoreQuery(shouldLoadLegacy ? 'blogs' : '', [
-    where('type', '==', 'architecture'),
-  ]);
+  const { data: dynamicDocs } = usePublicData(
+    () => fetchPublicContentList({ type: 'architecture', limit: 250, source: 'blogs' }),
+    shouldLoadLegacy ? 'architecture:legacy' : ''
+  );
 
   const dynamicBlueprints =
     contentBlueprints.length > 0
@@ -58,9 +54,8 @@ export default function ArchitecturePage() {
       : (dynamicDocs || [])
           .filter(
             (doc) =>
-              isPublicDocument(doc) &&
               (doc.cloudProvider || doc['Cloud Provider'] || 'aws').toLowerCase() ===
-                provider.toLowerCase()
+              provider.toLowerCase()
           )
           .map((doc) => ({
             icon: 'architecture', // default icon

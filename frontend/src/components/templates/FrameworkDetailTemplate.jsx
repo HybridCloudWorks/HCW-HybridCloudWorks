@@ -3,51 +3,38 @@ import React, { lazy, Suspense } from 'react';
 import DOMPurify from 'dompurify';
 import { Helmet } from 'react-helmet-async';
 import { useParams, Link } from 'react-router-dom';
-import { useFirestoreQuery } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentItem } from '@/lib/publicApi';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, ExternalLink, Code, Loader2, BookOpen, Layers } from 'lucide-react';
-import { where, limit } from 'firebase/firestore';
 const FrameworkRadar = lazy(() => import('@/components/widgets/FrameworkRadar'));
 import ContextSidebar from '@/components/layout/ContextSidebar';
 import ShareVia from '@/components/shared/ShareVia';
 
 /**
  * Detail page template for framework entries.
- * Queries Firestore `blogs` collection where type === 'framework' and slug matches.
+ * Resolution (slug lookup, content then legacy blogs, published-only) is
+ * folded into GET public/content/{slugOrId}; the type check stays client-side
+ * so a blog sharing the slug can't render as a framework.
  * Tabs: Overview | Pillars | Implementation (CLI + IaC) | Resources (docs)
  */
 export default function FrameworkDetailTemplate({ provider = 'aws' }) {
   const { slug } = useParams();
 
-  const { data: contentResults, loading: contentLoading } = useFirestoreQuery('content', [
-    where('slug', '==', slug),
-    where('type', '==', 'framework'),
-    limit(1),
-  ]);
+  const { data: item, loading } = usePublicData(
+    () => fetchPublicContentItem(slug),
+    slug ? `framework:${slug}` : ''
+  );
 
-  const contentFramework = contentResults && contentResults.length > 0 ? contentResults[0] : null;
-  const shouldLoadLegacy = !contentLoading && !contentFramework;
+  const framework = item && String(item.type || '').toLowerCase() === 'framework' ? item : null;
+  // The server 404s anything non-public, so a returned document is live.
+  const isFrameworkLive = Boolean(framework);
 
-  const { data: results, loading } = useFirestoreQuery(shouldLoadLegacy ? 'blogs' : '', [
-    where('slug', '==', slug),
-    where('type', '==', 'framework'),
-    limit(1),
-  ]);
-
-  const framework = contentFramework || (results && results.length > 0 ? results[0] : null);
-  const isFrameworkLive =
-    framework &&
-    !framework.softDeletedAt &&
-    !framework.softDeleteExpiresAt &&
-    (framework.Live === true ||
-      framework.Status === 'Live' ||
-      String(framework.contentStatus || '').startsWith('published_'));
-
-  if ((contentLoading || (shouldLoadLegacy && loading)) && !framework) {
+  if (loading && !framework) {
     return (
       <div className="container mx-auto px-4 py-20 flex justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

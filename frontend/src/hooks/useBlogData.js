@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { useFirestoreCollection } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 import { formatPostDate, normalizePublicImageUrl } from '@/lib/blogUtils';
 
 // Canonical governance source is `content`.
@@ -108,12 +109,6 @@ const getReadTime = (doc) => {
   return null;
 };
 
-const isPublishedDocument = (doc) => {
-  const contentStatus = String(doc.contentStatus || '');
-  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
-  return contentStatus.startsWith('published') || doc.Live === true || doc.Status === 'Live';
-};
-
 const isBlogDocument = (doc) => !EXCLUDED_TYPES.has(String(doc.type || '').toLowerCase());
 
 const matchesProvider = (doc, providerKey) => {
@@ -123,11 +118,12 @@ const matchesProvider = (doc, providerKey) => {
 
 const isValidPost = (post) => post.title && post.title !== 'Untitled';
 
+// Visibility is enforced server-side now — the public API only ever returns
+// published documents — so the client filters are scoped to provider/type.
 const mapToPublicPosts = (docs, providerKey) =>
   (docs || [])
     .filter((doc) => matchesProvider(doc, providerKey))
     .filter(isBlogDocument)
-    .filter(isPublishedDocument)
     .map(normalizePost)
     .filter(isValidPost);
 
@@ -216,9 +212,10 @@ export function useBlogData(provider) {
   const providerKey = normalizeProvider(provider);
 
   // Canonical source — content collection (pipeline + admin published)
-  const { data: contentData, loading: contentLoading } = useFirestoreCollection('content', {
-    limit: 200,
-  });
+  const { data: contentData, loading: contentLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 200 }),
+    'blog:content'
+  );
   const contentPosts = useMemo(
     () =>
       mapToPublicPosts(
@@ -230,11 +227,9 @@ export function useBlogData(provider) {
   const shouldLoadLegacy = !contentLoading && contentPosts.length === 0;
 
   // Legacy source — blogs collection (older migrated content + republished docs)
-  const { data: blogsData, loading: blogsLoading } = useFirestoreCollection(
-    shouldLoadLegacy ? 'blogs' : '',
-    {
-      limit: 200,
-    }
+  const { data: blogsData, loading: blogsLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 200, source: 'blogs' }),
+    shouldLoadLegacy ? 'blog:legacy' : ''
   );
 
   const blogsPosts = useMemo(

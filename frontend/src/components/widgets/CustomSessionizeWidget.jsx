@@ -1,9 +1,8 @@
 /* eslint-disable complexity */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '@/lib/firebaseConfig';
-import { getDoc, doc } from 'firebase/firestore';
 import { loadPublicDataSnapshot } from '@/lib/publicData';
+import { fetchPublicSnapshotItems } from '@/lib/publicApi';
 
 /**
  * CustomSessionizeWidget: Displays speaking engagements from Sessionize API + Firestore
@@ -367,17 +366,13 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
         const sessionizeData = await sessionizeResponse.json();
         const allSessionizeEvents = sessionizeData.events || sessionizeData.sessions || [];
 
-        // Static JSON is the fast public path. Firestore is only a quiet
-        // fallback for older deploys that do not have the generated file yet.
+        // Static JSON is the fast public path. The snapshots API is only a
+        // quiet fallback for deploys that do not have the generated file yet.
         let rawCustomEvents = await loadPublicDataSnapshot('/data/speakerevents.json');
 
         if (rawCustomEvents.length === 0) {
           try {
-            const snapDoc = await getDoc(doc(db, '_snapshots', 'speakerevents'));
-            if (snapDoc.exists()) {
-              const data = snapDoc.data();
-              rawCustomEvents = Array.isArray(data.items) ? data.items : [];
-            }
+            rawCustomEvents = await fetchPublicSnapshotItems('speakerevents');
           } catch {
             rawCustomEvents = [];
           }

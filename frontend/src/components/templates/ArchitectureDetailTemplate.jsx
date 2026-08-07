@@ -3,7 +3,8 @@ import React from 'react';
 import DOMPurify from 'dompurify';
 import { Helmet } from 'react-helmet-async';
 import { useParams, Link } from 'react-router-dom';
-import { useFirestoreDocument, useFirestoreQuery } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentItem } from '@/lib/publicApi';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -11,54 +12,31 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Download, ExternalLink, Code, Loader2 } from 'lucide-react';
 import { awsArchitectures } from '@/data/architectures';
-import { where, limit } from 'firebase/firestore';
 import InteractiveDiagram from '@/components/widgets/InteractiveDiagram';
 import ContextSidebar from '@/components/layout/ContextSidebar';
 import ShareVia from '@/components/shared/ShareVia';
 
 /**
- * Detail page template for architecture designs
+ * Detail page template for architecture designs.
+ * Resolution (slug lookup, content then legacy blogs, published-only) is
+ * folded into GET public/content/{slugOrId}; the type check stays client-side
+ * so a blog sharing the slug can't render as an architecture. The static
+ * awsArchitectures map remains the last-resort fallback.
  */
 export default function ArchitectureDetailTemplate({ provider = 'aws' }) {
   const { slug } = useParams();
 
-  const { data: contentResults, loading: contentLoading } = useFirestoreQuery('content', [
-    where('slug', '==', slug),
-    where('type', '==', 'architecture'), // precise match
-    limit(1),
-  ]);
-
-  const contentArchitecture =
-    contentResults && contentResults.length > 0 ? contentResults[0] : null;
-  const shouldLoadLegacy = !contentLoading && !contentArchitecture;
-
-  // 1. Try legacy/provider specific path
-  const { data: legacyData, loading: legacyLoading } = useFirestoreDocument(
-    shouldLoadLegacy ? `${provider}/architectures/${slug}` : ''
-  );
-
-  // 2. Try legacy Content Forge "blogs" collection
-  const { data: blogResults, loading: blogLoading } = useFirestoreQuery(
-    shouldLoadLegacy ? 'blogs' : '',
-    [where('slug', '==', slug), where('type', '==', 'architecture'), limit(1)]
+  const { data: item, loading } = usePublicData(
+    () => fetchPublicContentItem(slug),
+    slug ? `architecture:${slug}` : ''
   );
 
   // Static fallback for "Real Data Phase 1"
   const staticData = provider === 'aws' ? awsArchitectures[slug] : null;
 
   const dynamicArchitecture =
-    contentArchitecture || (blogResults && blogResults.length > 0 ? blogResults[0] : null);
-  const liveDynamicArchitecture =
-    dynamicArchitecture &&
-    !dynamicArchitecture.softDeletedAt &&
-    !dynamicArchitecture.softDeleteExpiresAt &&
-    (dynamicArchitecture.Live === true ||
-      dynamicArchitecture.Status === 'Live' ||
-      String(dynamicArchitecture.contentStatus || '').startsWith('published_'))
-      ? dynamicArchitecture
-      : null;
-  const architecture = liveDynamicArchitecture || legacyData || staticData;
-  const loading = contentLoading || (shouldLoadLegacy && (legacyLoading || blogLoading));
+    item && String(item.type || '').toLowerCase() === 'architecture' ? item : null;
+  const architecture = dynamicArchitecture || staticData;
 
   if (loading && !staticData && !architecture) {
     return (

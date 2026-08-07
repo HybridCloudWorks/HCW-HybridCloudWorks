@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
-import { useFirestoreCollection } from '@/hooks/useFirestore';
-
-const PUBLISHED_STATUSES = new Set(['published_blog']);
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicContentList } from '@/lib/publicApi';
 
 const normalizeProvider = (value) =>
   String(value || '')
@@ -76,12 +75,6 @@ const inferProviderFromDoc = (doc = {}) => {
     inferProviderFromText(firstPresent(doc.Summary, doc.summary)),
     ''
   );
-};
-
-const isPublicDocument = (doc = {}) => {
-  const status = String(doc.contentStatus || '');
-  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
-  return doc.Live === true || PUBLISHED_STATUSES.has(status) || doc.Status === 'Live';
 };
 
 const normalizeConcept = (entry, index = 0) => {
@@ -179,10 +172,11 @@ const matchesProvider = (doc, providerKey) => {
   return inferProviderFromDoc(doc) === providerKey;
 };
 
+// Visibility is enforced server-side — the public API only returns published
+// documents — so the client filters are scoped to type/provider.
 const mapFrameworkDocs = (docs = [], providerKey = '') =>
   docs
     .filter(isFrameworkDocument)
-    .filter(isPublicDocument)
     .filter((doc) => matchesProvider(doc, providerKey))
     .map(normalizeFramework);
 
@@ -192,19 +186,18 @@ const sortFeaturedFirst = (frameworks = []) =>
 export function useFrameworkData(provider) {
   const providerKey = normalizeProvider(provider);
 
-  const { data: contentDocs, loading: contentLoading } = useFirestoreCollection('content', {
-    limit: 250,
-  });
+  const { data: contentDocs, loading: contentLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 250 }),
+    'frameworks:content'
+  );
   const contentFrameworks = useMemo(
-    () => sortFeaturedFirst(mapFrameworkDocs(contentDocs, providerKey)),
+    () => sortFeaturedFirst(mapFrameworkDocs(contentDocs || [], providerKey)),
     [contentDocs, providerKey]
   );
   const shouldLoadLegacy = !contentLoading && contentFrameworks.length === 0;
-  const { data: legacyDocs, loading: legacyLoading } = useFirestoreCollection(
-    shouldLoadLegacy ? 'blogs' : '',
-    {
-      limit: 150,
-    }
+  const { data: legacyDocs, loading: legacyLoading } = usePublicData(
+    () => fetchPublicContentList({ limit: 150, source: 'blogs' }),
+    shouldLoadLegacy ? 'frameworks:legacy' : ''
   );
 
   const frameworks = useMemo(() => {
@@ -212,7 +205,7 @@ export function useFrameworkData(provider) {
       return contentFrameworks;
     }
 
-    return sortFeaturedFirst(mapFrameworkDocs(legacyDocs, providerKey));
+    return sortFeaturedFirst(mapFrameworkDocs(legacyDocs || [], providerKey));
   }, [contentFrameworks, legacyDocs, providerKey]);
 
   return {

@@ -2,9 +2,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebaseConfig';
 import { loadPublicDataSnapshot } from '@/lib/publicData';
+import { fetchPublicSnapshotItems } from '@/lib/publicApi';
 import CustomSessionizeWidget from '@/components/widgets/CustomSessionizeWidget';
 
 function normalizeCertification(rawData) {
@@ -278,20 +277,12 @@ export default function AboutPage() {
       setLoading(true);
 
       try {
-        // Static JSON is the fast public path. Firestore is only a quiet
-        // fallback for older deploys that do not have the generated file yet.
+        // Static JSON is the fast public path. The snapshots API is only a
+        // quiet fallback for deploys that do not have the generated file yet.
         let rawItems = await loadPublicDataSnapshot('/data/certifications.json');
 
         if (rawItems.length === 0) {
-          try {
-            const snapDoc = await getDoc(doc(db, '_snapshots', 'certifications'));
-            if (snapDoc.exists()) {
-              const data = snapDoc.data();
-              rawItems = Array.isArray(data.items) ? data.items : [];
-            }
-          } catch {
-            rawItems = [];
-          }
+          rawItems = await fetchPublicSnapshotItems('certifications');
         }
 
         try {

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { useFirestoreCollection } from './useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { fetchPublicFeed } from '@/lib/publicApi';
 
 const SITE_RELEVANT_TAGS_BY_PROVIDER = {
   azure: [
@@ -157,42 +158,19 @@ function curateArticlesFromRss(rssItems, provider) {
   };
 }
 
-function getInsightsData(includeInsights, insightsFromFirestore) {
-  if (!includeInsights) {
-    return [];
-  }
-  return insightsFromFirestore || [];
-}
-
-function getLoadingState(includeInsights, rssLoading, insightsLoading) {
-  if (includeInsights) {
-    return rssLoading || insightsLoading;
-  }
-  return rssLoading;
-}
-
-function getErrorState(includeInsights, rssError, insightsError) {
-  return rssError || (includeInsights ? insightsError : null);
-}
-
 export function useNewsData(provider, options = {}) {
   const includeInsights = options.includeInsights === true;
 
+  // One round trip: the feed endpoint returns the rss_cache documents plus
+  // active insights for the provider (two separate Firestore queries before).
   const {
-    data: rawRssCache,
-    loading: rssLoading,
-    error: rssError,
-  } = useFirestoreCollection('rss_cache', {
-    where: ['provider', '==', provider],
-  });
+    data: feed,
+    loading,
+    error,
+  } = usePublicData(() => fetchPublicFeed(provider), provider ? `feed:${provider}` : '');
 
-  const {
-    data: rawInsights,
-    loading: insightsLoading,
-    error: insightsError,
-  } = useFirestoreCollection('ai_insights', {
-    where: ['provider', '==', provider],
-  });
+  const rawRssCache = feed?.rssCache;
+  const rawInsights = feed?.insights;
 
   const rssFromFirestore = useMemo(() => {
     if (rawRssCache && rawRssCache.length > 0) {
@@ -231,9 +209,7 @@ export function useNewsData(provider, options = {}) {
 
   const articles = curatedArticles;
   const rssItems = liveItems;
-  const insights = getInsightsData(includeInsights, insightsFromFirestore);
-  const loading = getLoadingState(includeInsights, rssLoading, insightsLoading);
-  const error = getErrorState(includeInsights, rssError, insightsError);
+  const insights = includeInsights ? insightsFromFirestore || [] : [];
 
   return { articles, rssItems, insights, loading, error };
 }
