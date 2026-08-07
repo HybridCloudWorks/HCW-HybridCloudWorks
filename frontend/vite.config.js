@@ -2,24 +2,6 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-// F10 — Firebase SDK split. Returns the chunk name for a given module id, or
-// null if the id isn't a Firebase package. Pulled out to keep manualChunks
-// from tripping the complexity lint rule.
-function pickFirebaseChunk(id) {
-  if (!id.includes('firebase')) return null;
-  if (id.includes('@firebase/storage') || id.includes('firebase/storage')) {
-    return 'vendor-firebase-storage';
-  }
-  if (id.includes('@firebase/auth') || id.includes('firebase/auth')) {
-    return 'vendor-firebase-auth';
-  }
-  if (id.includes('@firebase/functions') || id.includes('firebase/functions')) {
-    return 'vendor-firebase-functions';
-  }
-  if (id.includes('node_modules')) return 'vendor-firebase';
-  return null;
-}
-
 function pickMarkdownChunk(id) {
   if (
     id.includes('react-markdown') ||
@@ -120,12 +102,6 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
-            // F10 — Split Firebase SDK so the public-page bundle stops paying
-            // for Storage/Auth/Functions code that only admin routes use.
-            // firebase/app + firestore stays in the core chunk (every page
-            // reads from Firestore today via useFirestore).
-            const firebaseChunk = pickFirebaseChunk(id);
-            if (firebaseChunk) return firebaseChunk;
             const markdownChunk = pickMarkdownChunk(id);
             if (markdownChunk) return markdownChunk;
             const chartsChunk = pickChartsChunk(id);

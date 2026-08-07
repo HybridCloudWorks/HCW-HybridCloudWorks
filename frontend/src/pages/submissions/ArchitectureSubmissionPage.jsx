@@ -22,17 +22,7 @@ import {
   Network,
   Eye,
 } from 'lucide-react';
-import { db } from '@/lib/firebaseConfig';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-
-function slugify(text) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-}
+import { submitPublicContent } from '@/lib/publicApi';
 
 const REFERENCE_BLUEPRINTS = [
   {
@@ -132,45 +122,18 @@ export default function ArchitectureSubmissionPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const slug = slugify(form.title);
-      await addDoc(collection(db, 'content'), {
+      // The server validates, composes the review-pipeline document, and
+      // enforces the anonymous hourly quota (public/submissions).
+      await submitPublicContent({
         type: 'architecture',
-        contentStatus: 'ingested',
-        storageCollection: 'content',
-        publishTarget: 'architecture',
-        Live: false,
-        approvedForBlog: false,
-        slug,
         title: form.title.trim(),
-        Title: form.title.trim(),
         summary: form.summary.trim(),
-        Summary: form.summary.trim(),
         cloudProvider: form.cloudProvider,
-        'Cloud Provider': form.cloudProvider,
         category: form.category,
         complexity: form.complexity,
-        tags: form.tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean),
+        tags: form.tags,
         diagramUrl: form.diagramUrl.trim(),
         overviewHtml: form.overviewHtml.trim(),
-        technicalSpecs: {
-          components: form.technicalComponents
-            .split('\n')
-            .map((c) => c.trim())
-            .filter(Boolean),
-          patterns: [],
-        },
-        costAnalysis: {
-          estimatedMonthly: form.estimatedMonthlyCost.trim(),
-          breakdown: [],
-        },
-        terraformCode: form.terraformCode.trim(),
-        featured: false,
-        source: 'template-form',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
       setSubmitted(true);
       setForm(EMPTY_FORM);

@@ -76,6 +76,35 @@ export async function fetchPublicSnapshotItems(id) {
   }
 }
 
+/**
+ * POST public/submissions — anonymous content submission. The server owns
+ * validation, document composition, and the per-client hourly quota (429),
+ * replacing the pages' direct addDoc writes into the content collection.
+ * Resolves to { ok, id }; throws with the server's message on rejection.
+ */
+export async function submitPublicContent(body) {
+  if (!API_BASE) {
+    throw new Error(
+      'VITE_GCP_FUNCTIONS_URL is not set. Add it to your .env file before submitting.'
+    );
+  }
+  const res = await fetch(`${API_BASE}/public/submissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      data.error ||
+        (res.status === 429
+          ? 'Submission rate limit exceeded — try again later.'
+          : `Submission failed with HTTP ${res.status}`)
+    );
+  }
+  return data;
+}
+
 /** GET public/podcasts — episodes for a provider, newest first. */
 export async function fetchPublicPodcasts({ provider, limit } = {}) {
   const params = new URLSearchParams();
