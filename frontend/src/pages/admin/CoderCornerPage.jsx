@@ -2,11 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import { useSearchParams } from 'react-router-dom';
 import { useAuthReady } from '@/hooks/useAuthReady';
-import { db } from '@/lib/firebaseConfig';
-import { collection, query, where, limit, getDocs } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { CoderCornerReviewBoard } from '@/components/admin/CoderCornerReviewBoard';
 import { getPublishTargetForType } from '@/lib/contentModel';
@@ -21,28 +19,34 @@ const STATUS_FILTERS = [
   { value: 'rejected', label: 'Rejected' },
 ];
 
-function getStatusConstraints(statusFilter) {
+function getStatusParam(statusFilter) {
   if (statusFilter === 'needs_review') {
-    return [where('contentStatus', 'in', ['ingested', 'inspected'])];
+    return 'ingested,inspected';
   }
-  return [where('contentStatus', '==', statusFilter)];
+  return statusFilter;
+}
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function sortByDate(a, b) {
-  const aTime = a.fetchedAt?.toMillis?.() || a.createdAt?.toMillis?.() || 0;
-  const bTime = b.fetchedAt?.toMillis?.() || b.createdAt?.toMillis?.() || 0;
+  const aTime = toMillis(a.fetchedAt) || toMillis(a.createdAt);
+  const bTime = toMillis(b.fetchedAt) || toMillis(b.createdAt);
   return bTime - aTime;
 }
 
 async function fetchCoderCorner(statusFilter) {
-  const constraints = [
-    where('type', '==', 'coder_corner'),
-    ...getStatusConstraints(statusFilter),
-    limit(200),
-  ];
-  const q = query(collection(db, 'content'), ...constraints);
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(sortByDate);
+  const params = new URLSearchParams({
+    type: 'coder_corner',
+    status: getStatusParam(statusFilter),
+    limit: '200',
+  });
+  const res = await getJSON(`cms/content?${params.toString()}`);
+  return (res.items || []).sort(sortByDate);
 }
 
 export default function CoderCornerPage() {

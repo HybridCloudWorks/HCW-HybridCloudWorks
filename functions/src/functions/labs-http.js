@@ -34,6 +34,13 @@ app.http('getLabsSnapshot', {
   handler: (request, context) => handlers().getLabsSnapshot(request, context),
 });
 
+app.http('getLabJob', {
+  methods: ['GET', 'POST'],
+  authLevel: 'anonymous',
+  route: 'getLabJob',
+  handler: (request, context) => handlers().getLabJob(request, context),
+});
+
 app.http('cancelLabJob', {
   methods: ['POST'],
   authLevel: 'anonymous',

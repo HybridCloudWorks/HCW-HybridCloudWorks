@@ -36,9 +36,7 @@ import {
   BarChart3,
   Send,
 } from 'lucide-react';
-import { postJSON } from '@/lib/api';
-import { db } from '@/lib/firebaseConfig';
-import { collection, query, limit, getDocs } from 'firebase/firestore';
+import { postJSON, getJSON } from '@/lib/api';
 
 const TABS = [
   { id: 'links', label: 'Links' },
@@ -601,13 +599,10 @@ export default function LinkiePage() {
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
-    getDocs(query(collection(db, 'content'), limit(500)))
-      .then((snap) => {
+    getJSON('cms/content?limit=500')
+      .then((res) => {
         if (cancelled) return;
-        const live = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter(isLiveRecord)
-          .filter((item) => getLiveUrl(item));
+        const live = (res.items || []).filter(isLiveRecord).filter((item) => getLiveUrl(item));
         setRecentContent(live.slice(0, 50));
       })
       .catch(() => {});

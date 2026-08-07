@@ -213,7 +213,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
           reviewNotes: notesRef.current,
         });
         await logAdminAction('status_transition', { contentId: blogId, newStatus });
-        // useFirestoreDocument is a real-time listener — state updates automatically
+        // The parent's data hook refetches on demand — state updates on reload
       } catch (err) {
         setTransitionError(err.message);
       } finally {

@@ -206,15 +206,24 @@ export function createAdminIntegrationHandlers({
 
     // ── image gallery reads (lib/imageGallery.js) ──────────────────────────
 
-    /** GET /api/cms/images?limit= — both galleries, newest first each. */
+    /**
+     * GET /api/cms/images?limit=&articleId= — both galleries, newest first
+     * each; articleId narrows to one article's images (SubmitUrls preview
+     * gallery watches generated rows for its session id).
+     */
     async listImages(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
         const limit = Math.min(Math.max(Number(request.query.get('limit')) || 60, 1), 200);
+        const articleId = String(request.query.get('articleId') || '').trim();
+        const query = articleId
+          ? `SELECT TOP ${LIST_WINDOW} * FROM c WHERE c.articleId = @articleId`
+          : `SELECT TOP ${LIST_WINDOW} * FROM c`;
+        const parameters = articleId ? [{ name: '@articleId', value: articleId }] : [];
         const [curated, generated] = await Promise.all([
-          store.queryDocs('curated_article_images', `SELECT TOP ${LIST_WINDOW} * FROM c`, []),
-          store.queryDocs('generated_content_images', `SELECT TOP ${LIST_WINDOW} * FROM c`, []),
+          store.queryDocs('curated_article_images', query, parameters),
+          store.queryDocs('generated_content_images', query, parameters),
         ]);
         const newestFirst = (rows) =>
           rows.sort((a, b) => dateValue(b.createdAt) - dateValue(a.createdAt)).slice(0, limit);

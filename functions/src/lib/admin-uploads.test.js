@@ -102,10 +102,10 @@ describe('uploadFile', () => {
     expect(storage.uploadBlob).not.toHaveBeenCalled();
   });
 
-  it('enforces the decoded 5MB cap server-side', async () => {
+  it('enforces the decoded 15MB cap server-side', async () => {
     const storage = { uploadBlob: vi.fn() };
     const h = createAdminUploadHandlers({ guard: allowGuard(), storage });
-    const big = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
+    const big = Buffer.alloc(15 * 1024 * 1024 + 1).toString('base64');
     const res = await h.uploadFile(
       makeRequest({ body: { ...validBody(), dataBase64: big } }),
       context

@@ -133,3 +133,55 @@ describe('auth', () => {
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 });
+
+describe('getLabJob', () => {
+  const makeStore = (over = {}) => ({
+    queryDocs: vi.fn(async () => []),
+    readDoc: vi.fn(async () => null),
+    upsertDoc: vi.fn(),
+    patchDoc: vi.fn(),
+    ...over,
+  });
+
+  it('returns the job with its output for a viewer', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'job-1',
+        type: 'shell-echo',
+        status: 'succeeded',
+        output: 'hello',
+        exitCode: 0,
+        payload: 'SECRETISH',
+        createdAt: '2026-08-01T00:00:00Z',
+      })),
+    });
+    const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed });
+    const res = await h.getLabJob(
+      { method: 'GET', query: { get: (k) => (k === 'jobId' ? 'job-1' : null) } },
+      context
+    );
+    const body = JSON.parse(res.body);
+    expect(body.job.output).toBe('hello');
+    expect(body.job.status).toBe('succeeded');
+    // Projection only — the raw payload is not echoed back.
+    expect(body.job).not.toHaveProperty('payload');
+  });
+
+  it('denial makes zero store calls; missing job 404s', async () => {
+    const store = makeStore();
+    const denied = createLabHandlers({ guard: denyGuard, store, ...fixed });
+    const res = await denied.getLabJob(
+      { method: 'GET', query: { get: () => 'job-1' } },
+      context
+    );
+    expect(res.status).toBe(403);
+    expect(store.readDoc).not.toHaveBeenCalled();
+
+    const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed });
+    const miss = await h.getLabJob(
+      { method: 'GET', query: { get: (k) => (k === 'jobId' ? 'nope' : null) } },
+      context
+    );
+    expect(miss.status).toBe(404);
+  });
+});

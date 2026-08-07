@@ -15,8 +15,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { collection, doc, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { db } from '@/lib/firebaseConfig';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { postJSON } from '@/lib/api';
 import ServicePageHeader from '@/components/admin/ServicePageHeader';
@@ -77,7 +75,12 @@ function StatusBadge({ status }) {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-const toMillis = (ts) => (ts?.toMillis ? ts.toMillis() : 0);
+const toMillis = (value) => {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 function isAgentOnline(agent, now) {
   const lastSeen = toMillis(agent.lastSeenAt);
@@ -99,35 +102,45 @@ function formatTime(ts) {
   return ms ? new Date(ms).toLocaleString() : '—';
 }
 
-/** Live subscriptions to lab_agents + recent lab_jobs (admin read-only). */
+/**
+ * Polling view of lab_agents + recent lab_jobs (admin read-only) — the
+ * getLabsSnapshot RPC every 15s replaces the two Firestore subscriptions,
+ * and also supplies the server's job-type allowlist.
+ */
 function useLabsLive(enabled) {
   const [agents, setAgents] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [jobTypes, setJobTypes] = useState([]);
   const [error, setError] = useState(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const unsubAgents = onSnapshot(
-      collection(db, 'lab_agents'),
-      (snap) => setAgents(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      (err) => setError(err.message)
-    );
-    const unsubJobs = onSnapshot(
-      query(collection(db, 'lab_jobs'), orderBy('createdAt', 'desc'), limit(25)),
-      (snap) => setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      (err) => setError(err.message)
-    );
-    // Re-evaluate online/offline staleness even with no Firestore traffic.
-    const ticker = setInterval(() => setNow(Date.now()), 15000);
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const snap = await postJSON('getLabsSnapshot', {});
+        if (cancelled) return;
+        setError(null);
+        setAgents(snap?.agents || []);
+        setJobs(snap?.jobs || []);
+        if (Array.isArray(snap?.jobTypes) && snap.jobTypes.length) setJobTypes(snap.jobTypes);
+        setNow(Date.now());
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      }
+    };
+
+    load();
+    const ticker = setInterval(load, 15000);
     return () => {
-      unsubAgents();
-      unsubJobs();
+      cancelled = true;
       clearInterval(ticker);
     };
   }, [enabled]);
 
-  return { agents, jobs, error, now };
+  return { agents, jobs, jobTypes, error, now };
 }
 
 // ── Dashboard tab ─────────────────────────────────────────────────────────────
@@ -344,20 +357,36 @@ function ConsoleTab({ jobTypes }) {
   const effectiveType =
     jobTypes.length && !jobTypes.some((jt) => jt.type === type) ? jobTypes[0].type : type;
 
-  // Live status/output for the submitted job.
+  // Status/output for the submitted job — poll getLabJob until it reaches a
+  // terminal state (replaces the per-doc Firestore subscription).
   useEffect(() => {
     if (!activeJobId) return undefined;
-    const unsub = onSnapshot(
-      doc(db, 'lab_jobs', activeJobId),
-      (snap) => setActiveJob(snap.exists() ? { id: snap.id, ...snap.data() } : null),
-      (err) =>
+    let cancelled = false;
+    let timer = null;
+
+    const poll = async () => {
+      try {
+        const res = await postJSON('getLabJob', { jobId: activeJobId });
+        if (cancelled) return;
+        const job = res?.job || null;
+        setActiveJob(job);
+        const terminal = ['succeeded', 'failed', 'cancelled'].includes(job?.status);
+        if (!terminal) timer = setTimeout(poll, 5000);
+      } catch (err) {
+        if (cancelled) return;
         setActiveJob({
           id: activeJobId,
           status: 'failed',
-          output: `subscription error: ${err.message}`,
-        })
-    );
-    return unsub;
+          output: `status fetch error: ${err.message}`,
+        });
+      }
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [activeJobId]);
 
   const selectedSpec = jobTypes.find((jt) => jt.type === effectiveType);
@@ -561,18 +590,11 @@ export default function LabsPage() {
     : 'dashboard';
   const setTab = (id) => setSearchParams({ tab: id });
 
-  const { agents, jobs, error, now } = useLabsLive(authReady);
+  const { agents, jobs, jobTypes: liveJobTypes, error, now } = useLabsLive(authReady);
 
-  // Job-type allowlist for the Console (server is source of truth).
-  const [jobTypes, setJobTypes] = useState(FALLBACK_JOB_TYPES);
-  useEffect(() => {
-    if (!authReady) return;
-    postJSON('getLabsSnapshot', {})
-      .then((snap) => {
-        if (Array.isArray(snap?.jobTypes) && snap.jobTypes.length) setJobTypes(snap.jobTypes);
-      })
-      .catch(() => {}); // fallback list already in place
-  }, [authReady]);
+  // Job-type allowlist for the Console (server is source of truth; fallback
+  // list until the first snapshot arrives).
+  const jobTypes = liveJobTypes.length ? liveJobTypes : FALLBACK_JOB_TYPES;
 
   const connected = useMemo(
     () => (authReady ? agents.some((a) => isAgentOnline(a, now)) : 'checking'),
