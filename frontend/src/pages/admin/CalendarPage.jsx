@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPublishTargetForItem } from '@/lib/contentModel';
-import { useFirestoreCollection } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
+import { getJSON } from '@/lib/api';
 import { saveContentSchedule } from '@/lib/contentWorkflow';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -76,11 +77,26 @@ const getQueueStatusLabel = (item) => {
   return `ready ${target}`;
 };
 
+function toScheduledDate(value) {
+  if (!value) return null;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export default function CalendarPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { data: allContent, loading } = useFirestoreCollection('content');
-  const { data: socialPosts } = useFirestoreCollection('social_posts');
+  const { data: allContentRaw, loading } = usePublicData(
+    () => getJSON('cms/content?limit=500').then((res) => res.items || []),
+    'calendar:content'
+  );
+  const { data: socialPostsRaw } = usePublicData(
+    () => getJSON('cms/social-posts?status=all&limit=100').then((res) => res.items || []),
+    'calendar:social'
+  );
+  const allContent = allContentRaw || [];
+  const socialPosts = socialPostsRaw || [];
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
@@ -124,10 +140,11 @@ export default function CalendarPage() {
     );
   });
 
-  // Group content by date
+  // Group content by date (scheduledPublishDate is an ISO string from the
+  // API; tolerate legacy Timestamp objects during migration)
   const contentByDate = scheduledContent.reduce((acc, item) => {
-    if (item.scheduledPublishDate?.toDate) {
-      const date = item.scheduledPublishDate.toDate();
+    const date = toScheduledDate(item.scheduledPublishDate);
+    if (date) {
       const dayKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
       if (!acc[dayKey]) acc[dayKey] = [];
       acc[dayKey].push(item);
@@ -482,7 +499,7 @@ export default function CalendarPage() {
                   <div className="space-y-2">
                     {getItemsForDay(selectedDate).map((item) => {
                       const coverUrl = getCoverImageUrl(item);
-                      const scheduledTime = item.scheduledPublishDate?.toDate?.();
+                      const scheduledTime = toScheduledDate(item.scheduledPublishDate);
 
                       return (
                         <div

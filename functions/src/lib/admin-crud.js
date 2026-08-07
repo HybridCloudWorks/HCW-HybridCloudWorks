@@ -141,7 +141,11 @@ export function createAdminCrudHandlers({ guard, store, now = () => new Date(), 
 
     // ── social posts ───────────────────────────────────────────────────────
 
-    /** GET /api/cms/social-posts?status=a,b&limit= — SocialHubPage list. */
+    /**
+     * GET /api/cms/social-posts?status=a,b&limit= — SocialHubPage list.
+     * status=all lists every post regardless of status (CalendarPage reads
+     * the unfiltered collection).
+     */
     async listSocialPosts(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
@@ -152,10 +156,13 @@ export function createAdminCrudHandlers({ guard, store, now = () => new Date(), 
           : SOCIAL_DEFAULT_STATUSES;
         const limit = Math.min(Math.max(Number(request.query.get('limit')) || 50, 1), 100);
 
+        const unfiltered = statuses.includes('all');
         const items = await store.queryDocs(
           'social_posts',
-          `SELECT TOP ${LIST_WINDOW} * FROM c WHERE ARRAY_CONTAINS(@statuses, c.status)`,
-          [{ name: '@statuses', value: statuses }]
+          unfiltered
+            ? `SELECT TOP ${LIST_WINDOW} * FROM c`
+            : `SELECT TOP ${LIST_WINDOW} * FROM c WHERE ARRAY_CONTAINS(@statuses, c.status)`,
+          unfiltered ? [] : [{ name: '@statuses', value: statuses }]
         );
         const sorted = items
           .sort((a, b) => createdAtValue(b) - createdAtValue(a))

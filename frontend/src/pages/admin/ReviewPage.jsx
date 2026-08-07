@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useFirestoreDocument } from '@/hooks/useFirestore';
+import { usePublicData } from '@/hooks/usePublicData';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft } from 'lucide-react';
 import ArchitectureReviewBoard from '@/components/admin/ArchitectureReviewBoard';
 import FrameworkReviewBoard from '@/components/admin/FrameworkReviewBoard';
 import BlogReviewBoard from '@/components/admin/BlogReviewBoard';
-import { postJSON } from '@/lib/api';
+import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { getPublishTargetForType } from '@/lib/contentModel';
 import PipelineStepper from '@/components/admin/PipelineStepper';
@@ -16,8 +16,15 @@ import PipelineStepper from '@/components/admin/PipelineStepper';
 export default function ReviewPage() {
   const { blogId } = useParams();
   const navigate = useNavigate();
-  const collectionName = 'content';
-  const { data: blog, error, loading } = useFirestoreDocument(`${collectionName}/${blogId}`);
+  const {
+    data: blog,
+    error,
+    loading,
+  } = usePublicData(
+    () =>
+      getJSON(`cms/content/item?contentId=${encodeURIComponent(blogId)}`).then((res) => res.item),
+    blogId ? `review:${blogId}` : ''
+  );
   const [frameworkDeleteOpen, setFrameworkDeleteOpen] = useState(false);
 
   if (loading) {
