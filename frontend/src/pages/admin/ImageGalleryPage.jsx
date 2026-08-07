@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { postJSON } from '@/lib/api';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +20,6 @@ import {
   Pencil,
 } from 'lucide-react';
 import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
-import { getStorage } from '@/lib/firebaseStorage';
 import { normalizeContentProvider } from '@/lib/contentModel';
 
 const COMMON_PROVIDERS = [
@@ -229,9 +227,20 @@ async function uploadGalleryFile({
     uploadFilesLength,
   });
 
-  const storageRef = ref(getStorage(), uploadData.storagePath);
-  await uploadBytes(storageRef, file, { contentType: file.type || 'image/png' });
-  const imageUrl = await getDownloadURL(storageRef);
+  // Upload into the 'content' container; the stored ref carries the container
+  // prefix so the delete path (parseStorageRef) can find the blob later.
+  const dataBase64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
+  const uploaded = await postJSON('cms/uploads/content', {
+    path: uploadData.storagePath,
+    contentType: file.type || 'image/png',
+    dataBase64,
+  });
+  const imageUrl = uploaded.url;
 
   await postJSON('createManualGalleryImageRecord', {
     articleId: 'manual-upload',
@@ -239,7 +248,7 @@ async function uploadGalleryFile({
     provider: normalizedProvider,
     title: uploadData.title,
     slot: uploadSlot,
-    storagePath: uploadData.storagePath,
+    storagePath: `content/${uploadData.storagePath}`,
     customTags: uploadData.allTags,
     folder: uploadData.folder,
   });

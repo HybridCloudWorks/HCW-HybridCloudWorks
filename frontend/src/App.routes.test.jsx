@@ -17,8 +17,8 @@ vi.mock('@/hooks/useNewsData', () => ({
   useNewsData: () => ({ articles: [], rssItems: [], insights: [], loading: false }),
 }));
 
-vi.mock('@/hooks/useFirestore', () => ({
-  useFirestoreCollection: () => ({ data: [], loading: false, error: null }),
+vi.mock('@/hooks/usePublicData', () => ({
+  usePublicData: () => ({ data: null, loading: false, error: null }),
 }));
 
 vi.mock('@/components/landing/ProviderLatestContentPanel', () => ({

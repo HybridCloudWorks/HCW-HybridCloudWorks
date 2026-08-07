@@ -72,7 +72,8 @@ export function createCmsContentHandlers({ guard, store }) {
     /**
      * GET /api/cms/content — source: listContentItems.
      * status accepts a comma-separated list (the workflow pages query
-     * multi-status windows); live=true filters to c.Live = true.
+     * multi-status windows); live=true filters to c.Live = true; type
+     * filters case-insensitively (Frameworks/CoderCorner boards).
      */
     async list(request, context) {
       const auth = await guard.requireRole(request, 'editor');
@@ -84,6 +85,7 @@ export function createCmsContentHandlers({ guard, store }) {
           ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
           : [];
         const liveOnly = request.query.get('live') === 'true';
+        const type = String(request.query.get('type') || '').trim().toLowerCase();
         const max = Math.min(Number(request.query.get('limit') || LIST_DEFAULT_LIMIT), LIST_MAX_LIMIT);
 
         let query = `SELECT TOP @limit ${PROJECTION} FROM c`;
@@ -98,6 +100,10 @@ export function createCmsContentHandlers({ guard, store }) {
         }
         if (liveOnly) {
           clauses.push('c.Live = true');
+        }
+        if (type) {
+          clauses.push('LOWER(c.type) = @type');
+          parameters.push({ name: '@type', value: type });
         }
         if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
 

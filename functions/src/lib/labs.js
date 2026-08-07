@@ -121,6 +121,50 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
       }
     },
 
+    /**
+     * GET|POST /api/getLabJob — viewer; one job with its output. The console
+     * tab watches the job it just enqueued (this replaces the browser's
+     * onSnapshot on lab_jobs/{id}); output is agent-written text, returned
+     * only to authenticated viewers.
+     */
+    async getLabJob(request, context) {
+      const auth = await guard.requireRole(request, 'viewer');
+      if (auth.error) return auth.error;
+
+      try {
+        let jobId;
+        if (String(request.method).toUpperCase() === 'GET') {
+          jobId = request.query.get('jobId');
+        } else {
+          const body = await request.json().catch(() => null);
+          jobId = body?.jobId;
+        }
+        jobId = String(jobId || '').trim();
+        if (!jobId) return json(400, { error: 'jobId required' });
+
+        const data = await store.readDoc('lab_jobs', jobId, jobId);
+        if (!data) return json(404, { error: `job ${jobId} not found` });
+
+        return json(200, {
+          job: {
+            id: data.id,
+            type: data.type,
+            status: data.status,
+            output: data.output ?? null,
+            exitCode: data.exitCode ?? null,
+            agentId: data.agentId || null,
+            requestedByEmail: data.requestedByEmail || null,
+            createdAt: toIsoOrNull(data.createdAt),
+            claimedAt: toIsoOrNull(data.claimedAt),
+            finishedAt: toIsoOrNull(data.finishedAt),
+          },
+        });
+      } catch (error) {
+        context.error('getLabJob failed:', error);
+        return json(500, { error: 'Failed to get lab job' });
+      }
+    },
+
     /** GET|POST /api/getLabsSnapshot — viewer; agents + jobs + queue depth. */
     async getLabsSnapshot(request, context) {
       const auth = await guard.requireRole(request, 'viewer');

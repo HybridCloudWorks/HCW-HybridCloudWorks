@@ -7,11 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Upload, Loader2, CheckCircle, AlertCircle, Sparkles, Link2, X } from 'lucide-react';
-import { postJSON } from '@/lib/api';
-import { db } from '@/lib/firebaseConfig';
-import { storage } from '@/lib/firebaseStorage';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { postJSON, getJSON } from '@/lib/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getPublishTargetForType, getPublicSectionForTarget } from '@/lib/contentModel';
@@ -1987,21 +1983,11 @@ export default function SubmitUrlsPage() {
       }
 
       try {
-        const snapshot = await getDocs(
-          query(
-            collection(db, 'generated_content_images'),
-            where('articleId', '==', previewSessionId),
-            limit(24)
-          )
+        const res = await getJSON(
+          `cms/images?articleId=${encodeURIComponent(previewSessionId)}&limit=24`
         );
-
-        const items = snapshot.docs
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-          .sort((a, b) => {
-            const aTime = a.createdAt?.toMillis?.() || 0;
-            const bTime = b.createdAt?.toMillis?.() || 0;
-            return bTime - aTime;
-          });
+        // Server returns each gallery newest-first already.
+        const items = res.generated || [];
 
         setGalleryItems(items);
       } catch (err) {
@@ -2291,20 +2277,24 @@ export default function SubmitUrlsPage() {
   const uploadSlotImage = async (slot, explicitFile = null) => {
     const file = explicitFile || slotFiles[slot];
     if (!file) return;
-    if (!storage) {
-      setError('Firebase Storage is not configured.');
-      return;
-    }
 
     setUploadingSlot(slot);
     setError('');
     try {
       const ext = file.name.split('.').pop() || 'png';
       const path = `content-submissions/${slot}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const imageRef = ref(storage, path);
-      await uploadBytes(imageRef, file, { contentType: file.type || 'image/png' });
-      const downloadUrl = await getDownloadURL(imageRef);
-      setSlotUrls((prev) => ({ ...prev, [slot]: downloadUrl }));
+      const dataBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
+      const uploaded = await postJSON('cms/uploads/content', {
+        path,
+        contentType: file.type || 'image/png',
+        dataBase64,
+      });
+      setSlotUrls((prev) => ({ ...prev, [slot]: uploaded.url }));
       setSelectedUploaded((prev) => ({ ...prev, [slot]: true }));
       setSlotFiles((prev) => ({ ...prev, [slot]: null }));
     } catch (err) {

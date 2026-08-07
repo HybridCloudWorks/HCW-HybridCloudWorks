@@ -30,7 +30,9 @@ export const UPLOAD_CONTAINERS = new Set([
   'content',
 ]);
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+// 15 MB: gallery hero/cover images run larger than cert badges, and the
+// gallery pages never had a client-side cap under Firebase Storage.
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const MAX_PATH_LENGTH = 300;
 const PATH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
@@ -80,7 +82,7 @@ export function createAdminUploadHandlers({ guard, storage }) {
           return json(400, { error: 'dataBase64 is not valid base64' });
         }
         if (buffer.length > MAX_UPLOAD_BYTES) {
-          return json(413, { error: 'File exceeds the 5MB upload limit' });
+          return json(413, { error: 'File exceeds the 15MB upload limit' });
         }
 
         const url = await storage.uploadBlob(container, path, buffer, contentType);
