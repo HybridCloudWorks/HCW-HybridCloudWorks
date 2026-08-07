@@ -6,6 +6,7 @@ import './admin-identity-http.js';
 import './admin-integrations-http.js';
 import './admin-snapshots-http.js';
 import './cms-http.js';
+import './content-workflow-http.js';
 import './image-prompts-http.js';
 import './labs-http.js';
 import './ops-health-http.js';
