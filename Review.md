@@ -309,6 +309,69 @@ literal `TODO`.
 Enabling them is a deliberate act, not a side effect. `migrate-data` in particular reads the whole
 production Firestore database.
 
+### 4.4 Self-hosted CI runner — operator setup and failover runbook
+
+`infra/ci-runner.tf` defines an Azure Container Apps event-driven Job running ephemeral GitHub
+runners (KEDA `github-runner` scaler, scale-to-zero — idle days cost $0, active days ≈ $10/mo for
+this repo's CI volume). It is a **fallback** for GitHub-hosted runner outages, selected per-run by
+the `CI_RUNNER` repository variable. Everything below is operator work this environment cannot do.
+
+**One-time setup, in order:**
+
+1. **GitHub App** (org settings → Developer settings → GitHub Apps → New): no webhook, repository
+   permission **Administration: Read & write** (self-hosted runner registration) only. Install it
+   on `HCW-HybridCloudWorks` only. Record: App ID, Installation ID, and a generated private key
+   (PEM). A GitHub App is used instead of a PAT so tokens are short-lived and not person-bound.
+2. **Docker Hub**: create repository `hcw-runner` and a **read/write access token scoped to that
+   repository** (Captain/Pro account — authenticated pulls are unlimited, which is what sidesteps
+   the per-IP anonymous rate limit on Azure's shared NAT egress). Add `DOCKERHUB_USERNAME` /
+   `DOCKERHUB_TOKEN` as repository secrets, then run the `Build runner image` workflow once
+   (`workflow_dispatch`) to publish the image (it Scout-gates critical/high CVEs before push and
+   pushes a GHCR mirror tag as break-glass).
+3. **Terraform**: `terraform apply` picks up `ci-runner.tf` (environment + job). Placeholders ship
+   in state, never real secrets.
+4. **Seed the job's secrets and config** (the values Terraform deliberately does not manage —
+   `lifecycle.ignore_changes` protects everything set here):
+
+   ```bash
+   RG=<resource-group> JOB=hcw-ci-runner
+   az containerapp job secret set -g $RG --name $JOB \
+     --secrets gh-app-private-key="$(cat app-key.pem)" dockerhub-token='<token>'
+   az containerapp job registry set -g $RG --name $JOB \
+     --server docker.io --username '<dockerhub-user>' --password-secret-ref dockerhub-token
+   az containerapp job update -g $RG --name $JOB \
+     --set-env-vars GH_APP_ID=<app-id> GH_APP_INSTALLATION_ID=<installation-id> \
+       GH_REPO_OWNER=HybridCloudWorks GH_REPO_NAME=HCW-HybridCloudWorks
+   # Scaler metadata (applicationID/installationID) — az CLI cannot patch scale-rule
+   # metadata in place; re-run `az containerapp job update` with
+   # --scale-rule-name github-runner --scale-rule-type github-runner \
+   # --scale-rule-metadata owner=HybridCloudWorks repos=HCW-HybridCloudWorks \
+   #   runnerScope=repo labels=aca targetWorkflowQueueLength=1 \
+   #   applicationID=<app-id> installationID=<installation-id> \
+   # --scale-rule-auth appKey=gh-app-private-key
+   ```
+
+5. **Smoke test**: set the repo variable and start any workflow run —
+   `gh variable set CI_RUNNER --body '["self-hosted","aca"]'` — watch a job execution appear in the
+   Container Apps job, then flip back.
+
+**Failover runbook (during a GitHub-hosted runner outage):**
+
+```bash
+gh variable set CI_RUNNER --body '["self-hosted","aca"]'   # fail over
+gh variable delete CI_RUNNER                                # restore hosted runners
+```
+
+Applies to runs created after the change; already-queued runs keep their original target. Caveat
+recorded from the 2026-08-06 outage: its second phase stalled workflow-run **creation** itself —
+no runner, self-hosted or otherwise, helps when the control plane is down. This fallback covers
+hosted-runner-capacity outages (phase one, jobs queued with no runner).
+
+**Deliberate security posture** (do not "improve" these without reading `infra/ci-runner.tf`'s
+header): no managed identity on the runner job, no VNet, JIT ephemeral runners via
+`generate-jitconfig`, secrets out-of-band of Terraform state, `runner-image` rebuilt weekly on
+GitHub-hosted runners so a broken runner image cannot brick its own rebuild.
+
 ---
 
 ## 5. Not started — the remaining migration itself
