@@ -8,6 +8,7 @@ import './admin-snapshots-http.js';
 import './cms-http.js';
 import './image-prompts-http.js';
 import './labs-http.js';
+import './ops-health-http.js';
 import './public-reads.js';
 import './public-submissions.js';
 import './schedulers.js';
