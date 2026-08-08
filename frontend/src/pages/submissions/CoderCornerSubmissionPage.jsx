@@ -6,19 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle, Loader2, Send } from 'lucide-react';
-import { db } from '@/lib/firebaseConfig';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { submitPublicContent } from '@/lib/publicApi';
 
 const PROVIDER_OPTIONS = ['Github', 'Terraform'];
-
-function slugify(text) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-}
 
 const EMPTY_FORM = {
   title: '',
@@ -51,7 +41,6 @@ export default function CoderCornerSubmissionPage() {
     try {
       const title = form.title.trim();
       const summary = form.summary.trim();
-      const slug = slugify(title);
       const articleContent = [
         form.explanation.trim(),
         form.codeSnippet.trim()
@@ -61,32 +50,16 @@ export default function CoderCornerSubmissionPage() {
         .filter(Boolean)
         .join('\n\n');
 
-      await addDoc(collection(db, 'content'), {
+      await submitPublicContent({
         type: 'coder_corner',
-        contentStatus: 'ingested',
-        storageCollection: 'content',
-        publishTarget: 'coder_corner',
-        Live: false,
-        approvedForBlog: false,
-        source: 'template-form',
-        slug,
         title,
-        Title: title,
         summary,
-        Summary: summary,
         content: articleContent,
-        Content: articleContent,
-        postContent: articleContent,
         cloudProvider: form.provider,
-        'Cloud Provider': form.provider,
-        category: 'Coder Corner',
         language: form.language.trim(),
         repoUrl: form.repoUrl.trim(),
         codeSnippet: form.codeSnippet.trim(),
         explanation: form.explanation.trim(),
-        tags: ['coder-corner', form.provider.toLowerCase()].filter(Boolean),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
 
       setSubmitted(true);

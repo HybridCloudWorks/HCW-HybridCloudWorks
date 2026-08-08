@@ -5,22 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { CheckCircle, Loader2, Send } from 'lucide-react';
-import { db } from '@/lib/firebaseConfig';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { submitPublicContent } from '@/lib/publicApi';
 
 const MAX_CONTENT_LENGTH = 50000;
 const VALID_URL_RE = /^https?:\/\/.+\..+/;
 
 const PROVIDER_OPTIONS = ['Azure', 'Aws', 'Gcp', 'Github', 'Terraform', 'Finops'];
-
-function slugify(text) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-}
 
 const EMPTY_FORM = {
   title: '',
@@ -67,34 +57,17 @@ export default function BlogSubmissionPage() {
       const title = form.title.trim();
       const summary = form.summary.trim();
       const content = form.content.trim();
-      const slug = slugify(title);
 
-      await addDoc(collection(db, 'content'), {
+      // The server validates, composes the review-pipeline document, and
+      // enforces the anonymous hourly quota (public/submissions).
+      await submitPublicContent({
         type: 'blog',
-        contentStatus: 'ingested',
-        storageCollection: 'content',
-        publishTarget: 'blog',
-        Live: false,
-        approvedForBlog: false,
-        source: 'template-form',
-        slug,
         title,
-        Title: title,
         summary,
-        Summary: summary,
         content,
-        Content: content,
-        postContent: content,
         cloudProvider: form.provider,
-        'Cloud Provider': form.provider,
-        tags: form.tags
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter(Boolean),
+        tags: form.tags,
         sourceUrl: form.sourceUrl.trim(),
-        'CD Url': form.sourceUrl.trim(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
 
       setSubmitted(true);
