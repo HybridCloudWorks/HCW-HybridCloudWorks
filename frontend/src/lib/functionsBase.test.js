@@ -77,6 +77,39 @@ describe('requireFunctionsBase', () => {
   });
 });
 
+describe('resolveMediaUrl', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('leaves a stored media path alone when the API is same-origin', async () => {
+    const { resolveMediaUrl } = await loadWithBase('/api');
+    expect(resolveMediaUrl('/api/public/media/covers/a.png')).toBe(
+      '/api/public/media/covers/a.png'
+    );
+  });
+
+  it('points a stored media path at the API origin when cross-origin', async () => {
+    const { resolveMediaUrl } = await loadWithBase('https://hcw-functions.azurewebsites.net/api');
+    expect(resolveMediaUrl('/api/public/media/covers/a.png')).toBe(
+      'https://hcw-functions.azurewebsites.net/api/public/media/covers/a.png'
+    );
+  });
+
+  it('leaves absolute URLs from the source system untouched', async () => {
+    const { resolveMediaUrl } = await loadWithBase('https://hcw-functions.azurewebsites.net/api');
+    const legacy = 'https://firebasestorage.googleapis.com/v0/b/x/o/y.png';
+    expect(resolveMediaUrl(legacy)).toBe(legacy);
+  });
+
+  it('passes through data URIs and empty values', async () => {
+    const { resolveMediaUrl } = await loadWithBase('/api');
+    expect(resolveMediaUrl('data:image/png;base64,AAA')).toBe('data:image/png;base64,AAA');
+    expect(resolveMediaUrl('')).toBe('');
+    expect(resolveMediaUrl(undefined)).toBe('');
+  });
+});
+
 describe('no module reads the API base outside this resolver', () => {
   it('has no remaining VITE_GCP_FUNCTIONS_URL reference in src', async () => {
     const { readFileSync, readdirSync, statSync } = await import('node:fs');

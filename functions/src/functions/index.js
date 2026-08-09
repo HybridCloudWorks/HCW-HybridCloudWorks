@@ -12,6 +12,7 @@ import './gallery-images-http.js';
 import './image-prompts-http.js';
 import './labs-http.js';
 import './ops-health-http.js';
+import './public-media.js';
 import './public-reads.js';
 import './publish-http.js';
 import './public-submissions.js';

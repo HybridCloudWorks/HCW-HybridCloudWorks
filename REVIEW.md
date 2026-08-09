@@ -30,8 +30,17 @@ without a human decision. Tracked engineering work is in [TODO.md](TODO.md).
 
 ### 0.1 Deployment topology — same-origin or cross-origin?
 
-TODO.md T-101 (API base URL) and T-102 (CORS) have **different correct answers**
-depending on this, so it must be settled first.
+TODO.md T-102 (CORS) and T-318 (image render sites) have **different correct
+answers** depending on this.
+
+**No longer blocks T-101.** The API base was made a configuration value rather
+than a code path: `VITE_AZURE_FUNCTIONS_URL=/api` selects same-origin, an
+absolute origin ending in `/api` selects cross-origin, and one resolver
+(`frontend/src/lib/functionsBase.js`) serves both. Uploaded-image URLs are
+likewise stored site-relative so the decision cannot invalidate rows already in
+Cosmos. What still depends on the answer is CORS — which is either unnecessary
+or required across all 58 routes — and whether ~30 image render sites must be
+routed through `resolveMediaUrl()`.
 
 - **Same-origin:** serve the API through the Static Web App via a linked backend
   or a `staticwebapp.config.json` `/api/*` rewrite. CORS becomes unnecessary and
@@ -87,6 +96,30 @@ endpoint, or a workload identity with a scoped role assignment.
 T-401.
 
 **Unblocked by:** an architecture/security decision.
+
+### 0.5 Media delivery — keep the account closed, or open it behind a CDN?
+
+**Not blocking.** T-105 is resolved in the closed configuration; this decides
+whether to change it later.
+
+Uploaded images are served by
+`GET /api/public/media/{container}/{*path}`, reading blobs through the Function
+App's managed identity. The storage account stays closed to the internet
+(`allow_nested_items_to_be_public = false`, `network_rules default_action =
+"Deny"`), no new Azure resource is provisioned, and no security setting is
+reversed. Responses are `immutable` with ETag support, so repeat views do not
+reach the function.
+
+The alternative the review preferred — open the account and front it with
+Cloudflare or Azure Front Door — trades two security settings and a monthly
+service floor for edge caching and bytes that never touch compute. Against a USD
+150 design ceiling that is a spend decision.
+
+Worth revisiting if image egress through the Function App turns out to dominate
+invocation cost. Nothing in the delivered implementation forecloses it: the
+route can sit behind a CDN unchanged, and stored URLs are site-relative.
+
+**Unblocked by:** a cost/exposure decision, once there is real traffic data.
 
 ---
 

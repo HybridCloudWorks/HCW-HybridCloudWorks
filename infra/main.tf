@@ -303,7 +303,13 @@ resource "azurerm_storage_account" "hcw" {
   account_kind                    = "StorageV2"
   access_tier                     = "Hot"
   min_tls_version                 = "TLS1_2"
-  allow_nested_items_to_be_public = false # account-level public access off; containers opt-in below
+  # Master override, not a default. With this false, a container declared
+  # `container_access_type = "blob"` still answers 409 to an anonymous reader —
+  # containers CANNOT opt in above it. Combined with the Deny network rule
+  # below, nothing in this account is reachable from the internet, by design.
+  # Public media is served through the Function App's identity at
+  # `GET /api/public/media/{container}/{*path}` (functions/src/lib/public-media.js).
+  allow_nested_items_to_be_public = false
 
   blob_properties {
     cors_rule {
@@ -328,24 +334,31 @@ resource "azurerm_storage_account" "hcw" {
   tags = var.tags
 }
 
-# Blob containers — account-level public access is OFF (set above)
-# Only media containers explicitly serving public assets have container_access_type = "blob"
+# Blob containers — every one private, because the account override above means
+# every one IS private regardless of what is written here. Declaring three of
+# them "blob" described an access model that did not exist and could not be
+# reached, and it is the kind of drift that gets read as an audit finding.
+#
+# The three media containers are served anonymously through the Function App at
+# `GET /api/public/media/{container}/{*path}`; the allowlist that decides which
+# ones lives in functions/src/lib/blob-paths.js (PUBLIC_MEDIA_CONTAINERS) and
+# must be kept in step with the comments here.
 resource "azurerm_storage_container" "blogs" {
   name                  = "blogs"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob" # public read: blog cover images served directly
+  container_access_type = "private" # blog cover images, served via the media route
 }
 
 resource "azurerm_storage_container" "covers" {
   name                  = "covers"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob" # public read: content cover images
+  container_access_type = "private" # content cover images, served via the media route
 }
 
 resource "azurerm_storage_container" "certifications" {
   name                  = "certifications"
   storage_account_id    = azurerm_storage_account.hcw.id
-  container_access_type = "blob" # public read: certification badge images
+  container_access_type = "private" # certification badges, served via the media route
 }
 
 resource "azurerm_storage_container" "speakerevents" {
@@ -698,6 +711,17 @@ resource "azurerm_role_assignment" "func_blob" {
 resource "azurerm_role_assignment" "func_queue" {
   scope                = azurerm_storage_account.hcw.id
   role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
+# Required to mint user-delegation SAS tokens (blob-storage.js generateSasUrl).
+# Storage Blob Data Contributor cannot call getUserDelegationKey; without this
+# the failure is a 403 at signing time, which reads as a bug rather than as a
+# missing role. Narrower than it looks: it grants only the delegation key, and
+# the resulting SAS can never exceed the identity's own data-plane permissions.
+resource "azurerm_role_assignment" "func_blob_delegator" {
+  scope                = azurerm_storage_account.hcw.id
+  role_definition_name = "Storage Blob Delegator"
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 

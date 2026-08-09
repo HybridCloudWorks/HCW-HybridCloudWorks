@@ -17,12 +17,12 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 39 |
-| Critical | 4 |
+| Open items | 38 |
+| Critical | 2 |
 | High | 10 |
-| Medium | 17 |
+| Medium | 18 |
 | Low | 8 |
-| Resolved since the review | 2 (T-101, T-403) |
+| Resolved since the review | 4 (T-101, T-104, T-105, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
@@ -39,7 +39,7 @@ Do these in sequence — later items cannot be verified before earlier ones.
 
 1. ~~**T-101** API base URL~~ — **done**, see below
 2. **T-102** CORS across all routes → **T-103** route-inventory test to lock it in
-3. **T-104 + T-105** blob credential and image delivery (one piece of work)
+3. ~~**T-104 + T-105**~~ blob credential and image delivery — **done**, see below
 4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
 5. **Deploy a smoke test** — everything above is unverifiable from an agent session
 6. **T-201 → T-205** the anonymous data-exposure set
@@ -134,7 +134,7 @@ emitted. Properties 2 and 3 would have caught T-102 before it shipped.
 
 ---
 
-### T-104 — Blob storage has no credential; every upload and delete throws
+### ~~T-104 — Blob storage has no credential; every upload and delete throws~~ RESOLVED
 **Category:** Configuration / defect · **Label:** Confirmed Issue
 **Files:** `functions/src/lib/blob-storage.js:24-27`, `:143`; `infra/main.tf:560-575`
 
@@ -148,15 +148,33 @@ Dead in production: `POST cms/uploads/{container}`, both gallery delete paths,
 the certification badge flow. Invisible to `admin-uploads.test.js`, which injects
 `storage: { uploadBlob: vi.fn() }`.
 
-**Fix — do not add the connection string.** Align with the platform's keyless
-posture: `new BlobServiceClient(process.env.STORAGE_BLOB_ENDPOINT, new
-DefaultAzureCredential())`. The role assignment already exists
-(`main.tf:692`). Replace `generateSasUrl` with a user-delegation SAS
-(`getUserDelegationKey`), which needs the `Storage Blob Delegator` role added.
+**Resolved.** `blob-storage.js` now builds its client as
+`new BlobServiceClient(resolveBlobEndpoint(), new DefaultAzureCredential())`,
+matching `cosmos-client.js`. No connection string was added. `generateSasUrl`
+became a user-delegation SAS via `getUserDelegationKey` — and therefore async,
+which is safe because nothing calls it yet. `azurerm_role_assignment.func_blob_delegator`
+(`Storage Blob Delegator`) was added to `infra/main.tf`; without it
+`getUserDelegationKey` returns 403 even though the identity can read the blob.
+
+`getBlobUrl` no longer hardcodes `blob.core.windows.net`; it composes from the
+configured endpoint, so the account's cloud is not assumed.
+
+The test gap that hid this is closed by `functions/src/lib/blob-storage.test.js`
+(14 tests): endpoint and account-name resolution including the endpoint-carries-
+the-suffix case, the throw when neither setting is present, an assertion that a
+connection string is **not** accepted as configuration, and source guards that
+no shared-key path (`StorageSharedKeyCredential`, `fromConnectionString`,
+`STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`) returns to the module.
+
+Two things this does **not** establish, both requiring a deployed environment
+(REVIEW.md §1.1): that the role assignments apply cleanly, and that an upload
+succeeds end to end. The handler tests still inject a fake `uploadBlob`; that is
+appropriate for them, but it means no test in the repository exercises a real
+blob write.
 
 ---
 
-### T-105 — Uploaded images are unreachable from the internet
+### ~~T-105 — Uploaded images are unreachable from the internet~~ RESOLVED
 **Category:** Configuration / defect · **Label:** Confirmed Issue
 **Files:** `infra/main.tf:306` (and its comment), `:325`, `:333-355`
 
@@ -171,10 +189,44 @@ regardless.
 persists as `imageUrl`. Images upload successfully and render broken everywhere,
 with a dead URL stored in Cosmos.
 
-**Fix:** choose the delivery model and make code and Terraform agree — either
-open the account and front it with Cloudflare/CDN (preferred: also gets edge
-caching), or keep it locked and return a user-delegation SAS or an
-`/api/media/...` proxy URL. Correct the misleading comment either way.
+**Resolved by keeping the account closed and serving through the Function App.**
+The review preferred opening the account behind a CDN. That option reverses two
+security settings, exposes the account to the internet, and adds a service with
+a monthly floor against a USD 150 design ceiling — a spend-and-exposure
+decision, not an engineering one. It is recorded in [REVIEW.md](REVIEW.md) §0.5
+and remains available: nothing here forecloses it.
+
+Delivered:
+
+- **`GET public/media/{container}/{*blobPath}`** (anonymous), backed by
+  `functions/src/lib/public-media.js`. Reads through the managed identity that
+  already holds Storage Blob Data Contributor. `Cache-Control: public,
+  max-age=31536000, immutable` plus ETag/`If-None-Match`, so repeat views never
+  reach the function and a CDN can be layered in front later unchanged.
+- **A separate, narrower allowlist.** `PUBLIC_MEDIA_CONTAINERS` is
+  `blogs`/`covers`/`certifications` — a strict subset of the five containers
+  uploads may write to, asserted by test. `content` and `speakerevents` stay
+  private, as Terraform always said they were. This is the load-bearing control:
+  the identity can read the entire account, so the allowlist is the only thing
+  between an anonymous caller and a private container.
+- **Uploads now return a URL that will serve.** `POST cms/uploads/{container}`
+  returns the media-route path as `url` (what pages persist into Cosmos) and the
+  raw blob URL as `blobUrl` for diagnostics. A non-public container returns an
+  empty `url` rather than a plausible dead one.
+- **Stored URLs are site-relative**, so the §0.1 topology decision cannot
+  invalidate images already written to the database.
+  `resolveMediaUrl()` in `frontend/src/lib/functionsBase.js` maps them onto the
+  API origin when that base is absolute, and returns absolute source-system URLs
+  untouched.
+- **Terraform now describes reality.** The three containers are `private` —
+  which is what they were, since the account override made `"blob"` inert — and
+  the misleading `# containers opt-in below` comment is replaced with what the
+  setting actually does.
+
+Follow-up, deliberately not done here: components render `imageUrl` directly in
+roughly thirty places rather than through one helper. In the same-origin
+topology that is correct as written. **If §0.1 chooses cross-origin, those
+render sites must be routed through `resolveMediaUrl()`** — tracked as T-318.
 
 ---
 
@@ -540,6 +592,19 @@ work, not a rename, and half-migrating it would produce a script that looks
 runnable and is not.
 **Fix:** port the smoke to the Entra/MSAL sign-in path, or delete both scripts
 and the nested workflow directory.
+
+### T-318 — Route image rendering through `resolveMediaUrl()` (cross-origin only)
+**Files:** ~30 components rendering `imageUrl` / `heroImageUrl` / `aiImageUrls`
+Uploaded-image URLs are stored site-relative (`/api/public/media/...`) so that a
+topology change cannot invalidate rows already in Cosmos. Components render them
+straight into `<img src>`, which is correct **only** in the same-origin topology.
+
+**Conditional on [REVIEW.md](REVIEW.md) §0.1.** If cross-origin is chosen, every
+render site must call `resolveMediaUrl()` from
+`frontend/src/lib/functionsBase.js`; the helper and its tests already exist.
+If same-origin is chosen, close this as not applicable. Doing the churn before
+the decision would touch thirty files to no purpose and risk breaking the
+absolute source-system URLs that legacy documents still hold.
 
 ---
 

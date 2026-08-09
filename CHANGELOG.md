@@ -37,6 +37,11 @@ This project has not cut a tagged release; entries are grouped under
   image-prompt RPCs** — 34 named RPCs total. (#50, #54, #55, #56, #57, #58)
 - **`getLabJob` RPC** — single lab job with output, replacing the Labs console's
   per-document realtime subscription. (#65)
+- **Anonymous media delivery** — `GET public/media/{container}/{*blobPath}`,
+  serving uploaded images through the Function App's managed identity with
+  immutable cache headers and conditional-request support. The storage account
+  stays closed to the internet; the container allowlist is a strict subset of
+  the containers uploads may write to. (TODO.md T-105)
 - **Self-hosted CI runner** — Azure Container Apps Job with KEDA scale-to-zero, an
   ephemeral JIT-config runner image published to Docker Hub with a GHCR mirror,
   and a `CI_RUNNER` repository-variable failover switch. (#48)
@@ -78,6 +83,21 @@ This project has not cut a tagged release; entries are grouped under
   accepts either `/api` (same-origin) or an absolute origin (cross-origin), so
   deployment topology is configuration rather than code. A deploy build with no
   base configured now fails instead of shipping. (TODO.md T-101)
+- **Every upload and every gallery delete would have thrown.**
+  `blob-storage.js` required `STORAGE_CONNECTION_STRING`, which no file in
+  `infra/` has ever produced — the code was written for shared-key auth while
+  the infrastructure was built for managed identity. It now uses
+  `DefaultAzureCredential` against `STORAGE_BLOB_ENDPOINT`, matching
+  `cosmos-client.js`, and `generateSasUrl` signs with a user-delegation key
+  instead of an account key. No key or connection string was added.
+  (TODO.md T-104)
+- **Uploaded images were unreachable, and the URL to them was stored anyway.**
+  `allow_nested_items_to_be_public = false` is an account-level master override,
+  so the three containers declared public in Terraform served 409 — while
+  uploads returned the raw blob URL for pages to persist into Cosmos. Uploads
+  now return the media-route URL, non-public containers return none, and the
+  Terraform containers are declared `private`, which is what they always were.
+  (TODO.md T-105)
 - **Scheduled-publish dates were silently dropped** — `scheduledPublishDate` and
   the editor's `blogEditedAt` were parsed with Firestore `Timestamp`-only code
   paths that returned `0` for the ISO strings the API now returns. This would

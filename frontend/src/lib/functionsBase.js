@@ -56,6 +56,33 @@ export function getFunctionsBase() {
  * @returns {string} The base URL.
  * @throws {Error} When `VITE_AZURE_FUNCTIONS_URL` is unset or blank.
  */
+/**
+ * Resolve a stored media URL for use in an `<img src>`.
+ *
+ * The API persists uploaded-image URLs as site-relative paths
+ * (`/api/public/media/{container}/{path}`) so that a topology change cannot
+ * invalidate every image already written to Cosmos. That value is directly
+ * usable in a same-origin deployment and meaningless in a cross-origin one,
+ * which is what this bridges.
+ *
+ * Anything else — an absolute URL, a data URI, an empty value — is returned
+ * untouched. Documents migrated from the source system hold absolute URLs, and
+ * rewriting those would break them.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function resolveMediaUrl(url) {
+  const value = typeof url === 'string' ? url.trim() : '';
+  if (!value.startsWith('/api/')) return value;
+
+  const base = getFunctionsBase();
+  // Relative base: the path already points at the right place.
+  if (!/^https?:\/\//i.test(base)) return value;
+
+  return `${new URL(base).origin}${value}`;
+}
+
 export function requireFunctionsBase(context) {
   const base = getFunctionsBase();
   if (!base) {

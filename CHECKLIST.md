@@ -19,7 +19,8 @@ it.
 
 **Validation Status** is one of: `Verified` (observed working in a deployed
 environment) · `Unverified` (declared in code, never exercised) · `Missing`
-(consumed by code but not yet provisioned).
+(consumed by code but not yet provisioned) · `Retired` (no longer read by any
+code, and listed so it is not reintroduced).
 
 ---
 
@@ -27,11 +28,12 @@ environment) · `Unverified` (declared in code, never exercised) · `Missing`
 
 | | |
 | --- | --- |
-| Total entries | 29 |
-| Critical config defects | 3 (`STORAGE_CONNECTION_STRING`, `VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) |
+| Total entries | 30 |
+| Critical config defects | 2 (`VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) — both unset, both required |
 | Verified | 0 |
-| Unverified | 19 |
-| Missing | 10 |
+| Unverified | 21 |
+| Missing | 8 |
+| Retired | 2 |
 | Last updated | 2026-08-09 |
 
 Nothing is `Verified`: no Azure control plane, Terraform apply, or deployed
@@ -55,9 +57,10 @@ environment has been reachable from any session to date (see
 | `COSMOS_ENDPOINT` | Cosmos DB account endpoint | Yes | Azure resource | `functions/src/lib/cosmos-client.js` | `XXXXX!//XXXXXXX.XXXXXX.XXXXX.XXX!` | Unverified | |
 | `COSMOS_DATABASE` | Database name | Yes | Terraform variable | `functions/src/lib/cosmos-client.js` | `XXXXXXX` | Unverified | |
 | `COSMOS_CONNECTION_STRING` | Change-feed trigger binding only (not the SDK client) | No | App setting | `functions/src/functions/cosmos-triggers.js` | `XXXXXXXXX!XXXXX00000!!!!!` | Missing | Carries the account **primary key** and blocks `local_authentication_disabled`, for two empty trigger handlers — see [TODO.md](TODO.md) T-315 |
-| `STORAGE_ACCOUNT_NAME` | Blob storage account | Yes | Azure resource | `functions/src/lib/blob-storage.js` | `XXXXXXXXXXX` | Unverified | |
-| `STORAGE_ACCOUNT_KEY` | Shared key for SAS generation | **Should not exist** | — | `functions/src/lib/blob-storage.js:143` | `XXXXX00000!!!!!XXXXX` | **Missing** | Replace with user-delegation SAS via managed identity — see [TODO.md](TODO.md) T-104 |
-| `STORAGE_CONNECTION_STRING` | Blob client connection | **Should not exist** | — | `functions/src/lib/blob-storage.js:24` | `XXXXXXXXX!XXXXX00000!!!!!` | **Missing** | **Never set in Terraform; every blob operation throws.** Do NOT add it — the fix is `DefaultAzureCredential` + `STORAGE_BLOB_ENDPOINT`. See [TODO.md](TODO.md) T-104 |
+| `STORAGE_ACCOUNT_NAME` | Blob storage account, and the account name the user-delegation SAS signature needs | Yes | Azure resource (`infra/main.tf`) | `functions/src/lib/blob-storage.js` | `XXXXXXXXXXX` | Unverified | Derived from `STORAGE_BLOB_ENDPOINT` when absent |
+| `STORAGE_BLOB_ENDPOINT` | Blob service endpoint the client is built against | **Yes** | Azure resource (`infra/main.tf`) | `functions/src/lib/blob-storage.js` | `XXXXX!//XXXXXXXXXXX.XXXX.XXXX.XXXXXXX.XXX/` | Unverified | Preferred over the account name because it carries the correct suffix for the account's cloud |
+| `STORAGE_ACCOUNT_KEY` | Shared key for SAS generation | **Must not exist** | — | No longer read by any code | `XXXXX00000!!!!!XXXXX` | **Retired** | T-104 resolved: SAS tokens are user-delegation, signed via managed identity. A test asserts this name cannot return to the module |
+| `STORAGE_CONNECTION_STRING` | Blob client connection | **Must not exist** | — | No longer read by any code | `XXXXXXXXX!XXXXX00000!!!!!` | **Retired** | T-104 resolved: the client is `DefaultAzureCredential` + `STORAGE_BLOB_ENDPOINT`. A test asserts this name cannot return to the module |
 | `KEY_VAULT_URI` | Key Vault the app resolves secrets from | Yes | Azure resource | Functions host config | `XXXXX!//XXXXXXX.XXXX.XXXXX.XXX!` | Unverified | |
 
 ## 3. Azure Functions — Anti-Abuse
