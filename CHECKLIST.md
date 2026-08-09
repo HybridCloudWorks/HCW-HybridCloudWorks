@@ -27,11 +27,11 @@ environment) · `Unverified` (declared in code, never exercised) · `Missing`
 
 | | |
 | --- | --- |
-| Total entries | 31 |
+| Total entries | 29 |
 | Critical config defects | 3 (`STORAGE_CONNECTION_STRING`, `VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) |
 | Verified | 0 |
-| Unverified | 20 |
-| Missing | 11 |
+| Unverified | 19 |
+| Missing | 10 |
 | Last updated | 2026-08-09 |
 
 Nothing is `Verified`: no Azure control plane, Terraform apply, or deployed
@@ -96,9 +96,7 @@ is publicly readable — no secret may ever be added to this section.**
 
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `VITE_GCP_FUNCTIONS_URL` | API base URL that `api.js` and `publicApi.js` actually resolve | Yes (today) | Deployment | `frontend/src/lib/api.js:8`, `publicApi.js:11` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | **Missing** | **Not a naming artifact — a live defect.** `.env.example` sets this to a Google Cloud Functions host and ~60 call sites use it. Must be retired in favour of `VITE_AZURE_FUNCTIONS_URL` via `getFunctionsBase()`. See [TODO.md](TODO.md) T-101 |
-| `VITE_AZURE_FUNCTIONS_URL` | The correct API base | **Yes** | Deployment | `frontend/src/lib/azureConfig.js`, via `functionsBase.js` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | **Missing** | Only 3 files resolve through it today (T-101). Must agree with the CSP `connect-src` and the `api-azure` DNS record |
-| `VITE_BACKEND_PROVIDER` | Selects backend implementation | No | Deployment | `frontend/src/lib/azureConfig.js` | `XXXXX` | Unverified | |
+| `VITE_AZURE_FUNCTIONS_URL` | The one API base URL the browser needs | **Yes** | Deployment | `frontend/src/lib/functionsBase.js` — the only module that reads it, enforced by test | Cross-origin `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX`; same-origin `/XXX` | **Missing** | **Must end in the Functions route prefix `/api`** — routes are registered relative to it, so a base without it 404s uniformly. `/api` selects same-origin, an absolute origin selects cross-origin ([REVIEW.md](REVIEW.md) §0.1). Must agree with the CSP `connect-src`. A deploy build without it now fails (`REQUIRE_API_BASE=true`) |
 | `VITE_ENTRA_CLIENT_ID` | SPA app registration client id | Yes | Entra app registration | `frontend/src/lib/msalConfig.js` | `00000000-0000-0000-0000-000000000000` | Unverified | Distinct from the API's `ENTRA_CLIENT_ID` |
 | `VITE_ENTRA_TENANT_ID` | Directory tenant for the SPA authority | Yes | Entra directory | `frontend/src/lib/msalConfig.js` | `00000000-0000-0000-0000-000000000000` | Unverified | Falls back to `common` if unset — set it explicitly |
 | `VITE_ENTRA_API_SCOPE` | Scope requested so the token audience matches the API | Yes | Entra app registration | `frontend/src/lib/msalConfig.js` | `XXX!//00000000-0000-0000-0000-000000000000/XXXXXX_XX_XXXXX` | Unverified | **Must correspond to `ENTRA_API_AUDIENCE`.** Empty or wrong ⇒ sign-in works, all API calls 401 |

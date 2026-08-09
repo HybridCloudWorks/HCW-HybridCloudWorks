@@ -4,8 +4,7 @@
  * requests via MSAL — see lib/entraAuth.js.
  */
 import { acquireApiToken } from '@/lib/entraAuth';
-
-const GCP_FUNCTIONS_BASE = import.meta.env.VITE_GCP_FUNCTIONS_URL || '';
+import { requireFunctionsBase } from '@/lib/functionsBase';
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const FUNCTION_TIMEOUT_MS = {
@@ -31,17 +30,12 @@ function timeoutForFunction(fnName) {
 }
 
 /**
- * Build the full endpoint URL for a Cloud Function.
- * @param {string} fnName - Cloud Function name (e.g. 'submitContentUrls')
+ * Build the full endpoint URL for an Azure Functions route.
+ * @param {string} fnName - Route name (e.g. 'submitContentUrls', 'cms/content')
  * @returns {string} Full URL
  */
 export function getEndpoint(fnName) {
-  if (!GCP_FUNCTIONS_BASE) {
-    throw new Error(
-      `VITE_GCP_FUNCTIONS_URL is not set. Add it to your .env file before calling ${fnName}.`
-    );
-  }
-  return `${GCP_FUNCTIONS_BASE}/${fnName}`;
+  return `${requireFunctionsBase(fnName)}/${fnName}`;
 }
 
 /**
@@ -75,7 +69,7 @@ async function fetchWithTimeout(url, options, timeoutMs, fnName) {
  * Admin status forces a token refresh so a newly granted role is visible immediately.
  * Retries once on transient 429/5xx failures with a 2-second backoff.
  *
- * @param {string} fnName - Cloud Function name
+ * @param {string} fnName - Azure Functions route name
  * @param {object} options - fetch options (method, body, etc.)
  * @returns {Promise<Response>}
  */
@@ -123,8 +117,8 @@ export async function authedFetch(fnName, options = {}) {
 }
 
 /**
- * POST JSON to an authenticated Cloud Function.
- * @param {string} fnName - Cloud Function name
+ * POST JSON to an authenticated Azure Functions route.
+ * @param {string} fnName - Azure Functions route name
  * @param {object} body - JSON payload
  * @returns {Promise<object>} Parsed JSON response
  */

@@ -41,7 +41,10 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_BACKEND_PROVIDER: azure
+          # Fails the build rather than shipping a bundle with no API base.
+          REQUIRE_API_BASE: 'true'
+          # Must include the Functions route prefix, e.g. https://<host>/api,
+          # or "/api" when the SPA and the Function App share an origin.
           VITE_AZURE_FUNCTIONS_URL: ${{ secrets.AZURE_FUNCTIONS_URL }}
           # Entra ID — public client registration values (not secrets)
           VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}

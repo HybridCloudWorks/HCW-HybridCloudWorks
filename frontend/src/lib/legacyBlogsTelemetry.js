@@ -1,5 +1,12 @@
-const LEGACY_BLOGS_TELEMETRY_ENDPOINT = import.meta.env.VITE_GCP_FUNCTIONS_URL
-  ? `${import.meta.env.VITE_GCP_FUNCTIONS_URL}/recordLegacyBlogsRead`
+import { getFunctionsBase } from '@/lib/functionsBase';
+
+// `recordLegacyBlogsRead` has no Azure Functions route yet — see TODO.md T-316.
+// The beacon is therefore inert until that route is ported; it resolves through
+// the shared base so it starts working the moment the route exists, rather than
+// pointing at the decommissioned Google Cloud Functions host it used to target.
+const FUNCTIONS_BASE = getFunctionsBase();
+const LEGACY_BLOGS_TELEMETRY_ENDPOINT = FUNCTIONS_BASE
+  ? `${FUNCTIONS_BASE}/recordLegacyBlogsRead`
   : '';
 
 export function recordLegacyBlogsRead({ source, count = 1, details = {} } = {}) {

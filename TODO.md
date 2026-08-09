@@ -17,16 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 38 |
-| Critical | 5 |
+| Open items | 39 |
+| Critical | 4 |
 | High | 10 |
-| Medium | 15 |
+| Medium | 17 |
 | Low | 8 |
+| Resolved since the review | 2 (T-101, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
-**Release readiness: NOT READY.** Five Critical items each independently prevent
-the deployed application from functioning. None is caught by the 534 passing
+**Release readiness: NOT READY.** The Critical items each independently prevent
+the deployed application from functioning. None was caught by the 534 passing
 tests, because each lives in the seam between a correctly-built module and its
 environment. Merging to a branch is fine; deploying is not.
 
@@ -36,10 +37,10 @@ environment. Merging to a branch is fine; deploying is not.
 
 Do these in sequence — later items cannot be verified before earlier ones.
 
-1. **T-101** API base URL (nothing else is testable until this lands)
+1. ~~**T-101** API base URL~~ — **done**, see below
 2. **T-102** CORS across all routes → **T-103** route-inventory test to lock it in
 3. **T-104 + T-105** blob credential and image delivery (one piece of work)
-4. **T-106 + T-107** delete the Cosmos key from `.env.example`, tighten CSP
+4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
 5. **Deploy a smoke test** — everything above is unverifiable from an agent session
 6. **T-201 → T-205** the anonymous data-exposure set
 7. **T-301+** correctness and hardening
@@ -48,29 +49,45 @@ Do these in sequence — later items cannot be verified before earlier ones.
 
 ## CRITICAL
 
-### T-101 — `api.js` and `publicApi.js` call Google Cloud, not Azure
+### ~~T-101 — `api.js` and `publicApi.js` call Google Cloud, not Azure~~ RESOLVED
 **Category:** Configuration / contract deviation · **Label:** Confirmed Issue
 **Files:** `frontend/src/lib/api.js:8`, `frontend/src/lib/publicApi.js:11`
 
-Both hardcode `import.meta.env.VITE_GCP_FUNCTIONS_URL`. `.env.example:9` sets that
-to a Google Cloud Functions host. The correct resolver already exists —
-`frontend/src/lib/functionsBase.js` switches on `VITE_BACKEND_PROVIDER=azure` —
-and is used by only three files (`NewsletterSignup.jsx`,
-`useGenerateCuratedImages.js`, `HomePage.jsx`). Roughly sixty call sites resolve
-to Google.
+Both hardcoded `import.meta.env.VITE_GCP_FUNCTIONS_URL`. `.env.example:9` set that
+to a Google Cloud Functions host. The correct resolver already existed —
+`frontend/src/lib/functionsBase.js` — and was used by only three files
+(`NewsletterSignup.jsx`, `useGenerateCuratedImages.js`, `HomePage.jsx`). Roughly
+sixty call sites resolved to Google. Beyond the outage: admin bearer tokens
+minted for the Azure API audience would have been transmitted to a
+Google-controlled endpoint if that project is still live.
 
-`.azure/api-surface.json` → `authMigration.to` requires this change verbatim:
-*"lib/api.js swaps token source and base URL (VITE_GCP_FUNCTIONS_URL →
-VITE_AZURE_FUNCTIONS_URL)"*. The token source was swapped in #60; the base URL
-was not.
+**Resolved.** `functionsBase.js` is now the single resolver, reading only
+`VITE_AZURE_FUNCTIONS_URL`, and `api.js`, `publicApi.js` and
+`legacyBlogsTelemetry.js` all route through it. Three points differ from the
+fix as originally written:
 
-Beyond the outage: admin bearer tokens minted for the Azure API audience are
-transmitted to a Google-controlled endpoint if that project is still live.
+- **The `VITE_BACKEND_PROVIDER` switch is gone, not tested.** The review
+  proposed asserting that `VITE_BACKEND_PROVIDER=azure` resolves to the Azure
+  URL. With Firebase removed from the frontend there is no second provider to
+  switch to, so `azureConfig.js` — whose only consumer was `functionsBase.js` —
+  was deleted rather than kept as dead indirection. Duplicated resolution logic
+  is what caused this defect; leaving a vestigial branch invites its return.
+- **The base must include the `api` route prefix.** `functions/host.json` does
+  not override `routePrefix`, so `route: 'public/content'` is served at
+  `<host>/api/public/content`. `.env.example` previously set
+  `VITE_AZURE_FUNCTIONS_URL` without `/api`, which would have produced a
+  uniform 404 — the same outage under a different name.
+- **The topology is now a config value, not a code path.** `/api` for
+  same-origin, `https://<host>/api` for cross-origin. This resolves T-101
+  without waiting on the [REVIEW.md](REVIEW.md) §0.1 decision, which still
+  gates T-102.
 
-**Fix:** import `getFunctionsBase()` in both files; throw a clear error when the
-base is unset; delete `VITE_GCP_FUNCTIONS_URL` from `.env.example` so it cannot
-be reintroduced. Add a test asserting `VITE_BACKEND_PROVIDER=azure` resolves to
-`VITE_AZURE_FUNCTIONS_URL`.
+Enforced by `frontend/src/lib/functionsBase.test.js` (10 tests, in `test:admin`
+so CI runs it): resolution for both topologies, the throw when unset, a guard
+that no file under `src/` mentions the retired variable, and a guard that
+`VITE_AZURE_FUNCTIONS_URL` is read in exactly one module. A deploy build with
+no base now fails in `vite.config.js` rather than shipping a broken bundle
+(`REQUIRE_API_BASE=true`, set in `deploy-azure-frontend.yml`).
 
 ---
 
@@ -485,6 +502,45 @@ nonetheless run continuously, billing lease-container RU.
 implemented, then use the identity-based binding form
 (`COSMOS_CONNECTION__accountEndpoint` + `__credential=managedidentity`).
 
+### T-316 — Two anonymous routes the frontend calls do not exist
+**Files:** `frontend/src/lib/legacyBlogsTelemetry.js`,
+`frontend/src/pages/shared/HomePage.jsx:325`; `functions/src/functions/`
+Neither `recordLegacyBlogsRead` nor `getPlatformHealth` is registered anywhere
+in `functions/src/`. Both are 404s.
+
+- **`recordLegacyBlogsRead`** — the legacy-blogs read beacon. It fails silently,
+  because both the `sendBeacon` and `fetch` paths swallow failures by design, so
+  fallback-container reads are unmeasured. That telemetry is the evidence for
+  retiring the fallback container.
+- **`getPlatformHealth`** — backs the home page's four cloud-status indicators,
+  which will sit at `CHECKING` and then render "Health API unavailable" to every
+  anonymous visitor on the landing page.
+
+Found while retiring the GCP base URL in T-101: both endpoints had been pointing
+at the decommissioned Google host, so the misses were invisible.
+**Fix:** port both routes (anonymous, rate-limited; the health route needs a
+cache so it cannot be used to hammer upstream status APIs), or delete the
+callers if neither feature is wanted. This is separately a case for T-103's
+route-inventory test to compare the frontend's call sites against the registered
+route table, not just the documented one.
+
+### T-317 — Retire the Firebase-era live smoke scripts and nested workflows
+**Files:** `frontend/scripts/smoke-admin-hardened-live.mjs`,
+`frontend/scripts/smoke-admin-hardened-token-live.mjs`,
+`frontend/.github/workflows/`
+The two live smoke scripts still read `VITE_GCP_FUNCTIONS_URL` and build a
+`firebaseConfig` from `VITE_FIREBASE_*`, none of which the application sets any
+more; they cannot run. `frontend/.github/workflows/` holds the source
+repository's Firebase deploy and E2E workflows — inert, since GitHub only reads
+`.github/workflows/` at the repository root, but they still reference the
+retired variable and read as live configuration.
+
+Left untouched by T-101 deliberately: porting an admin smoke to MSAL is real
+work, not a rename, and half-migrating it would produce a script that looks
+runnable and is not.
+**Fix:** port the smoke to the Entra/MSAL sign-in path, or delete both scripts
+and the nested workflow directory.
+
 ---
 
 ## LOW
@@ -505,12 +561,20 @@ never built (delete the entry); ai-providers note says `oauthToken` stripped
 other. `GET /api/health` is implemented but undocumented and reports
 `process.version` anonymously.
 
-### T-403 — `.env.example` is substantially stale
+### ~~T-403 — `.env.example` is substantially stale~~ RESOLVED
 **File:** `frontend/.env.example`
-`VITE_ENTRA_API_SCOPE` is **required and undocumented** (without it every token
-is acquired for no scope). Documents `VITE_OWNER_ADMIN_EMAIL`/`_UID`; code reads
-`VITE_ADMIN_EMAILS`/`_UIDS`. Firebase secret-set instructions reference
-decommissioned tooling. Rewrite against the real `import.meta.env` inventory.
+`VITE_ENTRA_API_SCOPE` was **required and undocumented** (without it every token
+is acquired for no scope). The file documented `VITE_OWNER_ADMIN_EMAIL`/`_UID`
+and carried Firebase secret-set instructions for decommissioned tooling.
+
+**Resolved** alongside T-101: rewritten against the actual `import.meta.env`
+inventory (nine variables, enumerated in `vite.config.js`). One correction to
+the finding as written — it claimed code reads `VITE_ADMIN_EMAILS`/`_UIDS`. No
+file under `src/` reads either; the build-time admin allowlist went away with
+the MSAL swap in #60, and admin access is now the Entra App Role plus the
+`admins/{oid}` registry. Neither variable is documented in the rewrite.
+The Cosmos endpoint and read key are gone from the file, with a comment
+explaining why they must not return.
 
 ### T-404 — CSP still grants the entire Firebase/GCP surface
 **File:** `frontend/staticwebapp.config.json`
@@ -519,7 +583,10 @@ Zero Firebase imports remain, but `connect-src` still allows `*.googleapis.com`,
 — dead allowlist. `login.microsoftonline.com` is **absent** from `connect-src`
 and `frame-src`; verify admin sign-in works at all. `*.documents.azure.com` must
 go (see [REVIEW.md](REVIEW.md) Cosmos-key item). Note `'self'` does not cover the
-`api-azure` subdomain — CSP and DNS disagree about the API host.
+`api-azure` subdomain — CSP and DNS disagree about the API host. Since T-101 the
+API host is whatever `VITE_AZURE_FUNCTIONS_URL` names, so `connect-src` must be
+written against the topology chosen in [REVIEW.md](REVIEW.md) §0.1: `'self'`
+suffices for a same-origin `/api` base, and nothing else does.
 
 ### T-405 — Key Vault reads uncached, failures indistinguishable from absence
 **File:** `functions/src/lib/key-vault.js:29-41`

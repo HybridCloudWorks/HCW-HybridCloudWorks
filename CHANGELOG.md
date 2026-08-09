@@ -68,6 +68,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The browser called Google Cloud, not Azure.** `api.js`, `publicApi.js` and
+  `legacyBlogsTelemetry.js` each resolved `VITE_GCP_FUNCTIONS_URL` — a
+  decommissioned Google Cloud Functions host — so roughly sixty call sites,
+  including every authenticated admin request, would have been sent off-platform
+  with an Entra bearer token attached. `lib/functionsBase.js` is now the single
+  resolver over `VITE_AZURE_FUNCTIONS_URL`; the dead `azureConfig.js` provider
+  switch was deleted. The base carries the Functions `api` route prefix and
+  accepts either `/api` (same-origin) or an absolute origin (cross-origin), so
+  deployment topology is configuration rather than code. A deploy build with no
+  base configured now fails instead of shipping. (TODO.md T-101)
 - **Scheduled-publish dates were silently dropped** — `scheduledPublishDate` and
   the editor's `blogEditedAt` were parsed with Firestore `Timestamp`-only code
   paths that returned `0` for the ISO strings the API now returns. This would
