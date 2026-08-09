@@ -1,9 +1,92 @@
-# Review — blocked and deferred work
+# REVIEW — human blockers
 
-Work identified but **not completed**, with the reason each is blocked and what would unblock it.
-Anything not listed here has either been done or is actively in progress.
+**Blockers only a human can resolve.**
 
-Last updated against `main` @ `fad7c05`.
+**Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
+file holds missing approvals, missing requirements, missing access, missing
+credential ownership, and business, architecture, vendor, legal, or compliance
+decisions. *If an engineer can resolve it without human input, it does not
+belong here* — it belongs in [TODO.md](TODO.md).
+
+Required inputs and configuration inventory are in [CHECKLIST.md](CHECKLIST.md).
+Completed work is in [CHANGELOG.md](CHANGELOG.md).
+
+Last updated 2026-08-09, against `main` @ `e4873b8`.
+
+> **Reclassification notice.** This file predates the SOP and previously mixed
+> human blockers with engineering work. Sections describing code to be written
+> have moved to [TODO.md](TODO.md) as items T-001 through T-005. Section 5.0,
+> which described the frontend as "still a Firebase client — this is the
+> Go-Live blocker", is **obsolete**: the decoupling completed in PRs #61–#66 and
+> the file counts it cited are now zero. It is retained below, struck through,
+> until the next review confirms removal.
+
+---
+
+## 0. Decisions required by the 2026-08-09 code review
+
+Raised by the SOP review run. Each blocks engineering work that cannot proceed
+without a human decision. Tracked engineering work is in [TODO.md](TODO.md).
+
+### 0.1 Deployment topology — same-origin or cross-origin?
+
+TODO.md T-101 (API base URL) and T-102 (CORS) have **different correct answers**
+depending on this, so it must be settled first.
+
+- **Same-origin:** serve the API through the Static Web App via a linked backend
+  or a `staticwebapp.config.json` `/api/*` rewrite. CORS becomes unnecessary and
+  the API base becomes a relative path.
+- **Cross-origin:** keep `api-azure.hybridcloudworks.com` separate and wire CORS
+  across all 58 routes.
+
+The decision is recorded nowhere. `infra/main.tf:530-544` removed the platform
+CORS block on the reasoning that CORS lives in code, which implies cross-origin —
+but no `azurerm_static_web_app_function_app_registration` exists either.
+
+**Unblocked by:** an architecture decision.
+
+### 0.2 Was a Cosmos key ever deployed? (rotation decision)
+
+`frontend/.env.example:16-18` instructs operators to set `VITE_COSMOS_ENDPOINT`,
+`VITE_COSMOS_READ_KEY` and `VITE_COSMOS_DATABASE`. Anything `VITE_`-prefixed is
+compiled into the public browser bundle, and the SWA CSP still permits
+`https://*.documents.azure.com` — so a populated value would be a published,
+account-scoped read key over all 71 containers, including `admins`,
+`admin_audit_logs`, `mcp_servers` (oauthToken) and every unpublished draft.
+
+No file in `frontend/src` reads these variables, so this is a latent instruction
+rather than an active leak. Removing the lines is engineering work (TODO.md
+T-403/T-404). **The decision is whether rotation is required**, which depends on
+whether the value was ever set in a real `.env`, in CI, or in Static Web App
+application settings.
+
+**Unblocked by:** someone with portal/CI access checking. If it was ever set:
+rotate the Cosmos account keys and set `local_authentication_disabled = true`.
+
+### 0.3 Authorize inspection of live container contents
+
+Three findings cannot be closed from source and need one query each against the
+deployed data:
+
+| Question | Bears on |
+| --- | --- |
+| Document count in `content` and `blogs` | TODO.md T-206 — whether the 1000-row window is already truncating |
+| `SELECT DISTINCT VALUE c.contentStatus FROM c WHERE STARTSWITH(c.contentStatus, 'published')` | Whether the four-value public allowlist hides legacy documents the old prefix match admitted |
+| Contents of `podcasts`, `rss_cache`, `ai_insights`, `_snapshots` | TODO.md T-201/T-202 — the actual exposure of the unfiltered anonymous reads |
+
+**Unblocked by:** read access to the deployed Cosmos account.
+
+### 0.4 Credential model for the VPS agent
+
+`vps-agent/index.js:16` uses a Cosmos **account primary key** — full read/write
+on all 71 containers — deployed to a third-party VPS. Options: a resource token
+scoped to `lab_jobs`/`lab_agents` brokered by an authenticated Functions
+endpoint, or a workload identity with a scoped role assignment.
+
+**Do not deploy the agent until this is decided.** Engineering work in TODO.md
+T-401.
+
+**Unblocked by:** an architecture/security decision.
 
 ---
 
@@ -130,7 +213,9 @@ change than any request so far covered.
 
 **Unblocked by:** a decision to delete or relocate them.
 
-### 2.6 Genuinely removing the `frontend/scripts` package boundary
+### 2.6 ~~Genuinely removing the `frontend/scripts` package boundary~~ — MOVED to TODO.md
+
+> **Moved to [TODO.md](TODO.md).** Engineer-resolvable refactoring.
 
 `frontend/scripts/package.json` has no dependencies and no scripts, but **is load-bearing**: with no
 `"type"` field it marks that directory CommonJS inside an ESM parent, and nine `.js` helpers there
@@ -402,7 +487,13 @@ the 34 files reading Firestore directly — those are the frontend rewiring phas
 
 ## 5. Not started — the remaining migration itself
 
-### 5.0 The frontend is still a Firebase client — this is the Go-Live blocker
+### 5.0 ~~The frontend is still a Firebase client — this is the Go-Live blocker~~ — RESOLVED 2026-08-09
+
+> **RESOLVED in PRs #61–#66.** Every count in this section is now zero and the
+> production bundle contains no Firebase chunk. `useFirestore.js`,
+> `firebaseConfig.js` and `firebaseStorage.js` are deleted. Firebase *can* now be
+> decommissioned at Go-Live, contradicting the conclusion below. Retained for
+> historical context only; delete at the next review.
 
 Measured against `Site-Main` @ `4560130` and `main` @ `a10ee9d`. **Porting the backend handlers alone
 does not produce a working Azure site**, because the browser does not call the backend for most
@@ -435,7 +526,11 @@ warm until the frontend is ported.
 **Unblocked by:** nothing external. This is scope, and it is much larger than the TODO count in §5.1
 suggests — the TODOs mark where the backend logic goes, not the frontend rewiring that has to follow.
 
-### 5.1 Fourteen TODOs across four handler files
+### 5.1 ~~Fourteen TODOs across four handler files~~ — MOVED to TODO.md
+
+> **Moved to [TODO.md](TODO.md) T-001, T-002, T-003.** This is engineering work,
+> not a human blocker. The count is also stale: 6 TODOs remain, not 14 —
+> `labs-http.js` was completed and the `cms-http.js` match is prose.
 
 The Azure Functions scaffold exposes routes whose bodies are stubs:
 
@@ -450,7 +545,9 @@ Each says *"Port the business logic from Personal-Site_HCW/..."*. That source is
 `hybridcloudworks/Main-Site` in this org, so this is **no longer blocked** — it is simply large, and
 is the next phase of active work rather than a deferred item.
 
-### 5.2 `vps-agent` — Azure scaffold incomplete
+### 5.2 ~~`vps-agent` — Azure scaffold incomplete~~ — MOVED to TODO.md
+
+> **Moved to [TODO.md](TODO.md) T-004.** Engineering work, not a human blocker.
 
 Three TODOs: port the original logic, implement the change-feed listener or polling loop, start the
 heartbeat interval. The README already marks it *"Incomplete; source agent contract still requires

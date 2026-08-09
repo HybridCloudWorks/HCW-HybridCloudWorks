@@ -14,7 +14,36 @@ $allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', '
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
-$allowedRootFiles = @('.gitignore', 'README.md', 'Architecture_Plan.md', 'Migration_Plan.md', 'Variables.md', 'Review.md')
+#
+# CHANGELOG.md, REVIEW.md, TODO.md and CHECKLIST.md are the four working
+# documents mandated by the Code Review SOP (CODE_REVIEW_PROMPT.md v1.0, Phase
+# 10). They are the machine-readable handoff surface an orchestrating agent
+# reads between sessions — TODO.md in particular must exist even when empty, so
+# that "no outstanding work" is a readable state rather than a missing file.
+# They are deliberately exempt from the Wiki policy below: the Wiki holds
+# human-facing narrative documentation, these hold review state.
+#
+# REVIEW.md is upper-case per the SOP. It was `Review.md` until the SOP was
+# adopted; the rename is intentional and the lower-case spelling must not come
+# back.
+$allowedRootFiles = @(
+  '.gitignore',
+  'README.md',
+  'Architecture_Plan.md',
+  'Migration_Plan.md',
+  'Variables.md',
+  'CHANGELOG.md',
+  'CHECKLIST.md',
+  'REVIEW.md',
+  'TODO.md'
+)
+
+# Guard the casing explicitly: on a case-insensitive filesystem (Windows,
+# default macOS) `Review.md` and `REVIEW.md` collide, so a careless checkout or
+# editor save can silently reintroduce the old name. The allowlist above is
+# compared case-sensitively by -in on Linux CI but not on Windows, so this
+# check is what actually holds the line for local runs.
+$casingSensitiveNames = @('REVIEW.md', 'TODO.md', 'CHECKLIST.md', 'CHANGELOG.md')
 
 # Directory names never walked by the Markdown scan, at any depth.
 $unscannedDirectories = @('.git', 'node_modules') + $harnessDirectories
@@ -34,6 +63,21 @@ $actualRootFiles = Get-ChildItem -LiteralPath $repositoryRoot -File -Force |
 foreach ($file in $actualRootFiles) {
   if ($file -notin $allowedRootFiles) {
     $errors.Add("Unexpected root file: $file")
+  }
+  # Reject a case variant of a SOP document (e.g. Review.md vs REVIEW.md).
+  $casingMatch = $casingSensitiveNames |
+    Where-Object { $_ -ieq $file -and $_ -cne $file }
+  if ($casingMatch) {
+    $errors.Add("Root file has wrong casing: found '$file', expected '$casingMatch'")
+  }
+}
+
+# The SOP documents must exist. TODO.md is the one an orchestrating agent reads
+# to decide whether there is outstanding work, so its absence is indistinguishable
+# from "the file was never written" — require it even when it holds no items.
+foreach ($requiredFile in @('README.md', 'CHANGELOG.md', 'CHECKLIST.md', 'REVIEW.md', 'TODO.md')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $requiredFile))) {
+    $errors.Add("Missing required SOP document: $requiredFile")
   }
 }
 
