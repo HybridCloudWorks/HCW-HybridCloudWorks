@@ -1,9 +1,25 @@
-# Review — blocked and deferred work
+# REVIEW — human blockers
 
-Work identified but **not completed**, with the reason each is blocked and what would unblock it.
-Anything not listed here has either been done or is actively in progress.
+**Blockers only a human can resolve.**
 
-Last updated against `main` @ `fad7c05`.
+**Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
+file holds missing approvals, missing requirements, missing access, missing
+credential ownership, and business, architecture, vendor, legal, or compliance
+decisions. *If an engineer can resolve it without human input, it does not
+belong here* — it belongs in [TODO.md](TODO.md).
+
+Required inputs and configuration inventory are in [CHECKLIST.md](CHECKLIST.md).
+Completed work is in [CHANGELOG.md](CHANGELOG.md).
+
+Last updated 2026-08-09, against `main` @ `e4873b8`.
+
+> **Reclassification notice.** This file predates the SOP and previously mixed
+> human blockers with engineering work. Sections describing code to be written
+> have moved to [TODO.md](TODO.md) as items T-001 through T-005. Section 5.0,
+> which described the frontend as "still a Firebase client — this is the
+> Go-Live blocker", is **obsolete**: the decoupling completed in PRs #61–#66 and
+> the file counts it cited are now zero. It is retained below, struck through,
+> until the next review confirms removal.
 
 ---
 
@@ -130,7 +146,9 @@ change than any request so far covered.
 
 **Unblocked by:** a decision to delete or relocate them.
 
-### 2.6 Genuinely removing the `frontend/scripts` package boundary
+### 2.6 ~~Genuinely removing the `frontend/scripts` package boundary~~ — MOVED to TODO.md
+
+> **Moved to [TODO.md](TODO.md).** Engineer-resolvable refactoring.
 
 `frontend/scripts/package.json` has no dependencies and no scripts, but **is load-bearing**: with no
 `"type"` field it marks that directory CommonJS inside an ESM parent, and nine `.js` helpers there
@@ -402,7 +420,13 @@ the 34 files reading Firestore directly — those are the frontend rewiring phas
 
 ## 5. Not started — the remaining migration itself
 
-### 5.0 The frontend is still a Firebase client — this is the Go-Live blocker
+### 5.0 ~~The frontend is still a Firebase client — this is the Go-Live blocker~~ — RESOLVED 2026-08-09
+
+> **RESOLVED in PRs #61–#66.** Every count in this section is now zero and the
+> production bundle contains no Firebase chunk. `useFirestore.js`,
+> `firebaseConfig.js` and `firebaseStorage.js` are deleted. Firebase *can* now be
+> decommissioned at Go-Live, contradicting the conclusion below. Retained for
+> historical context only; delete at the next review.
 
 Measured against `Site-Main` @ `4560130` and `main` @ `a10ee9d`. **Porting the backend handlers alone
 does not produce a working Azure site**, because the browser does not call the backend for most
@@ -435,7 +459,11 @@ warm until the frontend is ported.
 **Unblocked by:** nothing external. This is scope, and it is much larger than the TODO count in §5.1
 suggests — the TODOs mark where the backend logic goes, not the frontend rewiring that has to follow.
 
-### 5.1 Fourteen TODOs across four handler files
+### 5.1 ~~Fourteen TODOs across four handler files~~ — MOVED to TODO.md
+
+> **Moved to [TODO.md](TODO.md) T-001, T-002, T-003.** This is engineering work,
+> not a human blocker. The count is also stale: 6 TODOs remain, not 14 —
+> `labs-http.js` was completed and the `cms-http.js` match is prose.
 
 The Azure Functions scaffold exposes routes whose bodies are stubs:
 
@@ -450,7 +478,9 @@ Each says *"Port the business logic from Personal-Site_HCW/..."*. That source is
 `hybridcloudworks/Main-Site` in this org, so this is **no longer blocked** — it is simply large, and
 is the next phase of active work rather than a deferred item.
 
-### 5.2 `vps-agent` — Azure scaffold incomplete
+### 5.2 ~~`vps-agent` — Azure scaffold incomplete~~ — MOVED to TODO.md
+
+> **Moved to [TODO.md](TODO.md) T-004.** Engineering work, not a human blocker.
 
 Three TODOs: port the original logic, implement the change-feed listener or polling loop, start the
 heartbeat interval. The README already marks it *"Incomplete; source agent contract still requires

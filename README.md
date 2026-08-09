@@ -39,6 +39,23 @@ The root README must be updated whenever repository structure, documentation aut
 status, or delivery status changes. Markdown consumed by GitHub or development tooling may remain next
 to that tooling; general documentation belongs only in the Wiki.
 
+## Review and delivery state
+
+Four working documents at the repository root hold review state, per the Code
+Review SOP (`CODE_REVIEW_PROMPT.md` v1.0). They are the handoff surface between
+engineering sessions and are deliberately distinct from the Wiki's narrative
+documentation — the Wiki explains the system, these record its current state.
+
+| Document | Holds | Read it when |
+| --- | --- | --- |
+| [TODO.md](TODO.md) | Actionable engineering work | Deciding what to pick up next. An empty list means no known outstanding work |
+| [REVIEW.md](REVIEW.md) | Blockers only a human can resolve — approvals, access, credential ownership, business decisions | Something is stalled and code cannot unstick it |
+| [CHECKLIST.md](CHECKLIST.md) | Required inputs: variables, secret references, keys, APIs, certificates. Never actual values | Preparing a deployment or provisioning an environment |
+| [CHANGELOG.md](CHANGELOG.md) | Completed and released work | Establishing what has already shipped |
+
+`scripts/validate-repository-structure.ps1` enforces that all four exist and are
+spelled exactly as above; CI fails if one is missing or its casing drifts.
+
 ## Repository layout
 
 | Path | Purpose | Current posture |
