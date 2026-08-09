@@ -3,7 +3,7 @@
  * the frontend's route names. Registration only; semantics in
  * lib/ops-health.js.
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createOpsHealthHandlers } from '../lib/ops-health.js';
@@ -14,14 +14,14 @@ const handlers = () =>
     store: { queryDocs, readDoc, upsertDoc, patchDoc },
   });
 
-app.http('getOpsHealthSnapshot', {
+httpRoute('getOpsHealthSnapshot', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'getOpsHealthSnapshot',
   handler: (request, context) => handlers().getOpsHealthSnapshot(request, context),
 });
 
-app.http('updateWorkflowAlert', {
+httpRoute('updateWorkflowAlert', {
   methods: ['POST', 'PATCH'],
   authLevel: 'anonymous',
   route: 'updateWorkflowAlert',

@@ -17,19 +17,22 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 38 |
-| Critical | 2 |
+| Open items | 36 |
+| Critical | 0 |
 | High | 10 |
 | Medium | 18 |
 | Low | 8 |
-| Resolved since the review | 4 (T-101, T-104, T-105, T-403) |
+| Resolved since the review | 6 (T-101, T-102, T-103, T-104, T-105, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
-**Release readiness: NOT READY.** The Critical items each independently prevent
-the deployed application from functioning. None was caught by the 534 passing
-tests, because each lives in the seam between a correctly-built module and its
-environment. Merging to a branch is fine; deploying is not.
+**Release readiness: STILL NOT VERIFIED.** All five Critical items are
+resolved, and the suite is now 575 functions tests and 31 frontend tests. That
+changes what is known to be broken; it does not change what is known to work.
+Every Critical item lived in the seam between a correctly-built module and its
+environment — exactly the seam no test in this repository can reach. **Nothing
+below the line has been exercised against a deployed Azure environment**
+(REVIEW.md §1.1), so the next step is a deployed smoke test, not a release.
 
 ---
 
@@ -38,10 +41,11 @@ environment. Merging to a branch is fine; deploying is not.
 Do these in sequence — later items cannot be verified before earlier ones.
 
 1. ~~**T-101** API base URL~~ — **done**, see below
-2. **T-102** CORS across all routes → **T-103** route-inventory test to lock it in
+2. ~~**T-102** CORS across all routes → **T-103** route-inventory test~~ — **done**, see below
 3. ~~**T-104 + T-105**~~ blob credential and image delivery — **done**, see below
 4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
-5. **Deploy a smoke test** — everything above is unverifiable from an agent session
+5. **Deploy a smoke test** — everything above is unverifiable from an agent
+   session, and this is now the top open item
 6. **T-201 → T-205** the anonymous data-exposure set
 7. **T-301+** correctness and hardening
 
@@ -78,9 +82,9 @@ fix as originally written:
   `VITE_AZURE_FUNCTIONS_URL` without `/api`, which would have produced a
   uniform 404 — the same outage under a different name.
 - **The topology is now a config value, not a code path.** `/api` for
-  same-origin, `https://<host>/api` for cross-origin. This resolves T-101
-  without waiting on the [REVIEW.md](REVIEW.md) §0.1 decision, which still
-  gates T-102.
+  same-origin, `https://<host>/api` for cross-origin. This resolved T-101
+  without waiting on the [REVIEW.md](REVIEW.md) §0.1 decision — and T-102 was
+  then resolved the same way, so §0.1 no longer gates any Critical item.
 
 Enforced by `frontend/src/lib/functionsBase.test.js` (10 tests, in `test:admin`
 so CI runs it): resolution for both topologies, the throw when unset, a guard
@@ -91,7 +95,7 @@ no base now fails in `vite.config.js` rather than shipping a broken bundle
 
 ---
 
-### T-102 — CORS is wired into 1 of 58 routes
+### ~~T-102 — CORS is wired into 1 of 58 routes~~ RESOLVED
 **Category:** Defect / architecture · **Label:** Confirmed Issue
 **Files:** all `functions/src/functions/*.js`; `functions/src/lib/auth/cors.js:98`; `infra/main.tf:530-544`
 
@@ -105,17 +109,31 @@ Two compounding defects: `ALLOW_METHODS` is `GET, POST, OPTIONS`, but the
 migration added `PUT`/`PATCH`/`DELETE` routes; and every authenticated call
 carries `Authorization`, forcing a preflight on all of them.
 
-**Fix:** a shared `httpRoute()` registration helper that evaluates CORS,
-short-circuits preflights, merges headers, and appends `OPTIONS` to every
-`methods` array. Extend `ALLOW_METHODS`.
+**Resolved.** `functions/src/lib/auth/http-route.js` is now the single
+registration helper, and all 59 registrations go through it. It appends
+`OPTIONS` to every `methods` array, evaluates CORS before the handler runs
+(so a preflight consumes no guard call, no store read and no rate-limit quota),
+and merges the headers onto whatever the handler returns — **including error
+responses**, because a 401 without `Access-Control-Allow-Origin` reaches the
+browser as an opaque network error and the guard's message is never shown.
+`ALLOW_METHODS` now covers `PUT`, `PATCH` and `DELETE`; fourteen routes use
+them, and a browser preflighting one of those would have refused to send.
 
-**Blocked on a decision:** same-origin (SWA linked backend / `/api/*` rewrite) vs
-cross-origin. See [REVIEW.md](REVIEW.md) — T-101 and T-102 have different correct
-answers depending on it.
+`public-submissions.js` had its own `cors.evaluate` call, now removed: with the
+wrapper in place it was a second evaluation of the same allowlist, which is
+precisely the drift hazard `cors.js` DECISION 7 exists to prevent. Its two CORS
+tests were rewritten to exercise the registered composition rather than the bare
+handler, so the coverage moved rather than disappearing.
+
+**No longer blocked on the topology decision.** Like T-101, this became
+configuration: same-origin requests either carry no `Origin` (allowed — CORS is
+not an authorization control) or carry the site's own, already in the production
+allowlist. A different SPA hostname is added through `CORS_ALLOWED_ORIGINS`
+without a code change.
 
 ---
 
-### T-103 — Write the route-inventory test the guard module declares
+### ~~T-103 — Write the route-inventory test the guard module declares~~ RESOLVED
 **Category:** Test coverage / security · **Label:** Confirmed Issue
 **File:** `functions/src/lib/auth/require-role.js:20-33` (declaration); no such test exists
 
@@ -127,10 +145,20 @@ Hand-audited state is **correct**: all 58 registrations either guard or are
 intentionally public. This is the control that keeps route 59 from shipping
 unguarded, not a live vulnerability.
 
-**Fix:** import `index.js` against a stubbed `app.http` recorder; assert per
-registration: (1) route ∈ `PUBLIC_ROUTES` or the handler reaches
-`guard.requireRole`; (2) `methods` includes `OPTIONS`; (3) CORS headers are
-emitted. Properties 2 and 3 would have caught T-102 before it shipped.
+**Resolved.** `functions/src/functions/route-inventory.test.js` imports
+`index.js` against a stubbed `app` recorder and a stubbed guard, then asserts
+all three properties across every registration: guarded or on an explicit
+eight-entry `PUBLIC_ROUTES` allowlist, `OPTIONS` registered, and CORS evaluated
+before the handler.
+
+It passed on first run, which for a test of this kind is not evidence of
+anything, so it was checked by mutation. Registering an unguarded route through
+`httpRoute` fails property 1 by name; registering a route with raw `app.http`
+fails all four assertions. Both mutations were reverted.
+
+The allowlist is the deliberate part: adding a route to it means anyone on the
+internet can call it, with no token, forever — so it carries a per-entry comment
+saying which Firestore rule it replaces.
 
 ---
 

@@ -17,7 +17,7 @@
  * and the cmsGenerateContent AI pipeline (route intentionally NOT registered
  * until it exists — a stub returning "TODO: AI output" is not an endpoint).
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, deleteDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createCmsContentHandlers } from '../lib/cms-content.js';
@@ -41,14 +41,14 @@ const createHandler = () =>
     store: { queryDocs, upsertDoc },
   });
 
-app.http('cmsListContent', {
+httpRoute('cmsListContent', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/content',
   handler: (request, context) => handlers().list(request, context),
 });
 
-app.http('cmsGetContentItem', {
+httpRoute('cmsGetContentItem', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
   route: 'cms/content/item',
@@ -58,7 +58,7 @@ app.http('cmsGetContentItem', {
 // Replaces the interim raw-upsert save placeholder: creation now goes through
 // the full source semantics (dedup 409, quality gate 422) at the RPC route the
 // frontend actually calls (SubmitUrlsPage → postJSON('createContentItem')).
-app.http('createContentItem', {
+httpRoute('createContentItem', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'createContentItem',
@@ -67,7 +67,7 @@ app.http('createContentItem', {
 
 // Partial writes on content go through patchDoc — an upsert would replace the
 // whole document (see #42). Same RPC-route convention as createContentItem.
-app.http('updateContentItem', {
+httpRoute('updateContentItem', {
   methods: ['POST', 'PATCH'],
   authLevel: 'anonymous',
   route: 'updateContentItem',
@@ -78,7 +78,7 @@ app.http('updateContentItem', {
     })(request, context),
 });
 
-app.http('transitionContentStatus', {
+httpRoute('transitionContentStatus', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'transitionContentStatus',
@@ -89,7 +89,7 @@ app.http('transitionContentStatus', {
     })(request, context),
 });
 
-app.http('cmsDeleteContent', {
+httpRoute('cmsDeleteContent', {
   methods: ['DELETE'],
   authLevel: 'anonymous',
   route: 'cms/content/{id}',

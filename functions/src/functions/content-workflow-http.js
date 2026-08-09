@@ -3,7 +3,7 @@
  * frontend's route names. Registration only; semantics in
  * lib/content-workflow.js.
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { readDoc, patchDoc, upsertDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createContentWorkflowHandlers } from '../lib/content-workflow.js';
@@ -23,7 +23,7 @@ for (const name of [
   'requestContentInspection',
   'resetContentReviewState',
 ]) {
-  app.http(name, {
+  httpRoute(name, {
     methods: ['POST'],
     authLevel: 'anonymous',
     route: name,

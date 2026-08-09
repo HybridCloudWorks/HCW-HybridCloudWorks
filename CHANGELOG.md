@@ -118,6 +118,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **CORS applied to every route.** `lib/auth/http-route.js` is now the single
+  registration helper for all 59 HTTP routes: it registers `OPTIONS`, evaluates
+  CORS before the handler runs, and merges the headers onto every response
+  including errors. Previously `cors.evaluate` was called by one route of
+  fifty-eight, and the advertised method list predated the REST surface, so a
+  browser preflighting any of the fourteen `PUT`/`PATCH`/`DELETE` routes would
+  have refused to send. (TODO.md T-102)
+- **Route-inventory test added** — the replacement for the `firestore.rules`
+  default-deny catch-all that Azure has no equivalent of, and the test
+  `require-role.js` declared in its header and never had. Every registration
+  must be guarded or named in an explicit eight-entry public allowlist, must
+  accept `OPTIONS`, and must evaluate CORS. Verified by mutation: an unguarded
+  route and a raw `app.http` registration both fail it. (TODO.md T-103)
 - **Dependency advisories cleared** — `dompurify` to `^3.4.13` (moderate: XSS via
   detached subtree after `IN_PLACE` hook removal; ships in the app bundle),
   `nanoid` override `^3.3.18` (high), `js-yaml` override `^4.3.1` (high). Both
@@ -132,6 +145,10 @@ This project has not cut a tagged release; entries are grouped under
   cannot become a generic container read. (#45)
 
 ### Infrastructure
+
+- Storage: `Storage Blob Delegator` role assignment for user-delegation SAS;
+  media containers declared `private`, matching the account-level override that
+  already made them so.
 
 Authored but **never applied** — no Terraform `validate`, `plan`, or `apply` has
 run from any session (see [REVIEW.md](REVIEW.md) §1.1).

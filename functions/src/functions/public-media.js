@@ -7,13 +7,13 @@
  * directly against Firebase Storage under public rules. The lib enforces the
  * container allowlist and path validation that replace them.
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { readBlobForDelivery } from '../lib/blob-storage.js';
 import { createPublicMediaHandlers } from '../lib/public-media.js';
 
 const handlers = () => createPublicMediaHandlers({ storage: { readBlobForDelivery } });
 
-app.http('publicGetMedia', {
+httpRoute('publicGetMedia', {
   methods: ['GET'],
   authLevel: 'anonymous',
   // The wildcard segment is required: blob paths contain slashes
