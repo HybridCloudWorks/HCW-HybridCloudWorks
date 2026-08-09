@@ -54,27 +54,47 @@ export default defineConfig(({ mode }) => {
     ...loadEnv(mode, process.cwd(), ''), // Load from root (standard Vite behavior)
   };
 
-  // List of required Firebase variables
-  const firebaseVars = [
-    'VITE_FIREBASE_API_KEY',
-    'VITE_FIREBASE_AUTH_DOMAIN',
-    'VITE_FIREBASE_PROJECT_ID',
-    'VITE_FIREBASE_STORAGE_BUCKET',
-    'VITE_FIREBASE_MESSAGING_SENDER_ID',
-    'VITE_FIREBASE_APP_ID',
-    'VITE_FIREBASE_MEASUREMENT_ID',
-    'VITE_GCP_FUNCTIONS_URL',
+  // Browser configuration that must survive the custom secrets directories
+  // above. Vite only reads .env files from its own envDir, so anything sourced
+  // from secrets/env has to be injected explicitly here.
+  //
+  // The Firebase variables that used to occupy this list are gone: no file
+  // under src/ reads them any more. VITE_GCP_FUNCTIONS_URL is gone with them —
+  // the API base is VITE_AZURE_FUNCTIONS_URL, resolved in lib/functionsBase.js.
+  const browserEnvVars = [
+    'VITE_AZURE_FUNCTIONS_URL',
+    'VITE_ENTRA_CLIENT_ID',
+    'VITE_ENTRA_TENANT_ID',
+    'VITE_ENTRA_API_SCOPE',
+    'VITE_SOCIAL_X_URL',
+    'VITE_SOCIAL_LINKEDIN_URL',
+    'VITE_SOCIAL_GITHUB_URL',
+    'VITE_DEFAULT_LANGUAGE',
+    'VITE_TRANSLATIONS',
+    'VITE_NEWS_ENABLE_INSIGHTS',
   ];
 
   // Create define object with fallbacks for non-prefixed versions just in case
   const defineConf = {};
-  firebaseVars.forEach((key) => {
+  browserEnvVars.forEach((key) => {
     // Try VITE_ prefixed first, then try same name without VITE_ prefix as fallback
     const fallbackKey = key.replace('VITE_', '');
     const value = env[key] || env[fallbackKey] || '';
 
     defineConf[`import.meta.env.${key}`] = JSON.stringify(value);
   });
+
+  // A deploy build without an API base produces a bundle whose every backend
+  // call throws at runtime. REQUIRE_API_BASE is set by the deploy workflow so
+  // that misconfiguration fails the build instead of the site; plain CI builds
+  // leave it unset and stay green without backend secrets.
+  if (process.env.REQUIRE_API_BASE === 'true' && !env.VITE_AZURE_FUNCTIONS_URL) {
+    throw new Error(
+      'VITE_AZURE_FUNCTIONS_URL is required for a deploy build. Set it to "/api" ' +
+        'for a same-origin deployment, or to the Function App origin followed by ' +
+        '"/api" for a cross-origin one.'
+    );
+  }
 
   // Log injected keys (NOT values) to help debug CI issues
   console.log('--- CI/CD Build Config ---');

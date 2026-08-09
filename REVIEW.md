@@ -25,25 +25,49 @@ Last updated 2026-08-09, against `main` @ `e4873b8`.
 
 ## 0. Decisions required by the 2026-08-09 code review
 
-Raised by the SOP review run. Each blocks engineering work that cannot proceed
-without a human decision. Tracked engineering work is in [TODO.md](TODO.md).
+Raised by the SOP review run. Tracked engineering work is in [TODO.md](TODO.md).
+
+**Status after the Critical fixes:** §0.1 and §0.5 no longer block anything —
+both were resolved as configuration, and the decisions now select a deployment
+shape rather than gating code. §0.2, §0.3 and §0.4 still need you: they require
+portal or data access, or a security decision, that no code change can supply.
 
 ### 0.1 Deployment topology — same-origin or cross-origin?
 
-TODO.md T-101 (API base URL) and T-102 (CORS) have **different correct answers**
-depending on this, so it must be settled first.
+**No longer blocks any engineering work.** It was raised as gating T-101 and
+T-102; both were instead resolved so that the topology is a configuration
+value rather than a code path, and both are now closed:
 
-- **Same-origin:** serve the API through the Static Web App via a linked backend
-  or a `staticwebapp.config.json` `/api/*` rewrite. CORS becomes unnecessary and
-  the API base becomes a relative path.
-- **Cross-origin:** keep `api-azure.hybridcloudworks.com` separate and wire CORS
-  across all 58 routes.
+- **API base** — `VITE_AZURE_FUNCTIONS_URL=/api` selects same-origin, an
+  absolute origin ending in `/api` selects cross-origin. One resolver
+  (`frontend/src/lib/functionsBase.js`) serves both.
+- **CORS** — applied to all 59 routes by `lib/auth/http-route.js`. Same-origin
+  requests carry either no `Origin` or the site's own, which is already
+  allowlisted; a different SPA hostname is added through `CORS_ALLOWED_ORIGINS`.
+- **Image URLs** — stored site-relative, so the decision cannot invalidate rows
+  already written to Cosmos.
 
-The decision is recorded nowhere. `infra/main.tf:530-544` removed the platform
-CORS block on the reasoning that CORS lives in code, which implies cross-origin —
+What remains is a **deployment choice you still have to make and configure**, not
+a blocker: set `VITE_AZURE_FUNCTIONS_URL` and, if cross-origin,
+`CORS_ALLOWED_ORIGINS`. One consequence is tracked as TODO.md T-318 — if
+cross-origin is chosen, ~30 image render sites must call `resolveMediaUrl()`.
+
+The decision is still recorded nowhere. `infra/main.tf` removed the platform
+CORS block on the reasoning that CORS lives in code, which implies cross-origin,
 but no `azurerm_static_web_app_function_app_registration` exists either.
 
-**Unblocked by:** an architecture decision.
+The two shapes, for the record:
+
+- **Same-origin:** serve the API through the Static Web App via a linked backend
+  or a `staticwebapp.config.json` `/api/*` rewrite. Set
+  `VITE_AZURE_FUNCTIONS_URL=/api`.
+- **Cross-origin:** keep `api-azure.hybridcloudworks.com` separate. Set
+  `VITE_AZURE_FUNCTIONS_URL=https://api-azure.hybridcloudworks.com/api`, add the
+  SPA origin to `CORS_ALLOWED_ORIGINS` if it is not `hybridcloudworks.com`, and
+  do T-318.
+
+**Unblocked by:** an architecture decision — which now selects configuration
+rather than gating code.
 
 ### 0.2 Was a Cosmos key ever deployed? (rotation decision)
 
@@ -87,6 +111,30 @@ endpoint, or a workload identity with a scoped role assignment.
 T-401.
 
 **Unblocked by:** an architecture/security decision.
+
+### 0.5 Media delivery — keep the account closed, or open it behind a CDN?
+
+**Not blocking.** T-105 is resolved in the closed configuration; this decides
+whether to change it later.
+
+Uploaded images are served by
+`GET /api/public/media/{container}/{*path}`, reading blobs through the Function
+App's managed identity. The storage account stays closed to the internet
+(`allow_nested_items_to_be_public = false`, `network_rules default_action =
+"Deny"`), no new Azure resource is provisioned, and no security setting is
+reversed. Responses are `immutable` with ETag support, so repeat views do not
+reach the function.
+
+The alternative the review preferred — open the account and front it with
+Cloudflare or Azure Front Door — trades two security settings and a monthly
+service floor for edge caching and bytes that never touch compute. Against a USD
+150 design ceiling that is a spend decision.
+
+Worth revisiting if image egress through the Function App turns out to dominate
+invocation cost. Nothing in the delivered implementation forecloses it: the
+route can sit behind a CDN unchanged, and stored URLs are site-relative.
+
+**Unblocked by:** a cost/exposure decision, once there is real traffic data.
 
 ---
 

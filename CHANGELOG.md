@@ -37,6 +37,11 @@ This project has not cut a tagged release; entries are grouped under
   image-prompt RPCs** — 34 named RPCs total. (#50, #54, #55, #56, #57, #58)
 - **`getLabJob` RPC** — single lab job with output, replacing the Labs console's
   per-document realtime subscription. (#65)
+- **Anonymous media delivery** — `GET public/media/{container}/{*blobPath}`,
+  serving uploaded images through the Function App's managed identity with
+  immutable cache headers and conditional-request support. The storage account
+  stays closed to the internet; the container allowlist is a strict subset of
+  the containers uploads may write to. (TODO.md T-105)
 - **Self-hosted CI runner** — Azure Container Apps Job with KEDA scale-to-zero, an
   ephemeral JIT-config runner image published to Docker Hub with a GHCR mirror,
   and a `CI_RUNNER` repository-variable failover switch. (#48)
@@ -68,6 +73,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The browser called Google Cloud, not Azure.** `api.js`, `publicApi.js` and
+  `legacyBlogsTelemetry.js` each resolved `VITE_GCP_FUNCTIONS_URL` — a
+  decommissioned Google Cloud Functions host — so roughly sixty call sites,
+  including every authenticated admin request, would have been sent off-platform
+  with an Entra bearer token attached. `lib/functionsBase.js` is now the single
+  resolver over `VITE_AZURE_FUNCTIONS_URL`; the dead `azureConfig.js` provider
+  switch was deleted. The base carries the Functions `api` route prefix and
+  accepts either `/api` (same-origin) or an absolute origin (cross-origin), so
+  deployment topology is configuration rather than code. A deploy build with no
+  base configured now fails instead of shipping. (TODO.md T-101)
+- **Every upload and every gallery delete would have thrown.**
+  `blob-storage.js` required `STORAGE_CONNECTION_STRING`, which no file in
+  `infra/` has ever produced — the code was written for shared-key auth while
+  the infrastructure was built for managed identity. It now uses
+  `DefaultAzureCredential` against `STORAGE_BLOB_ENDPOINT`, matching
+  `cosmos-client.js`, and `generateSasUrl` signs with a user-delegation key
+  instead of an account key. No key or connection string was added.
+  (TODO.md T-104)
+- **Uploaded images were unreachable, and the URL to them was stored anyway.**
+  `allow_nested_items_to_be_public = false` is an account-level master override,
+  so the three containers declared public in Terraform served 409 — while
+  uploads returned the raw blob URL for pages to persist into Cosmos. Uploads
+  now return the media-route URL, non-public containers return none, and the
+  Terraform containers are declared `private`, which is what they always were.
+  (TODO.md T-105)
 - **Scheduled-publish dates were silently dropped** — `scheduledPublishDate` and
   the editor's `blogEditedAt` were parsed with Firestore `Timestamp`-only code
   paths that returned `0` for the ISO strings the API now returns. This would
@@ -88,6 +118,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **CORS applied to every route.** `lib/auth/http-route.js` is now the single
+  registration helper for all 59 HTTP routes: it registers `OPTIONS`, evaluates
+  CORS before the handler runs, and merges the headers onto every response
+  including errors. Previously `cors.evaluate` was called by one route of
+  fifty-eight, and the advertised method list predated the REST surface, so a
+  browser preflighting any of the fourteen `PUT`/`PATCH`/`DELETE` routes would
+  have refused to send. (TODO.md T-102)
+- **Route-inventory test added** — the replacement for the `firestore.rules`
+  default-deny catch-all that Azure has no equivalent of, and the test
+  `require-role.js` declared in its header and never had. Every registration
+  must be guarded or named in an explicit eight-entry public allowlist, must
+  accept `OPTIONS`, and must evaluate CORS. Verified by mutation: an unguarded
+  route and a raw `app.http` registration both fail it. (TODO.md T-103)
 - **Dependency advisories cleared** — `dompurify` to `^3.4.13` (moderate: XSS via
   detached subtree after `IN_PLACE` hook removal; ships in the app bundle),
   `nanoid` override `^3.3.18` (high), `js-yaml` override `^4.3.1` (high). Both
@@ -102,6 +145,10 @@ This project has not cut a tagged release; entries are grouped under
   cannot become a generic container read. (#45)
 
 ### Infrastructure
+
+- Storage: `Storage Blob Delegator` role assignment for user-delegation SAS;
+  media containers declared `private`, matching the account-level override that
+  already made them so.
 
 Authored but **never applied** — no Terraform `validate`, `plan`, or `apply` has
 run from any session (see [REVIEW.md](REVIEW.md) §1.1).

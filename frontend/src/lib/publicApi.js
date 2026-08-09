@@ -8,15 +8,11 @@
  * in responses) and strips internal review/audit fields, so consumers can
  * render what they receive without re-checking visibility.
  */
-const API_BASE = import.meta.env.VITE_GCP_FUNCTIONS_URL || '';
+import { requireFunctionsBase } from '@/lib/functionsBase';
 
 async function publicGet(pathAndQuery) {
-  if (!API_BASE) {
-    throw new Error(
-      'VITE_GCP_FUNCTIONS_URL is not set. Add it to your .env file before loading public data.'
-    );
-  }
-  const res = await fetch(`${API_BASE}/${pathAndQuery}`, {
+  const base = requireFunctionsBase(pathAndQuery);
+  const res = await fetch(`${base}/${pathAndQuery}`, {
     headers: { Accept: 'application/json' },
   });
   if (res.status === 404) return null;
@@ -83,12 +79,8 @@ export async function fetchPublicSnapshotItems(id) {
  * Resolves to { ok, id }; throws with the server's message on rejection.
  */
 export async function submitPublicContent(body) {
-  if (!API_BASE) {
-    throw new Error(
-      'VITE_GCP_FUNCTIONS_URL is not set. Add it to your .env file before submitting.'
-    );
-  }
-  const res = await fetch(`${API_BASE}/public/submissions`, {
+  const base = requireFunctionsBase('public/submissions');
+  const res = await fetch(`${base}/public/submissions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),

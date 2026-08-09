@@ -4,11 +4,7 @@
  * blob path is attacker-influenced input that becomes a storage key.
  */
 import { describe, it, expect, vi } from 'vitest';
-import {
-  createAdminUploadHandlers,
-  isValidBlobPath,
-  UPLOAD_CONTAINERS,
-} from './admin-uploads.js';
+import { createAdminUploadHandlers, isValidBlobPath, UPLOAD_CONTAINERS } from './admin-uploads.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -51,18 +47,40 @@ describe('isValidBlobPath', () => {
 });
 
 describe('uploadFile', () => {
-  it('uploads to the named container and returns the public URL', async () => {
+  it('uploads to the named container and returns a URL that will serve', async () => {
     const storage = { uploadBlob: vi.fn(async () => 'https://acct.blob/x/y.png') };
     const h = createAdminUploadHandlers({ guard: allowGuard(), storage });
     const res = await h.uploadFile(makeRequest({ body: validBody() }), context);
     const parsed = JSON.parse(res.body);
-    expect(parsed.url).toBe('https://acct.blob/x/y.png');
+
+    // NOT the raw blob URL. The account is closed to the internet and
+    // allow_nested_items_to_be_public overrides container access, so that URL
+    // is dead (TODO.md T-105). `url` is what pages persist into Cosmos.
+    expect(parsed.url).toBe('/api/public/media/certifications/cert-1/images/badge-123.png');
+    expect(parsed.blobUrl).toBe('https://acct.blob/x/y.png');
+
     const [container, path, buffer, contentType] = storage.uploadBlob.mock.calls[0];
     expect(container).toBe('certifications');
     expect(path).toBe('cert-1/images/badge-123.png');
     expect(Buffer.isBuffer(buffer)).toBe(true);
     expect(buffer.toString()).toBe('fake-png-bytes');
     expect(contentType).toBe('image/png');
+  });
+
+  it('returns no URL for a container that is not publicly served', async () => {
+    // A plausible-looking dead URL persisted into Cosmos is worse than none:
+    // the page renders a broken image and nothing indicates why.
+    const storage = { uploadBlob: vi.fn(async () => 'https://acct.blob/x/y.png') };
+    const h = createAdminUploadHandlers({ guard: allowGuard(), storage });
+    const res = await h.uploadFile(
+      makeRequest({ container: 'content', body: validBody() }),
+      context
+    );
+    const parsed = JSON.parse(res.body);
+
+    expect(res.status).toBe(200);
+    expect(parsed.url).toBe('');
+    expect(parsed.blobUrl).toBe('https://acct.blob/x/y.png');
   });
 
   it('denial makes zero storage calls', async () => {

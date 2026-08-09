@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSubmissionsHandler } from './public-submissions.js';
 import { createCors } from '../lib/auth/cors.js';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { createClientIdentity } from '../lib/auth/client-identity.js';
 import { SUBMISSIONS_PER_HOUR } from '../lib/submissions.js';
 
@@ -45,7 +46,6 @@ const blogBody = {
 function makeHandler({ existingQuota, environment = 'production' } = {}) {
   const writes = [];
   const handler = createSubmissionsHandler({
-    cors: createCors({ environment }),
     identity: createClientIdentity({
       originSecret: SECRET,
       ipSalt: 'salt',
@@ -60,19 +60,45 @@ function makeHandler({ existingQuota, environment = 'production' } = {}) {
   return { handler, writes };
 }
 
+/**
+ * CORS moved out of the handler and into httpRoute, which applies it to every
+ * route rather than to this one. These two cases still matter for this route
+ * specifically — it is the only anonymous write path — so they now exercise
+ * the registered composition rather than the bare handler.
+ */
+function makeRegisteredRoute(options = {}) {
+  const { handler, writes } = makeHandler(options);
+  let registered;
+  httpRoute(
+    'publicSubmissions',
+    { methods: ['POST'], authLevel: 'anonymous', route: 'public/submissions', handler },
+    {
+      cors: createCors({ environment: options.environment || 'production' }),
+      register: { http: (_name, opts) => (registered = opts) },
+    }
+  );
+  return { route: registered, writes };
+}
+
 describe('public submissions handler', () => {
-  it('answers preflight with 204 and CORS headers', async () => {
-    const { handler } = makeHandler();
-    const res = await handler(makeRequest({ method: 'OPTIONS' }), context);
+  it('answers preflight with 204 and CORS headers, without running the handler', async () => {
+    const { route, writes } = makeRegisteredRoute();
+    const res = await route.handler(makeRequest({ method: 'OPTIONS' }), context);
     expect(res.status).toBe(204);
     expect(res.headers['Access-Control-Allow-Origin']).toBe(ORIGIN);
+    expect(writes).toHaveLength(0);
   });
 
   it('403s a disallowed origin without touching identity or storage', async () => {
-    const { handler, writes } = makeHandler();
-    const res = await handler(makeRequest({ origin: 'https://evil.example' }), context);
+    const { route, writes } = makeRegisteredRoute();
+    const res = await route.handler(makeRequest({ origin: 'https://evil.example' }), context);
     expect(res.status).toBe(403);
     expect(writes).toHaveLength(0);
+  });
+
+  it('registers OPTIONS so the preflight can reach it at all', async () => {
+    const { route } = makeRegisteredRoute();
+    expect(route.methods).toContain('OPTIONS');
   });
 
   it('405s non-POST', async () => {

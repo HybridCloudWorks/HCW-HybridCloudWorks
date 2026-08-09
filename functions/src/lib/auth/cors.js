@@ -38,10 +38,18 @@
  */
 
 /** Production origins. */
-const PRODUCTION_ORIGINS = [
-  'https://hybridcloudworks.com',
-  'https://www.hybridcloudworks.com',
-];
+const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridcloudworks.com'];
+
+/**
+ * Methods advertised in a preflight response.
+ *
+ * This was `GET, POST, OPTIONS`, written before the migration added the REST
+ * surface. Fourteen registered routes use PUT, PATCH or DELETE; a browser that
+ * preflights one of those reads this header, does not find its method, and
+ * refuses to send the request — the call never reaches the guard, so nothing
+ * server-side ever logs it (TODO.md T-102).
+ */
+const ALLOW_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 
 /** Dev-only origins, any port. Never active when NODE_ENV=production. */
 const LOCALHOST_PATTERN = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
@@ -95,7 +103,7 @@ export function createCors({ environment = process.env.NODE_ENV, extraOrigins = 
         // Origin is now part of the cache key — without this a shared cache can
         // serve one origin's allow header to another.
         Vary: 'Origin',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Methods': ALLOW_METHODS,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Max-Age': '3600',
       };

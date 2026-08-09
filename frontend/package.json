@@ -33,7 +33,7 @@
     "clean": "node -e \"const fs=require('fs');const rm=p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('dist');rm('node_modules/.vite');\"",
     "clean:all": "node -e \"const fs=require('fs');const rm=p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('dist');rm('node_modules');\"",
     "test": "vitest",
-    "test:admin": "vitest run src/lib/contentImages.test.js src/pages/admin/DashboardPage.test.jsx src/pages/admin/QueuePage.test.jsx src/pages/admin/OpsHealthPage.test.jsx functions/cms-functions.test.js",
+    "test:admin": "vitest run src/lib/contentImages.test.js src/lib/functionsBase.test.js src/pages/admin/DashboardPage.test.jsx src/pages/admin/QueuePage.test.jsx src/pages/admin/OpsHealthPage.test.jsx functions/cms-functions.test.js",
     "test:rules": "firebase emulators:exec --project demo-hybridcloudworks-admin-rules --only firestore \"vitest run functions/firestore.rules.test.js\"",
     "test:e2e": "playwright test",
     "test:e2e:debug": "playwright test --debug",

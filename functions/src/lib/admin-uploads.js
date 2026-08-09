@@ -16,36 +16,26 @@
  * storage key.
  */
 
+import {
+  isValidBlobPath,
+  mediaUrlFor,
+  PUBLIC_MEDIA_CONTAINERS,
+  UPLOAD_CONTAINERS,
+} from './blob-paths.js';
+
+// Re-exported: these moved to blob-paths.js so the delivery route could share
+// them without a cycle, and call sites and tests still import them from here.
+export { isValidBlobPath, UPLOAD_CONTAINERS };
+
 const json = (status, body) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
 
-export const UPLOAD_CONTAINERS = new Set([
-  'certifications',
-  'speakerevents',
-  'covers',
-  'blogs',
-  'content',
-]);
-
 // 15 MB: gallery hero/cover images run larger than cert badges, and the
 // gallery pages never had a client-side cap under Firebase Storage.
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
-const MAX_PATH_LENGTH = 300;
-const PATH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
-
-export function isValidBlobPath(path) {
-  return (
-    typeof path === 'string' &&
-    path.length > 0 &&
-    path.length <= MAX_PATH_LENGTH &&
-    PATH_PATTERN.test(path) &&
-    !path.includes('..') &&
-    !path.endsWith('/')
-  );
-}
 
 /**
  * @param {object} deps
@@ -85,8 +75,17 @@ export function createAdminUploadHandlers({ guard, storage }) {
           return json(413, { error: 'File exceeds the 15MB upload limit' });
         }
 
-        const url = await storage.uploadBlob(container, path, buffer, contentType);
-        return json(200, { success: true, url, container, path });
+        const blobUrl = await storage.uploadBlob(container, path, buffer, contentType);
+
+        // The pages persist `url` into Cosmos, so it must be the URL that will
+        // actually serve. The raw blob URL does not: the account is closed to
+        // the internet and `allow_nested_items_to_be_public = false` overrides
+        // the containers' public access (TODO.md T-105). Public containers get
+        // the delivery route; private ones get no URL at all rather than a
+        // plausible-looking dead one.
+        const url = PUBLIC_MEDIA_CONTAINERS.has(container) ? mediaUrlFor(container, path) : '';
+
+        return json(200, { success: true, url, blobUrl, container, path });
       } catch (error) {
         context.error('uploadFile failed:', error);
         return json(500, { error: 'Failed to upload file' });

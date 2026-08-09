@@ -9,7 +9,7 @@
  * deliberately not registered — it authenticates plain (non-admin) users and
  * belongs to the frontend auth-swap phase; see lib/labs.js.
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createLabHandlers } from '../lib/labs.js';
@@ -20,28 +20,28 @@ const handlers = () =>
     store: { queryDocs, readDoc, upsertDoc, patchDoc },
   });
 
-app.http('enqueueLabJob', {
+httpRoute('enqueueLabJob', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'enqueueLabJob',
   handler: (request, context) => handlers().enqueueLabJob(request, context),
 });
 
-app.http('getLabsSnapshot', {
+httpRoute('getLabsSnapshot', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
   route: 'getLabsSnapshot',
   handler: (request, context) => handlers().getLabsSnapshot(request, context),
 });
 
-app.http('getLabJob', {
+httpRoute('getLabJob', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
   route: 'getLabJob',
   handler: (request, context) => handlers().getLabJob(request, context),
 });
 
-app.http('cancelLabJob', {
+httpRoute('cancelLabJob', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'cancelLabJob',

@@ -287,13 +287,21 @@ const getOverallHealthIcon = (status) => {
   return 'sync';
 };
 
+// Don't call a deployed backend from a developer's machine — the health widget
+// is decorative, and a cross-origin call from localhost fails on CORS anyway.
+// This used to test the base for 'cloudfunctions.net'; that literal became
+// unreachable when the GCP base URL was retired (TODO.md T-101), so the check
+// is now expressed against origin rather than against one specific host.
 const shouldFetchPlatformHealth = (functionsBase) => {
   if (!functionsBase) return false;
   if (typeof window === 'undefined') return true;
 
   const isLocalOrigin = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  const isRemoteFunctionsBase = functionsBase.includes('cloudfunctions.net');
-  return !(isLocalOrigin && isRemoteFunctionsBase);
+  if (!isLocalOrigin) return true;
+
+  // A relative base ('/api') is served by whatever is answering locally.
+  if (!/^https?:\/\//i.test(functionsBase)) return true;
+  return new URL(functionsBase).origin === window.location.origin;
 };
 
 export default function HomePage() {

@@ -7,7 +7,7 @@
  * The {collection} segment on the config routes is allowlisted in the lib
  * (ai-providers, mcp-servers) — anything else 404s before touching Cosmos.
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createAdminIntegrationHandlers } from '../lib/admin-integrations.js';
@@ -18,91 +18,91 @@ const handlers = () =>
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
   });
 
-app.http('cmsListRecordings', {
+httpRoute('cmsListRecordings', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/recordings',
   handler: (request, context) => handlers().listRecordings(request, context),
 });
 
-app.http('cmsCreateRecording', {
+httpRoute('cmsCreateRecording', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'cms/recordings',
   handler: (request, context) => handlers().createRecording(request, context),
 });
 
-app.http('cmsPatchRecording', {
+httpRoute('cmsPatchRecording', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   route: 'cms/recordings/{id}',
   handler: (request, context) => handlers().patchRecording(request, context),
 });
 
-app.http('cmsListSpeakerEvents', {
+httpRoute('cmsListSpeakerEvents', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/speakerevents',
   handler: (request, context) => handlers().listSpeakerEvents(request, context),
 });
 
-app.http('cmsGetSettings', {
+httpRoute('cmsGetSettings', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/settings',
   handler: (request, context) => handlers().getSettings(request, context),
 });
 
-app.http('cmsPutSettings', {
+httpRoute('cmsPutSettings', {
   methods: ['PUT'],
   authLevel: 'anonymous',
   route: 'cms/settings',
   handler: (request, context) => handlers().putSettings(request, context),
 });
 
-app.http('cmsGetCuratedImage', {
+httpRoute('cmsGetCuratedImage', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/images/curated/{id}',
   handler: (request, context) => handlers().getCuratedImage(request, context),
 });
 
-app.http('cmsListImages', {
+httpRoute('cmsListImages', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/images',
   handler: (request, context) => handlers().listImages(request, context),
 });
 
-app.http('cmsListConfig', {
+httpRoute('cmsListConfig', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/config/{collection}',
   handler: (request, context) => handlers().listConfig(request, context),
 });
 
-app.http('cmsPutConfig', {
+httpRoute('cmsPutConfig', {
   methods: ['PUT'],
   authLevel: 'anonymous',
   route: 'cms/config/{collection}/{id}',
   handler: (request, context) => handlers().putConfig(request, context),
 });
 
-app.http('cmsPatchConfig', {
+httpRoute('cmsPatchConfig', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   route: 'cms/config/{collection}/{id}',
   handler: (request, context) => handlers().patchConfig(request, context),
 });
 
-app.http('cmsDeleteConfig', {
+httpRoute('cmsDeleteConfig', {
   methods: ['DELETE'],
   authLevel: 'anonymous',
   route: 'cms/config/{collection}/{id}',
   handler: (request, context) => handlers().deleteConfig(request, context),
 });
 
-app.http('cmsListAiUsage', {
+httpRoute('cmsListAiUsage', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'cms/ai-usage',

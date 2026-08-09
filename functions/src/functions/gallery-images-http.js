@@ -4,7 +4,7 @@
  * through lib/blob-storage.js against the containers Terraform names after
  * the GCS path prefixes.
  */
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { deleteBlob } from '../lib/blob-storage.js';
@@ -25,7 +25,7 @@ for (const name of [
   'deleteContentGeneratedImage',
   'deleteRejectedContent',
 ]) {
-  app.http(name, {
+  httpRoute(name, {
     methods: ['POST'],
     authLevel: 'anonymous',
     route: name,

@@ -17,18 +17,22 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 38 |
-| Critical | 5 |
+| Open items | 36 |
+| Critical | 0 |
 | High | 10 |
-| Medium | 15 |
+| Medium | 18 |
 | Low | 8 |
+| Resolved since the review | 6 (T-101, T-102, T-103, T-104, T-105, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
-**Release readiness: NOT READY.** Five Critical items each independently prevent
-the deployed application from functioning. None is caught by the 534 passing
-tests, because each lives in the seam between a correctly-built module and its
-environment. Merging to a branch is fine; deploying is not.
+**Release readiness: STILL NOT VERIFIED.** All five Critical items are
+resolved, and the suite is now 575 functions tests and 31 frontend tests. That
+changes what is known to be broken; it does not change what is known to work.
+Every Critical item lived in the seam between a correctly-built module and its
+environment — exactly the seam no test in this repository can reach. **Nothing
+below the line has been exercised against a deployed Azure environment**
+(REVIEW.md §1.1), so the next step is a deployed smoke test, not a release.
 
 ---
 
@@ -36,11 +40,12 @@ environment. Merging to a branch is fine; deploying is not.
 
 Do these in sequence — later items cannot be verified before earlier ones.
 
-1. **T-101** API base URL (nothing else is testable until this lands)
-2. **T-102** CORS across all routes → **T-103** route-inventory test to lock it in
-3. **T-104 + T-105** blob credential and image delivery (one piece of work)
-4. **T-106 + T-107** delete the Cosmos key from `.env.example`, tighten CSP
-5. **Deploy a smoke test** — everything above is unverifiable from an agent session
+1. ~~**T-101** API base URL~~ — **done**, see below
+2. ~~**T-102** CORS across all routes → **T-103** route-inventory test~~ — **done**, see below
+3. ~~**T-104 + T-105**~~ blob credential and image delivery — **done**, see below
+4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
+5. **Deploy a smoke test** — everything above is unverifiable from an agent
+   session, and this is now the top open item
 6. **T-201 → T-205** the anonymous data-exposure set
 7. **T-301+** correctness and hardening
 
@@ -48,33 +53,49 @@ Do these in sequence — later items cannot be verified before earlier ones.
 
 ## CRITICAL
 
-### T-101 — `api.js` and `publicApi.js` call Google Cloud, not Azure
+### ~~T-101 — `api.js` and `publicApi.js` call Google Cloud, not Azure~~ RESOLVED
 **Category:** Configuration / contract deviation · **Label:** Confirmed Issue
 **Files:** `frontend/src/lib/api.js:8`, `frontend/src/lib/publicApi.js:11`
 
-Both hardcode `import.meta.env.VITE_GCP_FUNCTIONS_URL`. `.env.example:9` sets that
-to a Google Cloud Functions host. The correct resolver already exists —
-`frontend/src/lib/functionsBase.js` switches on `VITE_BACKEND_PROVIDER=azure` —
-and is used by only three files (`NewsletterSignup.jsx`,
-`useGenerateCuratedImages.js`, `HomePage.jsx`). Roughly sixty call sites resolve
-to Google.
+Both hardcoded `import.meta.env.VITE_GCP_FUNCTIONS_URL`. `.env.example:9` set that
+to a Google Cloud Functions host. The correct resolver already existed —
+`frontend/src/lib/functionsBase.js` — and was used by only three files
+(`NewsletterSignup.jsx`, `useGenerateCuratedImages.js`, `HomePage.jsx`). Roughly
+sixty call sites resolved to Google. Beyond the outage: admin bearer tokens
+minted for the Azure API audience would have been transmitted to a
+Google-controlled endpoint if that project is still live.
 
-`.azure/api-surface.json` → `authMigration.to` requires this change verbatim:
-*"lib/api.js swaps token source and base URL (VITE_GCP_FUNCTIONS_URL →
-VITE_AZURE_FUNCTIONS_URL)"*. The token source was swapped in #60; the base URL
-was not.
+**Resolved.** `functionsBase.js` is now the single resolver, reading only
+`VITE_AZURE_FUNCTIONS_URL`, and `api.js`, `publicApi.js` and
+`legacyBlogsTelemetry.js` all route through it. Three points differ from the
+fix as originally written:
 
-Beyond the outage: admin bearer tokens minted for the Azure API audience are
-transmitted to a Google-controlled endpoint if that project is still live.
+- **The `VITE_BACKEND_PROVIDER` switch is gone, not tested.** The review
+  proposed asserting that `VITE_BACKEND_PROVIDER=azure` resolves to the Azure
+  URL. With Firebase removed from the frontend there is no second provider to
+  switch to, so `azureConfig.js` — whose only consumer was `functionsBase.js` —
+  was deleted rather than kept as dead indirection. Duplicated resolution logic
+  is what caused this defect; leaving a vestigial branch invites its return.
+- **The base must include the `api` route prefix.** `functions/host.json` does
+  not override `routePrefix`, so `route: 'public/content'` is served at
+  `<host>/api/public/content`. `.env.example` previously set
+  `VITE_AZURE_FUNCTIONS_URL` without `/api`, which would have produced a
+  uniform 404 — the same outage under a different name.
+- **The topology is now a config value, not a code path.** `/api` for
+  same-origin, `https://<host>/api` for cross-origin. This resolved T-101
+  without waiting on the [REVIEW.md](REVIEW.md) §0.1 decision — and T-102 was
+  then resolved the same way, so §0.1 no longer gates any Critical item.
 
-**Fix:** import `getFunctionsBase()` in both files; throw a clear error when the
-base is unset; delete `VITE_GCP_FUNCTIONS_URL` from `.env.example` so it cannot
-be reintroduced. Add a test asserting `VITE_BACKEND_PROVIDER=azure` resolves to
-`VITE_AZURE_FUNCTIONS_URL`.
+Enforced by `frontend/src/lib/functionsBase.test.js` (10 tests, in `test:admin`
+so CI runs it): resolution for both topologies, the throw when unset, a guard
+that no file under `src/` mentions the retired variable, and a guard that
+`VITE_AZURE_FUNCTIONS_URL` is read in exactly one module. A deploy build with
+no base now fails in `vite.config.js` rather than shipping a broken bundle
+(`REQUIRE_API_BASE=true`, set in `deploy-azure-frontend.yml`).
 
 ---
 
-### T-102 — CORS is wired into 1 of 58 routes
+### ~~T-102 — CORS is wired into 1 of 58 routes~~ RESOLVED
 **Category:** Defect / architecture · **Label:** Confirmed Issue
 **Files:** all `functions/src/functions/*.js`; `functions/src/lib/auth/cors.js:98`; `infra/main.tf:530-544`
 
@@ -88,17 +109,31 @@ Two compounding defects: `ALLOW_METHODS` is `GET, POST, OPTIONS`, but the
 migration added `PUT`/`PATCH`/`DELETE` routes; and every authenticated call
 carries `Authorization`, forcing a preflight on all of them.
 
-**Fix:** a shared `httpRoute()` registration helper that evaluates CORS,
-short-circuits preflights, merges headers, and appends `OPTIONS` to every
-`methods` array. Extend `ALLOW_METHODS`.
+**Resolved.** `functions/src/lib/auth/http-route.js` is now the single
+registration helper, and all 59 registrations go through it. It appends
+`OPTIONS` to every `methods` array, evaluates CORS before the handler runs
+(so a preflight consumes no guard call, no store read and no rate-limit quota),
+and merges the headers onto whatever the handler returns — **including error
+responses**, because a 401 without `Access-Control-Allow-Origin` reaches the
+browser as an opaque network error and the guard's message is never shown.
+`ALLOW_METHODS` now covers `PUT`, `PATCH` and `DELETE`; fourteen routes use
+them, and a browser preflighting one of those would have refused to send.
 
-**Blocked on a decision:** same-origin (SWA linked backend / `/api/*` rewrite) vs
-cross-origin. See [REVIEW.md](REVIEW.md) — T-101 and T-102 have different correct
-answers depending on it.
+`public-submissions.js` had its own `cors.evaluate` call, now removed: with the
+wrapper in place it was a second evaluation of the same allowlist, which is
+precisely the drift hazard `cors.js` DECISION 7 exists to prevent. Its two CORS
+tests were rewritten to exercise the registered composition rather than the bare
+handler, so the coverage moved rather than disappearing.
+
+**No longer blocked on the topology decision.** Like T-101, this became
+configuration: same-origin requests either carry no `Origin` (allowed — CORS is
+not an authorization control) or carry the site's own, already in the production
+allowlist. A different SPA hostname is added through `CORS_ALLOWED_ORIGINS`
+without a code change.
 
 ---
 
-### T-103 — Write the route-inventory test the guard module declares
+### ~~T-103 — Write the route-inventory test the guard module declares~~ RESOLVED
 **Category:** Test coverage / security · **Label:** Confirmed Issue
 **File:** `functions/src/lib/auth/require-role.js:20-33` (declaration); no such test exists
 
@@ -110,14 +145,24 @@ Hand-audited state is **correct**: all 58 registrations either guard or are
 intentionally public. This is the control that keeps route 59 from shipping
 unguarded, not a live vulnerability.
 
-**Fix:** import `index.js` against a stubbed `app.http` recorder; assert per
-registration: (1) route ∈ `PUBLIC_ROUTES` or the handler reaches
-`guard.requireRole`; (2) `methods` includes `OPTIONS`; (3) CORS headers are
-emitted. Properties 2 and 3 would have caught T-102 before it shipped.
+**Resolved.** `functions/src/functions/route-inventory.test.js` imports
+`index.js` against a stubbed `app` recorder and a stubbed guard, then asserts
+all three properties across every registration: guarded or on an explicit
+eight-entry `PUBLIC_ROUTES` allowlist, `OPTIONS` registered, and CORS evaluated
+before the handler.
+
+It passed on first run, which for a test of this kind is not evidence of
+anything, so it was checked by mutation. Registering an unguarded route through
+`httpRoute` fails property 1 by name; registering a route with raw `app.http`
+fails all four assertions. Both mutations were reverted.
+
+The allowlist is the deliberate part: adding a route to it means anyone on the
+internet can call it, with no token, forever — so it carries a per-entry comment
+saying which Firestore rule it replaces.
 
 ---
 
-### T-104 — Blob storage has no credential; every upload and delete throws
+### ~~T-104 — Blob storage has no credential; every upload and delete throws~~ RESOLVED
 **Category:** Configuration / defect · **Label:** Confirmed Issue
 **Files:** `functions/src/lib/blob-storage.js:24-27`, `:143`; `infra/main.tf:560-575`
 
@@ -131,15 +176,33 @@ Dead in production: `POST cms/uploads/{container}`, both gallery delete paths,
 the certification badge flow. Invisible to `admin-uploads.test.js`, which injects
 `storage: { uploadBlob: vi.fn() }`.
 
-**Fix — do not add the connection string.** Align with the platform's keyless
-posture: `new BlobServiceClient(process.env.STORAGE_BLOB_ENDPOINT, new
-DefaultAzureCredential())`. The role assignment already exists
-(`main.tf:692`). Replace `generateSasUrl` with a user-delegation SAS
-(`getUserDelegationKey`), which needs the `Storage Blob Delegator` role added.
+**Resolved.** `blob-storage.js` now builds its client as
+`new BlobServiceClient(resolveBlobEndpoint(), new DefaultAzureCredential())`,
+matching `cosmos-client.js`. No connection string was added. `generateSasUrl`
+became a user-delegation SAS via `getUserDelegationKey` — and therefore async,
+which is safe because nothing calls it yet. `azurerm_role_assignment.func_blob_delegator`
+(`Storage Blob Delegator`) was added to `infra/main.tf`; without it
+`getUserDelegationKey` returns 403 even though the identity can read the blob.
+
+`getBlobUrl` no longer hardcodes `blob.core.windows.net`; it composes from the
+configured endpoint, so the account's cloud is not assumed.
+
+The test gap that hid this is closed by `functions/src/lib/blob-storage.test.js`
+(14 tests): endpoint and account-name resolution including the endpoint-carries-
+the-suffix case, the throw when neither setting is present, an assertion that a
+connection string is **not** accepted as configuration, and source guards that
+no shared-key path (`StorageSharedKeyCredential`, `fromConnectionString`,
+`STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`) returns to the module.
+
+Two things this does **not** establish, both requiring a deployed environment
+(REVIEW.md §1.1): that the role assignments apply cleanly, and that an upload
+succeeds end to end. The handler tests still inject a fake `uploadBlob`; that is
+appropriate for them, but it means no test in the repository exercises a real
+blob write.
 
 ---
 
-### T-105 — Uploaded images are unreachable from the internet
+### ~~T-105 — Uploaded images are unreachable from the internet~~ RESOLVED
 **Category:** Configuration / defect · **Label:** Confirmed Issue
 **Files:** `infra/main.tf:306` (and its comment), `:325`, `:333-355`
 
@@ -154,10 +217,44 @@ regardless.
 persists as `imageUrl`. Images upload successfully and render broken everywhere,
 with a dead URL stored in Cosmos.
 
-**Fix:** choose the delivery model and make code and Terraform agree — either
-open the account and front it with Cloudflare/CDN (preferred: also gets edge
-caching), or keep it locked and return a user-delegation SAS or an
-`/api/media/...` proxy URL. Correct the misleading comment either way.
+**Resolved by keeping the account closed and serving through the Function App.**
+The review preferred opening the account behind a CDN. That option reverses two
+security settings, exposes the account to the internet, and adds a service with
+a monthly floor against a USD 150 design ceiling — a spend-and-exposure
+decision, not an engineering one. It is recorded in [REVIEW.md](REVIEW.md) §0.5
+and remains available: nothing here forecloses it.
+
+Delivered:
+
+- **`GET public/media/{container}/{*blobPath}`** (anonymous), backed by
+  `functions/src/lib/public-media.js`. Reads through the managed identity that
+  already holds Storage Blob Data Contributor. `Cache-Control: public,
+  max-age=31536000, immutable` plus ETag/`If-None-Match`, so repeat views never
+  reach the function and a CDN can be layered in front later unchanged.
+- **A separate, narrower allowlist.** `PUBLIC_MEDIA_CONTAINERS` is
+  `blogs`/`covers`/`certifications` — a strict subset of the five containers
+  uploads may write to, asserted by test. `content` and `speakerevents` stay
+  private, as Terraform always said they were. This is the load-bearing control:
+  the identity can read the entire account, so the allowlist is the only thing
+  between an anonymous caller and a private container.
+- **Uploads now return a URL that will serve.** `POST cms/uploads/{container}`
+  returns the media-route path as `url` (what pages persist into Cosmos) and the
+  raw blob URL as `blobUrl` for diagnostics. A non-public container returns an
+  empty `url` rather than a plausible dead one.
+- **Stored URLs are site-relative**, so the §0.1 topology decision cannot
+  invalidate images already written to the database.
+  `resolveMediaUrl()` in `frontend/src/lib/functionsBase.js` maps them onto the
+  API origin when that base is absolute, and returns absolute source-system URLs
+  untouched.
+- **Terraform now describes reality.** The three containers are `private` —
+  which is what they were, since the account override made `"blob"` inert — and
+  the misleading `# containers opt-in below` comment is replaced with what the
+  setting actually does.
+
+Follow-up, deliberately not done here: components render `imageUrl` directly in
+roughly thirty places rather than through one helper. In the same-origin
+topology that is correct as written. **If §0.1 chooses cross-origin, those
+render sites must be routed through `resolveMediaUrl()`** — tracked as T-318.
 
 ---
 
@@ -485,6 +582,58 @@ nonetheless run continuously, billing lease-container RU.
 implemented, then use the identity-based binding form
 (`COSMOS_CONNECTION__accountEndpoint` + `__credential=managedidentity`).
 
+### T-316 — Two anonymous routes the frontend calls do not exist
+**Files:** `frontend/src/lib/legacyBlogsTelemetry.js`,
+`frontend/src/pages/shared/HomePage.jsx:325`; `functions/src/functions/`
+Neither `recordLegacyBlogsRead` nor `getPlatformHealth` is registered anywhere
+in `functions/src/`. Both are 404s.
+
+- **`recordLegacyBlogsRead`** — the legacy-blogs read beacon. It fails silently,
+  because both the `sendBeacon` and `fetch` paths swallow failures by design, so
+  fallback-container reads are unmeasured. That telemetry is the evidence for
+  retiring the fallback container.
+- **`getPlatformHealth`** — backs the home page's four cloud-status indicators,
+  which will sit at `CHECKING` and then render "Health API unavailable" to every
+  anonymous visitor on the landing page.
+
+Found while retiring the GCP base URL in T-101: both endpoints had been pointing
+at the decommissioned Google host, so the misses were invisible.
+**Fix:** port both routes (anonymous, rate-limited; the health route needs a
+cache so it cannot be used to hammer upstream status APIs), or delete the
+callers if neither feature is wanted. This is separately a case for T-103's
+route-inventory test to compare the frontend's call sites against the registered
+route table, not just the documented one.
+
+### T-317 — Retire the Firebase-era live smoke scripts and nested workflows
+**Files:** `frontend/scripts/smoke-admin-hardened-live.mjs`,
+`frontend/scripts/smoke-admin-hardened-token-live.mjs`,
+`frontend/.github/workflows/`
+The two live smoke scripts still read `VITE_GCP_FUNCTIONS_URL` and build a
+`firebaseConfig` from `VITE_FIREBASE_*`, none of which the application sets any
+more; they cannot run. `frontend/.github/workflows/` holds the source
+repository's Firebase deploy and E2E workflows — inert, since GitHub only reads
+`.github/workflows/` at the repository root, but they still reference the
+retired variable and read as live configuration.
+
+Left untouched by T-101 deliberately: porting an admin smoke to MSAL is real
+work, not a rename, and half-migrating it would produce a script that looks
+runnable and is not.
+**Fix:** port the smoke to the Entra/MSAL sign-in path, or delete both scripts
+and the nested workflow directory.
+
+### T-318 — Route image rendering through `resolveMediaUrl()` (cross-origin only)
+**Files:** ~30 components rendering `imageUrl` / `heroImageUrl` / `aiImageUrls`
+Uploaded-image URLs are stored site-relative (`/api/public/media/...`) so that a
+topology change cannot invalidate rows already in Cosmos. Components render them
+straight into `<img src>`, which is correct **only** in the same-origin topology.
+
+**Conditional on [REVIEW.md](REVIEW.md) §0.1.** If cross-origin is chosen, every
+render site must call `resolveMediaUrl()` from
+`frontend/src/lib/functionsBase.js`; the helper and its tests already exist.
+If same-origin is chosen, close this as not applicable. Doing the churn before
+the decision would touch thirty files to no purpose and risk breaking the
+absolute source-system URLs that legacy documents still hold.
+
 ---
 
 ## LOW
@@ -505,12 +654,20 @@ never built (delete the entry); ai-providers note says `oauthToken` stripped
 other. `GET /api/health` is implemented but undocumented and reports
 `process.version` anonymously.
 
-### T-403 — `.env.example` is substantially stale
+### ~~T-403 — `.env.example` is substantially stale~~ RESOLVED
 **File:** `frontend/.env.example`
-`VITE_ENTRA_API_SCOPE` is **required and undocumented** (without it every token
-is acquired for no scope). Documents `VITE_OWNER_ADMIN_EMAIL`/`_UID`; code reads
-`VITE_ADMIN_EMAILS`/`_UIDS`. Firebase secret-set instructions reference
-decommissioned tooling. Rewrite against the real `import.meta.env` inventory.
+`VITE_ENTRA_API_SCOPE` was **required and undocumented** (without it every token
+is acquired for no scope). The file documented `VITE_OWNER_ADMIN_EMAIL`/`_UID`
+and carried Firebase secret-set instructions for decommissioned tooling.
+
+**Resolved** alongside T-101: rewritten against the actual `import.meta.env`
+inventory (nine variables, enumerated in `vite.config.js`). One correction to
+the finding as written — it claimed code reads `VITE_ADMIN_EMAILS`/`_UIDS`. No
+file under `src/` reads either; the build-time admin allowlist went away with
+the MSAL swap in #60, and admin access is now the Entra App Role plus the
+`admins/{oid}` registry. Neither variable is documented in the rewrite.
+The Cosmos endpoint and read key are gone from the file, with a comment
+explaining why they must not return.
 
 ### T-404 — CSP still grants the entire Firebase/GCP surface
 **File:** `frontend/staticwebapp.config.json`
@@ -519,7 +676,10 @@ Zero Firebase imports remain, but `connect-src` still allows `*.googleapis.com`,
 — dead allowlist. `login.microsoftonline.com` is **absent** from `connect-src`
 and `frame-src`; verify admin sign-in works at all. `*.documents.azure.com` must
 go (see [REVIEW.md](REVIEW.md) Cosmos-key item). Note `'self'` does not cover the
-`api-azure` subdomain — CSP and DNS disagree about the API host.
+`api-azure` subdomain — CSP and DNS disagree about the API host. Since T-101 the
+API host is whatever `VITE_AZURE_FUNCTIONS_URL` names, so `connect-src` must be
+written against the topology chosen in [REVIEW.md](REVIEW.md) §0.1: `'self'`
+suffices for a same-origin `/api` base, and nothing else does.
 
 ### T-405 — Key Vault reads uncached, failures indistinguishable from absence
 **File:** `functions/src/lib/key-vault.js:29-41`

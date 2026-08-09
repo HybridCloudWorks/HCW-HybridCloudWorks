@@ -1,4 +1,4 @@
-import { app } from '@azure/functions';
+import { httpRoute } from '../lib/auth/http-route.js';
 
 // Import all triggers so they are registered with the Azure Functions framework
 import './admin-crud-http.js';
@@ -12,6 +12,7 @@ import './gallery-images-http.js';
 import './image-prompts-http.js';
 import './labs-http.js';
 import './ops-health-http.js';
+import './public-media.js';
 import './public-reads.js';
 import './publish-http.js';
 import './public-submissions.js';
@@ -20,7 +21,7 @@ import './cosmos-triggers.js';
 
 const BUILD_TIME = new Date().toISOString();
 
-app.http('healthCheck', {
+httpRoute('healthCheck', {
   methods: ['GET'],
   authLevel: 'anonymous',
   route: 'health', // resolves to GET /api/health
@@ -39,4 +40,3 @@ app.http('healthCheck', {
     };
   },
 });
-

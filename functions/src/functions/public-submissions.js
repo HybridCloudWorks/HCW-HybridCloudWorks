@@ -10,11 +10,14 @@
  * on a spoofable header. That is DECISION 6 doing its job — do not soften it
  * here.
  */
-import { app } from '@azure/functions';
-import { createCors } from '../lib/auth/cors.js';
+import { httpRoute } from '../lib/auth/http-route.js';
 import { createClientIdentity } from '../lib/auth/client-identity.js';
 import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
-import { validateSubmission, composeSubmissionDoc, enforceSubmissionQuota } from '../lib/submissions.js';
+import {
+  validateSubmission,
+  composeSubmissionDoc,
+  enforceSubmissionQuota,
+} from '../lib/submissions.js';
 
 const json = (status, body, headers = {}) => ({
   status,
@@ -26,17 +29,17 @@ const json = (status, body, headers = {}) => ({
  * @param {object} [deps] test seam; production uses the real modules
  */
 export function createSubmissionsHandler({
-  cors = createCors(),
   identity = createClientIdentity(),
   store = { readDoc, upsertDoc },
   now = Date.now,
 } = {}) {
   return async function handleSubmission(request, context) {
-    const cv = cors.evaluate(request);
-    if (cv.response) return { ...cv.response };
-
+    // CORS — origin allowlisting, the 403, and the preflight — is applied by
+    // httpRoute before this runs, and its headers are merged onto whatever is
+    // returned here. Evaluating it a second time would reintroduce exactly the
+    // two-allowlist hazard that cors.js DECISION 7 exists to avoid.
     if (String(request.method).toUpperCase() !== 'POST') {
-      return json(405, { ok: false, error: 'POST only' }, cv.headers);
+      return json(405, { ok: false, error: 'POST only' });
     }
 
     let clientKey;
@@ -46,26 +49,26 @@ export function createSubmissionsHandler({
       // Origin not verifiably Cloudflare and not in dev: refuse, and say why
       // in the log but not to the caller.
       context.warn('submission rejected: unverified origin');
-      return json(403, { ok: false, error: 'Forbidden' }, cv.headers);
+      return json(403, { ok: false, error: 'Forbidden' });
     }
 
     let body;
     try {
       body = await request.json();
     } catch {
-      return json(400, { ok: false, error: 'Body must be valid JSON' }, cv.headers);
+      return json(400, { ok: false, error: 'Body must be valid JSON' });
     }
 
     const validated = validateSubmission(body);
     if (validated.error) {
-      return json(400, { ok: false, error: validated.error }, cv.headers);
+      return json(400, { ok: false, error: validated.error });
     }
 
     try {
       await enforceSubmissionQuota(store, clientKey, { now: now() });
     } catch (err) {
       if (err.code === 'SUBMISSION_RATE_LIMIT') {
-        return json(429, { ok: false, error: err.message }, { ...cv.headers, 'Retry-After': '3600' });
+        return json(429, { ok: false, error: err.message }, { 'Retry-After': '3600' });
       }
       throw err;
     }
@@ -76,11 +79,11 @@ export function createSubmissionsHandler({
     await store.upsertDoc('content', doc);
 
     context.log(`submission accepted: type=${doc.type} id=${doc.id}`);
-    return json(201, { ok: true, id: doc.id }, cv.headers);
+    return json(201, { ok: true, id: doc.id });
   };
 }
 
-app.http('publicSubmitContent', {
+httpRoute('publicSubmitContent', {
   methods: ['POST', 'OPTIONS'],
   authLevel: 'anonymous',
   route: 'public/submissions',
