@@ -27,7 +27,8 @@ to the rest of the repository, not to the harness.
 Workspace agentic skills located in `.claude/skills/` are registered via [.agents/skills.json](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.agents/skills.json).
 
 ## Specialized Agents
-The repository contains 38 specialized agent role definitions under [.claude/agents/](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.claude/agents). When executing tasks matching these domains, load and follow the corresponding persona guidelines:
+The repository contains 39 specialized agent role definitions under [.claude/agents/](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.claude/agents). When executing tasks matching these domains, load and follow the corresponding persona guidelines:
+- **Code Reviewer**: [code-reviewer.md](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.claude/agents/code-reviewer.md) — operates the Code Review SOP (CODE_REVIEW_PROMPT.md v1.0); required for all pull request, feature, bug fix, refactor, security, performance and audit reviews
 - **Agentic Workflows**: [agentic-workflow-engineer.md](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.claude/agents/agentic-workflow-engineer.md)
 - **AWS Architect**: [aws-architect.md](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.claude/agents/aws-architect.md)
 - **Azure Architect**: [azure-architect.md](file:///c:/Users/saulp/Workspace/HCW-HybridCloudWorks/.claude/agents/azure-architect.md)
