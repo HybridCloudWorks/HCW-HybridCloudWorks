@@ -23,6 +23,73 @@ Last updated 2026-08-09, against `main` @ `e4873b8`.
 
 ---
 
+## 0. Decisions required by the 2026-08-09 code review
+
+Raised by the SOP review run. Each blocks engineering work that cannot proceed
+without a human decision. Tracked engineering work is in [TODO.md](TODO.md).
+
+### 0.1 Deployment topology — same-origin or cross-origin?
+
+TODO.md T-101 (API base URL) and T-102 (CORS) have **different correct answers**
+depending on this, so it must be settled first.
+
+- **Same-origin:** serve the API through the Static Web App via a linked backend
+  or a `staticwebapp.config.json` `/api/*` rewrite. CORS becomes unnecessary and
+  the API base becomes a relative path.
+- **Cross-origin:** keep `api-azure.hybridcloudworks.com` separate and wire CORS
+  across all 58 routes.
+
+The decision is recorded nowhere. `infra/main.tf:530-544` removed the platform
+CORS block on the reasoning that CORS lives in code, which implies cross-origin —
+but no `azurerm_static_web_app_function_app_registration` exists either.
+
+**Unblocked by:** an architecture decision.
+
+### 0.2 Was a Cosmos key ever deployed? (rotation decision)
+
+`frontend/.env.example:16-18` instructs operators to set `VITE_COSMOS_ENDPOINT`,
+`VITE_COSMOS_READ_KEY` and `VITE_COSMOS_DATABASE`. Anything `VITE_`-prefixed is
+compiled into the public browser bundle, and the SWA CSP still permits
+`https://*.documents.azure.com` — so a populated value would be a published,
+account-scoped read key over all 71 containers, including `admins`,
+`admin_audit_logs`, `mcp_servers` (oauthToken) and every unpublished draft.
+
+No file in `frontend/src` reads these variables, so this is a latent instruction
+rather than an active leak. Removing the lines is engineering work (TODO.md
+T-403/T-404). **The decision is whether rotation is required**, which depends on
+whether the value was ever set in a real `.env`, in CI, or in Static Web App
+application settings.
+
+**Unblocked by:** someone with portal/CI access checking. If it was ever set:
+rotate the Cosmos account keys and set `local_authentication_disabled = true`.
+
+### 0.3 Authorize inspection of live container contents
+
+Three findings cannot be closed from source and need one query each against the
+deployed data:
+
+| Question | Bears on |
+| --- | --- |
+| Document count in `content` and `blogs` | TODO.md T-206 — whether the 1000-row window is already truncating |
+| `SELECT DISTINCT VALUE c.contentStatus FROM c WHERE STARTSWITH(c.contentStatus, 'published')` | Whether the four-value public allowlist hides legacy documents the old prefix match admitted |
+| Contents of `podcasts`, `rss_cache`, `ai_insights`, `_snapshots` | TODO.md T-201/T-202 — the actual exposure of the unfiltered anonymous reads |
+
+**Unblocked by:** read access to the deployed Cosmos account.
+
+### 0.4 Credential model for the VPS agent
+
+`vps-agent/index.js:16` uses a Cosmos **account primary key** — full read/write
+on all 71 containers — deployed to a third-party VPS. Options: a resource token
+scoped to `lab_jobs`/`lab_agents` brokered by an authenticated Functions
+endpoint, or a workload identity with a scoped role assignment.
+
+**Do not deploy the agent until this is decided.** Engineering work in TODO.md
+T-401.
+
+**Unblocked by:** an architecture/security decision.
+
+---
+
 ## 1. Blocked by this environment
 
 These cannot be done from an agent session regardless of scope or approval.

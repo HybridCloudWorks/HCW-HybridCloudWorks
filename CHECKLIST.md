@@ -28,6 +28,7 @@ environment) · `Unverified` (declared in code, never exercised) · `Missing`
 | | |
 | --- | --- |
 | Total entries | 31 |
+| Critical config defects | 3 (`STORAGE_CONNECTION_STRING`, `VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) |
 | Verified | 0 |
 | Unverified | 20 |
 | Missing | 11 |
@@ -53,10 +54,10 @@ environment has been reachable from any session to date (see
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `COSMOS_ENDPOINT` | Cosmos DB account endpoint | Yes | Azure resource | `functions/src/lib/cosmos-client.js` | `XXXXX!//XXXXXXX.XXXXXX.XXXXX.XXX!` | Unverified | |
 | `COSMOS_DATABASE` | Database name | Yes | Terraform variable | `functions/src/lib/cosmos-client.js` | `XXXXXXX` | Unverified | |
-| `COSMOS_CONNECTION_STRING` | Data-plane credential | Yes | Key Vault | `functions/src/lib/cosmos-client.js` | `XXXXXXXXX!XXXXX00000!!!!!` | Missing | Carries the account primary key — see [REVIEW.md](REVIEW.md) §3.2 |
+| `COSMOS_CONNECTION_STRING` | Change-feed trigger binding only (not the SDK client) | No | App setting | `functions/src/functions/cosmos-triggers.js` | `XXXXXXXXX!XXXXX00000!!!!!` | Missing | Carries the account **primary key** and blocks `local_authentication_disabled`, for two empty trigger handlers — see [TODO.md](TODO.md) T-315 |
 | `STORAGE_ACCOUNT_NAME` | Blob storage account | Yes | Azure resource | `functions/src/lib/blob-storage.js` | `XXXXXXXXXXX` | Unverified | |
-| `STORAGE_ACCOUNT_KEY` | Blob storage shared key | Yes | Key Vault | `functions/src/lib/blob-storage.js` | `XXXXX00000!!!!!XXXXX` | Missing | Used for SAS generation |
-| `STORAGE_CONNECTION_STRING` | Blob client connection | Yes | Key Vault | `functions/src/lib/blob-storage.js` | `XXXXXXXXX!XXXXX00000!!!!!` | Missing | Client throws at first use if absent |
+| `STORAGE_ACCOUNT_KEY` | Shared key for SAS generation | **Should not exist** | — | `functions/src/lib/blob-storage.js:143` | `XXXXX00000!!!!!XXXXX` | **Missing** | Replace with user-delegation SAS via managed identity — see [TODO.md](TODO.md) T-104 |
+| `STORAGE_CONNECTION_STRING` | Blob client connection | **Should not exist** | — | `functions/src/lib/blob-storage.js:24` | `XXXXXXXXX!XXXXX00000!!!!!` | **Missing** | **Never set in Terraform; every blob operation throws.** Do NOT add it — the fix is `DefaultAzureCredential` + `STORAGE_BLOB_ENDPOINT`. See [TODO.md](TODO.md) T-104 |
 | `KEY_VAULT_URI` | Key Vault the app resolves secrets from | Yes | Azure resource | Functions host config | `XXXXX!//XXXXXXX.XXXX.XXXXX.XXX!` | Unverified | |
 
 ## 3. Azure Functions — Anti-Abuse
@@ -68,8 +69,9 @@ environment has been reachable from any session to date (see
 
 ## 4. Azure Functions — AI Providers
 
-Consumed by the 17 unimplemented AI RPCs (see [TODO.md](TODO.md) T-005). All
-`Missing`; the RPCs cannot be ported until these exist.
+Consumed by the 17 unimplemented AI RPCs (see [TODO.md](TODO.md) T-207). All
+`Missing`; the RPCs cannot be ported until these exist. **16 of those RPCs have
+live frontend call sites and are 404ing in the admin UI today.**
 
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -82,7 +84,7 @@ Consumed by the 17 unimplemented AI RPCs (see [TODO.md](TODO.md) T-005). All
 
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `FEATURE_FLAG_SCHEDULERS` | Gates the four timer triggers | Yes | App setting | `functions/src/functions/schedulers.js` | `XXXXX` | Unverified | Must stay `false` until [TODO.md](TODO.md) T-001/T-002 land, or timers fire empty |
+| `FEATURE_FLAG_SCHEDULERS` | Gates all four timer triggers together | Yes | App setting | `functions/src/functions/schedulers.js` | `XXXXX` | Unverified | **Must stay `false`.** One flag arms four timers, one of which deletes blobs with an unimplemented body — see [TODO.md](TODO.md) T-301, T-302 |
 | `NODE_ENV` | Runtime mode | No | Host | Functions runtime | `XXXXXXXXXX` | Unverified | |
 | `REGION_NAME` | Azure region, used in logging | No | Host | Functions runtime | `XXXXXX` | Unverified | Host-provided |
 | `WEBSITE_SITE_NAME` | Function App name | No | Host | Functions runtime | `XXX-XXXXXXX-XXXX` | Unverified | Host-provided |
@@ -94,8 +96,8 @@ is publicly readable — no secret may ever be added to this section.**
 
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `VITE_GCP_FUNCTIONS_URL` | API base URL for every backend call | Yes | Deployment | `frontend/src/lib/api.js`, `publicApi.js` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | Unverified | Name is a legacy artifact — it now points at Azure Functions, not GCP. Rename tracked in [TODO.md](TODO.md) |
-| `VITE_AZURE_FUNCTIONS_URL` | Intended replacement for the above | No | Deployment | `frontend/src/lib/azureConfig.js` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | Unverified | Declared but not yet the primary |
+| `VITE_GCP_FUNCTIONS_URL` | API base URL that `api.js` and `publicApi.js` actually resolve | Yes (today) | Deployment | `frontend/src/lib/api.js:8`, `publicApi.js:11` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | **Missing** | **Not a naming artifact — a live defect.** `.env.example` sets this to a Google Cloud Functions host and ~60 call sites use it. Must be retired in favour of `VITE_AZURE_FUNCTIONS_URL` via `getFunctionsBase()`. See [TODO.md](TODO.md) T-101 |
+| `VITE_AZURE_FUNCTIONS_URL` | The correct API base | **Yes** | Deployment | `frontend/src/lib/azureConfig.js`, via `functionsBase.js` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | **Missing** | Only 3 files resolve through it today (T-101). Must agree with the CSP `connect-src` and the `api-azure` DNS record |
 | `VITE_BACKEND_PROVIDER` | Selects backend implementation | No | Deployment | `frontend/src/lib/azureConfig.js` | `XXXXX` | Unverified | |
 | `VITE_ENTRA_CLIENT_ID` | SPA app registration client id | Yes | Entra app registration | `frontend/src/lib/msalConfig.js` | `00000000-0000-0000-0000-000000000000` | Unverified | Distinct from the API's `ENTRA_CLIENT_ID` |
 | `VITE_ENTRA_TENANT_ID` | Directory tenant for the SPA authority | Yes | Entra directory | `frontend/src/lib/msalConfig.js` | `00000000-0000-0000-0000-000000000000` | Unverified | Falls back to `common` if unset — set it explicitly |
