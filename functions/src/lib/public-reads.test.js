@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   createPublicReadHandlers,
+  isSoftDeleted,
   isPublicDocument,
   resolvePublishedDateValue,
   stripInternalFields,
@@ -250,6 +251,95 @@ describe('getSnapshot', () => {
     const h = createPublicReadHandlers({ store });
     const res = await h.getSnapshot(makeRequest({ params: { id: 'certifications' } }), context);
     expect(JSON.parse(res.body).snapshot.items).toEqual([1, 'two', null, ['x']]);
+  });
+});
+
+describe('T-202 — anonymous feeds filter deletions, not publication status', () => {
+  const handlers = (rows) =>
+    createPublicReadHandlers({
+      store: {
+        queryDocs: vi.fn(async (container) => rows[container] ?? []),
+        readDoc: vi.fn(),
+      },
+    });
+
+  it('listPodcasts drops soft-deleted episodes', async () => {
+    const h = handlers({
+      podcasts: [
+        { id: 'live', title: 'Kept', publishedAt: '2026-01-02' },
+        { id: 'gone', title: 'Removed', publishedAt: '2026-01-03', softDeletedAt: '2026-02-01' },
+        { id: 'expiring', title: 'Also removed', softDeleteExpiresAt: '2026-03-01' },
+      ],
+    });
+    const body = JSON.parse((await h.listPodcasts(makeRequest(), context)).body);
+    expect(body.items.map((i) => i.id)).toEqual(['live']);
+  });
+
+  it('listPodcasts still serves episodes that carry no publication status', async () => {
+    // The outage guard. Podcasts have no contentStatus/Live/Status, so
+    // filtering them on isPublicDocument — which is what T-202 literally
+    // prescribed — would return an empty page for every provider.
+    const h = handlers({
+      podcasts: [
+        { id: 'a', title: 'Episode A', publishedAt: '2026-01-01' },
+        { id: 'b', title: 'Episode B', publishedAt: '2026-01-02' },
+      ],
+    });
+    const body = JSON.parse((await h.listPodcasts(makeRequest(), context)).body);
+    expect(body.items).toHaveLength(2);
+  });
+
+  it('getFeed drops soft-deleted cache documents and insights', async () => {
+    const h = handlers({
+      rss_cache: [
+        { id: 'c1', provider: 'azure', feedName: 'Azure Blog', items: [] },
+        { id: 'c2', provider: 'azure', feedName: 'Stale', items: [], softDeletedAt: '2026-02-01' },
+      ],
+      ai_insights: [
+        { id: 'i1', provider: 'azure', active: true, summary: 'Kept' },
+        { id: 'i2', provider: 'azure', active: true, summary: 'Deleted', softDeletedAt: '2026-02-01' },
+        { id: 'i3', provider: 'azure', active: false, summary: 'Hidden' },
+      ],
+    });
+    const req = makeRequest({ query: { provider: 'azure' } });
+    const body = JSON.parse((await h.getFeed(req, context)).body);
+
+    expect(body.rssCache.map((d) => d.id)).toEqual(['c1']);
+    // A soft-deleted insight passed `active !== false` — that was the half of
+    // T-202 that leaked.
+    expect(body.insights.map((d) => d.id)).toEqual(['i1']);
+  });
+
+  it('getFeed still serves cache documents, which never carry a status', async () => {
+    const h = handlers({
+      rss_cache: [{ id: 'c1', provider: 'azure', feedName: 'Azure Blog', items: [{ title: 'x' }] }],
+      ai_insights: [{ id: 'i1', provider: 'azure', summary: 'No active flag set' }],
+    });
+    const req = makeRequest({ query: { provider: 'azure' } });
+    const body = JSON.parse((await h.getFeed(req, context)).body);
+
+    expect(body.rssCache).toHaveLength(1);
+    // `active` absent means visible — only an explicit false hides an insight.
+    expect(body.insights).toHaveLength(1);
+  });
+});
+
+describe('isSoftDeleted', () => {
+  it('is the universal half of isPublicDocument', () => {
+    expect(isSoftDeleted({ softDeletedAt: '2026-01-01' })).toBe(true);
+    expect(isSoftDeleted({ softDeleteExpiresAt: '2026-01-01' })).toBe(true);
+    expect(isSoftDeleted({})).toBe(false);
+    expect(isSoftDeleted(null)).toBe(false);
+  });
+
+  it('does not require a publication status, unlike isPublicDocument', () => {
+    // This is the distinction T-202 turned on: a cache document has no
+    // contentStatus, so isPublicDocument rejects it while isSoftDeleted admits
+    // it. Filtering rss_cache/podcasts/ai_insights on the former would have
+    // emptied three public pages.
+    const cacheDoc = { provider: 'azure', feedName: 'Azure Blog', items: [] };
+    expect(isSoftDeleted(cacheDoc)).toBe(false);
+    expect(isPublicDocument(cacheDoc)).toBe(false);
   });
 });
 

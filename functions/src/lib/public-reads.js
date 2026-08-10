@@ -12,10 +12,20 @@
  * change.
  *
  * Two rules every handler obeys:
- *   1. PUBLIC FILTER SERVER-SIDE. The browser used to apply isPublicDocument
- *      after Firestore rules; here the rules are gone, so the filter is the
- *      only thing keeping drafts and soft-deleted docs out of anonymous
- *      responses. A non-public document 404s identically to a missing one.
+ *   1. VISIBILITY FILTERED SERVER-SIDE. The browser used to apply
+ *      isPublicDocument after Firestore rules; here the rules are gone, so the
+ *      server is the only thing keeping drafts and soft-deleted docs out of
+ *      anonymous responses. A non-public document 404s identically to a
+ *      missing one.
+ *
+ *      Which filter depends on the collection, and this used to say
+ *      "isPublicDocument" flatly, which was wrong in a way that mattered:
+ *      `content` and `blogs` have an editorial workflow and use
+ *      isPublicDocument; `podcasts`, `rss_cache` and `ai_insights` have none
+ *      and use isSoftDeleted (plus `active` for insights). Applying
+ *      isPublicDocument to the latter three rejects every document — see the
+ *      note on isSoftDeleted. The invariant is that a handler filters, not
+ *      that every handler filters identically.
  *   2. NO ORDER BY ON published-date fields in Cosmos SQL. The published
  *      date lives under five aliases and ORDER BY silently drops documents
  *      missing the property — a legacy doc with only 'Published At' would
@@ -58,12 +68,43 @@ const PUBLIC_STATUSES = new Set(['published', 'published_blog', 'published_news'
 
 export function isPublicDocument(doc = {}) {
   if (!doc) return false;
-  if (doc.softDeletedAt || doc.softDeleteExpiresAt) return false;
+  if (isSoftDeleted(doc)) return false;
   return (
     doc.Live === true ||
     doc.Status === 'Live' ||
     PUBLIC_STATUSES.has(String(doc.contentStatus || ''))
   );
+}
+
+/**
+ * The half of `isPublicDocument` that applies to every collection.
+ *
+ * `isPublicDocument` combines two independent questions: has this document been
+ * deleted, and has it been published. Only the first is universal. Publication
+ * status is the *editorial content* model — `Live`, `Status`, `contentStatus` —
+ * and three of the collections served anonymously have no editorial workflow at
+ * all:
+ *
+ *   - `rss_cache` is a fetch cache, refilled by a scheduled job with a 7-day
+ *     TTL (`infra/cosmos-containers.json`). Its documents are `{provider,
+ *     feedName, items[]}`.
+ *   - `ai_insights` is generated, and carries its own visibility flag,
+ *     `active` — which is in its composite index precisely because that is how
+ *     the collection expresses hidden.
+ *   - `podcasts` is indexed on `provider + publishedAt`, with no status field.
+ *
+ * TODO.md T-202 prescribed `.filter(isPublicDocument)` on the podcasts and feed
+ * handlers. Applied literally it would have returned `false` for **every**
+ * document in all three, silently emptying the podcasts page, the news feed and
+ * the insights panel — the same shape of failure as T-101, arrived at through a
+ * security fix. The contract the module header states ("the server must
+ * filter") is honoured by applying the part that is actually meaningful.
+ *
+ * If a publication workflow is ever added to one of these collections, the
+ * corresponding handler should move to `isPublicDocument`.
+ */
+export function isSoftDeleted(doc = {}) {
+  return Boolean(doc?.softDeletedAt || doc?.softDeleteExpiresAt);
 }
 
 /** Published-date resolution across the five aliases (useCoderCornerData). */
@@ -266,7 +307,10 @@ export function createPublicReadHandlers({ store }) {
           parameters.push({ name: '@provider', value: provider });
         }
         const rows = await store.queryDocs('podcasts', query, parameters);
+        // Soft-delete only: podcasts have no publication workflow, so
+        // isPublicDocument would reject every row. See isSoftDeleted.
         const items = rows
+          .filter((doc) => !isSoftDeleted(doc))
           .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a))
           .slice(0, limit)
           .map(stripInternalFields);
@@ -300,8 +344,15 @@ export function createPublicReadHandlers({ store }) {
           200,
           {
             success: true,
-            rssCache: rssCache.map(stripInternalFields),
-            insights: insights.filter((i) => i.active !== false).map(stripInternalFields),
+            // Soft-delete applies to both; publication status applies to
+            // neither (see isSoftDeleted). `active !== false` is the
+            // ai_insights visibility model — it is in the container's composite
+            // index for exactly that reason — and a soft-deleted insight passed
+            // it, which is the half of T-202 that was a real leak.
+            rssCache: rssCache.filter((doc) => !isSoftDeleted(doc)).map(stripInternalFields),
+            insights: insights
+              .filter((doc) => doc.active !== false && !isSoftDeleted(doc))
+              .map(stripInternalFields),
           },
           120
         );
