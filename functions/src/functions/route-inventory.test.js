@@ -31,7 +31,7 @@
  * Adding a route to `PUBLIC_ROUTES` is a security decision. It means anyone on
  * the internet can call it, with no token, forever.
  */
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
 
 /** Registrations recorded in place of the real Functions host. */
 const httpRegistrations = new Map();
@@ -132,8 +132,33 @@ async function invoke(options, request) {
   }
 }
 
+/**
+ * No test in this file may touch the network.
+ *
+ * The properties below work by *invoking* every registered handler, and
+ * `public/platform-health` really does call four third-party status APIs. On a
+ * runner without egress those sockets hang until the handler's own 8 s abort
+ * fires — past vitest's 5 s test timeout — so the suite failed in CI while
+ * passing locally, where the connections are refused immediately. CI was right:
+ * a route-inventory test that reaches the internet is not testing route
+ * inventory.
+ *
+ * Rejecting rather than resolving is deliberate. It exercises the degradation
+ * path, and it means a handler that starts making outbound calls cannot quietly
+ * make this suite slow or flaky.
+ */
 beforeAll(async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new Error('network disabled in route-inventory tests');
+    })
+  );
   await import('./index.js');
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('route inventory', () => {
