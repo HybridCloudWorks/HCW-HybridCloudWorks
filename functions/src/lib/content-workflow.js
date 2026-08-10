@@ -161,7 +161,12 @@ export function validateSaveEditorDraftBody(body) {
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
-export function createContentWorkflowHandlers({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createContentWorkflowHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+}) {
   const actor = (user) => user.email || user.preferred_username || user.oid || 'admin';
 
   const auditRow = ({ action, user, request, details, contentId, contentTitle, nowIso }) => ({
@@ -205,11 +210,23 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         }
 
         const validation = validateSaveEditorDraftBody({
-          draft, title, authorName, summary, sidebarContent, orderedImageUrls, publishedDate, tags,
+          draft,
+          title,
+          authorName,
+          summary,
+          sidebarContent,
+          orderedImageUrls,
+          publishedDate,
+          tags,
         });
         if (!validation.ok) return json(400, { error: validation.error });
-        const { normalizedDraft, resolvedAuthor, normalizedTags, validatedImageUrls, nextPublishedDate } =
-          validation;
+        const {
+          normalizedDraft,
+          resolvedAuthor,
+          normalizedTags,
+          validatedImageUrls,
+          nextPublishedDate,
+        } = validation;
 
         const currentData = await store.readDoc('content', contentId, contentId);
         if (!currentData) return json(404, { error: `content ${contentId} not found` });
@@ -281,13 +298,30 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         return json(200, {
           success: true,
           contentId,
+          // The marker this write just stamped. The editor needs it for two
+          // things it could not do without it (TODO.md T-208):
+          //
+          //   1. Recognise its OWN write when the poll returns it. The client
+          //      used a one-shot boolean, which was consumed by whatever the
+          //      next poll happened to return — under `onSnapshot` that was our
+          //      own write within milliseconds; under a 20-second poll it can be
+          //      a collaborator's, and adopting their marker lets the next save
+          //      pass this very conflict check and overwrite them silently.
+          //   2. Send a correct `expectedEditedAtMs` on an immediately
+          //      following save. Without it the client keeps the pre-save value
+          //      until the next poll, so a second save inside the poll window
+          //      conflicts with the caller's own previous one.
+          blogEditedAt: nowIso,
           normalizedDraft,
           editorAuthor: resolvedAuthor,
           tagCount: normalizedTags.length,
         });
       } catch (error) {
         context.error('saveEditorDraft failed:', error);
-        return json(500, { error: 'Failed to save draft', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to save draft',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -356,7 +390,10 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         return json(200, { success: true, contentId, from: previousStatus, to: 'inspected' });
       } catch (error) {
         context.error('unpublishContentToInspected failed:', error);
-        return json(500, { error: 'Failed to unpublish content', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to unpublish content',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -379,7 +416,10 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         return json(200, { success: true, contentId });
       } catch (error) {
         context.error('deleteContentItem failed:', error);
-        return json(500, { error: 'Failed to delete content', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to delete content',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -443,7 +483,10 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         });
       } catch (error) {
         context.error('saveContentSchedule failed:', error);
-        return json(500, { error: 'Failed to save schedule', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to save schedule',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -494,7 +537,10 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         });
       } catch (error) {
         context.error('softDeleteLivePage failed:', error);
-        return json(500, { error: 'Failed to soft-delete page', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to soft-delete page',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -524,7 +570,10 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         return json(200, { success: true, contentId });
       } catch (error) {
         context.error('requestContentInspection failed:', error);
-        return json(500, { error: 'Failed to request inspection', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to request inspection',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -557,7 +606,10 @@ export function createContentWorkflowHandlers({ guard, store, now = () => new Da
         return json(200, { success: true, contentId });
       } catch (error) {
         context.error('resetContentReviewState failed:', error);
-        return json(500, { error: 'Failed to reset review state', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to reset review state',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
   };

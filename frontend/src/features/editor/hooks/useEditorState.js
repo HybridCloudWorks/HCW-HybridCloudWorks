@@ -169,7 +169,6 @@ export function useEditorState(blogId, navigate) {
   const loadTimeRef = useRef(null);
   const initializedRef = useRef(false);
   const lastSeenEditedAtMsRef = useRef(0);
-  const pendingLocalSaveRef = useRef(false);
   const orderedImageUrlsRef = useRef([]);
   useEffect(() => {
     orderedImageUrlsRef.current = orderedImageUrls;
@@ -271,10 +270,10 @@ export function useEditorState(blogId, navigate) {
       if (cancelled) return;
       setLoadError(null);
       const remoteEditedAtMs = getEditedAtMs(data);
-      lastSeenEditedAtMsRef.current = remoteEditedAtMs;
 
       if (!initializedRef.current) {
         initializedRef.current = true;
+        lastSeenEditedAtMsRef.current = remoteEditedAtMs;
         setBlog(data);
         setFields(fieldsFromDoc(data));
         setBaselineDraft(getBaselineDraftFromDoc(data));
@@ -285,16 +284,34 @@ export function useEditorState(blogId, navigate) {
         return;
       }
 
-      const hasLocalSavePending = pendingLocalSaveRef.current && remoteEditedAtMs > 0;
-      if (hasLocalSavePending) {
-        pendingLocalSaveRef.current = false;
-        loadTimeRef.current = new Date(remoteEditedAtMs);
-        setExternallyModified(false);
-        setBlog(data);
-        setOrderedImageUrls(getOrderedContentImageUrls(data));
-        return;
-      }
+      // Nothing changed since the last tick — including the case where this is
+      // our own save coming back, because `handleSave` records the marker the
+      // server returned the moment it returns it.
+      //
+      // The poll has no change detection at all, so this branch used to fall
+      // through and reset `orderedImageUrls` — user-mutable state that is only
+      // persisted on save — from the remote document every twenty seconds,
+      // discarding an in-progress reorder. It also re-rendered the whole editor
+      // on every tick while idle. (TODO.md T-209)
+      //
+      // `blogEditedAt` is the only change marker here, and `saveEditorDraft` is
+      // its only writer, so an out-of-band status change does not wake this.
+      // That is correct for what the poll is: a detector for "another editor
+      // saved this document".
+      if (remoteEditedAtMs === lastSeenEditedAtMsRef.current) return;
 
+      lastSeenEditedAtMsRef.current = remoteEditedAtMs;
+
+      // Anything that reaches here is a marker we have not seen and did not
+      // write, i.e. somebody else's save.
+      //
+      // What used to be here was a one-shot `pendingLocalSaveRef` boolean,
+      // consumed by whatever the *next* response happened to carry. Under
+      // `onSnapshot` that was reliably our own write, milliseconds later. Under
+      // a twenty-second poll it can be a collaborator's — and the branch then
+      // cleared `externallyModified` and adopted THEIR `blogEditedAt` as our
+      // baseline, so our next save passed the server's equality check and
+      // overwrote them, with no warning to either person. (TODO.md T-208)
       const wasRemoteUpdateAfterLoad =
         remoteEditedAtMs > 0 &&
         loadTimeRef.current &&
@@ -362,7 +379,6 @@ export function useEditorState(blogId, navigate) {
     setBaselineDraft(getBaselineDraftFromDoc(blog));
     setOrderedImageUrls(getOrderedContentImageUrls(blog));
     loadTimeRef.current = new Date(lastSeenEditedAtMsRef.current || Date.now());
-    pendingLocalSaveRef.current = false;
     setExternallyModified(false);
     setSaveError(null);
   }, [blog]);
@@ -381,7 +397,7 @@ export function useEditorState(blogId, navigate) {
         // Read latest fields snapshot via closure — fields is stable object ref per render
         const { draft, title, authorName, publishedDate, summary, tags, sidebarContent } = fields;
         const normalizedDraft = ensureTldrSectionAtEnd(draft);
-        await postJSON('saveEditorDraft', {
+        const response = await postJSON('saveEditorDraft', {
           contentId: blogId,
           expectedEditedAtMs,
           force,
@@ -395,8 +411,25 @@ export function useEditorState(blogId, navigate) {
           orderedImageUrls: orderedImageUrlsRef.current,
         });
 
-        pendingLocalSaveRef.current = true;
-        loadTimeRef.current = new Date();
+        // Adopt the marker the server just stamped, rather than waiting up to a
+        // poll interval to learn it (TODO.md T-208).
+        //
+        // This is what makes the poll's "is this my own write?" test an identity
+        // comparison instead of a one-shot flag, and it also fixes a second
+        // save inside the poll window: `expectedEditedAtMs` came from this ref,
+        // so without it the next save would send the pre-save value and 409
+        // against the caller's own previous write.
+        //
+        // Guarded on `> 0` so an older server that does not return the field
+        // leaves the refs alone and the poll reconciles as before — adopting a
+        // 0 here would make every later tick look like a remote edit.
+        const savedEditedAtMs = getEditedAtMs(response || {});
+        if (savedEditedAtMs > 0) {
+          lastSeenEditedAtMsRef.current = savedEditedAtMs;
+          loadTimeRef.current = new Date(savedEditedAtMs);
+        } else {
+          loadTimeRef.current = new Date();
+        }
         setExternallyModified(false);
         if (normalizedDraft !== draft) {
           setField('draft', normalizedDraft);

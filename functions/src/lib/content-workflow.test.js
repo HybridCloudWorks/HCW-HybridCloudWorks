@@ -62,10 +62,16 @@ describe('helpers', () => {
 
   it('validateSaveEditorDraftBody enforces the source ceilings', () => {
     expect(validateSaveEditorDraftBody({ draft: 'ok', tags: 'a,b' }).ok).toBe(true);
-    expect(validateSaveEditorDraftBody({ tags: Array(26).fill('t').join(',') }).error).toMatch(/25 entries/);
-    expect(validateSaveEditorDraftBody({ orderedImageUrls: ['ftp://x'] }).error).toMatch(/http\(s\)/);
+    expect(validateSaveEditorDraftBody({ tags: Array(26).fill('t').join(',') }).error).toMatch(
+      /25 entries/
+    );
+    expect(validateSaveEditorDraftBody({ orderedImageUrls: ['ftp://x'] }).error).toMatch(
+      /http\(s\)/
+    );
     expect(validateSaveEditorDraftBody({ publishedDate: 'junk' }).error).toMatch(/valid date/);
-    expect(validateSaveEditorDraftBody({ authorName: '  ' }).resolvedAuthor).toBe('Hybrid Cloud Works');
+    expect(validateSaveEditorDraftBody({ authorName: '  ' }).resolvedAuthor).toBe(
+      'Hybrid Cloud Works'
+    );
   });
 
   it('image slot builders: hero fans out, cleared slots become deletions', () => {
@@ -91,7 +97,10 @@ describe('saveEditorDraft', () => {
     });
     const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
 
-    const stale = await h.saveEditorDraft(makeRequest({ ...validBody, expectedEditedAtMs: 0 }), context);
+    const stale = await h.saveEditorDraft(
+      makeRequest({ ...validBody, expectedEditedAtMs: 0 }),
+      context
+    );
     expect(stale.status).toBe(409);
     expect(JSON.parse(stale.body).error).toBe('EDIT_CONFLICT');
     expect(store.patchDoc).not.toHaveBeenCalled();
@@ -108,7 +117,10 @@ describe('saveEditorDraft', () => {
   it('patches content, then writes version + audit with the source shapes', async () => {
     const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1', Title: 'Old' })) });
     const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
-    const res = await h.saveEditorDraft(makeRequest({ ...validBody, expectedEditedAtMs: 0 }), context);
+    const res = await h.saveEditorDraft(
+      makeRequest({ ...validBody, expectedEditedAtMs: 0 }),
+      context
+    );
     const body = JSON.parse(res.body);
     expect(body).toMatchObject({ success: true, contentId: 'c1', tagCount: 2 });
 
@@ -121,6 +133,26 @@ describe('saveEditorDraft', () => {
     const audit = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_audit_logs')[1];
     expect(audit.action).toBe('draft_saved');
     expect(audit.contentTitle).toBe('Old');
+  });
+
+  it('returns the marker it just wrote, so the client can save again immediately', async () => {
+    // The editor polls this document every twenty seconds and sends the
+    // `blogEditedAt` it last saw as `expectedEditedAtMs`. Without the marker in
+    // the response, a second save inside that window still carries the
+    // pre-save value and 409s the caller against their own previous write —
+    // and, worse, the client had to guess which polled document was its own.
+    // (TODO.md T-208)
+    const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1' })) });
+    const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
+
+    const res = await h.saveEditorDraft(
+      makeRequest({ ...validBody, expectedEditedAtMs: 0 }),
+      context
+    );
+
+    // Identical to the persisted value, not merely present: the client compares
+    // it for exact equality against what the next poll returns.
+    expect(JSON.parse(res.body).blogEditedAt).toBe(store.patchDoc.mock.calls[0][2].blogEditedAt);
   });
 
   it('preserves a published_* status instead of demoting to editing', async () => {
@@ -151,11 +183,20 @@ describe('unpublishContentToInspected', () => {
     });
     const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
     const body = JSON.parse(
-      (await h.unpublishContentToInspected(makeRequest({ contentId: 'c1', reviewNotes: 'n' }), context)).body
+      (
+        await h.unpublishContentToInspected(
+          makeRequest({ contentId: 'c1', reviewNotes: 'n' }),
+          context
+        )
+      ).body
     );
     expect(body).toMatchObject({ from: 'published', to: 'inspected' });
     const patch = store.patchDoc.mock.calls[0][2];
-    expect(patch).toMatchObject({ contentStatus: 'inspected', Live: false, scheduledPublishDate: null });
+    expect(patch).toMatchObject({
+      contentStatus: 'inspected',
+      Live: false,
+      scheduledPublishDate: null,
+    });
     expect(store.upsertDoc.mock.calls.find(([c]) => c === 'admin_audit_logs')[1].action).toBe(
       'content_unpublished'
     );
@@ -172,7 +213,9 @@ describe('deleteContentItem / softDeleteLivePage', () => {
       }),
     });
     const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    expect((await h.deleteContentItem(makeRequest({ contentId: 'gone' }), context)).status).toBe(200);
+    expect((await h.deleteContentItem(makeRequest({ contentId: 'gone' }), context)).status).toBe(
+      200
+    );
   });
 
   it('soft delete resolves blogId as a legacy content-id alias', async () => {
@@ -180,7 +223,10 @@ describe('deleteContentItem / softDeleteLivePage', () => {
       readDoc: vi.fn(async (_c, id) => (id === 'legacy-1' ? { id: 'legacy-1' } : null)),
     });
     const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    const res = await h.softDeleteLivePage(makeRequest({ blogId: 'legacy-1', reason: ' old ' }), context);
+    const res = await h.softDeleteLivePage(
+      makeRequest({ blogId: 'legacy-1', reason: ' old ' }),
+      context
+    );
     const body = JSON.parse(res.body);
     expect(body.contentId).toBe('legacy-1');
     expect(body.softDeleteExpiresAt).toBe('2026-08-08T04:00:00.000Z'); // +24h
@@ -206,7 +252,8 @@ describe('saveContentSchedule', () => {
     const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
 
     const instant = JSON.parse(
-      (await h.saveContentSchedule(makeRequest({ contentId: 'c1', instantPublish: true }), context)).body
+      (await h.saveContentSchedule(makeRequest({ contentId: 'c1', instantPublish: true }), context))
+        .body
     );
     expect(instant.scheduledPublishDate).toBeNull();
     expect(store.patchDoc.mock.calls[0][2]).toMatchObject({
@@ -225,7 +272,11 @@ describe('saveContentSchedule', () => {
     const future = JSON.parse(
       (
         await h.saveContentSchedule(
-          makeRequest({ contentId: 'c1', instantPublish: false, scheduledPublishDate: '2026-09-01T00:00:00Z' }),
+          makeRequest({
+            contentId: 'c1',
+            instantPublish: false,
+            scheduledPublishDate: '2026-09-01T00:00:00Z',
+          }),
           context
         )
       ).body
@@ -240,7 +291,10 @@ describe('inspection state RPCs', () => {
     const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
 
     await h.requestContentInspection(makeRequest({ contentId: 'c1' }), context);
-    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ inspectTrigger: true, contentStatus: 'ingested' });
+    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({
+      inspectTrigger: true,
+      contentStatus: 'ingested',
+    });
 
     await h.resetContentReviewState(makeRequest({ contentId: 'c1' }), context);
     expect(store.patchDoc.mock.calls[1][2]).toMatchObject({
