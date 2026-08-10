@@ -1,0 +1,103 @@
+/**
+ * The agent's only connection to the platform.
+ *
+ * There is deliberately no Cosmos client in this process. The agent runs on a
+ * third-party VPS, which puts it outside the trust boundary in exactly the way
+ * the browser is — so it gets the same answer the browser got during the
+ * migration: an authenticated API, not a data-plane credential
+ * (REVIEW.md §0.4, TODO.md T-401).
+ *
+ * What it holds instead is an Entra **certificate** credential for a
+ * confidential-client app registration carrying the `LabAgent` App Role. A
+ * certificate rather than a client secret because the private key can be
+ * generated on the VPS and never transmitted, and because a leaked secret is a
+ * copy-paste away from working anywhere while a leaked certificate is at least
+ * a file someone has to exfiltrate.
+ *
+ * Even so, assume the credential is stealable — a VPS is a machine you do not
+ * fully control. What bounds the damage is the server: the three endpoints
+ * this file calls are the whole of what the credential can do, and each is
+ * constrained further (claim only registered job types, complete only jobs
+ * this agent holds). See functions/src/lib/lab-agent.js.
+ */
+
+import { ClientCertificateCredential } from '@azure/identity';
+
+/**
+ * Build the API client.
+ *
+ * @param {object} config
+ * @param {string} config.apiBase - Functions base URL, including the `/api` route prefix
+ * @param {string} config.tenantId
+ * @param {string} config.clientId - the agent's app registration
+ * @param {string} config.certificatePath - PEM containing the private key
+ * @param {string} config.scope - e.g. `api://<api-client-id>/.default`
+ * @param {string} config.agentId - must match the lab_agents registry document
+ */
+export function createApiClient({
+  apiBase,
+  tenantId,
+  clientId,
+  certificatePath,
+  scope,
+  agentId,
+  fetchImpl = fetch,
+}) {
+  const credential = new ClientCertificateCredential(tenantId, clientId, certificatePath);
+
+  // The SDK caches and refreshes internally; asking per request is correct and
+  // cheap, and avoids the agent holding a token past its expiry across a long
+  // idle period.
+  async function authHeader() {
+    const token = await credential.getToken(scope);
+    if (!token?.token) throw new Error('failed to acquire an API token');
+    return `Bearer ${token.token}`;
+  }
+
+  async function post(path, body, { timeoutMs = 20000 } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetchImpl(`${apiBase}/${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: await authHeader(),
+        },
+        // agentId travels in the body on every call; the server binds it to the
+        // token's object id and refuses a mismatch, so it is a claim to be
+        // checked rather than an assertion to be trusted.
+        body: JSON.stringify({ agentId, ...body }),
+        signal: controller.signal,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || `${path} failed with HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    /** @returns {Promise<{id: string, type: string, payload: string}|null>} */
+    async claimJob() {
+      const { job } = await post('agent/claimLabJob', {});
+      return job ?? null;
+    },
+
+    /** Liveness. The server owns the field names and the busy/idle derivation. */
+    heartbeat({ status, activeJobs, hostname, version }) {
+      return post('agent/heartbeat', { status, activeJobs, hostname, version });
+    },
+
+    /** Terminal result. The server refuses jobs this agent does not hold. */
+    completeJob({ jobId, status, exitCode, output }) {
+      return post('agent/completeLabJob', { jobId, status, exitCode, output });
+    },
+  };
+}

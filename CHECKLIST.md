@@ -28,11 +28,11 @@ code, and listed so it is not reintroduced).
 
 | | |
 | --- | --- |
-| Total entries | 30 |
+| Total entries | 36 |
 | Critical config defects | 2 (`VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) — both unset, both required |
 | Verified | 0 |
 | Unverified | 21 |
-| Missing | 8 |
+| Missing | 14 |
 | Retired | 2 |
 | Last updated | 2026-08-09 |
 
@@ -62,6 +62,31 @@ environment has been reachable from any session to date (see
 | `STORAGE_ACCOUNT_KEY` | Shared key for SAS generation | **Must not exist** | — | No longer read by any code | `XXXXX00000!!!!!XXXXX` | **Retired** | T-104 resolved: SAS tokens are user-delegation, signed via managed identity. A test asserts this name cannot return to the module |
 | `STORAGE_CONNECTION_STRING` | Blob client connection | **Must not exist** | — | No longer read by any code | `XXXXXXXXX!XXXXX00000!!!!!` | **Retired** | T-104 resolved: the client is `DefaultAzureCredential` + `STORAGE_BLOB_ENDPOINT`. A test asserts this name cannot return to the module |
 | `KEY_VAULT_URI` | Key Vault the app resolves secrets from | Yes | Azure resource | Functions host config | `XXXXX!//XXXXXXX.XXXX.XXXXX.XXX!` | Unverified | |
+
+## 2b. Labs VPS Agent — Entra directory configuration
+
+Provisioned by hand, not by this repository's Terraform: these are Entra
+directory objects and Cosmos documents, not Azure resources. See
+[REVIEW.md](REVIEW.md) §0.4.
+
+**The agent holds no database credential.** If anything in this section ever
+grows a `COSMOS_*` entry, something has gone wrong.
+
+| Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `LABS_AGENT_API_BASE` | Functions API base, including the `api` route prefix | **Yes** | Deployment | `vps-agent/lib/api.js` | `XXXXX!//XXX-XXXXXXX.XXXXXXXXXXX.XXX/XXX` | **Missing** | Same value shape as `VITE_AZURE_FUNCTIONS_URL`, and subject to the same `/api` requirement |
+| `LABS_AGENT_TENANT_ID` | Directory tenant for the agent credential | **Yes** | Entra directory | `vps-agent/lib/api.js` | `00000000-0000-0000-0000-000000000000` | **Missing** | |
+| `LABS_AGENT_CLIENT_ID` | The agent's own app registration | **Yes** | Entra app registration | `vps-agent/lib/api.js` | `00000000-0000-0000-0000-000000000000` | **Missing** | **One registration per agent host**, so a compromised VPS is revoked alone rather than fleet-wide |
+| `LABS_AGENT_CERT_PATH` | PEM holding the certificate and private key | **Yes** | Generated **on the VPS** | `vps-agent/lib/api.js` | `/XXX/XXX/XXXXX-XXXXX.XXX` | **Missing** | Generate the key on the host and upload only the public certificate. Root-owned, `0600`, outside the repository |
+| `LABS_AGENT_API_SCOPE` | Scope requested for the API token | **Yes** | Entra app registration | `vps-agent/lib/api.js` | `XXX!//00000000-0000-0000-0000-000000000000/.XXXXXXX` | **Missing** | Audience must match `ENTRA_API_AUDIENCE`, exactly as `VITE_ENTRA_API_SCOPE` must |
+| `LABS_AGENT_ID` | Which `lab_agents` document this host is | **Yes** | Operator | `vps-agent/index.js` | `XXX-XXXXXXXXX-00` | **Missing** | Defaults to the hostname. A wrong value fails closed — the server refuses it unless the registry document's `oid` matches this credential |
+
+Not environment variables, but required for any of the above to work:
+
+| Input | Purpose | Required | Source | Expected Format | Validation Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `LabAgent` App Role | Gate 1 of the agent guard | **Yes** | API app registration manifest | `XXXXXXXX` | **Missing** | Assigned to each agent registration's service principal. Deliberately distinct from `Admin` — the two guards are disjoint |
+| `lab_agents/{agentId}` document | Gate 2 of the agent guard | **Yes** | Cosmos, written by an admin | `{oid, active, capabilities[]}` | **Missing** | `oid` is the agent service principal's object id. `capabilities` is what the agent may claim — the agent cannot set it. `active: false` revokes immediately |
 
 ## 3. Azure Functions — Anti-Abuse
 

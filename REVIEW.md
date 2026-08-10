@@ -27,10 +27,10 @@ Last updated 2026-08-09, against `main` @ `e4873b8`.
 
 Raised by the SOP review run. Tracked engineering work is in [TODO.md](TODO.md).
 
-**Status after the Critical fixes:** §0.1 and §0.5 no longer block anything —
-both were resolved as configuration, and the decisions now select a deployment
-shape rather than gating code. §0.2, §0.3 and §0.4 still need you: they require
-portal or data access, or a security decision, that no code change can supply.
+**Status:** §0.1, §0.4 and §0.5 no longer block engineering work — each was
+resolved in code, and what remains is configuration or provisioning. §0.2 and
+§0.3 still need you: they require portal or live-data access that no code change
+can supply.
 
 ### 0.1 Deployment topology — same-origin or cross-origin?
 
@@ -102,15 +102,47 @@ deployed data:
 
 ### 0.4 Credential model for the VPS agent
 
-`vps-agent/index.js:16` uses a Cosmos **account primary key** — full read/write
-on all 71 containers — deployed to a third-party VPS. Options: a resource token
-scoped to `lab_jobs`/`lab_agents` brokered by an authenticated Functions
-endpoint, or a workload identity with a scoped role assignment.
+**Decided and implemented — API-only.** What remains here is provisioning, not
+a decision.
 
-**Do not deploy the agent until this is decided.** Engineering work in TODO.md
-T-401.
+`vps-agent/index.js:16` used a Cosmos **account primary key** — full read/write
+on all 71 containers — deployed to a third-party VPS. This section offered two
+alternatives. One of them does not work:
 
-**Unblocked by:** an architecture/security decision.
+- **A brokered resource token is not viable.** Resource tokens are minted from
+  the SQL API's users/permissions model, which requires the master key to
+  create, and `disableLocalAuth` admits "only MSI and AAD" — it disables
+  resource tokens along with keys. Brokering them would mean the Functions app
+  holds the master key and the account can never turn local auth off, which is
+  what TODO.md T-315 exists to make possible. It would have traded one
+  permanent key for another.
+- **A workload identity via Azure Arc** remains viable, and was not chosen. It
+  would still leave the VPS holding read/write over both lab containers,
+  including other agents' rows, and it puts an Arc agent on a host you do not
+  fully control.
+
+**What was built instead:** the agent holds no database credential. It
+authenticates to the Functions API with an Entra certificate credential and can
+reach exactly three endpoints, each further constrained server-side (TODO.md
+T-401). A stolen VPS credential buys those three operations, not two
+containers.
+
+**What you still have to provision** — none of it expressible in this
+repository's Terraform, since it is Entra directory configuration:
+
+1. An app registration per agent host, confidential client, with a certificate
+   whose **private key is generated on the VPS and never transmitted**.
+2. A `LabAgent` App Role on the API app registration, assigned to that
+   registration's service principal.
+3. A `lab_agents/{agentId}` document per agent, carrying `oid` (the agent
+   service principal's object id), `active: true`, and the `capabilities` array
+   that decides which job types it may claim.
+
+Revocation is `active: false` on the registry document, which takes effect on
+the agent's next call — there is no cache to wait out.
+
+**Unblocked by:** someone with Entra directory access performing the three
+steps above. Required inputs are itemised in [CHECKLIST.md](CHECKLIST.md).
 
 ### 0.5 Media delivery — keep the account closed, or open it behind a CDN?
 

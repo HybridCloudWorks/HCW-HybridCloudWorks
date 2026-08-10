@@ -90,6 +90,37 @@ export async function upsertDoc(containerName, document) {
 }
 
 /**
+ * Replace a document only if it has not changed since it was read.
+ *
+ * The Cosmos equivalent of a Firestore single-document transaction: read,
+ * decide, write-if-unchanged. A concurrent writer loses with a 412 rather than
+ * silently overwriting, and the caller decides what losing means — for the
+ * Labs agent claiming a job, losing means "someone else took it, try the next
+ * one" (lib/lab-agent.js).
+ *
+ * Distinct from `upsertDoc`, which replaces unconditionally, and from
+ * `patchDoc`, whose read-modify-write path retries on 412 because for a field
+ * update the retry is what the caller wants. Here it is not: re-reading a job
+ * that another agent just claimed and claiming it anyway would defeat the
+ * point.
+ *
+ * @param {string} containerName
+ * @param {object} document - must include 'id' and the '_etag' it was read with
+ * @param {object} [options]
+ * @param {string} [options.partitionKey] - defaults to the document id
+ * @returns {Promise<object>} the document after the write
+ * @throws {{code: 412}} when the document changed since it was read
+ */
+export async function replaceDocIfMatch(containerName, document, options = {}) {
+  const container = getContainer(containerName);
+  const pk = options.partitionKey ?? document.id;
+  const { resource } = await container
+    .item(document.id, pk)
+    .replace(document, { accessCondition: { type: 'IfMatch', condition: document._etag } });
+  return resource;
+}
+
+/**
  * Cosmos rejects a patch specification with more than ten operations:
  * "The number of patch operations can't exceed 10."
  * https://learn.microsoft.com/azure/cosmos-db/partial-document-update-faq

@@ -45,6 +45,12 @@ This project has not cut a tagged release; entries are grouped under
 - **Self-hosted CI runner** — Azure Container Apps Job with KEDA scale-to-zero, an
   ephemeral JIT-config runner image published to Docker Hub with a GHCR mirror,
   and a `CI_RUNNER` repository-variable failover switch. (#48)
+- **Labs agent API** — `POST agent/claimLabJob`, `agent/heartbeat`,
+  `agent/completeLabJob`, behind a machine-identity guard (`LabAgent` App Role
+  plus a `lab_agents/{agentId}` registry document bound to the credential's
+  object id) that is disjoint from the admin role hierarchy. Claim atomicity is
+  an ETag-guarded write with a lease, so a dead agent's jobs are picked up
+  rather than stranded. (TODO.md T-401)
 - **`code-reviewer` agent** — carries the Code Review SOP (CODE_REVIEW_PROMPT.md
   v1.0) as agent 39 of the harness. (#68)
 - **SOP working documents** — `TODO.md`, `CHECKLIST.md`, `CHANGELOG.md`.
@@ -118,6 +124,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **The Labs VPS agent no longer holds a database credential.** It ran on a
+  third-party host with a Cosmos **account primary key** — read/write over all
+  71 containers. It now authenticates to the Functions API with an Entra
+  certificate and can reach three endpoints, each constrained server-side:
+  claims are limited to the job types its registry document lists, results can
+  only be written for jobs it currently holds, and `cancelled` is not a status
+  it may report. Revocation is a field on the registry document and takes
+  effect on the next call, with no cache in between. The rejected alternative
+  and what still needs provisioning are recorded in REVIEW.md §0.4.
+  (TODO.md T-401)
 - **CORS applied to every route.** `lib/auth/http-route.js` is now the single
   registration helper for all 59 HTTP routes: it registers `OPTIONS`, evaluates
   CORS before the handler runs, and merges the headers onto every response
