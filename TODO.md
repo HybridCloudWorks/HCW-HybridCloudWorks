@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 12 |
+| Open items | 10 |
 | Critical | 0 |
-| High | 7 |
+| High | 5 |
 | Medium | 4 |
 | Low | 1 |
-| Resolved since the review | 31 (T-101 – T-105, T-201 – T-203, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
+| Resolved since the review | 33 (T-101 – T-105, T-201 – T-203, T-208, T-209, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 758 functions tests and 70 frontend tests. That
+resolved, and the suite is now 759 functions tests and 79 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -470,7 +470,7 @@ vice versa.
 
 ---
 
-### T-208 — Editor poll can silently overwrite a collaborator's save
+### ~~T-208 — Editor poll can silently overwrite a collaborator's save~~ RESOLVED
 **Category:** Defect (lost update) · **Label:** Confirmed Issue
 **File:** `frontend/src/features/editor/hooks/useEditorState.js:291-299`, `:340`
 
@@ -481,13 +481,34 @@ it may be someone else's version — the branch then calls
 passes the server's optimistic-concurrency check and overwrites them with no
 warning to either party. A ~20,000× widening of a pre-existing race.
 
-**Fix:** make the flag identity-based — have `saveEditorDraft` return the
-`blogEditedAt` it wrote, and take the pending-save branch only when the polled
-value equals it. Strictly more correct than the `onSnapshot` version was.
+**Resolved as suggested,** identity-based. `saveEditorDraft` now returns the
+`blogEditedAt` it wrote; `handleSave` records it in `lastSeenEditedAtMsRef` and
+`loadTimeRef` the moment the response lands, and `pendingLocalSaveRef` is gone
+entirely rather than being made conditional. There is no "is this mine?" guess
+left to get wrong: a polled marker either equals one we recorded or it does not.
+
+Two details worth stating, because both were checked rather than assumed.
+`saveEditorDraft` is the **only** writer of `blogEditedAt` anywhere in
+`content-workflow.js`, so the marker is a faithful identity for editor saves and
+nothing else perturbs it. And the adoption is guarded on `savedEditedAtMs > 0`
+— against an older deployment that returns no marker the client falls back to
+the previous behaviour, because adopting a `0` would make every subsequent tick
+look like a remote edit and wedge the editor in "changed remotely" permanently.
+
+**This also fixed an adjacent bug the finding did not mention.** A second save
+inside the 20-second poll window used to send the pre-save `expectedEditedAtMs`,
+so it 409'd the caller against their *own* previous write — an editor saving
+twice in quick succession hit a spurious conflict on a document nobody else had
+touched. Adopting the returned marker removes that too.
+
+Nine hook tests plus one server-side test, verified in both directions:
+restoring the one-shot flag fails four (including the lost update itself —
+`postJSON` fires where the fixed client refuses), and dropping `blogEditedAt`
+from the response fails the server test.
 
 ---
 
-### T-209 — Editor poll discards unsaved image reordering every 20 seconds
+### ~~T-209 — Editor poll discards unsaved image reordering every 20 seconds~~ RESOLVED
 **Category:** Defect (loss of user work) · **Label:** Confirmed Issue
 **File:** `frontend/src/features/editor/hooks/useEditorState.js:301-310`
 
@@ -495,9 +516,20 @@ value equals it. Strictly more correct than the `onSnapshot` version was.
 `!wasRemoteUpdateAfterLoad` branch resets `orderedImageUrls` (user-mutable local
 state, only persisted on save) to the remote value every 20 seconds.
 
-**Fix:** early-return from `applyRemoteDoc` when
-`remoteEditedAtMs === lastSeenEditedAtMsRef.current` after initialization. Also
-removes a full editor re-render every 20 seconds while idle.
+**Resolved as suggested.** `applyRemoteDoc` early-returns once initialized when
+`remoteEditedAtMs === lastSeenEditedAtMsRef.current`, which also removes a full
+editor re-render every 20 seconds while idle.
+
+The one thing to be careful of here is that the early return must not become
+"ignore the remote document", so a test asserts a genuine remote change still
+replaces the image order. Worth recording what the guard deliberately does
+*not* wake on: `blogEditedAt` is the only change marker, and only
+`saveEditorDraft` writes it, so an out-of-band `contentStatus` change does not
+trigger a re-apply. That is correct for what this poll is — a detector for
+"another editor saved this document" — and the editor consumes only
+`blog.sourceUrl` from the polled document, so no rendered field goes stale.
+
+Removing the early return fails three tests.
 
 ---
 
@@ -1200,7 +1232,8 @@ cold-start milliseconds on an anonymous GET is a bad trade.
 
 **Remaining:** `frontend/package.json` `test:admin` still names files
 explicitly rather than globbing — see T-320, which is where that belongs and
-where the blocking diagnosis lives.
+where the blocking diagnosis lives. Each new frontend test file has to be added
+by hand until then; `useEditorState.poll.test.jsx` is the latest.
 
 ---
 
@@ -1208,15 +1241,17 @@ where the blocking diagnosis lives.
 
 Backend coverage is strong (517 tests); frontend coverage of the migration is
 effectively zero when the review ran. T-303, T-304, T-308 and T-309 would each
-have been caught by a modest test, and all four now are.
+have been caught by a modest test, and all four now are — as would T-208 and
+T-209, which are the first two to get hook-level tests rather than tests of the
+pure helpers underneath them.
 
 | Type | Scenario | Assertion | Covers |
 | --- | --- | --- | --- |
 | Integration | Route inventory over `index.js` | guard + OPTIONS + CORS per registration | T-102, T-103 |
 | Unit | `api.js` with `VITE_BACKEND_PROVIDER=azure` | resolves to `VITE_AZURE_FUNCTIONS_URL` | T-101 |
 | ~~Unit~~ | ~~Date helpers: ISO, null, malformed, Timestamp~~ | ~~correct ms or 0; never NaN~~ | ~~T-303, T-304~~ — written |
-| Hook | Save, then external `blogEditedAt` on next poll | `externallyModified === true` | T-208 |
-| Hook | Reorder images, advance 20 s, unchanged remote | ordering preserved | T-209 |
+| ~~Hook~~ | ~~Save, then external `blogEditedAt` on next poll~~ | ~~`externallyModified === true`~~ | ~~T-208~~ — written |
+| ~~Hook~~ | ~~Reorder images, advance 20 s, unchanged remote~~ | ~~ordering preserved~~ | ~~T-209~~ — written |
 | ~~Unit~~ | ~~Job poll with `timeout`; with rejected fetch~~ | ~~stops; does not fabricate `failed`~~ | ~~T-308, T-309~~ — written |
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |

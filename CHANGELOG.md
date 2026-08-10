@@ -103,6 +103,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The editor could silently overwrite a colleague's save.** Replacing
+  `onSnapshot` with a twenty-second poll left behind a one-shot "this response
+  is my own write" flag that was consumed by whatever the next tick happened to
+  return. At millisecond latency that was reliably our own write; at twenty
+  seconds it can be a collaborator's — and the branch then adopted *their* edit
+  marker as our baseline, so the next save passed the server's
+  optimistic-concurrency check and their work vanished with no warning to
+  either person. `saveEditorDraft` now returns the `blogEditedAt` it wrote and
+  the client matches on that identity, so the flag is gone rather than merely
+  narrowed. It also fixes an adjacent bug: a second save inside the poll window
+  used to send the pre-save marker and conflict against the caller's *own*
+  previous write. (TODO.md T-208)
+- **Twenty seconds was long enough to lose an image reorder.** The poll had no
+  change detection, so every idle tick re-applied the remote document over
+  `orderedImageUrls` — local state the user drags into order and that is only
+  persisted on save — and re-rendered the whole editor while doing it. Ticks
+  that carry a marker we have already seen now return early. A genuine remote
+  change still replaces the order; the tests assert both directions, because an
+  early return that goes too far is just a stale editor. (TODO.md T-209)
 - **`total` reported the page size.** Two public list endpoints measured it
   after slicing, so it always equalled `items.length` and any paginating
   consumer would conclude there was exactly one page. (TODO.md T-407)
