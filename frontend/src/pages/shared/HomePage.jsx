@@ -334,7 +334,7 @@ export default function HomePage() {
       }
 
       try {
-        const res = await fetch(`${functionsBase}/getPlatformHealth`, {
+        const res = await fetch(`${functionsBase}/public/platform-health`, {
           signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

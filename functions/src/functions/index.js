@@ -12,13 +12,14 @@ import './gallery-images-http.js';
 import './image-prompts-http.js';
 import './lab-agent-http.js';
 import './labs-http.js';
+import './legacy-blogs-telemetry-http.js';
 import './ops-health-http.js';
+import './platform-health-http.js';
 import './public-media.js';
 import './public-reads.js';
 import './publish-http.js';
 import './public-submissions.js';
 import './schedulers.js';
-import './cosmos-triggers.js';
 
 const BUILD_TIME = new Date().toISOString();
 

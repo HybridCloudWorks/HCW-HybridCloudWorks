@@ -65,7 +65,6 @@ These are set automatically by `infra/main.tf`. Listed here for reference and lo
 |---------|-----------|-------------|
 | `COSMOS_ENDPOINT` | 🟡 No | Cosmos DB account endpoint URL |
 | `COSMOS_DATABASE` | 🟡 No | Cosmos DB database name |
-| `COSMOS_CONNECTION_STRING` | 🔴 Yes | Required by Cosmos DB change-feed trigger binding only. Not used by application code — application code uses managed identity via `DefaultAzureCredential`. |
 | `STORAGE_ACCOUNT_NAME` | 🟡 No | Content storage account name |
 | `STORAGE_BLOB_ENDPOINT` | 🟡 No | Blob endpoint URL |
 | `STORAGE_QUEUE_ENDPOINT` | 🟡 No | Queue endpoint URL |

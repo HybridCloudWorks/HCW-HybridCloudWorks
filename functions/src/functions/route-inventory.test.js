@@ -103,6 +103,11 @@ const PUBLIC_ROUTES = new Set([
   'public/feed',
   'public/submissions', // anonymous write: validated, quota-limited, Cloudflare-verified
   'public/media/{container}/{*blobPath}', // container allowlist — lib/blob-paths.js
+  // Reads no database, returns four enum values. The reason it is here rather
+  // than guarded is that it backs indicators rendered to every anonymous
+  // visitor on the landing page; the reason it is safe is that its cache bounds
+  // what it can be made to do to the upstream status APIs — lib/platform-health.js
+  'public/platform-health',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';
@@ -241,7 +246,15 @@ describe('non-HTTP triggers', () => {
     expect(timerRegistrations.size).toBe(4);
   });
 
-  it('the change-feed triggers are still registered', () => {
-    expect(cosmosRegistrations.size).toBe(2);
+  it('registers no change-feed trigger', () => {
+    // Both handlers were empty TODOs, and a registered change-feed trigger runs
+    // its processor continuously whether or not the handler does anything —
+    // billing lease-container RU to log a document id. Their only reason to
+    // exist was the reason COSMOS_CONNECTION_STRING, and therefore the account
+    // primary key, sat in app settings (TODO.md T-315).
+    //
+    // Bringing them back means the identity-based binding form, not that
+    // setting. This assertion is the thing that makes reinstating it visible.
+    expect(cosmosRegistrations.size).toBe(0);
   });
 });

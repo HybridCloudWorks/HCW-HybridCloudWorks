@@ -559,15 +559,20 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
     "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
-    # COSMOS_CONNECTION_STRING is required by the Cosmos DB change-feed trigger binding
-    # See: https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
+    # COSMOS_CONNECTION_STRING is deliberately absent (TODO.md T-315).
     #
-    # NOTE: this carries the account PRIMARY KEY. It is retained only because the
-    # trigger binding needs it today; the identity-based form
-    # (COSMOS_CONNECTION__accountEndpoint + __credential=managedidentity) should
-    # replace it once azurerm_cosmosdb_sql_role_assignment.func_cosmos is
-    # confirmed working, after which local_authentication_disabled can go on.
-    "COSMOS_CONNECTION_STRING" = azurerm_cosmosdb_account.hcw.primary_sql_connection_string
+    # It carried the account PRIMARY KEY — readable by anyone with Contributor on
+    # the resource group, and present in Terraform state — and existed solely for
+    # the Cosmos change-feed trigger binding, whose two handlers were empty TODOs
+    # that nonetheless ran continuously and billed lease-container RU. The
+    # handlers and their registrations are gone, so the setting has nothing left
+    # to serve.
+    #
+    # When change-feed triggers return, use the identity-based binding form
+    # rather than reinstating this:
+    #   COSMOS_CONNECTION__accountEndpoint = azurerm_cosmosdb_account.hcw.endpoint
+    #   COSMOS_CONNECTION__credential      = "managedidentity"
+    # See https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
 
     "STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.hcw.name
     "STORAGE_BLOB_ENDPOINT"  = azurerm_storage_account.hcw.primary_blob_endpoint
@@ -700,9 +705,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 #
 # functions/src/lib/cosmos-client.js authenticates with DefaultAzureCredential
 # and no key, so without this assignment every Cosmos operation returns 403.
-# That is currently masked by COSMOS_CONNECTION_STRING in app settings, which
-# carries the primary key and keeps the trigger binding working while the
-# client would not.
+#
+# Nothing masks that any more. COSMOS_CONNECTION_STRING used to sit in app
+# settings carrying the primary key, which kept the change-feed trigger binding
+# working while every SDK call failed — so a broken role assignment would have
+# looked like a partially working app. Both are gone (TODO.md T-315): this
+# assignment is now the only thing standing between the app and a uniform 403,
+# which is the failure mode you want, because it is unambiguous.
 #
 # 00000000-0000-0000-0000-000000000002 is the built-in Data Contributor role.
 #
@@ -837,7 +846,13 @@ resource "azurerm_consumption_budget_resource_group" "hcw" {
 }
 
 # Change feed lease container — explicit so it has a controlled partition key
-# and is tracked in state (not auto-created by the SDK at runtime)
+# and is tracked in state (not auto-created by the SDK at runtime).
+#
+# Currently unused: the change-feed triggers were removed with their connection
+# string (TODO.md T-315), so nothing leases anything. Kept rather than destroyed
+# because removing a container is a destructive Terraform change that does not
+# belong in a code cleanup, and because it costs only storage on a serverless
+# account with no processor polling it.
 resource "azurerm_cosmosdb_sql_container" "leases" {
   name                = "leases"
   resource_group_name = azurerm_resource_group.hcw.name

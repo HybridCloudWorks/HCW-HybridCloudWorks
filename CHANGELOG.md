@@ -37,6 +37,18 @@ This project has not cut a tagged release; entries are grouped under
   image-prompt RPCs** — 34 named RPCs total. (#50, #54, #55, #56, #57, #58)
 - **`getLabJob` RPC** — single lab job with output, replacing the Labs console's
   per-document realtime subscription. (#65)
+- **`GET public/platform-health`** — the landing page's four cloud-status
+  indicators, ported from the Firebase original. Anonymous, with a five-minute
+  cache that is the only thing bounding how hard the route can be made to hit
+  four third-party status APIs; each provider degrades to `UNKNOWN`
+  independently and the handler never returns 500, because a dead upstream must
+  not blank the panel. Ported without adding a dependency — `axios` and
+  `rss-parser` stay unreachable. (TODO.md T-316)
+- **`POST cms/telemetry/legacy-blogs-read`** — the counter that will justify
+  retiring the `blogs` fallback container. Guarded at `viewer`, unlike the
+  anonymous Firebase original: its only caller is an admin page, so anonymity
+  bought nothing and left an unauthenticated write endpoint anyone could use to
+  poison the evidence. (TODO.md T-316)
 - **Anonymous media delivery** — `GET public/media/{container}/{*blobPath}`,
   serving uploaded images through the Function App's managed identity with
   immutable cache headers and conditional-request support. The storage account
@@ -79,6 +91,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Two routes the frontend called did not exist.** `recordLegacyBlogsRead` and
+  `getPlatformHealth` were registered nowhere — both 404s. The health one meant
+  every anonymous visitor saw four `CHECKING` indicators resolve to "Health
+  check unavailable" on the landing page; the telemetry one meant
+  fallback-container reads went unmeasured, which is the evidence for retiring
+  that container. Both were invisible until T-101, because until then they were
+  pointed at the decommissioned Google host. (TODO.md T-316)
 - **Scheduled publishing works.** `scheduledPublishDate` had a complete write
   side and no read side: an operator scheduled a post, the server validated and
   stored the date, the UI confirmed it, and nothing ever published it — no
@@ -185,6 +204,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **The Cosmos account primary key is out of app settings.**
+  `COSMOS_CONNECTION_STRING` carried it — readable by anyone with Contributor on
+  the resource group, and present in Terraform state — for the sole benefit of a
+  change-feed trigger binding whose two handlers were empty TODOs that
+  nonetheless ran continuously and billed lease-container RU. The handlers, the
+  registrations and the setting are all gone, and the route-inventory test now
+  asserts zero change-feed registrations so reinstating one is a visible
+  decision. It was also masking a real risk: the binding kept working off the
+  key while `cosmos-client.js`, which uses managed identity, would have returned
+  403 on every call if its role assignment were wrong — a half-working app is
+  harder to diagnose than a uniformly broken one. (TODO.md T-315)
 - **The Labs VPS agent no longer holds a database credential.** It ran on a
   third-party host with a Cosmos **account primary key** — read/write over all
   71 containers. It now authenticates to the Functions API with an Entra

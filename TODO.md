@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 21 |
+| Open items | 19 |
 | Critical | 0 |
 | High | 7 |
-| Medium | 7 |
+| Medium | 5 |
 | Low | 7 |
-| Resolved since the review | 23 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-301, T-303, T-304, T-305, T-306, T-307, T-308, T-309, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect; T-302 half-resolved |
+| Resolved since the review | 25 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-301, T-303, T-304, T-305, T-306, T-307, T-308, T-309, T-310, T-312, T-313, T-314, T-315, T-316, T-401, T-403) + T-311 corrected as not-a-defect; T-302 half-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 697 functions tests and 62 frontend tests. That
+resolved, and the suite is now 726 functions tests and 62 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -826,37 +826,89 @@ empty string still clears — revocation through this route stays possible, whic
 an unconditional carry-forward would have broken. Non-MCP collections are
 untouched.
 
-### T-315 — Cosmos primary key in app settings for two empty triggers
-**Files:** `infra/main.tf:565-574`; `functions/src/functions/cosmos-triggers.js:17-56`
-`COSMOS_CONNECTION_STRING` carries the account primary key, readable by anyone
-with Contributor, and blocks `local_authentication_disabled`. It exists solely
-for the change-feed binding — whose two handlers are empty TODOs that
-nonetheless run continuously, billing lease-container RU.
-**Fix:** drop the trigger import and the setting until the handlers are
-implemented, then use the identity-based binding form
-(`COSMOS_CONNECTION__accountEndpoint` + `__credential=managedidentity`).
+### ~~T-315 — Cosmos primary key in app settings for two empty triggers~~ RESOLVED
+**Files:** `infra/main.tf`; `functions/src/functions/cosmos-triggers.js` (deleted)
+`COSMOS_CONNECTION_STRING` carried the account primary key — readable by anyone
+with Contributor and present in Terraform state — and existed solely for the
+change-feed binding, whose two handlers were empty TODOs that nonetheless ran
+continuously and billed lease-container RU.
 
-### T-316 — Two anonymous routes the frontend calls do not exist
-**Files:** `frontend/src/lib/legacyBlogsTelemetry.js`,
-`frontend/src/pages/shared/HomePage.jsx:325`; `functions/src/functions/`
-Neither `recordLegacyBlogsRead` nor `getPlatformHealth` is registered anywhere
-in `functions/src/`. Both are 404s.
+Both registrations and the setting are gone. `route-inventory.test.js` now
+asserts **zero** change-feed registrations, so reinstating one is a visible
+decision rather than an import someone adds back.
 
-- **`recordLegacyBlogsRead`** — the legacy-blogs read beacon. It fails silently,
-  because both the `sendBeacon` and `fetch` paths swallow failures by design, so
-  fallback-container reads are unmeasured. That telemetry is the evidence for
-  retiring the fallback container.
-- **`getPlatformHealth`** — backs the home page's four cloud-status indicators,
-  which will sit at `CHECKING` and then render "Health API unavailable" to every
-  anonymous visitor on the landing page.
+**When the triggers return, do not reinstate the setting.** Use the
+identity-based binding form, which `infra/main.tf` now spells out at the point
+where the old one was:
 
-Found while retiring the GCP base URL in T-101: both endpoints had been pointing
-at the decommissioned Google host, so the misses were invisible.
-**Fix:** port both routes (anonymous, rate-limited; the health route needs a
-cache so it cannot be used to hammer upstream status APIs), or delete the
-callers if neither feature is wanted. This is separately a case for T-103's
-route-inventory test to compare the frontend's call sites against the registered
-route table, not just the documented one.
+    COSMOS_CONNECTION__accountEndpoint = azurerm_cosmosdb_account.hcw.endpoint
+    COSMOS_CONNECTION__credential      = "managedidentity"
+
+The `leases` container is kept rather than destroyed — removing a container is a
+destructive Terraform change that does not belong in a code cleanup, and on a
+serverless account with no processor polling it, an empty container costs only
+storage.
+
+**A side effect worth naming.** The connection string was masking a real risk:
+it kept the trigger binding working while `cosmos-client.js` — which uses
+managed identity — would have returned 403 on every call if
+`azurerm_cosmosdb_sql_role_assignment.func_cosmos` were wrong. A half-working
+app is harder to diagnose than a uniformly broken one. That assignment is now
+the only thing between the app and a uniform 403.
+
+**Not done here:** `local_authentication_disabled` is unblocked on the
+application side but not set. `.github/workflows/migrate-data.yml` still passes
+an optional `COSMOS_KEY`, and turning local auth off must follow the data
+migration rather than precede it. Moved to [REVIEW.md](REVIEW.md) §3.2 as a
+deployment decision.
+
+### ~~T-316 — Two anonymous routes the frontend calls do not exist~~ RESOLVED
+**Files:** `functions/src/lib/platform-health.js`, `functions/src/lib/legacy-blogs-telemetry.js` (both new), plus their registrations and the two frontend callers
+Neither `recordLegacyBlogsRead` nor `getPlatformHealth` was registered anywhere
+in `functions/src/`. Both were 404s. Found while retiring the GCP base URL in
+T-101 — until then both pointed at the decommissioned Google host, so the misses
+were invisible.
+
+Both are **ports, not inventions**: the originals are in
+`frontend/functions/index.js:113-249` and
+`frontend/functions/cms-functions.js:3145-3230`.
+
+**`getPlatformHealth` → `GET public/platform-health`.** Anonymous, because it
+backs four indicators rendered to every visitor on the landing page; before
+this, all four sat at `CHECKING` and then showed "Health check unavailable".
+The five-minute cache is the finding's requirement and is the only thing
+bounding how hard this route can be made to hit four third-party status APIs.
+Every provider degrades to `UNKNOWN` independently, and the handler never
+returns 500 — a dead upstream must not blank the panel, and failing towards
+`OPERATIONAL` would be the dangerous direction, since the page would claim
+everything is fine exactly when it cannot tell.
+
+Ported without adding a dependency. The original used `axios` and `rss-parser`;
+this uses global `fetch`, and for Azure a presence test on the raw feed, because
+the original parsed the feed and then read nothing but `items.length`. Both
+packages stay unreachable, which keeps T-407's "drop unreachable dependencies"
+available and keeps them out of an anonymous route's cold start. The AWS
+UTF-16 decode **is** ported faithfully — getting it wrong produces mojibake that
+`JSON.parse` rejects, which would read as "AWS is down".
+
+**`recordLegacyBlogsRead` → `POST cms/telemetry/legacy-blogs-read`.**
+**Deviation from the finding, which specifies anonymous and rate-limited: this
+one is guarded at `viewer`.** Its only caller is an admin page, so anonymity
+bought nothing and cost an unauthenticated write endpoint whose whole job is to
+increment a counter — a free write-amplification target that also lets anyone
+poison the very evidence the counter exists to produce. A guard is a stronger
+control than a rate limit here, and it is why no quota was added.
+
+That removed the reason the browser used `sendBeacon` (which cannot carry a
+bearer token); the call site is an ordinary async load, not an unload handler,
+so nothing depended on beacon semantics.
+
+Two adaptations: Firestore's `FieldValue.increment` on nested paths became a
+read-modify-write of the whole counter document, the same adaptation
+`bumpForgeStats` makes and for the same reason. And the source's allowlist named
+five `useFirestore*` hooks that went away with the migration — keeping dead
+entries would make the allowlist read as a record of live callers, so only the
+one surviving caller is listed.
 
 ### T-319 — Bound `items[]` within an `rss_cache` document
 **Files:** `functions/src/lib/public-reads.js` (getFeed); `functions/src/functions/schedulers.js` (syncRssFeeds)
@@ -1059,6 +1111,7 @@ have been caught by a modest test, and all four now are.
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
 | ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |
 | Contract | Every `implemented` contract entry | resolves to a live route | T-402 |
+| ~~Unit~~ | ~~Health route with a dead upstream; called 20× in one TTL~~ | ~~that provider UNKNOWN, others unaffected; one round of upstream calls~~ | ~~T-316~~ — written |
 
 ---
 

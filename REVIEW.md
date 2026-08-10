@@ -353,14 +353,25 @@ rather than directly at the origin.
 **Unblocked by:** pulling the current Cloudflare IP range list and deciding on a refresh mechanism —
 the list changes, so a hardcoded copy goes stale silently.
 
-### 3.2 `COSMOS_CONNECTION_STRING` carries the account primary key
+### 3.2 Turn on `local_authentication_disabled` for Cosmos
 
-Retained only because the Cosmos change-feed trigger binding requires it today. Should become the
-identity-based form (`COSMOS_CONNECTION__accountEndpoint` + `__credential=managedidentity`) once
-`azurerm_cosmosdb_sql_role_assignment.func_cosmos` is confirmed working — after which
-`local_authentication_disabled` can be enabled on the account.
+**The application side is done.** `COSMOS_CONNECTION_STRING` — which carried the account primary
+key — has been removed from app settings along with the change-feed triggers that were its only
+consumer (TODO.md T-315). No application code path uses a Cosmos key.
 
-**Unblocked by:** a deployed environment in which the role assignment can be confirmed.
+What remains is a decision, not a refactor. `.github/workflows/migrate-data.yml` still passes an
+optional `COSMOS_KEY` secret to the migration scripts; they accept Entra credentials instead
+(`scripts/lib/cli.mjs`), but the key path is still wired. Setting
+`local_authentication_disabled = true` on the account breaks that path for anyone relying on it, and
+it must be set *after* the data migration, not before.
+
+Note this also disables Cosmos **resource tokens**, which require the master key — confirmed against
+the Cosmos documentation, which describes the setting as admitting "only MSI and AAD". Nothing in
+this repository issues resource tokens today; the constraint is recorded so a future design does not
+assume they remain available.
+
+**Unblocked by:** confirming the data migration is complete and that no operator workflow depends on
+`COSMOS_KEY`, then setting `local_authentication_disabled = true` and rotating the keys (§0.2).
 
 ### 3.3 Two unconvertible pricing unit mismatches
 
