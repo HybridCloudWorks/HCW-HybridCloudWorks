@@ -1,42 +1,29 @@
-import { getFunctionsBase } from '@/lib/functionsBase';
+import { postJSON } from '@/lib/api';
 
-// `recordLegacyBlogsRead` has no Azure Functions route yet — see TODO.md T-316.
-// The beacon is therefore inert until that route is ported; it resolves through
-// the shared base so it starts working the moment the route exists, rather than
-// pointing at the decommissioned Google Cloud Functions host it used to target.
-const FUNCTIONS_BASE = getFunctionsBase();
-const LEGACY_BLOGS_TELEMETRY_ENDPOINT = FUNCTIONS_BASE
-  ? `${FUNCTIONS_BASE}/recordLegacyBlogsRead`
-  : '';
-
+/**
+ * Record that a page fell back to the legacy `blogs` container.
+ *
+ * The number this produces is the evidence for retiring that container: without
+ * it, "is anything still reading the fallback?" has no answer and the container
+ * stays forever on the grounds that nobody can prove it is unused.
+ *
+ * This used `navigator.sendBeacon` against an anonymous endpoint. The route is
+ * authenticated now (TODO.md T-316) — its only caller is an admin page, so
+ * anonymity bought nothing and cost an unauthenticated write endpoint that
+ * anyone could use to poison the very evidence it exists to produce. A beacon
+ * cannot carry a bearer token, and nothing here needed beacon semantics: the
+ * call site is an ordinary async load, not an unload handler.
+ *
+ * @param {{source?: string, count?: number, details?: object}} [event]
+ */
 export function recordLegacyBlogsRead({ source, count = 1, details = {} } = {}) {
-  if (!LEGACY_BLOGS_TELEMETRY_ENDPOINT || typeof window === 'undefined') {
-    return;
-  }
-
   const payload = {
     source: String(source || 'unknown').slice(0, 80),
     count: Number.isFinite(count) && count > 0 ? Math.floor(count) : 1,
     details: details && typeof details === 'object' && !Array.isArray(details) ? details : {},
   };
 
-  try {
-    const body = JSON.stringify(payload);
-    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-      navigator.sendBeacon(
-        LEGACY_BLOGS_TELEMETRY_ENDPOINT,
-        new Blob([body], { type: 'application/json' })
-      );
-      return;
-    }
-
-    void fetch(LEGACY_BLOGS_TELEMETRY_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(() => {});
-  } catch {
-    // Telemetry must never block content reads.
-  }
+  // Fire-and-forget. Telemetry must never block, delay, or fail a content read,
+  // which is why nothing awaits this and every rejection is swallowed.
+  void postJSON('cms/telemetry/legacy-blogs-read', payload).catch(() => {});
 }

@@ -79,6 +79,18 @@ export const ENTRA_ADMIN_APP_ROLE = 'Admin';
 export const ROLE_CACHE_TTL_MS = 60_000;
 
 /**
+ * How many resolved roles may be held at once.
+ *
+ * Not a tuning knob either, but for a duller reason: the cache had no eviction
+ * at all, so on a long-lived instance it grew with every distinct principal
+ * that ever signed in (TODO.md T-408). Entries are only created for tokens that
+ * verified, so this is bounded by real admins in practice — the limit exists so
+ * that "in practice" is not the only thing bounding it. Well above any
+ * plausible admin count, and small enough that a full sweep is trivial.
+ */
+export const ROLE_CACHE_MAX_ENTRIES = 500;
+
+/**
  * Hierarchy level for a role name, or 0 when the name is unknown or empty.
  *
  * Unknown names must sort BELOW every real role so they never satisfy a check.

@@ -46,28 +46,16 @@ export default function ContextSidebar({ content }) {
     },
   };
 
-  // NOTE: To truly support <DidYouKnow> tags written in the editor, we would need
-  // 'rehype-raw' and 'rehype-react' to parse HTML and map it to components.
-  // Given the constraints, let's provide a "renderHtml" prop approach or just
-  // dangerouslySetInnerHTML if we trust the admin input (we do, it's an admin portal).
-  // But mixing React components is tricky without MDX.
-
-  // ALTERNATIVE: Let's parse the specific widget tags manually or use a library that handles it.
-  // For simplicity and robustness given the current stack, let's treat the sidebar content
-  // as potentially containing HTML that we want to substitute with our widgets,
-  // OR we just use a helper to render them if they are in a structured format.
-
-  // Let's go with a "Hybrid" approach: The sidebar content is rendered via a custom
-  // component that can handle our specific "pseudo-tags" if we wanted,
-  // but for now let's just render it as Markdown and allow HTML (rehype-raw would be best).
-
-  // Since we don't have rehype-raw installed in the plan (I didn't see it),
-  // I will use a simple regex replacer to find our specific widget patterns
-  // and render them as actual React components if possible,
-  // OR just rely on standard HTML rendering if safety allows.
-
-  // Simpler approach for this task: The sidebar content is Markdown.
-  // We encourage the admin to use "Callouts" (blockquotes, bold headers) which we style heavily.
+  // Sidebar content is rendered as Markdown. Raw HTML in it is NOT rendered:
+  // react-markdown escapes HTML unless `rehype-raw` is added, and it is not a
+  // dependency here.
+  //
+  // Keep it that way. This content is admin-authored, but "admin-authored" is
+  // an argument about who writes it, not about what reaches the reader — the
+  // sidebar renders on public pages. Enabling raw HTML would make a compromised
+  // or careless admin account an XSS vector on the public site. Widget-style
+  // tags such as <DidYouKnow> are therefore not supported; use the callout
+  // conventions (blockquotes, bold headers) the styles already cover.
 
   return (
     <>

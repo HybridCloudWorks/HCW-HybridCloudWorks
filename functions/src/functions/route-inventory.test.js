@@ -31,7 +31,7 @@
  * Adding a route to `PUBLIC_ROUTES` is a security decision. It means anyone on
  * the internet can call it, with no token, forever.
  */
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
 
 /** Registrations recorded in place of the real Functions host. */
 const httpRegistrations = new Map();
@@ -103,6 +103,11 @@ const PUBLIC_ROUTES = new Set([
   'public/feed',
   'public/submissions', // anonymous write: validated, quota-limited, Cloudflare-verified
   'public/media/{container}/{*blobPath}', // container allowlist — lib/blob-paths.js
+  // Reads no database, returns four enum values. The reason it is here rather
+  // than guarded is that it backs indicators rendered to every anonymous
+  // visitor on the landing page; the reason it is safe is that its cache bounds
+  // what it can be made to do to the upstream status APIs — lib/platform-health.js
+  'public/platform-health',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';
@@ -127,8 +132,33 @@ async function invoke(options, request) {
   }
 }
 
+/**
+ * No test in this file may touch the network.
+ *
+ * The properties below work by *invoking* every registered handler, and
+ * `public/platform-health` really does call four third-party status APIs. On a
+ * runner without egress those sockets hang until the handler's own 8 s abort
+ * fires — past vitest's 5 s test timeout — so the suite failed in CI while
+ * passing locally, where the connections are refused immediately. CI was right:
+ * a route-inventory test that reaches the internet is not testing route
+ * inventory.
+ *
+ * Rejecting rather than resolving is deliberate. It exercises the degradation
+ * path, and it means a handler that starts making outbound calls cannot quietly
+ * make this suite slow or flaky.
+ */
 beforeAll(async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new Error('network disabled in route-inventory tests');
+    })
+  );
   await import('./index.js');
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('route inventory', () => {
@@ -241,7 +271,15 @@ describe('non-HTTP triggers', () => {
     expect(timerRegistrations.size).toBe(4);
   });
 
-  it('the change-feed triggers are still registered', () => {
-    expect(cosmosRegistrations.size).toBe(2);
+  it('registers no change-feed trigger', () => {
+    // Both handlers were empty TODOs, and a registered change-feed trigger runs
+    // its processor continuously whether or not the handler does anything —
+    // billing lease-container RU to log a document id. Their only reason to
+    // exist was the reason COSMOS_CONNECTION_STRING, and therefore the account
+    // primary key, sat in app settings (TODO.md T-315).
+    //
+    // Bringing them back means the identity-based binding form, not that
+    // setting. This assertion is the thing that makes reinstating it visible.
+    expect(cosmosRegistrations.size).toBe(0);
   });
 });
