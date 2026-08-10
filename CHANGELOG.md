@@ -103,6 +103,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The anonymous submission limit of five could be turned into two hundred.**
+  The quota read the counter, compared it, and wrote it back as three separate
+  operations, so simultaneous requests all read the same value, all passed the
+  check, and all wrote `count: 1` — accepted submissions bounded only by how
+  many the caller sent, each landing in the review queue, and a counter left at
+  1 so the trick repeated every burst rather than once an hour. The accepted
+  path is now a single conditional atomic increment: Cosmos evaluates
+  `count < limit` and applies the increment as one operation, and writes to one
+  document serialize, so exactly five concurrent callers get through. Starting a
+  window and rolling one over are the two things a predicate cannot express, so
+  they go through operations that have a loser — a create that 409s and a
+  replace that 412s — and the loser re-evaluates rather than assuming.
+  (TODO.md T-204)
+- **An IPv6 client had an unlimited submission budget.** The quota key was the
+  hash of the full address, and a standard residential IPv6 allocation is a
+  whole `/64` — 2^64 addresses, each hashing to its own counter, every one of
+  them reading well under the limit, with `submission_quota` growing a document
+  per address as a side effect. Addresses are now normalized before hashing:
+  full address for IPv4, `/64` prefix for IPv6, with `::` expanded first so one
+  address written three ways lands in one bucket, and `::ffff:` v4-mapped
+  addresses treated as the IPv4 clients they are rather than collapsing every
+  such client into a single shared bucket. (TODO.md T-205)
 - **The editor could silently overwrite a colleague's save.** Replacing
   `onSnapshot` with a twenty-second poll left behind a one-shot "this response
   is my own write" flag that was consumed by whatever the next tick happened to
