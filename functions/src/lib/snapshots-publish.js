@@ -89,8 +89,60 @@ export function sanitizeCertification(doc) {
   });
 }
 
+/**
+ * The speaker-events equivalent, and the reason it now exists.
+ *
+ * `SANITIZERS` had a `certifications` entry and no `speakerevents` one, so raw
+ * rows were written wholesale into `_snapshots/speakerevents` and served
+ * anonymously by `GET public/snapshots/speakerevents` (TODO.md T-201). Two
+ * things leaked:
+ *
+ *  - **Every admin's email address.** `upsertSpeakerEvent` stamps `createdBy`
+ *    and `updatedBy` with `actor(user)`, which resolves to the admin's email.
+ *    Both names are in `INTERNAL_FIELDS`, but `stripInternalFields` operates on
+ *    the snapshot wrapper and never descends into `items[]`, so it never
+ *    reached them.
+ *  - **Hidden events.** `display: false` was filtered only client-side, in
+ *    `CustomSessionizeWidget.jsx:451`, which is not a filter at all for anyone
+ *    reading the endpoint directly.
+ *
+ * The allowlist below is positive, not a denylist, and that is the point:
+ * `upsertSpeakerEvent` has no field allowlist on the write side, so anything an
+ * editor adds to a document would otherwise become public the next time
+ * snapshots are published. Only the fields the widget actually renders are
+ * listed — derived from `mergeWithFirestore` and the manual-entry path in
+ * `CustomSessionizeWidget.jsx`.
+ *
+ * Adding a field here publishes it to anonymous callers. That should be a
+ * deliberate act, which is why the list is enumerated rather than computed.
+ */
+export function sanitizeSpeakerEvent(doc) {
+  // Not `!== false`: a document with no `display` field is not published.
+  // Failing closed matters more than showing an event whose author forgot the
+  // flag, and it matches how sanitizeCertification treats the same field.
+  if (getFirst(doc, ['display', 'Display']) !== true) return null;
+
+  return compactObject({
+    id: doc.id,
+    name: getFirst(doc, ['name', 'Name', 'title', 'Title']),
+    date: getFirst(doc, ['date', 'Date']),
+    location: getFirst(doc, ['location', 'Location']),
+    location_coords: serializeValue(getFirst(doc, ['location_coords', 'locationCoords'])),
+    description: getFirst(doc, ['description', 'Description']),
+    eventUrl: getFirst(doc, ['eventUrl', 'event_url', 'website', 'Website']),
+    presentationUrl: getFirst(doc, ['presentationUrl', 'presentation_url']),
+    image: sanitizeImageValue(getFirst(doc, ['image', 'Image'])),
+    eventImageUrl: sanitizeImageValue(getFirst(doc, ['eventImageUrl', 'event_image_url'])),
+    // The join key the widget matches Sessionize entries on. Not sensitive —
+    // Sessionize ids are public — and omitting it would break the merge.
+    sessionizeId: getFirst(doc, ['sessionizeId', 'sessionize_id']),
+    display: true,
+  });
+}
+
 const SANITIZERS = {
   certifications: sanitizeCertification,
+  speakerevents: sanitizeSpeakerEvent,
 };
 
 const SNAPSHOT_COLLECTIONS = ['certifications', 'speakerevents'];
@@ -128,7 +180,10 @@ export function createSnapshotPublishHandlers({ guard, store, now = () => new Da
         return json(200, { ...results, generatedAt });
       } catch (error) {
         context.error('publishSnapshot failed:', error);
-        return json(500, { error: 'Failed to publish snapshots', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to publish snapshots',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
   };

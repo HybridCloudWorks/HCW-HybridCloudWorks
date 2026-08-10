@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 35 |
+| Open items | 34 |
 | Critical | 0 |
-| High | 10 |
+| High | 9 |
 | Medium | 18 |
 | Low | 7 |
-| Resolved since the review | 7 (T-101, T-102, T-103, T-104, T-105, T-401, T-403) |
+| Resolved since the review | 8 (T-101, T-102, T-103, T-104, T-105, T-201, T-401, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 619 functions tests and 31 frontend tests. That
+resolved, and the suite is now 630 functions tests and 31 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -46,7 +46,7 @@ Do these in sequence — later items cannot be verified before earlier ones.
 4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
 5. **Deploy a smoke test** — everything above is unverifiable from an agent
    session, and this is now the top open item
-6. **T-201 → T-205** the anonymous data-exposure set
+6. **T-201 → T-205** the anonymous data-exposure set (~~T-201~~ done)
 7. **T-301+** correctness and hardening
 
 ---
@@ -260,7 +260,7 @@ render sites must be routed through `resolveMediaUrl()`** — tracked as T-318.
 
 ## HIGH
 
-### T-201 — `speakerevents` snapshot leaks admin emails and hidden events anonymously
+### ~~T-201 — `speakerevents` snapshot leaks admin emails and hidden events anonymously~~ RESOLVED
 **Category:** Security · **Label:** Confirmed Issue / Security Sensitive
 **Files:** `functions/src/lib/snapshots-publish.js:92-96,110-114`; `functions/src/lib/public-reads.js:219-231`
 
@@ -279,9 +279,34 @@ render sites must be routed through `resolveMediaUrl()`** — tracked as T-318.
 `sanitizeCertification` does exactly the right thing for the sibling collection,
 which proves this is an oversight rather than a design choice.
 
-**Fix:** add `speakerevents: sanitizeSpeakerEvent` modelled on the certifications
-sanitizer — require `display === true`, positive field allowlist. Defence in
-depth: `items: (doc.items || []).map(stripInternalFields)` in `getSnapshot`.
+**Resolved, both halves.**
+
+- **`sanitizeSpeakerEvent`** in `snapshots-publish.js`, modelled on the
+  certifications sanitizer: requires `display === true` (failing closed when the
+  field is absent, not just when it is `false`), and emits a positive allowlist
+  of the ten fields `CustomSessionizeWidget.jsx` actually renders. Positive
+  rather than a denylist because `upsertSpeakerEvent` has no write-side
+  allowlist — anything an editor adds would otherwise publish itself.
+- **`getSnapshot` now descends into `items[]`**, so `stripInternalFields`
+  reaches the per-item `createdBy`/`updatedBy` it previously skipped. This is
+  defence in depth, not the boundary: a collection with no sanitizer would still
+  leak every non-internal field and every `display: false` row.
+
+Verified by mutation, since both halves passing is not by itself evidence:
+removing the `SANITIZERS` entry fails two tests, and disabling the `items[]`
+descent fails one. A further test asserts that **every** collection in
+`SNAPSHOT_COLLECTIONS` is sanitized, so adding a third without a sanitizer —
+the exact shape of this bug — now fails in CI rather than in production.
+
+One test had to be rewritten rather than added: `publishSnapshot` had a case
+named *"writes sanitized certifications and **raw** speakerevents"*, which
+asserted the leak. It passed, and passing meant nothing.
+
+**Not verified against live data.** REVIEW.md §0.3 asks for the contents of
+`_snapshots`; until someone looks, the size of the historical exposure is
+unknown. Note that the fix takes effect only when snapshots are next published —
+**an already-published `_snapshots/speakerevents` document keeps whatever it
+holds until `publishSnapshot` runs again.**
 
 ---
 

@@ -223,7 +223,27 @@ export function createPublicReadHandlers({ store }) {
         if (!PUBLIC_SNAPSHOTS.has(id)) return json(404, { error: 'Snapshot not found' });
         const doc = await store.readDoc('_snapshots', id, id);
         if (!doc) return json(404, { error: 'Snapshot not found' });
-        return json(200, { success: true, snapshot: stripInternalFields(doc) }, 600);
+
+        // Defence in depth. The publish-side sanitizers
+        // (lib/snapshots-publish.js) are the real boundary — they decide which
+        // fields exist in the stored snapshot at all. But stripInternalFields
+        // used to be applied to the wrapper only, so `createdBy` and
+        // `updatedBy` inside items[] were never reached, and a collection with
+        // no sanitizer leaked wholesale (TODO.md T-201).
+        //
+        // Descending here means a future snapshot collection added without a
+        // sanitizer still cannot publish admin emails. It is not a substitute
+        // for the sanitizer: a missing one still leaks every non-internal
+        // field, and display:false rows.
+        const snapshot = stripInternalFields(doc);
+        if (Array.isArray(snapshot.items)) {
+          snapshot.items = snapshot.items.map((item) =>
+            item && typeof item === 'object' && !Array.isArray(item)
+              ? stripInternalFields(item)
+              : item
+          );
+        }
+        return json(200, { success: true, snapshot }, 600);
       } catch (error) {
         context.error('publicGetSnapshot failed:', error);
         return json(500, { error: 'Failed to get snapshot' });
