@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 28 |
+| Open items | 26 |
 | Critical | 0 |
 | High | 7 |
-| Medium | 14 |
+| Medium | 12 |
 | Low | 7 |
-| Resolved since the review | 15 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect |
-| Last updated | 2026-08-09 |
+| Resolved since the review | 17 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-306, T-307, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect |
+| Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 649 functions tests and 31 frontend tests. That
+resolved, and the suite is now 664 functions tests and 31 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -581,24 +581,63 @@ documents sharing a slug resolve arbitrarily, and a published article can 404
 because an unpublished duplicate sorted first. **Fix:** filter in SQL, `ORDER BY
 c._ts DESC` (always present, so the drop-on-undefined trap does not apply).
 
-### T-306 — Upload size checked after allocation
-**File:** `functions/src/lib/admin-uploads.js:68-86`
+### ~~T-306 — Upload size checked after allocation~~ RESOLVED
+**File:** `functions/src/lib/admin-uploads.js`
 Full JSON parse → full base64 string → full `Buffer` decode → *then* the 413.
 ~250 MB transient peak for a 100 MB body against a 2048 MB instance.
-Editor-gated, so not anonymously reachable. **Fix:** `Content-Length` pre-check
-and a `dataBase64.length` check before `Buffer.from`; add
-`http.maxRequestBodySize` to `host.json` (also covers the anonymous
-submissions parse). Contract says 5 MB, implementation is 15 MB — reconcile.
+Editor-gated, so not anonymously reachable.
 
-### T-307 — Upload `contentType` unvalidated on publicly-readable containers
-**File:** `functions/src/lib/admin-uploads.js:70`, `blob-storage.js:57`
-Taken verbatim from the body with no allowlist. An editor can upload
+Three checks now run in increasing order of cost: `Content-Length` before the
+body is read at all, `dataBase64.length` before `Buffer.from`, and the decoded
+byte count as the final authority (base64 tolerates whitespace and padding).
+The header one is an early reject rather than the limit — it is caller-supplied
+and absent on a chunked request, so it can only ever turn work away, never
+authorize it.
+
+**One part of the prescription does not exist.** There is no
+`http.maxRequestBodySize` in `host.json`. The v2+ `extensions.http` schema is
+`routePrefix`, `maxOutstandingRequests`, `maxConcurrentRequests`,
+`dynamicThrottlesEnabled`, `hsts`, and `customHeaders` — nothing else
+([host.json settings](https://learn.microsoft.com/azure/azure-functions/functions-bindings-http-webhook#hostjson-settings),
+confirmed against the live reference). Adding the key would have been silently
+ignored and would have read, to the next person, as a limit that was in force.
+The anonymous submissions parse the finding wanted covered therefore still needs
+its own in-handler check; that is not in this fix.
+
+Contract said 5 MB against a 15 MB implementation. Reconciled to 15 MB, which is
+the deliberate value — gallery hero images run larger than cert badges, and
+CertificationsPage's 5 MB picker limit is that page's UX, not the route's rule.
+
+### ~~T-307 — Upload `contentType` unvalidated on publicly-readable containers~~ RESOLVED
+**File:** `functions/src/lib/admin-uploads.js`, `blob-storage.js`
+Taken verbatim from the body with no allowlist. An editor could upload
 `evil.html` as `text/html` into `certifications`. Different origin from the SPA,
-so not XSS — arbitrary content hosting on an org-owned domain. Also: no
-`ifNoneMatch`, so a caller-chosen path silently overwrites existing assets.
-**Fix:** content-type allowlist + matching extension check + `ifNoneMatch: '*'`.
-(The container allowlist and `isValidBlobPath` were attacked and held — do not
-change those.)
+so not XSS — arbitrary content hosting on an org-owned domain. Also no
+`ifNoneMatch`, so a caller-chosen path silently overwrote existing assets.
+
+Now an allowlist of six image types, each mapped to the extensions that may
+declare it; the declared type must be in the list **and** agree with the path's
+extension, because letting them disagree is how `badge.png` ends up served as
+`text/html`. `image/svg+xml` is accepted into private containers only —
+SubmitUrlsPage's picker offers SVG and uploads to `content`, which the anonymous
+media route does not serve, whereas an SVG on a public URL is a scriptable
+document executing in the storage origin. `nosniff` does not help there: it
+stops a browser guessing a type, and here the declared type is the problem.
+
+`uploadBlob` gained an `options.overwrite` flag that becomes
+`conditions: { ifNoneMatch: '*' }`; the admin route opts in, so the default is
+unchanged for the AI-image and migration paths that rewrite deterministic keys
+on purpose. All three upload call sites mint timestamped, randomized paths, so
+the new 409 means something unintended. It is returned without logging — a
+conflict is an outcome, not a failure.
+
+The condition is asserted in `blob-storage.test.js` against a mocked SDK, not
+only in the handler test: the handler test injects a fake `uploadBlob`, and
+that is exactly the shape that let T-104 stay green while every real upload
+threw.
+
+(The container allowlist and `isValidBlobPath` were attacked and held — not
+changed.)
 
 ### T-308 — Labs console polls forever on `timeout`, and fabricates `failed`
 **File:** `frontend/src/pages/admin/LabsPage.jsx:373-381`
@@ -899,7 +938,7 @@ modest test.
 | Unit | Job poll with `timeout`; with rejected fetch | stops; does not fabricate `failed` | T-308 |
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
-| Unit | `uploadFile` `text/html`; oversized Content-Length | 415; 413 before decode | T-306, T-307 |
+| ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |
 | Contract | Every `implemented` contract entry | resolves to a live route | T-402 |
 
 ---

@@ -204,6 +204,30 @@ This project has not cut a tagged release; entries are grouped under
 - **`deleteSetArtifacts` queries one logical partition** instead of fanning out
   across all of them; `queryDocs` gained an optional `partitionKey`.
   (TODO.md T-312)
+- **Uploads no longer accept an arbitrary content type.** `contentType` was
+  taken verbatim from the body and stored as the blob's Content-Type, which the
+  media route serves back: an editor could host `evil.html` as `text/html` on an
+  org-owned domain. Six image types are now allowed, each having to agree with
+  the path's extension — `badge.png` declared `text/html` and `evil.html`
+  declared `image/png` are both refused. `image/svg+xml` is accepted only into
+  containers the anonymous route does not serve, since an SVG on a public URL is
+  a scriptable document in the storage origin and `nosniff` does not address a
+  type that was declared rather than guessed. (TODO.md T-307)
+- **A caller-chosen upload path can no longer replace a live asset.** Uploads
+  from the admin route are conditioned on `If-None-Match: *` and answer 409
+  instead of overwriting; `uploadBlob`'s default is unchanged, so the paths that
+  rewrite deterministic keys on purpose still do. The condition is asserted
+  against a mocked SDK rather than only against the handler's fake storage —
+  that fake is what let T-104 stay green while every real upload threw.
+  (TODO.md T-307)
+- **Upload size is checked before memory is committed.** The 413 came after a
+  full JSON parse, a full base64 string and a full `Buffer` decode — roughly a
+  250 MB peak for a 100 MB body on a 2048 MB instance. `Content-Length` is now
+  checked before the body is read and `dataBase64.length` before it is decoded,
+  with the decoded count still the final authority. There is no
+  `http.maxRequestBodySize` in `host.json` to complement this; the v2+
+  `extensions.http` schema has no such key, so the anonymous submissions parse
+  still needs its own check. (TODO.md T-306)
 
 ### Infrastructure
 

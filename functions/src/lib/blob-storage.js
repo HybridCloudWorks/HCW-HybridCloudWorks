@@ -116,15 +116,29 @@ export function getContainerClient(containerName) {
  * @param {Buffer|ReadableStream} content - File content
  * @param {string} contentType - MIME type (e.g. 'image/png')
  * @param {object} [metadata] - Custom metadata key-value pairs
+ * @param {object} [options]
+ * @param {boolean} [options.overwrite=true] - When false, the upload is
+ *   conditioned on `If-None-Match: *` and the service answers 409
+ *   `BlobAlreadyExists` rather than replacing an existing blob. Opt-in rather
+ *   than the default so the AI-image and migration paths, which rewrite the
+ *   same deterministic keys on purpose, keep working unchanged (TODO.md T-307).
  * @returns {Promise<string>} URL of the uploaded blob
  */
-export async function uploadBlob(containerName, blobName, content, contentType, metadata = {}) {
+export async function uploadBlob(
+  containerName,
+  blobName,
+  content,
+  contentType,
+  metadata = {},
+  options = {}
+) {
   const containerClient = getContainerClient(containerName);
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
   await blockBlobClient.upload(content, Buffer.byteLength(content), {
     blobHTTPHeaders: { blobContentType: contentType },
     metadata,
+    ...(options.overwrite === false ? { conditions: { ifNoneMatch: '*' } } : {}),
   });
 
   return blockBlobClient.url;

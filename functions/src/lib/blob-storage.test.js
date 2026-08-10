@@ -20,7 +20,29 @@ import {
   resolveAccountName,
   getBlobUrl,
   resetBlobServiceForTests,
+  uploadBlob,
 } from './blob-storage.js';
+
+const uploadSpy = vi.hoisted(() => vi.fn());
+
+// Only the service client is replaced. Everything else in the SDK — the SAS
+// helpers this module imports at load time — stays real.
+vi.mock('@azure/storage-blob', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    BlobServiceClient: class {
+      getContainerClient() {
+        return {
+          getBlockBlobClient: (blobName) => ({
+            url: `https://hcwmedia.blob.core.windows.net/c/${blobName}`,
+            upload: uploadSpy,
+          }),
+        };
+      }
+    },
+  };
+});
 
 const MODULE_SOURCE = readFileSync(
   fileURLToPath(new URL('./blob-storage.js', import.meta.url)),
@@ -114,6 +136,43 @@ describe('getBlobUrl', () => {
     expect(getBlobUrl('covers', 'a.png')).toBe(
       'https://hcwmedia.blob.core.usgovcloudapi.net/covers/a.png'
     );
+  });
+});
+
+describe('uploadBlob overwrite conditions', () => {
+  const original = { ...process.env };
+
+  beforeEach(() => {
+    uploadSpy.mockClear();
+    resetBlobServiceForTests();
+    process.env.STORAGE_BLOB_ENDPOINT = 'https://hcwmedia.blob.core.windows.net';
+  });
+
+  afterEach(() => {
+    process.env = { ...original };
+    resetBlobServiceForTests();
+  });
+
+  it('turns overwrite:false into If-None-Match: *', async () => {
+    // The handler asking for the option is only half the fix; if this module
+    // drops it, the caller-chosen path silently replaces a live asset and
+    // admin-uploads.test.js still passes against its fake (TODO.md T-307).
+    await uploadBlob('covers', 'a/b.png', Buffer.from('x'), 'image/png', {}, { overwrite: false });
+    expect(uploadSpy.mock.calls[0][2].conditions).toEqual({ ifNoneMatch: '*' });
+  });
+
+  it('sets no condition by default', async () => {
+    // The AI-image and migration paths rewrite deterministic keys on purpose.
+    await uploadBlob('covers', 'a/b.png', Buffer.from('x'), 'image/png');
+    expect(uploadSpy.mock.calls[0][2].conditions).toBeUndefined();
+  });
+
+  it('sends the declared content type and the byte length', async () => {
+    await uploadBlob('covers', 'a/b.png', Buffer.from('hello'), 'image/png');
+    const [content, length, options] = uploadSpy.mock.calls[0];
+    expect(content.toString()).toBe('hello');
+    expect(length).toBe(5);
+    expect(options.blobHTTPHeaders).toEqual({ blobContentType: 'image/png' });
   });
 });
 
