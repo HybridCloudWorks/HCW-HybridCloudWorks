@@ -159,6 +159,16 @@ This project has not cut a tagged release; entries are grouped under
   validation, and a decoded size cap enforced before storage is touched. (#62)
 - **Snapshot endpoint allowlisted** to `certifications` and `speakerevents` so it
   cannot become a generic container read. (#45)
+- **`speakerevents` snapshots no longer publish admin emails or hidden events.**
+  `SANITIZERS` had a `certifications` entry and none for `speakerevents`, so raw
+  rows were written into `_snapshots/speakerevents` and served anonymously —
+  including `createdBy`/`updatedBy`, which carry the email of every admin who
+  touched an event, and `display: false` records whose only filter was
+  client-side. A positive field allowlist now governs what is published, and
+  `getSnapshot` strips internal fields inside `items[]` rather than on the
+  wrapper alone. A test asserts every snapshot collection has a sanitizer.
+  **Takes effect on the next `publishSnapshot` run** — an already-published
+  snapshot keeps its contents until then. (TODO.md T-201)
 
 ### Infrastructure
 

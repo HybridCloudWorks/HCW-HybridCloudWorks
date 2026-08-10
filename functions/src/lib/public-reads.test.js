@@ -93,10 +93,7 @@ describe('listContent', () => {
   it('builds parameterized type and provider-alias clauses', async () => {
     const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
     const h = createPublicReadHandlers({ store });
-    await h.listContent(
-      makeRequest({ query: { type: 'coder_corner', provider: 'gcp' } }),
-      context
-    );
+    await h.listContent(makeRequest({ query: { type: 'coder_corner', provider: 'gcp' } }), context);
     const [container, query, params] = store.queryDocs.mock.calls[0];
     expect(container).toBe('content');
     expect(query).toContain('LOWER(c.type) = @type');
@@ -213,6 +210,46 @@ describe('getSnapshot', () => {
     const denied = await h.getSnapshot(makeRequest({ params: { id: 'admin_settings' } }), context);
     expect(denied.status).toBe(404);
     expect(store.readDoc).toHaveBeenCalledTimes(1); // denylist short-circuits before the read
+  });
+
+  it('strips internal fields from inside items[], not just the wrapper', async () => {
+    // stripInternalFields used to be applied to the wrapper only, so createdBy
+    // and updatedBy on each item were never reached — the read-path half of
+    // TODO.md T-201.
+    const store = {
+      readDoc: vi.fn(async (_c, id) => ({
+        id,
+        updatedBy: 'wrapper-admin@example.com',
+        items: [
+          { id: 'a', name: 'Visible', createdBy: 'admin@example.com', _etag: '"x"' },
+          { id: 'b', name: 'Also visible', updatedBy: 'other@example.com' },
+        ],
+      })),
+      queryDocs: vi.fn(),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.getSnapshot(makeRequest({ params: { id: 'speakerevents' } }), context);
+    const { snapshot } = JSON.parse(res.body);
+
+    expect(snapshot).not.toHaveProperty('updatedBy');
+    for (const item of snapshot.items) {
+      expect(item).not.toHaveProperty('createdBy');
+      expect(item).not.toHaveProperty('updatedBy');
+      expect(item).not.toHaveProperty('_etag');
+    }
+    expect(JSON.stringify(snapshot)).not.toContain('@example.com');
+    // The fields consumers need survive.
+    expect(snapshot.items.map((i) => i.name)).toEqual(['Visible', 'Also visible']);
+  });
+
+  it('leaves non-object entries in items[] alone', async () => {
+    const store = {
+      readDoc: vi.fn(async (_c, id) => ({ id, items: [1, 'two', null, ['x']] })),
+      queryDocs: vi.fn(),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.getSnapshot(makeRequest({ params: { id: 'certifications' } }), context);
+    expect(JSON.parse(res.body).snapshot.items).toEqual([1, 'two', null, ['x']]);
   });
 });
 
