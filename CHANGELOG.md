@@ -178,6 +178,13 @@ This project has not cut a tagged release; entries are grouped under
   **not** applied: these three collections carry no publication status, so it
   would have emptied the podcasts page, the news feed and the insights panel.
   (TODO.md T-202)
+- **The anonymous feed endpoint is bounded.** `getFeed` ran
+  `SELECT * FROM c WHERE c.provider = @provider` against both `rss_cache` and
+  `ai_insights` with no ceiling, and `queryDocs` calls `.fetchAll()`. Both now
+  cap at 200 documents — a runaway guard, not a page size: one `rss_cache`
+  document is one feed, so sizing the bound to the 30 items the client renders
+  would have dropped whole feeds. Items *within* a document remain unbounded,
+  tracked as T-319. (TODO.md T-203)
 
 ### Infrastructure
 

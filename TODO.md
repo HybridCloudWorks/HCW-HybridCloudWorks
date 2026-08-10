@@ -19,15 +19,15 @@ work** — that is a valid state, not a missing document.
 | --- | --- |
 | Open items | 33 |
 | Critical | 0 |
-| High | 8 |
-| Medium | 18 |
+| High | 7 |
+| Medium | 19 |
 | Low | 7 |
-| Resolved since the review | 9 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-401, T-403) |
+| Resolved since the review | 10 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-401, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 636 functions tests and 31 frontend tests. That
+resolved, and the suite is now 640 functions tests and 31 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -46,7 +46,7 @@ Do these in sequence — later items cannot be verified before earlier ones.
 4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
 5. **Deploy a smoke test** — everything above is unverifiable from an agent
    session, and this is now the top open item
-6. **T-201 → T-205** the anonymous data-exposure set (~~T-201, T-202~~ done)
+6. **T-201 → T-205** the anonymous data-exposure set (~~T-201, T-202, T-203~~ done)
 7. **T-301+** correctness and hardening
 
 ---
@@ -357,7 +357,7 @@ every handler filters identically.
 
 ---
 
-### T-203 — `getFeed` has no `TOP` clause
+### ~~T-203 — `getFeed` has no `TOP` clause~~ RESOLVED
 **Category:** Performance / DoS · **Label:** Confirmed Issue
 **File:** `functions/src/lib/public-reads.js:271`, `:274`
 
@@ -367,7 +367,31 @@ unbounded, on an anonymous endpoint. `queryDocs` calls `.fetchAll()`.
 unimplemented scheduler — the day it goes live this becomes a function of feed
 volume with no ceiling. `ai_insights` has no TTL.
 
-**Fix:** add `TOP` to both, sized to what `useNewsData.js` renders. Two lines.
+**Resolved,** but not sized as suggested. `useNewsData.js` renders 30 — and 30
+is the count of **items** it keeps after flattening every `cache.items[]` array
+together and sorting by `pubDate`. One `rss_cache` document is one *feed*,
+holding many items. `TOP 30` would have bounded feeds, so a provider with more
+feeds than the ceiling would lose whole feeds' worth of recent news — and an
+arbitrary set of them, because there is no `ORDER BY` and (per the module's own
+rule 2) there must not be: `lastFetched`/`generatedAt` appear only in the
+composite indexes, which does not guarantee presence, and Cosmos drops documents
+missing a sort key.
+
+Both queries are now `SELECT TOP 200`, set as a runaway guard rather than a page
+size. The arbitrary-subset behaviour of an unordered `TOP` only manifests once a
+container has already run away, which is the case being defended against.
+Guarded by four tests and verified in both directions: removing the bounds fails
+two, tightening one to the render count fails another.
+
+**One thing this does not bound: items within a document.** A single `rss_cache`
+document holds `items[]`, and nothing caps its length — so one runaway feed
+still produces a large response even with the document ceiling in place. That is
+deliberately left alone rather than guessed at: truncating the array means
+choosing which end to keep, and `syncRssFeeds` is still a stub, so nothing in
+the repository establishes whether items are written newest-first. Getting it
+backwards would silently hide the newest news, which is the entire feature.
+Tracked as T-319 for whoever implements the scheduler, since they will define
+the write order.
 
 ---
 
@@ -659,6 +683,22 @@ cache so it cannot be used to hammer upstream status APIs), or delete the
 callers if neither feature is wanted. This is separately a case for T-103's
 route-inventory test to compare the frontend's call sites against the registered
 route table, not just the documented one.
+
+### T-319 — Bound `items[]` within an `rss_cache` document
+**Files:** `functions/src/lib/public-reads.js` (getFeed); `functions/src/functions/schedulers.js` (syncRssFeeds)
+T-203 bounded the *document* count the feed endpoint returns. Nothing bounds the
+`items[]` array inside a document, so a single runaway feed still produces a
+large anonymous response.
+
+Left open deliberately rather than guessed: truncating the array means choosing
+which end to keep, and `syncRssFeeds` is a stub, so nothing in the repository
+establishes whether items are written newest-first or appended. Truncating the
+wrong end silently hides the newest news — the entire point of the feature.
+
+**Fix:** when `syncRssFeeds` is implemented, cap the array at write time (the
+natural place, since the writer knows the order) and add a matching read-side
+ceiling in `getFeed`. If a read-side cap is wanted sooner, sort `items` by
+`pubDate` in the handler before slicing rather than trusting stored order.
 
 ### T-317 — Retire the Firebase-era live smoke scripts and nested workflows
 **Files:** `frontend/scripts/smoke-admin-hardened-live.mjs`,
