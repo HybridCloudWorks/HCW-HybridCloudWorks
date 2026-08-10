@@ -157,6 +157,32 @@ const LIST_MAX_LIMIT = 250;
 // is well inside this. Bounded so a runaway container can't OOM the handler.
 const FETCH_WINDOW = 1000;
 
+/**
+ * Document ceilings for the feed endpoint (TODO.md T-203).
+ *
+ * These are runaway guards, NOT page sizes, and the distinction is the whole
+ * of why they are not smaller. T-203 suggested sizing them to "what
+ * useNewsData.js renders", which is 30 — but 30 is the count of *items* the
+ * client keeps after flattening every `cache.items[]` array together and
+ * sorting by `pubDate`. One `rss_cache` document is one FEED, holding many
+ * items. `TOP 30` would therefore bound feeds, not articles, and a provider
+ * with more feeds than the ceiling would lose whole feeds' worth of recent
+ * news.
+ *
+ * Worse, it would lose an *arbitrary* set of them: there is no ORDER BY here,
+ * and there deliberately is not. Rule 2 in the module header forbids ordering
+ * on a field that may be absent, because Cosmos drops documents missing the
+ * sort key — and `lastFetched` / `generatedAt` are only in the containers'
+ * composite indexes, which does not guarantee presence. So `TOP N` returns an
+ * arbitrary N, which is acceptable precisely because N is set above the
+ * realistic document count: the arbitrary case only arises once a container
+ * has already run away, which is the case being defended against.
+ *
+ * Do not tighten these to a render count.
+ */
+const FEED_CACHE_MAX_DOCS = 200;
+const FEED_INSIGHTS_MAX_DOCS = 200;
+
 // Containers the list endpoint may serve. 'blogs' is the legacy fallback the
 // list hooks query when 'content' comes back empty — the browser read it
 // directly under the old Firestore rules, so exposing it (public-filtered,
@@ -331,13 +357,21 @@ export function createPublicReadHandlers({ store }) {
         const provider = String(request.query.get('provider') || '').trim();
         if (!provider) return json(400, { error: 'provider required' });
 
+        // Both queries were unbounded on an anonymous endpoint, and queryDocs
+        // calls .fetchAll() (TODO.md T-203). rss_cache is TTL-bounded at seven
+        // days, but that bound is enforced by syncRssFeeds — a scheduler that
+        // is still a stub — so today nothing limits either container.
         const [rssCache, insights] = await Promise.all([
-          store.queryDocs('rss_cache', 'SELECT * FROM c WHERE c.provider = @provider', [
-            { name: '@provider', value: provider },
-          ]),
-          store.queryDocs('ai_insights', 'SELECT * FROM c WHERE c.provider = @provider', [
-            { name: '@provider', value: provider },
-          ]),
+          store.queryDocs(
+            'rss_cache',
+            `SELECT TOP ${FEED_CACHE_MAX_DOCS} * FROM c WHERE c.provider = @provider`,
+            [{ name: '@provider', value: provider }]
+          ),
+          store.queryDocs(
+            'ai_insights',
+            `SELECT TOP ${FEED_INSIGHTS_MAX_DOCS} * FROM c WHERE c.provider = @provider`,
+            [{ name: '@provider', value: provider }]
+          ),
         ]);
 
         return json(

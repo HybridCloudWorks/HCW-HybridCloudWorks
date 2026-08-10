@@ -324,6 +324,75 @@ describe('T-202 — anonymous feeds filter deletions, not publication status', (
   });
 });
 
+describe('T-203 — the feed endpoint is bounded', () => {
+  const capture = () => {
+    const queries = [];
+    return {
+      queries,
+      store: {
+        queryDocs: vi.fn(async (container, query) => {
+          queries.push({ container, query });
+          return [];
+        }),
+        readDoc: vi.fn(),
+      },
+    };
+  };
+
+  it('bounds both containers, which were unbounded on an anonymous endpoint', async () => {
+    const { queries, store } = capture();
+    const h = createPublicReadHandlers({ store });
+    await h.getFeed(makeRequest({ query: { provider: 'azure' } }), context);
+
+    expect(queries).toHaveLength(2);
+    for (const { query } of queries) {
+      expect(query).toMatch(/SELECT TOP \d+ /);
+    }
+  });
+
+  it('bounds documents well above any plausible feed count, not at the render count', async () => {
+    // The ceiling is a runaway guard, not a page size. One rss_cache document
+    // is one feed holding many items; useNewsData renders 30 *items* after
+    // flattening. Sizing the document bound to 30 would drop whole feeds.
+    const { queries, store } = capture();
+    const h = createPublicReadHandlers({ store });
+    await h.getFeed(makeRequest({ query: { provider: 'azure' } }), context);
+
+    for (const { query } of queries) {
+      const bound = Number(query.match(/SELECT TOP (\d+) /)[1]);
+      expect(bound).toBeGreaterThanOrEqual(100);
+    }
+  });
+
+  it('does not order the feed queries', async () => {
+    // Rule 2: ORDER BY drops documents missing the sort key, and lastFetched /
+    // generatedAt are only in the composite indexes — presence is not
+    // guaranteed. An arbitrary TOP N is acceptable because N only binds once a
+    // container has run away.
+    const { queries, store } = capture();
+    const h = createPublicReadHandlers({ store });
+    await h.getFeed(makeRequest({ query: { provider: 'azure' } }), context);
+
+    for (const { query } of queries) {
+      expect(query).not.toMatch(/ORDER BY/i);
+    }
+  });
+
+  it('still parameterises the provider rather than interpolating it', async () => {
+    const store = {
+      queryDocs: vi.fn(async () => []),
+      readDoc: vi.fn(),
+    };
+    const h = createPublicReadHandlers({ store });
+    await h.getFeed(makeRequest({ query: { provider: "azure' OR 1=1--" } }), context);
+
+    for (const call of store.queryDocs.mock.calls) {
+      expect(call[1]).not.toContain('OR 1=1');
+      expect(call[2]).toEqual([{ name: '@provider', value: "azure' OR 1=1--" }]);
+    }
+  });
+});
+
 describe('isSoftDeleted', () => {
   it('is the universal half of isPublicDocument', () => {
     expect(isSoftDeleted({ softDeletedAt: '2026-01-01' })).toBe(true);
