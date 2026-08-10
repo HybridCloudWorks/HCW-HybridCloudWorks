@@ -269,6 +269,7 @@ export function useEditorState(blogId, navigate) {
     initializedRef.current = false;
     loadTimeRef.current = new Date();
     let cancelled = false;
+    let inFlight = false;
 
     const applyRemoteDoc = (data) => {
       if (cancelled) return;
@@ -311,6 +312,14 @@ export function useEditorState(blogId, navigate) {
     };
 
     const fetchRemoteDoc = async () => {
+      // getJSON allows 20 s and the poll below fires every 20 s, so ticks can
+      // overlap. Two in flight at once can resolve out of order and render an
+      // older document over a newer one — which here is worse than a stale
+      // view, because `applyRemoteDoc` compares the response's `blogEditedAt`
+      // against our load time to decide whether someone else edited the doc.
+      // (TODO.md T-309)
+      if (inFlight) return;
+      inFlight = true;
       try {
         const res = await getJSON(`cms/content/item?contentId=${encodeURIComponent(blogId)}`);
         if (res.item) applyRemoteDoc(res.item);
@@ -333,6 +342,11 @@ export function useEditorState(blogId, navigate) {
           );
           setLoading(false);
         }
+      } finally {
+        // `finally`, not the end of `try` — the catch block returns early on a
+        // missing doc and on cancellation, and leaving the flag set on either
+        // path would stop the poll permanently.
+        inFlight = false;
       }
     };
 

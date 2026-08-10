@@ -1,11 +1,15 @@
 /**
  * Labs — admin control panel for the VPS lab execution platform.
  *
- * Pull-based architecture: jobs are enqueued into Firestore `lab_jobs` via the
- * enqueueLabJob Cloud Function; the Hostinger VPS agent (labs/vps-agent/)
- * dials out, claims jobs, runs them in sandboxed Docker containers and writes
- * results back. No inbound ports on the VPS. Admin clients are read-only on
- * lab_jobs / lab_agents (see platform/firebase/firestore.rules).
+ * Pull-based architecture: jobs are enqueued into the `lab_jobs` container via
+ * the enqueueLabJob route; the VPS agent (vps-agent/) dials out, claims jobs,
+ * runs them in sandboxed Docker containers and writes results back through the
+ * API. No inbound ports on the VPS, and no database credential on it — the
+ * agent authenticates with an Entra certificate and reaches three endpoints,
+ * each constrained server-side (functions/src/lib/lab-agent.js).
+ *
+ * This page is read-only on jobs and agents, and reaches them only through
+ * getLabsSnapshot / getLabJob, both behind the admin role guard.
  *
  * Tabs:
  *   Dashboard — agent status cards + queue depth + recent jobs table (live)
@@ -17,6 +21,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { postJSON } from '@/lib/api';
+import { isAgentOnline, isTerminalJobStatus, jobPollDelay, toMillis } from '@/lib/labsPolling';
 import ServicePageHeader from '@/components/admin/ServicePageHeader';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -34,8 +39,12 @@ const TABS = [
   { id: 'setup', label: 'Setup' },
 ];
 
-// 3 missed 30s heartbeats — must match getLabsSnapshot in functions/labs-functions.js
-const STALE_AFTER_MS = 90 * 1000;
+// The staleness threshold, the terminal-status set and the poll backoff live in
+// lib/labsPolling.js — see that module's header for why.
+
+// How often the staleness clock advances. Independent of the snapshot fetch,
+// and much finer than the 90 s threshold it feeds.
+const CLOCK_TICK_MS = 5000;
 
 // Fallback mirror of LAB_JOB_TYPES in functions/labs-functions.js. The Console
 // prefers the live list returned by getLabsSnapshot; this keeps the select
@@ -75,18 +84,6 @@ function StatusBadge({ status }) {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-const toMillis = (value) => {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-function isAgentOnline(agent, now) {
-  const lastSeen = toMillis(agent.lastSeenAt);
-  return lastSeen > 0 && now - lastSeen < STALE_AFTER_MS;
-}
-
 function formatDuration(job) {
   const start = toMillis(job.claimedAt) || toMillis(job.createdAt);
   const end = toMillis(job.finishedAt);
@@ -114,11 +111,31 @@ function useLabsLive(enabled) {
   const [error, setError] = useState(null);
   const [now, setNow] = useState(() => Date.now());
 
+  // The staleness clock, deliberately independent of the fetch.
+  //
+  // `now` is only ever compared against each agent's `lastSeenAt`. Advancing it
+  // inside the fetch's success path meant that during an outage — when no
+  // snapshot arrives — it froze, `now - lastSeenAt` stopped growing, and every
+  // agent stayed "connected" for exactly as long as nothing was reachable.
+  // The clock has to keep running when the fetch does not; that is the only
+  // condition under which it says anything. (TODO.md T-309)
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const clock = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(clock);
+  }, [enabled]);
+
   useEffect(() => {
     if (!enabled) return undefined;
     let cancelled = false;
+    let inFlight = false;
 
     const load = async () => {
+      // postJSON allows 20 s against a 15 s interval, so ticks can overlap.
+      // Without this a slow backend stacks requests and the responses land out
+      // of order, rendering an older snapshot over a newer one.
+      if (inFlight) return;
+      inFlight = true;
       try {
         const snap = await postJSON('getLabsSnapshot', {});
         if (cancelled) return;
@@ -126,9 +143,10 @@ function useLabsLive(enabled) {
         setAgents(snap?.agents || []);
         setJobs(snap?.jobs || []);
         if (Array.isArray(snap?.jobTypes) && snap.jobTypes.length) setJobTypes(snap.jobTypes);
-        setNow(Date.now());
       } catch (err) {
         if (!cancelled) setError(err.message);
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -293,8 +311,21 @@ const PAYLOAD_PLACEHOLDERS = {
   'ansible-check': '# playbook.yml contents…',
 };
 
-function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel }) {
-  const isTerminal = ['succeeded', 'failed', 'timeout', 'cancelled'].includes(activeJob?.status);
+/**
+ * Reachability of the status endpoint, reported separately from the job's own
+ * status so the two are never confused for each other.
+ */
+function PollErrorNotice({ pollError }) {
+  if (!pollError) return null;
+  return (
+    <p className="text-xs text-amber-600 dark:text-amber-400" role="status">
+      Can&apos;t reach the status endpoint ({pollError}). The job is still running — retrying.
+    </p>
+  );
+}
+
+function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel, pollError }) {
+  const isTerminal = isTerminalJobStatus(activeJob?.status);
   if (!activeJobId) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
@@ -330,6 +361,7 @@ function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel }) {
           </Button>
         )}
       </div>
+      <PollErrorNotice pollError={pollError} />
       <pre className="bg-muted/60 border border-border rounded-md p-3 text-xs font-mono whitespace-pre-wrap break-words min-h-[200px] max-h-[400px] overflow-auto">
         {activeJob?.output ??
           (isTerminal ? '(no output)' : 'Waiting for the agent to pick this up…')}
@@ -351,6 +383,9 @@ function ConsoleTab({ jobTypes }) {
   const [activeJobId, setActiveJobId] = useState(null);
   const [activeJob, setActiveJob] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  // Kept apart from `activeJob` on purpose — a failure to *read* the status is
+  // not a status. See the poll below.
+  const [pollError, setPollError] = useState(null);
 
   // Keep the selected type valid when the live job-type list arrives —
   // derived during render rather than synced via effect.
@@ -359,26 +394,38 @@ function ConsoleTab({ jobTypes }) {
 
   // Status/output for the submitted job — poll getLabJob until it reaches a
   // terminal state (replaces the per-doc Firestore subscription).
+  //
+  // Self-scheduling rather than an interval, so exactly one request is ever in
+  // flight regardless of how slow the backend is.
   useEffect(() => {
     if (!activeJobId) return undefined;
     let cancelled = false;
     let timer = null;
+    let consecutiveErrors = 0;
 
     const poll = async () => {
       try {
         const res = await postJSON('getLabJob', { jobId: activeJobId });
         if (cancelled) return;
+        consecutiveErrors = 0;
+        setPollError(null);
         const job = res?.job || null;
         setActiveJob(job);
-        const terminal = ['succeeded', 'failed', 'cancelled'].includes(job?.status);
-        if (!terminal) timer = setTimeout(poll, 5000);
+        // `timeout` is a real status the agent can report, and omitting it here
+        // meant a timed-out job was polled every five seconds for as long as
+        // the console stayed open. (TODO.md T-308)
+        if (!isTerminalJobStatus(job?.status)) timer = setTimeout(poll, jobPollDelay(0));
       } catch (err) {
         if (cancelled) return;
-        setActiveJob({
-          id: activeJobId,
-          status: 'failed',
-          output: `status fetch error: ${err.message}`,
-        });
+        consecutiveErrors += 1;
+        // A transport failure is not a job outcome. Writing `status: 'failed'`
+        // put a real status value on screen that nothing distinguished from an
+        // actual failure, and returning without rescheduling stopped the poll
+        // for good — so a job that went on to succeed was displayed as failed
+        // permanently. The error is now separate state, and the poll keeps
+        // going with backoff. (TODO.md T-308)
+        setPollError(err.message);
+        timer = setTimeout(poll, jobPollDelay(consecutiveErrors));
       }
     };
 
@@ -481,7 +528,7 @@ function ConsoleTab({ jobTypes }) {
             Job output
           </CardTitle>
           <CardDescription>
-            Live via Firestore — updates as the agent claims, runs, and finishes the job.
+            Polled from the API — updates as the agent claims, runs, and finishes the job.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -490,6 +537,7 @@ function ConsoleTab({ jobTypes }) {
             activeJob={activeJob}
             cancelling={cancelling}
             onCancel={handleCancel}
+            pollError={pollError}
           />
         </CardContent>
       </Card>

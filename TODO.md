@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 26 |
+| Open items | 25 |
 | Critical | 0 |
 | High | 7 |
-| Medium | 12 |
+| Medium | 11 |
 | Low | 7 |
-| Resolved since the review | 17 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-306, T-307, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect |
+| Resolved since the review | 19 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-306, T-307, T-308, T-309, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 664 functions tests and 31 frontend tests. That
+resolved, and the suite is now 664 functions tests and 47 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -639,21 +639,47 @@ threw.
 (The container allowlist and `isValidBlobPath` were attacked and held — not
 changed.)
 
-### T-308 — Labs console polls forever on `timeout`, and fabricates `failed`
-**File:** `frontend/src/pages/admin/LabsPage.jsx:373-381`
-Terminal set omits `'timeout'`, which is in `JOB_STATUSES`. And a transient fetch
-error writes `status: 'failed'` — a real status value, indistinguishable from an
-actual failure — then stops polling permanently.
-**Fix:** import the terminal set from a shared constant; keep a transport error in
-separate state and retry with backoff.
+### ~~T-308 — Labs console polls forever on `timeout`, and fabricates `failed`~~ RESOLVED
+**File:** `frontend/src/pages/admin/LabsPage.jsx`
+Terminal set omitted `'timeout'`, which is in `JOB_STATUSES`. And a transient
+fetch error wrote `status: 'failed'` — a real status value, indistinguishable
+from an actual failure — then stopped polling permanently, so a job that went
+on to succeed was displayed as failed for good.
 
-### T-309 — Labs "connected" freezes healthy during an outage
-**File:** `frontend/src/pages/admin/LabsPage.jsx:121-137`
-`setNow` moved into the fetch success path, so a failing poll freezes the
-staleness clock and the dashboard keeps showing "connected". The deleted code had
+The terminal set now comes from `frontend/src/lib/labsPolling.js`. Worth noting
+why the drift happened: the *same file* already had the correct four-element
+list in `JobOutputPane` and the wrong three-element one in the poll, so a
+timed-out job was polled every five seconds by a loop whose own output pane had
+already declared it finished. A constant two call sites must agree on does not
+belong inline in either of them.
+
+Transport failures are now `pollError`, separate state, surfaced as a notice
+that says the job is still running. The poll continues with backoff — 5 s
+doubling to a 60 s ceiling, reset on the first success — and is never
+abandoned, because the job is still executing on the agent and giving up means
+the operator never learns how it ended.
+
+### ~~T-309 — Labs "connected" freezes healthy during an outage~~ RESOLVED
+**File:** `frontend/src/pages/admin/LabsPage.jsx`, `frontend/src/features/editor/hooks/useEditorState.js`
+`setNow` had moved into the fetch success path, so a failing poll froze the
+staleness clock and the dashboard kept showing "connected". The deleted code had
 a dedicated ticker with a comment explaining exactly this.
-**Fix:** restore the independent clock interval. Also add an in-flight guard to
-this poll and the editor's — 20 s timeout against a 15/20 s interval overlaps.
+
+Independent 5 s clock interval restored, and `setNow` removed from the fetch
+entirely. The clock has to keep running when the fetch does not — that is the
+only condition under which it says anything.
+
+In-flight guards added to both polls. `postJSON`/`getJSON` allow 20 s against a
+15 s snapshot interval and a 20 s editor interval, so ticks overlap and
+responses can land out of order. That is worse than staleness in the editor,
+where `applyRemoteDoc` compares the response's `blogEditedAt` against the load
+time to decide whether someone else edited the document. The editor's guard is
+released in a `finally`, not at the end of `try` — its catch block returns early
+on a missing doc and on cancellation, and either path would otherwise leave the
+flag set and stop the poll forever.
+
+The job poll needed no guard: it is a self-scheduling `setTimeout` chain, so
+exactly one request is in flight by construction.
 
 ### ~~T-310 — `cms-content.js` limit has no NaN or lower bound~~ RESOLVED
 **File:** `functions/src/lib/cms-content.js:89`
@@ -781,6 +807,33 @@ wrong end silently hides the newest news — the entire point of the feature.
 natural place, since the writer knows the order) and add a matching read-side
 ceiling in `getFeed`. If a read-side cap is wanted sooner, sort `items` by
 `pubDate` in the handler before slicing rather than trusting stored order.
+
+### T-320 — Eight frontend tests fail, and CI does not run them
+**Files:** `frontend/src/App.routes.test.jsx`, `frontend/src/pages/admin/PublishedPage.test.jsx`, `frontend/package.json:36`
+Found while adding the T-308/T-309 coverage, not introduced by it — confirmed by
+stashing the change and re-running on a clean tree.
+
+`npm run test:admin`, which is what CI runs, names six files explicitly. The
+repository contains twelve. The six it does not name include these two, and
+both are red:
+
+- `App.routes.test.jsx` — 6 failures across the public route contract
+  (`/aws/news`, `/azure/news`, and the four placeholder routes)
+- `PublishedPage.test.jsx` — 2 failures in publish diagnostics and public-URL
+  mapping
+
+A third, `functions/firestore.rules.test.js`, also fails, but that one is
+expected: it needs the Firestore emulator and belongs to `test:rules`, which is
+a Firebase-era script that should go with T-317.
+
+The enumerated list is the real defect. It was presumably a way to keep CI green
+during the migration, and it works — the suite is green because the failures are
+not looked at. Whoever fixes this should diagnose the eight failures first and
+only then widen the glob, because widening it first turns a green pipeline red
+with no diagnosis attached.
+
+**Fix:** triage the 8 failures, then replace the file list in `test:admin` with
+a directory glob and move the emulator-dependent file out of the default run.
 
 ### T-317 — Retire the Firebase-era live smoke scripts and nested workflows
 **Files:** `frontend/scripts/smoke-admin-hardened-live.mjs`,
@@ -925,8 +978,8 @@ dynamic `import()` on the hot path; `:68` cache is unbounded.
 ## Test recommendations
 
 Backend coverage is strong (517 tests); frontend coverage of the migration is
-effectively zero. T-303, T-304, T-308, T-309 would each have been caught by a
-modest test.
+effectively zero. T-303 and T-304 would each have been caught by a modest
+test; T-308 and T-309 now are.
 
 | Type | Scenario | Assertion | Covers |
 | --- | --- | --- | --- |
@@ -935,7 +988,7 @@ modest test.
 | Unit | Date helpers: ISO, null, malformed, Timestamp | correct ms or 0; never NaN | T-303, T-304 |
 | Hook | Save, then external `blogEditedAt` on next poll | `externallyModified === true` | T-208 |
 | Hook | Reorder images, advance 20 s, unchanged remote | ordering preserved | T-209 |
-| Unit | Job poll with `timeout`; with rejected fetch | stops; does not fabricate `failed` | T-308 |
+| ~~Unit~~ | ~~Job poll with `timeout`; with rejected fetch~~ | ~~stops; does not fabricate `failed`~~ | ~~T-308, T-309~~ — written |
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
 | ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |
