@@ -183,6 +183,25 @@ const FETCH_WINDOW = 1000;
 const FEED_CACHE_MAX_DOCS = 200;
 const FEED_INSIGHTS_MAX_DOCS = 200;
 
+/**
+ * How many same-slug documents the detail lookup considers.
+ *
+ * Slugs are meant to be unique, so this is normally 1 row. It is >1 because
+ * they are not *enforced* unique, and the previous `SELECT TOP 1` with no
+ * `ORDER BY` picked arbitrarily among duplicates and only then asked whether
+ * the winner was public — so a published article could 404 forever because an
+ * unpublished draft shared its slug (TODO.md T-305).
+ *
+ * `ORDER BY c._ts DESC` is safe here for a reason that does not generalize:
+ * `_ts` is a system property Cosmos writes on every document, so the
+ * "never ORDER BY on a possibly-missing field" rule — which silently drops
+ * documents lacking the sort key — does not apply. No composite index is
+ * needed; a filter plus a single-property ORDER BY runs on the range index
+ * that `/*` already provides, at a slightly higher RU cost that a
+ * near-unique predicate makes irrelevant.
+ */
+const SLUG_CANDIDATES = 10;
+
 // Containers the list endpoint may serve. 'blogs' is the legacy fallback the
 // list hooks query when 'content' comes back empty — the browser read it
 // directly under the old Firestore rules, so exposing it (public-filtered,
@@ -262,11 +281,16 @@ export function createPublicReadHandlers({ store }) {
           for (const field of ['slug', 'Slug']) {
             const rows = await store.queryDocs(
               container,
-              `SELECT TOP 1 * FROM c WHERE c["${field}"] = @slug`,
+              `SELECT TOP ${SLUG_CANDIDATES} * FROM c WHERE c["${field}"] = @slug ORDER BY c._ts DESC`,
               [{ name: '@slug', value: slugOrId }]
             );
-            if (rows[0] && isPublicDocument(rows[0])) {
-              return json(200, { success: true, item: stripInternalFields(rows[0]), source: container }, 300);
+            // `find`, not `rows[0] && isPublicDocument(...)`. Filtering after
+            // taking one row meant a published article 404'd whenever an
+            // unpublished document happened to share its slug and win the
+            // arbitrary pick (TODO.md T-305).
+            const match = rows.find(isPublicDocument);
+            if (match) {
+              return json(200, { success: true, item: stripInternalFields(match), source: container }, 300);
             }
           }
         }

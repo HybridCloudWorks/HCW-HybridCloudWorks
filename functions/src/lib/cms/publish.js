@@ -167,6 +167,14 @@ export function accumulatePublishResult(results, contentId, r) {
     results.errors.push({ contentId, error: r.error });
     return;
   }
+  // Distinct from `reused`: nothing was written and there is no mapping to
+  // report. Counted as skipped rather than published, because falling through
+  // to the tail of this function would report a publish that did not happen.
+  if (r.skipped) {
+    results.skipped += 1;
+    results.warnings.push({ contentId, warning: r.reason || 'Skipped' });
+    return;
+  }
   if (r.warning) {
     results.warnings.push({ contentId, warning: r.warning });
   }
@@ -352,7 +360,20 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
         }),
       });
 
-      await store.patchDoc('content', contentId, contentUpdate);
+      // Conditioned on the ETag from the read at the top of this function.
+      // Everything above — the status gate, the quality and image reports, the
+      // slug — was decided from `contentData`; without the precondition two
+      // concurrent runs both pass the gate and both publish, which the
+      // scheduled publisher makes reachable rather than theoretical
+      // (TODO.md T-301).
+      try {
+        await store.patchDoc('content', contentId, contentUpdate, { ifMatch: contentData._etag });
+      } catch (error) {
+        if (error?.code === 412 || error?.statusCode === 412) {
+          return { skipped: true, reason: 'Content changed while publishing; not retried' };
+        }
+        throw error;
+      }
 
       if (contentData.forgeMeta?.formatKey && !isRepublish) {
         await bumpForgeStats(contentData.forgeMeta.formatKey);
@@ -455,5 +476,12 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
         return json(500, { error: 'Failed to publish content', message: error?.message || 'Unknown error' });
       }
     },
+
+    // Not a route. Exposed so the scheduled publisher runs the same pipeline
+    // rather than a second implementation of it — the status gate, quality and
+    // image gates, slug resolution and version snapshot are the publish
+    // semantics, and a timer that reimplemented them would drift
+    // (TODO.md T-301).
+    processPublishContent,
   };
 }

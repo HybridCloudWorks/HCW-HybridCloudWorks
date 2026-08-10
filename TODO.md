@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 25 |
+| Open items | 21 |
 | Critical | 0 |
 | High | 7 |
-| Medium | 11 |
+| Medium | 7 |
 | Low | 7 |
-| Resolved since the review | 19 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-306, T-307, T-308, T-309, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect |
+| Resolved since the review | 23 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-301, T-303, T-304, T-305, T-306, T-307, T-308, T-309, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect; T-302 half-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 664 functions tests and 47 frontend tests. That
+resolved, and the suite is now 697 functions tests and 62 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -522,64 +522,130 @@ imagery, where cached images previously rendered.
 
 ## MEDIUM
 
-### T-301 — `scheduledPublishDate` never publishes (write side complete, read side empty)
-**File:** `functions/src/functions/schedulers.js:27-38`
+### ~~T-301 — `scheduledPublishDate` never publishes (write side complete, read side empty)~~ RESOLVED
+**Files:** `functions/src/lib/scheduled-publish.js` (new), `functions/src/functions/schedulers.js`, `functions/src/lib/cms/publish.js`, `functions/src/lib/cosmos-client.js`
 
-The timer body is a TODO behind `FEATURE_FLAG_SCHEDULERS`. The write side is
-fully shipped: `content-workflow.js:425-433` validates and persists,
-`BlogReviewBoard.jsx:136-149` renders scheduling UI, Calendar and Queue display
-it. An operator schedules, the server accepts, the UI confirms — nothing
-publishes, with no error or alert. A complete non-functional feature is worse
-than an absent one.
+The timer body was a TODO. The write side was fully shipped: `content-workflow.js`
+validates and persists, `BlogReviewBoard.jsx` renders the picker, Calendar and
+Queue display it. An operator scheduled, the server accepted, the UI confirmed —
+and nothing published, with no error or alert anywhere.
 
-**Implementation requirements** (verified against the code): query
-`scheduledPublishDate <= @nowIso AND contentStatus = 'approved' AND (NOT
-IS_DEFINED(c.Live) OR c.Live = false)` — this query **can** safely `ORDER BY`,
-because the `WHERE` already requires the field to exist, so the blanket
-"never ORDER BY" rule does not apply and must not be cargo-culted here; the
-composite index `(/Live, /scheduledPublishDate)` already exists; call
-`processPublishContent` rather than reimplementing; **add an ETag precondition**
-on the status flip (`processPublishContent` reads at `:238` and patches at `:355`
-with no guard — two runs can both publish); **clear `scheduledPublishDate` after
-publishing** or every tick re-matches forever (silent, manifests as version-history
-spam); cap at 25/tick with carry-over; normalize to UTC; write failures to
-`workflow_alerts`.
+Every implementation requirement in the finding is met:
 
-**Until implemented:** hide the scheduling UI or reject `scheduledPublishDate`
-with 501.
+- **Query** as prescribed, plus `IS_STRING(c.scheduledPublishDate)`. That extra
+  clause is not cosmetic: `saveContentSchedule` writes
+  `scheduledPublishDate: null` for an instant publish, on a document that is
+  also `approved` and not `Live`. Without it every instant-publish document
+  matches on every tick.
+- **`ORDER BY` is used**, and the exemption is documented at the query rather
+  than assumed — the `WHERE` clause is what makes it safe, so the two must not
+  be separated.
+- **`processPublishContent` is called, not reimplemented.** It is now returned
+  from `createPublishHandlers` (not registered as a route). The status gate,
+  quality gate, image gate, slug resolution and version snapshot *are* the
+  publish semantics; a timer with its own copy would drift, and the drift would
+  surface as posts publishing differently depending on who published them.
+- **ETag precondition added.** `patchDoc` gained an optional `options.ifMatch`,
+  and the publish write is conditioned on the `_etag` read at the top of
+  `processPublishContent` — the whole decision above the write is made from
+  that document. A 412 becomes `{skipped}`, which `accumulatePublishResult` now
+  counts separately; without that branch it fell through and reported a publish
+  that never happened. When a caller supplies an ETag the read-modify-write
+  path no longer retries, because retrying re-reads and re-reading is exactly
+  what the precondition exists to prevent.
+- **Schedule cleared after publishing**, with `null` rather than `undefined`
+  (`patchDoc` reads `undefined` as a deletion), and only on a publish that
+  actually happened — clearing it on failure would silently cancel the
+  operator's schedule.
+- **25/tick with carry-over**, reported as `hasMore` rather than chased within
+  the tick; **UTC** throughout, with the string comparison's dependence on
+  `toISOString()` output written down; **failures to `workflow_alerts`** under
+  `alertType: 'scheduled_publish_failures'` — the exact string `ops-health.js`
+  already counts, a consumer that had been waiting for a producer since the
+  migration.
 
-### T-302 — All four timers share one flag, and one deletes blobs
-**File:** `functions/src/functions/schedulers.js:13`
+**Per-timer flags landed with it** (the safe half of T-302). Shipping T-301
+under the shared flag would have armed `cleanupTempStorage` — an unimplemented
+blob-deletion TODO — the moment anyone enabled the publisher.
+`FEATURE_FLAG_SCHEDULERS` is now a master kill switch only.
 
-`FEATURE_FLAG_SCHEDULERS` gates `syncRssFeeds`, `publishScheduledContent`,
-`cleanupTempStorage` (**deletes blobs**) and `checkAgentHealth` together.
-Finishing T-301 and flipping the flag arms an unimplemented blob-deletion job
-whose TODO implies a query that the current `queryDocs` (no continuation token)
-would truncate — classifying everything past the window as an orphan. Only
+### T-302 — Blob GC is still unwritten (flag split done)
+**File:** `functions/src/functions/schedulers.js`
+
+**The flag half is resolved**, with T-301: each timer has its own
+`FEATURE_FLAG_<NAME>` and `FEATURE_FLAG_SCHEDULERS` is a master kill switch, so
+enabling the publisher no longer arms anything else. Terraform sets all four
+individual flags to `"false"`.
+
+**What remains is `cleanupTempStorage` itself**, still an unimplemented TODO.
+The hazard the finding names is real and unchanged: an orphan query has to
+enumerate every blob and every referencing document, and anything it fails to
+enumerate it classifies as an orphan and deletes. Only
 `delete_retention_policy { days = 7 }` makes that recoverable.
 
-**Fix:** per-timer flags. Do not implement blob GC until `queryDocs` supports
-continuation tokens (T-311); make the first version dry-run.
+Note the finding's stated blocker does **not** apply — `queryDocs` does not
+truncate (T-311, corrected). The real constraint is that `fetchAll` materialises
+the whole result set, so the enumeration needs a cursor rather than a bigger
+window. Make the first version dry-run regardless.
 
-### T-303 — `BlogReviewBoard` throws on a scheduled date
-**File:** `frontend/src/components/admin/BlogReviewBoard.jsx:138`
+### ~~T-303 — `BlogReviewBoard` throws on a scheduled date~~ RESOLVED
+**File:** `frontend/src/components/admin/BlogReviewBoard.jsx`
 `blog.scheduledPublishDate.toDate()` on a value that is now an ISO string.
-Reproduce: open `/admin/review/{id}` for any scheduled item. Throws inside a
-`setTimeout`, outside the error boundary.
+Reproduce: open `/admin/review/{id}` for any scheduled item. Threw inside a
+`setTimeout`, so outside the error boundary — the review page simply blanked.
 
-### T-304 — Published/EditorList sorts are permanent no-ops
-**Files:** `PublishedPage.jsx:92-101`; `EditorListPage.jsx:95-97,116-131,266-267,329`
+Now `toDate()` from the shared helper. A null falls through to the same default
+as an unscheduled item rather than taking the page down.
+
+### ~~T-304 — Published/EditorList sorts are permanent no-ops~~ RESOLVED
+**Files:** `frontend/src/lib/dateUtils.js` (new) and ten call sites
 `?.toMillis?.() || 0` on ISO strings → always 0 → comparator always returns 0.
-Lists render in raw Cosmos order; sort controls do nothing; timestamps show `—`.
-Four sibling files got the three-branch fix in the same migration; these did not.
-**Fix:** extract `lib/dateUtils.js`, replace all seven copies.
+Lists rendered in raw Cosmos order, sort controls did nothing, timestamps showed
+`—`. Several sibling files got the three-branch fix in the same migration; these
+did not.
 
-### T-305 — Detail-page slug resolution is non-deterministic
-**File:** `functions/src/lib/public-reads.js:195-204`
+**The finding counted seven copies. There were ten.** A source guard in
+`dateUtils.test.js` found the last three — one in `blogUtils.js`
+(`normalizeFirestoreDate`), a second in `QueuePage.jsx` written around `toDate`
+rather than `toMillis`, and one in `SocialHubPage.jsx` whose parameter was named
+`v`. The `QueuePage` one only surfaced because the *bundler* refused the
+redeclaration; ESLint reported zero errors on that file. The guard now asserts
+three things — one implementation under `src/`, no module-level redeclaration of
+the helper names, and no surviving `?.toMillis?.()` expression.
+
+Consolidating also folded in a capability only `QueuePage`'s copy had: a
+Timestamp that went through JSON and came back as plain `{seconds, nanoseconds}`
+with its methods gone. Dropping it silently would have been the sort of
+regression a "pure refactor" is expected not to contain.
+
+`byNewest(...fields)` uses `Math.max` across fields rather than `||`, because
+`||` takes the first field that *exists*, which is not the most recent — a
+document archived in January and updated in June belongs above one archived in
+March.
+
+### ~~T-305 — Detail-page slug resolution is non-deterministic~~ RESOLVED
+**File:** `functions/src/lib/public-reads.js`
 `SELECT TOP 1` with no `ORDER BY`, and the public filter applied *after*. Two
-documents sharing a slug resolve arbitrarily, and a published article can 404
-because an unpublished duplicate sorted first. **Fix:** filter in SQL, `ORDER BY
-c._ts DESC` (always present, so the drop-on-undefined trap does not apply).
+documents sharing a slug resolved arbitrarily, and a published article could 404
+forever because an unpublished duplicate won the arbitrary pick.
+
+`SELECT TOP 10 ... ORDER BY c._ts DESC`, then `rows.find(isPublicDocument)`.
+
+**One deviation from the prescribed fix.** The finding says to filter in SQL;
+the filter stays in JavaScript. `isPublicDocument` is the security predicate for
+every anonymous read in this file, and expressing it a second time in SQL means
+two definitions that must agree forever — the same drift hazard that produced
+T-304's ten copies and T-308's two terminal-status lists. Fetching a bounded
+candidate set and filtering with the one existing function fixes both halves of
+the defect (arbitrary pick, and filter-after-take) without splitting the
+predicate.
+
+`ORDER BY c._ts DESC` is safe for a reason that does not generalize: `_ts` is a
+system property Cosmos writes on every document, so the drop-on-undefined trap
+does not apply. Confirmed against the Cosmos indexing docs that a filter plus a
+single-property `ORDER BY` runs on the range index `/*` already provides — no
+composite index needed, only a marginally higher RU cost that a near-unique
+predicate makes irrelevant.
 
 ### ~~T-306 — Upload size checked after allocation~~ RESOLVED
 **File:** `functions/src/lib/admin-uploads.js`
@@ -978,14 +1044,14 @@ dynamic `import()` on the hot path; `:68` cache is unbounded.
 ## Test recommendations
 
 Backend coverage is strong (517 tests); frontend coverage of the migration is
-effectively zero. T-303 and T-304 would each have been caught by a modest
-test; T-308 and T-309 now are.
+effectively zero when the review ran. T-303, T-304, T-308 and T-309 would each
+have been caught by a modest test, and all four now are.
 
 | Type | Scenario | Assertion | Covers |
 | --- | --- | --- | --- |
 | Integration | Route inventory over `index.js` | guard + OPTIONS + CORS per registration | T-102, T-103 |
 | Unit | `api.js` with `VITE_BACKEND_PROVIDER=azure` | resolves to `VITE_AZURE_FUNCTIONS_URL` | T-101 |
-| Unit | Date helpers: ISO, null, malformed, Timestamp | correct ms or 0; never NaN | T-303, T-304 |
+| ~~Unit~~ | ~~Date helpers: ISO, null, malformed, Timestamp~~ | ~~correct ms or 0; never NaN~~ | ~~T-303, T-304~~ — written |
 | Hook | Save, then external `blogEditedAt` on next poll | `externallyModified === true` | T-208 |
 | Hook | Reorder images, advance 20 s, unchanged remote | ordering preserved | T-209 |
 | ~~Unit~~ | ~~Job poll with `timeout`; with rejected fetch~~ | ~~stops; does not fabricate `failed`~~ | ~~T-308, T-309~~ — written |

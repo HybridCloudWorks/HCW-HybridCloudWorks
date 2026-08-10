@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
+import { byNewest } from '@/lib/dateUtils';
 import { PenSquare, Loader2, Calendar, Images } from 'lucide-react';
 import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
@@ -89,17 +90,11 @@ function getPublicUrl(item) {
   return publicPath ? `https://hybridcloudworks.com${publicPath}` : '';
 }
 
-function sortByUpdatedAtDesc(a, b) {
-  const aTime = a.updatedAt?.toMillis?.() || 0;
-  const bTime = b.updatedAt?.toMillis?.() || 0;
-  return bTime - aTime;
-}
-
-function sortByPublishedAtDesc(a, b) {
-  const aDate = a.blogPublishedAt?.toDate?.() || new Date(0);
-  const bDate = b.blogPublishedAt?.toDate?.() || new Date(0);
-  return bDate - aDate;
-}
+// Both of these were Firestore-only (`?.toMillis?.() || 0`), so against the ISO
+// strings Cosmos returns they scored every document 0 and the comparators were
+// permanent no-ops (TODO.md T-304).
+const sortByUpdatedAtDesc = byNewest('updatedAt');
+const sortByPublishedAtDesc = byNewest('blogPublishedAt');
 
 function findPublishMapping(result, contentId) {
   if (!Array.isArray(result?.mappings)) return null;

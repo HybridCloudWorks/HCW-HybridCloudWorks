@@ -46,6 +46,7 @@ import {
 } from 'lucide-react';
 import { postJSON, getJSON, sendJSON } from '@/lib/api';
 import { fetchPublicContentList } from '@/lib/publicApi';
+import { toMillis } from '@/lib/dateUtils';
 
 // ── YouTube brand icon (no lucide equivalent) ─────────────────────────────────
 
@@ -120,14 +121,6 @@ function getLiveUrl(item) {
       ? `https://hybridcloudworks.com${String(item.curatedSubpagePath).startsWith('/') ? item.curatedSubpagePath : `/${item.curatedSubpagePath}`}`
       : '');
   return explicit || '';
-}
-
-function toMillis(v) {
-  if (!v) return 0;
-  if (typeof v?.toMillis === 'function') return v.toMillis();
-  if (typeof v?.toDate === 'function') return v.toDate().getTime();
-  const parsed = new Date(v).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function getRecency(item) {

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
+import { byNewest } from '@/lib/dateUtils';
 import { CoderCornerReviewBoard } from '@/components/admin/CoderCornerReviewBoard';
 import { getPublishTargetForType } from '@/lib/contentModel';
 import { RefreshCw, Loader2, Code2, Filter } from 'lucide-react';
@@ -26,18 +27,7 @@ function getStatusParam(statusFilter) {
   return statusFilter;
 }
 
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function sortByDate(a, b) {
-  const aTime = toMillis(a.fetchedAt) || toMillis(a.createdAt);
-  const bTime = toMillis(b.fetchedAt) || toMillis(b.createdAt);
-  return bTime - aTime;
-}
+const sortByDate = byNewest('fetchedAt', 'createdAt');
 
 async function fetchCoderCorner(statusFilter) {
   const params = new URLSearchParams({

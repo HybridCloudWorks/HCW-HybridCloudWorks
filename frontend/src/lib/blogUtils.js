@@ -1,3 +1,5 @@
+import { toDate } from '@/lib/dateUtils';
+
 /**
  * Normalize inconsistent Firestore field names into a canonical shape.
  * Many documents use both Title/title, Summary/summary, etc.
@@ -16,16 +18,12 @@ export const normalizeContentFields = (doc) => {
   };
 };
 
-export const normalizeFirestoreDate = (value) => {
-  if (!value) return null;
-  if (value?.toDate) return value.toDate();
-  if (value instanceof Date) return value;
-  if (typeof value === 'string') {
-    const d = new Date(value);
-    return isNaN(d) ? null : d;
-  }
-  return null;
-};
+/**
+ * Kept as a named export because several components import it; the
+ * implementation now lives in lib/dateUtils.js so there is one of it
+ * (TODO.md T-304).
+ */
+export const normalizeFirestoreDate = (value) => toDate(value);
 
 export const getCoverImageUrl = (article) => {
   if (!article) return null;

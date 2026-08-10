@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import { postJSON, getJSON } from '@/lib/api';
+import { toMillis } from '@/lib/dateUtils';
 
 function getProvider(item) {
   return item['Cloud Provider'] || item.cloudProvider || item.provider || 'Unknown';
@@ -41,14 +42,6 @@ function isLiveRecord(item) {
   const status = String(item?.contentStatus || '');
   if (item?.softDeletedAt || item?.softDeleteExpiresAt) return false;
   return item?.Live === true || item?.Status === 'Live' || status.startsWith('published_');
-}
-
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  if (typeof value?.toDate === 'function') return value.toDate().getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function getRecencyScore(item) {

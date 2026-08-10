@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import { formatPostDate } from '@/lib/blogUtils';
+import { toMillis } from '@/lib/dateUtils';
 import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
 
 const DISPLAY_TYPE_LABELS = {
@@ -97,14 +98,6 @@ function getPublicUrl(doc = {}) {
 
   const publicPath = getContentPublicPath(doc);
   return publicPath ? `https://hybridcloudworks.com${publicPath}` : '';
-}
-
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  if (typeof value?.toDate === 'function') return value.toDate().getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function getRecency(doc = {}) {

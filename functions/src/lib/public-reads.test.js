@@ -196,6 +196,58 @@ describe('getContent', () => {
     expect(res.status).toBe(404);
     expect(res.body).not.toContain('Draft');
   });
+
+  it('serves the published document when a draft shares its slug', async () => {
+    // The T-305 defect: `SELECT TOP 1` picked arbitrarily among duplicates and
+    // the public filter ran afterwards, so a live article 404'd whenever an
+    // unpublished document sharing its slug happened to come back first.
+    const draft = { id: 'draft-1', slug: 'shared', contentStatus: 'in_review', Title: 'Draft' };
+    const live = publicDoc({ id: 'live-1', slug: 'shared', Title: 'Live' });
+    const store = {
+      readDoc: vi.fn(async () => null),
+      queryDocs: vi.fn(async () => [draft, live]),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.getContent(makeRequest({ params: { slugOrId: 'shared' } }), context);
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).item.id).toBe('live-1');
+    expect(res.body).not.toContain('Draft');
+  });
+
+  it('orders slug candidates deterministically and bounds them', async () => {
+    // Without ORDER BY the winner among duplicates is whatever the engine
+    // returns; `_ts` is a system property present on every document, so it is
+    // one of the few fields this codebase may sort on without dropping rows.
+    const store = {
+      readDoc: vi.fn(async () => null),
+      queryDocs: vi.fn(async () => []),
+    };
+    const h = createPublicReadHandlers({ store });
+    await h.getContent(makeRequest({ params: { slugOrId: 'anything' } }), context);
+
+    for (const [, query] of store.queryDocs.mock.calls) {
+      expect(query).toMatch(/ORDER BY c\._ts DESC/);
+      expect(query).toMatch(/SELECT TOP \d+ /);
+      expect(query).not.toMatch(/SELECT TOP 1 /);
+    }
+  });
+
+  it('still 404s when every same-slug document is non-public', async () => {
+    const store = {
+      readDoc: vi.fn(async () => null),
+      queryDocs: vi.fn(async () => [
+        { id: 'a', slug: 'shared', contentStatus: 'in_review', Title: 'DraftA' },
+        { id: 'b', slug: 'shared', Live: true, softDeletedAt: '2026-01-01', Title: 'DeletedB' },
+      ]),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.getContent(makeRequest({ params: { slugOrId: 'shared' } }), context);
+
+    expect(res.status).toBe(404);
+    expect(res.body).not.toContain('DraftA');
+    expect(res.body).not.toContain('DeletedB');
+  });
 });
 
 describe('getSnapshot', () => {

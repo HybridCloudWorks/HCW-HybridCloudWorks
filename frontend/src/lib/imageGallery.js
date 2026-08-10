@@ -1,4 +1,5 @@
 import { getJSON } from '@/lib/api';
+import { toMillis } from '@/lib/dateUtils';
 
 const PAGE_SIZE = 200;
 
@@ -35,12 +36,7 @@ export function getSourceLabel(sourceCollection) {
   return 'Generated';
 }
 
-const createdAtMillis = (value) => {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+const createdAtMillis = toMillis;
 
 export async function loadGalleryItems({ max = PAGE_SIZE } = {}) {
   // GET cms/images returns both galleries, newest first each, capped at max.

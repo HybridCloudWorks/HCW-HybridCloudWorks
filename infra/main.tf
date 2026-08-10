@@ -652,8 +652,26 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 
     "NODE_ENV" = "production"
 
-    # Feature flags — set to "true" in TF Cloud vars once business logic is ported
+    # Feature flags.
+    #
+    # One per timer. They previously shared FEATURE_FLAG_SCHEDULERS, so enabling
+    # the scheduled publisher would also have armed cleanupTempStorage — an
+    # unimplemented TODO that deletes blobs (TODO.md T-302).
+    #
+    # FEATURE_FLAG_SCHEDULERS is now a master kill switch only: "false" holds
+    # every timer off regardless of the individual flags, and any other value
+    # defers to them. Set an individual flag to "true" once that timer's logic
+    # is ported and reviewed.
     "FEATURE_FLAG_SCHEDULERS" = "false"
+
+    # The only one implemented. Publishes content whose scheduledPublishDate has
+    # come due, through the same pipeline the operator's Publish button uses.
+    "FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT" = "false"
+
+    # Unimplemented TODOs. Do not set to "true".
+    "FEATURE_FLAG_SYNC_RSS_FEEDS"    = "false"
+    "FEATURE_FLAG_CLEANUP_TEMP_STORAGE" = "false"
+    "FEATURE_FLAG_CHECK_AGENT_HEALTH"   = "false"
   }
 
   identity {

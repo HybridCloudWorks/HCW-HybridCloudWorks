@@ -226,6 +226,14 @@ export function toJsonPointer(fieldPath) {
  * @param {Record<string, any>} updates - field path -> value. `undefined` deletes.
  * @param {object} [options]
  * @param {string} [options.partitionKey] - defaults to id
+ * @param {string} [options.ifMatch] - an `_etag` read earlier. The write then
+ *   fails with 412 if the document changed in between, instead of overwriting.
+ *   Use it when the update was *decided* from a document read earlier in the
+ *   handler — the RMW path's own ETag only protects the read it performs
+ *   itself, which is a much narrower window and re-reads on conflict rather
+ *   than telling the caller. The scheduled publisher needs the wider guard,
+ *   because the timer and an operator can both act on one document
+ *   (TODO.md T-301).
  * @returns {Promise<object>} the document after the write
  */
 export async function patchDoc(containerName, id, updates, options = {}) {
@@ -236,13 +244,18 @@ export async function patchDoc(containerName, id, updates, options = {}) {
 
   const container = getContainer(containerName);
   const pk = resolvePartitionKey(containerName, options.partitionKey, id);
+  const accessCondition = options.ifMatch
+    ? { accessCondition: { type: 'IfMatch', condition: options.ifMatch } }
+    : undefined;
 
   if (plan.strategy === 'patch') {
-    const { resource } = await container.item(id, pk).patch(plan.operations);
+    const { resource } = await container.item(id, pk).patch(plan.operations, accessCondition);
     return resource;
   }
 
-  return readModifyWrite(container, id, pk, plan.entries);
+  // A caller-supplied ETag makes the retry wrong: retrying re-reads, which is
+  // exactly the "decide from a stale document" the caller asked to prevent.
+  return readModifyWrite(container, id, pk, plan.entries, options.ifMatch ? 1 : 0, options.ifMatch);
 }
 
 /**
@@ -292,10 +305,16 @@ export function planPatch(updates) {
  * One retry: a 412 means someone else wrote between our read and our replace,
  * and re-reading resolves it unless the document is genuinely hot.
  */
-async function readModifyWrite(container, id, pk, entries, attempt = 0) {
+async function readModifyWrite(container, id, pk, entries, attempt = 0, ifMatch = null) {
   const { resource: current } = await container.item(id, pk).read();
   if (!current) {
     throw new Error(`patchDoc: document ${id} does not exist`);
+  }
+  // The caller decided this update from an earlier read. If the document moved
+  // since then, applying the update to what we just read would write a
+  // decision made about a document that no longer exists.
+  if (ifMatch && current._etag !== ifMatch) {
+    throw Object.assign(new Error(`patchDoc: ${id} changed since it was read`), { code: 412 });
   }
 
   const next = structuredClone(current);
@@ -310,7 +329,7 @@ async function readModifyWrite(container, id, pk, entries, attempt = 0) {
     return resource;
   } catch (err) {
     if (err.code === 412 && attempt === 0) {
-      return readModifyWrite(container, id, pk, entries, attempt + 1);
+      return readModifyWrite(container, id, pk, entries, attempt + 1, ifMatch);
     }
     throw err;
   }
