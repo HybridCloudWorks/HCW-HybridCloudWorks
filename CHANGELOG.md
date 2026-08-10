@@ -185,6 +185,25 @@ This project has not cut a tagged release; entries are grouped under
   document is one feed, so sizing the bound to the 30 items the client renders
   would have dropped whole feeds. Items *within* a document remain unbounded,
   tracked as T-319. (TODO.md T-203)
+- **Point reads against the four non-`/id` containers now fail loudly.**
+  `readDoc`/`patchDoc`/`deleteDoc`/`replaceDocIfMatch` defaulted the partition
+  key to the document id, which for `content_versions`, `image_prompt_sets_prompts`,
+  `image_prompts_sets` and `listen_and_learn_episodes` reads the wrong logical
+  partition and returns nothing — surfacing as a permanent `null`. They now
+  throw unless given an explicit key, and a test keeps the map in step with
+  `infra/cosmos-containers.json`. (TODO.md T-313)
+- **`putConfig` no longer deletes stored OAuth tokens.** It is a full replace and
+  reads never return `oauthToken`, so any read-modify-write round trip from an
+  edit form would have wiped it. The token is carried forward unless explicitly
+  supplied; an explicit empty string still revokes. The read-side
+  `hasOauthToken` boolean is stripped from incoming bodies. (TODO.md T-314)
+- **`cms/content` list rejects a malformed `limit`.** `?limit=abc` produced
+  `TOP NaN` — a 500 carrying raw Cosmos error text — and `?limit=0` produced a
+  silently empty list. Clamped like its four siblings, and `error.message` no
+  longer reaches the client on any of the file's 500 paths. (TODO.md T-310)
+- **`deleteSetArtifacts` queries one logical partition** instead of fanning out
+  across all of them; `queryDocs` gained an optional `partitionKey`.
+  (TODO.md T-312)
 
 ### Infrastructure
 

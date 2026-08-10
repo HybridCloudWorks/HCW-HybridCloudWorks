@@ -71,6 +71,18 @@ describe('cms content list', () => {
 
     await h.list(makeRequest({ query: { limit: '5000' } }), context);
     expect(store.queryDocs.mock.calls[1][2]).toContainEqual({ name: '@limit', value: LIST_MAX_LIMIT });
+
+    // `?limit=abc` produced `TOP NaN`, a 500 carrying raw Cosmos error text;
+    // `?limit=0` and negatives produced `TOP 0`, a silently empty list
+    // (TODO.md T-310).
+    for (const bad of ['abc', '0', '-5', '', 'NaN']) {
+      store.queryDocs.mockClear();
+      await h.list(makeRequest({ query: { limit: bad } }), context);
+      const limit = store.queryDocs.mock.calls[0][2].find((p) => p.name === '@limit').value;
+      expect(Number.isInteger(limit)).toBe(true);
+      expect(limit).toBeGreaterThanOrEqual(1);
+      expect(limit).toBeLessThanOrEqual(LIST_MAX_LIMIT);
+    }
   });
 
   it('filters by contentStatus only when asked, via parameter not interpolation', async () => {

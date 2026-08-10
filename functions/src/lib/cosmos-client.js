@@ -15,6 +15,55 @@ let client = null;
 let database = null;
 
 /**
+ * Containers whose partition key is NOT `/id`.
+ *
+ * `readDoc`, `patchDoc` and `deleteDoc` default the partition key to the
+ * document id, which is correct for 67 of the 71 containers and silently wrong
+ * for these four. Wrong in the worst way: a point read against the wrong
+ * logical partition does not error, it returns nothing — and `readDoc` maps
+ * that to `null`. The first person to write a `content_versions` reader would
+ * have got `null` forever with no indication why (TODO.md T-313).
+ *
+ * Mirrored from `infra/cosmos-containers.json`, which is the source of truth.
+ * `cosmos-client.test.js` asserts the two agree, so adding a fifth exception to
+ * the manifest without adding it here fails CI.
+ *
+ * Note for anyone comparing against T-313 as written: it named three
+ * exceptions. There are four — `listen_and_learn_episodes` (`/setId`) was
+ * missing from the finding.
+ */
+export const PARTITION_KEY_PATHS = Object.freeze({
+  content_versions: '/contentId',
+  image_prompt_sets_prompts: '/setName',
+  image_prompts_sets: '/pageId',
+  listen_and_learn_episodes: '/setId',
+});
+
+/**
+ * Resolve the partition key for a point operation.
+ *
+ * Throws rather than guessing for the four containers above: an explicit
+ * failure at the call site is recoverable, a silent `null` is not.
+ *
+ * @param {string} containerName
+ * @param {string|undefined} explicit - partition key the caller supplied
+ * @param {string} id - the document id, the default for `/id` containers
+ * @returns {string}
+ */
+export function resolvePartitionKey(containerName, explicit, id) {
+  if (explicit !== undefined && explicit !== null) return explicit;
+
+  const path = PARTITION_KEY_PATHS[containerName];
+  if (path) {
+    throw new Error(
+      `${containerName} is partitioned on ${path}, not /id — pass an explicit partition key. ` +
+        'Defaulting to the document id would read the wrong logical partition and return null.'
+    );
+  }
+  return id;
+}
+
+/**
  * Initialize or return the singleton Cosmos DB client.
  * Uses managed identity (DefaultAzureCredential) — no key required.
  */
@@ -56,8 +105,9 @@ export function getContainer(containerName) {
  */
 export async function readDoc(containerName, id, partitionKey) {
   const container = getContainer(containerName);
+  const pk = resolvePartitionKey(containerName, partitionKey, id);
   try {
-    const { resource } = await container.item(id, partitionKey || id).read();
+    const { resource } = await container.item(id, pk).read();
     return resource || null;
   } catch (err) {
     if (err.code === 404) return null;
@@ -113,7 +163,7 @@ export async function upsertDoc(containerName, document) {
  */
 export async function replaceDocIfMatch(containerName, document, options = {}) {
   const container = getContainer(containerName);
-  const pk = options.partitionKey ?? document.id;
+  const pk = resolvePartitionKey(containerName, options.partitionKey, document.id);
   const { resource } = await container
     .item(document.id, pk)
     .replace(document, { accessCondition: { type: 'IfMatch', condition: document._etag } });
@@ -185,7 +235,7 @@ export async function patchDoc(containerName, id, updates, options = {}) {
   }
 
   const container = getContainer(containerName);
-  const pk = options.partitionKey ?? id;
+  const pk = resolvePartitionKey(containerName, options.partitionKey, id);
 
   if (plan.strategy === 'patch') {
     const { resource } = await container.item(id, pk).patch(plan.operations);
@@ -299,25 +349,44 @@ export function applyFieldPath(target, segments, value) {
  */
 export async function deleteDoc(containerName, id, partitionKey) {
   const container = getContainer(containerName);
-  await container.item(id, partitionKey || id).delete();
+  await container.item(id, resolvePartitionKey(containerName, partitionKey, id)).delete();
 }
 
 /**
  * Query documents with SQL.
  * Equivalent to: admin.firestore().collection(name).where(...).orderBy(...).limit(n).get()
  *
+ * `fetchAll()` is NOT a single page. It loops until the query is exhausted,
+ * accumulating every page in memory — it consumes the continuation token
+ * rather than discarding it, so results are never silently truncated. (T-311
+ * claimed the opposite; the SDK's `toArrayImplementation` shows otherwise.)
+ *
+ * The consequence that matters is the other one: an unbounded query
+ * materialises the whole result set in the handler. That is why callers supply
+ * `TOP` in the SQL — the bounded-window rule in the public-reads header, and
+ * the ceilings added for the anonymous feed (T-203). The only queries here
+ * without `TOP` are `SELECT VALUE COUNT(1)` aggregates, which return one row.
+ *
+ * There is deliberately no cursor API. Adding one is a real feature — it would
+ * let callers page rather than window — and belongs with T-206, not here.
+ *
  * @param {string} containerName
  * @param {string} query - Cosmos DB SQL query
  * @param {Array<{name: string, value: any}>} [parameters]
  * @param {object} [options]
- * @param {number} [options.maxItemCount]
+ * @param {number} [options.maxItemCount] - page size for the internal loop
+ * @param {string} [options.partitionKey] - scope to one logical partition
+ *   instead of fanning out across all of them. Only correct when the query's
+ *   predicate matches the container's partition key (T-312).
  * @returns {Promise<object[]>}
  */
 export async function queryDocs(containerName, query, parameters = [], options = {}) {
   const container = getContainer(containerName);
-  const { resources } = await container.items
-    .query({ query, parameters }, { maxItemCount: options.maxItemCount })
-    .fetchAll();
+  const feedOptions = { maxItemCount: options.maxItemCount };
+  if (options.partitionKey !== undefined && options.partitionKey !== null) {
+    feedOptions.partitionKey = options.partitionKey;
+  }
+  const { resources } = await container.items.query({ query, parameters }, feedOptions).fetchAll();
   return resources;
 }
 

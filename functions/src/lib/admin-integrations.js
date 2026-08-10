@@ -292,12 +292,34 @@ export function createAdminIntegrationHandlers({
 
         const existing = await store.readDoc(container, id, id);
         const nowIso = now().toISOString();
+
+        // `hasOauthToken` is a READ artefact — stripOAuthToken synthesises it
+        // so consumers can render connection state without seeing the token.
+        // An edit form round-tripping a read back into this handler would
+        // otherwise persist the boolean into the stored document, where it
+        // would then shadow the real value on the next read.
+        const { hasOauthToken: _ignored, ...incoming } = body;
+
         const doc = {
-          ...body,
+          ...incoming,
           id,
           createdAt: existing?.createdAt || nowIso,
           updatedAt: nowIso,
         };
+
+        // putConfig is a full replace, and reads never return `oauthToken`
+        // (deliberately — it is write-only). So a read-modify-write round trip
+        // from any edit form would silently delete a stored token. Carry it
+        // forward unless the caller explicitly supplied a new one; an explicit
+        // empty string still clears it, which is how a token is revoked
+        // (TODO.md T-314).
+        if (
+          container === 'mcp_servers' &&
+          !Object.prototype.hasOwnProperty.call(incoming, 'oauthToken') &&
+          existing?.oauthToken !== undefined
+        ) {
+          doc.oauthToken = existing.oauthToken;
+        }
         await store.upsertDoc(container, doc);
         const item = container === 'mcp_servers' ? stripOAuthToken(doc) : doc;
         return json(200, { success: true, id, item });
