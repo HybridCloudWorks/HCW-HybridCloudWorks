@@ -15,7 +15,8 @@
  *
  *   1. **Guarded or explicitly public.** Either the route is named in
  *      `PUBLIC_ROUTES` below — a deliberate, reviewed decision — or invoking it
- *      reaches `guard.requireRole` / `guard.requireUser`.
+ *      reaches one of the recognised guards (`requireRole`, `requireUser`, or
+ *      the Labs agent's `requireAgent`).
  *   2. **`OPTIONS` is registered.** Without it the host 404s a preflight before
  *      any handler runs, and every authenticated call preflights because it
  *      carries `Authorization`.
@@ -45,17 +46,44 @@ vi.mock('@azure/functions', () => ({
   },
 }));
 
-/** Every guarded handler resolves its guard through this module. */
+/**
+ * Every guarded handler resolves its guard through one of these two modules.
+ *
+ * There are two, not one, and that is deliberate: the Labs VPS agent is a
+ * machine identity authorized by its own App Role and its own registry, not by
+ * the admin role hierarchy (lib/auth/require-agent.js). A third guard must be
+ * added HERE before its routes count as guarded — that is the whole point of
+ * this test, and adding one should be a visible, reviewed act.
+ */
 const requireRole = vi.fn(async () => ({
   error: { status: 403, headers: {}, body: JSON.stringify({ ok: false, error: 'Forbidden' }) },
 }));
 const requireUser = vi.fn(async () => ({
   error: { status: 401, headers: {}, body: JSON.stringify({ ok: false, error: 'Unauthorized' }) },
 }));
+const requireAgent = vi.fn(async () => ({
+  agent: null,
+  identity: null,
+  error: {
+    status: 403,
+    headers: {},
+    body: JSON.stringify({ ok: false, error: 'Agent access required' }),
+  },
+}));
+
+/** Every gate the inventory recognises. A route must reach at least one. */
+const GUARDS = [requireRole, requireUser, requireAgent];
+const guardCalls = () => GUARDS.reduce((n, g) => n + g.mock.calls.length, 0);
+const clearGuards = () => GUARDS.forEach((g) => g.mockClear());
 
 vi.mock('../lib/auth/default-guard.js', () => ({
   getDefaultGuard: () => ({ requireRole, requireUser }),
   resetDefaultGuard: () => {},
+}));
+
+vi.mock('../lib/auth/default-agent-guard.js', () => ({
+  getDefaultAgentGuard: () => ({ requireAgent }),
+  resetDefaultAgentGuard: () => {},
 }));
 
 /**
@@ -86,7 +114,7 @@ const makeRequest = ({ method = 'GET', origin } = {}) => ({
   params: {},
   query: new Map(),
   headers: { get: (name) => (name.toLowerCase() === 'origin' ? origin || null : null) },
-  json: async () => ({}),
+  json: async () => ({ agentId: 'inventory-probe' }),
   text: async () => '',
 });
 
@@ -124,11 +152,10 @@ describe('property 1 — every route is guarded or explicitly public', () => {
     for (const [name, options] of httpRegistrations) {
       if (PUBLIC_ROUTES.has(options.route)) continue;
 
-      requireRole.mockClear();
-      requireUser.mockClear();
+      clearGuards();
       await invoke(options, makeRequest({ method: options.methods[0] }));
 
-      if (requireRole.mock.calls.length === 0 && requireUser.mock.calls.length === 0) {
+      if (guardCalls() === 0) {
         unguarded.push(`${name} (${options.methods[0]} ${options.route})`);
       }
     }
@@ -144,11 +171,10 @@ describe('property 1 — every route is guarded or explicitly public', () => {
     for (const [name, options] of httpRegistrations) {
       if (!PUBLIC_ROUTES.has(options.route)) continue;
 
-      requireRole.mockClear();
-      requireUser.mockClear();
+      clearGuards();
       await invoke(options, makeRequest({ method: options.methods[0] }));
 
-      if (requireRole.mock.calls.length > 0 || requireUser.mock.calls.length > 0) {
+      if (guardCalls() > 0) {
         surprising.push(name);
       }
     }
@@ -174,14 +200,13 @@ describe('property 3 — every route evaluates CORS', () => {
     const notEvaluated = [];
 
     for (const [name, options] of httpRegistrations) {
-      requireRole.mockClear();
-      requireUser.mockClear();
+      clearGuards();
       const res = await invoke(
         options,
         makeRequest({ method: options.methods[0], origin: 'https://evil.test' })
       );
 
-      if (res?.status !== 403 || requireRole.mock.calls.length > 0) {
+      if (res?.status !== 403 || guardCalls() > 0) {
         notEvaluated.push(`${name} (${options.route})`);
       }
     }

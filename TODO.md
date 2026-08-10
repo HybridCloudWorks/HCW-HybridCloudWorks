@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 36 |
+| Open items | 35 |
 | Critical | 0 |
 | High | 10 |
 | Medium | 18 |
-| Low | 8 |
-| Resolved since the review | 6 (T-101, T-102, T-103, T-104, T-105, T-403) |
+| Low | 7 |
+| Resolved since the review | 7 (T-101, T-102, T-103, T-104, T-105, T-401, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 575 functions tests and 31 frontend tests. That
+resolved, and the suite is now 619 functions tests and 31 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -638,13 +638,46 @@ absolute source-system URLs that legacy documents still hold.
 
 ## LOW
 
-### T-401 — `vps-agent` heartbeat field mismatch, over-broad credential, incomplete
+### ~~T-401 — `vps-agent` heartbeat field mismatch, over-broad credential, incomplete~~ RESOLVED
 **File:** `vps-agent/index.js:15-53`
-Writes `lastPing`; `labs.js:188` reads `lastSeenAt` — **the Labs connected
-indicator can never be true.** Uses a Cosmos **account primary key** on a
-third-party VPS, contradicting `cosmos-client.js:5-8`. `pollJobs()` is a stub; no
-heartbeat interval. Do not deploy until the credential model is decided
-([REVIEW.md](REVIEW.md)).
+Wrote `lastPing` while `labs.js:188` reads `lastSeenAt` — **the Labs connected
+indicator could never be true.** Used a Cosmos **account primary key** on a
+third-party VPS, contradicting `cosmos-client.js:5-8`. `pollJobs()` was a stub;
+no heartbeat interval; and the module used ESM syntax in a package with no
+`"type": "module"`, so it could not have run at all.
+
+**Resolved by removing the database credential entirely.** The VPS is outside
+the trust boundary in the same way the browser is, so it now gets the same
+answer the browser got: an authenticated API, no data-plane client.
+
+- **`auth/require-agent.js`** — a guard disjoint from the admin one. Gate 1 is
+  the `LabAgent` App Role; gate 2 is a `lab_agents/{agentId}` document whose
+  `oid` matches the token's. That binding is what stops any holder of an agent
+  token from acting as an arbitrary agent. The registry is read on every call,
+  with no cache, so revoking `active` takes effect immediately rather than
+  after a TTL. An admin token does not satisfy it and an agent token does not
+  satisfy `requireRole`.
+- **`lib/lab-agent.js`** — three endpoints, `agent/claimLabJob`,
+  `agent/heartbeat`, `agent/completeLabJob`. Capabilities come from the registry
+  rather than the request; terminal statuses exclude `cancelled`, which belongs
+  to the operator; completing a job requires holding it. Claim atomicity moved
+  from the source's Firestore transaction to an ETag-guarded write
+  (`replaceDocIfMatch`, new in `cosmos-client.js`), and a claim lease lets a
+  dead agent's work be picked up instead of stranded — a hole the source had.
+- **`lastSeenAt` is now written server-side**, so no future agent can get the
+  field name wrong.
+- **The agent was rewritten** around a `ClientCertificateCredential`, and the
+  capability allowlist and Docker sandbox were ported from
+  `frontend/labs/vps-agent/lib/`.
+
+The route-inventory test (T-103) was extended to recognise the agent guard as a
+third gate; a mutation check confirms it still names an unguarded route.
+
+**Still not deployable, for a different reason than before.** None of this has
+run against a deployed environment, and the pieces below are not code:
+the app registration, its `LabAgent` App Role, the certificate, and the
+`lab_agents` registry documents all have to be created by hand — see
+[CHECKLIST.md](CHECKLIST.md) and [REVIEW.md](REVIEW.md) §0.4.
 
 ### T-402 — Contract drift in `.azure/api-surface.json`
 Uploads say 5 MB (actual 15 MB); `GET /api/cms/labs` documented but deliberately
