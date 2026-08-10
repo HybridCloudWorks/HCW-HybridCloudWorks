@@ -213,6 +213,70 @@ describe('config collections (ai-providers / mcp-servers)', () => {
     expect(doc.updatedAt).toBe('2026-08-06T12:00:00.000Z');
   });
 
+  it('PUT carries a stored oauthToken through a read-modify-write round trip', async () => {
+    // putConfig is a full replace and reads never return oauthToken, so an
+    // edit form that reads then writes would silently delete the token
+    // (TODO.md T-314).
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'stored-tok', createdAt: 'x' })),
+    });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    await h.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'plaud' },
+        body: { enabled: true, hasOauthToken: true },
+      }),
+      context
+    );
+
+    const doc = store.upsertDoc.mock.calls[0][1];
+    expect(doc.oauthToken).toBe('stored-tok');
+    // The read-side boolean must not persist into the document, where it would
+    // shadow the real value on the next read.
+    expect(doc).not.toHaveProperty('hasOauthToken');
+  });
+
+  it('PUT lets an explicit oauthToken overwrite the stored one', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'old-tok' })),
+    });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    await h.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'plaud' },
+        body: { oauthToken: 'new-tok' },
+      }),
+      context
+    );
+    expect(store.upsertDoc.mock.calls[0][1].oauthToken).toBe('new-tok');
+  });
+
+  it('PUT lets an explicit empty oauthToken revoke it', async () => {
+    // Clearing must stay possible — carrying forward unconditionally would
+    // make a token impossible to remove through this route.
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'old-tok' })),
+    });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    await h.putConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { oauthToken: '' } }),
+      context
+    );
+    expect(store.upsertDoc.mock.calls[0][1].oauthToken).toBe('');
+  });
+
+  it('PUT does not invent an oauthToken for a non-mcp collection', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'vertex', oauthToken: 'should-not-carry' })),
+    });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    await h.putConfig(
+      makeRequest({ params: { collection: 'ai-providers', id: 'vertex' }, body: { enabled: true } }),
+      context
+    );
+    expect(store.upsertDoc.mock.calls[0][1]).not.toHaveProperty('oauthToken');
+  });
+
   it('PATCH accepts an oauthToken write but strips it from the response', async () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({ id: 'plaud' })),

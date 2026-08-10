@@ -144,6 +144,33 @@ the agent's next call — there is no cache to wait out.
 **Unblocked by:** someone with Entra directory access performing the three
 steps above. Required inputs are itemised in [CHECKLIST.md](CHECKLIST.md).
 
+### 0.6 Republish the snapshots after the first deploy — REQUIRED, not optional
+
+**Action for you, not a decision.** It cannot be done from an agent session:
+`publishSnapshot` is an authenticated endpoint on a deployed Function App, and
+no environment has ever existed (§1.1, §1.2).
+
+TODO.md T-201 fixed what `publishSnapshot` **writes**. It does not touch what is
+already written. If a `_snapshots/speakerevents` document exists from before the
+fix, it still contains every admin email that ever touched an event, plus any
+`display: false` records — and `GET public/snapshots/speakerevents` will keep
+serving them until the document is regenerated.
+
+So the moment there is a deployed environment holding pre-fix snapshot data:
+
+1. Sign in as an admin with `editor` or above.
+2. `POST {api-base}/publishSnapshot` with the Entra bearer token. The admin UI's
+   PublishSnapshotButton does the same thing.
+3. Confirm `GET {api-base}/public/snapshots/speakerevents` contains no `@`
+   addresses and no `display: false` entries.
+
+If instead the account is provisioned fresh with no pre-fix data, there is
+nothing to clean and step 3 is just a check.
+
+Related but separate: §0.3 asks for the contents of `_snapshots` so the *size*
+of the historical exposure is known. Republishing removes the data; only reading
+it first tells you what was published, for how long.
+
 ### 0.5 Media delivery — keep the account closed, or open it behind a CDN?
 
 **Not blocking.** T-105 is resolved in the closed configuration; this decides

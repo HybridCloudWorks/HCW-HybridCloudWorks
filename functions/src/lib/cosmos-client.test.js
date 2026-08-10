@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PARTITION_KEY_PATHS,
+  resolvePartitionKey,
   MAX_PATCH_OPERATIONS,
   applyFieldPath,
   planPatch,
@@ -153,5 +155,56 @@ describe('applyFieldPath', () => {
     const doc = { a: 1 };
     applyFieldPath(doc, ['a'], null);
     expect(doc).toEqual({ a: null });
+  });
+});
+
+describe('partition keys (T-312, T-313)', () => {
+  it('stays in step with the migration manifest', async () => {
+    // infra/cosmos-containers.json is the source of truth. Adding a fifth
+    // non-/id container there without adding it here would reintroduce the
+    // silent-null trap, so this fails CI instead.
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const manifest = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../../infra/cosmos-containers.json', import.meta.url)),
+        'utf8'
+      )
+    );
+    const fromManifest = Object.fromEntries(
+      manifest.containers
+        .filter((c) => c.partition_key_path !== '/id')
+        .map((c) => [c.name, c.partition_key_path])
+    );
+    expect({ ...PARTITION_KEY_PATHS }).toEqual(fromManifest);
+  });
+
+  it('defaults to the document id for an /id container', () => {
+    expect(resolvePartitionKey('content', undefined, 'doc-1')).toBe('doc-1');
+  });
+
+  it('throws rather than guessing for a non-/id container', () => {
+    // Guessing produces a point read against the wrong logical partition,
+    // which returns nothing — and readDoc maps that to null. A loud throw is
+    // recoverable; a permanent null is not.
+    expect(() => resolvePartitionKey('content_versions', undefined, 'v1')).toThrow(/contentId/);
+    expect(() => resolvePartitionKey('image_prompt_sets_prompts', undefined, 'p1')).toThrow(
+      /setName/
+    );
+    expect(() => resolvePartitionKey('image_prompts_sets', undefined, 's1')).toThrow(/pageId/);
+    expect(() => resolvePartitionKey('listen_and_learn_episodes', undefined, 'e1')).toThrow(
+      /setId/
+    );
+  });
+
+  it('accepts an explicit key for those containers', () => {
+    expect(resolvePartitionKey('content_versions', 'content-7', 'v1')).toBe('content-7');
+  });
+
+  it('accepts an explicit key that happens to be empty', () => {
+    // '' is a legitimate partition key value and must not fall through to the
+    // id default — the manifest records that /contentId was written as the
+    // empty string on every legacy document.
+    expect(resolvePartitionKey('content_versions', '', 'v1')).toBe('');
   });
 });

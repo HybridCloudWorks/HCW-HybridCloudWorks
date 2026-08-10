@@ -185,6 +185,49 @@ This project has not cut a tagged release; entries are grouped under
   document is one feed, so sizing the bound to the 30 items the client renders
   would have dropped whole feeds. Items *within* a document remain unbounded,
   tracked as T-319. (TODO.md T-203)
+- **Point reads against the four non-`/id` containers now fail loudly.**
+  `readDoc`/`patchDoc`/`deleteDoc`/`replaceDocIfMatch` defaulted the partition
+  key to the document id, which for `content_versions`, `image_prompt_sets_prompts`,
+  `image_prompts_sets` and `listen_and_learn_episodes` reads the wrong logical
+  partition and returns nothing — surfacing as a permanent `null`. They now
+  throw unless given an explicit key, and a test keeps the map in step with
+  `infra/cosmos-containers.json`. (TODO.md T-313)
+- **`putConfig` no longer deletes stored OAuth tokens.** It is a full replace and
+  reads never return `oauthToken`, so any read-modify-write round trip from an
+  edit form would have wiped it. The token is carried forward unless explicitly
+  supplied; an explicit empty string still revokes. The read-side
+  `hasOauthToken` boolean is stripped from incoming bodies. (TODO.md T-314)
+- **`cms/content` list rejects a malformed `limit`.** `?limit=abc` produced
+  `TOP NaN` — a 500 carrying raw Cosmos error text — and `?limit=0` produced a
+  silently empty list. Clamped like its four siblings, and `error.message` no
+  longer reaches the client on any of the file's 500 paths. (TODO.md T-310)
+- **`deleteSetArtifacts` queries one logical partition** instead of fanning out
+  across all of them; `queryDocs` gained an optional `partitionKey`.
+  (TODO.md T-312)
+- **Uploads no longer accept an arbitrary content type.** `contentType` was
+  taken verbatim from the body and stored as the blob's Content-Type, which the
+  media route serves back: an editor could host `evil.html` as `text/html` on an
+  org-owned domain. Six image types are now allowed, each having to agree with
+  the path's extension — `badge.png` declared `text/html` and `evil.html`
+  declared `image/png` are both refused. `image/svg+xml` is accepted only into
+  containers the anonymous route does not serve, since an SVG on a public URL is
+  a scriptable document in the storage origin and `nosniff` does not address a
+  type that was declared rather than guessed. (TODO.md T-307)
+- **A caller-chosen upload path can no longer replace a live asset.** Uploads
+  from the admin route are conditioned on `If-None-Match: *` and answer 409
+  instead of overwriting; `uploadBlob`'s default is unchanged, so the paths that
+  rewrite deterministic keys on purpose still do. The condition is asserted
+  against a mocked SDK rather than only against the handler's fake storage —
+  that fake is what let T-104 stay green while every real upload threw.
+  (TODO.md T-307)
+- **Upload size is checked before memory is committed.** The 413 came after a
+  full JSON parse, a full base64 string and a full `Buffer` decode — roughly a
+  250 MB peak for a 100 MB body on a 2048 MB instance. `Content-Length` is now
+  checked before the body is read and `dataBase64.length` before it is decoded,
+  with the decoded count still the final authority. There is no
+  `http.maxRequestBodySize` in `host.json` to complement this; the v2+
+  `extensions.http` schema has no such key, so the anonymous submissions parse
+  still needs its own check. (TODO.md T-306)
 
 ### Infrastructure
 

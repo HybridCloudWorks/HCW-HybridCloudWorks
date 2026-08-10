@@ -128,10 +128,14 @@ export function createImagePromptHandlers({ guard, store, now = () => new Date()
 
   /** Source deleteImagePromptSetArtifacts (:1072). */
   async function deleteSetArtifacts(setName, nowIso) {
+    // Scoped to one logical partition rather than fanned out: this container
+    // is partitioned on /setName and the predicate IS the partition key, so the
+    // fan-out was buying nothing (TODO.md T-312).
     const prompts = await store.queryDocs(
       'image_prompt_sets_prompts',
       'SELECT c.id, c.setName FROM c WHERE c.setName = @set',
-      [{ name: '@set', value: setName }]
+      [{ name: '@set', value: setName }],
+      { partitionKey: setName }
     );
     for (const prompt of prompts) {
       await deleteIgnoringMissing(store, 'image_prompt_sets_prompts', prompt.id, setName);

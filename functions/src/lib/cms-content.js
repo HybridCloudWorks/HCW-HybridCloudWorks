@@ -86,7 +86,13 @@ export function createCmsContentHandlers({ guard, store }) {
           : [];
         const liveOnly = request.query.get('live') === 'true';
         const type = String(request.query.get('type') || '').trim().toLowerCase();
-        const max = Math.min(Number(request.query.get('limit') || LIST_DEFAULT_LIMIT), LIST_MAX_LIMIT);
+        // `?limit=abc` produced `TOP NaN` (a 500 carrying raw Cosmos error
+        // text) and `?limit=0` produced `TOP 0` (a silently empty list). Same
+        // clamp the four sibling handlers use (TODO.md T-310).
+        const max = Math.min(
+          Math.max(Number(request.query.get('limit')) || LIST_DEFAULT_LIMIT, 1),
+          LIST_MAX_LIMIT
+        );
 
         let query = `SELECT TOP @limit ${PROJECTION} FROM c`;
         const parameters = [{ name: '@limit', value: max }];
@@ -111,7 +117,9 @@ export function createCmsContentHandlers({ guard, store }) {
         return json(200, { success: true, items, total: items.length });
       } catch (error) {
         context.error('listContentItems failed:', error);
-        return json(500, { error: 'Failed to list content items', message: error?.message || 'Unknown error' });
+        // No error.message to the client: it is raw Cosmos text on this path
+        // and can carry query structure. The context.error above keeps it.
+        return json(500, { error: 'Failed to list content items' });
       }
     },
 
@@ -135,7 +143,7 @@ export function createCmsContentHandlers({ guard, store }) {
         return json(200, { success: true, item });
       } catch (error) {
         context.error('getContentItem failed:', error);
-        return json(500, { error: 'Failed to get content item', message: error?.message || 'Unknown error' });
+        return json(500, { error: 'Failed to get content item' });
       }
     },
 
@@ -155,7 +163,7 @@ export function createCmsContentHandlers({ guard, store }) {
         return json(200, { success: true });
       } catch (error) {
         context.error('cmsDeleteContent failed:', error);
-        return json(500, { error: 'Failed to delete content', message: error?.message || 'Unknown error' });
+        return json(500, { error: 'Failed to delete content' });
       }
     },
   };

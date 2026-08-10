@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 33 |
+| Open items | 26 |
 | Critical | 0 |
 | High | 7 |
-| Medium | 19 |
+| Medium | 12 |
 | Low | 7 |
-| Resolved since the review | 10 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-401, T-403) |
-| Last updated | 2026-08-09 |
+| Resolved since the review | 17 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-306, T-307, T-310, T-312, T-313, T-314, T-401, T-403) + T-311 corrected as not-a-defect |
+| Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 640 functions tests and 31 frontend tests. That
+resolved, and the suite is now 664 functions tests and 31 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -581,24 +581,63 @@ documents sharing a slug resolve arbitrarily, and a published article can 404
 because an unpublished duplicate sorted first. **Fix:** filter in SQL, `ORDER BY
 c._ts DESC` (always present, so the drop-on-undefined trap does not apply).
 
-### T-306 — Upload size checked after allocation
-**File:** `functions/src/lib/admin-uploads.js:68-86`
+### ~~T-306 — Upload size checked after allocation~~ RESOLVED
+**File:** `functions/src/lib/admin-uploads.js`
 Full JSON parse → full base64 string → full `Buffer` decode → *then* the 413.
 ~250 MB transient peak for a 100 MB body against a 2048 MB instance.
-Editor-gated, so not anonymously reachable. **Fix:** `Content-Length` pre-check
-and a `dataBase64.length` check before `Buffer.from`; add
-`http.maxRequestBodySize` to `host.json` (also covers the anonymous
-submissions parse). Contract says 5 MB, implementation is 15 MB — reconcile.
+Editor-gated, so not anonymously reachable.
 
-### T-307 — Upload `contentType` unvalidated on publicly-readable containers
-**File:** `functions/src/lib/admin-uploads.js:70`, `blob-storage.js:57`
-Taken verbatim from the body with no allowlist. An editor can upload
+Three checks now run in increasing order of cost: `Content-Length` before the
+body is read at all, `dataBase64.length` before `Buffer.from`, and the decoded
+byte count as the final authority (base64 tolerates whitespace and padding).
+The header one is an early reject rather than the limit — it is caller-supplied
+and absent on a chunked request, so it can only ever turn work away, never
+authorize it.
+
+**One part of the prescription does not exist.** There is no
+`http.maxRequestBodySize` in `host.json`. The v2+ `extensions.http` schema is
+`routePrefix`, `maxOutstandingRequests`, `maxConcurrentRequests`,
+`dynamicThrottlesEnabled`, `hsts`, and `customHeaders` — nothing else
+([host.json settings](https://learn.microsoft.com/azure/azure-functions/functions-bindings-http-webhook#hostjson-settings),
+confirmed against the live reference). Adding the key would have been silently
+ignored and would have read, to the next person, as a limit that was in force.
+The anonymous submissions parse the finding wanted covered therefore still needs
+its own in-handler check; that is not in this fix.
+
+Contract said 5 MB against a 15 MB implementation. Reconciled to 15 MB, which is
+the deliberate value — gallery hero images run larger than cert badges, and
+CertificationsPage's 5 MB picker limit is that page's UX, not the route's rule.
+
+### ~~T-307 — Upload `contentType` unvalidated on publicly-readable containers~~ RESOLVED
+**File:** `functions/src/lib/admin-uploads.js`, `blob-storage.js`
+Taken verbatim from the body with no allowlist. An editor could upload
 `evil.html` as `text/html` into `certifications`. Different origin from the SPA,
-so not XSS — arbitrary content hosting on an org-owned domain. Also: no
-`ifNoneMatch`, so a caller-chosen path silently overwrites existing assets.
-**Fix:** content-type allowlist + matching extension check + `ifNoneMatch: '*'`.
-(The container allowlist and `isValidBlobPath` were attacked and held — do not
-change those.)
+so not XSS — arbitrary content hosting on an org-owned domain. Also no
+`ifNoneMatch`, so a caller-chosen path silently overwrote existing assets.
+
+Now an allowlist of six image types, each mapped to the extensions that may
+declare it; the declared type must be in the list **and** agree with the path's
+extension, because letting them disagree is how `badge.png` ends up served as
+`text/html`. `image/svg+xml` is accepted into private containers only —
+SubmitUrlsPage's picker offers SVG and uploads to `content`, which the anonymous
+media route does not serve, whereas an SVG on a public URL is a scriptable
+document executing in the storage origin. `nosniff` does not help there: it
+stops a browser guessing a type, and here the declared type is the problem.
+
+`uploadBlob` gained an `options.overwrite` flag that becomes
+`conditions: { ifNoneMatch: '*' }`; the admin route opts in, so the default is
+unchanged for the AI-image and migration paths that rewrite deterministic keys
+on purpose. All three upload call sites mint timestamped, randomized paths, so
+the new 409 means something unintended. It is returned without logging — a
+conflict is an outcome, not a failure.
+
+The condition is asserted in `blob-storage.test.js` against a mocked SDK, not
+only in the handler test: the handler test injects a fake `uploadBlob`, and
+that is exactly the shape that let T-104 stay green while every real upload
+threw.
+
+(The container allowlist and `isValidBlobPath` were attacked and held — not
+changed.)
 
 ### T-308 — Labs console polls forever on `timeout`, and fabricates `failed`
 **File:** `frontend/src/pages/admin/LabsPage.jsx:373-381`
@@ -616,41 +655,84 @@ a dedicated ticker with a comment explaining exactly this.
 **Fix:** restore the independent clock interval. Also add an in-flight guard to
 this poll and the editor's — 20 s timeout against a 15/20 s interval overlaps.
 
-### T-310 — `cms-content.js` limit has no NaN or lower bound
+### ~~T-310 — `cms-content.js` limit has no NaN or lower bound~~ RESOLVED
 **File:** `functions/src/lib/cms-content.js:89`
 `?limit=abc` → `TOP NaN` → 500 with raw Cosmos error text returned to the client;
 `?limit=0` → `TOP 0` → silently empty. Four sibling handlers use
-`Math.min(Math.max(Number(...) || DEFAULT, 1), MAX)`. Also stop returning
-`error.message` at `:114`/`:138`.
+`Math.min(Math.max(Number(...) || DEFAULT, 1), MAX)`.
 
-### T-311 — `queryDocs` discards the continuation token
+**Resolved.** Same clamp as the siblings, and `error.message` is gone from all
+three 500 paths in the file (the finding named two; `deleteContent` had it too).
+A loop test covers `abc`, `0`, `-5`, `''` and `NaN`.
+
+### ~~T-311 — `queryDocs` discards the continuation token~~ NOT A DEFECT — corrected
 **File:** `functions/src/lib/cosmos-client.js:285-291`
-`.fetchAll()` with no continuation support, so `offset`/`limit` everywhere is
-fake pagination over a truncated window. Prerequisite for T-206 real paging and
-for safe blob GC (T-302).
 
-### T-312 — `queryDocs` cannot express a partition key
+**The premise is wrong.** `fetchAll()` does not discard the continuation token —
+it consumes it. The SDK's `toArrayImplementation` loops
+`while (this.queryExecutionContext.hasMoreResults())`, accumulating every page
+into one array
+(`node_modules/@azure/cosmos/dist/commonjs/queryIterator.js:296-330`). Results
+are never silently truncated, and the `offset`/`limit` applied in memory are not
+"fake pagination over a truncated window": the window comes from `TOP` in the
+SQL, which is the documented bounded-fetch-then-sort pattern.
+
+What is true is the opposite hazard. Because `fetchAll` materialises the whole
+result set, an **unbounded** query loads everything into the handler — which is
+what T-203 was really about. Audited: the only `queryDocs` calls without `TOP`
+are three `SELECT VALUE COUNT(1)` aggregates, which return one row, plus the
+`image_prompt_sets_prompts` query now scoped by partition key (T-312). So the
+hazard is currently contained.
+
+The genuinely missing thing is a **cursor API** — letting a caller page through
+results across requests rather than fetch a window. That is a feature, not a bug
+fix, and it belongs with T-206 where real paging is the actual requirement. The
+behaviour is now documented accurately on `queryDocs` so the next reader is not
+misled the way this finding was.
+
+### ~~T-312 — `queryDocs` cannot express a partition key~~ RESOLVED
 **File:** `functions/src/lib/cosmos-client.js:285-291`; `cms/image-prompts.js:131-135`
 The one query whose predicate matches its container's partition key
 (`image_prompt_sets_prompts` on `/setName`) fans out anyway. Cheap now; the
 partition key is doing no work.
 
-### T-313 — Default-partition-key convention is a silent-404 trap
+**Resolved.** `queryDocs` takes an optional `partitionKey`, and
+`deleteSetArtifacts` passes it. Only correct where the predicate IS the
+partition key, which is documented on the option.
+
+### ~~T-313 — Default-partition-key convention is a silent-404 trap~~ RESOLVED
 **File:** `functions/src/lib/cosmos-client.js:57,60,157,271`
 `readDoc`/`patchDoc`/`deleteDoc` default the partition key to the id — correct for
 62 containers, wrong for `content_versions` (`/contentId`),
 `image_prompt_sets_prompts` (`/setName`), `image_prompts_sets` (`/pageId`), and
 `readDoc` returns `null` on 404 rather than throwing. No live bug; the first
 person to add a `content_versions` reader gets `null` forever.
-**Fix:** generate a container→partition-key map from the migration manifest and
-throw when a container needs an explicit key.
+**Resolved.** `PARTITION_KEY_PATHS` + `resolvePartitionKey` in
+`cosmos-client.js`: `readDoc`, `patchDoc`, `deleteDoc` and `replaceDocIfMatch`
+all route through it, and it throws for a non-`/id` container called without an
+explicit key. A test asserts the map equals the manifest, so adding a fifth
+exception to `infra/cosmos-containers.json` without adding it here fails CI.
 
-### T-314 — `putConfig` will silently delete stored OAuth tokens
+**Correction to the finding:** it named three exception containers. There are
+**four** — `listen_and_learn_episodes` (`/setId`) was missing.
+
+An explicit empty-string key is honoured rather than falling through to the id
+default, which matters: the manifest records that `/contentId` was written as
+the empty string on every legacy `content_versions` document.
+
+### ~~T-314 — `putConfig` will silently delete stored OAuth tokens~~ RESOLVED
 **File:** `functions/src/lib/admin-integrations.js:58-61,295-302`
 Reads no longer return `oauthToken` (correct), and `putConfig` is a full replace —
 so any read-modify-write round-trip deletes the token. No such call site exists
 today; the first "edit MCP server" form creates one. Also `hasOauthToken` is not
 stripped from incoming bodies, so it persists into stored documents.
+
+**Resolved.** `putConfig` carries a stored `oauthToken` forward when the caller
+does not supply one, and strips the read-side `hasOauthToken` boolean from
+incoming bodies. An **explicit** `oauthToken` still overwrites, and an explicit
+empty string still clears — revocation through this route stays possible, which
+an unconditional carry-forward would have broken. Non-MCP collections are
+untouched.
 
 ### T-315 — Cosmos primary key in app settings for two empty triggers
 **Files:** `infra/main.tf:565-574`; `functions/src/functions/cosmos-triggers.js:17-56`
@@ -856,7 +938,7 @@ modest test.
 | Unit | Job poll with `timeout`; with rejected fetch | stops; does not fabricate `failed` | T-308 |
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
-| Unit | `uploadFile` `text/html`; oversized Content-Length | 415; 413 before decode | T-306, T-307 |
+| ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |
 | Contract | Every `implemented` contract entry | resolves to a live route | T-402 |
 
 ---
