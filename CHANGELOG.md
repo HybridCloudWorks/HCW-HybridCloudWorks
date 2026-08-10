@@ -69,6 +69,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Firebase-era smoke scripts and nested workflows removed.** Three live smoke
+  scripts read `VITE_GCP_FUNCTIONS_URL` and built a `firebaseConfig` from
+  `VITE_FIREBASE_*` — none of which the application sets any more, so they could
+  not run — and `frontend/.github/` held the source repository's Firebase deploy,
+  E2E and secret-rotation workflows, inert but reading as live configuration.
+  Deleted rather than ported: a half-migrated script that looks runnable and is
+  not is worse than no script, which is exactly what these were. A deployed
+  smoke test is still wanted, written against Entra and the Azure routes.
+  (TODO.md T-317)
+- **Six unused dependencies dropped** from the functions package — `sharp`,
+  `replicate`, `turndown`, `@mendable/firecrawl-js`, `axios` and `rss-parser`,
+  none of them referenced anywhere under `src/`. (TODO.md T-407)
 - **Frontend decoupled from Firebase.** All 34 files importing `firebase/firestore`,
   5 importing `firebase/auth`, and 4 importing `firebase/storage` now call the
   Azure Functions API. Public pages (#61), admin CRUD (#62), shared config
@@ -91,6 +103,9 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`total` reported the page size.** Two public list endpoints measured it
+  after slicing, so it always equalled `items.length` and any paginating
+  consumer would conclude there was exactly one page. (TODO.md T-407)
 - **Two routes the frontend called did not exist.** `recordLegacyBlogsRead` and
   `getPlatformHealth` were registered nowhere — both 404s. The health one meant
   every anonymous visitor saw four `CHECKING` indicators resolve to "Health
@@ -204,6 +219,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **Anonymously submitted HTML is sanitized on ingest.** `overviewHtml` arrives
+  through the anonymous submission endpoint, is stored, and is eventually
+  rendered with `dangerouslySetInnerHTML` on a public template — with a single
+  client-side `DOMPurify.sanitize()` call standing between those two facts.
+  Sanitizing at ingest makes safety a property of the stored data rather than of
+  one component's rendering choice; the client-side call stays, because two
+  layers is the point. No dependency was added: the sanitizer uses `cheerio`,
+  already in the tree, so it parses rather than pattern-matching markup.
+  (TODO.md T-408)
+- **The Content-Security-Policy stopped granting the Firebase/GCP surface, and
+  started granting Entra.** `connect-src` still allowed `*.googleapis.com`,
+  `*.firebaseio.com`, `*.cloudfunctions.net`, `*.run.app` and
+  `wss://*.firebaseio.com` long after the last Firebase import was deleted, plus
+  `*.documents.azure.com`, which contradicts the rule that the browser never
+  holds a Cosmos client. More consequential in the other direction:
+  `login.microsoftonline.com` was **absent** from `connect-src` and `frame-src`,
+  so admin sign-in and MSAL's silent token renewal could not have worked at all.
+  Pinned by `csp.test.js`, since a CSP failure appears only in a browser console
+  on a deployed site. (TODO.md T-404)
+- **Key Vault failures are no longer indistinguishable from a missing secret.**
+  Throttled, RBAC-denied and unreachable all returned `null`, the same value as
+  "this secret does not exist" — and the one caller turns `null` into an error
+  message naming the wrong cause. `null` now means absent and everything else
+  throws, carrying the real reason. Reads are cached for five minutes, so a hot
+  path no longer spends the vault's request budget on a value that changes
+  approximately never. (TODO.md T-405)
+- **`GET /api/health` stopped reporting the runtime.** It returned
+  `process.version` and the deployment name to anyone — an unauthenticated
+  inventory of exactly what an attacker enumerates first, and of no use to a
+  liveness probe. (TODO.md T-402)
+- **The role cache is bounded.** It is only reachable after a token verifies, so
+  an anonymous caller could not grow it, but it had no eviction at all and grew
+  with every distinct principal that ever signed in. (TODO.md T-408)
+- **Authorization-denial auditing is pinned by a test.** The `admin_audit_logs`
+  writer already existed in the guard's production composition — the finding was
+  stale — but nothing failed if the line were deleted. Now something does.
+  (TODO.md T-406)
 - **The Cosmos account primary key is out of app settings.**
   `COSMOS_CONNECTION_STRING` carried it — readable by anyone with Contributor on
   the resource group, and present in Terraform state — for the sole benefit of a

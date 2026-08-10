@@ -23,6 +23,19 @@ import './schedulers.js';
 
 const BUILD_TIME = new Date().toISOString();
 
+/**
+ * Liveness probe. Anonymous, and therefore says as little as possible.
+ *
+ * It used to return `node: process.version`, the site name, and whether the
+ * schedulers flag was on — an unauthenticated inventory of the runtime version
+ * and deployment name, which is the first thing anyone enumerating a host
+ * looks for and is of no use to a probe (TODO.md T-402). A liveness check
+ * needs one bit: is the host answering.
+ *
+ * `startedAt` stays. It is the one field with an operational use — telling a
+ * cold start from a warm instance while diagnosing — and it discloses nothing
+ * about the software.
+ */
 httpRoute('healthCheck', {
   methods: ['GET'],
   authLevel: 'anonymous',
@@ -34,9 +47,6 @@ httpRoute('healthCheck', {
       body: JSON.stringify({
         status: 'ok',
         service: 'hcw-functions',
-        region: process.env.REGION_NAME || process.env.WEBSITE_SITE_NAME || 'local',
-        node: process.version,
-        schedulers: process.env.FEATURE_FLAG_SCHEDULERS === 'true' ? 'enabled' : 'disabled',
         startedAt: BUILD_TIME,
       }),
     };

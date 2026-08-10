@@ -45,6 +45,10 @@
  * between the revocation and its effect.
  */
 
+// Static, not `await import()` inside the guard. verify-token.js imports
+// nothing from here, so there was no cycle to break (TODO.md T-408).
+import { bearerTokenFrom } from './verify-token.js';
+
 const deny = (status, error) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
@@ -87,7 +91,6 @@ export function createAgentGuard({ verifier, lookupAgent, auditDenial }) {
    * @returns {Promise<{agent: object|null, identity: object|null, error: object|null}>}
    */
   async function requireAgent(request, agentId) {
-    const { bearerTokenFrom } = await import('./verify-token.js');
     const token = bearerTokenFrom(request);
 
     if (!token) {

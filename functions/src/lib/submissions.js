@@ -16,6 +16,8 @@
  * casing — rather than tidying it and silently breaking the queue.
  */
 
+import { sanitizeSubmittedHtml } from './sanitize-html.js';
+
 /** Mirrors MAX_CONTENT_LENGTH in the submission pages. */
 export const MAX_CONTENT_LENGTH = 50000;
 export const MAX_TITLE_LENGTH = 200;
@@ -99,7 +101,15 @@ export function validateSubmission(body) {
   }
 
   const content = str(body.content);
-  const overviewHtml = str(body.overviewHtml);
+  // Sanitized here, not merely on render. This field arrives anonymously and
+  // is eventually rendered with dangerouslySetInnerHTML on a public template;
+  // sanitizing at ingest makes safety a property of the stored data rather
+  // than of one component's rendering choice (TODO.md T-408).
+  //
+  // The length check below therefore measures the SANITIZED value: the cap
+  // exists to bound what is stored, and measuring the input would let a
+  // payload of stripped markup pass a check the stored string never met.
+  const overviewHtml = sanitizeSubmittedHtml(str(body.overviewHtml));
   if (spec.requires.includes('content')) {
     if (!content) return { error: 'Content is required' };
     if (content.length > MAX_CONTENT_LENGTH) {

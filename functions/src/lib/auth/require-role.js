@@ -33,7 +33,18 @@
  * rule, and it is the highest-value test in the port.
  */
 
-import { ENTRA_ADMIN_APP_ROLE, ROLE_CACHE_TTL_MS, satisfiesRole, minimumRole } from './roles.js';
+import {
+  ENTRA_ADMIN_APP_ROLE,
+  ROLE_CACHE_MAX_ENTRIES,
+  ROLE_CACHE_TTL_MS,
+  satisfiesRole,
+  minimumRole,
+} from './roles.js';
+// Static, not `await import()` inside the handler. verify-token.js imports
+// nothing from this module, so there was never a cycle to break — the dynamic
+// form just put a module-map lookup and a microtask on the path every
+// authenticated request takes (TODO.md T-408).
+import { bearerTokenFrom } from './verify-token.js';
 
 /** Uniform JSON error. FIX (A10): the previous 401/403 paths set no
  *  Content-Type, so Azure served them as text/plain and a frontend calling
@@ -69,8 +80,13 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
 
   // FIX (A12): the replaced code logged nothing on the 403 path. Site-Main
   // logs every denial with uid and attempted role and writes admin_audit_logs
-  // (`admin-auth.js:109`, `:124-126`, `:405-411`); the container exists on the
-  // Azure side with no writer.
+  // (`admin-auth.js:109`, `:124-126`, `:405-411`).
+  //
+  // The sink is injected, and `default-guard.js` supplies the real one — an
+  // `admin_audit_logs` upsert. This comment used to end "the container exists
+  // on the Azure side with no writer", which was true when it was written and
+  // is what TODO.md T-406 recorded; the writer landed with the guard's
+  // production composition.
   const audit = (entry) => {
     try {
       auditDenial?.(entry);
@@ -78,6 +94,31 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
       // An audit sink failure must never turn a clean 403 into a 500.
     }
   };
+
+  /**
+   * Drop expired entries, then the oldest, until the map is within bounds.
+   *
+   * The cache is keyed by object id and only reached after a token verifies,
+   * so it cannot be grown by an anonymous caller — but it had no eviction at
+   * all, so on a long-lived instance it grew monotonically with every distinct
+   * principal that ever signed in (TODO.md T-408). Sweeping on write keeps it
+   * O(1) amortised without a timer.
+   */
+  function evict() {
+    if (cache.size <= ROLE_CACHE_MAX_ENTRIES) return;
+
+    const currentMs = now();
+    for (const [key, entry] of cache) {
+      if (entry.expiresAt <= currentMs) cache.delete(key);
+    }
+    // Map iterates in insertion order, so the first keys are the oldest
+    // writes. Still over budget after dropping the expired ones means every
+    // entry is live, and the oldest is the least likely to be needed next.
+    for (const key of cache.keys()) {
+      if (cache.size <= ROLE_CACHE_MAX_ENTRIES) break;
+      cache.delete(key);
+    }
+  }
 
   async function resolveAdmin(oid) {
     const cached = cache.get(oid);
@@ -88,6 +129,7 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
     // would reinstate the stale-role window the hybrid model exists to close.
     const record = await lookupAdmin(oid);
     cache.set(oid, { value: record ?? null, expiresAt: now() + ROLE_CACHE_TTL_MS });
+    evict();
     return record ?? null;
   }
 
@@ -144,7 +186,6 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
    * caller but not an admin (saveToolWorkspace, exportToolReport).
    */
   async function authenticate(request) {
-    const { bearerTokenFrom } = await import('./verify-token.js');
     const token = bearerTokenFrom(request);
 
     if (!token) {

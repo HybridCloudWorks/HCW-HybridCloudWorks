@@ -250,13 +250,22 @@ export function createPublicReadHandlers({ store }) {
         if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
 
         const rows = await store.queryDocs(requestedSource, query, parameters);
-        const items = rows
+        const matching = rows
           .filter(isPublicDocument)
-          .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a))
-          .slice(offset, offset + limit)
-          .map(stripInternalFields);
+          .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a));
+        const items = matching.slice(offset, offset + limit).map(stripInternalFields);
 
-        return json(200, { success: true, items, total: items.length }, 300);
+        // `total` is the number of matching documents, not the size of this
+        // page — it was measured after the slice, so it always equalled
+        // `items.length` and any paginating consumer would have concluded there
+        // was exactly one page (TODO.md T-407).
+        //
+        // It is still bounded by FETCH_WINDOW, so on a collection larger than
+        // that it under-reports. That is a smaller lie than the page size and
+        // it is the honest one available without a second COUNT query; a
+        // consumer that needs an exact total needs the cursor API tracked in
+        // T-206.
+        return json(200, { success: true, items, total: matching.length }, 300);
       } catch (error) {
         context.error('publicListContent failed:', error);
         return json(500, { error: 'Failed to list content' });
@@ -359,12 +368,12 @@ export function createPublicReadHandlers({ store }) {
         const rows = await store.queryDocs('podcasts', query, parameters);
         // Soft-delete only: podcasts have no publication workflow, so
         // isPublicDocument would reject every row. See isSoftDeleted.
-        const items = rows
+        const matching = rows
           .filter((doc) => !isSoftDeleted(doc))
-          .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a))
-          .slice(0, limit)
-          .map(stripInternalFields);
-        return json(200, { success: true, items, total: items.length }, 300);
+          .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a));
+        const items = matching.slice(0, limit).map(stripInternalFields);
+        // Counted before the slice — see listContent above (TODO.md T-407).
+        return json(200, { success: true, items, total: matching.length }, 300);
       } catch (error) {
         context.error('publicListPodcasts failed:', error);
         return json(500, { error: 'Failed to list podcasts' });

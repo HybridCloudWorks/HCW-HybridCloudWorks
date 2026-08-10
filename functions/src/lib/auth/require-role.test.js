@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 
 import { createTokenVerifier, bearerTokenFrom } from './verify-token.js';
 import { createRoleGuard } from './require-role.js';
-import { ENTRA_ADMIN_APP_ROLE, ROLE_CACHE_TTL_MS } from './roles.js';
+import { ENTRA_ADMIN_APP_ROLE, ROLE_CACHE_MAX_ENTRIES, ROLE_CACHE_TTL_MS } from './roles.js';
 
 /**
  * A real local JWKS endpoint, not a mocked verifier.
@@ -257,6 +257,56 @@ describe('audit trail (A12)', () => {
       },
     });
     expect((await guard.requireRole(requestWith(mintToken()), 'viewer')).error.status).toBe(403);
+  });
+});
+
+describe('role cache bounds (T-408)', () => {
+  it('stops growing once it is full', async () => {
+    // The cache is only reached after a token verifies, so an anonymous caller
+    // cannot grow it — but it had no eviction at all, so on a long-lived
+    // instance it grew with every distinct principal that ever signed in.
+    const admins = {};
+    for (let i = 0; i < ROLE_CACHE_MAX_ENTRIES + 50; i += 1) {
+      admins[`oid-${i}`] = { role: 'viewer', active: true };
+    }
+    const g = buildGuard({ admins });
+
+    for (let i = 0; i < ROLE_CACHE_MAX_ENTRIES + 50; i += 1) {
+      await g.requireRole(requestWith(mintToken({ oid: `oid-${i}` })), 'viewer');
+    }
+
+    // The most recent principal is still served from cache; a second call for
+    // it must not re-read.
+    const callsBefore = g.lookupAdmin.mock.calls.length;
+    const recent = `oid-${ROLE_CACHE_MAX_ENTRIES + 49}`;
+    await g.requireRole(requestWith(mintToken({ oid: recent })), 'viewer');
+    expect(g.lookupAdmin.mock.calls.length).toBe(callsBefore);
+
+    // The oldest was evicted, so it costs a lookup again.
+    await g.requireRole(requestWith(mintToken({ oid: 'oid-0' })), 'viewer');
+    expect(g.lookupAdmin.mock.calls.length).toBe(callsBefore + 1);
+  });
+
+  it('prefers dropping expired entries over live ones', async () => {
+    let clock = 1_000_000;
+    const admins = {};
+    for (let i = 0; i < ROLE_CACHE_MAX_ENTRIES + 1; i += 1) {
+      admins[`oid-${i}`] = { role: 'viewer', active: true };
+    }
+    const g = buildGuard({ admins, now: () => clock });
+
+    for (let i = 0; i < ROLE_CACHE_MAX_ENTRIES; i += 1) {
+      await g.requireRole(requestWith(mintToken({ oid: `oid-${i}` })), 'viewer');
+    }
+    // Everything cached so far is now stale; the sweep should reclaim it
+    // rather than evicting by age alone.
+    clock += ROLE_CACHE_TTL_MS + 1;
+    await g.requireRole(requestWith(mintToken({ oid: `oid-${ROLE_CACHE_MAX_ENTRIES}` })), 'viewer');
+
+    const callsBefore = g.lookupAdmin.mock.calls.length;
+    const newest = `oid-${ROLE_CACHE_MAX_ENTRIES}`;
+    await g.requireRole(requestWith(mintToken({ oid: newest })), 'viewer');
+    expect(g.lookupAdmin.mock.calls.length).toBe(callsBefore);
   });
 });
 

@@ -84,7 +84,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
           return null;
         }
 
-        // Check Firestore cache first
+        // Check the server-side image cache first (cms/images, not Firestore)
         const cachedUrl = await getCachedImageUrl(article.id);
         if (cachedUrl) {
           console.warn(`[generateCuratedImages] Using cached image for ${article.id}`);
@@ -92,10 +92,9 @@ export function useGenerateCuratedImages(pagePath, provider) {
           return cachedUrl;
         }
 
-        // Not cached, generate new image.
-        // Stage-2 fix: replaced raw fetch() with postJSON() which injects the
-        // Firebase Auth Bearer token. generateCuratedArticleImage now requires
-        // an adminRole claim after the requireAdmin gate was added (FINDING-10 fix).
+        // Not cached, generate a new image. postJSON injects the Entra access
+        // token (lib/api.js); generateCuratedArticleImage is behind the admin
+        // role guard.
         console.warn(`[generateCuratedImages] Generating new image for article: ${article.id}`);
         const requestBody = buildImageRequestBody(article, basePrompt, provider);
         const { imageUrl } = await postJSON('generateCuratedArticleImage', requestBody);

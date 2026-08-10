@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 19 |
+| Open items | 12 |
 | Critical | 0 |
 | High | 7 |
-| Medium | 5 |
-| Low | 7 |
-| Resolved since the review | 25 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-203, T-301, T-303, T-304, T-305, T-306, T-307, T-308, T-309, T-310, T-312, T-313, T-314, T-315, T-316, T-401, T-403) + T-311 corrected as not-a-defect; T-302 half-resolved |
+| Medium | 4 |
+| Low | 1 |
+| Resolved since the review | 31 (T-101 – T-105, T-201 – T-203, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 726 functions tests and 62 frontend tests. That
+resolved, and the suite is now 758 functions tests and 70 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -43,7 +43,7 @@ Do these in sequence — later items cannot be verified before earlier ones.
 1. ~~**T-101** API base URL~~ — **done**, see below
 2. ~~**T-102** CORS across all routes → **T-103** route-inventory test~~ — **done**, see below
 3. ~~**T-104 + T-105**~~ blob credential and image delivery — **done**, see below
-4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
+4. ~~**T-403** `.env.example`, **T-404** CSP~~ — **done**, see below
 5. **Deploy a smoke test** — everything above is unverifiable from an agent
    session, and this is now the top open item
 6. **T-201 → T-205** the anonymous data-exposure set (~~T-201, T-202, T-203~~ done)
@@ -927,48 +927,59 @@ ceiling in `getFeed`. If a read-side cap is wanted sooner, sort `items` by
 `pubDate` in the handler before slicing rather than trusting stored order.
 
 ### T-320 — Eight frontend tests fail, and CI does not run them
-**Files:** `frontend/src/App.routes.test.jsx`, `frontend/src/pages/admin/PublishedPage.test.jsx`, `frontend/package.json:36`
-Found while adding the T-308/T-309 coverage, not introduced by it — confirmed by
-stashing the change and re-running on a clean tree.
+**Files:** `frontend/src/App.routes.test.jsx`, `frontend/src/pages/admin/PublishedPage.test.jsx`, `frontend/package.json`
 
-`npm run test:admin`, which is what CI runs, names six files explicitly. The
-repository contains twelve. The six it does not name include these two, and
-both are red:
+**Diagnosed, not yet fixed** — which is the order this entry asked for.
 
-- `App.routes.test.jsx` — 6 failures across the public route contract
-  (`/aws/news`, `/azure/news`, and the four placeholder routes)
-- `PublishedPage.test.jsx` — 2 failures in publish diagnostics and public-URL
-  mapping
+The eight failures are **stale test expectations, not application defects**:
 
-A third, `functions/firestore.rules.test.js`, also fails, but that one is
-expected: it needs the Firestore emulator and belongs to `test:rules`, which is
-a Firebase-era script that should go with T-317.
+- `App.routes.test.jsx` asserts `/gcp`, `/terraform`, `/github` and `/finops`
+  render "Coming Soon". They do not: `App.jsx` now routes each to a real
+  landing page (`GCPLandingPage` and siblings). The test encodes a route
+  contract from before those pages were built.
+- `/aws/news` and `/azure/news` render `ProviderRssDispatcher`, lazily and
+  un-mocked, and never resolve within the timeout.
+- `PublishedPage.test.jsx`'s two failures are a changed `publishContent`
+  payload and changed diagnostic copy.
 
-The enumerated list is the real defect. It was presumably a way to keep CI green
-during the migration, and it works — the suite is green because the failures are
-not looked at. Whoever fixes this should diagnose the eight failures first and
-only then widen the glob, because widening it first turns a green pipeline red
-with no diagnosis attached.
+Also worth fixing while in there: both suites pass `{ timeout: 5000 }` to
+`findByText` while the vitest default test timeout is also 5000 ms, so the
+assertion timeout can never fire — the test times out first and the failure
+message says nothing about what was missing.
 
-**Fix:** triage the 8 failures, then replace the file list in `test:admin` with
-a directory glob and move the emulator-dependent file out of the default run.
+**Fix:** update the six route expectations to the pages that now exist (or mock
+them, as the suite already does for `/vmware` and `/ansible`), re-point the two
+`PublishedPage` assertions, drop the assertion timeouts below the test timeout,
+then replace the file list in `test:admin` with a directory glob and move
+`functions/firestore.rules.test.js` out of the default run — it needs the
+Firestore emulator and belongs with the `test:rules` script that T-317 retired.
 
-### T-317 — Retire the Firebase-era live smoke scripts and nested workflows
-**Files:** `frontend/scripts/smoke-admin-hardened-live.mjs`,
-`frontend/scripts/smoke-admin-hardened-token-live.mjs`,
-`frontend/.github/workflows/`
-The two live smoke scripts still read `VITE_GCP_FUNCTIONS_URL` and build a
+Deliberately not bundled with the cleanup batch: eight expectation rewrites
+across two suites is its own change, and getting one wrong quietly weakens a
+route contract.
+
+### ~~T-317 — Retire the Firebase-era live smoke scripts and nested workflows~~ RESOLVED
+**Files:** `frontend/scripts/`, `frontend/.github/`
+
+`smoke-admin-hardened-live.mjs`, `smoke-admin-hardened-token-live.mjs` and
+`check-ai-stack-readiness-live.mjs` read `VITE_GCP_FUNCTIONS_URL` and built a
 `firebaseConfig` from `VITE_FIREBASE_*`, none of which the application sets any
-more; they cannot run. `frontend/.github/workflows/` holds the source
-repository's Firebase deploy and E2E workflows — inert, since GitHub only reads
-`.github/workflows/` at the repository root, but they still reference the
-retired variable and read as live configuration.
+more — they could not run. `frontend/.github/` held the source repository's
+Firebase deploy, E2E, secret-rotation and quality workflows: inert, since GitHub
+only reads `.github/workflows/` at the repository root, but they still
+referenced the retired variables and read as live configuration.
 
-Left untouched by T-101 deliberately: porting an admin smoke to MSAL is real
-work, not a rename, and half-migrating it would produce a script that looks
-runnable and is not.
-**Fix:** port the smoke to the Entra/MSAL sign-in path, or delete both scripts
-and the nested workflow directory.
+**Deleted rather than ported.** The finding offered both. Porting an admin
+smoke to the MSAL sign-in path is real work, not a rename, and a half-migrated
+script that looks runnable and is not is worse than no script — which is
+exactly the state these were in. Their npm scripts are gone too
+(`smoke:admin:hardened`, `smoke:admin:hardened:token`, `readiness:remote:auto`,
+`smoke:firebase:postdeploy`), along with `test:rules` and
+`verify:optional:security`, which invoked the Firebase emulator.
+
+A deployed smoke test is still wanted — it is the top open item in the work
+order — but it should be written against Entra and the Azure routes rather than
+recovered from these.
 
 ### T-318 — Route image rendering through `resolveMediaUrl()` (cross-origin only)
 **Files:** ~30 components rendering `imageUrl` / `heroImageUrl` / `aiImageUrls`
@@ -1028,13 +1039,26 @@ the app registration, its `LabAgent` App Role, the certificate, and the
 `lab_agents` registry documents all have to be created by hand — see
 [CHECKLIST.md](CHECKLIST.md) and [REVIEW.md](REVIEW.md) §0.4.
 
-### T-402 — Contract drift in `.azure/api-surface.json`
-Uploads say 5 MB (actual 15 MB); `GET /api/cms/labs` documented but deliberately
-never built (delete the entry); ai-providers note says `oauthToken` stripped
-(now a `hasOauthToken` boolean); `storageMigration.to` still specifies SAS while
-`portSequence` step 5 records the base64 change — two sections contradict each
-other. `GET /api/health` is implemented but undocumented and reports
-`process.version` anonymously.
+### ~~T-402 — Contract drift in `.azure/api-surface.json`~~ RESOLVED
+Every drift the finding names is reconciled:
+
+- Upload cap 5 MB → 15 MB (done with T-306).
+- `GET /api/cms/labs`, documented but deliberately never built — entry deleted.
+- ai-providers note "oauthToken stripped from every read" → the read-side
+  `hasOauthToken` boolean, and the write-side strip (T-314).
+- `storageMigration.to` still described browser-held SAS while `portSequence`
+  step 5 recorded the base64 change. The SAS design was **not built** and could
+  not have worked: the account is closed to the internet and
+  `allow_nested_items_to_be_public` is false, so a browser-held SAS would have
+  had nothing to talk to (T-105). Rewritten to describe what exists.
+- `GET /api/health` documented.
+
+**`/api/health` also stopped reporting the runtime.** It returned
+`node: process.version` and the site name to anyone, which is an
+unauthenticated inventory of the runtime version and deployment name and is of
+no use to a liveness probe. `status`, `service` and `startedAt` remain —
+`startedAt` because telling a cold start from a warm instance has a real
+diagnostic use and discloses nothing.
 
 ### ~~T-403 — `.env.example` is substantially stale~~ RESOLVED
 **File:** `frontend/.env.example`
@@ -1051,45 +1075,132 @@ the MSAL swap in #60, and admin access is now the Entra App Role plus the
 The Cosmos endpoint and read key are gone from the file, with a comment
 explaining why they must not return.
 
-### T-404 — CSP still grants the entire Firebase/GCP surface
+### ~~T-404 — CSP still grants the entire Firebase/GCP surface~~ RESOLVED
 **File:** `frontend/staticwebapp.config.json`
-Zero Firebase imports remain, but `connect-src` still allows `*.googleapis.com`,
-`*.firebaseio.com`, `*.cloudfunctions.net`, `*.run.app`, `wss://*.firebaseio.com`
-— dead allowlist. `login.microsoftonline.com` is **absent** from `connect-src`
-and `frame-src`; verify admin sign-in works at all. `*.documents.azure.com` must
-go (see [REVIEW.md](REVIEW.md) Cosmos-key item). Note `'self'` does not cover the
-`api-azure` subdomain — CSP and DNS disagree about the API host. Since T-101 the
-API host is whatever `VITE_AZURE_FUNCTIONS_URL` names, so `connect-src` must be
-written against the topology chosen in [REVIEW.md](REVIEW.md) §0.1: `'self'`
-suffices for a same-origin `/api` base, and nothing else does.
 
-### T-405 — Key Vault reads uncached, failures indistinguishable from absence
-**File:** `functions/src/lib/key-vault.js:29-41`
-Every call is a network round trip on a throttled service; throttled, missing and
-RBAC-denied all return `null`. **Fix:** TTL cache; return `null` only on 404,
-throw otherwise.
+`connect-src` still allowed `*.googleapis.com`, `*.firebaseio.com`,
+`*.cloudfunctions.net`, `*.run.app` and `wss://*.firebaseio.com` — a standing
+permission for origins the application cannot reach. `*.documents.azure.com` was
+there too, contradicting the constraint that the browser never holds a Cosmos
+data-plane client. `frame-src` still listed `*.firebaseapp.com`.
 
-### T-406 — Authorization denials are console-only
-**File:** `functions/src/lib/auth/require-role.js:70-73`
-`auditDenial` runs on every denial; `admin_audit_logs` exists with no writer, as
-the module itself notes.
+**`login.microsoftonline.com` was absent from both `connect-src` and
+`frame-src`.** Admin sign-in cannot complete without the first, and MSAL's
+silent token renewal — a hidden iframe against the same authority — cannot work
+without the second. That was a live outage waiting on the first deploy, not
+cleanup.
 
-### T-407 — `total` reports page size, and cold-start weight
-`public-reads.js:173` returns `total: items.length` after slicing — wrong page
-counts for any paginating consumer (none today). Separately, `index.js` imports
-every trigger, pulling `cheerio` into an anonymous `GET public/content` cold
-start; `sharp`, `@aws-sdk/client-pricing`, `google-auth-library`, `replicate` ship
-unreachable. Lazy-import `cheerio`; drop unreachable dependencies.
+`script-src` lost `googletagmanager.com` and `apis.google.com` (no references
+anywhere in the repository) and kept `static.cloudflareinsights.com`, which
+Cloudflare injects at the edge rather than this repository.
 
-### T-408 — Cleanups
-`ContextSidebar.jsx:48-70` — 23 lines of unresolved AI deliberation in production
-source, leaving a security question ("if safety allows") open in a comment.
-Stale comments: `useGenerateCuratedImages.js:87,99-101` ("Firestore cache",
-"Firebase Auth Bearer token"), `blob-storage.js:43`. `require-role.js:147` does a
-dynamic `import()` on the hot path; `:68` cache is unbounded.
-`frontend/package.json` `test:admin` covers **none** of the 65 files changed in
-#61–#67 — switch to a directory glob. `submissions.js` should sanitize
-`overviewHtml` on ingest, not rely solely on client-side DOMPurify.
+**Not blocked on the §0.1 topology decision after all.** `'self'` covers a
+same-origin `/api` base and `https://*.azurewebsites.net` covers the
+cross-origin one; keeping both is correct under either choice, and the wildcard
+can be dropped once §0.1 settles on same-origin.
+
+Enforced by `frontend/src/lib/csp.test.js` (8 tests, in `test:admin`). A CSP
+failure shows up in a browser console on a deployed site and nowhere else —
+no build, lint or component test sees it. That test also caught a mistake in its
+own first draft: a blanket "no googleapis.com" assertion fails on
+`fonts.googleapis.com`, which `index.html` genuinely loads for the Material
+Symbols stylesheet. The guard is scoped to the three directives that give code
+a destination.
+
+### ~~T-405 — Key Vault reads uncached, failures indistinguishable from absence~~ RESOLVED
+**File:** `functions/src/lib/key-vault.js`
+Every call was a network round trip on a throttled service, and throttled,
+missing and RBAC-denied all returned `null`.
+
+Both halves fixed as prescribed. A five-minute TTL cache, and `null` **only**
+on a genuine 404 — everything else throws, carrying the real reason, so a
+caller can retry it. Absence is cached too; without that, a secret that is
+legitimately not configured turns every call into a round trip, which is the
+behaviour being removed, just on the unhappy path. A transient failure is not
+cached, because it is a condition rather than a fact about the secret.
+
+This matters more than it looks: `getGoogleAuth` turns `null` into the message
+"missing or unreadable", which was precisely the ambiguity that made it useless.
+
+### ~~T-406 — Authorization denials are console-only~~ ALREADY RESOLVED — verified
+**File:** `functions/src/lib/auth/default-guard.js`
+
+**The finding was stale when it was written down.** `auditDenial` is injected,
+and `default-guard.js` — the production composition — supplies an
+`admin_audit_logs` upsert. The writer exists.
+
+What was true is that nothing tested it: `require-role.test.js` covers the
+guard's behaviour against injected fakes, which is the right shape for the
+rules but cannot see whether the real composition supplies the dependencies at
+all. Deleting the `auditDenial` line failed no test. `default-guard.test.js`
+now covers it, along with the `admins/{oid}` lookup, the memoisation, and the
+deliberate absence of any work at import time.
+
+The comment in `require-role.js` that still read "the container exists on the
+Azure side with no writer" — the sentence this finding was drawn from — is
+corrected.
+
+### ~~T-407 — `total` reports page size, and cold-start weight~~ RESOLVED
+**File:** `functions/src/lib/public-reads.js`, `functions/package.json`
+
+`total: items.length` was measured *after* the slice, in two handlers, so it
+always equalled the page size and any paginating consumer would conclude there
+was exactly one page. Counted before the slice now. It remains bounded by
+`FETCH_WINDOW`, which is documented at the call site: that is a smaller
+inaccuracy than the page size and the honest one available without a second
+`COUNT` query — an exact total needs the cursor API tracked in T-206.
+
+**Six dependencies dropped** — `sharp`, `replicate`, `turndown`,
+`@mendable/firecrawl-js`, `axios`, `rss-parser`. Zero references anywhere under
+`src/`. The lockfile shrank by ~1,190 lines and `npm ci` was re-verified.
+Dropping `axios` and `rss-parser` is what makes T-316's choice to port the
+health route onto global `fetch` load-bearing rather than incidental.
+
+**`@aws-sdk/client-pricing` and `google-auth-library` are kept**, against the
+finding's list. They are unreachable *from a route*, but
+`src/lib/cloud-tools/pricing/{aws,gcp}.js` import them and are tested; removing
+the dependency removes a staged feature, which is a product decision rather
+than a cleanup.
+
+**`cheerio` is deliberately NOT lazy-imported.** It is reached through
+`content-quality.js`, whose `countWords` is synchronous and feeds the publish
+quality gate. Making it async ripples through the publish pipeline, and
+replacing the parser with a regex changes word counts — which changes which
+articles pass the gate. Trading a correctness risk in a publish gate for
+cold-start milliseconds on an anonymous GET is a bad trade.
+
+### T-408 — Cleanups (mostly done)
+**Done:**
+
+- `ContextSidebar.jsx` — the 23 lines of unresolved AI deliberation are gone,
+  replaced by a statement of what the component does and why. The security
+  question the old comment left open ("if safety allows") is answered rather
+  than deleted: raw HTML stays unrendered, because "admin-authored" is an
+  argument about who writes the content, not about who reads it — the sidebar
+  renders on public pages.
+- Stale comments corrected in `useGenerateCuratedImages.js` ("Firestore cache",
+  "Firebase Auth Bearer token").
+- `require-role.js:147` and the same line in `require-agent.js` — the dynamic
+  `import()` on the authenticated hot path is now a static import.
+  `verify-token.js` imports nothing from either module, so there was never a
+  cycle to break.
+- The role cache is bounded (`ROLE_CACHE_MAX_ENTRIES`, expired-first eviction).
+  It is only reachable after a token verifies, so an anonymous caller could not
+  grow it — but it had no eviction at all, so it grew with every distinct
+  principal that ever signed in.
+- `submissions.js` sanitizes `overviewHtml` on ingest
+  (`functions/src/lib/sanitize-html.js`). That field arrives through an
+  anonymous endpoint and ends up inside `dangerouslySetInnerHTML` on a public
+  template, where a single `DOMPurify.sanitize()` call was the only thing
+  between the two. The client-side call stays — two layers is the point.
+
+  No dependency was added: `cheerio` is already in the tree, so the sanitizer
+  uses a real parser rather than regexes over markup, which is how sanitizers
+  get written that look right and are not. Fourteen tests, all negative.
+
+**Remaining:** `frontend/package.json` `test:admin` still names files
+explicitly rather than globbing — see T-320, which is where that belongs and
+where the blocking diagnosis lives.
 
 ---
 
