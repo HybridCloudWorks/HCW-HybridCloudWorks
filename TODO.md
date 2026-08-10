@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 34 |
+| Open items | 33 |
 | Critical | 0 |
-| High | 9 |
+| High | 8 |
 | Medium | 18 |
 | Low | 7 |
-| Resolved since the review | 8 (T-101, T-102, T-103, T-104, T-105, T-201, T-401, T-403) |
+| Resolved since the review | 9 (T-101, T-102, T-103, T-104, T-105, T-201, T-202, T-401, T-403) |
 | Last updated | 2026-08-09 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 630 functions tests and 31 frontend tests. That
+resolved, and the suite is now 636 functions tests and 31 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -46,7 +46,7 @@ Do these in sequence — later items cannot be verified before earlier ones.
 4. ~~**T-403**~~ `.env.example` rewritten with T-101; **T-404** tighten CSP
 5. **Deploy a smoke test** — everything above is unverifiable from an agent
    session, and this is now the top open item
-6. **T-201 → T-205** the anonymous data-exposure set (~~T-201~~ done)
+6. **T-201 → T-205** the anonymous data-exposure set (~~T-201, T-202~~ done)
 7. **T-301+** correctness and hardening
 
 ---
@@ -310,7 +310,7 @@ holds until `publishSnapshot` runs again.**
 
 ---
 
-### T-202 — `listPodcasts` and `getFeed` skip the public filter
+### ~~T-202 — `listPodcasts` and `getFeed` skip the public filter~~ RESOLVED
 **Category:** Security · **Label:** Confirmed Issue
 **File:** `functions/src/lib/public-reads.js:249-252`, `:283-284`
 
@@ -322,7 +322,38 @@ insight is still returned; `rss_cache` is unfiltered.
 Not a regression — the pre-migration hooks had no client-side check either — but
 the contract says the server must filter, and nothing downstream compensates.
 
-**Fix:** `.filter(isPublicDocument)` on both, before `.slice()`.
+**Resolved — but NOT as prescribed.** `.filter(isPublicDocument)` would have
+caused an outage.
+
+`isPublicDocument` answers two questions at once: is this deleted, and is it
+published. The second is the *editorial content* model (`Live`, `Status`,
+`contentStatus`), and none of the three collections these handlers serve has an
+editorial workflow. `infra/cosmos-containers.json` is explicit: `rss_cache` is a
+*"cache — refilled by a scheduled job, not migrated"* with a 7-day TTL, indexed
+on `provider + lastFetched`; `ai_insights` is indexed on
+`provider + active + generatedAt`; `podcasts` on `provider + publishedAt`. No
+status field among them.
+
+So the literal fix returns `false` for every document in all three and silently
+empties the podcasts page, the news feed and the insights panel — the same
+failure shape as T-101, reached through a security fix.
+
+**What was done instead:** `isSoftDeleted` was extracted as the half of
+`isPublicDocument` that applies universally, and both handlers now filter on it.
+`ai_insights` additionally keeps `active !== false`, which is its real
+visibility model — the composite index says so. The genuine leak T-202 found is
+closed: **a soft-deleted insight passed `active !== false`** and was served.
+
+Verified in both directions, because a fix here can fail two ways: removing the
+soft-delete filters fails 2 tests, and applying `isPublicDocument` literally
+fails 6. The second set exists specifically so a future reader following this
+item's original wording cannot reintroduce the outage.
+
+The module header claimed the public filter is *"the only thing keeping drafts
+out"* and named `isPublicDocument` flatly. That was the sentence I relied on in
+#61 when removing client-side visibility checks, and it was wrong for three of
+five handlers. It now states the actual invariant: every handler filters, not
+every handler filters identically.
 
 ---
 

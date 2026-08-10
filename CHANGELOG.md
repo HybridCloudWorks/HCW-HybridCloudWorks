@@ -169,6 +169,15 @@ This project has not cut a tagged release; entries are grouped under
   wrapper alone. A test asserts every snapshot collection has a sanitizer.
   **Takes effect on the next `publishSnapshot` run** — an already-published
   snapshot keeps its contents until then. (TODO.md T-201)
+- **Soft-deleted podcasts, cache documents and AI insights are no longer served
+  anonymously.** `listPodcasts` and `getFeed` applied no deletion filter, and
+  `ai_insights` was filtered on `active !== false` only — so a soft-deleted
+  insight still reached the news feed. `isSoftDeleted` was extracted as the
+  portion of `isPublicDocument` that applies to collections with no editorial
+  workflow, and both handlers now use it. The full predicate was deliberately
+  **not** applied: these three collections carry no publication status, so it
+  would have emptied the podcasts page, the news feed and the insights panel.
+  (TODO.md T-202)
 
 ### Infrastructure
 
