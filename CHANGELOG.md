@@ -79,6 +79,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Labs dashboard reported agents "connected" through an outage.** The
+  staleness clock advanced only inside the snapshot fetch's success path, so a
+  failing poll froze it: `now - lastSeenAt` stopped growing and every agent
+  stayed online for exactly as long as nothing was reachable. The clock is an
+  independent interval again — it has to keep running when the fetch does not,
+  which is the only condition under which it says anything. (TODO.md T-309)
+- **A timed-out lab job was polled forever, and a network blip was displayed as
+  a failure.** The console's terminal-status set omitted `timeout`, which the
+  agent does report — while the output pane *in the same file* had the correct
+  four-element list, so the loop kept polling a job its own display had already
+  called finished. Both now read `TERMINAL_JOB_STATUSES` from
+  `lib/labsPolling.js`. A transport error no longer writes `status: 'failed'`
+  onto the job, which was indistinguishable from a real failure and stopped the
+  poll permanently; it is separate state, shown as "still running — retrying",
+  and the poll backs off from 5 s to a 60 s ceiling without ever giving up.
+  (TODO.md T-308)
+- **Overlapping polls could render an older document over a newer one.** Both
+  the Labs snapshot (15 s interval) and the editor's remote-document watch
+  (20 s) allow a 20 s request timeout, so ticks overlap under load and responses
+  can land out of order. Both now skip a tick while one is in flight. In the
+  editor the flag is released in a `finally`: its catch returns early on a
+  missing document and on cancellation, and either path would otherwise have
+  stopped the poll for the lifetime of the page. (TODO.md T-309)
 - **The browser called Google Cloud, not Azure.** `api.js`, `publicApi.js` and
   `legacyBlogsTelemetry.js` each resolved `VITE_GCP_FUNCTIONS_URL` — a
   decommissioned Google Cloud Functions host — so roughly sixty call sites,
