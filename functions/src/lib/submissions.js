@@ -49,13 +49,28 @@ export const SUBMISSION_TYPES = Object.freeze({
     publishTarget: 'architecture',
     providers: ['AWS', 'Azure', 'GCP', 'FinOps'],
     requires: ['title', 'summary', 'overviewHtml'],
-    optional: ['tags', 'category', 'complexity', 'diagramUrl', 'components', 'estimatedMonthlyCost'],
+    optional: [
+      'tags',
+      'category',
+      'complexity',
+      'diagramUrl',
+      'components',
+      'estimatedMonthlyCost',
+    ],
   },
   framework: {
     publishTarget: 'framework',
     providers: ['Github', 'Terraform'],
     requires: ['title', 'summary', 'overviewHtml'],
-    optional: ['tags', 'category', 'complexity', 'docLink', 'commandExample', 'keyPillars', 'patterns'],
+    optional: [
+      'tags',
+      'category',
+      'complexity',
+      'docLink',
+      'commandExample',
+      'keyPillars',
+      'patterns',
+    ],
   },
   coder_corner: {
     publishTarget: 'coder_corner',
@@ -136,9 +151,7 @@ export function validateSubmission(body) {
     if (err) return { error: err };
   }
 
-  let tags = Array.isArray(body.tags)
-    ? body.tags
-    : str(body.tags).split(',');
+  let tags = Array.isArray(body.tags) ? body.tags : str(body.tags).split(',');
   tags = tags.map(str).filter(Boolean).slice(0, MAX_TAGS);
 
   return {
@@ -223,7 +236,9 @@ export function composeSubmissionDoc(value, { nowIso = new Date().toISOString(),
         repoUrl: value.repoUrl,
         codeSnippet: value.codeSnippet,
         explanation: value.explanation,
-        tags: ['coder-corner', value.provider.toLowerCase(), ...value.tags].filter(Boolean).slice(0, MAX_TAGS),
+        tags: ['coder-corner', value.provider.toLowerCase(), ...value.tags]
+          .filter(Boolean)
+          .slice(0, MAX_TAGS),
       };
     case 'architecture':
       return {
@@ -249,40 +264,125 @@ export function composeSubmissionDoc(value, { nowIso = new Date().toISOString(),
 }
 
 /**
+ * How many times a request will re-evaluate the quota after losing a race.
+ *
+ * Every loss means another request from the SAME key won, so the counter moved
+ * and re-reading is the honest thing to do. The ceiling exists because losing
+ * repeatedly is itself evidence of a burst from one client: exhausting it is
+ * treated as being over quota, which is the answer a burst deserves and is the
+ * safe direction to be wrong in.
+ */
+const QUOTA_MAX_ATTEMPTS = 4;
+
+function rateLimitError() {
+  const err = new Error('Submission rate limit exceeded — try again later');
+  err.code = 'SUBMISSION_RATE_LIMIT';
+  return err;
+}
+
+/**
  * Enforce the rolling-hour anonymous quota.
  *
  * Same shape as Site-Main's enforceAnonymousExportRateLimit
  * (cloud-tools.js:417): a per-key counter document, reset when the window
- * lapses. Cosmos has no cross-operation transaction here; the read-modify-
- * write race can under-count by at most the number of truly simultaneous
- * requests from ONE client, which is acceptable for an abuse brake. The
- * container carries a TTL (see migration-manifest CONTAINER_TTL_SECONDS) so
- * stale counters age out on their own.
+ * lapses. The container carries a TTL (see migration-manifest
+ * CONTAINER_TTL_SECONDS) so stale counters age out on their own.
  *
- * @param {{ readDoc: Function, upsertDoc: Function }} store cosmos-client fns
+ * **What this used to be, and why it was worse than its own comment claimed.**
+ * Read the count, compare it, upsert count + 1 — three separate operations with
+ * nothing joining them. The comment here said the resulting race could
+ * under-count "by at most the number of truly simultaneous requests from ONE
+ * client", as though that were a small number. It is the attacker's choice of
+ * number: 200 concurrent POSTs all read `count: 0`, all pass the check, and all
+ * write `count: 1`, so 200 land in the review queue against a limit of 5 — and
+ * because the counter ends at 1 rather than 200, the trick repeats every burst
+ * instead of once an hour (TODO.md T-204).
+ *
+ * **The shape of the fix.** There are two distinct situations and they need
+ * different primitives, which is why this is not one operation:
+ *
+ *  1. *In-window, under the limit* — the overwhelmingly common accepted case.
+ *     One `incrementIf`: a server-side compare-and-increment, so concurrent
+ *     callers serialize on the document and exactly `limit` of them pass. No
+ *     read, no ETag, no retry.
+ *  2. *No document yet, or the window has rolled over* — the predicate cannot
+ *     express "reset to 1", so this path reads, decides, and writes with a
+ *     primitive that has a loser (`createDoc` 409 / `replaceDocIfMatch` 412).
+ *     The loser goes back to (1), where the winner's document now exists.
+ *
+ * The bound is exact in both directions and does not depend on timing: under a
+ * burst of any size against a fresh key, five requests are accepted.
+ *
+ * @param {{readDoc: Function, incrementIf: Function, createDoc: Function, replaceDocIfMatch: Function}} store
  * @param {string} key hashed client identity (client-identity.js anonymousKey)
  * @param {{ now?: number, limit?: number }} [options]
  * @throws {Error} code SUBMISSION_RATE_LIMIT when over quota
  */
-export async function enforceSubmissionQuota(store, key, { now = Date.now(), limit = SUBMISSIONS_PER_HOUR } = {}) {
-  const existing = await store.readDoc('submission_quota', key, key);
-  const windowStartMs = Number(existing?.windowStartMs) || 0;
-  // Absence is checked explicitly rather than through `now - 0 < WINDOW_MS`:
-  // the source's arithmetic-only form happens to work because real epoch
-  // milliseconds dwarf the window, which is a coincidence, not a contract.
-  const inWindow = existing != null && now - windowStartMs < WINDOW_MS;
-  const count = inWindow ? Number(existing?.count) || 0 : 0;
+export async function enforceSubmissionQuota(
+  store,
+  key,
+  { now = Date.now(), limit = SUBMISSIONS_PER_HOUR } = {}
+) {
+  // `>` rather than `>=` so this matches the `now - windowStartMs < WINDOW_MS`
+  // test below exactly: a document stamped precisely one window ago is out.
+  const windowFloor = now - WINDOW_MS;
 
-  if (count >= limit) {
-    const err = new Error('Submission rate limit exceeded — try again later');
-    err.code = 'SUBMISSION_RATE_LIMIT';
-    throw err;
+  for (let attempt = 0; attempt < QUOTA_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await store.incrementIf('submission_quota', key, {
+        path: '/count',
+        value: 1,
+        condition: 'FROM c WHERE c.windowStartMs > @windowFloor AND c.count < @limit',
+        conditionValues: { windowFloor, limit },
+      });
+      return;
+    } catch (err) {
+      // 404: no document yet. 412: the predicate failed — either the window
+      // rolled over or we are genuinely at the limit, and only a read can say
+      // which. Anything else is a real fault and must not be swallowed into
+      // "allowed".
+      if (err?.code !== 404 && err?.code !== 412) throw err;
+    }
+
+    const existing = await store.readDoc('submission_quota', key, key);
+    const windowStartMs = Number(existing?.windowStartMs) || 0;
+    // Absence is checked explicitly rather than through `now - 0 < WINDOW_MS`:
+    // the source's arithmetic-only form happens to work because real epoch
+    // milliseconds dwarf the window, which is a coincidence, not a contract.
+    const inWindow = existing != null && now - windowStartMs < WINDOW_MS;
+    const count = inWindow ? Number(existing?.count) || 0 : 0;
+
+    if (count >= limit) throw rateLimitError();
+
+    const updatedAt = new Date(now).toISOString();
+    try {
+      if (existing == null) {
+        await store.createDoc('submission_quota', {
+          id: key,
+          windowStartMs: now,
+          count: 1,
+          updatedAt,
+        });
+      } else {
+        // Spread `existing` so its `_etag` rides along — that is what makes the
+        // replace conditional, and what gives a concurrent resetter a 412
+        // instead of a silent overwrite.
+        await store.replaceDocIfMatch('submission_quota', {
+          ...existing,
+          id: key,
+          windowStartMs: inWindow ? windowStartMs : now,
+          count: count + 1,
+          updatedAt,
+        });
+      }
+      return;
+    } catch (err) {
+      // 409: someone else created it first. 412: someone else wrote it between
+      // our read and our write. Both mean the document now says something we
+      // have not seen, so go around again rather than assuming.
+      if (err?.code !== 409 && err?.code !== 412) throw err;
+    }
   }
 
-  await store.upsertDoc('submission_quota', {
-    id: key,
-    windowStartMs: inWindow ? windowStartMs : now,
-    count: count + 1,
-    updatedAt: new Date(now).toISOString(),
-  });
+  throw rateLimitError();
 }

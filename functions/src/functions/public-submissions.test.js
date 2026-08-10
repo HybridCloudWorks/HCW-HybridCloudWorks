@@ -43,8 +43,25 @@ const blogBody = {
   content: 'Body content.',
 };
 
+const fail = (code) => Object.assign(new Error(`fake Cosmos ${code}`), { code });
+
+/**
+ * The quota needs store operations that can FAIL — a conditional increment, a
+ * create that 409s, a replace that 412s — because a counter built only from
+ * operations that always succeed is the defect it was built to fix
+ * (TODO.md T-204). This fake gives them their success and 404/412 behaviour,
+ * which is all this file needs: it is a transport test, and the concurrency
+ * bound itself is pinned in lib/submissions.test.js against a fake that models
+ * Cosmos's per-document serialization.
+ */
 function makeHandler({ existingQuota, environment = 'production' } = {}) {
   const writes = [];
+  let quota = existingQuota ? { id: 'quota', _etag: 'e0', ...existingQuota } : null;
+  const record = (container, doc) => {
+    writes.push({ container, doc });
+    return doc;
+  };
+
   const handler = createSubmissionsHandler({
     identity: createClientIdentity({
       originSecret: SECRET,
@@ -52,8 +69,23 @@ function makeHandler({ existingQuota, environment = 'production' } = {}) {
       allowUnverifiedOrigin: environment !== 'production',
     }),
     store: {
-      readDoc: async () => existingQuota,
-      upsertDoc: async (container, doc) => writes.push({ container, doc }),
+      readDoc: async () => quota,
+      upsertDoc: async (container, doc) => record(container, doc),
+      incrementIf: async (container, _id, { conditionValues }) => {
+        if (!quota) throw fail(404);
+        const { windowFloor, limit } = conditionValues;
+        if (!(quota.windowStartMs > windowFloor) || !(quota.count < limit)) throw fail(412);
+        quota = { ...quota, count: quota.count + 1 };
+        return record(container, quota);
+      },
+      createDoc: async (container, doc) => {
+        quota = doc;
+        return record(container, doc);
+      },
+      replaceDocIfMatch: async (container, doc) => {
+        quota = doc;
+        return record(container, doc);
+      },
     },
     now: () => 1_754_000_000_000,
   });

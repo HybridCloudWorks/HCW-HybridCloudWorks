@@ -12,7 +12,13 @@
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { createClientIdentity } from '../lib/auth/client-identity.js';
-import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
+import {
+  createDoc,
+  incrementIf,
+  readDoc,
+  replaceDocIfMatch,
+  upsertDoc,
+} from '../lib/cosmos-client.js';
 import {
   validateSubmission,
   composeSubmissionDoc,
@@ -30,7 +36,10 @@ const json = (status, body, headers = {}) => ({
  */
 export function createSubmissionsHandler({
   identity = createClientIdentity(),
-  store = { readDoc, upsertDoc },
+  // `upsertDoc` writes the submission itself; the other three are the quota's,
+  // and it needs all three because a correct counter needs operations that can
+  // fail — see enforceSubmissionQuota (TODO.md T-204).
+  store = { readDoc, upsertDoc, incrementIf, createDoc, replaceDocIfMatch },
   now = Date.now,
 } = {}) {
   return async function handleSubmission(request, context) {

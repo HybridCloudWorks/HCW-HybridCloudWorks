@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 10 |
+| Open items | 8 |
 | Critical | 0 |
-| High | 5 |
+| High | 3 |
 | Medium | 4 |
 | Low | 1 |
-| Resolved since the review | 33 (T-101 – T-105, T-201 – T-203, T-208, T-209, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
+| Resolved since the review | 35 (T-101 – T-105, T-201 – T-205, T-208, T-209, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 759 functions tests and 79 frontend tests. That
+resolved, and the suite is now 796 functions tests and 79 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -46,7 +46,7 @@ Do these in sequence — later items cannot be verified before earlier ones.
 4. ~~**T-403** `.env.example`, **T-404** CSP~~ — **done**, see below
 5. **Deploy a smoke test** — everything above is unverifiable from an agent
    session, and this is now the top open item
-6. **T-201 → T-205** the anonymous data-exposure set (~~T-201, T-202, T-203~~ done)
+6. **T-201 → T-205** the anonymous data-exposure set — ~~done~~
 7. **T-301+** correctness and hardening
 
 ---
@@ -395,7 +395,7 @@ the write order.
 
 ---
 
-### T-204 — Submissions quota race admits ~40× the limit
+### ~~T-204 — Submissions quota race admits ~40× the limit~~ RESOLVED
 **Category:** Security / abuse · **Label:** Confirmed Issue
 **File:** `functions/src/lib/submissions.js:257-278`
 
@@ -406,12 +406,56 @@ queue. After the burst the counter reads 1, so it repeats per request cycle, not
 per hour. The header comment's claim that the under-count is bounded by
 simultaneous requests from one client understates it.
 
-**Fix:** Cosmos atomic patch increment on `/count`, rejecting when the returned
-post-increment value exceeds the limit.
+**Resolved,** using the atomic increment as suggested but *not* the suggested
+rejection test, because that half does not survive contact with the window.
+
+The suggestion was to increment unconditionally and reject when the returned
+post-increment value exceeds the limit. That is atomic, and it does bound
+acceptances — but it cannot express the rolling window. Deciding whether to
+*reset* the counter still requires reading it, and the reset is precisely where
+a lost update reappears: a burst arriving as the hour rolls over would have
+every request read the lapsed document and every one of them write `count: 1`.
+It also lets rejected requests inflate the counter without bound, so the
+observed value stops meaning anything.
+
+What landed instead splits the problem by which primitive can express it:
+
+ 1. *In-window and under the limit* — the common accepted case — is one
+    `incrementIf`: a **conditional** patch, `incr /count` guarded by
+    `FROM c WHERE c.windowStartMs > @floor AND c.count < @limit`. Cosmos
+    evaluates the predicate and applies the increment as one atomic operation,
+    and writes to a single document serialize within its partition, so exactly
+    `limit` concurrent callers observe a passing predicate. One round trip, no
+    read, no ETag, no retry.
+ 2. *No document yet, or the window has rolled over* — the two cases the
+    predicate cannot express — read, decide, and write with a primitive that
+    has a **loser**: `createDoc` (409) or `replaceDocIfMatch` (412). The loser
+    goes back to (1), where the winner's document now exists.
+
+Two new primitives in `cosmos-client.js` (`incrementIf`, `createDoc`), with the
+predicate's value substitution split out as `bindConditionValues` and tested
+separately — there is no parameter binding for a patch predicate in either the
+REST API or the SDK, so that substitution is the only thing standing between a
+condition and SQL injection, and it refuses anything that is not a finite
+number rather than quoting it.
+
+Verified against a fake that models Cosmos's per-document serialization rather
+than assuming it, in both directions: restoring the original read-compare-write
+fails six tests including all four concurrency bounds (200 accepted where 5 is
+correct), dropping the `count` term from the predicate fails five, and dropping
+the ETag from the reset path fails four.
+
+**Not verified against a live Cosmos account,** because nothing in this
+repository can be (REVIEW.md §1.1). Specifically unconfirmed by execution: that
+a failed predicate surfaces as 412 and a missing document as 404 through the JS
+SDK. Both are documented REST behaviour, `PatchRequestBody` is typed
+`{operations, condition?}`, and `ClientContext.patch` forwards the body
+verbatim — but the JS SDK's own docs tab omits conditional patch entirely, so
+this is the first thing to exercise in a deployed smoke test.
 
 ---
 
-### T-205 — Quota key hashes the full IPv6 address
+### ~~T-205 — Quota key hashes the full IPv6 address~~ RESOLVED
 **Category:** Security / abuse · **Label:** Confirmed Issue
 **File:** `functions/src/lib/auth/client-identity.js:94-97`
 
@@ -419,8 +463,31 @@ A standard `/64` allocation gives 2⁶⁴ source addresses, each hashing to a
 distinct quota document — unlimited submissions with every bucket under 5, plus
 unbounded growth of `submission_quota`.
 
-**Fix:** normalize before hashing — full address for IPv4, truncate to `/64` for
-IPv6.
+**Resolved as suggested.** `normalizeClientIp` runs before the hash: full
+address for IPv4, `/64` prefix for IPv6, family-tagged (`v4:` / `v6:`) so the
+two shapes cannot collide in the digest.
+
+Four cases the one-line description does not cover, each of which would have
+been a defect:
+
+- **`::` must be expanded before truncating.** `2001:db8::1`,
+  `2001:0db8:0:0:0:0:0:1` and `2001:db8:0:0::1` are one address written three
+  ways; truncating the text form would put them in three buckets.
+- **A v4-mapped address (`::ffff:203.0.113.7`) is an IPv4 client.** Truncating
+  it to a /64 would collapse *every* v4-mapped client into a single bucket —
+  over-grouping severe enough to be its own denial of service. An embedded IPv4
+  that is *not* v4-mapped (NAT64's `64:ff9b::/96`) is still truncated, because
+  there the prefix belongs to the translator.
+- **A zone index (`fe80::1%eth0`) is stripped**, or `isIP` rejects the address
+  and it falls through to the unknown bucket.
+- **Unparseable input shares one bucket, not a fresh one each.** "I cannot
+  identify this caller" must not be a way to obtain an unmetered quota.
+
+`client-identity.js` had no test file at all — an odd gap, since it decides what
+"one client" means for every quota in the API. It now has 22, covering the
+normalization and also DECISION 6's fail-closed behaviour, which was likewise
+untested. Verified in both directions: hashing the raw address again fails the
+grouping test, and widening the prefix to /128 fails seven.
 
 ---
 
@@ -1253,6 +1320,8 @@ pure helpers underneath them.
 | ~~Hook~~ | ~~Save, then external `blogEditedAt` on next poll~~ | ~~`externallyModified === true`~~ | ~~T-208~~ — written |
 | ~~Hook~~ | ~~Reorder images, advance 20 s, unchanged remote~~ | ~~ordering preserved~~ | ~~T-209~~ — written |
 | ~~Unit~~ | ~~Job poll with `timeout`; with rejected fetch~~ | ~~stops; does not fabricate `failed`~~ | ~~T-308, T-309~~ — written |
+| ~~Concurrency~~ | ~~N simultaneous submissions from one key~~ | ~~exactly `limit` accepted~~ | ~~T-204~~ — written |
+| ~~Unit~~ | ~~Addresses across one IPv6 /64; a v4-mapped address~~ | ~~one quota key; treated as IPv4~~ | ~~T-205~~ — written |
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
 | ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |

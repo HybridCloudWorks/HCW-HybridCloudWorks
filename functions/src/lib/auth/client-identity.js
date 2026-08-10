@@ -31,9 +31,83 @@
  */
 
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 
 /** Header Cloudflare sets to the true client address. */
 const CF_CLIENT_IP_HEADER = 'cf-connecting-ip';
+
+/**
+ * How much of an IPv6 address identifies the *subscriber* rather than the host.
+ *
+ * A residential or mobile IPv6 customer is allocated a whole prefix, not one
+ * address — /64 is the smallest thing RFC 4291 lets a link use, and it is what
+ * providers hand out at the low end. Hashing the full address therefore gave
+ * one client 2^64 distinct quota documents: unlimited submissions, every bucket
+ * reading well under the limit, and unbounded growth of `submission_quota` as a
+ * side effect (TODO.md T-205).
+ *
+ * Truncating to /64 is the conservative choice in the direction that matters.
+ * It can over-group — two households behind one ISP's /64 would share a bucket,
+ * which is the same situation every IPv4 NAT already creates — but it cannot
+ * under-group, and under-grouping is what makes a limiter decorative.
+ */
+const IPV6_PREFIX_HEXTETS = 4;
+
+/** `::ffff:192.0.2.1` is an IPv4 client wearing an IPv6 shirt. */
+const IPV4_MAPPED_PREFIX = /^::ffff:/i;
+
+/**
+ * Expand an IPv6 address to its eight four-digit hextets.
+ *
+ * `isIP` has already established the address is well-formed, so this only has
+ * to handle the two compressions the text form allows: `::` for a run of zero
+ * groups, and leading zeros dropped within a group.
+ */
+function expandIpv6(address) {
+  const [head, tail = ''] = address.split('::');
+  const headParts = head ? head.split(':') : [];
+  const tailParts = tail ? tail.split(':') : [];
+  const gap = 8 - headParts.length - tailParts.length;
+  return [...headParts, ...Array(Math.max(0, gap)).fill('0'), ...tailParts].map((part) =>
+    part.toLowerCase().padStart(4, '0')
+  );
+}
+
+/**
+ * Reduce a client address to the unit the quota should actually count.
+ *
+ * Returns a family-tagged string rather than a bare address so the two shapes
+ * can never collide in the hash, and so a `submission_quota` document id is
+ * traceable to *what kind* of thing it counted without being traceable to whom.
+ *
+ * Anything unparseable becomes a single shared bucket. That is deliberate: an
+ * unrecognised value means the header is absent or malformed, and the safe
+ * reading of "I do not know who this is" is "share one quota with everyone else
+ * I cannot identify", not "have a fresh quota of your own".
+ *
+ * @param {string} raw value of the CF-Connecting-IP header
+ * @returns {string} normalized, family-tagged quota unit
+ */
+export function normalizeClientIp(raw) {
+  // A zone index (`fe80::1%eth0`) is link-local scope, meaningless to us and
+  // rejected by isIP if left on.
+  const address = String(raw ?? '')
+    .trim()
+    .split('%')[0];
+
+  const family = isIP(address);
+  if (family === 4) return `v4:${address}`;
+  if (family !== 6) return 'unknown';
+
+  if (IPV4_MAPPED_PREFIX.test(address)) {
+    // The embedded address is the real client. Fall back to treating it as
+    // opaque IPv6 if it is in the hex rather than the dotted form.
+    const embedded = address.slice(address.lastIndexOf(':') + 1);
+    if (isIP(embedded) === 4) return `v4:${embedded}`;
+  }
+
+  return `v6:${expandIpv6(address).slice(0, IPV6_PREFIX_HEXTETS).join(':')}::/64`;
+}
 
 /** Header a Cloudflare transform rule injects, proving the request came via CF. */
 const CF_ORIGIN_SECRET_HEADER = 'x-hcw-origin-secret';
@@ -91,9 +165,12 @@ export function createClientIdentity({
         );
       }
 
-      const ip = request?.headers?.get?.(CF_CLIENT_IP_HEADER) || 'unknown';
+      // Normalized BEFORE hashing, because the hash is what the quota counts:
+      // hashing the raw address gave an IPv6 client one bucket per address in
+      // its /64 (TODO.md T-205).
+      const unit = normalizeClientIp(request?.headers?.get?.(CF_CLIENT_IP_HEADER));
       const hash = createHash('sha256')
-        .update(`${ipSalt ?? ''}:${ip}`)
+        .update(`${ipSalt ?? ''}:${unit}`)
         .digest('hex');
 
       return { key: hash, trusted };

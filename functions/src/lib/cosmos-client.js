@@ -171,6 +171,127 @@ export async function replaceDocIfMatch(containerName, document, options = {}) {
 }
 
 /**
+ * Add to a numeric field atomically, but only if the document still satisfies a
+ * predicate.
+ *
+ * This is the one primitive Cosmos offers that a read-modify-write cannot
+ * emulate, and the reason it exists here is a counter that was wrong under
+ * concurrency in the expensive direction: the submission quota read the count,
+ * compared it, and wrote it back as three separate operations, so N simultaneous
+ * requests all read the same value, all passed the limit check, and all wrote
+ * `count: 1` — N accepted against a limit of five (TODO.md T-204).
+ *
+ * Both halves are needed and neither is sufficient alone:
+ *
+ *  - `incr` is applied server-side, so the increment cannot be lost. On its own
+ *    it would still let every caller past the limit, because nobody checked.
+ *  - `condition` is a SQL `FROM ... WHERE` predicate evaluated against the
+ *    stored document in the same atomic operation as the patch. On its own it
+ *    is just an ETag with extra steps.
+ *
+ * Together they are a compare-and-increment: writes to one document serialize
+ * within its partition, so exactly the callers that observe a passing predicate
+ * get their increment, and the rest get 412.
+ *
+ * **The predicate is a raw SQL fragment — there is no parameter binding for it
+ * in the REST API or the SDK.** Never interpolate caller-controlled text into
+ * it. `conditionValues` exists so the common case (numeric bounds) cannot be
+ * written unsafely: values are checked as finite numbers and substituted for
+ * `@name` placeholders, and anything else throws.
+ *
+ * **`incr` fails on a path that is absent or non-numeric** — "Node(PATH) isn't
+ * a number", a 400, not a silent no-op. The documented "creates the field if it
+ * doesn't exist" behaviour does not extend to a path holding a string. The
+ * practical consequence is that a caller must make the predicate imply the
+ * field is a number: a bound like `c.count < @limit` does this for free, since
+ * a comparison against a missing or non-numeric property is undefined and
+ * therefore does not match. Take that away and a malformed document turns into
+ * a 400 on a hot path.
+ *
+ * Note also that the JS SDK's own documentation tab omits conditional patch —
+ * only the .NET, Java and Python tabs show it. It does work: `PatchRequestBody`
+ * is typed `{operations, condition?}` and `ClientContext.patch` forwards the
+ * body verbatim to the REST API, whose documented shape is exactly that.
+ *
+ * @param {string} containerName
+ * @param {string} id
+ * @param {object} options
+ * @param {string} options.path - JSON Pointer to the numeric field, e.g. `/count`
+ * @param {number} [options.value] - amount to add; may be negative. Default 1.
+ * @param {string} options.condition - `FROM c WHERE ...` with `@name` placeholders
+ * @param {Record<string, number>} [options.conditionValues] - numeric bindings
+ * @param {string} [options.partitionKey] - defaults to id
+ * @returns {Promise<object>} the document after the increment
+ * @throws {{code: 412}} when the predicate did not hold
+ * @throws {{code: 404}} when the document does not exist
+ */
+export async function incrementIf(containerName, id, options) {
+  const { path, value = 1, condition, conditionValues, partitionKey } = options ?? {};
+  if (!path?.startsWith('/')) {
+    throw new Error(`incrementIf: path must be a JSON Pointer, got ${JSON.stringify(path)}`);
+  }
+
+  const container = getContainer(containerName);
+  const pk = resolvePartitionKey(containerName, partitionKey, id);
+  const { resource } = await container.item(id, pk).patch({
+    condition: bindConditionValues(condition, conditionValues),
+    operations: [{ op: 'incr', path, value }],
+  });
+  return resource;
+}
+
+/**
+ * Substitute numeric bindings into a patch predicate.
+ *
+ * Exported for its own tests because it is the safety property of
+ * `incrementIf`, and a safety property that is only exercised through a live
+ * Cosmos account is one that is not exercised.
+ *
+ * Non-numeric values are refused rather than quoted. Quoting is where string
+ * interpolation into SQL goes wrong, and nothing in this repository needs a
+ * string binding here — the day something does, it should be a deliberate
+ * change to this function with its own tests, not an accident.
+ */
+export function bindConditionValues(condition, values = {}) {
+  if (typeof condition !== 'string' || condition.trim() === '') {
+    throw new Error('incrementIf: condition is required');
+  }
+
+  return condition.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name) => {
+    if (!Object.hasOwn(values, name)) {
+      throw new Error(`incrementIf: condition references @${name} with no value`);
+    }
+    const value = values[name];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(
+        `incrementIf: @${name} must be a finite number, got ${JSON.stringify(value)}`
+      );
+    }
+    return String(value);
+  });
+}
+
+/**
+ * Create a document, failing if the id is already taken.
+ *
+ * `upsertDoc` cannot express this: it replaces whatever is there, so two
+ * callers racing to initialise the same document both "succeed" and one
+ * silently discards the other's write. `items.create` is the Cosmos operation
+ * that has a loser, and a caller that needs to know it lost — the quota's
+ * first-request-in-a-window path — needs the 409.
+ *
+ * @param {string} containerName
+ * @param {object} document - must include 'id'
+ * @returns {Promise<object>} the created document
+ * @throws {{code: 409}} when a document with that id already exists
+ */
+export async function createDoc(containerName, document) {
+  const container = getContainer(containerName);
+  const { resource } = await container.items.create(document);
+  return resource;
+}
+
+/**
  * Cosmos rejects a patch specification with more than ten operations:
  * "The number of patch operations can't exceed 10."
  * https://learn.microsoft.com/azure/cosmos-db/partial-document-update-faq
@@ -423,9 +544,7 @@ export async function countDocs(containerName, whereClause, parameters = []) {
   const query = whereClause
     ? `SELECT VALUE COUNT(1) FROM c WHERE ${whereClause}`
     : 'SELECT VALUE COUNT(1) FROM c';
-  const { resources } = await container.items
-    .query({ query, parameters })
-    .fetchAll();
+  const { resources } = await container.items.query({ query, parameters }).fetchAll();
   return resources[0] || 0;
 }
 
@@ -438,9 +557,7 @@ export async function countDocs(containerName, whereClause, parameters = []) {
  * @returns {Promise<object[]>}
  */
 export async function batchRead(containerName, ids) {
-  const results = await Promise.all(
-    ids.map((id) => readDoc(containerName, id))
-  );
+  const results = await Promise.all(ids.map((id) => readDoc(containerName, id)));
   return results.filter(Boolean);
 }
 

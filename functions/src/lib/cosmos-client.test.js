@@ -5,6 +5,7 @@ import {
   resolvePartitionKey,
   MAX_PATCH_OPERATIONS,
   applyFieldPath,
+  bindConditionValues,
   planPatch,
   toJsonPointer,
 } from './cosmos-client.js';
@@ -206,5 +207,65 @@ describe('partition keys (T-312, T-313)', () => {
     // id default — the manifest records that /contentId was written as the
     // empty string on every legacy document.
     expect(resolvePartitionKey('content_versions', '', 'v1')).toBe('');
+  });
+});
+
+/**
+ * `incrementIf`'s predicate is a raw SQL fragment — neither the Cosmos REST API
+ * nor the SDK offers parameter binding for it, so this substitution is the only
+ * thing standing between a condition and SQL injection. It is separated from
+ * the network call precisely so it can be tested without a Cosmos account: a
+ * safety property that only runs against live infrastructure is a safety
+ * property that does not run.
+ */
+describe('bindConditionValues', () => {
+  it('substitutes numeric placeholders', () => {
+    expect(
+      bindConditionValues('FROM c WHERE c.windowStartMs > @floor AND c.count < @limit', {
+        floor: 1000,
+        limit: 5,
+      })
+    ).toBe('FROM c WHERE c.windowStartMs > 1000 AND c.count < 5');
+  });
+
+  it('substitutes every occurrence of a placeholder', () => {
+    expect(bindConditionValues('FROM c WHERE c.a > @n OR c.b > @n', { n: 3 })).toBe(
+      'FROM c WHERE c.a > 3 OR c.b > 3'
+    );
+  });
+
+  it('accepts zero and negatives rather than treating them as missing', () => {
+    expect(bindConditionValues('FROM c WHERE c.n > @a AND c.m > @b', { a: 0, b: -1 })).toBe(
+      'FROM c WHERE c.n > 0 AND c.m > -1'
+    );
+  });
+
+  it('refuses a string, rather than quoting it', () => {
+    // Quoting is where interpolation into SQL goes wrong. Nothing in this
+    // repository needs a string binding, so the safe answer is to refuse until
+    // something does and can argue for it.
+    expect(() => bindConditionValues('FROM c WHERE c.id = @id', { id: "x' OR '1'='1" })).toThrow(
+      /finite number/
+    );
+  });
+
+  it('refuses NaN and Infinity', () => {
+    // `Number(undefined)` and a divide-by-zero both arrive here looking numeric
+    // and would interpolate as bare `NaN`/`Infinity` tokens.
+    expect(() => bindConditionValues('FROM c WHERE c.n < @n', { n: NaN })).toThrow(/finite/);
+    expect(() => bindConditionValues('FROM c WHERE c.n < @n', { n: Infinity })).toThrow(/finite/);
+  });
+
+  it('refuses a placeholder with no value instead of leaving it in the SQL', () => {
+    expect(() => bindConditionValues('FROM c WHERE c.n < @limit', {})).toThrow(/no value/);
+    expect(() => bindConditionValues('FROM c WHERE c.n < @limit')).toThrow(/no value/);
+  });
+
+  it('refuses an empty or absent condition', () => {
+    // An empty predicate would make the patch unconditional — the exact defect
+    // the primitive exists to prevent, arriving silently.
+    expect(() => bindConditionValues('', { a: 1 })).toThrow(/required/);
+    expect(() => bindConditionValues('   ', { a: 1 })).toThrow(/required/);
+    expect(() => bindConditionValues(undefined, { a: 1 })).toThrow(/required/);
   });
 });
