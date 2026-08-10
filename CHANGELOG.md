@@ -79,6 +79,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Scheduled publishing works.** `scheduledPublishDate` had a complete write
+  side and no read side: an operator scheduled a post, the server validated and
+  stored the date, the UI confirmed it, and nothing ever published it — no
+  error, no alert. `publishScheduledContent` now runs the same
+  `processPublishContent` pipeline the Publish button uses, rather than a second
+  implementation of it, clears the schedule only after a publish that actually
+  happened, caps each tick at 25 with carry-over, and records failures under the
+  `scheduled_publish_failures` alert type the ops dashboard has counted since
+  the migration without ever having a producer. (TODO.md T-301)
+- **Two concurrent publishes can no longer both succeed.** `patchDoc` gained an
+  optional `ifMatch`, and the publish write is now conditioned on the ETag read
+  at the top of `processPublishContent` — the status gate, quality and image
+  reports and slug were all decided from that document. A lost race is reported
+  as skipped rather than counted as a publish that did not happen. Timer-driven
+  publishing is what turns this from theoretical into reachable. (TODO.md T-301)
+- **The four timers no longer share one flag.** Enabling the scheduled publisher
+  would also have armed `cleanupTempStorage`, an unimplemented TODO that deletes
+  blobs. Each timer has its own flag; `FEATURE_FLAG_SCHEDULERS` is a master kill
+  switch. The blob-GC job itself is still unwritten and still flagged off.
+  (TODO.md T-302, flag half)
+- **Every admin list sort worked again.** `PublishedPage` and `EditorListPage`
+  kept the Firestore-only `?.toMillis?.() || 0`, which against the ISO strings
+  Cosmos returns scores every document 0 — so every comparator returned 0, the
+  lists rendered in raw database order while the sort controls appeared to work,
+  and the timestamp columns showed an em dash. One `lib/dateUtils.js` now backs
+  all of it. The review counted seven copies of that helper; there were **ten**,
+  and a source guard in the new test file found the last three — one of which
+  only surfaced when the bundler refused a redeclaration that ESLint had passed.
+  (TODO.md T-304)
+- **The review board no longer blanks on a scheduled item.** `BlogReviewBoard`
+  called `.toDate()` on what is now an ISO string, inside a `setTimeout` and so
+  outside the error boundary. (TODO.md T-303)
+- **A published article can no longer 404 because a draft shares its slug.**
+  The detail lookup ran `SELECT TOP 1` with no `ORDER BY` and applied the public
+  filter afterwards, so it picked arbitrarily among duplicates and then rejected
+  the winner. It now orders by `_ts` — a system property present on every
+  document, so the drop-on-undefined trap does not apply — and finds the first
+  public candidate. (TODO.md T-305)
 - **The Labs dashboard reported agents "connected" through an outage.** The
   staleness clock advanced only inside the snapshot fetch's success path, so a
   failing poll froze it: `now - lastSeenAt` stopped growing and every agent

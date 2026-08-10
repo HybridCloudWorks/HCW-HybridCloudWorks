@@ -9,6 +9,8 @@
  * rule worth agreeing on is worth testing.
  */
 
+import { toMillis } from '@/lib/dateUtils';
+
 /**
  * Statuses after which a lab job will never change again.
  *
@@ -56,19 +58,11 @@ export function jobPollDelay(consecutiveErrors) {
 export const STALE_AFTER_MS = 90 * 1000;
 
 /**
- * Milliseconds from a Firestore Timestamp, an ISO string, or a Date — 0 for
- * anything unparseable, never NaN, because NaN comparisons are silently false
- * and would report every agent as offline.
- *
- * @param {unknown} value
- * @returns {number}
+ * Re-exported so LabsPage has one import for the rules it polls by. The
+ * implementation is in lib/dateUtils.js — this was the eighth copy of it, and
+ * T-304 collapsed all of them.
  */
-export function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
+export { toMillis };
 
 /**
  * Whether an agent has heartbeated recently enough to be considered online.

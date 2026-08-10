@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { getCoverImageUrl } from '@/lib/blogUtils';
+import { toMillis } from '@/lib/dateUtils';
 import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { useSections, joinSectionsToDraft } from './useSections';
@@ -28,12 +29,7 @@ function normalizeProvider(value = '') {
 }
 
 function getEditedAtMs(data = {}) {
-  const value = data.blogEditedAt;
-  if (!value) return 0;
-  if (typeof value?.toMillis === 'function') return value.toMillis();
-  if (typeof value?.toDate === 'function') return value.toDate().getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
+  return toMillis(data.blogEditedAt);
 }
 
 function getEditorAuthor(data = {}) {

@@ -28,6 +28,7 @@ import {
 import { postJSON } from '@/lib/api';
 import { PROVIDER_OPTIONS } from '@/config/admin';
 import { logAdminAction } from '@/lib/auditLog';
+import { toDate } from '@/lib/dateUtils';
 import { getContentPublicPath, getPublishTargetForItem } from '@/lib/contentModel';
 import {
   unpublishToInspected,
@@ -133,9 +134,15 @@ export default function BlogReviewBoard({ blog, blogId }) {
   useEffect(() => {
     if (!blog) return undefined;
     const timer = setTimeout(() => {
-      if (blog.scheduledPublishDate) {
+      // `toDate`, not `.toDate()`. `scheduledPublishDate` is an ISO string
+      // since the migration, and calling the Firestore Timestamp method on it
+      // threw — inside a setTimeout, so outside the error boundary, blanking
+      // the review page for any scheduled item (TODO.md T-303). A null here
+      // now falls through to the same default as an unscheduled item rather
+      // than taking the page down.
+      const date = toDate(blog.scheduledPublishDate);
+      if (date) {
         setInstantPublish(false);
-        const date = blog.scheduledPublishDate.toDate();
         setScheduledDate(toLocalDateInputValue(date));
         setScheduledTime(date.toTimeString().split(' ')[0].substring(0, 5));
       } else {

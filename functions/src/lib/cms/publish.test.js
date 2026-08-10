@@ -113,6 +113,76 @@ describe('pure helpers', () => {
   });
 });
 
+describe('concurrent publish protection (T-301)', () => {
+  it('conditions the content write on the ETag it read', async () => {
+    // Everything above the write — the status gate, the quality and image
+    // reports, the slug — was decided from the document read at the top of
+    // processPublishContent. Without the precondition two concurrent runs both
+    // pass the gate and both publish, which the scheduled publisher turns from
+    // theoretical into reachable.
+    const store = makeStore(readyDoc({ _etag: '"abc"' }));
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+
+    const call = store.patchDoc.mock.calls.find(([c]) => c === 'content');
+    expect(call[3]).toEqual({ ifMatch: '"abc"' });
+  });
+
+  it('reports a lost race as skipped, not published', async () => {
+    const conflict = Object.assign(new Error('precondition failed'), { code: 412 });
+    const store = makeStore(readyDoc({ _etag: '"abc"' }), {
+      patchDoc: vi.fn(async (container) => {
+        if (container === 'content') throw conflict;
+        return {};
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context))
+        .body
+    );
+
+    expect(body.published).toBe(0);
+    expect(body.skipped).toBe(1);
+    // No mapping: nothing was written, so there is no published URL to report.
+    expect(body.mappings).toEqual([]);
+    expect(body.errors).toEqual([]);
+  });
+
+  it('still surfaces a non-412 write failure as an error, not a skip', async () => {
+    // Only a lost race is a skip. A genuine write failure has to reach the
+    // operator, or the batch reports a publish that did not happen.
+    const store = makeStore(readyDoc({ _etag: '"abc"' }), {
+      patchDoc: vi.fn(async (container) => {
+        if (container === 'content') throw new Error('cosmos down');
+        return {};
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context))
+        .body
+    );
+
+    expect(body.published).toBe(0);
+    expect(body.skipped).toBe(0);
+    expect(body.errors).toEqual([{ contentId: 'c1', error: 'cosmos down' }]);
+  });
+
+  it('exposes processPublishContent for the scheduler, without registering a route', async () => {
+    const store = makeStore();
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    expect(typeof h.processPublishContent).toBe('function');
+
+    // No publishTarget, exactly as the scheduler calls it — it falls back to
+    // the document's own, which is what makes a timer-driven publish match an
+    // operator-driven one.
+    const result = await h.processPublishContent('c1', { markLive: true });
+    expect(result.error).toBeUndefined();
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].Live).toBe(true);
+  });
+});
+
 describe('publishContent', () => {
   it('publishes a ready item: status, slug, URLs, provider, version row', async () => {
     const store = makeStore();

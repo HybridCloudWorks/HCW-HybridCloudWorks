@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { usePublicData } from '@/hooks/usePublicData';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
+import { byNewest, toDate } from '@/lib/dateUtils';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -87,17 +88,12 @@ function filterByType(items, typeFilter) {
   return items.filter((item) => getContentType(item) === typeFilter);
 }
 
-function sortByPublishedDateDesc(a, b) {
-  const aDate = a.blogPublishedAt?.toDate?.() || new Date(0);
-  const bDate = b.blogPublishedAt?.toDate?.() || new Date(0);
-  return bDate - aDate;
-}
-
-function sortByUpdatedDateDesc(a, b) {
-  const aDate = a.updatedAt?.toDate?.() || a.blogEditedAt?.toDate?.() || new Date(0);
-  const bDate = b.updatedAt?.toDate?.() || b.blogEditedAt?.toDate?.() || new Date(0);
-  return bDate - aDate;
-}
+// Every comparator in this file was Firestore-only, so against the ISO strings
+// Cosmos returns each scored 0 and the sorts were permanent no-ops — the lists
+// rendered in raw Cosmos order while the controls appeared to work
+// (TODO.md T-304).
+const sortByPublishedDateDesc = byNewest('blogPublishedAt');
+const sortByUpdatedDateDesc = byNewest('updatedAt', 'blogEditedAt');
 
 function filterAndSortLiveItems(items, typeFilter, searchText) {
   const byType = filterByType(items, typeFilter);
@@ -113,21 +109,12 @@ function filterAndSortDraftItems(items, typeFilter, searchText) {
 }
 
 const ARCHIVE_SORT_COMPARE = {
-  archivedAt: (a, b) => {
-    const aTime = a.archivedAt?.toMillis?.() || a.updatedAt?.toMillis?.() || 0;
-    const bTime = b.archivedAt?.toMillis?.() || b.updatedAt?.toMillis?.() || 0;
-    return bTime - aTime;
-  },
-  updatedAt: (a, b) => {
-    const aTime = a.archivedAt?.toMillis?.() || a.updatedAt?.toMillis?.() || 0;
-    const bTime = b.archivedAt?.toMillis?.() || b.updatedAt?.toMillis?.() || 0;
-    return bTime - aTime;
-  },
-  publishedAt: (a, b) => {
-    const aTime = a.blogPublishedAt?.toMillis?.() || 0;
-    const bTime = b.blogPublishedAt?.toMillis?.() || 0;
-    return bTime - aTime;
-  },
+  // `archivedAt` and `updatedAt` were byte-identical before, so the two menu
+  // entries did the same thing even once the comparator worked. Kept distinct
+  // now, which is what the labels promise.
+  archivedAt: byNewest('archivedAt', 'updatedAt'),
+  updatedAt: byNewest('updatedAt'),
+  publishedAt: byNewest('blogPublishedAt'),
   provider: (a, b) => getProviderDisplay(a).localeCompare(getProviderDisplay(b)),
 };
 
@@ -263,8 +250,8 @@ function ArchiveRow({ item }) {
   const publicUrl = getPublicUrl(item);
   const provider = getProviderDisplay(item);
   const type = getContentType(item);
-  const archivedAt = item.archivedAt?.toDate?.() || item.updatedAt?.toDate?.() || null;
-  const publishedAt = item.blogPublishedAt?.toDate?.() || null;
+  const archivedAt = toDate(item.archivedAt) || toDate(item.updatedAt);
+  const publishedAt = toDate(item.blogPublishedAt);
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors text-sm">
@@ -326,7 +313,7 @@ function DraftItemRow({ item }) {
   const provider = getProviderDisplay(item);
   const title = item.Title || item.title || 'Untitled';
   const status = String(item.contentStatus || 'editing').replace(/_/g, ' ');
-  const updatedAt = item.updatedAt?.toDate?.() || item.blogEditedAt?.toDate?.() || null;
+  const updatedAt = toDate(item.updatedAt) || toDate(item.blogEditedAt);
 
   return (
     <div className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-card hover:bg-muted/40 transition-colors">

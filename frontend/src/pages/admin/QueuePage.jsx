@@ -12,6 +12,7 @@ import { logAdminAction } from '@/lib/auditLog';
 import { ADMIN_ROUTES } from '@/config/admin';
 import { requestContentInspection } from '@/lib/contentWorkflow';
 import { getPublishTargetForItem } from '@/lib/contentModel';
+import { toDate, toMillis } from '@/lib/dateUtils';
 import {
   CheckCircle,
   XCircle,
@@ -32,15 +33,7 @@ function getReviewPath(contentId) {
   return `${ADMIN_ROUTES.REVIEW.replace(':id', contentId)}?source=content`;
 }
 
-function toDateMaybe(value) {
-  if (!value) return null;
-  if (typeof value?.toDate === 'function') return value.toDate();
-  if (typeof value?.toMillis === 'function') return new Date(value.toMillis());
-  if (value?.seconds !== undefined && value?.seconds !== null)
-    return new Date(value.seconds * 1000);
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
+const toDateMaybe = toDate;
 
 function formatPublishedDate(item) {
   const published =
@@ -104,20 +97,11 @@ function getPublishedMs(item) {
     item?.publishedDate ||
     item?.datePublished ||
     item?.pubDate;
-  if (!v) return null;
-  if (typeof v.toMillis === 'function') return v.toMillis();
-  if (v instanceof Date) return v.getTime();
-  const t = new Date(v).getTime();
-  return Number.isNaN(t) ? null : t;
+  return toMillis(v) || null;
 }
 
 function getIngestedMs(item) {
-  const v = item?.fetchedAt || item?.createdAt;
-  if (!v) return 0;
-  if (typeof v.toMillis === 'function') return v.toMillis();
-  if (v instanceof Date) return v.getTime();
-  const t = new Date(v).getTime();
-  return Number.isNaN(t) ? 0 : t;
+  return toMillis(item?.fetchedAt) || toMillis(item?.createdAt);
 }
 
 function getRootDomainForSort(item) {
@@ -198,17 +182,6 @@ function getLiveBadge(item) {
 // Returns null for any item not in those states.
 const SOFT_DELETE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const REJECTION_GRACE_MS = 24 * 60 * 60 * 1000;
-
-function toDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value.toDate === 'function') return value.toDate();
-  if (typeof value === 'string' || typeof value === 'number') {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
 
 function formatRemaining(ms) {
   if (ms <= 0) return 'imminent';
