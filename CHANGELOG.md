@@ -103,6 +103,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **One anonymous list request could eat four seconds of the database's entire
+  budget.** The public content list ran `SELECT TOP 1000 *` with no WHERE — an
+  *arbitrary* 1000 documents of a ~1k-document container (so published articles
+  could vanish from listings non-deterministically, made intermittent by the
+  300 s cache), each transferred whole at ~20 KB including article bodies no
+  list consumer renders. The public filter now runs in SQL, so the window
+  counts published documents of the requested type/provider; and the projection
+  is an audited explicit field list — the union of what the public list
+  consumers actually read, pinned by a test naming the consumer behind each
+  field. Of nine heavy body fields exactly one has a list reader
+  (`explanation`, a Coder Corner excerpt fallback); the other eight stay out,
+  which is where the RU win lives. The in-memory sort and the ORDER BY
+  avoidance stay until a materialized sort field plus composite index can be
+  deployed. (TODO.md T-206, steps 1–2)
+- **The API contract can no longer lie about what exists.** It documented
+  seventeen RPCs the admin UI invokes that were never registered — every call a
+  live 404, invisible because nothing compared the document to the code. The
+  contract now carries an explicit `rpc.notImplemented` block (all seventeen,
+  blocked on provider credentials), and a test holds the whole document to
+  account: invoked = implemented + notImplemented exactly; every implemented
+  entry resolves to a registered route with the methods it advertises;
+  registered method+route pairs and contract claims form a full bijection.
+  Making the bijection true surfaced more drift, now fixed: `getLabJob` was
+  implemented but missing from the invoked list, the Labs agent API had no
+  contract entry at all, six registered admin/public routes were undocumented,
+  and the `CRUD` shorthand entries now enumerate their real routes — recording
+  honestly that social-posts has no PATCH and recordings no DELETE.
+  (TODO.md T-207)
 - **Public news pages showed no curated imagery.** #63 moved the cached-image
   lookup off an anonymous Firestore read onto an editor-gated `cms/*` endpoint,
   reached through a token acquisition that throws outright without a signed-in

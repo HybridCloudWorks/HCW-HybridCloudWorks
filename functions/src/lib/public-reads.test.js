@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   createPublicReadHandlers,
+  PUBLIC_CONTENT_LIST_FIELDS,
   isSoftDeleted,
   isPublicDocument,
   resolvePublishedDateValue,
@@ -75,6 +76,139 @@ describe('stripInternalFields', () => {
 });
 
 describe('listContent', () => {
+  /** Capture the SQL listContent issues, alongside a benign row. */
+  const captureQuery = async (request = makeRequest()) => {
+    const store = { queryDocs: vi.fn(async () => [publicDoc()]), readDoc: vi.fn() };
+    const h = createPublicReadHandlers({ store });
+    await h.listContent(request, context);
+    const [, query, parameters] =
+      store.queryDocs.mock.calls[0].length === 3
+        ? store.queryDocs.mock.calls[0]
+        : [null, store.queryDocs.mock.calls[0][1], store.queryDocs.mock.calls[0][2]];
+    return { query, parameters };
+  };
+
+  describe('the window counts published documents, not all documents (T-206)', () => {
+    it('filters public status and soft-deletion in SQL, before TOP applies', async () => {
+      // The defect: `SELECT TOP 1000 *` with no WHERE returned an ARBITRARY
+      // 1000 of a ~1k-document container, so published articles vanished
+      // non-deterministically once the count crossed the window. The filter
+      // must narrow the window server-side.
+      const { query } = await captureQuery();
+      expect(query).toMatch(/^SELECT TOP 1000 /);
+      expect(query).toContain('c.Live = true');
+      expect(query).toContain('c.Status = "Live"');
+      expect(query).toContain(
+        'c.contentStatus IN ("published", "published_blog", "published_news", "published_both")'
+      );
+      expect(query).toContain('softDeletedAt');
+      expect(query).toContain('softDeleteExpiresAt');
+    });
+
+    it('errs WIDE where SQL and JS truthiness could disagree', async () => {
+      // A soft-delete marker holding '', false or 0 is NOT deleted to
+      // isSoftDeleted (JS truthiness). The SQL must admit those rows and let
+      // the JS filter decide — erring narrow would drop a published article,
+      // which is the finding's defect reintroduced through its own fix.
+      const { query } = await captureQuery();
+      expect(query).toContain('c.softDeletedAt = ""');
+      expect(query).toContain('c.softDeletedAt = false');
+      expect(query).toContain('c.softDeletedAt = 0');
+    });
+
+    it('keeps the type and provider narrowing alongside the public filter', async () => {
+      const { query, parameters } = await captureQuery(
+        makeRequest({ query: { type: 'coder_corner', provider: 'gcp' } })
+      );
+      expect(query).toContain('LOWER(c.type) = @type');
+      expect(query).toContain('ARRAY_CONTAINS(@providers');
+      expect(parameters.find((x) => x.name === '@providers').value).toContain('Google Cloud');
+    });
+
+    it('still applies the JS filter as the authority', async () => {
+      // The SQL layer only shapes the window; a fake store that ignores the
+      // query (as this one does) must still never leak a draft. This is the
+      // two-layer contract stated on SQL_PUBLIC_CLAUSE.
+      const store = {
+        queryDocs: vi.fn(async () => [publicDoc(), { id: 'd', contentStatus: 'draft' }]),
+        readDoc: vi.fn(),
+      };
+      const h = createPublicReadHandlers({ store });
+      const res = await h.listContent(makeRequest(), context);
+      expect(JSON.parse(res.body).items.map((i) => i.id)).toEqual(['p1']);
+    });
+  });
+
+  describe('the projection replaces SELECT * (T-206)', () => {
+    it('projects explicit fields — never the whole document', async () => {
+      const { query } = await captureQuery();
+      expect(query).not.toContain('SELECT TOP 1000 *');
+      for (const field of PUBLIC_CONTENT_LIST_FIELDS) {
+        expect(query, `projection lost ${field}`).toContain(`c["${field}"]`);
+      }
+    });
+
+    it('leaves article bodies out of list responses', async () => {
+      // The RU story: full documents averaged ~20 KB, dominated by bodies no
+      // list consumer reads. The audit found exactly one heavy field with a
+      // list reader — `explanation` (useCoderCornerData excerpt fallback) —
+      // and these eight with none.
+      for (const heavy of [
+        'content',
+        'Content',
+        'postContent',
+        'blogDraft',
+        'overviewHtml',
+        'codeSnippet',
+        'commandExample',
+        'sidebarContent',
+      ]) {
+        expect(PUBLIC_CONTENT_LIST_FIELDS, `${heavy} has no list consumer`).not.toContain(heavy);
+      }
+      expect(PUBLIC_CONTENT_LIST_FIELDS).toContain('explanation');
+    });
+
+    it('covers every audited consumer requirement', () => {
+      // Each entry names the consumer that reads it; losing one silently
+      // blanks a public page. This is the audit, pinned — extend it when a
+      // consumer starts reading a new field.
+      const required = {
+        // the server's own filter and sort
+        Live: 'isPublicDocument',
+        Status: 'isPublicDocument',
+        contentStatus: 'isPublicDocument',
+        softDeletedAt: 'isSoftDeleted',
+        softDeleteExpiresAt: 'isSoftDeleted',
+        publishedDate: 'resolvePublishedDateValue',
+        datePublished: 'resolvePublishedDateValue',
+        'Published At': 'resolvePublishedDateValue',
+        blogPublishedAt: 'resolvePublishedDateValue',
+        publishedAt: 'resolvePublishedDateValue',
+        // cards
+        explanation: 'useCoderCornerData:41,:53 excerpt fallback',
+        language: 'useCoderCornerData card',
+        repoUrl: 'useCoderCornerData card',
+        altCoverImageVariants: 'useBlogData:174-179 image race',
+        costAnalysis: 'ArchitecturePage doc.costAnalysis?.estimatedMonthly',
+        frameworkPillars: 'useFrameworkData:93-101',
+        keyTopics: 'useBlogData tags',
+        'CD Url': 'useBlogData url resolution',
+        'Source URL': 'useBlogData url resolution',
+        curatedSubpagePath: 'SocialHubPage getLiveUrl',
+        slugPageUrl: 'SocialHubPage getLiveUrl',
+        // delete/dedup identity on LivePagesPage
+        sourceContentId: 'LivePagesPage delete path',
+        publishedContentId: 'LivePagesPage delete path',
+        publishedBlogId: 'LivePagesPage delete path',
+        blogId: 'LivePagesPage delete path',
+      };
+      const missing = Object.entries(required)
+        .filter(([field]) => !PUBLIC_CONTENT_LIST_FIELDS.includes(field))
+        .map(([field, consumer]) => `${field} (${consumer})`);
+      expect(missing).toEqual([]);
+    });
+  });
+
   it('filters non-public docs server-side and sorts by resolved date desc', async () => {
     const store = {
       queryDocs: vi.fn(async () => [
