@@ -14,7 +14,7 @@
     "node": "22"
   },
   "dependencies": {
-    "@aws-sdk/client-pricing": "^3.1104.0",
+    "@aws-sdk/client-pricing": "^3.1106.0",
     "@azure/cosmos": "^4.3.0",
     "@azure/functions": "^4.7.0",
     "@azure/identity": "^4.8.0",
