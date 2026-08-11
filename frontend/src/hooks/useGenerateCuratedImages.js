@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react';
 import { getFunctionsBase } from '@/lib/functionsBase';
 import { useImagePrompts } from './useImagePrompts';
-import { postJSON, getJSON } from '@/lib/api'; // Stage-2 fix: authed call required after requireAdmin gate added
+import { useAdminAuth } from '@/hooks/useAdminAuth';
+import { fetchPublicCuratedImage } from '@/lib/publicApi';
+import { postJSON } from '@/lib/api';
 
 const DEFAULT_PROMPT_BY_PROVIDER = {
   AWS: 'Cinematic AWS cloud architecture illustration with modern enterprise infrastructure, warm amber accents, clean geometric composition, no text overlay, high-detail digital art',
@@ -37,22 +39,51 @@ function buildImageRequestBody(article, basePrompt, provider) {
 
 /**
  * Hook to generate and manage images for curated articles.
- * Generates unique images per article using the page's saved prompt.
+ *
+ * Two audiences, and the split between them is the point (TODO.md T-210). This
+ * hook runs on the PUBLIC `/{provider}/news` route, but every call it made was
+ * authenticated: the cache lookup went to an editor-gated `cms/*` endpoint via
+ * `getJSON`, whose `acquireApiToken` throws outright without an MSAL account.
+ * So for an anonymous visitor every lookup failed and the grid rendered no
+ * curated imagery at all, where cached images used to appear.
+ *
+ * Now:
+ *   - **Reading** a cached image is anonymous, through `public/curated-image`.
+ *     Every visitor gets the imagery.
+ *   - **Generating** a missing one stays behind the admin gate, and is simply
+ *     not attempted without the `editor` role. It was never going to succeed
+ *     without it; skipping it also stops the hook dragging MSAL onto the
+ *     critical path of a public page.
+ *
+ * The prompt lookup is gated with generation for the same reason: it reads
+ * editor-only configuration and is an input to generation, so an anonymous
+ * visitor has no use for it. It used to be attempted, fail, and fall back to a
+ * default prompt that was then never used for anything.
  */
 export function useGenerateCuratedImages(pagePath, provider) {
   const [imageMap, setImageMap] = useState({}); // { articleId: imageUrl }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Get cached image URL from the curated-image cache endpoint
+  // The gate is the ROLE, not merely "somebody is signed in". Generation and
+  // the prompt read are both `editor`-gated server-side, so a signed-in viewer
+  // gated on presence alone would fire a prompt read plus up to twelve
+  // generation requests and collect a 403 for each — the same
+  // requests-that-cannot-succeed defect as T-210 itself, just with a narrower
+  // audience.
+  //
+  // `hasRole` also subsumes the wait for auth to settle: it reads the admin
+  // status fetched after sign-in, so it is false while that is still in flight
+  // and false for an anonymous visitor. An earlier version of this gate paired
+  // `authReady` with a presence check to get that behaviour; with the role
+  // check it would be a conjunct that can never change the answer.
+  const { hasRole } = useAdminAuth();
+  const canGenerate = hasRole('editor');
+
+  /** Anonymous cache read — see the header. */
   const getCachedImageUrl = useCallback(async (articleId) => {
     try {
-      const res = await getJSON(`cms/images/curated/${encodeURIComponent(articleId)}`);
-      if (res.item?.imageUrl) {
-        console.warn(`[generateCuratedImages] Found cached image for ${articleId}`);
-        return res.item.imageUrl;
-      }
-      return null;
+      return await fetchPublicCuratedImage(articleId);
     } catch (err) {
       console.error(`[generateCuratedImages] Error fetching cache for ${articleId}:`, err.message);
       return null;
@@ -84,17 +115,20 @@ export function useGenerateCuratedImages(pagePath, provider) {
           return null;
         }
 
-        // Check the server-side image cache first (cms/images, not Firestore)
+        // Check the server-side image cache first — anonymous, so this is the
+        // part that works for a public visitor.
         const cachedUrl = await getCachedImageUrl(article.id);
         if (cachedUrl) {
-          console.warn(`[generateCuratedImages] Using cached image for ${article.id}`);
           setImageMap((prev) => ({ ...prev, [article.id]: cachedUrl }));
           return cachedUrl;
         }
 
-        // Not cached, generate a new image. postJSON injects the Entra access
-        // token (lib/api.js); generateCuratedArticleImage is behind the admin
-        // role guard.
+        // Not cached. Generating one is an admin action behind the role guard,
+        // so an anonymous visitor stops here with whatever the cache had rather
+        // than issuing a request that cannot succeed.
+        if (!canGenerate) return null;
+
+        // postJSON injects the Entra access token (lib/api.js).
         console.warn(`[generateCuratedImages] Generating new image for article: ${article.id}`);
         const requestBody = buildImageRequestBody(article, basePrompt, provider);
         const { imageUrl } = await postJSON('generateCuratedArticleImage', requestBody);
@@ -112,7 +146,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
         return null;
       }
     },
-    [functionsBase, provider, getCachedImageUrl]
+    [functionsBase, provider, getCachedImageUrl, canGenerate]
   );
 
   /**
@@ -140,25 +174,32 @@ export function useGenerateCuratedImages(pagePath, provider) {
           DEFAULT_PROMPT_BY_PROVIDER[providerKey] ||
           'Professional technical illustration for cloud infrastructure with clean, modern design';
 
-        try {
-          const promptData = await resolvePromptForPage(pagePath);
-          if (promptData?.primaryPrompt) {
-            const additionalParameters = promptData.additionalParameters?.trim();
-            basePrompt = additionalParameters
-              ? `${promptData.primaryPrompt}\n\nAdditional Style Constraints:\n${additionalParameters}`
-              : promptData.primaryPrompt;
+        // The prompt is editor-only configuration and is only ever an input to
+        // generation, so an anonymous visitor neither can nor needs to read it.
+        // Attempting it was pure cost: the call threw, the default prompt was
+        // substituted, and the default was then used for nothing, because
+        // generation is gated too.
+        if (canGenerate) {
+          try {
+            const promptData = await resolvePromptForPage(pagePath);
+            if (promptData?.primaryPrompt) {
+              const additionalParameters = promptData.additionalParameters?.trim();
+              basePrompt = additionalParameters
+                ? `${promptData.primaryPrompt}\n\nAdditional Style Constraints:\n${additionalParameters}`
+                : promptData.primaryPrompt;
+              console.warn(
+                `[generateCuratedImages] Using prompt set: ${promptData.setName} / ${promptData.promptName || 'primary'}`
+              );
+            } else {
+              console.warn('[generateCuratedImages] No prompt assignment configured for this page');
+            }
+          } catch (promptErr) {
             console.warn(
-              `[generateCuratedImages] Using prompt set: ${promptData.setName} / ${promptData.promptName || 'primary'}`
+              '[generateCuratedImages] Could not fetch prompts, using default:',
+              promptErr.message
             );
-          } else {
-            console.warn('[generateCuratedImages] No prompt assignment configured for this page');
+            // Continue with default prompt
           }
-        } catch (promptErr) {
-          console.warn(
-            '[generateCuratedImages] Could not fetch prompts, using default:',
-            promptErr.message
-          );
-          // Continue with default prompt
         }
 
         // Generate images for all articles in parallel
@@ -199,7 +240,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
         setLoading(false);
       }
     },
-    [provider, pagePath, resolvePromptForPage, generateArticleImage]
+    [provider, pagePath, resolvePromptForPage, generateArticleImage, canGenerate]
   );
 
   /**

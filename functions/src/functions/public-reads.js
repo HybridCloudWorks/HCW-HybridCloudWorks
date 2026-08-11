@@ -45,3 +45,10 @@ httpRoute('publicGetFeed', {
   route: 'public/feed',
   handler: (request, context) => handlers().getFeed(request, context),
 });
+
+httpRoute('publicGetCuratedImage', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/curated-image/{id}',
+  handler: (request, context) => handlers().getCuratedImage(request, context),
+});

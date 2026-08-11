@@ -118,3 +118,19 @@ export async function fetchPublicFeed(provider) {
     insights: body?.insights || [],
   };
 }
+
+/**
+ * GET public/curated-image/{articleId} — the cached hero image for a curated
+ * news article, or null when none has been generated.
+ *
+ * Anonymous on purpose. The equivalent admin route is editor-gated, and the
+ * news pages that need this are public, so calling that one made every
+ * anonymous visitor's lookup throw at token acquisition and left the grid with
+ * no imagery (TODO.md T-210). The server returns only the URL — never the
+ * document, which carries an internal blob path and prompt metadata.
+ */
+export async function fetchPublicCuratedImage(articleId) {
+  if (!articleId) return null;
+  const body = await publicGet(`public/curated-image/${encodeURIComponent(articleId)}`);
+  return body?.imageUrl || null;
+}
