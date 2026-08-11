@@ -103,6 +103,11 @@ const PUBLIC_ROUTES = new Set([
   'public/feed',
   'public/submissions', // anonymous write: validated, quota-limited, Cloudflare-verified
   'public/media/{container}/{*blobPath}', // container allowlist — lib/blob-paths.js
+  // Returns one field, `imageUrl`, for one cached news-article image — never
+  // the document, which carries an internal blob path and prompt metadata. It
+  // is here because the public news pages were calling the editor-gated
+  // equivalent and rendering nothing (TODO.md T-210).
+  'public/curated-image/{id}',
   // Reads no database, returns four enum values. The reason it is here rather
   // than guarded is that it backs indicators rendered to every anonymous
   // visitor on the landing page; the reason it is safe is that its cache bounds

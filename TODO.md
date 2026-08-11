@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 8 |
+| Open items | 7 |
 | Critical | 0 |
-| High | 3 |
+| High | 2 |
 | Medium | 4 |
 | Low | 1 |
-| Resolved since the review | 35 (T-101 – T-105, T-201 – T-205, T-208, T-209, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
+| Resolved since the review | 36 (T-101 – T-105, T-201 – T-205, T-208 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 796 functions tests and 79 frontend tests. That
+resolved, and the suite is now 804 functions tests and 92 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -600,7 +600,7 @@ Removing the early return fails three tests.
 
 ---
 
-### T-210 — Public news pages fire authenticated requests as anonymous visitors
+### ~~T-210 — Public news pages fire authenticated requests as anonymous visitors~~ RESOLVED
 **Category:** Defect (public regression) · **Label:** Confirmed Issue
 **File:** `frontend/src/hooks/useGenerateCuratedImages.js:48-59`
 
@@ -613,9 +613,46 @@ the **public** `/{provider}/news` route via `CuratedArticlesGrid.jsx:239-244`.
 Every anonymous visitor triggers up to 12 failing requests and sees no curated
 imagery, where cached images previously rendered.
 
-**Fix:** anonymous `GET /api/public/curated-image/{articleId}` returning only
-`{ imageUrl }`, consumed via `publicApi.js`; and gate
-`generateImagesForArticles` on an authenticated session.
+**Resolved as suggested,** both halves: an anonymous
+`GET /api/public/curated-image/{articleId}` consumed through `publicApi.js`, and
+generation gated on an authenticated session.
+
+**One correction to the finding.** "Up to 12 failing requests" overstates the
+network cost, and the detail matters for anyone judging severity.
+`acquireApiToken` throws *before* `fetch` is called, so nothing was ever put on
+the wire — the requests were 24 local exceptions per page load (12 cache
+lookups plus 12 generation attempts), not 24 round trips. The user-visible half
+of the finding is exactly right; the load half was not. What the page really
+paid was MSAL initialization on a public route and a console full of caught
+errors, and what it lost was the imagery.
+
+Three things worth recording beyond the stated fix:
+
+- **The public endpoint returns only `imageUrl`, never the document.** The
+  finding said this and it is worth saying why: a `curated_article_images`
+  document also carries `storagePath` (an internal blob path) and the prompt
+  metadata the gallery writes — `promptSet`, `promptName`,
+  `promptTemplateVersion`, `theme`, `style`. That is editorial IP and internal
+  layout, and an allowlist of one field cannot leak a field added later.
+- **Archived images are withheld**, which was not asked for. `archived` is set
+  by an admin explicitly retiring an image, so the only thing this can do is
+  keep a retired image off a public page.
+- **The prompt lookup is gated with generation, not separately.** It reads
+  editor-only configuration and is only ever an *input* to generation. Before,
+  it was attempted, threw, and a default prompt was substituted — a default
+  that was then used for nothing, because generation could not proceed either.
+
+The gate is `authReady && Boolean(user)`, not `Boolean(user)`. `useAdminAuth`
+sets `user` and then awaits the admin-status fetch before flipping `authReady`,
+so there is a real render in between with a user present and the session still
+indeterminate; generating there would fire an editor-gated request before
+knowing whether the account is an editor. A test pins that case specifically,
+because without it `authReady` is indistinguishable from redundant — the first
+version of the test suite could not tell the two apart.
+
+Thirteen hook tests and eight endpoint tests, verified in both directions:
+putting the cache lookup back on the authed endpoint fails four, removing the
+generation gate fails five, and dropping `authReady` fails one.
 
 ---
 
@@ -1322,6 +1359,7 @@ pure helpers underneath them.
 | ~~Unit~~ | ~~Job poll with `timeout`; with rejected fetch~~ | ~~stops; does not fabricate `failed`~~ | ~~T-308, T-309~~ — written |
 | ~~Concurrency~~ | ~~N simultaneous submissions from one key~~ | ~~exactly `limit` accepted~~ | ~~T-204~~ — written |
 | ~~Unit~~ | ~~Addresses across one IPv6 /64; a v4-mapped address~~ | ~~one quota key; treated as IPv4~~ | ~~T-205~~ — written |
+| ~~Hook~~ | ~~News page with no MSAL account~~ | ~~cached images render; no authed call made~~ | ~~T-210~~ — written |
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
 | ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |

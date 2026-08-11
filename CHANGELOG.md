@@ -103,6 +103,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Public news pages showed no curated imagery.** #63 moved the cached-image
+  lookup off an anonymous Firestore read onto an editor-gated `cms/*` endpoint,
+  reached through a token acquisition that throws outright without a signed-in
+  account. The hook runs on the public `/{provider}/news` route, so for every
+  anonymous visitor the lookup failed and the grid rendered nothing where
+  cached images used to appear. Reading a cached image is now anonymous
+  (`GET public/curated-image/{articleId}`, returning only the URL — never the
+  document, which carries an internal blob path and prompt metadata), while
+  generating a missing one stays behind the admin gate and is no longer
+  attempted when nobody is signed in. That also keeps MSAL off the critical
+  path of a public page. Archived images are withheld, so retiring an image in
+  the gallery now keeps it off the public site. (TODO.md T-210)
 - **The anonymous submission limit of five could be turned into two hundred.**
   The quota read the counter, compared it, and wrote it back as three separate
   operations, so simultaneous requests all read the same value, all passed the

@@ -250,6 +250,108 @@ describe('getContent', () => {
   });
 });
 
+/**
+ * The public news pages were calling the EDITOR-gated cache lookup, so an
+ * anonymous visitor's requests threw at token acquisition and no curated
+ * imagery rendered (TODO.md T-210). The assertions that matter are about what
+ * this endpoint does NOT return: the admin equivalent answers with the whole
+ * document, and the document is not public.
+ */
+describe('getCuratedImage', () => {
+  const cached = (over = {}) => ({
+    id: 'a1',
+    imageUrl: 'https://cdn.example/img/a1.png',
+    storagePath: 'curated/internal/a1.png',
+    promptSet: 'house-style-v3',
+    promptName: 'news-hero',
+    promptTemplateVersion: 7,
+    theme: 'cool-blue',
+    style: 'cinematic',
+    ...over,
+  });
+
+  const handlersFor = (doc) =>
+    createPublicReadHandlers({
+      store: { readDoc: vi.fn(async () => doc), queryDocs: vi.fn() },
+    });
+
+  it('returns the image url', async () => {
+    const h = handlersFor(cached());
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).imageUrl).toBe('https://cdn.example/img/a1.png');
+  });
+
+  it('returns ONLY the image url — never the document', async () => {
+    // storagePath is an internal blob path and the prompt fields are editorial
+    // IP. Neither is needed to render an <img>, and an allowlist of one field
+    // cannot leak a field added to the container later.
+    const h = handlersFor(cached());
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    const body = JSON.parse(res.body);
+
+    expect(Object.keys(body).sort()).toEqual(['imageUrl', 'success']);
+    expect(res.body).not.toContain('storagePath');
+    expect(res.body).not.toContain('house-style-v3');
+    expect(res.body).not.toContain('cinematic');
+  });
+
+  it('answers 200 with a null url when nothing is cached', async () => {
+    // The caller's question is "is there a cached image?", and "no" is a
+    // successful answer to it — the hook treats absence as "not cached", not
+    // as an error, so a 404 here would show up in its error path.
+    const h = handlersFor(null);
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'missing' } }), context);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).imageUrl).toBeNull();
+  });
+
+  it('withholds an archived image', async () => {
+    // Not asked for by the finding. `archived` is set by an admin explicitly
+    // retiring an image, and the only thing this can do is stop a retired
+    // image appearing on a public page.
+    const h = handlersFor(cached({ archived: true }));
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    expect(JSON.parse(res.body).imageUrl).toBeNull();
+  });
+
+  it('treats a document with no usable url as uncached', async () => {
+    for (const over of [{ imageUrl: '' }, { imageUrl: null }, { imageUrl: { url: 'x' } }]) {
+      const h = handlersFor(cached(over));
+      const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+      expect(JSON.parse(res.body).imageUrl).toBeNull();
+    }
+  });
+
+  it('rejects an empty id without reading', async () => {
+    const store = { readDoc: vi.fn(), queryDocs: vi.fn() };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.getCuratedImage(makeRequest({ params: { id: '  ' } }), context);
+    expect(res.status).toBe(400);
+    expect(store.readDoc).not.toHaveBeenCalled();
+  });
+
+  it('is cacheable — it is hit up to twelve times per news page load', async () => {
+    const h = handlersFor(cached());
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    expect(res.headers['Cache-Control']).toMatch(/max-age=\d+/);
+  });
+
+  it('500s rather than leaking a store error to an anonymous caller', async () => {
+    const h = createPublicReadHandlers({
+      store: {
+        readDoc: vi.fn(async () => {
+          throw new Error('cosmos exploded with connection string in it');
+        }),
+        queryDocs: vi.fn(),
+      },
+    });
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    expect(res.status).toBe(500);
+    expect(res.body).not.toContain('connection string');
+  });
+});
+
 describe('getSnapshot', () => {
   it('serves only the allowlisted snapshot ids', async () => {
     const store = {
@@ -349,7 +451,13 @@ describe('T-202 — anonymous feeds filter deletions, not publication status', (
       ],
       ai_insights: [
         { id: 'i1', provider: 'azure', active: true, summary: 'Kept' },
-        { id: 'i2', provider: 'azure', active: true, summary: 'Deleted', softDeletedAt: '2026-02-01' },
+        {
+          id: 'i2',
+          provider: 'azure',
+          active: true,
+          summary: 'Deleted',
+          softDeletedAt: '2026-02-01',
+        },
         { id: 'i3', provider: 'azure', active: false, summary: 'Hidden' },
       ],
     });

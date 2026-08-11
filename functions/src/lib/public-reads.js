@@ -64,7 +64,12 @@ export const PROVIDER_ALIASES = {
  * 'published_blog' set predates it — both must pass or freshly published
  * documents disappear from public pages).
  */
-const PUBLIC_STATUSES = new Set(['published', 'published_blog', 'published_news', 'published_both']);
+const PUBLIC_STATUSES = new Set([
+  'published',
+  'published_blog',
+  'published_news',
+  'published_both',
+]);
 
 export function isPublicDocument(doc = {}) {
   if (!doc) return false;
@@ -184,6 +189,13 @@ const FEED_CACHE_MAX_DOCS = 200;
 const FEED_INSIGHTS_MAX_DOCS = 200;
 
 /**
+ * A curated article's image changes only when someone regenerates it, so this
+ * is cached harder than the list endpoints (300 s). It is also the endpoint a
+ * news page hits up to twelve times per load, which is the other reason.
+ */
+const CURATED_IMAGE_CACHE_SECONDS = 3600;
+
+/**
  * How many same-slug documents the detail lookup considers.
  *
  * Slugs are meant to be unique, so this is normally 1 row. It is >1 because
@@ -223,8 +235,12 @@ export function createPublicReadHandlers({ store }) {
      */
     async listContent(request, context) {
       try {
-        const type = String(request.query.get('type') || '').trim().toLowerCase();
-        const provider = String(request.query.get('provider') || '').trim().toLowerCase();
+        const type = String(request.query.get('type') || '')
+          .trim()
+          .toLowerCase();
+        const provider = String(request.query.get('provider') || '')
+          .trim()
+          .toLowerCase();
         const requestedSource = String(request.query.get('source') || 'content').trim();
         if (!LIST_SOURCES.has(requestedSource)) {
           return json(400, { error: 'Invalid source' });
@@ -244,7 +260,9 @@ export function createPublicReadHandlers({ store }) {
         }
         if (provider) {
           const labels = PROVIDER_ALIASES[provider] || [provider, provider.toUpperCase()];
-          clauses.push('(ARRAY_CONTAINS(@providers, c["Cloud Provider"]) OR ARRAY_CONTAINS(@providers, c["cloudProvider"]))');
+          clauses.push(
+            '(ARRAY_CONTAINS(@providers, c["Cloud Provider"]) OR ARRAY_CONTAINS(@providers, c["cloudProvider"]))'
+          );
           parameters.push({ name: '@providers', value: labels });
         }
         if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
@@ -285,7 +303,11 @@ export function createPublicReadHandlers({ store }) {
         for (const container of ['content', 'blogs']) {
           const byId = await store.readDoc(container, slugOrId, slugOrId);
           if (byId && isPublicDocument(byId)) {
-            return json(200, { success: true, item: stripInternalFields(byId), source: container }, 300);
+            return json(
+              200,
+              { success: true, item: stripInternalFields(byId), source: container },
+              300
+            );
           }
           for (const field of ['slug', 'Slug']) {
             const rows = await store.queryDocs(
@@ -299,7 +321,11 @@ export function createPublicReadHandlers({ store }) {
             // arbitrary pick (TODO.md T-305).
             const match = rows.find(isPublicDocument);
             if (match) {
-              return json(200, { success: true, item: stripInternalFields(match), source: container }, 300);
+              return json(
+                200,
+                { success: true, item: stripInternalFields(match), source: container },
+                300
+              );
             }
           }
         }
@@ -308,6 +334,53 @@ export function createPublicReadHandlers({ store }) {
       } catch (error) {
         context.error('publicGetContent failed:', error);
         return json(500, { error: 'Failed to get content' });
+      }
+    },
+
+    /**
+     * GET /api/public/curated-image/{articleId} — the cached hero image for a
+     * curated news article.
+     *
+     * This exists because the public news pages were calling an EDITOR-gated
+     * endpoint. #63 moved the cache lookup off an anonymous Firestore read onto
+     * `getJSON('cms/images/curated/...')`, which runs through `acquireApiToken`
+     * and throws without an MSAL account — so on `/{provider}/news`, an
+     * anonymous visitor's lookups all failed and no curated imagery rendered
+     * where cached images used to (TODO.md T-210).
+     *
+     * **Only `imageUrl` is returned, never the document.** The admin endpoint
+     * answers with the whole thing, and the whole thing is not public: a
+     * `curated_article_images` document also carries `storagePath` (an internal
+     * blob path) and the prompt metadata the gallery writes — `promptSet`,
+     * `promptName`, `promptTemplateVersion`, `theme`, `style`. That is
+     * editorial IP and internal layout, and none of it is needed to render an
+     * `<img>`.
+     *
+     * Archived images are withheld, which the finding did not ask for. It is a
+     * deliberate hardening in the same direction as the module's other filters:
+     * `archived` is set by an admin explicitly retiring an image, and the only
+     * thing this can do is stop a retired image appearing on a public page.
+     *
+     * Absence answers 200 with `imageUrl: null`, not 404. The caller's question
+     * is "is there a cached image?", and "no" is a successful answer to it —
+     * matching the admin endpoint, whose `item: null` the hook already treats
+     * as "not cached" rather than as an error.
+     */
+    async getCuratedImage(request, context) {
+      try {
+        const id = String(request.params.id || '').trim();
+        if (!id) return json(400, { error: 'articleId required' });
+
+        const doc = await store.readDoc('curated_article_images', id, id);
+        const imageUrl =
+          doc && doc.archived !== true && typeof doc.imageUrl === 'string' && doc.imageUrl
+            ? doc.imageUrl
+            : null;
+
+        return json(200, { success: true, imageUrl }, CURATED_IMAGE_CACHE_SECONDS);
+      } catch (error) {
+        context.error('publicGetCuratedImage failed:', error);
+        return json(500, { error: 'Failed to get curated image' });
       }
     },
 
