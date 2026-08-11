@@ -70,6 +70,85 @@ vi.mock('@/pages/azure/LandingPage', () => ({
   ),
 }));
 
+// These six routes used to assert "Coming Soon". They stopped being
+// placeholders when App.jsx routed them to real pages (TODO.md T-320); the
+// suite is a ROUTE contract — path -> page module — so the pages are mocked
+// with distinctive headings exactly like the providers above, not rendered.
+vi.mock('@/pages/gcp/LandingPage', () => ({
+  default: () => (
+    <main>
+      <h1>GCP Reference Architectures</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/finops/LandingPage', () => ({
+  default: () => (
+    <main>
+      <h1>FinOps Landing</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/terraform/LandingPage', () => ({
+  default: () => (
+    <main>
+      <h1>Terraform Landing</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/github/LandingPage', () => ({
+  default: () => (
+    <main>
+      <h1>GitHub Landing</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/finops/ToolsPage', () => ({
+  default: () => (
+    <main>
+      <h1>FinOps Tools</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/terraform/ToolsPage', () => ({
+  default: () => (
+    <main>
+      <h1>Terraform Tools</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/github/ToolsPage', () => ({
+  default: () => (
+    <main>
+      <h1>GitHub Tools</h1>
+    </main>
+  ),
+}));
+
+// The news routes render real RSS pages now — lazy and fetch-happy, so
+// un-mocked they never resolved inside the test timeout. The mock headings
+// keep the original contract text.
+vi.mock('@/pages/aws/RssPage', () => ({
+  default: () => (
+    <main>
+      <h1>AWS Cloud News</h1>
+    </main>
+  ),
+}));
+
+vi.mock('@/pages/azure/RssPage', () => ({
+  default: () => (
+    <main>
+      <h1>Azure Platform News</h1>
+    </main>
+  ),
+}));
+
 vi.mock('@/components/animations', () => ({
   ScrollTrigger: ({ children }) => children,
 }));
@@ -102,31 +181,23 @@ describe('public route contract', () => {
   it.each([
     ['/aws', /AWS Reference Architectures/i],
     ['/azure', /Azure Reference Architectures/i],
+    ['/gcp', /GCP Reference Architectures/i],
+    ['/finops', /FinOps Landing/i],
+    ['/terraform', /Terraform Landing/i],
+    ['/github', /GitHub Landing/i],
+    ['/vmware', /VMware Reference Architectures/i],
+    ['/ansible', /Automation intelligence with Ansible/i],
     ['/aws/blog', /AWS Architecture Blog/i],
     ['/azure/blog', /Azure Cloud Insights/i],
     ['/aws/news', /AWS Cloud News/i],
     ['/azure/news', /Azure Platform News/i],
+    ['/finops/tools', /FinOps Tools/i],
+    ['/terraform/tools', /Terraform Tools/i],
+    ['/github/tools', /GitHub Tools/i],
   ])('renders live public route %s', async (pathname, expectedText) => {
     renderRoute(pathname);
 
-    expect(await screen.findByText(expectedText, {}, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.queryByText(/PAGES Not Found/i)).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ['/gcp', 'Coming Soon'],
-    ['/terraform', 'Coming Soon'],
-    ['/github', 'Coming Soon'],
-    ['/finops', 'Coming Soon'],
-    ['/vmware', /VMware Reference Architectures/i],
-    ['/ansible', /Automation intelligence with Ansible/i],
-    ['/github/tools', 'Coming Soon'],
-    ['/terraform/tools', 'Coming Soon'],
-    ['/finops/tools', 'Coming Soon'],
-  ])('renders approved placeholder route %s', async (pathname, expectedText) => {
-    renderRoute(pathname);
-
-    expect(await screen.findByText(expectedText, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText(expectedText)).toBeInTheDocument();
     expect(screen.queryByText(/PAGES Not Found/i)).not.toBeInTheDocument();
   });
 });

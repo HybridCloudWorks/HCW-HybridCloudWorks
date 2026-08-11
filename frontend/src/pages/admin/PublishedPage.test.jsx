@@ -2,9 +2,10 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import PublishedPage from './PublishedPage';
+import PublishedPage, { getPrePublishFailures } from './PublishedPage';
 
 const postJSON = vi.fn();
+const getJSON = vi.fn();
 const logAdminAction = vi.fn();
 const unpublishToInspected = vi.fn();
 
@@ -14,6 +15,7 @@ vi.mock('@/hooks/useAuthReady', () => ({
 
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
+  getJSON: (...args) => getJSON(...args),
 }));
 
 vi.mock('@/lib/auditLog', () => ({
@@ -45,6 +47,8 @@ const sampleSnapshot = {
       type: 'blog',
       publishTarget: 'blog',
       cloudProvider: 'Azure',
+      Summary: 'A summary that satisfies the pre-publish checklist.',
+      altCoverImage: 'https://cdn.example/hero.png',
       slug: 'azure-publish-candidate',
       curatedSubpagePath: '/azure/blog/azure-publish-candidate',
       updatedAt: { toMillis: () => 200 },
@@ -68,11 +72,58 @@ const sampleSnapshot = {
   ],
 };
 
+/**
+ * Drive the publish flow as an admin does since the pre-publish checklist
+ * landed: the row button VALIDATES (fetching the full document for the body
+ * check) and opens a modal; the modal's "Publish Now" is what publishes. A
+ * test that clicked the row button and expected publishContent was asserting
+ * a flow that no longer exists (TODO.md T-320).
+ */
+async function publishFirstCandidate() {
+  fireEvent.click(screen.getAllByRole('button', { name: 'Publish' })[0]);
+  expect(await screen.findByText('Ready to publish')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Now' }));
+}
+
+describe('getPrePublishFailures — the modal gate', () => {
+  const passing = {
+    Title: 'T',
+    Summary: 'S',
+    altCoverImage: 'https://cdn.example/hero.png',
+    slug: 's',
+    blogDraft: 'x'.repeat(201),
+  };
+
+  it('passes a complete item', () => {
+    expect(getPrePublishFailures(passing)).toEqual([]);
+  });
+
+  it('names each missing prerequisite', () => {
+    // The publish flow's only guard between the row button and publishContent
+    // is this checklist; if a check silently disappears, the happy-path tests
+    // above would still pass, so each check is pinned here.
+    expect(getPrePublishFailures({ ...passing, altCoverImage: '' }).join()).toMatch(/hero image/i);
+    expect(getPrePublishFailures({ ...passing, Title: ' ' }).join()).toMatch(/title/i);
+    expect(getPrePublishFailures({ ...passing, Summary: '' }).join()).toMatch(/summary/i);
+    expect(getPrePublishFailures({ ...passing, blogDraft: 'short' }).join()).toMatch(/too short/i);
+    expect(getPrePublishFailures({ ...passing, slug: '' }).join()).toMatch(/slug/i);
+  });
+});
+
 describe('PublishedPage', () => {
   beforeEach(() => {
     postJSON.mockReset();
     logAdminAction.mockReset();
     unpublishToInspected.mockReset();
+    getJSON.mockReset();
+    // The validation step's full-document fetch: the body-length check reads
+    // blogDraft, which the snapshot row deliberately omits.
+    getJSON.mockResolvedValue({
+      item: {
+        id: 'content-1',
+        blogDraft: 'A body well past the two-hundred character floor. '.repeat(8),
+      },
+    });
   });
 
   it('publishes a staged item and surfaces publish diagnostics', async () => {
@@ -112,7 +163,7 @@ describe('PublishedPage', () => {
     expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
     expect(screen.getByText('Azure publish candidate')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Publish' })[0]);
+    await publishFirstCandidate();
 
     await waitFor(() =>
       expect(postJSON).toHaveBeenCalledWith('publishContent', {
@@ -188,7 +239,7 @@ describe('PublishedPage', () => {
 
     expect(await screen.findByText('Azure publish candidate')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Publish' })[0]);
+    await publishFirstCandidate();
 
     expect(
       await screen.findByText(
