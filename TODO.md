@@ -17,11 +17,11 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 8 |
 | Critical | 0 |
 | High | 2 |
 | Medium | 4 |
-| Low | 1 |
+| Low | 2 |
 | Resolved since the review | 36 (T-101 – T-105, T-201 – T-205, T-208 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
@@ -1148,6 +1148,23 @@ absolute source-system URLs that legacy documents still hold.
 ---
 
 ## LOW
+
+### D-001 — ESLint 10 upgrade blocked upstream (deferred, not a review finding)
+**Category:** Dependency maintenance · **Label:** Deferred
+
+Dependabot PR #17 (eslint 9 → 10) had a red `frontend` job. Reproduced locally:
+`eslint-plugin-react@7.37.5` calls `context.getFilename()`, which ESLint 10
+removed, so every `react/*` rule crashes — and the plugin's peer range tops out
+at `eslint ^9.7`. The repo itself is ready (already on flat config); the block
+is entirely in the plugin ecosystem.
+
+Closed #17 with `@dependabot ignore this major version` so it stops recreating
+a PR that cannot go green. **Revisit when `eslint-plugin-react`,
+`eslint-plugin-react-hooks` and `eslint-plugin-jsx-a11y` declare ESLint 10
+support**, then re-enable with `@dependabot unignore eslint` or bump manually.
+
+---
+
 
 ### ~~T-401 — `vps-agent` heartbeat field mismatch, over-broad credential, incomplete~~ RESOLVED
 **File:** `vps-agent/index.js:15-53`
