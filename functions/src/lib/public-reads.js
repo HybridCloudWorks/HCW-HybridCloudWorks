@@ -158,9 +158,193 @@ const LIST_DEFAULT_LIMIT = 60;
 // useProviderLandingContent ask for 250 and filter by provider client-side —
 // a smaller cap would silently hide older provider-specific documents).
 const LIST_MAX_LIMIT = 250;
-// The in-memory sort window. Content is ~1k docs total; the published subset
-// is well inside this. Bounded so a runaway container can't OOM the handler.
+// The in-memory sort window. Bounded so a runaway container can't OOM the
+// handler. This used to be the failure threshold too: with no WHERE clause the
+// window applied to ALL documents, and the file's own comment noted content is
+// ~1k docs total — the bound and the count were the same number, past which
+// published articles vanish arbitrarily. The public filter now runs in SQL
+// (see listContent), so the window applies to the PUBLISHED subset of the
+// requested type/provider, which moves the threshold far from the data
+// (TODO.md T-206).
 const FETCH_WINDOW = 1000;
+
+/**
+ * The SQL half of the public filter (TODO.md T-206), mirroring
+ * `isPublicDocument` — which STILL runs on every row afterwards. Two layers on
+ * purpose, with an asymmetry that matters:
+ *
+ *  - The SQL layer exists so `TOP ${FETCH_WINDOW}` counts published documents,
+ *    not all documents. It is deliberately written WIDE: where JS truthiness
+ *    and SQL comparison could disagree (a soft-delete marker holding '', 0 or
+ *    false is NOT deleted to `isSoftDeleted`), the SQL admits the row and lets
+ *    the JS filter decide. Erring wide costs a few rows of window; erring
+ *    narrow silently drops a published article, which is this finding's
+ *    defect reintroduced through its own fix.
+ *  - The JS layer stays the authority. If the two ever disagree, the response
+ *    is what `isPublicDocument` says, and the SQL only affects which rows made
+ *    the window.
+ *
+ * PUBLIC_STATUSES is inlined as literals rather than parameterized because the
+ * values are this module's own constants, not caller input.
+ */
+const SQL_PUBLIC_CLAUSE =
+  '(c.Live = true OR c.Status = "Live" OR c.contentStatus IN ' +
+  `(${[...PUBLIC_STATUSES].map((s) => `"${s}"`).join(', ')}))`;
+
+/** A marker counts as set only when it holds a JS-truthy value — see above. */
+const sqlNotTruthy = (field) =>
+  `(NOT IS_DEFINED(c.${field}) OR IS_NULL(c.${field}) OR c.${field} = "" OR c.${field} = false OR c.${field} = 0)`;
+
+const SQL_NOT_SOFT_DELETED = `${sqlNotTruthy('softDeletedAt')} AND ${sqlNotTruthy('softDeleteExpiresAt')}`;
+
+/**
+ * What the public LIST endpoint returns per document (TODO.md T-206).
+ *
+ * This replaces `SELECT *`, which transferred whole documents — body fields
+ * included — at ~20 KB average, making one anonymous list request the dominant
+ * RU line (~12–24k RU against a 5,000 RU/s serverless budget: two concurrent
+ * page loads were enough for 429s).
+ *
+ * The list is NOT guessed and NOT copied from the admin projection
+ * (cms-content.js ADMIN_CONTENT_SNAPSHOT_FIELDS): it is the union of every
+ * field the public list consumers actually read, from a file-by-file audit of
+ * useCoderCornerData / useBlogData / useFrameworkData /
+ * useProviderLandingContent, the five provider ArchitecturePages, SocialHubPage
+ * and LivePagesPage, following items through every spread and normalizer.
+ * A missing field here silently renders blank on a public page, so
+ * public-reads.test.js pins the audited requirements against this list —
+ * removing an entry fails a test naming the consumer that needs it.
+ *
+ * Of the nine heavy body fields, exactly ONE is read by a list consumer:
+ * `explanation`, a third-priority excerpt fallback in useCoderCornerData
+ * (:41, :53). `content`/`Content`/`postContent`/`blogDraft`/`overviewHtml`/
+ * `codeSnippet`/`commandExample`/`sidebarContent` are read only by DETAIL
+ * consumers (blogUtils normalizeContentFields), so this projection must stay
+ * scoped to listContent — getContent keeps returning whole documents.
+ */
+export const PUBLIC_CONTENT_LIST_FIELDS = [
+  // identity / typing
+  'id',
+  'type',
+  'contentType',
+  'publishTarget',
+  'targetLandingZone',
+  // titles and copy (excerpt fallbacks included — see header for explanation)
+  'Title',
+  'title',
+  'name',
+  'Summary',
+  'summary',
+  'description',
+  'excerpt',
+  'explanation',
+  // slugs, categorisation, tags
+  'slug',
+  'Slug',
+  'category',
+  'Category',
+  'primaryCategory',
+  'complexity',
+  'Complexity',
+  'technicalLevel',
+  'TechnicalLevel',
+  'level',
+  'tags',
+  'Tags',
+  'keyTopics',
+  'featured',
+  'Featured',
+  // visibility — what isPublicDocument and the workflow badges read
+  'Live',
+  'Status',
+  'contentStatus',
+  'softDeletedAt',
+  'softDeleteExpiresAt',
+  // provider spellings
+  'Cloud Provider',
+  'cloudProvider',
+  'provider',
+  'Provider',
+  'primaryProvider',
+  // the five published-date aliases plus recency fields
+  'publishedDate',
+  'datePublished',
+  'Published At',
+  'blogPublishedAt',
+  'publishedAt',
+  'updatedAt',
+  'createdAt',
+  // links
+  'slugPageUrl',
+  'expectedPublicUrl',
+  'publishedUrl',
+  'publicUrl',
+  'blogUrl',
+  'curatedSubpagePath',
+  'sourceUrl',
+  'url',
+  'CD Url',
+  'Source URL',
+  'link',
+  'docLink',
+  // reading stats and attribution
+  'readTime',
+  'ReadTime',
+  'wordCount',
+  'WordCount',
+  'words',
+  'editorAuthor',
+  'siteAuthor',
+  'publishedByName',
+  'createdByName',
+  // imagery
+  'contentImageUrl',
+  'altCoverImage',
+  'altCoverImageVariants',
+  'imageUrl',
+  'ImageUrl',
+  'coverImage',
+  'thumbnail',
+  // coder corner cards
+  'language',
+  'stack',
+  'repoUrl',
+  'icon',
+  'categoryColor',
+  // architecture cards
+  'costColor',
+  'cost',
+  'costAnalysis',
+  'rpo',
+  'RPO',
+  'rto',
+  'RTO',
+  'waf',
+  'wellArchitectedScore',
+  // framework pages (arrays project whole; element fields ride along)
+  'frameworkConcepts',
+  'frameworkNodes',
+  'frameworkPillars',
+  'keyPillars',
+  'pillars',
+  'officialSources',
+  'frameworkSourceUrls',
+  'sourceUrls',
+  'architectureRecommendation',
+  'recommendation',
+  'summaryRecommendation',
+  'frameworkKnowledgePrompt',
+  'frameworkImagePrompt',
+  'frameworkDiagramPrompt',
+  // cross-document identity (LivePages delete path, SocialHub dedup)
+  'sourceContentId',
+  'publishedContentId',
+  'publishedBlogId',
+  'blogId',
+];
+
+/** `c["Cover Image"]`-style quoting handles spaced and cased names. */
+const LIST_PROJECTION = PUBLIC_CONTENT_LIST_FIELDS.map((f) => `c["${f}"]`).join(', ');
 
 /**
  * Document ceilings for the feed endpoint (TODO.md T-203).
@@ -259,8 +443,12 @@ export function createPublicReadHandlers({ store }) {
         );
         const offset = Math.max(Number(request.query.get('offset')) || 0, 0);
 
-        let query = `SELECT TOP ${FETCH_WINDOW} * FROM c`;
-        const clauses = [];
+        // The public filter runs in SQL so the TOP window counts published
+        // documents rather than all documents, and the projection replaces
+        // `SELECT *` so a list request stops transferring article bodies —
+        // both halves of TODO.md T-206. `isPublicDocument` still re-filters
+        // every row below; see SQL_PUBLIC_CLAUSE for why both layers exist.
+        const clauses = [SQL_PUBLIC_CLAUSE, SQL_NOT_SOFT_DELETED];
         const parameters = [];
         if (type) {
           clauses.push('LOWER(c.type) = @type');
@@ -273,7 +461,7 @@ export function createPublicReadHandlers({ store }) {
           );
           parameters.push({ name: '@providers', value: labels });
         }
-        if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
+        const query = `SELECT TOP ${FETCH_WINDOW} ${LIST_PROJECTION} FROM c WHERE ${clauses.join(' AND ')}`;
 
         const rows = await store.queryDocs(requestedSource, query, parameters);
         const matching = rows

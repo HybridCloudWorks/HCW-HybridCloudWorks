@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 8 |
+| Open items | 7 |
 | Critical | 0 |
-| High | 2 |
+| High | 1 |
 | Medium | 4 |
 | Low | 2 |
-| Resolved since the review | 36 (T-101 – T-105, T-201 – T-205, T-208 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 and T-408 part-resolved |
+| Resolved since the review | 37 (T-101 – T-105, T-201 – T-205, T-207 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-206, T-302 and T-408 part-resolved |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 807 functions tests and 92 frontend tests. That
+resolved, and the suite is now 818 functions tests and 92 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -492,7 +492,7 @@ grouping test, and widening the prefix to /128 fails seven.
 ---
 
 ### T-206 — Public content list: unordered 1000-row window at the current document count
-**Category:** Defect / performance · **Label:** Confirmed Issue
+**Category:** Defect / performance · **Label:** Confirmed Issue · **Status: PART-RESOLVED** — steps 1–2 done, step 3 blocked
 **File:** `functions/src/lib/public-reads.js:117`, `:152`, `:166-171`
 
 `SELECT TOP 1000 * FROM c` with no `ORDER BY` returns an **arbitrary** 1000 in
@@ -506,35 +506,81 @@ fields. At ~20 KB average that is ~12–24k RU per request — roughly four seco
 of the container's entire 5,000 RU/s serverless budget, so two concurrent public
 page loads produce 429s.
 
-**Fix, in order:** (1) move the public filter into SQL so the window narrows
-before `TOP`; (2) project explicit fields instead of `SELECT *` — `cms-content.js`
-already models this with `ADMIN_CONTENT_SNAPSHOT_FIELDS`; (3) materialize a
-`sortDate` field (or a Cosmos computed property) so `ORDER BY` is safe, plus a
-composite index. Keep the `ORDER BY`-avoidance reasoning at `:19-23` — it is
-correct; fix the window bound instead.
+**Steps 1 and 2 are done; both directions verified.**
 
+1. *Public filter in SQL* — `SQL_PUBLIC_CLAUSE` + `SQL_NOT_SOFT_DELETED` run
+   before `TOP`, so the window counts published documents of the requested
+   type/provider rather than all documents; the threshold moves far from the
+   data. The SQL is deliberately WIDE where SQL comparison and JS truthiness
+   could disagree (a marker holding `''`/`false`/`0` is admitted and left to
+   the JS filter), because erring narrow silently drops a published article —
+   the finding's own defect reintroduced through its fix. `isPublicDocument`
+   still runs on every row as the authority.
+2. *Explicit projection* — `PUBLIC_CONTENT_LIST_FIELDS` replaces `SELECT *`.
+   **Not** copied from the admin snapshot list, which the finding suggested as
+   a model: it is the union of every field the public list consumers actually
+   read, from a file-by-file audit (the four hooks, five provider
+   ArchitecturePages — two more than the contract listed — SocialHubPage,
+   LivePagesPage, followed through every spread and normalizer). Of the nine
+   heavy body fields exactly ONE has a list reader: `explanation`, a
+   third-priority excerpt fallback in useCoderCornerData. The other eight stay
+   out, which is where the RU win lives. The audit is pinned as a test naming
+   the consumer behind each required field; the projection is scoped to
+   `listContent` only, because detail consumers do read bodies.
+
+   Mutations: dropping the SQL filter fails 2 tests, reverting to `SELECT *`
+   fails 1, dropping `explanation` fails 2, narrowing the wide soft-delete SQL
+   fails 1.
+
+**Step 3 remains open and blocked:** a materialized `sortDate` (or computed
+property) plus composite index, so `ORDER BY` becomes safe and the in-memory
+sort can go. That needs a backfill over existing documents and an index change
+— infra work this environment cannot run (REVIEW.md §1.1). The ORDER BY
+avoidance at `:19-23` stays correct until then. A cursor-paging API for exact
+`total` (see T-407 note) belongs to the same step.
 ---
 
-### T-207 — 16 documented RPCs are live 404s in the admin UI
+### ~~T-207 — 16 documented RPCs are live 404s in the admin UI~~ RESOLVED (contract half; implementations stay blocked)
 **Category:** Incomplete feature · **Label:** Confirmed Issue
 **File:** `.azure/api-surface.json:193-244` vs `:21-192`
 
-`rpc.functions` describes *"functions the frontend already invokes"*. Seventeen
-are unregistered and **sixteen have live call sites** in `frontend/src`:
-`aiProxy`, `batchInspect`, `createContentFromRecording`, `fetchRssFeedsManual`,
-`generateArticleDraft`, `generateCuratedArticleImage`, `generatePreviewImages`,
-`generateReviewHeroImage`, `generateReviewerDigestManual`,
-`generateSocialCaption`, `klaviyoProxy`, `linkieProxy`, `mcpProxy`,
-`publerProxy`, `syncMcpTools`, `triggerAiImageGeneration`. Several already have
+`rpc.functions` describes *"functions the frontend already invokes"*.
+Seventeen are unregistered and — one correction to the finding as written —
+**all seventeen** have live call sites in `frontend/src`, not sixteen:
+`testAiProvider` is also called (lib/aiEngine.js). Several already have
 per-function timeouts configured in `api.js:11-18`.
 
-Blocked on provider credentials ([CHECKLIST.md](CHECKLIST.md) §4). But the
-contract has no status field on `rpc.functions`, so the gap is invisible.
+**Resolved as suggested, and wider.** The contract now carries an explicit
+`rpc.notImplemented` block (all 17 names, with the shared blocker: provider
+credentials, CHECKLIST.md §4), and `api-contract.test.js` holds the whole
+document to account:
 
-**Fix now (unblocked):** add an explicit `rpc.notImplemented` array, and a CI
-check asserting every implemented contract entry resolves to a live route and
-vice versa.
+1. `rpc.functions` = `implemented` + `notImplemented`, exactly — no overlap,
+   no gap. This immediately caught a second drift: `getLabJob` was implemented
+   and invoked but missing from the invoked list.
+2. Every implemented RPC resolves to a registered route **with the methods it
+   advertises** — registrations enumerated by mocking the Functions host and
+   importing `index.js`, because several RPCs register through loops and a
+   static grep misses them.
+3. No notImplemented name is registered — so implementing one of the seventeen
+   REQUIRES moving it to `implemented` in the same change.
+4. Registered method+route pairs ↔ contract claims, a full bijection.
+   Making that true surfaced real contract gaps, now filled: the agent API
+   trio had no entry at all; `public/media`, `cms/content/item`,
+   `cms/content/{id}`, `cms/images/curated/{id}`, `cms/settings` GET and
+   `cms/ai-usage` were registered but undocumented; and the `CRUD` shorthand
+   entries now enumerate their real `registeredRoutes`, which recorded three
+   honest asymmetries (social-posts has no PATCH, recordings no DELETE,
+   image-prompt writes go through the RPC).
 
+Mutations: removing a notImplemented name fails the partition test, a contract
+route advertising an unregistered method fails two, deleting a section's
+entries fails the bijection, removing `getLabJob` fails the partition.
+
+**The seventeen implementations themselves remain blocked** on provider
+credentials ([CHECKLIST.md](CHECKLIST.md) §4) — the routes are not the blocker,
+and shipping a proxy with nowhere to proxy to trades a 404 for a 502. The gap
+is now visible and machine-checked instead of invisible.
 ---
 
 ### ~~T-208 — Editor poll can silently overwrite a collaborator's save~~ RESOLVED
@@ -1395,7 +1441,7 @@ pure helpers underneath them.
 | Unit | `cms-content.list` limit `abc`/`0`/`-5`/`99999` | clamped to [1,500] | T-310 |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | T-314 |
 | ~~Unit~~ | ~~`uploadFile` `text/html`; oversized Content-Length~~ | ~~415; 413 before decode~~ | ~~T-306, T-307~~ — written |
-| Contract | Every `implemented` contract entry | resolves to a live route | T-402 |
+| ~~Contract~~ | ~~Every `implemented` contract entry~~ | ~~resolves to a live route~~ | ~~T-207/T-402~~ — written |
 | ~~Unit~~ | ~~Health route with a dead upstream; called 20× in one TTL~~ | ~~that provider UNKNOWN, others unaffected; one round of upstream calls~~ | ~~T-316~~ — written |
 
 ---
