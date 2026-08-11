@@ -18,7 +18,20 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 const fetchPublicCuratedImage = vi.fn();
 const postJSON = vi.fn();
 const resolvePromptForPage = vi.fn();
-let authState = { authReady: true, user: null };
+/**
+ * Mirrors `useAdminAuth`: `hasRole` answers from the admin status fetched after
+ * sign-in, so it is false for an anonymous visitor AND false while that fetch
+ * is still in flight. The role hierarchy is viewer < editor < publisher <
+ * super_admin, and generation needs `editor`.
+ */
+const ROLE_RANK = { viewer: 1, editor: 2, publisher: 3, super_admin: 4 };
+let authState;
+const setAuth = ({ user = null, role = null } = {}) => {
+  authState = {
+    user,
+    hasRole: (required) => (ROLE_RANK[role] || 0) >= (ROLE_RANK[required] || 999),
+  };
+};
 
 vi.mock('@/lib/publicApi', () => ({
   fetchPublicCuratedImage: (...args) => fetchPublicCuratedImage(...args),
@@ -44,15 +57,12 @@ const ARTICLES = [
   { id: 'a2', title: 'Two' },
 ];
 
-const anonymous = () => {
-  authState = { authReady: true, user: null };
-};
-const signedIn = () => {
-  authState = { authReady: true, user: { uid: 'admin-1' } };
-};
-const resolving = () => {
-  authState = { authReady: false, user: null };
-};
+const anonymous = () => setAuth();
+const signedIn = () => setAuth({ user: { uid: 'admin-1' }, role: 'editor' });
+/** Signed in, but below the role the server requires. */
+const viewer = () => setAuth({ user: { uid: 'viewer-1' }, role: 'viewer' });
+/** Signed in, admin status still in flight — no role known yet. */
+const resolving = () => setAuth({ user: { uid: 'admin-1' } });
 
 async function run(articles = ARTICLES) {
   const view = renderHook(() => useGenerateCuratedImages('/aws/news', 'AWS'));
@@ -154,27 +164,36 @@ describe('signed-in admin', () => {
   });
 });
 
-describe('before auth resolves', () => {
-  it('makes no authenticated call while the session is unknown', async () => {
+describe('signed in below the required role', () => {
+  beforeEach(viewer);
+
+  it('reads the cache but attempts nothing editor-gated', async () => {
+    // Generation and the prompt read are both `editor`-gated server-side, so a
+    // viewer gated only on "somebody is signed in" would collect a 403 for the
+    // prompt read and one per article — the same requests-that-cannot-succeed
+    // defect as T-210, with a narrower audience.
+    fetchPublicCuratedImage.mockResolvedValue('https://cdn.example/a1.png');
+    const view = await run([{ id: 'a1' }]);
+
+    expect(view.result.current.imageMap).toEqual({ a1: 'https://cdn.example/a1.png' });
+    expect(postJSON).not.toHaveBeenCalled();
+    expect(resolvePromptForPage).not.toHaveBeenCalled();
+  });
+});
+
+describe('before the session resolves', () => {
+  it('attempts nothing editor-gated while the role is unknown', async () => {
+    // `useAdminAuth` sets `user` and then awaits the admin-status fetch, so
+    // there is a real render with a user present and no role yet. Acting there
+    // would fire an editor-gated request before knowing the account is an
+    // editor.
     resolving();
     await run([{ id: 'a1' }]);
     expect(postJSON).not.toHaveBeenCalled();
     expect(resolvePromptForPage).not.toHaveBeenCalled();
   });
 
-  it('waits for admin status even once a user is known', async () => {
-    // `useAdminAuth` sets `user` and then awaits the admin-status fetch before
-    // flipping `authReady`, so there is a real render in between with a user
-    // present and the session still indeterminate. Generating there would fire
-    // an editor-gated request before knowing whether this account is an editor.
-    // This is the case that makes `authReady` load-bearing rather than
-    // redundant with `Boolean(user)`.
-    authState = { authReady: false, user: { uid: 'admin-1' } };
-    await run([{ id: 'a1' }]);
-    expect(postJSON).not.toHaveBeenCalled();
-  });
-
-  it('generates once the session resolves', async () => {
+  it('generates once the role is known', async () => {
     // The other direction: waiting must not become never.
     signedIn();
     await run([{ id: 'a1' }]);

@@ -51,8 +51,8 @@ function buildImageRequestBody(article, basePrompt, provider) {
  *   - **Reading** a cached image is anonymous, through `public/curated-image`.
  *     Every visitor gets the imagery.
  *   - **Generating** a missing one stays behind the admin gate, and is simply
- *     not attempted when nobody is signed in. It was never going to succeed
- *     anonymously; skipping it also stops the hook dragging MSAL onto the
+ *     not attempted without the `editor` role. It was never going to succeed
+ *     without it; skipping it also stops the hook dragging MSAL onto the
  *     critical path of a public page.
  *
  * The prompt lookup is gated with generation for the same reason: it reads
@@ -65,14 +65,20 @@ export function useGenerateCuratedImages(pagePath, provider) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // `authReady` matters as much as `user`: it starts false, and treating "not
-  // resolved yet" as "signed out" would skip generation for an admin. An
-  // anonymous visitor resolves to false and stays there, so they make exactly
-  // one pass; a signed-in admin makes a second once auth settles, which costs
-  // one more round of cached lookups and is what buys the first paint being
-  // independent of MSAL.
-  const { authReady, user } = useAdminAuth();
-  const canGenerate = authReady && Boolean(user);
+  // The gate is the ROLE, not merely "somebody is signed in". Generation and
+  // the prompt read are both `editor`-gated server-side, so a signed-in viewer
+  // gated on presence alone would fire a prompt read plus up to twelve
+  // generation requests and collect a 403 for each — the same
+  // requests-that-cannot-succeed defect as T-210 itself, just with a narrower
+  // audience.
+  //
+  // `hasRole` also subsumes the wait for auth to settle: it reads the admin
+  // status fetched after sign-in, so it is false while that is still in flight
+  // and false for an anonymous visitor. An earlier version of this gate paired
+  // `authReady` with a presence check to get that behaviour; with the role
+  // check it would be a conjunct that can never change the answer.
+  const { hasRole } = useAdminAuth();
+  const canGenerate = hasRole('editor');
 
   /** Anonymous cache read — see the header. */
   const getCachedImageUrl = useCallback(async (articleId) => {

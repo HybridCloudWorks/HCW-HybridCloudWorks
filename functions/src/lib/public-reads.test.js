@@ -316,7 +316,14 @@ describe('getCuratedImage', () => {
   });
 
   it('treats a document with no usable url as uncached', async () => {
-    for (const over of [{ imageUrl: '' }, { imageUrl: null }, { imageUrl: { url: 'x' } }]) {
+    // Whitespace-only included: untrimmed, it is truthy, and would reach the
+    // browser as an `<img src=" ">` that resolves back to the page itself.
+    for (const over of [
+      { imageUrl: '' },
+      { imageUrl: '   ' },
+      { imageUrl: null },
+      { imageUrl: { url: 'x' } },
+    ]) {
       const h = handlersFor(cached(over));
       const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
       expect(JSON.parse(res.body).imageUrl).toBeNull();
@@ -331,10 +338,43 @@ describe('getCuratedImage', () => {
     expect(store.readDoc).not.toHaveBeenCalled();
   });
 
-  it('is cacheable — it is hit up to twelve times per news page load', async () => {
+  it('trims the stored url', async () => {
+    const h = handlersFor(cached({ imageUrl: '  https://cdn.example/img/a1.png  ' }));
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    expect(JSON.parse(res.body).imageUrl).toBe('https://cdn.example/img/a1.png');
+  });
+
+  it('caches a hit hard — it is hit up to twelve times per news page load', async () => {
     const h = handlersFor(cached());
     const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
-    expect(res.headers['Cache-Control']).toMatch(/max-age=\d+/);
+    expect(res.headers['Cache-Control']).toBe('public, max-age=3600');
+  });
+
+  it('caches a miss only briefly, so a new image is not hidden for an hour', async () => {
+    // Negative caching at the hit's TTL would mean that after an admin
+    // generates an image, visitors and any CDN in front of them keep being
+    // told there is none until the hour is out — a slower version of the bug
+    // this endpoint exists to fix.
+    const hit = await handlersFor(cached()).getCuratedImage(
+      makeRequest({ params: { id: 'a1' } }),
+      context
+    );
+    const miss = await handlersFor(null).getCuratedImage(
+      makeRequest({ params: { id: 'a1' } }),
+      context
+    );
+
+    const seconds = (res) => Number(/max-age=(\d+)/.exec(res.headers['Cache-Control'])[1]);
+    expect(seconds(miss)).toBeGreaterThan(0);
+    expect(seconds(miss)).toBeLessThan(seconds(hit));
+  });
+
+  it('caches an archived image as a miss, not as a hit', async () => {
+    // Otherwise retiring an image would be cached for an hour at the TTL meant
+    // for a stable URL.
+    const h = handlersFor(cached({ archived: true }));
+    const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
+    expect(res.headers['Cache-Control']).toBe('public, max-age=60');
   });
 
   it('500s rather than leaking a store error to an anonymous caller', async () => {

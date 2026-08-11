@@ -189,11 +189,19 @@ const FEED_CACHE_MAX_DOCS = 200;
 const FEED_INSIGHTS_MAX_DOCS = 200;
 
 /**
- * A curated article's image changes only when someone regenerates it, so this
- * is cached harder than the list endpoints (300 s). It is also the endpoint a
- * news page hits up to twelve times per load, which is the other reason.
+ * A curated article's image changes only when someone regenerates it, so a HIT
+ * is cached hard — and this is the endpoint a news page hits up to twelve times
+ * per load, which is the other reason.
+ *
+ * A MISS is not, and the asymmetry is the point. Caching "there is no image"
+ * for an hour means that after an admin generates one, visitors and any CDN in
+ * front of them keep being told there is none until the hour is out — turning
+ * "no image yet" into "no image for an hour", which is a slower version of the
+ * bug this endpoint exists to fix. A minute still absorbs reloads without
+ * making a freshly generated image wait.
  */
-const CURATED_IMAGE_CACHE_SECONDS = 3600;
+const CURATED_IMAGE_HIT_CACHE_SECONDS = 3600;
+const CURATED_IMAGE_MISS_CACHE_SECONDS = 60;
 
 /**
  * How many same-slug documents the detail lookup considers.
@@ -372,12 +380,17 @@ export function createPublicReadHandlers({ store }) {
         if (!id) return json(400, { error: 'articleId required' });
 
         const doc = await store.readDoc('curated_article_images', id, id);
-        const imageUrl =
-          doc && doc.archived !== true && typeof doc.imageUrl === 'string' && doc.imageUrl
-            ? doc.imageUrl
-            : null;
+        // Trimmed, so a whitespace-only value is uncached rather than being
+        // handed to the browser as an `<img src>` that resolves to the page
+        // itself.
+        const stored = typeof doc?.imageUrl === 'string' ? doc.imageUrl.trim() : '';
+        const imageUrl = doc && doc.archived !== true && stored ? stored : null;
 
-        return json(200, { success: true, imageUrl }, CURATED_IMAGE_CACHE_SECONDS);
+        return json(
+          200,
+          { success: true, imageUrl },
+          imageUrl ? CURATED_IMAGE_HIT_CACHE_SECONDS : CURATED_IMAGE_MISS_CACHE_SECONDS
+        );
       } catch (error) {
         context.error('publicGetCuratedImage failed:', error);
         return json(500, { error: 'Failed to get curated image' });

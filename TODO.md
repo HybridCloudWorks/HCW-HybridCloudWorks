@@ -27,7 +27,7 @@ work** — that is a valid state, not a missing document.
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 804 functions tests and 92 frontend tests. That
+resolved, and the suite is now 807 functions tests and 92 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -642,17 +642,32 @@ Three things worth recording beyond the stated fix:
   it was attempted, threw, and a default prompt was substituted — a default
   that was then used for nothing, because generation could not proceed either.
 
-The gate is `authReady && Boolean(user)`, not `Boolean(user)`. `useAdminAuth`
-sets `user` and then awaits the admin-status fetch before flipping `authReady`,
-so there is a real render in between with a user present and the session still
-indeterminate; generating there would fire an editor-gated request before
-knowing whether the account is an editor. A test pins that case specifically,
-because without it `authReady` is indistinguishable from redundant — the first
-version of the test suite could not tell the two apart.
+**The gate is the role, and getting there took two passes.** It began as
+`authReady && Boolean(user)`, which is wrong in the same way the finding itself
+is about: generation and the prompt read are both `editor`-gated server-side, so
+a signed-in *viewer* would fire a prompt read plus up to twelve generation
+requests and collect a 403 for each — requests that cannot succeed, with a
+narrower audience than the anonymous case but the same shape. Caught in review
+by Copilot. It is now `hasRole('editor')`, which also subsumes the wait for the
+session to settle: `hasRole` reads the admin status fetched after sign-in, so it
+is false while that is in flight and false for an anonymous visitor. Pairing it
+with `authReady` would be a conjunct that can never change the answer, so
+`authReady` is gone rather than kept for the look of it.
 
-Thirteen hook tests and eight endpoint tests, verified in both directions:
+Two more from the same review, both correct:
+
+- **A miss is no longer cached at the hit's TTL.** Caching "there is no image"
+  for an hour meant that after an admin generated one, visitors and any CDN in
+  front of them kept being told there was none until the hour was out — a
+  slower version of this very bug. Hits cache for an hour, misses for a minute.
+  An archived image caches as a miss, so retiring one is not sticky either.
+- **The stored URL is trimmed.** A whitespace-only value is truthy, and would
+  have reached the browser as an `<img src=" ">` resolving back to the page.
+
+Thirteen hook tests and eleven endpoint tests, verified in both directions:
 putting the cache lookup back on the authed endpoint fails four, removing the
-generation gate fails five, and dropping `authReady` fails one.
+generation gate fails five, gating on presence rather than role fails two,
+caching a miss at the hit TTL fails two, and dropping the trim fails two.
 
 ---
 

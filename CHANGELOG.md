@@ -112,9 +112,13 @@ This project has not cut a tagged release; entries are grouped under
   (`GET public/curated-image/{articleId}`, returning only the URL — never the
   document, which carries an internal blob path and prompt metadata), while
   generating a missing one stays behind the admin gate and is no longer
-  attempted when nobody is signed in. That also keeps MSAL off the critical
-  path of a public page. Archived images are withheld, so retiring an image in
-  the gallery now keeps it off the public site. (TODO.md T-210)
+  attempted without the `editor` role that the server requires — not merely
+  when nobody is signed in, since a signed-in viewer would have collected a 403
+  per article. That also keeps MSAL off the critical path of a public page.
+  Archived images are withheld, so retiring an image in the gallery now keeps
+  it off the public site, and a cache miss is cached for a minute rather than
+  an hour so a freshly generated image is not hidden behind its own absence.
+  (TODO.md T-210)
 - **The anonymous submission limit of five could be turned into two hundred.**
   The quota read the counter, compared it, and wrote it back as three separate
   operations, so simultaneous requests all read the same value, all passed the
