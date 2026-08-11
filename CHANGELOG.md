@@ -103,6 +103,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The frontend CI gate now runs the whole test suite.** `test:admin` was a
+  hand-curated file list — every new test file had to be added by hand, and
+  eight known-stale failures elsewhere were simply never run. The eight were
+  stale expectations, not application defects, and are fixed: the route
+  contract now asserts the real pages behind `/gcp`, `/terraform`, `/github`,
+  `/finops`, the three `/tools` routes and the two news routes (mocked, as the
+  suite already did for other providers); and the PublishedPage tests drive
+  the publish flow that actually exists — a pre-publish checklist modal whose
+  "Publish Now" is what publishes — with the checklist itself now unit-tested.
+  `test:admin` is plain `vitest run`; the one legitimately unrunnable file
+  (`firestore.rules.test.js`, which needs the retired Firestore emulator
+  setup) is excluded in vitest.config.js with the reason recorded.
+  Default run: 15 files, 115 tests. (TODO.md T-320)
 - **One anonymous list request could eat four seconds of the database's entire
   budget.** The public content list ran `SELECT TOP 1000 *` with no WHERE — an
   *arbitrary* 1000 documents of a ~1k-document container (so published articles

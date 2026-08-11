@@ -17,17 +17,17 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 6 |
 | Critical | 0 |
 | High | 1 |
-| Medium | 4 |
+| Medium | 3 |
 | Low | 2 |
-| Resolved since the review | 37 (T-101 – T-105, T-201 – T-205, T-207 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-206, T-302 and T-408 part-resolved |
+| Resolved since the review | 37 (T-101 – T-105, T-201 – T-205, T-207 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-206 and T-302 part-resolved; T-408's last residue closed with T-320 |
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 818 functions tests and 92 frontend tests. That
+resolved, and the suite is now 818 functions tests and 115 frontend tests. That
 changes what is known to be broken; it does not change what is known to work.
 Every Critical item lived in the seam between a correctly-built module and its
 environment — exactly the seam no test in this repository can reach. **Nothing
@@ -1123,37 +1123,41 @@ natural place, since the writer knows the order) and add a matching read-side
 ceiling in `getFeed`. If a read-side cap is wanted sooner, sort `items` by
 `pubDate` in the handler before slicing rather than trusting stored order.
 
-### T-320 — Eight frontend tests fail, and CI does not run them
-**Files:** `frontend/src/App.routes.test.jsx`, `frontend/src/pages/admin/PublishedPage.test.jsx`, `frontend/package.json`
+### ~~T-320 — Eight frontend tests fail, and CI does not run them~~ RESOLVED
+**Files:** `frontend/src/App.routes.test.jsx`, `frontend/src/pages/admin/PublishedPage.test.jsx`, `frontend/package.json`, `frontend/vitest.config.js`
 
-**Diagnosed, not yet fixed** — which is the order this entry asked for.
+The eight failures were **stale test expectations, not application defects** —
+the diagnosis held, with one addition worth recording.
 
-The eight failures are **stale test expectations, not application defects**:
+- **App.routes.test.jsx**: `/gcp`, `/terraform`, `/github`, `/finops` and the
+  three `/tools` routes asserted "Coming Soon"; App.jsx routes each to a real
+  page now. Fixed the way the suite already handles vmware/ansible: the pages
+  are mocked with distinctive headings, because this suite is a ROUTE contract
+  (path → page module), not a page renderer. `/aws/news` and `/azure/news`
+  render real RSS pages — lazy and fetch-happy, so un-mocked they never
+  resolved — mocked likewise, keeping the original contract text. The
+  "approved placeholder" table is retired: nothing on it is a placeholder.
+  Mutation: unrouting `/gcp` in App.jsx fails its row.
+- **PublishedPage.test.jsx**: the finding said "changed payload and changed
+  copy". Neither, exactly — the payload and copy are identical; **the flow
+  changed**. Publishing gained a pre-publish checklist: the row button now
+  VALIDATES (fetching the full document, because the snapshot omits body text)
+  and opens a modal, and the modal's "Publish Now" is what publishes. The test
+  clicked a button that no longer publishes — and its `@/lib/api` mock did not
+  even export `getJSON`, so the validation fetch threw into a swallow-catch and
+  the fixture failed three checklist items silently. The tests now drive the
+  real flow, the fixture satisfies the checklist (via `altCoverImage`, the
+  field `getCoverImageUrl` actually reads — `heroImageUrl` is not), and
+  `getPrePublishFailures` gained its own unit test, since the happy-path tests
+  cannot see a check silently disappearing. Mutation: removing the summary
+  check fails it.
+- **Assertion timeouts** equal to the test timeout are gone.
+- **`test:admin` is now `vitest run`** — the whole discovered suite, no more
+  hand-curated file list to forget a new test file in (the T-408 residue).
+  `functions/firestore.rules.test.js` is excluded in vitest.config.js with the
+  reason: it needs the Firestore emulator, whose `test:rules` runner T-317
+  retired. Default run: 15 files, 115 tests, all green.
 
-- `App.routes.test.jsx` asserts `/gcp`, `/terraform`, `/github` and `/finops`
-  render "Coming Soon". They do not: `App.jsx` now routes each to a real
-  landing page (`GCPLandingPage` and siblings). The test encodes a route
-  contract from before those pages were built.
-- `/aws/news` and `/azure/news` render `ProviderRssDispatcher`, lazily and
-  un-mocked, and never resolve within the timeout.
-- `PublishedPage.test.jsx`'s two failures are a changed `publishContent`
-  payload and changed diagnostic copy.
-
-Also worth fixing while in there: both suites pass `{ timeout: 5000 }` to
-`findByText` while the vitest default test timeout is also 5000 ms, so the
-assertion timeout can never fire — the test times out first and the failure
-message says nothing about what was missing.
-
-**Fix:** update the six route expectations to the pages that now exist (or mock
-them, as the suite already does for `/vmware` and `/ansible`), re-point the two
-`PublishedPage` assertions, drop the assertion timeouts below the test timeout,
-then replace the file list in `test:admin` with a directory glob and move
-`functions/firestore.rules.test.js` out of the default run — it needs the
-Firestore emulator and belongs with the `test:rules` script that T-317 retired.
-
-Deliberately not bundled with the cleanup batch: eight expectation rewrites
-across two suites is its own change, and getting one wrong quietly weakens a
-route contract.
 
 ### ~~T-317 — Retire the Firebase-era live smoke scripts and nested workflows~~ RESOLVED
 **Files:** `frontend/scripts/`, `frontend/.github/`
