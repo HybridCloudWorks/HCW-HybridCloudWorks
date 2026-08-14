@@ -45,7 +45,12 @@ Do these in sequence — later items cannot be verified before earlier ones.
 3. ~~**T-104 + T-105**~~ blob credential and image delivery — **done**, see below
 4. ~~**T-403** `.env.example`, **T-404** CSP~~ — **done**, see below
 5. **Deploy a smoke test** — everything above is unverifiable from an agent
-   session, and this is now the top open item
+   session, and this is now the top open item. **The script exists**:
+   `scripts/smoke-deployed.mjs` (`npm run smoke:deployed -- --base <url>`),
+   three tiers — anonymous surface (filter, projection, guards, CORS, caching,
+   contract 404s), the Cosmos conditional-patch 412/404 assumption from T-204
+   (`--cosmos`, az login + data-plane RBAC), and an authed spot-check
+   (`SMOKE_BEARER_TOKEN`). Running it against the deployment is what remains
 6. **T-201 → T-205** the anonymous data-exposure set — ~~done~~
 7. **T-301+** correctness and hardening
 
