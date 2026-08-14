@@ -17,13 +17,13 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 6 |
+| Open items | 5 |
 | Critical | 0 |
-| High | 1 |
+| High | 0 |
 | Medium | 3 |
 | Low | 2 |
-| Resolved since the review | 37 (T-101 – T-105, T-201 – T-205, T-207 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-206 and T-302 part-resolved; T-408's last residue closed with T-320 |
-| Last updated | 2026-08-10 |
+| Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
+| Last updated | 2026-08-14 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
@@ -44,7 +44,10 @@ the one assumption nothing had ever executed.
 What it does not establish: authenticated *workflows* (publish, editor save
 conflict paths) end-to-end, timer behavior, or anything behind provider
 credentials. The smoke test is a floor, not a certification — but the "next
-step is a smoke test, not a release" gate is now passed.
+step is a smoke test, not a release" gate is now passed. A second passing run
+on 2026-08-14 was taken AFTER `cp_sortDate` was applied and
+`PUBLIC_LIST_SQL_ORDER=1` flipped, so the SQL-ordered list window is verified
+live as well (T-206 closed).
 
 ---
 
@@ -508,8 +511,8 @@ grouping test, and widening the prefix to /128 fails seven.
 
 ---
 
-### T-206 — Public content list: unordered 1000-row window at the current document count
-**Category:** Defect / performance · **Label:** Confirmed Issue · **Status: PART-RESOLVED** — steps 1–2 done, step 3 blocked
+### ~~T-206 — Public content list: unordered 1000-row window at the current document count~~ RESOLVED
+**Category:** Defect / performance · **Label:** Confirmed Issue
 **File:** `functions/src/lib/public-reads.js:117`, `:152`, `:166-171`
 
 `SELECT TOP 1000 * FROM c` with no `ORDER BY` returns an **arbitrary** 1000 in
@@ -549,7 +552,10 @@ page loads produce 429s.
    fails 1, dropping `explanation` fails 2, narrowing the wide soft-delete SQL
    fails 1.
 
-**Step 3 is authored; two operator commands remain.** The design is a Cosmos
+**Step 3 is closed (2026-08-14).** The operator ran `--inspect` (clean),
+`--apply`, set `PUBLIC_LIST_SQL_ORDER=1`, and re-ran the deployed smoke test,
+which passed — the public list's window now returns the newest N documents,
+ordered in the database. The machinery, for the record: The design is a Cosmos
 COMPUTED property, not the materialized field the finding sketched — evaluated
 server-side on every document with `''` as the fallback, so it cannot be
 missing, which is what exempts `ORDER BY c.cp_sortDate` from rule 2. No

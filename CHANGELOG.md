@@ -28,7 +28,9 @@ This project has not cut a tagged release; entries are grouped under
   ORDER BY on it safe under the module's own rule 2. The azurerm provider
   cannot express computed properties, so the script is the applier and the
   manifest records the drift hazard: a terraform apply that updates the
-  container wipes the property. (TODO.md T-206, step 3)
+  container wipes the property. Applied to the live containers and flipped on
+  2026-08-14; the deployed smoke test passed against the ordered window,
+  closing T-206 entirely. (TODO.md T-206)
 
 - **Deployed smoke test** — `scripts/smoke-deployed.mjs`, the runnable half of
   the work order's top item. Tier 1 exercises the anonymous surface with no
