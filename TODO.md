@@ -26,13 +26,25 @@ work** — that is a valid state, not a missing document.
 | Last updated | 2026-08-10 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
-**Release readiness: STILL NOT VERIFIED.** All five Critical items are
-resolved, and the suite is now 818 functions tests and 115 frontend tests. That
-changes what is known to be broken; it does not change what is known to work.
-Every Critical item lived in the seam between a correctly-built module and its
-environment — exactly the seam no test in this repository can reach. **Nothing
-below the line has been exercised against a deployed Azure environment**
-(REVIEW.md §1.1), so the next step is a deployed smoke test, not a release.
+**Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
+are resolved, the suite is 818 functions tests and 115 frontend tests, and
+`scripts/smoke-deployed.mjs` has now been **run against the deployed
+environment and reported passing** by the operator. That is the first time
+anything below the line has been exercised in the seam between the code and
+its environment — the seam every Critical item lived in and no test in this
+repository can reach.
+
+What a passing run establishes: the anonymous surface serves filtered,
+projected responses; the admin guards refuse anonymous callers in the deployed
+wiring; CORS, negative caching and the health endpoint behave as authored; the
+seventeen notImplemented RPCs 404 as the contract says. If the `--cosmos` tier
+was included, it also establishes the T-204 conditional-patch 412/404 mapping —
+the one assumption nothing had ever executed.
+
+What it does not establish: authenticated *workflows* (publish, editor save
+conflict paths) end-to-end, timer behavior, or anything behind provider
+credentials. The smoke test is a floor, not a certification — but the "next
+step is a smoke test, not a release" gate is now passed.
 
 ---
 
@@ -44,8 +56,8 @@ Do these in sequence — later items cannot be verified before earlier ones.
 2. ~~**T-102** CORS across all routes → **T-103** route-inventory test~~ — **done**, see below
 3. ~~**T-104 + T-105**~~ blob credential and image delivery — **done**, see below
 4. ~~**T-403** `.env.example`, **T-404** CSP~~ — **done**, see below
-5. **Deploy a smoke test** — everything above is unverifiable from an agent
-   session, and this is now the top open item. **The script exists**:
+5. ~~**Deploy a smoke test**~~ — **done and run (2026-08-14, passing).**
+   The script:
    `scripts/smoke-deployed.mjs` (`npm run smoke:deployed -- --base <url>`),
    three tiers — anonymous surface (filter, projection, guards, CORS, caching,
    contract 404s), the Cosmos conditional-patch 412/404 assumption from T-204
@@ -537,12 +549,24 @@ page loads produce 429s.
    fails 1, dropping `explanation` fails 2, narrowing the wide soft-delete SQL
    fails 1.
 
-**Step 3 remains open and blocked:** a materialized `sortDate` (or computed
-property) plus composite index, so `ORDER BY` becomes safe and the in-memory
-sort can go. That needs a backfill over existing documents and an index change
-— infra work this environment cannot run (REVIEW.md §1.1). The ORDER BY
-avoidance at `:19-23` stays correct until then. A cursor-paging API for exact
-`total` (see T-407 note) belongs to the same step.
+**Step 3 is authored; two operator commands remain.** The design is a Cosmos
+COMPUTED property, not the materialized field the finding sketched — evaluated
+server-side on every document with `''` as the fallback, so it cannot be
+missing, which is what exempts `ORDER BY c.cp_sortDate` from rule 2. No
+backfill, no write-site maintenance. `scripts/apply-computed-sortdate.mjs`:
+
+1. `--inspect` — reports any non-ISO date values in `content`/`blogs`
+   (ISO strings sort lexicographically = chronologically; anything else would
+   silently mis-sort, and only live data can say — this is the §0.3 evidence).
+2. `--apply` — adds `cp_sortDate` to both containers, idempotently.
+3. Flip `PUBLIC_LIST_SQL_ORDER=1` on the Function App: the TOP window becomes
+   the NEWEST N documents instead of an arbitrary N. Unflagged, nothing
+   changes, so deploy order is safe both ways.
+
+**Drift hazard, recorded in the manifest too:** `azurerm_cosmosdb_sql_container`
+does not model computedProperties, so a `terraform apply` that updates either
+container wipes the property — re-run `--apply` after. A cursor-paging API for
+exact `total` (see T-407 note) still belongs to a later step.
 ---
 
 ### ~~T-207 — 16 documented RPCs are live 404s in the admin UI~~ RESOLVED (contract half; implementations stay blocked)

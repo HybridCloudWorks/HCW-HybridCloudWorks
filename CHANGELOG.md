@@ -17,6 +17,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`cp_sortDate` computed property + flag-gated ORDER BY** — T-206's last
+  step, authored as operator tooling. `scripts/apply-computed-sortdate.mjs
+  --inspect` reports non-ISO date values (the evidence gate), `--apply` adds a
+  computed property that resolves the five published-date aliases server-side
+  with a total fallback, and `PUBLIC_LIST_SQL_ORDER=1` then makes the public
+  list's TOP window return the newest N documents instead of an arbitrary N.
+  A computed property rather than a materialized field: no backfill, no
+  write-site maintenance, and it cannot be missing — which is what makes
+  ORDER BY on it safe under the module's own rule 2. The azurerm provider
+  cannot express computed properties, so the script is the applier and the
+  manifest records the drift hazard: a terraform apply that updates the
+  container wipes the property. (TODO.md T-206, step 3)
+
 - **Deployed smoke test** — `scripts/smoke-deployed.mjs`, the runnable half of
   the work order's top item. Tier 1 exercises the anonymous surface with no
   side effects: the public filter and T-206 projection (asserting the eight

@@ -139,6 +139,27 @@ describe('listContent', () => {
     });
   });
 
+  describe('the ORDER BY switch (T-206 step 3)', () => {
+    it('is off by default — the window stays unordered until the operator flips it', async () => {
+      const { query } = await captureQuery();
+      expect(query).not.toContain('ORDER BY');
+    });
+
+    it('orders by the computed property when PUBLIC_LIST_SQL_ORDER=1', async () => {
+      // cp_sortDate is a computed property, defined on every document, which
+      // is what exempts this from rule 2's "never ORDER BY a possibly-missing
+      // field". The flag exists because the property must be applied to the
+      // live containers first (scripts/apply-computed-sortdate.mjs).
+      process.env.PUBLIC_LIST_SQL_ORDER = '1';
+      try {
+        const { query } = await captureQuery();
+        expect(query).toMatch(/ORDER BY c\.cp_sortDate DESC$/);
+      } finally {
+        delete process.env.PUBLIC_LIST_SQL_ORDER;
+      }
+    });
+  });
+
   describe('the projection replaces SELECT * (T-206)', () => {
     it('projects explicit fields — never the whole document', async () => {
       const { query } = await captureQuery();

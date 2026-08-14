@@ -1,5 +1,5 @@
 {
-  "_comment": "GENERATED FILE — do not edit. Run `node scripts/generate-cosmos-container-spec.mjs` after changing scripts/lib/migration-manifest.mjs. Read by infra/main.tf.",
+  "_comment": "GENERATED FILE \u2014 do not edit. Run `node scripts/generate-cosmos-container-spec.mjs` after changing scripts/lib/migration-manifest.mjs. Read by infra/main.tf.",
   "_source": "scripts/lib/migration-manifest.mjs",
   "containers": [
     {
@@ -133,7 +133,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "seed data — re-seeded on the far side, not migrated"
+      "note": "seed data \u2014 re-seeded on the far side, not migrated"
     },
     {
       "name": "blogs",
@@ -149,7 +149,13 @@
       ],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": null
+      "note": null,
+      "computedProperties": [
+        {
+          "name": "cp_sortDate",
+          "query": "(applied by scripts/apply-computed-sortdate.mjs \u2014 azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; re-run --apply after)"
+        }
+      ]
     },
     {
       "name": "certEvents",
@@ -399,7 +405,13 @@
         ]
       ],
       "default_ttl": null,
-      "note": null
+      "note": null,
+      "computedProperties": [
+        {
+          "name": "cp_sortDate",
+          "query": "(applied by scripts/apply-computed-sortdate.mjs \u2014 azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; re-run --apply after)"
+        }
+      ]
     },
     {
       "name": "content_templates",
@@ -426,7 +438,7 @@
       ],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "subcollection of content — Editor version history. Written server-side on every save; read by VersionHistoryDialog.jsx scoped to one parent. Not covered by an explicit rules match."
+      "note": "subcollection of content \u2014 Editor version history. Written server-side on every save; read by VersionHistoryDialog.jsx scoped to one parent. Not covered by an explicit rules match."
     },
     {
       "name": "curated_article_images",
@@ -503,7 +515,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "cache — refilled by a scheduled job, not migrated"
+      "note": "cache \u2014 refilled by a scheduled job, not migrated"
     },
     {
       "name": "image_prompt_pages",
@@ -536,7 +548,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "subcollection of image_prompt_sets — Ids are prompt names, unique only within a set."
+      "note": "subcollection of image_prompt_sets \u2014 Ids are prompt names, unique only within a set."
     },
     {
       "name": "image_prompts",
@@ -558,7 +570,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "subcollection of image_prompts — Deliberately NOT `image_prompt_sets` — that name is already a distinct top-level collection. Ids are set names, unique only within a page."
+      "note": "subcollection of image_prompts \u2014 Deliberately NOT `image_prompt_sets` \u2014 that name is already a distinct top-level collection. Ids are set names, unique only within a page."
     },
     {
       "name": "lab_agents",
@@ -600,7 +612,7 @@
         ]
       ],
       "default_ttl": 2592000,
-      "note": "transient runtime state — written at runtime, not migrated"
+      "note": "transient runtime state \u2014 written at runtime, not migrated"
     },
     {
       "name": "lab_public_quota",
@@ -611,7 +623,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": 7200,
-      "note": "transient runtime state — written at runtime, not migrated"
+      "note": "transient runtime state \u2014 written at runtime, not migrated"
     },
     {
       "name": "listen_and_learn",
@@ -633,7 +645,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "subcollection of listen_and_learn — Ids are exam-area slugs, unique only within a set."
+      "note": "subcollection of listen_and_learn \u2014 Ids are exam-area slugs, unique only within a set."
     },
     {
       "name": "mcp_servers",
@@ -798,7 +810,7 @@
         ]
       ],
       "default_ttl": 604800,
-      "note": "cache — refilled by a scheduled job, not migrated"
+      "note": "cache \u2014 refilled by a scheduled job, not migrated"
     },
     {
       "name": "site_settings",
@@ -853,7 +865,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": 7200,
-      "note": "transient runtime state — written at runtime, not migrated"
+      "note": "transient runtime state \u2014 written at runtime, not migrated"
     },
     {
       "name": "system",
@@ -886,7 +898,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": 7200,
-      "note": "transient runtime state — written at runtime, not migrated"
+      "note": "transient runtime state \u2014 written at runtime, not migrated"
     },
     {
       "name": "tool_architecture_plans",
@@ -919,7 +931,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": 7200,
-      "note": "transient runtime state — written at runtime, not migrated"
+      "note": "transient runtime state \u2014 written at runtime, not migrated"
     },
     {
       "name": "tool_exports",
@@ -952,7 +964,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": 604800,
-      "note": "cache — refilled by a scheduled job, not migrated"
+      "note": "cache \u2014 refilled by a scheduled job, not migrated"
     },
     {
       "name": "tool_service_catalog",
@@ -963,7 +975,7 @@
       "excluded_paths": [],
       "composite_indexes": [],
       "default_ttl": null,
-      "note": "seed data — re-seeded on the far side, not migrated"
+      "note": "seed data \u2014 re-seeded on the far side, not migrated"
     },
     {
       "name": "tool_workspaces",

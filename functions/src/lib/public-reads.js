@@ -461,7 +461,19 @@ export function createPublicReadHandlers({ store }) {
           );
           parameters.push({ name: '@providers', value: labels });
         }
-        const query = `SELECT TOP ${FETCH_WINDOW} ${LIST_PROJECTION} FROM c WHERE ${clauses.join(' AND ')}`;
+        // T-206 step 3, behind a flag so deploy order is safe in either
+        // direction. With PUBLIC_LIST_SQL_ORDER=1 the window becomes the
+        // NEWEST N documents instead of an arbitrary N — the last part of the
+        // finding. `cp_sortDate` is a COMPUTED property (defined on every
+        // document, '' when no date alias is present), which is what makes
+        // this exempt from rule 2's "never ORDER BY a possibly-missing field":
+        // it cannot be missing. Flip the flag only after
+        // scripts/apply-computed-sortdate.mjs --inspect reports clean and
+        // --apply has run. The in-memory sort below stays either way — it is
+        // the authority on order exactly as isPublicDocument is on visibility.
+        const orderBy =
+          process.env.PUBLIC_LIST_SQL_ORDER === '1' ? ' ORDER BY c.cp_sortDate DESC' : '';
+        const query = `SELECT TOP ${FETCH_WINDOW} ${LIST_PROJECTION} FROM c WHERE ${clauses.join(' AND ')}${orderBy}`;
 
         const rows = await store.queryDocs(requestedSource, query, parameters);
         const matching = rows
