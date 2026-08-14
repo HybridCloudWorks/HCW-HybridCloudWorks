@@ -17,6 +17,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Deployed smoke test** — `scripts/smoke-deployed.mjs`, the runnable half of
+  the work order's top item. Tier 1 exercises the anonymous surface with no
+  side effects: the public filter and T-206 projection (asserting the eight
+  excluded body fields stay excluded and `explanation` does not false-alarm),
+  guard liveness on admin RPCs, CORS refusal and preflight, negative-cache
+  headers, the health endpoint's non-disclosure, and that the seventeen
+  notImplemented RPCs still 404. Tier 2 (`--cosmos`) executes the one
+  assumption nothing has executed: that a failed Cosmos patch predicate
+  surfaces through the JS SDK as code 412 and a missing document as 404 — the
+  submission quota's correctness rests on it; it writes a single smoke-prefixed
+  document into the TTL-bounded `submission_quota` container and deletes it.
+  Tier 3 (`SMOKE_BEARER_TOKEN`) verifies a real token is admitted. Six unit
+  tests pin the script's own assertion helpers, because a smoke test with a
+  wrong filter passes against a broken deployment.
+
 - **Anonymous public read API** — `GET public/content`, `public/content/{slugOrId}`,
   `public/snapshots/{id}`, `public/podcasts`, `public/feed`. The published/draft
   boundary is enforced server-side, replacing the Firestore security rules that
