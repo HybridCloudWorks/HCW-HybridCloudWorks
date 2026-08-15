@@ -569,9 +569,15 @@ backfill, no write-site maintenance. `scripts/apply-computed-sortdate.mjs`:
    the NEWEST N documents instead of an arbitrary N. Unflagged, nothing
    changes, so deploy order is safe both ways.
 
-**Drift hazard, recorded in the manifest too:** `azurerm_cosmosdb_sql_container`
-does not model computedProperties, so a `terraform apply` that updates either
-container wipes the property — re-run `--apply` after. A cursor-paging API for
+**Drift hazard — now self-healing.** `azurerm_cosmosdb_sql_container` does not
+model computedProperties, so a `terraform apply` that updates either container
+wipes the property. `.github/workflows/heal-computed-properties.yml` re-applies
+it on pushes touching the infra files and every six hours (idempotent, so
+racing a TF Cloud apply is harmless — the next tick heals). Its identity is the
+OIDC deploy principal with Data Contributor scoped to exactly the two
+containers (`infra/oidc.tf`, the one documented exception to its no-Cosmos
+posture) — **the healer fails loudly until that role assignment is applied via
+Terraform**, which is itself the reminder. A cursor-paging API for
 exact `total` (see T-407 note) still belongs to a later step.
 ---
 

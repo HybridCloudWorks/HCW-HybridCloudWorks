@@ -1,0 +1,68 @@
+# Re-applies the cp_sortDate computed property whenever Terraform could have
+# wiped it — and on a schedule, because Terraform applies happen in TF Cloud
+# on their own clock, AFTER the push that triggers this workflow. A push-time
+# heal can therefore itself be overwritten minutes later; the schedule is what
+# guarantees the wound closes. The script is idempotent, so racing an apply is
+# harmless — worst case the next tick heals again.
+#
+# Why the property gets wiped at all: azurerm_cosmosdb_sql_container cannot
+# express computedProperties, so any terraform apply that updates the content
+# or blogs container PUTs a definition without them (TODO.md T-206;
+# scripts/apply-computed-sortdate.mjs header). With PUBLIC_LIST_SQL_ORDER=1
+# live, a wiped property breaks the public content list until re-applied —
+# which is why this exists as automation rather than a runbook note.
+#
+# Auth: the OIDC deploy identity, which infra/oidc.tf grants Cosmos Built-in
+# Data Contributor scoped to exactly these two containers. Until that role
+# assignment is applied, this workflow FAILS — loudly, on a schedule — which
+# still beats silence: a red run every six hours is the reminder.
+
+name: Heal Cosmos computed properties
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/main.tf'
+      - 'infra/cosmos-containers.json'
+  schedule:
+    # Every six hours, offset from the top of the hour.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+# id-token: write is what lets the runner request a GitHub OIDC token. Without
+# it azure/login has nothing to exchange and fails before reaching Azure.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - run: npm ci
+
+      # DefaultAzureCredential resolves through the CLI session azure/login
+      # just established. --apply is a no-op when the property is intact.
+      - name: Re-apply cp_sortDate if missing
+        env:
+          COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
+        run: node apply-computed-sortdate.mjs --apply

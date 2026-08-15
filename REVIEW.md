@@ -601,6 +601,30 @@ the single-registration model:
 Not yet swapped (still Firebase): the PUBLIC site's sign-in (`submitPublicLabJob` / LabRunner) and
 the 34 files reading Firestore directly — those are the frontend rewiring phase.
 
+### 4.6 Enable secret scanning + push protection (free — repo is public)
+
+Two toggles in repository settings, unreachable from any session tooling:
+**Settings → Advanced Security** (`/settings/security_analysis`) → enable **Secret scanning**, then
+**Push protection** beneath it. The repository is public, so both are provided free — no billing
+prompt, no Advanced Security license. Push protection turns "a credential was committed, now
+rotate it" into "the push was refused"; given that §0.2's rotation question exists at all, the
+cheaper failure mode is worth two clicks.
+
+### 4.7 Computed-property healer — the role grant it fails without
+
+`heal-computed-properties.yml` (PR #94) re-applies `cp_sortDate` after any Terraform apply that
+touches the `content`/`blogs` containers — on push, every six hours, and on dispatch. Two
+operator-visible consequences, both by design:
+
+1. **The workflow runs red every six hours until Terraform Cloud applies the two
+   `azurerm_cosmosdb_sql_role_assignment` grants in `infra/oidc.tf`** (Data Contributor, scoped to
+   exactly those two containers). The red run *is* the reminder that the grant is pending — do not
+   silence the schedule to make it green.
+2. **The first run after the grant lands is also the RBAC test.** Container-scoped Data
+   Contributor should cover `container.replace`, but container-level metadata writes are a newer
+   corner of Cosmos data-plane RBAC. If that run 403s, widen the two grants' `scope` from
+   `…/colls/<name>` to the database — the first debugging step documented in `oidc.tf`.
+
 ---
 
 ## 5. Not started — the remaining migration itself
