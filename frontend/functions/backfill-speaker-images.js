@@ -101,6 +101,24 @@ function guessExtFromUrl(url) {
   return 'png';
 }
 
+/** True if the URL's host is a Firebase/GCS Storage host (checked on the parsed
+ *  hostname, not a substring, so a lookalike host elsewhere in the URL cannot spoof it). */
+function isStorageHostUrl(val) {
+  if (!val || typeof val !== 'string') return false;
+  let host;
+  try {
+    host = new URL(val).hostname;
+  } catch {
+    return false;
+  }
+  return (
+    host === 'firebasestorage.googleapis.com' ||
+    host === 'storage.googleapis.com' ||
+    host.endsWith('.firebasestorage.googleapis.com') ||
+    host.endsWith('.storage.googleapis.com')
+  );
+}
+
 async function processEvent(doc) {
   const data = doc.data();
   const eventId = doc.id;
@@ -115,9 +133,7 @@ async function processEvent(doc) {
     return { skipped: 'images already set', url: existing[0].downloadURL };
   }
 
-  const isStorageUrl =
-    eventImageUrl.includes('firebasestorage.googleapis.com') ||
-    eventImageUrl.includes('storage.googleapis.com');
+  const isStorageUrl = isStorageHostUrl(eventImageUrl);
 
   if (isStorageUrl) {
     // Already in Firebase Storage — just copy the URL into the images field

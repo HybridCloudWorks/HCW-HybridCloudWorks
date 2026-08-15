@@ -13,6 +13,14 @@ const SENSITIVE_KEY_PATTERN = /(token|secret|password|credential|api[_-]?key|pri
 const MAX_STRING_LENGTH = 2000;
 const MAX_DEPTH = 4;
 
+/** Cryptographically secure random hex string of `bytes` bytes (fallback path
+ *  for browsers without crypto.randomUUID; still uses the CSPRNG, not Math.random). */
+function randomHex(bytes) {
+  const buf = new Uint8Array(bytes);
+  window.crypto.getRandomValues(buf);
+  return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function createSessionId() {
   if (typeof window === 'undefined') return null;
 
@@ -23,7 +31,7 @@ function createSessionId() {
   const next =
     typeof window.crypto?.randomUUID === 'function'
       ? window.crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      : `${Date.now()}-${randomHex(16)}`;
   window.sessionStorage.setItem(key, next);
   return next;
 }

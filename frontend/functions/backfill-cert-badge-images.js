@@ -74,12 +74,29 @@ function fetchImage(url, redirectsLeft = 5) {
   });
 }
 
+/** True if the URL's host is a Firebase/GCS Storage host (checked on the parsed
+ *  hostname, not a substring, so a lookalike host elsewhere in the URL cannot spoof it). */
+function isStorageHostUrl(val) {
+  if (!val || typeof val !== 'string') return false;
+  let host;
+  try {
+    host = new URL(val).hostname;
+  } catch {
+    return false;
+  }
+  return (
+    host === 'firebasestorage.googleapis.com' ||
+    host === 'storage.googleapis.com' ||
+    host.endsWith('.firebasestorage.googleapis.com') ||
+    host.endsWith('.storage.googleapis.com')
+  );
+}
+
 /** True if val is a plain external URL (not Firebase/GCS Storage). */
 function isExternalUrlString(val) {
   if (!val || typeof val !== 'string') return false;
   if (!val.startsWith('http')) return false;
-  if (val.includes('firebasestorage.googleapis.com') || val.includes('storage.googleapis.com'))
-    return false;
+  if (isStorageHostUrl(val)) return false;
   return true;
 }
 
@@ -90,7 +107,7 @@ function hasStoredImage(imageField) {
   if (!entry) return false;
   const url = typeof entry === 'object' ? entry.downloadURL || entry.url : entry;
   if (!url || typeof url !== 'string') return false;
-  return url.includes('firebasestorage.googleapis.com') || url.includes('storage.googleapis.com');
+  return isStorageHostUrl(url);
 }
 
 async function processCert(doc) {

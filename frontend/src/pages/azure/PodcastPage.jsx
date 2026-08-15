@@ -23,7 +23,15 @@ function formatDuration(raw) {
 
 function stripHtml(html) {
   if (!html) return '';
-  return html.replace(/<[^>]+>/g, '').trim();
+  // Apply tag removal repeatedly until stable: a single pass leaves residues for
+  // overlapping constructs like `<scr<script>ipt>`.
+  let prev;
+  let out = String(html);
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, '');
+  } while (out !== prev);
+  return out.trim();
 }
 
 function EpisodeImage({ image, title, size = 'md' }) {

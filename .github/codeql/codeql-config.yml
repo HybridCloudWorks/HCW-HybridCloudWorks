@@ -1,0 +1,17 @@
+name: "HCW CodeQL config"
+
+# `.claude/` and `.agents/` hold the vendored Claude Code agent harness — skill
+# and agent bundles whose `scripts/*.py` are security *demonstration* code
+# (e.g. a hash-cracking skill that hashes with MD5, a TLS skill that enables
+# legacy protocols to show them off). They are deliberately source-controlled
+# (see scripts/validate-repository-structure.ps1, which treats them as the
+# harness, not the site) but are never imported or executed by the application
+# or its CI. Scanning them produced 100+ alerts that are either intentional to
+# the lesson or outright false positives (logging an OAuth endpoint URL flagged
+# as a "secret"). Exclude them so code scanning covers only first-party code.
+#
+# Note: paths-ignore applies to the interpreted languages CodeQL analyses here
+# (JavaScript/TypeScript and Python), which is exactly this repository's surface.
+paths-ignore:
+  - '.claude'
+  - '.agents'

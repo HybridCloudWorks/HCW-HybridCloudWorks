@@ -23,7 +23,15 @@ async function main() {
     throw new Error('No browser context found over CDP. Open at least one tab in Edge first.');
   }
 
-  let page = context.pages().find((p) => p.url().includes('hybridcloudworks.com'));
+  const isHcwUrl = (u) => {
+    try {
+      const host = new URL(u).hostname;
+      return host === 'hybridcloudworks.com' || host.endsWith('.hybridcloudworks.com');
+    } catch {
+      return false;
+    }
+  };
+  let page = context.pages().find((p) => isHcwUrl(p.url()));
   if (!page) page = await context.newPage();
 
   await page.goto(`${BASE_URL}/admin`, { waitUntil: 'domcontentloaded', timeout: 45000 });
