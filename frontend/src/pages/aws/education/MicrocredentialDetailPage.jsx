@@ -338,7 +338,7 @@ export default function MicrocredentialDetailPage() {
                       key={cert.code}
                       to={getProviderPath(
                         'aws',
-                        `education/${cert.code.toLowerCase().replace('-', '-')}`
+                        `education/${cert.code.toLowerCase()}`
                       )}
                       className={`group flex items-center gap-3 bg-card/40 hover:bg-card/60 border border-card/30 ${c.hover} rounded-xl px-4 py-3 transition-all`}
                     >

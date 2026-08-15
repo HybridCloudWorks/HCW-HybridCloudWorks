@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { stripHtmlTags } from '@/lib/blogUtils';
 import { useEditor } from '../context/EditorContext';
 import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
@@ -50,12 +51,7 @@ export function MetadataTab() {
 
   const { title, summary, tags, authorName, publishedDate, sidebarContent, draft } = fields;
 
-  const wordCount = draft
-    ? draft
-        .replace(/<[^>]+>/g, '')
-        .split(/\s+/)
-        .filter(Boolean).length
-    : 0;
+  const wordCount = draft ? stripHtmlTags(draft).split(/\s+/).filter(Boolean).length : 0;
   const readMinutes = Math.max(1, Math.round(wordCount / 200));
 
   const scrapedImages = imageCandidates.filter((img) => img.source === 'scraped');

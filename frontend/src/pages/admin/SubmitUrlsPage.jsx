@@ -1834,9 +1834,15 @@ export default function SubmitUrlsPage() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [builderStateLoaded, setBuilderStateLoaded] = useState(false);
-  const [previewSessionId] = useState(
-    () => `preview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  );
+  const [previewSessionId] = useState(() => {
+    const rand =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID().slice(0, 8)
+        : Array.from(globalThis.crypto.getRandomValues(new Uint8Array(4)), (b) =>
+            b.toString(16).padStart(2, '0')
+          ).join('');
+    return `preview-${Date.now()}-${rand}`;
+  });
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {

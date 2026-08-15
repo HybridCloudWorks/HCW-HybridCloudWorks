@@ -5450,7 +5450,10 @@ function getStoragePathFromPublicUrl(url) {
       }
     }
 
-    if (parsed.hostname.includes('firebasestorage.googleapis.com')) {
+    if (
+      parsed.hostname === 'firebasestorage.googleapis.com' ||
+      parsed.hostname.endsWith('.firebasestorage.googleapis.com')
+    ) {
       const marker = '/o/';
       const markerIndex = parsed.pathname.indexOf(marker);
       if (markerIndex >= 0) {

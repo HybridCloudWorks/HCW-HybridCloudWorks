@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { stripHtmlTags } from '@/lib/blogUtils';
 import { useEditor } from '../context/EditorContext';
 import { useDragDrop } from '../hooks/useDragDrop';
 import { SectionCard } from './SectionCard';
@@ -100,10 +101,7 @@ export function ContentTab() {
     : null;
 
   const wordCount = fields.draft
-    ? fields.draft
-        .replace(/<[^>]+>/g, '')
-        .split(/\s+/)
-        .filter(Boolean).length
+    ? stripHtmlTags(fields.draft).split(/\s+/).filter(Boolean).length
     : 0;
 
   return (

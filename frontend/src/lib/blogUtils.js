@@ -25,6 +25,23 @@ export const normalizeContentFields = (doc) => {
  */
 export const normalizeFirestoreDate = (value) => toDate(value);
 
+/**
+ * Remove HTML tags from a string, applying the removal repeatedly until the
+ * result is stable. A single pass of `<[^>]*>` is incomplete — overlapping
+ * constructs such as `<scr<script>ipt>` leave a live tag behind — so we loop
+ * to a fixed point. Used for plain-text previews and word counts.
+ */
+export const stripHtmlTags = (value) => {
+  if (!value) return '';
+  let prev;
+  let out = String(value);
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, '');
+  } while (out !== prev);
+  return out;
+};
+
 export const getCoverImageUrl = (article) => {
   if (!article) return null;
 

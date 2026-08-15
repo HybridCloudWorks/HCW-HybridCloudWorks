@@ -678,7 +678,18 @@ async function fetchImage(url, redirectsLeft = 5) {
 function isExternalUrlString(val) {
   if (!val || typeof val !== 'string') return false;
   if (!val.startsWith('http')) return false;
-  if (val.includes('firebasestorage.googleapis.com') || val.includes('storage.googleapis.com'))
+  let host;
+  try {
+    host = new URL(val).hostname;
+  } catch {
+    return true;
+  }
+  if (
+    host === 'firebasestorage.googleapis.com' ||
+    host === 'storage.googleapis.com' ||
+    host.endsWith('.firebasestorage.googleapis.com') ||
+    host.endsWith('.storage.googleapis.com')
+  )
     return false;
   return true;
 }
@@ -899,14 +910,27 @@ const PROVIDER_FEEDS = {
 };
 
 /**
+ * Strip HTML tags, applying the removal repeatedly until the string is stable.
+ * A single pass of `<[^>]*>` is incomplete: overlapping constructs such as
+ * `<scr<script>ipt>` would leave a live tag behind. Looping to a fixed point
+ * removes those residues.
+ */
+function stripHtmlTags(text) {
+  let prev;
+  let out = String(text);
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, '');
+  } while (out !== prev);
+  return out;
+}
+
+/**
  * Truncate text to a max length, preserving word boundaries.
  */
 function truncateText(text, maxLength = 200) {
   if (!text) return '';
-  const cleaned = text
-    .replace(/<[^>]*>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const cleaned = stripHtmlTags(text).replace(/\s+/g, ' ').trim();
   if (cleaned.length <= maxLength) return cleaned;
   return `${cleaned.substring(0, maxLength).replace(/\s\S*$/, '')}...`;
 }
@@ -916,7 +940,7 @@ function truncateText(text, maxLength = 200) {
  */
 function estimateReadTime(content) {
   if (!content) return '3 min';
-  const wordCount = content.replace(/<[^>]*>/g, '').split(/\s+/).length;
+  const wordCount = stripHtmlTags(content).split(/\s+/).length;
   const minutes = Math.max(1, Math.ceil(wordCount / 200));
   return `${minutes} min`;
 }
