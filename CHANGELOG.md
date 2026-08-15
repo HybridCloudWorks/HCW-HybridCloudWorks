@@ -17,6 +17,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Self-healing computed properties** — `.github/workflows/
+  heal-computed-properties.yml` re-applies `cp_sortDate` on any push touching
+  the Cosmos Terraform or container manifest, and every six hours — because
+  Terraform applies run in TF Cloud on their own clock, a push-time heal can
+  itself be overwritten, so the schedule is what guarantees the wound closes.
+  With `PUBLIC_LIST_SQL_ORDER=1` live, a wiped property breaks the public
+  content list, which is why this is automation rather than a runbook note.
+  The OIDC deploy identity gains Cosmos Data Contributor scoped to exactly the
+  `content` and `blogs` containers (`infra/oidc.tf`) — the one documented
+  exception to its deliberate no-Cosmos posture, and the healer fails loudly
+  on a schedule until that assignment is applied. (TODO.md T-206 follow-up)
+
 - **`cp_sortDate` computed property + flag-gated ORDER BY** — T-206's last
   step, authored as operator tooling. `scripts/apply-computed-sortdate.mjs
   --inspect` reports non-ISO date values (the evidence gate), `--apply` adds a

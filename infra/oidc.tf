@@ -80,9 +80,44 @@ resource "azurerm_role_assignment" "github_deploy_releases" {
 # Deliberately NOT granted:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
 #     managed identity does that at runtime.
-#   - Cosmos data-plane roles. The data migration authenticates with its own
-#     credentials rather than borrowing the deploy identity.
+#   - Cosmos data-plane roles beyond the two-container exception below. The
+#     data migration authenticates with its own credentials rather than
+#     borrowing the deploy identity.
 #   - anything at subscription scope.
+
+# ---------------------------------------------------------------------------
+# The one Cosmos exception: heal-computed-properties.yml
+# ---------------------------------------------------------------------------
+# azurerm_cosmosdb_sql_container cannot express computedProperties, so any
+# apply that updates the `content` or `blogs` container wipes cp_sortDate —
+# and with PUBLIC_LIST_SQL_ORDER=1 live, that breaks the public content list
+# (TODO.md T-206). The healer workflow re-applies it via
+# scripts/apply-computed-sortdate.mjs, and needs Data Contributor on EXACTLY
+# those two containers — scoped per container, not at the account, keeping
+# the "no Cosmos for the deploy identity" posture as narrow an exception as
+# the job allows. If the healer ever 403s despite these assignments, widening
+# the scope to the database is the first debugging step: container-scoped
+# metadata writes are the newest corner of Cosmos data-plane RBAC.
+#
+# `name` omitted for the same reason as func_cosmos in main.tf: the provider
+# generates a stable GUID, and a duplicated hardcoded name silently REPLACES
+# another identity's assignment instead of erroring.
+
+resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_content" {
+  resource_group_name = azurerm_resource_group.hcw.name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/content"
+}
+
+resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
+  resource_group_name = azurerm_resource_group.hcw.name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/blogs"
+}
 
 # ---------------------------------------------------------------------------
 # Values the GitHub workflows need. None are secret: federation means
