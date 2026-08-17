@@ -86,10 +86,13 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
-          curl -sSfL -o /tmp/trivy.tar.gz "${base}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          # Keep the release's own filename: the checksum manifest lists it by
+          # that name, so sha256sum -c can match it.
+          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
           curl -sSfL -o /tmp/trivy_checksums.txt "${base}/trivy_${TRIVY_VERSION}_checksums.txt"
-          (cd /tmp && grep "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt | sha256sum -c -)
-          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          (cd /tmp && grep " ${tarball}\$" trivy_checksums.txt | sha256sum -c -)
+          tar -xzf "/tmp/${tarball}" -C /tmp trivy
           install -m 0755 /tmp/trivy /usr/local/bin/trivy
           trivy --version
 
