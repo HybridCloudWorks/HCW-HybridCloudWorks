@@ -49,6 +49,18 @@ This project has not cut a tagged release; entries are grouped under
   they describe. The sidebar's repository links now point at the
   HybridCloudWorks org instead of the pre-move personal fork.
 
+### Fixed
+
+- **`iac-validate.yml` Trivy job unresolvable action pin** — the gate shipped
+  in PR #103 referencing `aquasecurity/trivy-action@0.28.0`, a tag that no
+  longer resolves: Aqua's 2026-03-19 security incident (trivy discussions
+  #10425) saw trivy-action git tags re-pointed to malicious commits, and the
+  v0.69.4 binary release was itself malicious. The job now installs the
+  Trivy **binary** pinned to v0.69.3 — the latest release the advisory names
+  safe — from the project's own release artifacts, verified against the
+  release checksum manifest, and no longer uses the marketplace action at
+  all. (PR #104)
+
 ### Changed
 
 - **`deploy-infra.yml` rewritten while remaining hard-disabled** — the

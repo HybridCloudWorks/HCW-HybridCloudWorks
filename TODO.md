@@ -17,10 +17,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 8 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 5 |
+| Medium | 6 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
 | Last updated | 2026-08-17 — IaC standardization pass added T-501, T-502 |
@@ -1265,6 +1265,30 @@ with an ADR that records why the flat module is the accepted shape
 (single-workload repo, no reuse consumer, `prevent_destroy` guards in place).
 Both are legitimate; the current state — a guardrail the implementation
 ignores — is not, because it reads as an audit finding.
+
+### T-503 — Network-restrict the Functions host storage account
+**Files:** `infra/main.tf` (`azurerm_storage_account.functions`, `azurerm_subnet.functions_integration`), `.github/workflows/deploy-functions.yml`
+
+Trivy flags AVD-AZU-0012 (CRITICAL): the Functions host storage account has
+no `network_rules` block, so its public endpoint answers everyone. The
+finding is real but cannot be fixed with a flag flip, which is why it is
+suppressed with a documented `#trivy:ignore` at the resource. Two live paths
+depend on public reachability today:
+
+- GitHub-hosted runners upload deployment packages to `function-releases`
+  from public, dynamic IPs (`oidc.tf` `github_deploy_releases`).
+- The Flex Consumption platform pulls those packages and keeps host state
+  here, and the integration subnet carries only the `Microsoft.KeyVault`
+  service endpoint — a subnet allow rule for storage would be inert without
+  adding `Microsoft.Storage`.
+
+Remediation design: add `Microsoft.Storage` to the subnet's service
+endpoints; move package upload off public ingress (deploy from the
+self-hosted ACA runner inside the VNet, or a short-lived SAS via a
+network-allowed path); then set `default_action = "Deny"` with
+`bypass = ["AzureServices"]` and the subnet rule, and delete the ignore.
+Verify with a functions deploy AND a cold-start invocation before calling it
+done — the failure mode is a deploy that succeeds against stale state.
 
 ## LOW
 

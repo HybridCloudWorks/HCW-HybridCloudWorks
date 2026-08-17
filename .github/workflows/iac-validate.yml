@@ -66,17 +66,37 @@ jobs:
   trivy:
     name: Trivy IaC misconfiguration scan
     runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    env:
+      # v0.69.3 is the latest release named safe by Aqua's 2026-03-19 security
+      # advisory (github.com/aquasecurity/trivy/discussions/10425): the
+      # trivy-action git tags were re-pointed to malicious commits (which is
+      # why the original `aquasecurity/trivy-action@0.28.0` pin stopped
+      # resolving), and the v0.69.4 binary release was itself malicious. So:
+      # no marketplace action, a version-pinned binary from the project's own
+      # releases, verified against the release's checksum manifest. When
+      # bumping, re-check the advisory thread first, and prefer embedding the
+      # tarball's sha256 directly here over trusting the manifest (T-501's
+      # supply-chain posture).
+      TRIVY_VERSION: 0.69.3
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Install Trivy (pinned release binary)
+        run: |
+          set -euo pipefail
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          # Keep the release's own filename: the checksum manifest lists it by
+          # that name, so sha256sum -c can match it.
+          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
+          curl -sSfL -o /tmp/trivy_checksums.txt "${base}/trivy_${TRIVY_VERSION}_checksums.txt"
+          (cd /tmp && grep " ${tarball}\$" trivy_checksums.txt | sha256sum -c -)
+          tar -xzf "/tmp/${tarball}" -C /tmp trivy
+          install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
+
+      # HIGH/CRITICAL fail the gate; MEDIUM and below are reported in the log
+      # only — tighten once the existing configuration is clean at that level.
       - name: Scan infra/
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: config
-          scan-ref: infra
-          format: table
-          exit-code: '1'
-          severity: HIGH,CRITICAL
-          # MEDIUM and below are reported in the log but do not fail the gate;
-          # tighten once the existing configuration is clean at that level.
+        run: trivy config --exit-code 1 --severity HIGH,CRITICAL infra

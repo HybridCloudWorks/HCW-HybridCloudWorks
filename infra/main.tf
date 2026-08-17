@@ -452,6 +452,15 @@ resource "azurerm_subnet" "functions_integration" {
 }
 
 
+# Trivy AVD-AZU-0012 (no network rules) is ACKNOWLEDGED here, not fixed:
+# locking this account to default Deny today would break two live paths —
+# GitHub-hosted runners upload deployment packages to function-releases from
+# public, dynamic IPs (oidc.tf github_deploy_releases), and the Flex
+# Consumption platform pulls those packages and keeps host state here, while
+# the integration subnet carries only the Microsoft.KeyVault service endpoint,
+# not Microsoft.Storage. Remediation is designed work, not a flag flip —
+# tracked as TODO.md T-503. Remove the ignore when it lands.
+#trivy:ignore:AVD-AZU-0012
 resource "azurerm_storage_account" "functions" {
   name                     = "${replace(var.project_name, "-", "")}funcsa"
   resource_group_name      = azurerm_resource_group.hcw.name
