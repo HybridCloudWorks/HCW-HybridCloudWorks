@@ -17,6 +17,48 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **IaC repository standardization** — the repository now carries the
+  baseline governance surface expected of a permanent infrastructure repo:
+  `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, `.github/CODEOWNERS`, a
+  pull-request template with a Terraform-plan gate, issue templates
+  (including an infrastructure change request with blast-radius and rollback
+  prompts), a root `.editorconfig`, and `infra/README.md` documenting layout,
+  working rules, guardrails and the ALZ-absorption posture. The repository
+  policy script allowlists exactly these files; narrative documentation still
+  belongs in the Wiki. A new `iac-repo-standardizer` agent
+  (`.claude/agents/`) encodes the standard so future repositories can be
+  brought to the same baseline.
+- **IaC validation gate** — `.github/workflows/iac-validate.yml` runs
+  `terraform fmt`, `terraform validate` (via `init -backend=false`, so no
+  credentials or state access), tflint (`infra/.tflint.hcl`) and a Trivy IaC
+  misconfiguration scan on every pull request touching `infra/**`. Until now
+  nothing validated Terraform changes at all while the prototype delivery
+  workflow stayed disabled.
+- **`prevent_destroy` guards on stateful resources** — the Cosmos DB account,
+  both storage accounts and the Key Vault now refuse plans that would replace
+  them; removing a guard is itself a reviewed change. Applied together with
+  the `terraform fmt` drift that had accumulated in `main.tf`.
+- **Deployment Runbook and IaC Repository Standard as wiki-as-code** — the
+  day-1 apply procedure, day-2 operations, ALZ-absorption sequence, and the
+  standard this repository now conforms to, staged under `.github/wiki/`
+  (with updated `Home` and `_Sidebar`) and published to the GitHub Wiki by
+  the new `sync-wiki.yml` workflow on merge to `main`. The workflow overlays
+  staged pages only — unstaged wiki pages remain UI-editable — and uses the
+  built-in `GITHUB_TOKEN`, so no PAT or additional GitHub App is required.
+  Staged pages become repository-owned: they get PR review like the code
+  they describe. The sidebar's repository links now point at the
+  HybridCloudWorks org instead of the pre-move personal fork.
+
+### Changed
+
+- **`deploy-infra.yml` rewritten while remaining hard-disabled** — the
+  prototype workflow applied with `-auto-approve` on every push to `main`,
+  masked failed plans with `continue-on-error`, and used unpinned actions.
+  The replacement is `workflow_dispatch`-only, runs in a `production-infra`
+  GitHub Environment for required-reviewer approval, starts an HCP Terraform
+  run whose apply is confirmed in TFC where the state lives, and keeps the
+  `if: ${{ false }}` gate until production applies are authorized.
+
 - **Self-healing computed properties** — `.github/workflows/
   heal-computed-properties.yml` re-applies `cp_sortDate` on any push touching
   the Cosmos Terraform or container manifest, and every six hours — because

@@ -1,0 +1,82 @@
+# Credential-free validation gate for infra/**.
+#
+# This is deliberately NOT a delivery workflow (same doctrine as ci.yml): no
+# secrets, no cloud credentials, no state access. `terraform init
+# -backend=false` installs providers without touching the HCP Terraform Cloud
+# workspace, so every check here is safe on any pull request.
+#
+# It exists because the prototype deploy workflow is hard-disabled, which left
+# infra/** with no validation at all — a formatting error or invalid resource
+# block would only surface at the next human-driven TFC run.
+
+name: IaC Validation
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/iac-validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iac-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: fmt, validate, tflint
+    # Same failover switch as ci.yml — see REVIEW.md §4.4.
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform fmt -recursive -check -diff
+
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Setup tflint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: tflint
+        run: |
+          tflint --init
+          tflint --format compact
+        env:
+          # Raises the anonymous GitHub API rate limit for plugin download.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  trivy:
+    name: Trivy IaC misconfiguration scan
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Scan infra/
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          # MEDIUM and below are reported in the log but do not fail the gate;
+          # tighten once the existing configuration is clean at that level.

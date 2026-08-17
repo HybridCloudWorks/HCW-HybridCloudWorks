@@ -1,0 +1,16 @@
+# CODEOWNERS — review routing. Later entries win on overlap.
+# Branch protection should require code-owner review for these paths.
+# Replace the individual owner with a GitHub team (e.g. @HybridCloudWorks/platform)
+# once org teams exist.
+
+# Default: repository owner.
+* @saulpatinojr
+
+# Infrastructure as Code — production platform. Every change here is a
+# potential production change; require infra review.
+/infra/ @saulpatinojr
+/.github/workflows/ @saulpatinojr
+
+# Repository policy and structure enforcement.
+/scripts/validate-repository-structure.ps1 @saulpatinojr
+/.github/CODEOWNERS @saulpatinojr

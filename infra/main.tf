@@ -122,6 +122,12 @@ resource "azurerm_cosmosdb_account" "hcw" {
     failover_priority = 0
   }
 
+  # This account holds all migrated production data. A plan that wants to
+  # replace it must fail until a human removes this guard in a reviewed PR.
+  lifecycle {
+    prevent_destroy = true
+  }
+
   tags = var.tags
 }
 
@@ -295,14 +301,14 @@ moved {
 # LRS (locally redundant) — sufficient for a single-region deployment.
 # =============================================================================
 resource "azurerm_storage_account" "hcw" {
-  name                            = var.storage_account_name
-  resource_group_name             = azurerm_resource_group.hcw.name
-  location                        = azurerm_resource_group.hcw.location
-  account_tier                    = "Standard"
-  account_replication_type        = "LRS"
-  account_kind                    = "StorageV2"
-  access_tier                     = "Hot"
-  min_tls_version                 = "TLS1_2"
+  name                     = var.storage_account_name
+  resource_group_name      = azurerm_resource_group.hcw.name
+  location                 = azurerm_resource_group.hcw.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  account_kind             = "StorageV2"
+  access_tier              = "Hot"
+  min_tls_version          = "TLS1_2"
   # Master override, not a default. With this false, a container declared
   # `container_access_type = "blob"` still answers 409 to an anonymous reader —
   # containers CANNOT opt in above it. Combined with the Deny network rule
@@ -329,6 +335,12 @@ resource "azurerm_storage_account" "hcw" {
     default_action             = "Deny"
     bypass                     = ["AzureServices"]
     virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
+  }
+
+  # Holds all migrated production media. Same guard rationale as the Cosmos
+  # account: replacement must be an explicit, reviewed decision.
+  lifecycle {
+    prevent_destroy = true
   }
 
   tags = var.tags
@@ -448,6 +460,12 @@ resource "azurerm_storage_account" "functions" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
   tags                     = var.tags
+
+  # Function host state and release packages live here; replacing it takes the
+  # API down until a redeploy. Guarded like the other stateful accounts.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_service_plan" "hcw" {
@@ -674,7 +692,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT" = "false"
 
     # Unimplemented TODOs. Do not set to "true".
-    "FEATURE_FLAG_SYNC_RSS_FEEDS"    = "false"
+    "FEATURE_FLAG_SYNC_RSS_FEEDS"       = "false"
     "FEATURE_FLAG_CLEANUP_TEMP_STORAGE" = "false"
     "FEATURE_FLAG_CHECK_AGENT_HEALTH"   = "false"
   }
@@ -791,6 +809,12 @@ resource "azurerm_key_vault" "hcw" {
     bypass                     = "AzureServices"
     virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
     ip_rules                   = var.admin_ip_rules
+  }
+
+  # Secrets are seeded by hand and exist nowhere else in managed form.
+  # Replacement must be an explicit, reviewed decision.
+  lifecycle {
+    prevent_destroy = true
   }
 
   tags = var.tags
