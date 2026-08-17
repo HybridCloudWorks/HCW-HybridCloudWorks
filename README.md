@@ -61,10 +61,10 @@ spelled exactly as above; CI fails if one is missing or its casing drifts.
 | Path | Purpose | Current posture |
 | --- | --- | --- |
 | `.azure/` | Machine-readable architecture plan and discovery output | Approved plan; not deployment code |
-| `.github/` | Repository-level GitHub Actions workflows | Prototype delivery jobs are disabled pending baseline hardening |
+| `.github/` | Repository-level GitHub Actions workflows, contribution standards (`CONTRIBUTING.md`, `SECURITY.md`, `CODEOWNERS`, PR/issue templates) | Prototype delivery jobs are disabled pending baseline hardening; credential-free validation gates (CI, CodeQL, repository policy, IaC validation) run on every PR |
 | `frontend/` | Imported React application and source-system compatibility code | Requires reconciliation with the old repository |
 | `functions/` | Azure Functions application scaffold | Prototype; must be aligned to approved boundaries |
-| `infra/` | Terraform Azure infrastructure | Prototype; do not apply as the approved architecture |
+| `infra/` | Terraform Azure infrastructure — see [`infra/README.md`](infra/README.md) for working rules, guardrails, and the ALZ-absorption posture | Deployed environment smoke-verified by the operator (TODO.md, 2026-08-14); applies remain gated and human-approved in HCP Terraform Cloud. Stateful resources carry `prevent_destroy` |
 | `scripts/` | Data and media migration tooling | Firestore data migration prepared against Site-Main and not yet executed; read-only preflight, dry-run and reconciliation implemented. Media migration still incomplete |
 | `vps-agent/` | Azure-oriented labs agent scaffold | Incomplete; source agent contract still requires migration |
 

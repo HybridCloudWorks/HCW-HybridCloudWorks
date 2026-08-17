@@ -17,13 +17,13 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 5 |
+| Open items | 7 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 3 |
+| Medium | 5 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
-| Last updated | 2026-08-14 |
+| Last updated | 2026-08-17 — IaC standardization pass added T-501, T-502 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
@@ -1237,6 +1237,34 @@ the decision would touch thirty files to no purpose and risk breaking the
 absolute source-system URLs that legacy documents still hold.
 
 ---
+
+### T-501 — SHA-pin every GitHub Action reference
+**Files:** `.github/workflows/*.yml`
+
+The repository mixes pinning styles: `repository-policy.yml` pins
+`actions/checkout` by commit SHA, while `ci.yml`, `codeql.yml` and the
+delivery workflows use mutable version tags (`@v7`, `@v4`). A tag can be
+re-pointed by a compromised action repository; a SHA cannot. Dependabot
+already covers `github-actions`, and it updates SHA pins with the same PRs it
+raises for tags, so pinning costs no maintenance. Convert every `uses:` to a
+full commit SHA with the version as a trailing comment. The new
+`iac-validate.yml` and `deploy-infra.yml` follow the split convention until
+this lands.
+
+### T-502 — Reconcile the Azure Verified Modules guardrail with the flat root module
+**Files:** `infra/*.tf`, root `README.md`, Wiki ADR register
+
+The README delivery guardrail says "Use reviewed, version-pinned Azure
+Verified Modules for the approved Terraform implementation," but `infra/` is
+(deliberately) a flat root module of raw `azurerm` resources — and the
+environment it manages is now live, so any move to AVM wrappers is a
+state-surgery exercise: every resource address changes and needs a `moved`
+block (or `terraform state mv`) with a plan proving zero destroy/create
+pairs. Either do that migration module-by-module, or supersede the guardrail
+with an ADR that records why the flat module is the accepted shape
+(single-workload repo, no reuse consumer, `prevent_destroy` guards in place).
+Both are legitimate; the current state — a guardrail the implementation
+ignores — is not, because it reads as an audit finding.
 
 ## LOW
 

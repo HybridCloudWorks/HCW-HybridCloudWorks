@@ -28,6 +28,7 @@ $allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', '
 # back.
 $allowedRootFiles = @(
   '.gitignore',
+  '.editorconfig',
   'README.md',
   'Architecture_Plan.md',
   'Migration_Plan.md',
@@ -122,7 +123,20 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath.StartsWith('frontend/.copilot/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
-    $relativePath -eq '.github/pull_request_template.md'
+    $relativePath -eq '.github/pull_request_template.md' -or
+    # Tooling-adjacent documentation, allowed by the same README clause that
+    # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING and
+    # SECURITY from .github/, and infra/README.md is the Terraform-standard
+    # module doc for the deployment source of truth. Narrative documentation
+    # still belongs in the Wiki.
+    $relativePath -eq '.github/CONTRIBUTING.md' -or
+    $relativePath -eq '.github/SECURITY.md' -or
+    $relativePath -eq 'infra/README.md' -or
+    # Wiki-as-code staging area: pages here ARE Wiki content, reviewed via PR
+    # and overlaid onto the GitHub Wiki by .github/workflows/sync-wiki.yml on
+    # merge to main. This is the one sanctioned in-repo home for narrative
+    # documentation, precisely because its destination is the Wiki.
+    $relativePath.StartsWith('.github/wiki/', [System.StringComparison]::OrdinalIgnoreCase)
   if (-not $isAllowed) {
     $errors.Add("Unexpected Markdown outside the Wiki: $relativePath")
   }
