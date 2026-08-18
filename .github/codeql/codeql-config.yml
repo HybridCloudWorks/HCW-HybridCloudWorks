@@ -11,7 +11,12 @@ name: "HCW CodeQL config"
 # as a "secret"). Exclude them so code scanning covers only first-party code.
 #
 # Note: paths-ignore applies to the interpreted languages CodeQL analyses here
-# (JavaScript/TypeScript and Python), which is exactly this repository's surface.
+# (JavaScript/TypeScript; the 'actions' language scans .github/workflows and is
+# unaffected), which is exactly this repository's first-party surface. The
+# harness also vendors stray Go/Java snippet files — the reason the retired
+# Default setup grew erroring language:go / language:java-kotlin
+# configurations; they are excluded here and deliberately NOT added to the
+# advanced matrix.
 paths-ignore:
   - '.claude'
   - '.agents'
