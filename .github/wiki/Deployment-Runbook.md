@@ -18,8 +18,118 @@ roles table.
 | Terraform source | `infra/` on `main` in HCW-HybridCloudWorks |
 | State and variables | HCP Terraform Cloud — org `HybridCloudWorks`, workspace `hybridcloudworks-azure` |
 | Required inputs (names, formats, consumers — never values) | `CHECKLIST.md` and `Variables.md` at the repository root |
+| Terraform's own identity | `id-hcw-terraform`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
 | Working rules for the directory | `infra/README.md` |
+
+## 0. Bootstrap — once per subscription, before anything else
+
+Everything below this section assumes HCP Terraform can already authenticate
+to Azure. On a subscription that has never been applied to, it cannot, and no
+amount of Terraform fixes that: **Terraform cannot create the credential
+Terraform authenticates with.** This section breaks that chicken-and-egg. It
+runs exactly once in the life of a subscription.
+
+### The two handshakes
+
+Confusing these is the most common way to get stuck, because both are called
+"the OIDC setup" and only one of them is in the repository.
+
+| | HCP Terraform → Azure | GitHub Actions → Azure |
+| --- | --- | --- |
+| Who authenticates | Terraform runs in HashiCorp's cloud | The deploy workflows |
+| Created by | `scripts/bootstrap-terraform-oidc.ps1` (manual, once) | `infra/oidc.tf` (Terraform) |
+| Identity | `id-hcw-terraform` in `rg-hcw-bootstrap` | `id-hybridcloudworks-github-deploy` |
+| Issuer | `https://app.terraform.io` | `https://token.actions.githubusercontent.com` |
+| Exists when | After you run the script | After the first successful apply |
+| Consumed as | `TFC_AZURE_RUN_CLIENT_ID` in the workspace | `CLIENT_ID` repository variable |
+
+If you are hunting for `CLIENT_ID` to give `azure/login`, it comes from the
+Terraform outputs **after** the left-hand column works. It does not exist
+before the first apply.
+
+### Why a managed identity, not an app registration
+
+Same reason as `infra/oidc.tf`, which documents it at length: app registrations
+need Application Administrator in Entra, and Azure **Owner does not grant
+that** — Entra and Azure RBAC are separate permission planes. A user-assigned
+managed identity is an ordinary Azure resource, and Entra supports federating
+one to an arbitrary external issuer, so an Azure Owner can create the whole
+chain with no directory role at all.
+
+### Why it is not in Terraform state
+
+The bootstrap identity is deliberately excluded from `infra/`. If Terraform
+managed the identity it authenticates with, a destroy, a taint, or a bad plan
+would lock the workspace out of the subscription with no path back in except
+re-running this script. It lives in its own resource group for the same
+reason: nothing in `infra/` can reach it.
+
+### Run it
+
+```powershell
+# Dry run first — prints every change without making one.
+./scripts/bootstrap-terraform-oidc.ps1 `
+    -TenantId <tenant-guid> `
+    -SubscriptionId <subscription-guid> `
+    -WhatIf
+```
+
+The script is idempotent, so re-running it is how you repair a broken
+handshake, not just how you create one. It preflights before it proposes
+anything: CLI present, signed in, correct tenant, subscription visible,
+role-assignment rights held, `Microsoft.ManagedIdentity` registered.
+
+**If the preflight says you hold no roles on the subscription:** that is
+expected on a tenant you created yourself. Global Administrator is an Entra
+role and carries zero Azure RBAC. Re-run with `-ElevateAccess`, which takes
+the documented one-time root-scope elevation, grants you Owner on the target
+subscription, and removes the root-scope grant again.
+
+It creates: `rg-hcw-bootstrap`, the `id-hcw-terraform` managed identity, two
+federated credentials, and two subscription role assignments (Contributor to
+create resources, Role Based Access Control Administrator to create the role
+assignments `infra/` declares — Contributor alone cannot, and RBAC
+Administrator cannot grant Owner, so the identity cannot escalate itself).
+
+**Two federated credentials, not one.** HCP Terraform stamps the run phase
+into the token subject, and Entra matches subjects as exact case-sensitive
+strings with no wildcards, so `run_phase:plan` and `run_phase:apply` are two
+different subjects. With only the plan credential every run plans cleanly and
+every apply fails at authentication — which reads like a permissions problem
+and is not one.
+
+### Then set the workspace variables
+
+In HCP Terraform → `hybridcloudworks-azure` → **Variables**, as *environment*
+variables (the script prints these with the values filled in):
+
+| Name | Value |
+| --- | --- |
+| `TFC_AZURE_PROVIDER_AUTH` | `true` |
+| `TFC_AZURE_RUN_CLIENT_ID` | client ID of `id-hcw-terraform` |
+| `ARM_TENANT_ID` | tenant GUID |
+| `ARM_SUBSCRIPTION_ID` | subscription GUID |
+
+These four names come from HashiCorp and Microsoft and are exempt from the
+[2-word variable rule](IaC-Repository-Standard#variable-naming) as contractual
+names. Terraform *variables* for the same workspace are listed in
+`CHECKLIST.md` section 7.
+
+### Verify
+
+```bash
+cd infra && terraform login && terraform plan
+```
+
+A plan that authenticates and shows resources to create is success — you are
+not applying yet. `AADSTS70021` ("No matching federated identity record
+found") means the subject did not match: re-run the script passing
+`-TfcProject` and `-TfcWorkspace` copied exactly off the workspace Settings
+page, capitalisation and spaces included. A workspace created without choosing
+a project is in `Default Project`, with the space.
+
+Bootstrap is done when a plan authenticates. Continue from section 1.
 
 ## 1. Preflight (every change)
 

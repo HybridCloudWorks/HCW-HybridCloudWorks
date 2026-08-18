@@ -140,6 +140,67 @@ While sweeping, also flag **duplicate outputs** (same value under two
 names) for consolidation, and **collisions** where two distinct values
 would claim the same 2-word name — that is what the third word is for.
 
+### The bootstrap identity — audit this first, every time
+
+Every credential-free repository has exactly one credential it cannot create:
+the one the Terraform runner authenticates with. A configuration cannot
+provision the identity it needs in order to provision anything.
+
+This gap is nearly invisible to file-by-file review, because every individual
+file is correct and only the join between them is missing. So check for it
+directly and early, before any other standardization work:
+
+1. Read the provider block. If it carries no credential, that is *probably*
+   right — but find where the credentials do come from.
+2. Grep the whole repository for the runner's credential contract:
+   `ARM_CLIENT_ID`, `TFC_AZURE_`, `app.terraform.io`, `AWS_ROLE_ARN`,
+   `WORKLOAD_IDENTITY_PROVIDER`, `use_oidc`, `dynamic credential`.
+3. **Zero hits across `.tf`, `.yml` and `.md` means the repository has never
+   documented how its own runs authenticate.** Treat it as a deploy-readiness
+   blocker ranked above everything else in the standardization report: no
+   other prerequisite can even be attempted until it is closed.
+
+Do not assume the environment exists because the repository is detailed, or
+because someone mentioned an apply. Verify or say you could not.
+
+Closing the gap means producing all five of:
+
+- A runnable, idempotent bootstrap script in `scripts/`, with a preflight
+  that reports what is missing rather than failing on it. This is the one
+  script that runs once, years apart, usually by someone who has not read the
+  repository — so the preflight is the point. Check the CLI, the sign-in, the
+  tenant/account match, the subscription's or project's visibility, the role
+  assignments actually held, and the resource providers registered; on each
+  failure, print the command that fixes it. Detect the fresh-tenant case
+  specifically: an operator who administers the directory but holds no
+  resource-plane RBAC at all is normal, and produces errors that suggest the
+  wrong fix.
+- **The bootstrap identity excluded from Terraform state**, in its own
+  resource group or account. If Terraform manages the credential it
+  authenticates with, a destroy, taint, or bad plan locks the workspace out
+  with no path back. Say so in a comment where someone would otherwise
+  "helpfully" import it.
+- A comment on the provider block explaining that the absent credential is
+  the configuration, not an omission — otherwise the next reader adds a
+  client secret.
+- **Section 0 of the runbook**, before preflight, stating that nothing below
+  it works until bootstrap is done. Where two OIDC handshakes exist
+  (runner→cloud and CI→cloud), table them side by side with who creates each,
+  which issuer, and when each one starts to exist. Both get called "the OIDC
+  setup"; confusing them is the default failure mode, and it strands the
+  operator hunting for an ID that will not exist until after the first apply.
+- A CHECKLIST section inventorying the runner's own credentials next to the
+  application inputs. An unrecorded input is an input nobody provisions.
+
+Prefer federating a **user-assigned managed identity** (or the cloud's
+equivalent resource-plane identity) over an app registration: app
+registrations need directory-plane roles that resource-plane Owner does not
+grant, and Entra supports federating a managed identity to an arbitrary
+external issuer. Where the platform stamps a phase or environment into the
+token subject, remember that subject matching is exact and case-sensitive with
+no wildcards — one credential per distinct subject, or half the lifecycle
+silently fails authentication.
+
 ### Identity and state
 
 - State in a remote backend (HCP Terraform or `azurerm` backend with
