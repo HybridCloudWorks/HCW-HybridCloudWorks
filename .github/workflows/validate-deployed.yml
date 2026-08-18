@@ -1,0 +1,98 @@
+# Deployed-surface validation — the externally observable half of the
+# Deployment Runbook's §4 post-apply verification, runnable on demand.
+#
+# Read-only by design: DNS lookups, TLS inspection, HTTP GET/HEAD, and the
+# smoke suite's tier 1 (which is documented no-credentials, no-side-effects).
+# No secrets, no cloud credentials, no state access — the same doctrine as
+# ci.yml. Tier 2 (Cosmos conditional patch) and tier 3 (authenticated guard
+# check) need credentials this workflow deliberately does not hold; run those
+# per the smoke script's header from an operator session.
+#
+# Trigger is workflow_dispatch so a human decides when the production surface
+# gets probed; wire a schedule here later if a synthetic monitor is wanted.
+
+name: Validate Deployed Surface
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'API base including the /api prefix'
+        required: false
+        default: 'https://hybridcloudworks.com/api'
+
+permissions:
+  contents: read
+
+jobs:
+  surface:
+    name: DNS, TLS and site surface
+    # Same failover switch as ci.yml — see REVIEW.md §4.4.
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    steps:
+      - name: DNS
+        run: |
+          set -uo pipefail
+          {
+            echo '## DNS'
+            for h in hybridcloudworks.com www.hybridcloudworks.com api-azure.hybridcloudworks.com; do
+              ips=$(getent ahostsv4 "$h" | awk '{print $1}' | sort -u | paste -sd, -) || true
+              echo "- \`$h\` → ${ips:-NXDOMAIN}"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: TLS certificate
+        run: |
+          set -uo pipefail
+          {
+            echo '## TLS (apex)'
+            echo '```'
+            echo | openssl s_client -servername hybridcloudworks.com -connect hybridcloudworks.com:443 2>/dev/null \
+              | openssl x509 -noout -subject -issuer -dates
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Frontend surface
+        run: |
+          set -uo pipefail
+          code=$(curl -sS -o /tmp/body -w '%{http_code}' -m 30 https://hybridcloudworks.com/)
+          {
+            echo '## Frontend'
+            echo "- \`GET /\` → HTTP $code ($(wc -c </tmp/body) bytes)"
+            echo '- Security headers:'
+            echo '```'
+            curl -sSI -m 30 https://hybridcloudworks.com/ \
+              | grep -iE 'content-security-policy|strict-transport|x-content-type|x-frame|referrer-policy|cache-control|server' || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$code" = "200"
+
+  smoke:
+    name: Smoke tier 1 (anonymous API surface)
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Run smoke tier 1
+        env:
+          # Env var, not inline interpolation, so the input value can never be
+          # parsed as shell. The script reads SMOKE_BASE_URL natively.
+          SMOKE_BASE_URL: ${{ github.event.inputs.base_url }}
+        run: |
+          set -uo pipefail
+          status=0
+          node scripts/smoke-deployed.mjs > /tmp/smoke.out 2>&1 || status=$?
+          {
+            echo '## smoke-deployed.mjs tier 1'
+            echo "Base: ${SMOKE_BASE_URL}"
+            echo '```'
+            cat /tmp/smoke.out
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$status"
