@@ -17,6 +17,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Free-tier disposition recorded on the Cost-Analysis wiki page** (now
+  wiki-as-code, staged in `.github/wiki/`). Decisions from the workload
+  owner's free-services meter review: runner image **stays on Docker Hub**
+  (ACR rejected — month-13 cost for a failover-only image); Cosmos free
+  tier is unusable by design (serverless); Service Bus / VM / SQL / LB
+  12-month meters rejected as expiring traps; blob + egress discounts are
+  automatic. Adds the standing **AI options reference** for the future AI
+  RPCs: always-free F0 SKUs per task (Translator, Language, Vision,
+  Content Safety, Document Intelligence, Speech) with the mechanics that
+  make them budget-safe (throttle-not-bill on quota, create directly with
+  F0 — Foundry-provisioned resources default to S0, keyless applies) and
+  the explicit note that generative drafting/image work has no free Azure
+  tier — that is Azure OpenAI or the SaaS keys. (PR #116)
+
 - **CodeQL `actions` language added to the advanced matrix** — the retired
   Default setup had been scanning workflow files (`language:actions`); the
   advanced setup now owns that coverage across the repository's 12
