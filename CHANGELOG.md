@@ -17,6 +17,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Infrastructure plan v0.2-as-built and ADRs 0018–0021** — implements the
+  REVIEW §8.2 decision (workload owner, 2026-08-18) to supersede plan v0.1
+  with a plan that describes the real system. `.azure/infrastructure-plan.json`
+  is now version `0.2-as-built`: every implemented resource with its
+  as-built properties, each deviation from v0.1 dispositioned as either a
+  ratified decision or explicitly-unratified remediation debt (T-503–T-506,
+  purge protection). Four ADRs staged to the Wiki: **0018** (umbrella
+  supersede + disposition table), **0019** (single Function App —
+  supersedes ADR-0004), **0020** (flat native Terraform root module —
+  supersedes ADR-0005's AVM clause, resolves TODO T-502, and rewrites the
+  README AVM guardrail to "pinned versions, stable addresses"), **0021**
+  (Container Apps CI runner ratified as failover-only). ADR register
+  updated; ADR-0004 marked superseded. New TODO **T-506** (keyless Azure
+  OpenAI: RBAC grant, delete the key output, disable local auth).
+  (PR #107)
+
 - **Resource validation pass, first execution (2026-08-18)** — results
   published as the Wiki **Resource-Validation-Report** page (staged in
   `.github/wiki/`, linked from Home and the sidebar). External surface:

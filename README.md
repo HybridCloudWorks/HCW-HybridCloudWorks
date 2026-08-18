@@ -75,7 +75,10 @@ endorsement of the final layout.
 ## Delivery guardrails
 
 - Use GitHub OIDC and managed identities; do not commit static cloud credentials.
-- Use reviewed, version-pinned Azure Verified Modules for the approved Terraform implementation.
+- Keep the Terraform implementation a flat native-provider root module with pinned provider
+  versions and stable resource addresses — any rename requires `moved` blocks and plan evidence
+  showing zero destroy/create pairs (ADR-0020; supersedes the earlier Azure Verified Modules
+  guardrail).
 - Keep Terraform state, saved plans, local settings, generated output, and secrets out of Git.
 - Require explicit approval for production applies, destructive changes, DNS cutover, credential
   revocation, Firebase/GCP decommissioning, and repository archival.

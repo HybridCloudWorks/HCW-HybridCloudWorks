@@ -769,7 +769,18 @@ runs the smoke suite from a residential IP.
 **Unblocked by:** creating the WAF skip rule + repo secret, or an explicit
 decision that synthetic origin validation is not wanted.
 
-### 8.2 The approved plan no longer describes the system
+### 8.2 The approved plan no longer describes the system — DECIDED 2026-08-18
+
+**Decision: option (b), supersede as-built** — chosen by the workload owner
+on 2026-08-18 and implemented the same day: plan **v0.2-as-built** replaces
+v0.1 in `.azure/infrastructure-plan.json`, with the deviations dispositioned
+in **ADR-0018** (umbrella + ratification table), **ADR-0019** (single
+Function App, supersedes ADR-0004), **ADR-0020** (native flat root module,
+supersedes ADR-0005's AVM clause, closes TODO T-502), and **ADR-0021** (CI
+runner ratified). Security/observability gaps were deliberately NOT ratified
+— they remain tracked debt (T-503–T-506, purge protection). The never-planned
+OpenAI provisioning is ratified retroactively with keyless hardening as
+T-506. Nothing left here needs a human; retained below for the record.
 
 `.azure/infrastructure-plan.json` (v0.1-approved) and `infra/*.tf` have
 diverged into two independently-evolved documents: ~40% of planned resources
