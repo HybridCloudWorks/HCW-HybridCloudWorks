@@ -28,17 +28,20 @@ code, and listed so it is not reintroduced).
 
 | | |
 | --- | --- |
-| Total entries | 38 |
+| Total entries | 41 |
 | Critical config defects | 2 (`VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) — both unset, both required |
 | Verified | 0 |
 | Unverified | 21 |
-| Missing | 16 |
+| Missing | 19 |
 | Retired | 2 |
-| Last updated | 2026-08-18 — T-503 firewall-window inputs added to §7 |
+| Last updated | 2026-08-18 — apply verification surfaced the three unset Azure OIDC repo variables (§7) |
 
-Nothing is `Verified`: no Azure control plane, Terraform apply, or deployed
-environment has been reachable from any session to date (see
-[REVIEW.md](REVIEW.md) §1.1–§1.2).
+Nothing is `Verified` *from an engineering session*: no Azure control plane
+has been reachable from any session to date (REVIEW.md §1.1–§1.2). Operator
+evidence exists — the 2026-08-14 smoke run and the 2026-08-18 hardening
+apply + cold-start check — but per this file's definition an entry flips to
+`Verified` only when the specific input is observed working, not when the
+system around it is.
 
 ---
 
@@ -142,6 +145,9 @@ is publicly readable — no secret may ever be added to this section.**
 | `DOCKERHUB_USERNAME` | Registry account for the runner image | Yes (runner build) | GitHub secret | runner image workflow | `XXXXXXXXX` | Missing | |
 | `DOCKERHUB_TOKEN` | Registry push credential | Yes (runner build) | GitHub secret | runner image workflow | `XXXXX00000!!!!!XXXXX` | Missing | |
 | GitHub App id / private key | Runner JIT registration | Yes (runner) | GitHub App | `infra/runner-image/entrypoint.sh` | `000000` / `XXXXX00000!!!!!XXXXX` | Missing | Needs Administration: Read & write |
+| `AZURE_CLIENT_ID` | Deploy identity client id for OIDC login | **Yes** | Terraform output `github_deploy_client_id` | `heal-computed-properties.yml`, `deploy-functions.yml` | `00000000-0000-0000-0000-000000000000` | **Missing** | Verified missing 2026-08-18: every heal run fails at Azure login with "client-id and tenant-id not supplied" |
+| `AZURE_TENANT_ID` | Entra tenant for OIDC login | **Yes** | Entra directory | same workflows | `00000000-0000-0000-0000-000000000000` | **Missing** | |
+| `AZURE_SUBSCRIPTION_ID` | Target subscription for OIDC login | **Yes** | Azure subscription | same workflows | `00000000-0000-0000-0000-000000000000` | **Missing** | |
 | `AZURE_RESOURCE_GROUP` | Resource group for the T-503 storage firewall window | Yes (functions deploy) | GitHub repo variable | `.github/workflows/deploy-functions.yml` | `XX-XXXXXXXXXXXXX-XXXX` | Missing | Value is the `resource_group_name` Terraform variable |
 | `FUNCTIONS_STORAGE_ACCOUNT` | Host storage account for the T-503 firewall window | Yes (functions deploy) | GitHub repo variable | `.github/workflows/deploy-functions.yml` | `XXXXXXXXXXXXXXXX` | Missing | The `${project_name minus hyphens}funcsa` account |
 

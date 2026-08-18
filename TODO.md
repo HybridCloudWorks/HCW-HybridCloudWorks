@@ -1332,6 +1332,10 @@ user). Verify with an AI-path smoke before and after the final flip.
 
 ### ~~T-504 — Cosmos DB network firewall and key-auth hardening~~ RESOLVED in code (PR #108, apply pending)
 
+**Applied 2026-08-18.** Runner-path (0.0.0.0 sentinel) verification is
+pending the AZURE_CLIENT_ID/TENANT/SUBSCRIPTION repo variables (CHECKLIST
+§7) — one green heal run closes it.
+
 Implemented: VNet filter + Functions-subnet rule, `Microsoft.AzureCosmosDB`
 service endpoint on the subnet, `ip_range_filter` with the `0.0.0.0`
 Azure-datacenter sentinel (keeps heal-computed-properties working from

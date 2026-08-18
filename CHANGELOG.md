@@ -17,6 +17,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Apply verification for the T-503–T-506 hardening (2026-08-18)** — the
+  operator applied the full set in HCP Terraform; cold start passed,
+  verifying the T-503 VNet runtime/package-pull path directly. A post-apply
+  `validate-deployed` run is byte-identical to the pre-apply baseline (no
+  external regression), and Repository Policy / IaC Validation / CI /
+  CodeQL are all green on `main`. One verification remains blocked:
+  `heal-computed-properties` — the probe for T-504's `0.0.0.0`
+  Azure-datacenter sentinel — fails at Azure login because the
+  `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`
+  repository variables were never set (a pre-existing gap, failing on every
+  run before the hardening too; now recorded in CHECKLIST §7). Evidence
+  table published as an addendum to the Wiki Resource-Validation-Report;
+  plan v0.2 dispositions moved to APPLIED. (PR #112)
+
 - **T-503 — Functions host storage network-restricted** (apply pending in
   HCP Terraform; the last item of the T-50x hardening series). The host
   storage account moves to default-Deny with three deliberate survivors:
