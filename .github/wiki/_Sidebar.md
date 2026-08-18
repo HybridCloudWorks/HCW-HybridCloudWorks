@@ -9,6 +9,7 @@
 - [Migration runbook](Migration-Runbook)
 - [Deployment runbook](Deployment-Runbook)
 - [IaC repository standard](IaC-Repository-Standard)
+- [Resource validation report](Resource-Validation-Report)
 - [Cost analysis](Cost-Analysis)
 - [Implementation plan](Implementation-Plan)
 
