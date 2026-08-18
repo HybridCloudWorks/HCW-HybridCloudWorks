@@ -1,0 +1,41 @@
+# Line-ending policy for the whole repository.
+#
+# Without this file git falls back to core.autocrlf, which is a per-developer
+# setting. With core.autocrlf=true (the Git for Windows default) the index
+# stays LF while the working tree becomes CRLF, and three things break on
+# Windows checkouts only — CI never sees any of them:
+#
+#   * vitest cannot load a module whose shebang line ends CRLF. It fails with
+#     a bare "SyntaxError: Invalid or unexpected token" because Vite's shebang
+#     stripper leaves the \r behind. This took out both scripts/*.test.mjs
+#     suites while `node --check` on the same files passed.
+#   * `npm run format:check` reported 244 frontend files, every one of them
+#     line-endings-only — .prettierrc pins endOfLine: lf.
+#   * infra/runner-image/entrypoint.sh is COPY'd into the CI runner image. A
+#     CRLF shebang there makes the container fail to exec.
+#
+# `eol=lf` rather than a bare `text=auto` is the operative part: text=auto
+# normalizes what git stores, eol=lf also dictates what git checks out. It is
+# what makes the host platform stop mattering. .editorconfig already declares
+# end_of_line = lf; this is the layer that enforces it.
+* text=auto eol=lf
+
+# Windows shells need CRLF in batch files. None exist today — this keeps a
+# future one from being silently broken by the rule above.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary: no line-ending conversion and no attempted textual diff.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
