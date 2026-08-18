@@ -1283,7 +1283,7 @@ firewall window in `deploy-functions.yml` (runner IP add → deploy →
 always-run remove) authorized by a Storage Account Contributor grant scoped
 to exactly this account, and the `#trivy:ignore:AVD-AZU-0012` suppression
 deleted — the gate now enforces the control instead of excusing it. New
-required inputs `AZURE_RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` are
+required inputs `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` are
 in CHECKLIST §7. Verify after apply with a functions deploy AND a
 cold-start invocation. Original item below.
 **Files:** `infra/main.tf` (`azurerm_storage_account.functions`, `azurerm_subnet.functions_integration`), `.github/workflows/deploy-functions.yml`
@@ -1333,7 +1333,7 @@ user). Verify with an AI-path smoke before and after the final flip.
 ### ~~T-504 — Cosmos DB network firewall and key-auth hardening~~ RESOLVED in code (PR #108, apply pending)
 
 **Applied 2026-08-18.** Runner-path (0.0.0.0 sentinel) verification is
-pending the AZURE_CLIENT_ID/TENANT/SUBSCRIPTION repo variables (CHECKLIST
+pending the CLIENT_ID/TENANT_ID/SUBSCRIPTION_ID repo variables (CHECKLIST
 §7) — one green heal run closes it.
 
 Implemented: VNet filter + Functions-subnet rule, `Microsoft.AzureCosmosDB`

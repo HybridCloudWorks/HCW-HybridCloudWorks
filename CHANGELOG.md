@@ -17,6 +17,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Variable naming standard** (workload owner directive, 2026-08-18) —
+  operator-set configuration names are UPPER_SNAKE_CASE, **maximum 2
+  words** (3 only to break a real collision), with no provider prefixes:
+  `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`,
+  `APP_HOSTNAME`. Contractual names (`VITE_*`, `GITHUB_TOKEN`) are exempt.
+  Applied immediately to every workflow-consumed repository variable —
+  all were still unset, so the renames are free: `AZURE_CLIENT_ID`→
+  `CLIENT_ID`, `AZURE_TENANT_ID`→`TENANT_ID`, `AZURE_SUBSCRIPTION_ID`→
+  `SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`→`RESOURCE_GROUP`,
+  `FUNCTION_APP_HOSTNAME`→`APP_HOSTNAME` (`FUNCTIONS_STORAGE_ACCOUNT`
+  keeps its third word to avoid colliding with the content account).
+  The standard is codified in the `iac-repo-standardizer` agent — which
+  now sweeps `vars.*`/`secrets.*` on every standardization run — and in
+  the Wiki IaC-Repository-Standard page; CHECKLIST §7 carries the rule and
+  an `APP_HOSTNAME` row. (PR #114)
+
 - **Apply verification for the T-503–T-506 hardening (2026-08-18)** — the
   operator applied the full set in HCP Terraform; cold start passed,
   verifying the T-503 VNet runtime/package-pull path directly. A post-apply
