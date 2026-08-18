@@ -14,7 +14,7 @@
     "smoke:deployed": "node smoke-deployed.mjs"
   },
   "engines": {
-    "node": "22"
+    "node": ">=22"
   },
   "dependencies": {
     "@azure/cosmos": "^4.3.0",

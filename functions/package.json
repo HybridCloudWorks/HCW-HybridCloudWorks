@@ -11,7 +11,7 @@
     "deploy": "func azure functionapp publish hcw-functions-prod"
   },
   "engines": {
-    "node": "22"
+    "node": ">=22"
   },
   "dependencies": {
     "@aws-sdk/client-pricing": "^3.1111.0",
