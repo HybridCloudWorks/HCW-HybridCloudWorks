@@ -263,6 +263,123 @@ function usePublishWorkflow({ navigate, withImageOverride, setLocalLiveOverrides
   };
 }
 
+/**
+ * The amber panel summarising the last publish attempt.
+ *
+ * Lifted out of PublishedPage unchanged: it is six `|| 'n/a'` fallbacks and a
+ * guarded warnings line, which together were about a third of that component’s
+ * branch count while being entirely presentational.
+ */
+function PublishDiagnostics({ publishDebug }) {
+  if (!publishDebug) return null;
+
+  return (
+    <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+      <p className="font-medium">Latest Publish Diagnostics</p>
+      <p>Content: {publishDebug.contentId}</p>
+      <p>Blog: {publishDebug.blogId || 'n/a'}</p>
+      <p>Provider: {publishDebug.landingProvider || 'n/a'}</p>
+      <p>Slug: {publishDebug.slug || 'n/a'}</p>
+      <p>Path: {publishDebug.curatedSubpagePath || 'n/a'}</p>
+      <p>Expected URL: {publishDebug.expectedPublicUrl || 'n/a'}</p>
+      <p>Source URL: {publishDebug.sourceUrl || 'n/a'}</p>
+      {publishDebug.warnings?.length > 0 && (
+        <p>Warnings: {publishDebug.warnings.map((w) => w.warning).join(' | ')}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Pre-publish checklist modal.
+ *
+ * Every branch in here keys off whether the checklist passed, so the whole
+ * subtree moves together. Rendering nothing without a candidate keeps the
+ * mount/unmount behaviour identical to the `{publishCandidate && ...}` guard it
+ * replaces.
+ */
+function PrePublishModal({
+  candidate,
+  failures,
+  autoPostSocial,
+  onAutoPostSocialChange,
+  onClose,
+  onPublishNow,
+}) {
+  if (!candidate) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="absolute inset-0" onClick={() => onClose()} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prepublish-modal-title"
+        className="relative w-full max-w-md rounded-2xl border bg-background shadow-2xl p-6 space-y-4"
+      >
+        <h2 id="prepublish-modal-title" className="text-lg font-semibold">
+          {failures.length === 0 ? 'Ready to publish' : 'Publish blocked'}
+        </h2>
+        <p className="text-sm text-muted-foreground truncate">
+          {candidate.Title || candidate.title || 'Untitled'}
+        </p>
+
+        {failures.length === 0 ? (
+          <p className="text-sm text-emerald-600 dark:text-emerald-400">
+            All pre-publish checks passed: hero image, title, summary, body length, and slug.
+          </p>
+        ) : (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+            <p className="text-sm font-medium text-destructive mb-2">
+              Fix these before publishing:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-sm text-destructive">
+              {failures.map((failure) => (
+                <li key={failure}>{failure}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {failures.length === 0 && (
+          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoPostSocial}
+              onChange={(e) => onAutoPostSocialChange(e.target.checked)}
+              className="h-4 w-4 rounded border-border accent-primary"
+            />
+            Auto-post to Social — open Social Hub compose after publish
+          </label>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" size="sm" onClick={() => onClose()}>
+            {failures.length === 0 ? 'Cancel' : 'Close'}
+          </Button>
+          {failures.length > 0 && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={ADMIN_ROUTES.EDITOR.replace(':id', candidate.id)}>Open Editor</Link>
+            </Button>
+          )}
+          {failures.length === 0 && (
+            <Button
+              size="sm"
+              onClick={() => {
+                const item = candidate;
+                onClose();
+                onPublishNow(item);
+              }}
+            >
+              Publish Now
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PublishedPage() {
   const navigate = useNavigate();
   const { authReady } = useAuthReady();
@@ -422,21 +539,7 @@ export default function PublishedPage() {
         {queryErrorMessage && <p className="text-sm text-destructive mt-1">{queryErrorMessage}</p>}
         {publishError && <p className="text-sm text-destructive mt-1">{publishError}</p>}
         {imageError && <p className="text-sm text-destructive mt-1">{imageError}</p>}
-        {publishDebug && (
-          <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            <p className="font-medium">Latest Publish Diagnostics</p>
-            <p>Content: {publishDebug.contentId}</p>
-            <p>Blog: {publishDebug.blogId || 'n/a'}</p>
-            <p>Provider: {publishDebug.landingProvider || 'n/a'}</p>
-            <p>Slug: {publishDebug.slug || 'n/a'}</p>
-            <p>Path: {publishDebug.curatedSubpagePath || 'n/a'}</p>
-            <p>Expected URL: {publishDebug.expectedPublicUrl || 'n/a'}</p>
-            <p>Source URL: {publishDebug.sourceUrl || 'n/a'}</p>
-            {publishDebug.warnings?.length > 0 && (
-              <p>Warnings: {publishDebug.warnings.map((w) => w.warning).join(' | ')}</p>
-            )}
-          </div>
-        )}
+        <PublishDiagnostics publishDebug={publishDebug} />
       </div>
 
       <Card>
@@ -638,82 +741,14 @@ export default function PublishedPage() {
       )}
 
       {/* Pre-publish validation checklist modal */}
-      {publishCandidate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div
-            className="absolute inset-0"
-            onClick={() => setPublishCandidate(null)}
-            aria-hidden="true"
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="prepublish-modal-title"
-            className="relative w-full max-w-md rounded-2xl border bg-background shadow-2xl p-6 space-y-4"
-          >
-            <h2 id="prepublish-modal-title" className="text-lg font-semibold">
-              {publishFailures.length === 0 ? 'Ready to publish' : 'Publish blocked'}
-            </h2>
-            <p className="text-sm text-muted-foreground truncate">
-              {publishCandidate.Title || publishCandidate.title || 'Untitled'}
-            </p>
-
-            {publishFailures.length === 0 ? (
-              <p className="text-sm text-emerald-600 dark:text-emerald-400">
-                All pre-publish checks passed: hero image, title, summary, body length, and slug.
-              </p>
-            ) : (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-                <p className="text-sm font-medium text-destructive mb-2">
-                  Fix these before publishing:
-                </p>
-                <ul className="list-disc pl-5 space-y-1 text-sm text-destructive">
-                  {publishFailures.map((failure) => (
-                    <li key={failure}>{failure}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {publishFailures.length === 0 && (
-              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={autoPostSocial}
-                  onChange={(e) => setAutoPostSocial(e.target.checked)}
-                  className="h-4 w-4 rounded border-border accent-primary"
-                />
-                Auto-post to Social — open Social Hub compose after publish
-              </label>
-            )}
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setPublishCandidate(null)}>
-                {publishFailures.length === 0 ? 'Cancel' : 'Close'}
-              </Button>
-              {publishFailures.length > 0 && (
-                <Button size="sm" variant="outline" asChild>
-                  <Link to={ADMIN_ROUTES.EDITOR.replace(':id', publishCandidate.id)}>
-                    Open Editor
-                  </Link>
-                </Button>
-              )}
-              {publishFailures.length === 0 && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    const item = publishCandidate;
-                    setPublishCandidate(null);
-                    handlePublishNow(item);
-                  }}
-                >
-                  Publish Now
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <PrePublishModal
+        candidate={publishCandidate}
+        failures={publishFailures}
+        autoPostSocial={autoPostSocial}
+        onAutoPostSocialChange={setAutoPostSocial}
+        onClose={() => setPublishCandidate(null)}
+        onPublishNow={handlePublishNow}
+      />
 
       <ConfirmModal
         open={Boolean(unpublishTarget)}

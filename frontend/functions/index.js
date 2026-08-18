@@ -248,19 +248,35 @@ exports.getPlatformHealth = onRequest(
   }
 );
 
-function getMcpAuthError(err, fallbackMessage, serverId = null) {
-  const status = err?.response?.status;
-  const upstreamError = err?.response?.data?.error;
-  const upstreamDescription = err?.response?.data?.error_description;
-  const message = err?.message || '';
-  const invalidToken =
-    upstreamError === 'invalid_token' ||
-    /invalid[_\s-]?token/i.test(upstreamDescription || '') ||
-    /invalid[_\s-]?token/i.test(message) ||
-    /expired token/i.test(upstreamDescription || '') ||
-    /expired token/i.test(message);
+// An expired or revoked token is reported inconsistently across MCP servers:
+// sometimes as a structured error code, sometimes only in free text, and in
+// either the description or the message. Both spellings are checked against
+// both fields — the same four tests as before, expressed as a matrix.
+const INVALID_TOKEN_PATTERNS = [/invalid[_\s-]?token/i, /expired token/i];
 
-  if (status === 401 || status === 402 || invalidToken) {
+function isInvalidTokenError({ upstreamError, upstreamDescription, message }) {
+  if (upstreamError === 'invalid_token') return true;
+  const fields = [upstreamDescription || '', message];
+  return INVALID_TOKEN_PATTERNS.some((pattern) => fields.some((field) => pattern.test(field)));
+}
+
+// Every optional-chain hop and every || fallback is a branch, so lifting the
+// field reads and the token heuristic out leaves getMcpAuthError as just the
+// status/serverId decision it is meant to be.
+function readMcpErrorFields(err) {
+  return {
+    status: err?.response?.status,
+    upstreamError: err?.response?.data?.error,
+    upstreamDescription: err?.response?.data?.error_description,
+    message: err?.message || '',
+  };
+}
+
+function getMcpAuthError(err, fallbackMessage, serverId = null) {
+  const fields = readMcpErrorFields(err);
+  const { status, upstreamDescription, message } = fields;
+
+  if (status === 401 || status === 402 || isInvalidTokenError(fields)) {
     // Only surface Plaud-specific reconnect instructions for the Plaud server.
     if (serverId === 'plaud') {
       return {
@@ -413,6 +429,70 @@ async function mcpHttpRpc(serverId, url, rpcBody, authHeaders) {
   return parseMcpResponseBody(bodyText);
 }
 
+// ── SSE frame parsing, split out of the mcpSseRpc executor ────────────────────
+//
+// The executor below is a state machine over a byte stream; inlining the frame
+// parsing put every parse branch on the same function as the connection
+// lifecycle. These four helpers are the parsing half, and being pure they are
+// directly testable in a way the executor is not.
+
+/**
+ * Split an SSE buffer into { event, data } frames, returning the unconsumed
+ * tail. `event:` applies to the frames that follow it within the same buffer,
+ * which is the behaviour of the inline loop this replaces.
+ */
+function drainSseFrames(buffer) {
+  const bufferLines = buffer.split('\n');
+  const tail = bufferLines.pop();
+  const frames = [];
+  let currentEvent = '';
+  for (const line of bufferLines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('event:')) {
+      currentEvent = trimmed.slice(6).trim();
+    } else if (trimmed.startsWith('data:')) {
+      frames.push({ event: currentEvent, data: trimmed.slice(5).trim() });
+    }
+  }
+  return { frames, tail };
+}
+
+/** The frame that advertises where to POST — only meaningful before one is known. */
+function isSseEndpointFrame(postUrl, { event, data }) {
+  return (
+    !postUrl && (event === 'endpoint' || data.startsWith('/') || data.startsWith('http'))
+  );
+}
+
+/** The welcome/keepalive frame that signals the endpoint is ready to accept the POST. */
+function isSseReadyFrame(postUrl, requestSent, { data }) {
+  return (
+    Boolean(postUrl) &&
+    !requestSent &&
+    (data.includes('SSE Connection established') || data.includes('notifications/message'))
+  );
+}
+
+/** Absolute POST URL for a frame, falling back to the raw value if it will not parse. */
+function resolveSsePostUrl(data, sseUrl) {
+  try {
+    return new URL(data, sseUrl).toString();
+  } catch {
+    return data;
+  }
+}
+
+/** The JSON-RPC envelope for our request id, or null for any other frame. */
+function matchSseRpcResponse(data, targetId) {
+  if (!data.startsWith('{')) return null;
+  try {
+    const msg = JSON.parse(data);
+    return msg.id === targetId ? msg : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Executes an MCP JSON-RPC call over SSE transport (Firecrawl, Replicate).
  *
@@ -503,52 +583,28 @@ function mcpSseRpc(sseUrl, authHeaders, rpcBody) {
         }
 
         sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split('\n');
-        sseBuffer = lines.pop();
+        const { frames, tail } = drainSseFrames(sseBuffer);
+        sseBuffer = tail;
 
-        let currentEvent = '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('event:')) {
-            currentEvent = trimmed.slice(6).trim();
-          } else if (trimmed.startsWith('data:')) {
-            const dataVal = trimmed.slice(5).trim();
-
-            // Discover the POST endpoint
-            if (
-              !postUrl &&
-              (currentEvent === 'endpoint' || dataVal.startsWith('/') || dataVal.startsWith('http'))
-            ) {
-              try {
-                postUrl = new URL(dataVal, sseUrl).toString();
-              } catch {
-                postUrl = dataVal;
-              }
-              if (!readyTimer) {
-                readyTimer = setTimeout(sendRequest, 1500);
-              }
+        for (const frame of frames) {
+          // Discover the POST endpoint
+          if (isSseEndpointFrame(postUrl, frame)) {
+            postUrl = resolveSsePostUrl(frame.data, sseUrl);
+            if (!readyTimer) {
+              readyTimer = setTimeout(sendRequest, 1500);
             }
+          }
 
-            // Connection established / Welcome message
-            if (
-              postUrl &&
-              !requestSent &&
-              (dataVal.includes('SSE Connection established') ||
-                dataVal.includes('notifications/message'))
-            ) {
-              if (readyTimer) clearTimeout(readyTimer);
-              readyTimer = setTimeout(sendRequest, 1000);
-            }
+          // Connection established / Welcome message
+          if (isSseReadyFrame(postUrl, requestSent, frame)) {
+            if (readyTimer) clearTimeout(readyTimer);
+            readyTimer = setTimeout(sendRequest, 1000);
+          }
 
-            // Match target response by ID
-            if (dataVal.startsWith('{')) {
-              try {
-                const msg = JSON.parse(dataVal);
-                if (msg.id === targetId) {
-                  done(msg, null);
-                }
-              } catch (_) {}
-            }
+          // Match target response by ID
+          const matched = matchSseRpcResponse(frame.data, targetId);
+          if (matched) {
+            done(matched, null);
           }
         }
       }
@@ -2749,6 +2805,219 @@ function resolvePromptPagePath(provider, type) {
   return `${p}_${suffix}`;
 }
 
+/**
+ * Gather raw tag candidates from an article.
+ *
+ * Ingest paths populate wildly different fields, so every known source is
+ * pulled and flattened — arrays of strings, arrays of {name|label|title|value}
+ * objects, delimiter-separated strings, and plain string maps. Empty strings
+ * are deliberately kept: the caller passes these straight into applyMatrix as
+ * rawTags, and filtering here would change what that sees.
+ *
+ * Extracted verbatim from generateReviewHeroImage, where this loop alone
+ * accounted for most of the branch count.
+ */
+function collectTagCandidates(article) {
+  const tagSources = [
+    article.keyTopics,
+    article.tags,
+    article.Tags,
+    article.categories,
+    article.Categories,
+    article.category,
+    article.Category,
+    article.topics,
+    article.keywords,
+    article.Keywords,
+    article.services,
+    article.products,
+    article.awsServices,
+    article.azureServices,
+    article.gcpServices,
+    article.labels,
+    article.taxonomy,
+  ];
+  const collected = [];
+  for (const src of tagSources) {
+    if (!src) continue;
+    if (Array.isArray(src)) {
+      for (const v of src) {
+        if (typeof v === 'string') collected.push(v);
+        else if (v && typeof v === 'object') {
+          collected.push(v.name || v.label || v.title || v.value || '');
+        }
+      }
+    } else if (typeof src === 'string') {
+      src.split(/[,|;]/).forEach((v) => collected.push(v));
+    } else if (typeof src === 'object') {
+      Object.values(src).forEach((v) => {
+        if (typeof v === 'string') collected.push(v);
+      });
+    }
+  }
+  return collected;
+}
+
+/**
+ * Resolve a page path to its prompt pair.
+ *
+ * Authoritative source is image_prompt_pages/{pageDocId} -> (setName,
+ * promptName); the legacy fallback is a self-contained image_prompts/{pageDocId}
+ * doc. Because each miss is a distinct 404 for the caller, failures come back as
+ * { status, error } rather than being thrown or logged — the handler still sends
+ * exactly the statuses and messages it sent inline.
+ */
+async function resolveHeroPromptPair(db, pagePath) {
+  let setName = '';
+  let promptName = '';
+  let primaryPrompt = '';
+  let secondaryPrompt = '';
+  let slotTemplates = {};
+
+  const assignmentSnap = await db.collection('image_prompt_pages').doc(pagePath).get();
+  if (assignmentSnap.exists) {
+    const assign = assignmentSnap.data() || {};
+    setName = String(assign.setName || '').trim();
+    promptName = String(assign.promptName || '').trim();
+  }
+
+  if (setName && promptName) {
+    const setSnap = await db.collection('image_prompt_sets').doc(setName).get();
+    if (!setSnap.exists) {
+      return {
+        status: 404,
+        error: `Assigned set "${setName}" not found in image_prompt_sets.`,
+      };
+    }
+    primaryPrompt = String(setSnap.data()?.primaryPrompt || '').trim();
+
+    const nameSnap = await db
+      .collection('image_prompt_sets')
+      .doc(setName)
+      .collection('prompts')
+      .doc(promptName)
+      .get();
+    if (!nameSnap.exists) {
+      return {
+        status: 404,
+        error: `Assigned prompt name "${promptName}" not found under set "${setName}".`,
+      };
+    }
+    const nameData = nameSnap.data() || {};
+    secondaryPrompt = String(nameData.additionalParameters || '').trim();
+    slotTemplates = nameData.slotTemplates || {};
+  } else {
+    // Legacy fallback to self-contained doc
+    const legacySnap = await db.collection('image_prompts').doc(pagePath).get();
+    if (!legacySnap.exists) {
+      return {
+        status: 404,
+        error: `No prompt assignment found for ${pagePath} — assign a Prompt Set and Prompt Name in Prompts admin.`,
+      };
+    }
+    const legacy = legacySnap.data() || {};
+    primaryPrompt = String(legacy.primaryPrompt || '').trim();
+    secondaryPrompt = String(legacy.secondaryPrompt || '').trim();
+  }
+
+  if (!primaryPrompt && !secondaryPrompt) {
+    return {
+      status: 400,
+      error: `Prompt pair for ${pagePath} has no primary/secondary text.`,
+    };
+  }
+
+  return { setName, promptName, primaryPrompt, secondaryPrompt, slotTemplates };
+}
+
+/** The four article fields the hero prompt needs, across every field spelling. */
+function readHeroArticleFields(article) {
+  return {
+    provider: article.cloudProvider || article['Cloud Provider'] || article.provider || '',
+    type: article.type || article.contentType || 'blog',
+    title: article.Title || article.title || '',
+    summary: article.Summary || article.summary || '',
+  };
+}
+
+/**
+ * Assemble the image-generation prompt. Every section is optional except the
+ * character/style header, the title and the output directive; falsy sections
+ * drop out via filter(Boolean), exactly as they did inline.
+ */
+function buildHeroPrompt({
+  primaryPrompt,
+  secondaryPrompt,
+  heroSlotTemplate,
+  title,
+  summary,
+  allTags,
+  promptAugmentations,
+}) {
+  return [
+    `CHARACTER & STYLE:\n${primaryPrompt}`,
+    secondaryPrompt && `INSTRUCTIONS:\n${secondaryPrompt}`,
+    heroSlotTemplate && `SLOT:\n${heroSlotTemplate}`,
+    `ARTICLE TITLE: ${title}`,
+    summary && `ARTICLE SUMMARY: ${summary}`,
+    allTags.length > 0 && `TAGS / SERVICES TO REPRESENT: ${allTags.join(', ')}`,
+    promptAugmentations.length > 0 &&
+      `SCENE AUGMENTATIONS:\n- ${promptAugmentations.join('\n- ')}`,
+    'OUTPUT: Hero image, 16:9 aspect ratio, no text overlay other than official vendor logos.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** Field mask written back to the content doc after a successful generation. */
+function buildHeroContentUpdate(publicUrl, webp, finalPrompt) {
+  return {
+    altCoverImage: publicUrl,
+    altCoverImageVariants: webp || null,
+    altCoverImagePrompt: finalPrompt,
+    altCoverImageGeneratedAt: admin.firestore.FieldValue.serverTimestamp(),
+    altCoverImageError: admin.firestore.FieldValue.delete(),
+    [`aiImageUrls.hero`]: publicUrl,
+    [`aiImageVariants.hero`]: webp || null,
+    [`aiImageHistory.hero`]: admin.firestore.FieldValue.arrayUnion(publicUrl),
+  };
+}
+
+/** Audit row appended to generated_content_images for each generated hero. */
+function buildGeneratedImageRecord({
+  contentId,
+  publicUrl,
+  webp,
+  title,
+  provider,
+  type,
+  finalPrompt,
+  pagePath,
+  setName,
+  promptName,
+  allTags,
+  actor,
+}) {
+  return {
+    contentId,
+    articleId: contentId,
+    slot: 'hero',
+    imageUrl: publicUrl,
+    ...(webp && { imageVariants: webp }),
+    title,
+    provider,
+    contentType: type,
+    sourceCollection: 'content',
+    prompt: finalPrompt,
+    promptPagePath: pagePath,
+    promptSetName: setName || null,
+    promptName: promptName || null,
+    customTags: allTags,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdBy: actor.email || actor.uid || 'admin',
+  };
+}
+
 exports.generateReviewHeroImage = onRequest(
   {
     region: 'us-central1',
@@ -2776,8 +3045,7 @@ exports.generateReviewHeroImage = onRequest(
       return res.status(404).json({ success: false, error: `content/${contentId} not found` });
     }
     const article = contentSnap.data() || {};
-    const provider = article.cloudProvider || article['Cloud Provider'] || article.provider || '';
-    const type = article.type || article.contentType || 'blog';
+    const { provider, type, title, summary } = readHeroArticleFields(article);
 
     const pagePath = resolvePromptPagePath(provider, type);
     if (!pagePath) {
@@ -2786,112 +3054,19 @@ exports.generateReviewHeroImage = onRequest(
         .json({ success: false, error: `Cannot resolve prompt page for provider="${provider}"` });
     }
 
-    // Resolve the page assignment → (setName, promptName).
-    // Authoritative source: image_prompt_pages/{pageDocId}.
-    // Legacy fallback: image_prompts/{pageDocId} (self-contained primary+secondary).
-    let setName = '';
-    let promptName = '';
-    let primaryPrompt = '';
-    let secondaryPrompt = '';
-    let slotTemplates = {};
-
-    const assignmentSnap = await db.collection('image_prompt_pages').doc(pagePath).get();
-    if (assignmentSnap.exists) {
-      const assign = assignmentSnap.data() || {};
-      setName = String(assign.setName || '').trim();
-      promptName = String(assign.promptName || '').trim();
+    // Resolve the page assignment → (setName, promptName), or bail with the
+    // status that resolution determined.
+    const promptPair = await resolveHeroPromptPair(db, pagePath);
+    if (promptPair.status) {
+      return res.status(promptPair.status).json({ success: false, error: promptPair.error });
     }
-
-    if (setName && promptName) {
-      const setSnap = await db.collection('image_prompt_sets').doc(setName).get();
-      if (!setSnap.exists) {
-        return res.status(404).json({
-          success: false,
-          error: `Assigned set "${setName}" not found in image_prompt_sets.`,
-        });
-      }
-      primaryPrompt = String(setSnap.data()?.primaryPrompt || '').trim();
-
-      const nameSnap = await db
-        .collection('image_prompt_sets')
-        .doc(setName)
-        .collection('prompts')
-        .doc(promptName)
-        .get();
-      if (!nameSnap.exists) {
-        return res.status(404).json({
-          success: false,
-          error: `Assigned prompt name "${promptName}" not found under set "${setName}".`,
-        });
-      }
-      const nameData = nameSnap.data() || {};
-      secondaryPrompt = String(nameData.additionalParameters || '').trim();
-      slotTemplates = nameData.slotTemplates || {};
-    } else {
-      // Legacy fallback to self-contained doc
-      const legacySnap = await db.collection('image_prompts').doc(pagePath).get();
-      if (!legacySnap.exists) {
-        return res.status(404).json({
-          success: false,
-          error: `No prompt assignment found for ${pagePath} — assign a Prompt Set and Prompt Name in Prompts admin.`,
-        });
-      }
-      const legacy = legacySnap.data() || {};
-      primaryPrompt = String(legacy.primaryPrompt || '').trim();
-      secondaryPrompt = String(legacy.secondaryPrompt || '').trim();
-    }
-
-    if (!primaryPrompt && !secondaryPrompt) {
-      return res.status(400).json({
-        success: false,
-        error: `Prompt pair for ${pagePath} has no primary/secondary text.`,
-      });
-    }
+    const { setName, promptName, primaryPrompt, secondaryPrompt, slotTemplates } = promptPair;
 
     const heroSlotTemplate = String(slotTemplates?.hero || '').trim();
 
-    const title = article.Title || article.title || '';
-    const summary = article.Summary || article.summary || '';
-
     // Robust tag gathering: many ingest paths populate different fields. Pull
     // from every known source so the prompt always has vendor/service signal.
-    const tagSources = [
-      article.keyTopics,
-      article.tags,
-      article.Tags,
-      article.categories,
-      article.Categories,
-      article.category,
-      article.Category,
-      article.topics,
-      article.keywords,
-      article.Keywords,
-      article.services,
-      article.products,
-      article.awsServices,
-      article.azureServices,
-      article.gcpServices,
-      article.labels,
-      article.taxonomy,
-    ];
-    const collected = [];
-    for (const src of tagSources) {
-      if (!src) continue;
-      if (Array.isArray(src)) {
-        for (const v of src) {
-          if (typeof v === 'string') collected.push(v);
-          else if (v && typeof v === 'object') {
-            collected.push(v.name || v.label || v.title || v.value || '');
-          }
-        }
-      } else if (typeof src === 'string') {
-        src.split(/[,|;]/).forEach((v) => collected.push(v));
-      } else if (typeof src === 'object') {
-        Object.values(src).forEach((v) => {
-          if (typeof v === 'string') collected.push(v);
-        });
-      }
-    }
+    const collected = collectTagCandidates(article);
 
     // Run the keyword matrix to (a) collapse synonyms into canonical tags and
     // (b) pull in directive sentences for known triggers (Kiro, AWS Backup,
@@ -2906,19 +3081,15 @@ exports.generateReviewHeroImage = onRequest(
     const allTags = matrixResult.all;
     const promptAugmentations = matrixResult.augmentations;
 
-    const finalPrompt = [
-      `CHARACTER & STYLE:\n${primaryPrompt}`,
-      secondaryPrompt && `INSTRUCTIONS:\n${secondaryPrompt}`,
-      heroSlotTemplate && `SLOT:\n${heroSlotTemplate}`,
-      `ARTICLE TITLE: ${title}`,
-      summary && `ARTICLE SUMMARY: ${summary}`,
-      allTags.length > 0 && `TAGS / SERVICES TO REPRESENT: ${allTags.join(', ')}`,
-      promptAugmentations.length > 0 &&
-        `SCENE AUGMENTATIONS:\n- ${promptAugmentations.join('\n- ')}`,
-      'OUTPUT: Hero image, 16:9 aspect ratio, no text overlay other than official vendor logos.',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const finalPrompt = buildHeroPrompt({
+      primaryPrompt,
+      secondaryPrompt,
+      heroSlotTemplate,
+      title,
+      summary,
+      allTags,
+      promptAugmentations,
+    });
 
     try {
       const imageUrl = await callReplicateWithFallback(replicateApiKey.value(), finalPrompt);
@@ -2929,35 +3100,24 @@ exports.generateReviewHeroImage = onRequest(
         filename
       );
 
-      await contentRef.update({
-        altCoverImage: publicUrl,
-        altCoverImageVariants: webp || null,
-        altCoverImagePrompt: finalPrompt,
-        altCoverImageGeneratedAt: admin.firestore.FieldValue.serverTimestamp(),
-        altCoverImageError: admin.firestore.FieldValue.delete(),
-        [`aiImageUrls.hero`]: publicUrl,
-        [`aiImageVariants.hero`]: webp || null,
-        [`aiImageHistory.hero`]: admin.firestore.FieldValue.arrayUnion(publicUrl),
-      });
+      await contentRef.update(buildHeroContentUpdate(publicUrl, webp, finalPrompt));
 
-      await db.collection('generated_content_images').add({
-        contentId,
-        articleId: contentId,
-        slot: 'hero',
-        imageUrl: publicUrl,
-        ...(webp && { imageVariants: webp }),
-        title,
-        provider,
-        contentType: type,
-        sourceCollection: 'content',
-        prompt: finalPrompt,
-        promptPagePath: pagePath,
-        promptSetName: setName || null,
-        promptName: promptName || null,
-        customTags: allTags,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        createdBy: actor.email || actor.uid || 'admin',
-      });
+      await db.collection('generated_content_images').add(
+        buildGeneratedImageRecord({
+          contentId,
+          publicUrl,
+          webp,
+          title,
+          provider,
+          type,
+          finalPrompt,
+          pagePath,
+          setName,
+          promptName,
+          allTags,
+          actor,
+        })
+      );
 
       return res.json({
         success: true,
@@ -4007,17 +4167,17 @@ exports.scrapeSkillsHubRss = onSchedule(
  */
 async function generateAltTexts(imageUrls) {
   if (process.env.CONTENTFORGE_ALT_TEXT_ENABLED !== 'true') {
-    console.log('[alt-text] disabled via env');
+    logger.info('[alt-text] disabled via env');
     return {};
   }
   if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
-    console.log('[alt-text] no image urls provided');
+    logger.info('[alt-text] no image urls provided');
     return {};
   }
 
   const results = {};
   const urls = imageUrls.slice(0, 5); // cap at 5 per article to bound cost
-  console.log(`[alt-text] processing ${urls.length} of ${imageUrls.length} image(s)`);
+  logger.info(`[alt-text] processing ${urls.length} of ${imageUrls.length} image(s)`);
 
   for (const url of urls) {
     try {
@@ -4028,7 +4188,7 @@ async function generateAltTexts(imageUrls) {
         imageBase64 = buf.toString('base64');
         if (url.toLowerCase().endsWith('.png')) mimeType = 'image/png';
         if (url.toLowerCase().endsWith('.webp')) mimeType = 'image/webp';
-        console.log(`[alt-text] downloaded ${url} (${buf.length} bytes, ${mimeType})`);
+        logger.info(`[alt-text] downloaded ${url} (${buf.length} bytes, ${mimeType})`);
       } catch (err) {
         console.warn(`[alt-text] download failed for ${url}: ${err?.message || err}`);
         continue; // unreachable image — skip
@@ -4047,7 +4207,7 @@ async function generateAltTexts(imageUrls) {
 
         if (altText && altText.trim().length > 0) {
           results[url] = altText.trim().slice(0, 125);
-          console.log(`[alt-text] ok ${url} -> "${results[url]}"`);
+          logger.info(`[alt-text] ok ${url} -> "${results[url]}"`);
         } else {
           console.warn(`[alt-text] empty response for ${url}`);
         }
@@ -4059,13 +4219,25 @@ async function generateAltTexts(imageUrls) {
     }
   }
 
-  console.log(`[alt-text] completed: ${Object.keys(results).length} of ${urls.length} succeeded`);
+  logger.info(`[alt-text] completed: ${Object.keys(results).length} of ${urls.length} succeeded`);
   return results;
 }
 
 // ============================================================================
 // R8 — GENERATE POST CONTENT (deferred from ingest, triggered at publish time)
 // ============================================================================
+
+/**
+ * The two inputs the analyser can work from, across the field spellings the
+ * various ingest paths write. Either one is sufficient; the caller rejects the
+ * request only when both are empty.
+ */
+function readPostContentSources(data) {
+  return {
+    markdownContent: data.content || data.postContent || '',
+    sourceUrl: data.sourceUrl || data.url || '',
+  };
+}
 
 /**
  * HTTP Cloud Function: generate or regenerate the postContent field for an
@@ -4114,8 +4286,7 @@ exports.generatePostContent = onRequest(
     }
 
     const data = snap.data();
-    const markdownContent = data.content || data.postContent || '';
-    const sourceUrl = data.sourceUrl || data.url || '';
+    const { markdownContent, sourceUrl } = readPostContentSources(data);
 
     if (!markdownContent && !sourceUrl) {
       res.status(400).json({ ok: false, error: 'Document has no content or sourceUrl to analyse' });
@@ -4458,6 +4629,79 @@ exports.refreshPlaudTokenNow = onCall(
   }
 );
 
+// ── Shared MCP request plumbing ──────────────────────────────────────────────
+//
+// mcpProxy and syncMcpTools differ only in the RPC method they call and what
+// they do with the result. Everything below was duplicated verbatim between
+// them, which is also why both handlers were over the complexity limit.
+
+/**
+ * Auth header for an MCP server. A stored oauthToken wins over an env-var API
+ * key. The BOM strip matters: tokens pasted from a file written on Windows can
+ * carry U+FEFF, which a server rejects as a malformed bearer token.
+ */
+function resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar }) {
+  let bearerToken = oauthToken || (apiKeyEnvVar ? process.env[apiKeyEnvVar] : null) || null;
+  if (typeof bearerToken === 'string') {
+    bearerToken = bearerToken.replace(/^\ufeff/, '').trim();
+  }
+  return bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {};
+}
+
+/** Dispatch a JSON-RPC body over whichever transport the server is configured for. */
+function callMcpRpc({ serverId, url, transport, authHeaders, rpcBody }) {
+  if (transport === 'sse') {
+    return mcpSseRpc(url, authHeaders, rpcBody);
+  }
+  return mcpHttpRpc(serverId, url, rpcBody, authHeaders);
+}
+
+/** Flatten an MCP result envelope — { content: [{ type:'text', text }] } — to text. */
+function extractMcpText(rawResult) {
+  if (!Array.isArray(rawResult?.content)) {
+    return JSON.stringify(rawResult ?? {});
+  }
+  return rawResult.content
+    .filter((c) => c?.type === 'text')
+    .map((c) => c.text)
+    .join('\n');
+}
+
+/**
+ * Failure body for a caller-visible MCP error. These go out as HTTP 200 with
+ * ok:false — the proxy call itself succeeded, the upstream tool did not.
+ */
+function mcpFailureBody(authFailure, extra = {}) {
+  return {
+    ok: false,
+    error: authFailure.error,
+    ...(authFailure.code ? { code: authFailure.code } : {}),
+    ...extra,
+  };
+}
+
+/** Normalize a tools/list response to the shape stored on the server doc. */
+function normalizeMcpTools(rpcResult) {
+  const tools = rpcResult?.result?.tools || [];
+  return tools.map((t) => ({
+    name: t.name || '',
+    description: t.description || '',
+    inputSchema: t.inputSchema || {},
+  }));
+}
+
+/** Record a failed probe on the server doc. Best-effort: never masks the original error. */
+function markMcpServerError(docRef, errMsg) {
+  return docRef
+    .update({
+      status: 'error',
+      lastTested: admin.firestore.FieldValue.serverTimestamp(),
+      lastError: errMsg,
+    })
+    .catch(() => {});
+}
+
+
 /**
  * mcpProxy — Proxies an MCP tool call server-side so credentials never reach the browser.
  *
@@ -4499,11 +4743,7 @@ exports.mcpProxy = onRequest(
     if (!url) return res.status(400).json({ ok: false, error: 'Server has no URL configured' });
 
     // Resolve auth token — stored oauthToken takes priority over env-var API key
-    let bearerToken = oauthToken || (apiKeyEnvVar ? process.env[apiKeyEnvVar] : null) || null;
-    if (typeof bearerToken === 'string') {
-      bearerToken = bearerToken.replace(/^\ufeff/, '').trim();
-    }
-    const authHeaders = bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {};
+    const authHeaders = resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar });
 
     const rpcBody = {
       jsonrpc: '2.0',
@@ -4514,19 +4754,11 @@ exports.mcpProxy = onRequest(
 
     let rpcResult;
     try {
-      if (transport === 'sse') {
-        rpcResult = await mcpSseRpc(url, authHeaders, rpcBody);
-      } else {
-        rpcResult = await mcpHttpRpc(serverId, url, rpcBody, authHeaders);
-      }
+      rpcResult = await callMcpRpc({ serverId, url, transport, authHeaders, rpcBody });
     } catch (err) {
       logger.error('[mcpProxy] error', { serverId, tool, message: err.message });
       const authFailure = getMcpAuthError(err, 'MCP tool call failed', serverId);
-      return res.status(200).json({
-        ok: false,
-        error: authFailure.error,
-        ...(authFailure.code ? { code: authFailure.code } : {}),
-      });
+      return res.status(200).json(mcpFailureBody(authFailure));
     }
 
     if (rpcResult?.error) {
@@ -4538,13 +4770,7 @@ exports.mcpProxy = onRequest(
     }
 
     const rawResult = rpcResult?.result;
-    // MCP result may be { content: [{ type:'text', text:'' }] }
-    const text = Array.isArray(rawResult?.content)
-      ? rawResult.content
-          .filter((c) => c?.type === 'text')
-          .map((c) => c.text)
-          .join('\n')
-      : JSON.stringify(rawResult ?? {});
+    const text = extractMcpText(rawResult);
 
     if (rawResult?.isError) {
       return res.status(200).json({ ok: false, error: text || 'MCP tool error' });
@@ -4588,58 +4814,28 @@ exports.syncMcpTools = onRequest(
     const { url, apiKeyEnvVar, oauthToken, transport } = snap.data();
     if (!url) return res.status(400).json({ ok: false, error: 'Server has no URL configured' });
 
-    let bearerToken = oauthToken || (apiKeyEnvVar ? process.env[apiKeyEnvVar] : null) || null;
-    if (typeof bearerToken === 'string') {
-      bearerToken = bearerToken.replace(/^\ufeff/, '').trim();
-    }
-    const authHeaders = bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {};
+    const authHeaders = resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar });
 
     const rpcBody = { jsonrpc: '2.0', method: 'tools/list', params: {}, id: 1 };
 
     let rpcResult;
     try {
-      if (transport === 'sse') {
-        rpcResult = await mcpSseRpc(url, authHeaders, rpcBody);
-      } else {
-        rpcResult = await mcpHttpRpc(serverId, url, rpcBody, authHeaders);
-      }
+      rpcResult = await callMcpRpc({ serverId, url, transport, authHeaders, rpcBody });
     } catch (err) {
       const errMsg = err.message || 'MCP tool sync failed';
       logger.error('[syncMcpTools] error', { serverId, url, message: errMsg });
-      await docRef
-        .update({
-          status: 'error',
-          lastTested: admin.firestore.FieldValue.serverTimestamp(),
-          lastError: errMsg,
-        })
-        .catch(() => {});
+      await markMcpServerError(docRef, errMsg);
       const authFailure = getMcpAuthError(err, errMsg, serverId);
-      return res.status(200).json({
-        ok: false,
-        error: authFailure.error,
-        ...(authFailure.code ? { code: authFailure.code } : {}),
-        tools: [],
-      });
+      return res.status(200).json(mcpFailureBody(authFailure, { tools: [] }));
     }
 
     if (rpcResult?.error) {
       const errMsg = rpcResult.error.message || `MCP error ${rpcResult.error.code ?? ''}`.trim();
-      await docRef
-        .update({
-          status: 'error',
-          lastTested: admin.firestore.FieldValue.serverTimestamp(),
-          lastError: errMsg,
-        })
-        .catch(() => {});
+      await markMcpServerError(docRef, errMsg);
       return res.status(200).json({ ok: false, error: errMsg, tools: [] });
     }
 
-    const tools = rpcResult?.result?.tools || [];
-    const normalized = tools.map((t) => ({
-      name: t.name || '',
-      description: t.description || '',
-      inputSchema: t.inputSchema || {},
-    }));
+    const normalized = normalizeMcpTools(rpcResult);
 
     await docRef.update({
       tools: normalized,

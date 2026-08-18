@@ -26,6 +26,34 @@ import { fetchPublicSnapshotItems } from '@/lib/publicApi';
  * - Virtual indicator → Show "Virtual"
  * - No location data → Show "Virtual"
  */
+// Pure date helpers, deliberately at module scope rather than inside the
+// component: defined in the body they get a fresh identity every render, which
+// makes them unusable as useEffect dependencies — the sort effect below calls
+// getDateTimestamp, and react-hooks/exhaustive-deps rightly flagged its absence
+// from that dep array. Neither helper closes over props or state.
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    // Accept either a bare YYYY-MM-DD or a full ISO timestamp; anchor at
+    // local noon so display dates do not drift across timezones.
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const [, year, month, day] = match;
+      return new Date(Number(year), Number(month) - 1, Number(day), 12);
+    }
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getDateTimestamp = (value) => {
+  const date = parseDateValue(value);
+  return date ? date.getTime() : 0;
+};
+
 const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -110,29 +138,6 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
     // Non-US: "City, Country" (skip intermediate parts like region/province)
     const [city] = parts;
     return `${city}, ${last}`;
-  };
-
-  const parseDateValue = (value) => {
-    if (!value) return null;
-    if (typeof value?.toDate === 'function') return value.toDate();
-    if (value instanceof Date) return value;
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      // Accept either a bare YYYY-MM-DD or a full ISO timestamp; anchor at
-      // local noon so display dates do not drift across timezones.
-      const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (match) {
-        const [, year, month, day] = match;
-        return new Date(Number(year), Number(month) - 1, Number(day), 12);
-      }
-    }
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  };
-
-  const getDateTimestamp = (value) => {
-    const date = parseDateValue(value);
-    return date ? date.getTime() : 0;
   };
 
   const formatDateLabel = (value) => {
