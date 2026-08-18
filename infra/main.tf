@@ -155,7 +155,11 @@ resource "azurerm_cosmosdb_account" "hcw" {
   # a key that may once have existed — disabling local auth is the durable
   # answer to it. Set the variable false only if plan review surfaces a key
   # consumer nobody remembered.
-  local_authentication_disabled = var.cosmos_local_auth_disabled
+  # local_authentication_enabled replaced the deprecated
+  # local_authentication_disabled and inverts its polarity, hence the negation.
+  # The variable keeps the "disabled" sense deliberately: it reads as the
+  # security posture being asserted, and renaming it belongs to T-507.
+  local_authentication_enabled = !var.cosmos_local_auth_disabled
 
   # Continuous backup (7-day tier is free on serverless) — point-in-time
   # restore instead of the periodic default. One-way conversion.
