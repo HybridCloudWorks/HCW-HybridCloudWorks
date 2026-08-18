@@ -37,7 +37,11 @@ resource "azurerm_log_analytics_workspace" "hcw" {
   resource_group_name = azurerm_resource_group.hcw.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
-  tags                = var.tags
+  # T-505: the plan's telemetry cost ceiling. When the cap trips, ingestion
+  # stops until the daily reset — Cosmos DataPlaneRequests (observability.tf)
+  # is the likeliest culprit; prune that category before raising the cap.
+  daily_quota_gb = 0.25
+  tags           = var.tags
 }
 
 # =============================================================================
@@ -120,6 +124,44 @@ resource "azurerm_cosmosdb_account" "hcw" {
   geo_location {
     location          = azurerm_resource_group.hcw.location
     failover_priority = 0
+  }
+
+  # T-504: the service firewall ADR-001/ADR-0008 traded Private Link away for.
+  # Data-plane access is allowed from exactly:
+  #   - the Functions integration subnet (the app's runtime path — requires
+  #     the Microsoft.AzureCosmosDB service endpoint on that subnet);
+  #   - Azure datacenter IPs when cosmos_allow_azure_datacenter_ips is true —
+  #     the documented "0.0.0.0" sentinel. This is what keeps the
+  #     heal-computed-properties workflow working from GitHub-hosted runners
+  #     (which run in Azure). Drop it once that job runs from an in-VNet
+  #     runner; it narrows exposure to Azure tenants, not the open internet;
+  #   - any operator IPs in cosmos_admin_ip_rules (smoke tier 2), empty in
+  #     steady state.
+  # Management-plane (ARM) operations — Terraform itself — are not gated by
+  # this firewall.
+  is_virtual_network_filter_enabled = true
+
+  virtual_network_rule {
+    id = azurerm_subnet.functions_integration.id
+  }
+
+  ip_range_filter = toset(concat(
+    var.cosmos_allow_azure_datacenter_ips ? ["0.0.0.0"] : [],
+    var.cosmos_admin_ip_rules,
+  ))
+
+  # T-504: keys off. The app is managed-identity-only (AAD data plane), the
+  # migration tooling uses DefaultAzureCredential, and REVIEW §0.2's worry is
+  # a key that may once have existed — disabling local auth is the durable
+  # answer to it. Set the variable false only if plan review surfaces a key
+  # consumer nobody remembered.
+  local_authentication_disabled = var.cosmos_local_auth_disabled
+
+  # Continuous backup (7-day tier is free on serverless) — point-in-time
+  # restore instead of the periodic default. One-way conversion.
+  backup {
+    type = "Continuous"
+    tier = "Continuous7Days"
   }
 
   # This account holds all migrated production data. A plan that wants to
@@ -440,7 +482,10 @@ resource "azurerm_subnet" "functions_integration" {
   # @Microsoft.KeyVault(...) app-setting references fail to resolve and
   # getSecret() returns nothing, so a missing credential looks like missing
   # data rather than a network denial.
-  service_endpoints = ["Microsoft.KeyVault"]
+  # Microsoft.AzureCosmosDB is the same story for the Cosmos account's VNet
+  # rule (T-504): without the endpoint the rule is inert and the firewall
+  # denies the Function App along with everyone else.
+  service_endpoints = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB"]
 
   delegation {
     name = "flex-consumption"
@@ -648,6 +693,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # -------------------------------------------------------------------------
 
     # AI generation — content drafting, scoring and image pipelines.
+    #
+    # Azure OpenAI is keyless (T-506): endpoint only, no AZURE_OPENAI_KEY —
+    # when lib/openai-client.js is wired for real it must authenticate with
+    # DefaultAzureCredential against this endpoint, not a key. The *_API_KEY
+    # settings below are third-party SaaS keys, a different thing.
+    "AZURE_OPENAI_ENDPOINT" = azurerm_cognitive_account.openai.endpoint
+
     "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
     "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
     "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
@@ -856,25 +908,30 @@ resource "azurerm_consumption_budget_resource_group" "hcw" {
     start_date = "2026-07-01T00:00:00Z"
   }
 
-  notification {
-    enabled        = true
-    threshold      = 50
-    operator       = "GreaterThanOrEqualTo"
-    contact_emails = [var.budget_alert_email]
+  # T-505: the approved threshold ladder (50/75/90/100 actual + forecast),
+  # routed through the ops action group as well as direct email. Five
+  # notifications is the budget API's maximum.
+  dynamic "notification" {
+    for_each = [50, 75, 90, 100]
+    content {
+      enabled        = true
+      threshold      = notification.value
+      operator       = "GreaterThanOrEqualTo"
+      threshold_type = "Actual"
+      contact_emails = [var.budget_alert_email]
+      contact_groups = [azurerm_monitor_action_group.ops.id]
+    }
   }
 
-  notification {
-    enabled        = true
-    threshold      = 80
-    operator       = "GreaterThanOrEqualTo"
-    contact_emails = [var.budget_alert_email]
-  }
-
+  # Forecasted overrun fires before the money is spent — the alert that
+  # actually leaves time to act.
   notification {
     enabled        = true
     threshold      = 100
     operator       = "GreaterThanOrEqualTo"
+    threshold_type = "Forecasted"
     contact_emails = [var.budget_alert_email]
+    contact_groups = [azurerm_monitor_action_group.ops.id]
   }
 }
 
