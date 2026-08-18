@@ -87,6 +87,33 @@ authoritative narrative version of this standard lives in the Wiki page
 - CAF-style names (`rg-`, `kv-`, `st…`) for new resources; never rename
   existing live resources to chase the convention.
 
+### Variable naming standard
+
+Every operator-set configuration name — GitHub Actions variables and
+secrets, Terraform variables, app settings this repository controls —
+follows one rule:
+
+- **UPPER_SNAKE_CASE, maximum 2 words; 3 only when 2 is genuinely
+  ambiguous.** `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`,
+  `RESOURCE_GROUP`, `APP_HOSTNAME`, `CI_RUNNER` — not
+  `AZURE_CLIENT_ID` or `MY_APP_FUNCTION_STORAGE_KEY`.
+- **No provider prefixes.** The repository targets one platform; `AZURE_`
+  on every name is stutter. Say what the value *is*, not whose cloud it
+  belongs to or where it is consumed.
+- **Three words only to break a real collision** — e.g.
+  `FUNCTIONS_STORAGE_ACCOUNT` exists because plain `STORAGE_ACCOUNT`
+  would collide with the content account.
+- **Contractual names are exempt, never renamed:** names a framework or
+  third party dictates (`VITE_*` build variables, `GITHUB_TOKEN`,
+  provider-required setting names) keep their contractual form.
+- Apply the standard at creation time. Renaming a *set* variable is a
+  coordinated change (update the setting and every consumer in one PR);
+  renaming an unset one is free — do it immediately.
+
+When standardizing a repository, sweep `vars.*` and `secrets.*` in every
+workflow plus the CHECKLIST inventory, rename what is unset, and list
+set-but-nonconforming names as coordinated-rename TODOs.
+
 ### Identity and state
 
 - State in a remote backend (HCP Terraform or `azurerm` backend with

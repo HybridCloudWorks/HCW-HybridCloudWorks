@@ -45,9 +45,9 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
 
       # T-503: the Functions host storage account is default-Deny, and this
       # runner has a public dynamic IP, so the deployment-package upload needs
@@ -63,7 +63,7 @@ jobs:
           RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
           echo "runner_ip=${RUNNER_IP}" >> "$GITHUB_OUTPUT"
           az storage account network-rule add \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
             --account-name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
             --ip-address "${RUNNER_IP}" \
             --output none
@@ -80,7 +80,7 @@ jobs:
         if: ${{ always() && steps.fw.outputs.runner_ip != '' }}
         run: |
           az storage account network-rule remove \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
             --account-name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
             --ip-address "${{ steps.fw.outputs.runner_ip }}" \
             --output none
@@ -90,7 +90,7 @@ jobs:
           echo "## 🚀 Azure Functions Deploy Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          FUNC_URL="https://${{ vars.FUNCTION_APP_HOSTNAME }}"
+          FUNC_URL="https://${{ vars.APP_HOSTNAME }}"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FUNC_URL/api/health" || echo "000")
 
           if [ "$STATUS" = "200" ]; then

@@ -65,6 +65,20 @@ the agent drift, this page wins — update the agent.
 | `IaC-Repository-Standard` | This page |
 | ADR register | One ADR per irreversible or material decision, written before implementation |
 
+### Variable naming
+
+| Rule | Example |
+| --- | --- |
+| UPPER_SNAKE_CASE, **max 2 words** (3 only when 2 is genuinely ambiguous) | `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`, `APP_HOSTNAME` |
+| No provider prefixes — the repo targets one platform; say what the value *is* | `CLIENT_ID`, not `AZURE_CLIENT_ID` |
+| Third word only to break a real collision | `FUNCTIONS_STORAGE_ACCOUNT` (vs the content storage account) |
+| Contractual names are exempt and never renamed | `VITE_*` build variables, `GITHUB_TOKEN` |
+| Apply at creation; renaming a *set* variable is a coordinated one-PR change across setting + consumers | — |
+
+Applies to GitHub Actions variables and secrets, Terraform variables, and
+app settings the repository controls. The `iac-repo-standardizer` agent
+enforces this on every standardization run.
+
 ## ALZ-readiness checklist
 
 - [ ] No management groups, subscription-level policy assignments, or deny
