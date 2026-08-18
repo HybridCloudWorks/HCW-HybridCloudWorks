@@ -111,6 +111,31 @@ const COMPOSITE_INDEXES = {
   ],
 };
 
+/**
+ * Documentation-only computedProperties blocks, carried in the generated spec
+ * so regeneration does not lose them. The real property is applied at runtime
+ * by `scripts/apply-computed-sortdate.mjs` (azurerm_cosmosdb_sql_container
+ * cannot express computedProperties); this records, on the containers that
+ * carry it, that the property exists and who owns it. Keep the container list
+ * in step with CONTAINERS in that script.
+ */
+const COMPUTED_PROPERTIES_DOC = {
+  content: [
+    {
+      name: 'cp_sortDate',
+      query:
+        '(applied by scripts/apply-computed-sortdate.mjs — azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; .github/workflows/heal-computed-properties.yml re-applies on infra pushes and every six hours)',
+    },
+  ],
+  blogs: [
+    {
+      name: 'cp_sortDate',
+      query:
+        '(applied by scripts/apply-computed-sortdate.mjs — azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; .github/workflows/heal-computed-properties.yml re-applies on infra pushes and every six hours)',
+    },
+  ],
+};
+
 /** Why a container exists when no documents are migrated into it. */
 const DISPOSITION_NOTE = {
   reseed: 'seed data — re-seeded on the far side, not migrated',
@@ -134,6 +159,9 @@ function build() {
       // null means "retain forever". Terraform omits default_ttl when null.
       default_ttl: CONTAINER_TTL_SECONDS[name] ?? null,
       note: note ?? null,
+      ...(COMPUTED_PROPERTIES_DOC[name]
+        ? { computedProperties: COMPUTED_PROPERTIES_DOC[name] }
+        : {}),
     });
   };
 

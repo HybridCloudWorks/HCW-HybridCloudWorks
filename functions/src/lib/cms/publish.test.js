@@ -284,6 +284,23 @@ describe('publishContent', () => {
     const statsPatch = store.patchDoc.mock.calls.find(([c]) => c === 'admin_config');
     expect(statsPatch[2].totals.published).toBe(5);
     expect(statsPatch[2].formats['deep dive'].published).toBe(1);
+    // admin_config is partitioned on a constant (/configScope) — defaulting
+    // the partition key to the document id would write into the wrong logical
+    // partition, so the call must pass it explicitly.
+    expect(statsPatch[3]).toEqual({ partitionKey: 'admin_config' });
+  });
+
+  it('stamps configScope when creating forge stats, so the doc lands in the constant partition', async () => {
+    const store = makeStore(readyDoc({ forgeMeta: { formatKey: 'deep dive' } }), {
+      readDoc: vi.fn(async (container) => {
+        if (container === 'admin_config') return null;
+        return readyDoc({ forgeMeta: { formatKey: 'deep dive' } });
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+    const statsUpsert = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_config');
+    expect(statsUpsert[1]).toMatchObject({ id: 'forge_stats', configScope: 'admin_config' });
   });
 
   it('400s an empty batch and denies without store calls', async () => {

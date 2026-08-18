@@ -199,6 +199,13 @@ async function runExport() {
         doc[target.partitionKeyFromParent] = parentId;
       }
 
+      // A container partitioned on a constant (admin_config) needs that
+      // constant stamped as a real field — Cosmos partitions on a document
+      // property, and the Firestore source documents do not carry it.
+      if (target.partitionKeyConstant) {
+        doc[target.partitionKey.slice(1)] = target.partitionKeyConstant;
+      }
+
       // Two source documents that sanitise to the same Cosmos id would silently
       // overwrite each other on upsert. Catch it here, at export time, where
       // the source is still available to disambiguate.
@@ -208,9 +215,9 @@ async function runExport() {
       // `/id` that reduces to the id itself; under `/contentId` two version
       // documents with the same id under different parents are legitimate and
       // must not be reported.
-      const partitionValue = target.partitionKeyFromParent
-        ? doc[target.partitionKeyFromParent]
-        : doc.id;
+      const partitionValue =
+        target.partitionKeyConstant ??
+        (target.partitionKeyFromParent ? doc[target.partitionKeyFromParent] : doc.id);
       const uniquenessKey = `${partitionValue}\u0000${doc.id}`;
 
       if (seen.has(uniquenessKey)) {
