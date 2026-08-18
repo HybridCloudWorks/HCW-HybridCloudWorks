@@ -23,7 +23,7 @@ work** — that is a valid state, not a missing document.
 | Medium | 8 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
-| Last updated | 2026-08-17 — IaC standardization pass added T-501, T-502 |
+| Last updated | 2026-08-18 — validation pass added T-503–T-506; T-502 resolved by ADR-0020 |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
@@ -1251,7 +1251,14 @@ full commit SHA with the version as a trailing comment. The new
 `iac-validate.yml` and `deploy-infra.yml` follow the split convention until
 this lands.
 
-### T-502 — Reconcile the Azure Verified Modules guardrail with the flat root module
+### ~~T-502 — Reconcile the Azure Verified Modules guardrail with the flat root module~~ RESOLVED
+
+Resolved by **ADR-0020** (2026-08-18): the flat native-provider root module is
+the ratified module strategy; ADR-0005's AVM clause is superseded (its OIDC
+delivery clauses stand), and the root README guardrail now reads "pin
+versions, keep resource addresses stable" instead of mandating AVM. Original
+item retained below for context.
+
 **Files:** `infra/*.tf`, root `README.md`, Wiki ADR register
 
 The README delivery guardrail says "Use reviewed, version-pinned Azure
@@ -1289,6 +1296,20 @@ network-allowed path); then set `default_action = "Deny"` with
 `bypass = ["AzureServices"]` and the subnet rule, and delete the ignore.
 Verify with a functions deploy AND a cold-start invocation before calling it
 done — the failure mode is a deploy that succeeds against stale state.
+
+### T-506 — Keyless Azure OpenAI
+**Files:** `infra/openai.tf`, `infra/outputs-openai.tf`, `infra/main.tf` (role assignment)
+
+ADR-0018 ratified the OpenAI account's provisioning but explicitly kept the
+keyless posture as unratified debt: `local_authentication_disabled` is unset,
+no data-plane RBAC grant exists, and `outputs-openai.tf` exports
+`primary_access_key` — into TFC state and run output — against the
+identity-first principle. In one PR: grant the Function App's managed
+identity **Cognitive Services OpenAI User** on the account, switch the
+consuming code path to credential-based auth if it still reads a key from
+Key Vault or app settings, delete the key output, then set
+`local_authentication_disabled = true` last (it breaks any residual key
+user). Verify with an AI-path smoke before and after the final flip.
 
 ### T-504 — Cosmos DB network firewall and key-auth hardening
 **Files:** `infra/main.tf` (`azurerm_cosmosdb_account.hcw`)
