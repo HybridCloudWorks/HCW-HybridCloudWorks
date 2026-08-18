@@ -67,6 +67,34 @@ variable "cosmos_db_account_name" {
   default     = "hcw-cosmos-prod"
 }
 
+variable "cosmos_local_auth_disabled" {
+  description = "Disable Cosmos key (local) authentication — AAD/managed-identity only. The durable answer to REVIEW §0.2. Set false only if plan review surfaces a key consumer."
+  type        = bool
+  default     = true
+}
+
+variable "cosmos_allow_azure_datacenter_ips" {
+  description = "Include the '0.0.0.0' sentinel in the Cosmos firewall, allowing Azure datacenter IPs. Required while heal-computed-properties runs on GitHub-hosted runners (which are Azure-hosted). Drop when that job moves in-VNet."
+  type        = bool
+  default     = true
+}
+
+variable "cosmos_admin_ip_rules" {
+  description = <<-EOT
+    Operator IPv4 addresses/CIDRs allowed through the Cosmos firewall, for
+    smoke tier 2 or live-data inspection (REVIEW §0.3). Same pattern as
+    admin_ip_rules on Key Vault: populate for the window, apply, work, empty
+    it, apply again. Empty is the correct steady state.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.cosmos_admin_ip_rules : can(cidrnetmask("${ip}/32")) || can(cidrnetmask(ip))])
+    error_message = "cosmos_admin_ip_rules entries must be IPv4 addresses or CIDR ranges."
+  }
+}
+
 # -----------------------------------------------------------------------------
 # Storage
 # -----------------------------------------------------------------------------

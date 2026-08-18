@@ -17,6 +17,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **T-504/T-505/T-506 — the security and observability remediation ADR-0018
+  refused to ratify, now implemented in Terraform** (apply pending in HCP
+  Terraform). **Cosmos hardening (T-504):** VNet service firewall allowing
+  the Functions integration subnet (new `Microsoft.AzureCosmosDB` service
+  endpoint), the `0.0.0.0` Azure-datacenter sentinel so
+  heal-computed-properties keeps working from GitHub-hosted runners
+  (variable-gated to drop later), operator-window `cosmos_admin_ip_rules`,
+  `local_authentication_disabled` (variable, default true), and continuous
+  backup (free 7-day tier). **Observability layer (T-505):**
+  `infra/observability.tf` adds the `ag-hcw-ops-prod` action group and
+  diagnostic settings for Key Vault, Cosmos (the plan's four categories),
+  the content blob service and Azure OpenAI; the budget gains the approved
+  50/75/90/100 ladder plus a Forecasted-at-100 alert routed through the
+  group; Log Analytics gets the 0.25 GB/day cap. **Keyless OpenAI (T-506):**
+  custom subdomain (planned replacement of the stateless account + both
+  deployments — `openai-client.js` has zero importers, so nothing breaks),
+  `local_auth_enabled = false`, Cognitive Services OpenAI User for the
+  Function App identity, the primary-key output deleted, and an
+  `AZURE_OPENAI_ENDPOINT` app setting for future keyless wiring. Plan
+  v0.2-as-built dispositions updated to "resolved in code, closes on
+  apply". (PR #108)
+
 - **Infrastructure plan v0.2-as-built and ADRs 0018–0021** — implements the
   REVIEW §8.2 decision (workload owner, 2026-08-18) to supersede plan v0.1
   with a plan that describes the real system. `.azure/infrastructure-plan.json`

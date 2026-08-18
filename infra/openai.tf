@@ -11,7 +11,30 @@ resource "azurerm_cognitive_account" "openai" {
   kind                = "OpenAI"
   sku_name            = "S0"
 
+  # T-506: keyless. AAD data-plane auth requires a custom subdomain endpoint,
+  # and custom_subdomain_name forces replacement of an account created
+  # without one — the plan for this change WILL show a destroy/create pair on
+  # this account and both model deployments. That is expected and safe: the
+  # account is stateless, and functions/src/lib/openai-client.js has zero
+  # importers, so no runtime path exists to break. The endpoint moves from
+  # the regional URL to https://<subdomain>.openai.azure.com/.
+  custom_subdomain_name = "${var.project_name}-openai-${var.environment}"
+
+  # Keys off, permanently. The only consumers this account will ever have
+  # authenticate as the Function App's managed identity (role below). Note:
+  # the OPENAI_API_KEY app setting in main.tf is the OpenAI.com SaaS key, a
+  # different service — unaffected.
+  local_auth_enabled = false
+
   tags = var.tags
+}
+
+# The Function App's managed identity is the account's only data-plane
+# caller. Cognitive Services OpenAI User = inference only, no key listing.
+resource "azurerm_role_assignment" "func_openai" {
+  scope                = azurerm_cognitive_account.openai.id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 resource "azurerm_cognitive_deployment" "gpt4o" {

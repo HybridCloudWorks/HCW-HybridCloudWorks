@@ -17,13 +17,13 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 10 |
+| Open items | 7 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 8 |
+| Medium | 5 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
-| Last updated | 2026-08-18 — validation pass added T-503–T-506; T-502 resolved by ADR-0020 |
+| Last updated | 2026-08-18 — T-504/T-505/T-506 resolved in code (PR #108); T-503 remains open |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
@@ -1297,7 +1297,14 @@ network-allowed path); then set `default_action = "Deny"` with
 Verify with a functions deploy AND a cold-start invocation before calling it
 done — the failure mode is a deploy that succeeds against stale state.
 
-### T-506 — Keyless Azure OpenAI
+### ~~T-506 — Keyless Azure OpenAI~~ RESOLVED in code (PR #108, apply pending)
+
+Implemented: `custom_subdomain_name` (forces a planned replacement of the
+stateless account + deployments), `local_auth_enabled = false`, Cognitive
+Services OpenAI User for the Function App identity, key output deleted,
+`AZURE_OPENAI_ENDPOINT` app setting added. `lib/openai-client.js` has zero
+importers, so no runtime path breaks; it still speaks key-auth and MUST be
+rewritten to DefaultAzureCredential when AI is wired. Original item below.
 **Files:** `infra/openai.tf`, `infra/outputs-openai.tf`, `infra/main.tf` (role assignment)
 
 ADR-0018 ratified the OpenAI account's provisioning but explicitly kept the
@@ -1311,7 +1318,15 @@ Key Vault or app settings, delete the key output, then set
 `local_authentication_disabled = true` last (it breaks any residual key
 user). Verify with an AI-path smoke before and after the final flip.
 
-### T-504 — Cosmos DB network firewall and key-auth hardening
+### ~~T-504 — Cosmos DB network firewall and key-auth hardening~~ RESOLVED in code (PR #108, apply pending)
+
+Implemented: VNet filter + Functions-subnet rule, `Microsoft.AzureCosmosDB`
+service endpoint on the subnet, `ip_range_filter` with the `0.0.0.0`
+Azure-datacenter sentinel (keeps heal-computed-properties working from
+GitHub-hosted runners; variable-gated to drop later), operator-window
+`cosmos_admin_ip_rules`, `local_authentication_disabled` (variable, default
+true), continuous backup (7-day tier). Apply-time watch items are in the PR.
+Original item below.
 **Files:** `infra/main.tf` (`azurerm_cosmosdb_account.hcw`)
 
 The 2026-08-18 resource validation (Wiki: Resource-Validation-Report)
@@ -1334,7 +1349,15 @@ service firewall allowing only the Functions integration subnet, and
   outside the VNet — confirm what identity/path they use before Deny, or
   they join the firewall's casualty list.
 
-### T-505 — Implement the plan's observability control layer
+### ~~T-505 — Implement the plan's observability control layer~~ RESOLVED in code (PR #108, apply pending)
+
+Implemented in `infra/observability.tf` + `main.tf`: `ag-hcw-ops-prod`
+action group (common alert schema), budget thresholds 50/75/90/100 Actual +
+100 Forecasted routed to the group and email, Log Analytics
+`daily_quota_gb = 0.25`, diagnostic settings for Key Vault (AuditEvent),
+Cosmos (the plan's four categories, dedicated tables), content blob service
+(read/write/delete), and Azure OpenAI. Alert rules follow separately per
+the original contract. Original item below.
 **Files:** `infra/main.tf` (new resources)
 
 Also from the 2026-08-18 validation: the approved plan's operational alarm
