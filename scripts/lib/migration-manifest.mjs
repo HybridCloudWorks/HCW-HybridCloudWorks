@@ -211,6 +211,11 @@ export const COLLECTIONS = [
     note: 'Legacy, ~242 docs, reached only via a fallback path. Migration_Plan §3.6 decides whether this ships at all — until that decision lands, migrate it.',
   },
   { name: 'content_templates', disposition: 'migrate' },
+  {
+    name: 'content_stats_markers',
+    disposition: 'migrate',
+    note: 'Dashboard-stats trigger idempotency markers — one doc per content doc recording the position the counters were last moved to (Site-Main functions/cms/dashboard.js). Created in the 2026-08-17 trigger port, AFTER the 07f3123 review this manifest was built from; found by Site-Main scripts/inventory-collections.mjs on 2026-08-18. Migrated so the trigger stays idempotent across cutover instead of requiring an operator to remember recalculateDashboardStats.',
+  },
   { name: 'certifications', disposition: 'migrate', note: '~110 docs, partly machine-generated from Microsoft Learn.' },
   { name: 'certEvents', disposition: 'migrate' },
   { name: 'speakerevents', disposition: 'migrate', note: '~18 docs.' },
