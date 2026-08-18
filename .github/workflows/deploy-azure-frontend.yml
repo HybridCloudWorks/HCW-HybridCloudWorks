@@ -65,4 +65,5 @@ jobs:
           app_location: frontend
           output_location: dist
           skip_app_build: true
-          skip_api_build: true
+          # No skip_api_build here: it is not an input at the pinned action SHA,
+          # and with no api_location set there is no API build to skip anyway.
