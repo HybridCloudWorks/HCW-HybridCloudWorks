@@ -75,7 +75,11 @@ live — not on laptops, not on GitHub-hosted runners holding tokens.
 1. `terraform plan` again → **empty plan** (no immediate drift).
 2. Smoke: from the repository root, `node scripts/smoke-deployed.mjs`
    (see script header for flags) — anonymous surface filtered, admin guards
-   refusing, health endpoint answering.
+   refusing, health endpoint answering. The credential-free half of this
+   (DNS, TLS, frontend surface, smoke tier 1) is also runnable on demand as
+   the **Validate Deployed Surface** workflow
+   (`.github/workflows/validate-deployed.yml`, Actions → Run workflow);
+   tiers 2–3 need credentials and stay operator-run.
 3. Azure portal / CLI spot checks for the changed resources.
 4. Application Insights: no new exception cluster in the 30 minutes after
    apply; budget alert configuration intact after any resource-group-level

@@ -17,6 +17,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`validate-deployed.yml` — on-demand deployed-surface validation** — a
+  `workflow_dispatch` workflow running the externally observable half of the
+  Deployment Runbook's §4 verification from a GitHub-hosted runner: DNS for
+  the apex/`www`/`api-azure` names, TLS certificate inspection, frontend
+  status + security headers, and `scripts/smoke-deployed.mjs` tier 1
+  (anonymous, no side effects) against a dispatch-time base URL (default
+  `https://hybridcloudworks.com/api`). No secrets or cloud credentials —
+  same doctrine as `ci.yml`; smoke tiers 2–3 remain operator-run. Results
+  land in the job summary. The staged Deployment Runbook §4 references it.
+  (PR #105)
+
 - **IaC repository standardization** — the repository now carries the
   baseline governance surface expected of a permanent infrastructure repo:
   `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, `.github/CODEOWNERS`, a
