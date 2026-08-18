@@ -28,13 +28,13 @@ code, and listed so it is not reintroduced).
 
 | | |
 | --- | --- |
-| Total entries | 36 |
+| Total entries | 38 |
 | Critical config defects | 2 (`VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) — both unset, both required |
 | Verified | 0 |
 | Unverified | 21 |
-| Missing | 14 |
+| Missing | 16 |
 | Retired | 2 |
-| Last updated | 2026-08-09 |
+| Last updated | 2026-08-18 — T-503 firewall-window inputs added to §7 |
 
 Nothing is `Verified`: no Azure control plane, Terraform apply, or deployed
 environment has been reachable from any session to date (see
@@ -142,6 +142,8 @@ is publicly readable — no secret may ever be added to this section.**
 | `DOCKERHUB_USERNAME` | Registry account for the runner image | Yes (runner build) | GitHub secret | runner image workflow | `XXXXXXXXX` | Missing | |
 | `DOCKERHUB_TOKEN` | Registry push credential | Yes (runner build) | GitHub secret | runner image workflow | `XXXXX00000!!!!!XXXXX` | Missing | |
 | GitHub App id / private key | Runner JIT registration | Yes (runner) | GitHub App | `infra/runner-image/entrypoint.sh` | `000000` / `XXXXX00000!!!!!XXXXX` | Missing | Needs Administration: Read & write |
+| `AZURE_RESOURCE_GROUP` | Resource group for the T-503 storage firewall window | Yes (functions deploy) | GitHub repo variable | `.github/workflows/deploy-functions.yml` | `XX-XXXXXXXXXXXXX-XXXX` | Missing | Value is the `resource_group_name` Terraform variable |
+| `FUNCTIONS_STORAGE_ACCOUNT` | Host storage account for the T-503 firewall window | Yes (functions deploy) | GitHub repo variable | `.github/workflows/deploy-functions.yml` | `XXXXXXXXXXXXXXXX` | Missing | The `${project_name minus hyphens}funcsa` account |
 
 ---
 
