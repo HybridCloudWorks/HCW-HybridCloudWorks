@@ -395,6 +395,46 @@ baselines is a pricing-catalog decision, not a refactor.
 Not blocked work so much as **things an operator must do**, recorded so nothing is discovered at
 cutover.
 
+### 4.0 The bootstrap handshake — the prerequisite to every other item in this section
+
+**Status: open. This is the first thing an operator must do, and until 2026-08-18 it was written
+down nowhere.**
+
+`infra/providers.tf` declares the `azurerm` provider with no credential. That is correct — runs
+execute in HCP Terraform under dynamic provider credentials, which inject `ARM_CLIENT_ID`,
+`ARM_OIDC_TOKEN` and `ARM_USE_OIDC` into the run environment. But the identity those credentials
+assume has to exist first, and **nothing in this repository could create it**: `infra/oidc.tf`
+creates the *GitHub Actions* identity, which only comes into being after a successful apply.
+Terraform cannot create the credential Terraform authenticates with.
+
+A repository-wide grep for `ARM_CLIENT_ID`, `TFC_AZURE_*` or `app.terraform.io` returned nothing
+across `.tf`, `.yml` and `.md` before this entry. The gap was invisible in review because every
+individual file was correct; only the join between them was missing.
+
+**Resolved in the repository** by `scripts/bootstrap-terraform-oidc.ps1` plus section 0 of the
+Deployment Runbook and CHECKLIST §8. The script creates `rg-hcw-bootstrap`, the `id-hcw-terraform`
+user-assigned managed identity, two federated credentials against `https://app.terraform.io`
+(`run_phase:plan` and `run_phase:apply` — Entra matches subjects exactly, so one credential is not
+enough), and Contributor + Role Based Access Control Administrator at subscription scope.
+
+**Still requires an operator:** running it, and setting the four workspace environment variables it
+prints. Two decisions are recorded here rather than assumed:
+
+- **The bootstrap identity is not in Terraform state, by design.** If `infra/` managed it, a
+  destroy or a bad plan would lock the workspace out of the subscription irrecoverably. It also
+  means the identity will not appear in a drift plan — it is operator-owned infrastructure, and
+  the resource group name is the only handle on it.
+- **Managed identity, not app registration** — same reasoning as `infra/oidc.tf`: app registrations
+  need Application Administrator in Entra, which Azure Owner does not grant. Entra supports
+  federating a user-assigned managed identity to an arbitrary external issuer, so the whole chain
+  is creatable by an Azure Owner with no directory role.
+
+**Consequence for every "Verified" claim in this file and in CHECKLIST.md:** if this handshake has
+never been completed, no apply has ever run against this subscription and the platform does not
+exist yet, regardless of what the live site serves. The operator must confirm which state the
+subscription is actually in before section 4.2 (Key Vault seeding) or 4.3 (enabling the workflows)
+can start. Section 1.1 already records that no session has ever been able to check.
+
 ### 4.1 Required Terraform variables with no default
 
 Apply fails without all six. Three are sensitive and belong in Terraform Cloud workspace variables.

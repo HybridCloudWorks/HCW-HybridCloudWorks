@@ -28,13 +28,13 @@ code, and listed so it is not reintroduced).
 
 | | |
 | --- | --- |
-| Total entries | 42 |
-| Critical config defects | 2 (`VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) — both unset, both required |
+| Total entries | 46 |
+| Critical config defects | 3 (§8 as a set, `VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) |
 | Verified | 0 |
 | Unverified | 21 |
-| Missing | 20 |
+| Missing | 24 |
 | Retired | 2 |
-| Last updated | 2026-08-18 — §7 names standardized (2-word rule); APP_HOSTNAME added |
+| Last updated | 2026-08-18 — §8 added: the HCP Terraform → Azure credentials, previously recorded nowhere |
 
 Nothing is `Verified` *from an engineering session*: no Azure control plane
 has been reachable from any session to date (REVIEW.md §1.1–§1.2). Operator
@@ -159,8 +159,33 @@ prefixes. Contractual names (`VITE_*`, `GITHUB_TOKEN`) are exempt.
 
 ---
 
+## 8. HCP Terraform workspace — environment variables
+
+How Terraform itself authenticates to Azure. These are set in the
+`hybridcloudworks-azure` workspace as **environment** variables, not in
+GitHub and not as Terraform variables. Without them no run can reach Azure at
+all, which makes every other `Missing` entry in this file unreachable rather
+than merely unset — this is the first thing to provision, not the last.
+
+All four names are dictated by HashiCorp and Microsoft and are therefore
+**contractual**: exempt from the 2-word rule, never renamed.
+
+| Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `TFC_AZURE_PROVIDER_AUTH` | Switches the workspace to dynamic provider credentials | **Yes** | HCP Terraform workspace | HCP Terraform run environment | `true` | **Missing** | Absent ⇒ HCP Terraform never mints an OIDC token and the provider finds no credential |
+| `TFC_AZURE_RUN_CLIENT_ID` | Client id of `id-hcw-terraform`, the identity HCP Terraform assumes | **Yes** | `scripts/bootstrap-terraform-oidc.ps1` output | HCP Terraform run environment | `00000000-0000-0000-0000-000000000000` | **Missing** | Distinct from §7 `CLIENT_ID`, which is the GitHub Actions identity created by `infra/oidc.tf` |
+| `ARM_TENANT_ID` | Entra tenant for the token exchange | **Yes** | Entra directory | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `entra_tenant_id` Terraform variable |
+| `ARM_SUBSCRIPTION_ID` | Target subscription | **Yes** | Azure subscription | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `azure_subscription_id` Terraform variable |
+
+Bootstrap procedure — including the two federated credentials on
+`id-hcw-terraform` that these variables depend on — is section 0 of the
+[Deployment Runbook](.github/wiki/Deployment-Runbook.md).
+
+---
+
 ## Related
 
+- Bootstrap procedure: [Deployment Runbook](.github/wiki/Deployment-Runbook.md) §0
 - Seeding procedure: [REVIEW.md](REVIEW.md) §4.2 (Key Vault), §4.4 (runner), §4.5 (MSAL SPA)
 - Terraform variables without defaults: [REVIEW.md](REVIEW.md) §4.1
 - Narrative variable documentation: [Variables.md](Variables.md)

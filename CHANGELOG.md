@@ -15,6 +15,64 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **The HCP Terraform → Azure bootstrap, which existed nowhere.**
+  `infra/providers.tf` declares the `azurerm` provider with no credential —
+  correct, because runs execute under HCP Terraform dynamic provider
+  credentials — but the identity those credentials assume has to exist
+  first, and nothing in this repository could create it. `infra/oidc.tf`
+  creates the *GitHub Actions* identity, which only exists after a
+  successful apply. Terraform cannot create the credential Terraform
+  authenticates with. A repository-wide grep for `ARM_CLIENT_ID`,
+  `TFC_AZURE_*` and `app.terraform.io` across `.tf`, `.yml` and `.md`
+  returned nothing: the first apply had no documented path to authenticate,
+  and the gap was invisible to file-by-file review because every individual
+  file was correct and only the join between them was missing.
+
+  `scripts/bootstrap-terraform-oidc.ps1` closes it. It creates
+  `rg-hcw-bootstrap`, the `id-hcw-terraform` user-assigned managed identity,
+  two federated credentials against `https://app.terraform.io` — one per run
+  phase, because Entra matches token subjects exactly and case-sensitively
+  with no wildcards, so a single credential leaves every apply failing at
+  authentication while every plan succeeds — and Contributor plus Role Based
+  Access Control Administrator at subscription scope (Contributor cannot
+  create the role assignments `infra/` declares; RBAC Administrator cannot
+  grant Owner, so the identity cannot escalate itself).
+
+  A managed identity rather than an app registration, for the reason
+  `infra/oidc.tf` already documents: app registrations need Application
+  Administrator in Entra, which Azure Owner does not grant. The identity is
+  deliberately **outside Terraform state**, in its own resource group —
+  Terraform managing the credential it authenticates with means a destroy or
+  a bad plan locks the workspace out of the subscription with no way back.
+
+  The script is idempotent and preflights before it proposes anything: CLI
+  present, signed in, tenant matches, subscription visible, role-assignment
+  rights held, `Microsoft.ManagedIdentity` registered. Sign-in is performed
+  by the script rather than demanded of the operator — being signed in to a
+  different directory is the normal state for anyone working across tenants,
+  so it runs `az login --tenant` itself and re-reads the account afterwards,
+  because a directory switch also changes which subscriptions are visible.
+  `-DeviceCode` covers sessions with no browser of their own (SSH,
+  containers, Cloud Shell) and the case where the browser keeps reusing the
+  wrong cached account; the script falls back to it automatically when the
+  interactive flow fails, since that failure is environmental — no display,
+  no loopback — more often than it is a credential problem. It handles the
+  fresh-tenant case explicitly — a Global Administrator holds no Azure RBAC
+  by default, which produces errors that suggest the wrong fix, so
+  `-ElevateAccess` takes the documented one-time root-scope elevation, grants
+  Owner on the target subscription, and removes the root grant again.
+
+  Documented in Deployment Runbook §0 (which now tables the two OIDC
+  handshakes side by side — confusing them strands the operator hunting for a
+  `CLIENT_ID` that does not exist until after the first apply), CHECKLIST §8
+  (the four workspace environment variables, contractual and exempt from the
+  2-word rule), and REVIEW §4.0. The `iac-repo-standardizer` agent and the
+  IaC Repository Standard both gained a **bootstrap identity** section making
+  this the first thing audited on any repository, since the failure
+  generalizes to every credential-free IaC repo.
+
 ### Changed
 
 - **Every Terraform output renamed to the 2-word standard** (workload owner

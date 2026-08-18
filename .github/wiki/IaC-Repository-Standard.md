@@ -91,6 +91,34 @@ state backend or GitHub — report, never rename silently), or
 this on every standardization run, and also flags duplicate outputs for
 consolidation.
 
+## The bootstrap identity
+
+Every credential-free repository has exactly one credential it cannot create:
+the one the Terraform runner authenticates with. A configuration cannot
+provision the identity it needs in order to provision anything. Repositories
+routinely ship without this written down, because each file is individually
+correct and only the join between them is missing — the standard therefore
+makes the join a required artefact.
+
+| Rule | Why |
+| --- | --- |
+| A runnable bootstrap script exists in `scripts/`, idempotent, with a preflight that reports what is missing rather than failing on it | It runs once, years apart, usually by someone who has not read the repo |
+| The bootstrap identity is **excluded from Terraform state** and lives in its own resource group | If Terraform manages the credential it authenticates with, a destroy or bad plan locks the workspace out with no way back |
+| The provider block's *lack* of credentials carries a comment saying where they come from | Otherwise the next reader "fixes" it by adding a client secret |
+| The runbook's first section is bootstrap, and states plainly that nothing below it works until bootstrap is done | Ordering is the whole message |
+| Where two OIDC handshakes exist (runner→cloud and CI→cloud), the runbook tables them side by side | They are both called "the OIDC setup" and only one is in the repository; confusing them is the default failure |
+| The runner's own credentials are inventoried in CHECKLIST alongside application inputs | An unrecorded input is an input nobody provisions |
+| Prefer federating a **user-assigned managed identity** over an app registration | App registrations need Entra directory roles; cloud-resource Owner does not grant them. Managed identities are ordinary resources and federate to arbitrary external issuers |
+
+The preflight is what makes the script worth writing. Assume the operator has
+a directory created minutes ago and no resources anywhere: check the CLI, the
+sign-in, the tenant match, the subscription's visibility, the role assignments
+actually held, and the resource providers registered — and when one fails, say
+which command fixes it. In particular, detect the case where the operator
+administers the directory but holds no resource-plane RBAC at all; that is the
+normal state of a fresh tenant and it produces error messages that suggest the
+wrong fix.
+
 ## ALZ-readiness checklist
 
 - [ ] No management groups, subscription-level policy assignments, or deny
