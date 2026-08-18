@@ -69,15 +69,27 @@ the agent drift, this page wins — update the agent.
 
 | Rule | Example |
 | --- | --- |
-| UPPER_SNAKE_CASE, **max 2 words** (3 only when 2 is genuinely ambiguous) | `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`, `APP_HOSTNAME` |
-| No provider prefixes — the repo targets one platform; say what the value *is* | `CLIENT_ID`, not `AZURE_CLIENT_ID` |
-| Third word only to break a real collision | `FUNCTIONS_STORAGE_ACCOUNT` (vs the content storage account) |
-| Contractual names are exempt and never renamed | `VITE_*` build variables, `GITHUB_TOKEN` |
+| **Max 2 words** (3 only when 2 is genuinely ambiguous) | `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`, `APP_HOSTNAME` |
+| **Casing follows the language; the word count does not.** UPPER_SNAKE for GitHub, lower_snake for HCL | `CLIENT_ID` (GitHub) ↔ `client_id` (Terraform output) |
+| No provider prefixes — the repo targets one platform; say what the value *is* | `client_id`, not `github_deploy_client_id` |
+| Third word only to break a real collision | `app_principal_id` vs `deploy_principal_id`; `FUNCTIONS_STORAGE_ACCOUNT` vs the content account |
+| An output that feeds a GitHub variable mirrors its name | output `app_hostname` → variable `APP_HOSTNAME` |
+| Contractual names are exempt and never renamed | `VITE_*`, `GITHUB_TOKEN`, `process.env` app settings, provider-required attributes |
 | Apply at creation; renaming a *set* variable is a coordinated one-PR change across setting + consumers | — |
 
-Applies to GitHub Actions variables and secrets, Terraform variables, and
-app settings the repository controls. The `iac-repo-standardizer` agent
-enforces this on every standardization run.
+Applies to GitHub Actions variables and secrets, Terraform variables **and
+outputs**, and app settings the repository controls. Outputs count because
+they are operator-facing — someone reads them off the state backend's
+Outputs tab and pastes the value somewhere.
+
+Sweeps cover **every** file that declares a name, not a curated list:
+`output` blocks live in feature files (`ci-runner.tf`, `oidc.tf`), not only
+`outputs.tf`. Each name sorts into exactly one bucket — **safe now**
+(outputs; unset variables), **coordinated** (variables already set in the
+state backend or GitHub — report, never rename silently), or
+**contractual** (never touched). The `iac-repo-standardizer` agent enforces
+this on every standardization run, and also flags duplicate outputs for
+consolidation.
 
 ## ALZ-readiness checklist
 

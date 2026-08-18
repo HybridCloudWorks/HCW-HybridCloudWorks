@@ -93,10 +93,21 @@ Every operator-set configuration name — GitHub Actions variables and
 secrets, Terraform variables, app settings this repository controls —
 follows one rule:
 
-- **UPPER_SNAKE_CASE, maximum 2 words; 3 only when 2 is genuinely
-  ambiguous.** `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`,
-  `RESOURCE_GROUP`, `APP_HOSTNAME`, `CI_RUNNER` — not
-  `AZURE_CLIENT_ID` or `MY_APP_FUNCTION_STORAGE_KEY`.
+- **Maximum 2 words; 3 only when 2 is genuinely ambiguous.** `CLIENT_ID`,
+  `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`, `APP_HOSTNAME`,
+  `CI_RUNNER` — not `AZURE_CLIENT_ID` or `MY_APP_FUNCTION_STORAGE_KEY`.
+- **Casing follows the language, the word count does not.**
+  UPPER_SNAKE_CASE for GitHub Actions variables and secrets;
+  lower_snake_case for HCL (Terraform variables *and outputs*). The rule
+  being enforced is the word count — never rewrite HCL identifiers to
+  upper case to "comply".
+- **Terraform outputs are in scope.** They are operator-facing: someone
+  reads them off the state backend's Outputs tab and pastes the value
+  somewhere. Where an output feeds a GitHub variable, the two names
+  mirror each other — output `client_id` → variable `CLIENT_ID`, output
+  `app_hostname` → variable `APP_HOSTNAME`. Outputs are the *safest*
+  names to rename: no state impact, no runtime consumer — but grep the
+  whole repo for each name first, because comments and docs cite them.
 - **No provider prefixes.** The repository targets one platform; `AZURE_`
   on every name is stutter. Say what the value *is*, not whose cloud it
   belongs to or where it is consumed.
@@ -110,9 +121,24 @@ follows one rule:
   coordinated change (update the setting and every consumer in one PR);
   renaming an unset one is free — do it immediately.
 
-When standardizing a repository, sweep `vars.*` and `secrets.*` in every
-workflow plus the CHECKLIST inventory, rename what is unset, and list
-set-but-nonconforming names as coordinated-rename TODOs.
+When standardizing a repository, sweep **every** file that declares a name,
+not a curated list — `vars.*`/`secrets.*` across all workflows, `output`
+blocks in **every** `.tf` file (not just `outputs.tf`; they hide in
+feature files like `ci-runner.tf`), `variable` blocks, and the CHECKLIST
+inventory. Then sort each name into exactly one bucket:
+
+- **Safe now** — Terraform outputs, and any variable that is not yet set
+  anywhere. Rename immediately, updating every in-repo citation.
+- **Coordinated** — variables already set in the state backend or in
+  GitHub. The name must change in the setting and the code in one PR, so
+  report them as a table for a human to schedule; never rename silently.
+- **Contractual** — names a framework, provider, or running application
+  dictates: app settings read via `process.env`, `VITE_*`,
+  `GITHUB_TOKEN`, provider-required attribute names. Never touched.
+
+While sweeping, also flag **duplicate outputs** (same value under two
+names) for consolidation, and **collisions** where two distinct values
+would claim the same 2-word name — that is what the third word is for.
 
 ### Identity and state
 

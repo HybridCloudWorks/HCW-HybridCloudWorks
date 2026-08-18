@@ -37,7 +37,7 @@ Set these in the HCP Terraform Cloud workspace under **Variables**.
 
 | Secret Name | Description |
 |-------------|-------------|
-| `AZURE_STATIC_WEB_APPS_API_TOKEN` | SWA deployment token (output from Terraform: `static_web_app_api_key`) |
+| `AZURE_STATIC_WEB_APPS_API_TOKEN` | SWA deployment token (output from Terraform: `swa_token`) |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Firebase service account JSON for data migration only (Phase 4). Deleted after cutover. |
 
 ---
@@ -48,7 +48,7 @@ Non-sensitive values used by workflows.
 
 | Variable Name | Description | Example |
 |---------------|-------------|---------|
-| `FUNCTION_APP_HOSTNAME` | Azure Functions hostname for smoke test (output from Terraform: `azure_functions_hostname`) | `hcw-functions-prod.azurewebsites.net` |
+| `FUNCTION_APP_HOSTNAME` | Azure Functions hostname for smoke test (output from Terraform: `function_hostname`) | `hcw-functions-prod.azurewebsites.net` |
 | `VITE_ENTRA_CLIENT_ID` | Entra ID application client ID (public, safe in browser) | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
 | `VITE_ENTRA_TENANT_ID` | Entra ID tenant ID (public, safe in browser) | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
 | `VITE_SOCIAL_X_URL` | Twitter/X profile URL | `https://x.com/yourhandle` |
@@ -184,8 +184,8 @@ Run `terraform output` after `terraform apply` to get these values.
 
 | Output | Use |
 |--------|-----|
-| `cosmos_db_endpoint` | Set `COSMOS_ENDPOINT` in VPS agent `.env` |
-| `key_vault_uri` | Set `KEY_VAULT_URI` for local dev |
-| `function_app_url` | Set as GitHub variable `FUNCTION_APP_HOSTNAME` |
-| `static_web_app_api_key` | Set as GitHub secret `AZURE_STATIC_WEB_APPS_API_TOKEN` |
-| `functions_subnet_id` | Reference when adding additional service firewall rules |
+| `cosmos_endpoint` | Set `COSMOS_ENDPOINT` in VPS agent `.env` |
+| `vault_uri` | Set `KEY_VAULT_URI` for local dev |
+| `function_url` | Set as GitHub variable `FUNCTION_APP_HOSTNAME` |
+| `swa_token` | Set as GitHub secret `AZURE_STATIC_WEB_APPS_API_TOKEN` |
+| `subnet_id` | Reference when adding additional service firewall rules |

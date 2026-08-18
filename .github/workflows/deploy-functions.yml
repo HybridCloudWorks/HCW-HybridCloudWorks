@@ -36,11 +36,11 @@ jobs:
       # Federated OIDC — no stored credential. These three are repository
       # VARIABLES, not secrets: they identify the managed identity but grant
       # nothing without an OIDC token from this repo and ref. Their values come
-      # from the `github_deploy_client_id` Terraform output and the subscription
+      # from the `client_id` Terraform output and the subscription
       # and tenant the workspace targets.
       #
       # On AADSTS70021 ("no matching federated identity record found"), compare
-      # the token's subject against the `github_deploy_federated_subjects`
+      # the token's subject against the `federated_subjects`
       # output — the usual cause is a ref or repository name that has moved.
       - name: Azure Login
         uses: azure/login@v3
