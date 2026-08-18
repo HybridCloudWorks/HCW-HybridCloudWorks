@@ -40,26 +40,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR (mirror)
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Build (load locally for the scan gate)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: infra/runner-image
           load: true
@@ -69,7 +69,7 @@ jobs:
       # compare-to-latest is deliberately absent: this gate is absolute
       # (critical/high vulns fail), not relative to the previous build.
       - name: Docker Scout CVE gate
-        uses: docker/scout-action@v1
+        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1
         with:
           command: cves
           image: local/scan-candidate:latest
@@ -77,7 +77,7 @@ jobs:
           exit-code: true
 
       - name: Push to Docker Hub + GHCR mirror
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: infra/runner-image
           push: true
