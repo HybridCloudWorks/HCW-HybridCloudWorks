@@ -17,13 +17,13 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 6 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 5 |
+| Medium | 4 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
-| Last updated | 2026-08-18 — T-504/T-505/T-506 resolved in code (PR #108); T-503 remains open |
+| Last updated | 2026-08-18 — T-503 resolved in code (PR #111); the T-50x hardening series is complete in code |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
@@ -1273,7 +1273,19 @@ with an ADR that records why the flat module is the accepted shape
 Both are legitimate; the current state — a guardrail the implementation
 ignores — is not, because it reads as an audit finding.
 
-### T-503 — Network-restrict the Functions host storage account
+### ~~T-503 — Network-restrict the Functions host storage account~~ RESOLVED in code (PR #111, apply pending)
+
+Implemented: `Microsoft.Storage` service endpoint on the integration subnet,
+default-Deny `network_rules` on the host account (variable-gated —
+`functions_storage_network_default_action = "Allow"` is the one-step
+rollback), operator-window `functions_storage_admin_ip_rules`, a per-run
+firewall window in `deploy-functions.yml` (runner IP add → deploy →
+always-run remove) authorized by a Storage Account Contributor grant scoped
+to exactly this account, and the `#trivy:ignore:AVD-AZU-0012` suppression
+deleted — the gate now enforces the control instead of excusing it. New
+required inputs `AZURE_RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` are
+in CHECKLIST §7. Verify after apply with a functions deploy AND a
+cold-start invocation. Original item below.
 **Files:** `infra/main.tf` (`azurerm_storage_account.functions`, `azurerm_subnet.functions_integration`), `.github/workflows/deploy-functions.yml`
 
 Trivy flags AVD-AZU-0012 (CRITICAL): the Functions host storage account has

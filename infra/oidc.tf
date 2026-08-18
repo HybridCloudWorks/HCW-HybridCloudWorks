@@ -77,6 +77,23 @@ resource "azurerm_role_assignment" "github_deploy_releases" {
   principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
+# T-503 makes the host storage account default-Deny, and GitHub-hosted runners
+# have public dynamic IPs — so deploy-functions.yml opens a per-run firewall
+# window (add runner IP → upload → remove, always-run cleanup). Managing the
+# account's network rules is a control-plane write, which the data-plane role
+# above does not carry; Storage Account Contributor is the narrowest built-in
+# that does. Two things to know about it, on the record:
+#   - it also permits listKeys on this one account. The identity could already
+#     write the deployment package (the blob role above) — i.e. arbitrary code
+#     into the API — so this adds no capability an attacker holding the
+#     identity would care about.
+#   - scope is exactly this account, not the group or subscription.
+resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = "Storage Account Contributor"
+  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
+}
+
 # Deliberately NOT granted:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
 #     managed identity does that at runtime.

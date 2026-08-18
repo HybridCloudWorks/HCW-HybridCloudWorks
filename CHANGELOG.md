@@ -17,6 +17,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **T-503 — Functions host storage network-restricted** (apply pending in
+  HCP Terraform; the last item of the T-50x hardening series). The host
+  storage account moves to default-Deny with three deliberate survivors:
+  the Flex app's runtime/package-pull path (VNet integration + new
+  `Microsoft.Storage` service endpoint on the integration subnet — which
+  also makes the content account's existing subnet rule provably
+  non-inert), a per-run firewall window in `deploy-functions.yml` (add
+  runner IP → deploy → always-run remove) under a new Storage Account
+  Contributor grant scoped to exactly this account, and operator windows
+  via `functions_storage_admin_ip_rules`. Rollback is one variable:
+  `functions_storage_network_default_action = "Allow"`. The
+  `#trivy:ignore:AVD-AZU-0012` suppression is deleted — the CI gate now
+  enforces the control it previously excused. New required inputs
+  `AZURE_RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` recorded in
+  CHECKLIST §7. Verify after apply with a functions deploy **and** a
+  cold-start invocation. (PR #111)
+
 - **T-504/T-505/T-506 — the security and observability remediation ADR-0018
   refused to ratify, now implemented in Terraform** (apply pending in HCP
   Terraform). **Cosmos hardening (T-504):** VNet service firewall allowing

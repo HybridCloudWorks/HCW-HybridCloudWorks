@@ -98,6 +98,34 @@ variable "cosmos_admin_ip_rules" {
 # -----------------------------------------------------------------------------
 # Storage
 # -----------------------------------------------------------------------------
+variable "functions_storage_network_default_action" {
+  description = "Default network action on the Functions host storage account. \"Deny\" is the T-503 posture; \"Allow\" is the one-step rollback if the app stops cold-starting or deploys fail after the firewall lands."
+  type        = string
+  default     = "Deny"
+
+  validation {
+    condition     = contains(["Allow", "Deny"], var.functions_storage_network_default_action)
+    error_message = "functions_storage_network_default_action must be \"Allow\" or \"Deny\"."
+  }
+}
+
+variable "functions_storage_admin_ip_rules" {
+  description = <<-EOT
+    Operator IPv4 addresses/CIDRs allowed through the Functions host storage
+    firewall, for manual package uploads or host-state inspection. Same
+    pattern as admin_ip_rules and cosmos_admin_ip_rules: populate for the
+    window, apply, work, empty, apply. Empty is the correct steady state —
+    workflow deploys use their own per-run firewall window instead.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.functions_storage_admin_ip_rules : can(cidrnetmask("${ip}/32")) || can(cidrnetmask(ip))])
+    error_message = "functions_storage_admin_ip_rules entries must be IPv4 addresses or CIDR ranges."
+  }
+}
+
 variable "storage_account_name" {
   description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string

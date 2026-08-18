@@ -49,12 +49,41 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      # T-503: the Functions host storage account is default-Deny, and this
+      # runner has a public dynamic IP, so the deployment-package upload needs
+      # a firewall window: add this runner's IP, deploy, remove it in an
+      # always-run cleanup. Authorized by the deploy identity's Storage
+      # Account Contributor grant scoped to exactly this account (infra/
+      # oidc.tf github_deploy_funcsa_network). The rule add is eventually
+      # consistent — the short wait lets it propagate before the upload.
+      - name: Open storage firewall window for this runner
+        id: fw
+        run: |
+          set -euo pipefail
+          RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
+          echo "runner_ip=${RUNNER_IP}" >> "$GITHUB_OUTPUT"
+          az storage account network-rule add \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --account-name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
+            --ip-address "${RUNNER_IP}" \
+            --output none
+          sleep 30
+
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v2
         with:
           app-name: hcw-functions-prod
           package: functions/
           respect-funcignore: true
+
+      - name: Close storage firewall window
+        if: ${{ always() && steps.fw.outputs.runner_ip != '' }}
+        run: |
+          az storage account network-rule remove \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --account-name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
+            --ip-address "${{ steps.fw.outputs.runner_ip }}" \
+            --output none
 
       - name: Post-deploy smoke test
         run: |

@@ -483,9 +483,11 @@ resource "azurerm_subnet" "functions_integration" {
   # getSecret() returns nothing, so a missing credential looks like missing
   # data rather than a network denial.
   # Microsoft.AzureCosmosDB is the same story for the Cosmos account's VNet
-  # rule (T-504): without the endpoint the rule is inert and the firewall
-  # denies the Function App along with everyone else.
-  service_endpoints = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB"]
+  # rule (T-504), and Microsoft.Storage for both storage accounts' rules
+  # (content account, and the Functions host account since T-503): without
+  # the endpoint the rule is inert and the firewall denies the Function App
+  # along with everyone else.
+  service_endpoints = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB", "Microsoft.Storage"]
 
   delegation {
     name = "flex-consumption"
@@ -497,15 +499,6 @@ resource "azurerm_subnet" "functions_integration" {
 }
 
 
-# Trivy AVD-AZU-0012 (no network rules) is ACKNOWLEDGED here, not fixed:
-# locking this account to default Deny today would break two live paths —
-# GitHub-hosted runners upload deployment packages to function-releases from
-# public, dynamic IPs (oidc.tf github_deploy_releases), and the Flex
-# Consumption platform pulls those packages and keeps host state here, while
-# the integration subnet carries only the Microsoft.KeyVault service endpoint,
-# not Microsoft.Storage. Remediation is designed work, not a flag flip —
-# tracked as TODO.md T-503. Remove the ignore when it lands.
-#trivy:ignore:AVD-AZU-0012
 resource "azurerm_storage_account" "functions" {
   name                     = "${replace(var.project_name, "-", "")}funcsa"
   resource_group_name      = azurerm_resource_group.hcw.name
@@ -514,6 +507,33 @@ resource "azurerm_storage_account" "functions" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
   tags                     = var.tags
+
+  # T-503: the last publicly-open storage surface, closed. Three access paths
+  # survive default Deny, each deliberate:
+  #   1. Runtime and platform package-pull — the Flex app is VNet-integrated
+  #      (virtual_network_subnet_id) with identity-based storage auth, so
+  #      host-state and deployment reads arrive from the integration subnet;
+  #      the subnet rule + Microsoft.Storage service endpoint admit them.
+  #      This is the documented supported shape for network-restricted
+  #      deployment storage on Flex Consumption.
+  #   2. Workflow package upload — GitHub-hosted runners have public dynamic
+  #      IPs, so deploy-functions.yml opens a per-run firewall window (adds
+  #      the runner IP, uploads, removes it; see that workflow), authorized
+  #      by the deploy identity's Storage Account Contributor grant scoped to
+  #      exactly this account (oidc.tf).
+  #   3. Operator windows — functions_storage_admin_ip_rules, same
+  #      populate/apply/work/empty pattern as the Key Vault and Cosmos vars.
+  #
+  # Rollback: if the app stops cold-starting after apply (the failure mode is
+  # a deploy that "succeeds" against stale state — verify with a deploy AND a
+  # cold-start invocation), set functions_storage_network_default_action =
+  # "Allow" and re-apply; that restores the pre-T-503 posture in one step.
+  network_rules {
+    default_action             = var.functions_storage_network_default_action
+    bypass                     = ["AzureServices"]
+    virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
+    ip_rules                   = var.functions_storage_admin_ip_rules
+  }
 
   # Function host state and release packages live here; replacing it takes the
   # API down until a redeploy. Guarded like the other stateful accounts.
