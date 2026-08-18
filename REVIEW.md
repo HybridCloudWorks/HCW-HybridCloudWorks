@@ -642,6 +642,53 @@ the single-registration model:
 Not yet swapped (still Firebase): the PUBLIC site's sign-in (`submitPublicLabJob` / LabRunner) and
 the 34 files reading Firestore directly — those are the frontend rewiring phase.
 
+### 4.6b Disable CodeQL **default setup** — it is the source of every open alert
+
+**Status: open. Nothing in the repository can fix this; it is a repository setting.**
+
+Confirmed 2026-08-18 by enumerating the open alerts: every single one is in
+`.claude/skills/**/scripts/*.py` — vendored Claude Code harness bundles whose
+`scripts/*.py` are security *demonstration* code (a hash-cracking skill that
+hashes with MD5, a TLS skill that enables legacy protocols in order to show
+them off). They are not imported or executed by the application or by CI, and
+`scripts/validate-repository-structure.ps1` already classifies `.claude/` and
+`.agents/` as the agent harness rather than the site.
+
+`.github/codeql/codeql-config.yml` already excludes both directories, and the
+advanced matrix scans only `javascript-typescript` and `actions`. **Python is
+not in the matrix at all** — which is the proof that these alerts are not
+produced by `codeql.yml`. They come from GitHub's **default setup**, which
+picks languages automatically and ignores `config-file` entirely. The two
+setups are mutually exclusive by design; default setup is still enabled, so it
+is still scanning, still choosing its own languages, and still ignoring the
+exclusions.
+
+Confirm the source before changing anything — `analysis_key` names the
+configuration that produced each alert:
+
+```bash
+gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/code-scanning/alerts --paginate \
+  --jq '.[] | select(.state=="open") | "\(.tool.name)\t\(.most_recent_instance.analysis_key)"' \
+  | sort | uniq -c | sort -rn
+```
+
+`dynamic/github-code-scanning/codeql` is default setup.
+`.github/workflows/codeql.yml:analyze` is the advanced workflow.
+
+**Fix:** Settings → Code security → CodeQL analysis → Default setup → disable.
+Removing a configuration closes the alerts it raised, so this resolves the
+backlog rather than requiring alerts to be dismissed one at a time. Dismissing
+them individually would be wrong anyway: it records a security judgement about
+demonstration code instead of removing the scanner that should never have been
+looking at it.
+
+**Then, in a follow-up PR:** add a `pull_request:` trigger to `codeql.yml`.
+It is deliberately absent because the workflow's upload step fails with
+"analyses from advanced configurations cannot be processed when the default
+setup is enabled" while both are live. Once default setup is off, PR scanning
+should be turned on — until then the repository has no CodeQL coverage on pull
+requests.
+
 ### 4.6 Enable secret scanning + push protection (free — repo is public)
 
 Two toggles in repository settings, unreachable from any session tooling:
