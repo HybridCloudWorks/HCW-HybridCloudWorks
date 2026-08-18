@@ -49,7 +49,16 @@ This project has not cut a tagged release; entries are grouped under
 
   The script is idempotent and preflights before it proposes anything: CLI
   present, signed in, tenant matches, subscription visible, role-assignment
-  rights held, `Microsoft.ManagedIdentity` registered. It handles the
+  rights held, `Microsoft.ManagedIdentity` registered. Sign-in is performed
+  by the script rather than demanded of the operator — being signed in to a
+  different directory is the normal state for anyone working across tenants,
+  so it runs `az login --tenant` itself and re-reads the account afterwards,
+  because a directory switch also changes which subscriptions are visible.
+  `-DeviceCode` covers sessions with no browser of their own (SSH,
+  containers, Cloud Shell) and the case where the browser keeps reusing the
+  wrong cached account; the script falls back to it automatically when the
+  interactive flow fails, since that failure is environmental — no display,
+  no loopback — more often than it is a credential problem. It handles the
   fresh-tenant case explicitly — a Global Administrator holds no Azure RBAC
   by default, which produces errors that suggest the wrong fix, so
   `-ElevateAccess` takes the documented one-time root-scope elevation, grants

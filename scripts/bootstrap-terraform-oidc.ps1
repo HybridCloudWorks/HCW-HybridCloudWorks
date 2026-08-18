@@ -61,13 +61,29 @@
   target subscription, and then removes the root-scope grant again. Only pass
   it if the preflight tells you to.
 
+.PARAMETER DeviceCode
+  Sign in with the device-code flow — the script prints a short code and a URL,
+  and you complete the sign-in in any browser, including one on another
+  machine. Use it when this session has no browser of its own (SSH, a container,
+  Cloud Shell, a locked-down VM) or when the browser that opens is signed into
+  the wrong account and keeps silently reusing it. The script falls back to it
+  automatically if the interactive sign-in fails.
+
 .PARAMETER WhatIf
-  Print every change without making one.
+  Print every change without making one. Signing in still happens — it reads
+  your directory, it does not change it, and nothing can be inspected without
+  it.
 
 .EXAMPLE
   ./scripts/bootstrap-terraform-oidc.ps1 `
       -TenantId 00000000-0000-0000-0000-000000000000 `
       -SubscriptionId 11111111-1111-1111-1111-111111111111 -WhatIf
+
+.EXAMPLE
+  # No browser on this machine, or the wrong account keeps being reused.
+  ./scripts/bootstrap-terraform-oidc.ps1 `
+      -TenantId 00000000-0000-0000-0000-000000000000 `
+      -SubscriptionId 11111111-1111-1111-1111-111111111111 -DeviceCode
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -79,7 +95,8 @@ param(
   [string] $ResourceGroupName = 'rg-hcw-bootstrap',
   [string] $IdentityName = 'id-hcw-terraform',
   [string] $Location = 'eastus2',
-  [switch] $ElevateAccess
+  [switch] $ElevateAccess,
+  [switch] $DeviceCode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -120,6 +137,28 @@ function Invoke-Az {
   try { return $text | ConvertFrom-Json } catch { return $text }
 }
 
+# Sign-in is the one az call that must NOT be captured. The device-code flow
+# prints the code and URL you have to act on, and the interactive flow prints
+# the account picker's fallback URL — swallowing either leaves the operator
+# staring at a hung prompt. So this runs az directly and lets it own the
+# console.
+function Invoke-AzLogin {
+  param([switch] $UseDeviceCode)
+
+  $loginArgs = @('login', '--tenant', $TenantId, '--only-show-errors')
+  if ($UseDeviceCode) {
+    $loginArgs += '--use-device-code'
+    Write-Info 'Device-code sign-in — open the URL below and enter the code:'
+  } else {
+    Write-Info 'Opening a browser to sign in. If nothing opens, re-run with -DeviceCode.'
+  }
+
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & az @loginArgs | Out-Host } finally { $ErrorActionPreference = $previous }
+  return ($LASTEXITCODE -eq 0)
+}
+
 # ===========================================================================
 # 1. Preflight — establish what actually exists before proposing any change
 # ===========================================================================
@@ -133,15 +172,56 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
 }
 Write-Ok "Azure CLI present ($((Invoke-Az @('version')).'azure-cli'))"
 
+# Signing in is a read of your directory, not a change to it, so it happens
+# even under -WhatIf: nothing below can be inspected without a session.
 $account = Invoke-Az @('account', 'show', '-o', 'json') -AllowFailure
+
 if (-not $account) {
-  Stop-WithGuidance 'Not signed in to Azure.' @("Run: az login --tenant $TenantId", 'Then re-run this script.')
+  Write-Act 'Not signed in — starting sign-in'
+} elseif ($account.tenantId -ne $TenantId) {
+  # A stale session in the wrong directory is the normal state for anyone who
+  # works across tenants, and it is not the operator's mistake to correct by
+  # hand. Switching also changes which subscriptions are visible, so re-read
+  # the account afterwards rather than trusting the old one.
+  Write-Act "Signed in to tenant $($account.tenantId), which is not $TenantId — switching"
+  $account = $null
+}
+
+if (-not $account) {
+  $signedIn = Invoke-AzLogin -UseDeviceCode:$DeviceCode
+
+  # An interactive sign-in fails for environmental reasons far more often than
+  # for credential ones: no browser on the box, no display, a browser that
+  # cannot reach the loopback port. Device code needs none of that, so try it
+  # rather than making the operator discover the flag from an error message.
+  if (-not $signedIn -and -not $DeviceCode) {
+    Write-Info 'Interactive sign-in did not complete — retrying with a device code.'
+    $signedIn = Invoke-AzLogin -UseDeviceCode
+  }
+
+  if (-not $signedIn) {
+    Stop-WithGuidance 'Sign-in failed.' @(
+      "Run it by hand and read the error: az login --tenant $TenantId --use-device-code",
+      'If it reports the tenant does not exist, check the tenant GUID.',
+      'If it reports no subscriptions found, the sign-in worked — you have no',
+      'Azure RBAC yet, which this script can fix. Re-run it with -ElevateAccess.'
+    )
+  }
+
+  $account = Invoke-Az @('account', 'show', '-o', 'json') -AllowFailure
+}
+
+if (-not $account) {
+  Stop-WithGuidance 'Signed in, but no subscription context is set.' @(
+    "This directory may hold no subscriptions your account can see.",
+    'Check with: az account list --all -o table'
+  )
 }
 
 if ($account.tenantId -ne $TenantId) {
-  Stop-WithGuidance "Signed in to tenant $($account.tenantId), but -TenantId is $TenantId." @(
-    "Run: az login --tenant $TenantId",
-    'A directory switch also changes which subscriptions are visible.'
+  Stop-WithGuidance "Still signed in to tenant $($account.tenantId) after sign-in, not $TenantId." @(
+    'The sign-in most likely landed on a cached account in the other directory.',
+    "Clear it and try again: az logout; az login --tenant $TenantId --use-device-code"
   )
 }
 Write-Ok "Signed in as $($account.user.name) in tenant $TenantId"

@@ -80,6 +80,20 @@ handshake, not just how you create one. It preflights before it proposes
 anything: CLI present, signed in, correct tenant, subscription visible,
 role-assignment rights held, `Microsoft.ManagedIdentity` registered.
 
+**Sign-in is handled for you.** If you are not signed in, or your session is
+in a different directory — the normal state for anyone who works across
+tenants — the script runs `az login --tenant` itself and re-reads the account
+afterwards, because switching directories also changes which subscriptions are
+visible. Signing in happens even under `-WhatIf`: it reads your directory
+rather than changing it, and nothing can be inspected without a session.
+
+Add `-DeviceCode` when this session has no browser of its own (SSH, a
+container, Cloud Shell, a locked-down VM), or when the browser that opens
+keeps silently reusing the wrong account. You get a short code and a URL to
+complete in any browser, on any machine. The script also falls back to it
+automatically if the interactive sign-in fails, since that failure is usually
+environmental — no display, no loopback — rather than a credential problem.
+
 **If the preflight says you hold no roles on the subscription:** that is
 expected on a tenant you created yourself. Global Administrator is an Entra
 role and carries zero Azure RBAC. Re-run with `-ElevateAccess`, which takes
