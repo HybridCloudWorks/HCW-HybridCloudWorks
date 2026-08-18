@@ -17,6 +17,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **CodeQL `actions` language added to the advanced matrix** — the retired
+  Default setup had been scanning workflow files (`language:actions`); the
+  advanced setup now owns that coverage across the repository's 12
+  workflows. Context: the Tool status page's erroring `language:go` /
+  `language:java-kotlin` entries are stale Default-setup configurations
+  auto-created ~3 weeks ago from stray Go/Java snippet files inside the
+  vendored `.claude/` harness — the exact paths the advanced config
+  excludes. Those languages are deliberately NOT added to the matrix; the
+  stale configurations are removed operator-side from the Tool status
+  page's ⋯ menu. (PR #115)
+
 - **Variable naming standard** (workload owner directive, 2026-08-18) —
   operator-set configuration names are UPPER_SNAKE_CASE, **maximum 2
   words** (3 only to break a real collision), with no provider prefixes:

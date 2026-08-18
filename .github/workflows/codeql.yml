@@ -46,7 +46,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ['javascript-typescript']
+        # 'actions' scans the workflow files themselves (untrusted-input use,
+        # injection into run: steps). GitHub's retired Default setup used to
+        # carry this coverage; the advanced setup owns it now.
+        language: ['javascript-typescript', 'actions']
 
     steps:
       - name: Checkout
