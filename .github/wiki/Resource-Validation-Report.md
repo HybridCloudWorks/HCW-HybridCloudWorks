@@ -133,7 +133,7 @@ ran a cold-start check. Verification state per control:
 | Everything else on `main` | Repository Policy, IaC Validation, CI, CodeQL all green on the latest merges | **Healthy** |
 
 **Remaining to close the loop:** set the three OIDC repository variables (`CLIENT_ID`, `TENANT_ID`,
-`SUBSCRIPTION_ID` — names per the variable naming standard) (values from the `github_deploy_client_id` Terraform output +
+`SUBSCRIPTION_ID` — names per the variable naming standard) (values from the `client_id` Terraform output +
 tenant + subscription) and watch one heal run go green; optionally probe a
 Cosmos-backed endpoint (e.g. the public content list) from a browser; run
 one more TFC plan and confirm it is empty.

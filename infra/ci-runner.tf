@@ -150,7 +150,7 @@ resource "azurerm_container_app_job" "ci_runner" {
   }
 }
 
-output "ci_runner_job_name" {
+output "runner_job" {
   description = "Container Apps job name for the CI runner (used by the seeding runbook)"
   value       = azurerm_container_app_job.ci_runner.name
 }

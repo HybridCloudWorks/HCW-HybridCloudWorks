@@ -17,13 +17,13 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 6 |
+| Open items | 7 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 4 |
+| Medium | 5 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
-| Last updated | 2026-08-18 — T-503 resolved in code (PR #111); the T-50x hardening series is complete in code |
+| Last updated | 2026-08-18 — naming sweep standardized all Terraform outputs; T-507 filed for the coordinated input-variable rename |
 | Source | Code Review SOP run, repository-wide, three reviewers (SOP / security / Azure architecture), de-duplicated per Phase 11 |
 
 **Release readiness: SMOKE-VERIFIED (2026-08-14).** All five Critical items
@@ -1385,6 +1385,44 @@ Analytics workspace; and diagnostic settings for Cosmos, both storage
 accounts, and Key Vault (`AuditEvent`) into that workspace. All additive —
 no destroy risk. Alert *rules* (error rate, queue age) can follow once the
 action group exists.
+
+### T-507 — Coordinated rename of Terraform input variables
+**Files:** `infra/variables.tf` + every `.tf` reference + the HCP Terraform workspace
+
+The 2026-08-18 naming sweep standardized every Terraform **output** but
+deliberately left the **input** variables alone: `infra/variables.tf` states
+its keys must match the HCP Terraform Cloud workspace variable keys exactly,
+and several are already set in the live workspace, so each rename is a
+coordinated change — update the workspace key and the code in one PR, or the
+next plan fails on a missing required variable.
+
+Priority order is the six workspace-set variables, because those are the ones
+that break loudly: `azure_subscription_id`→`subscription_id`,
+`entra_tenant_id`→`tenant_id` (mirrors `TENANT_ID`),
+`entra_api_audience`→`api_audience`, `budget_alert_email`→`budget_email`,
+`cloudflare_api_token`→`cloudflare_token`, `cloudflare_zone_id`→`cloudflare_zone`.
+
+The defaulted remainder is lower-risk but still coordinated (an operator may
+have set any of them): `azure_location`→`location`,
+`resource_group_name`→`resource_group`, `cosmos_db_account_name`→`cosmos_account`,
+`cosmos_local_auth_disabled`→`cosmos_keyless`,
+`cosmos_allow_azure_datacenter_ips`→`cosmos_azure_ips`,
+`cosmos_admin_ip_rules`→`cosmos_admin_ips`,
+`functions_storage_network_default_action`→`funcsa_default_action`,
+`functions_storage_admin_ip_rules`→`funcsa_admin_ips`,
+`storage_account_name`→`storage_account`, `function_app_name`→`function_name`,
+`key_vault_name`→`vault_name`, `purge_protection_enabled`→`purge_protection`,
+`budget_amount_usd`→`budget_usd`, `vnet_address_space`→`vnet_cidr`,
+`functions_subnet_prefix`→`subnet_prefix`, `github_deploy_ref`→`deploy_ref`,
+`admin_ip_rules`→`admin_ips`.
+
+Already conforming, no action: `environment`, `project_name`, `github_org`,
+`github_repo`, `domain`, `tags`.
+
+Sequence it as one PR that renames in code, with the workspace keys renamed
+in the same maintenance window, and a plan run immediately after to prove
+nothing became unset. Not urgent — the current names are merely verbose, not
+wrong.
 
 ## LOW
 

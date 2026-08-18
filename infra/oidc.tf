@@ -141,17 +141,17 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
 # possession of these IDs grants nothing without a matching OIDC token from
 # this repository and ref.
 # ---------------------------------------------------------------------------
-output "github_deploy_client_id" {
-  description = "AZURE_CLIENT_ID for azure/login — set as a repository variable, not a secret"
+output "client_id" {
+  description = "CLIENT_ID for azure/login — set as a repository variable, not a secret"
   value       = azurerm_user_assigned_identity.github_deploy.client_id
 }
 
-output "github_deploy_principal_id" {
+output "deploy_principal_id" {
   description = "Principal ID of the GitHub deployment identity — for granting further roles"
   value       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
-output "github_deploy_federated_subjects" {
+output "federated_subjects" {
   description = "Exact OIDC subject claims trusted by this identity — compare against a failing token"
   value = [
     azurerm_federated_identity_credential.github_branch.subject,

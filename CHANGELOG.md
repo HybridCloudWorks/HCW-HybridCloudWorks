@@ -15,6 +15,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Changed
+
+- **Every Terraform output renamed to the 2-word standard** (workload owner
+  directive, 2026-08-18: `github_deploy_client_id` was four words). The
+  standard now explicitly covers **outputs** — they are operator-facing,
+  read off the state backend's Outputs tab — and states that **casing
+  follows the language while the word count does not**: UPPER_SNAKE for
+  GitHub variables, lower_snake for HCL. Outputs that feed a GitHub
+  variable now mirror it: `client_id` ↔ `CLIENT_ID`.
+  Headline renames: `github_deploy_client_id`→`client_id`,
+  `github_deploy_federated_subjects`→`federated_subjects`,
+  `function_app_default_hostname`→`function_hostname`,
+  `static_web_app_default_hostname`→`swa_hostname`,
+  `app_insights_connection_string`→`insights_connection`,
+  `ci_runner_job_name`→`runner_job`. Two genuine **duplicates removed**:
+  `azure_functions_hostname` and `azure_swa_hostname` returned values
+  identical to their non-prefixed twins and were folded into one output
+  each. One genuine **collision** resolved with a deliberate third word —
+  the Function App and the deploy identity both expose a principal id, so
+  `app_principal_id` / `deploy_principal_id`. No resource address,
+  `azurerm_*` argument, or state-bearing name changed; `terraform fmt`
+  and `validate` pass.
+  Terraform **input** variables were deliberately NOT renamed: they must
+  match HCP Terraform workspace keys exactly and several are set live, so
+  they are a coordinated setting-plus-code change — filed as TODO T-507
+  with the full proposed table. App settings read via `process.env`,
+  `VITE_*` and `GITHUB_TOKEN` are contractual and untouched. The
+  `iac-repo-standardizer` agent now sweeps every `.tf` file rather than a
+  curated list — the gap that let `ci_runner_job_name` survive the first
+  pass. (PR #117)
+
 ### Added
 
 - **Free-tier disposition recorded on the Cost-Analysis wiki page** (now
