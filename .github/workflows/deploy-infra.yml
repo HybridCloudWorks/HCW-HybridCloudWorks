@@ -53,10 +53,10 @@ jobs:
           exit 1
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 

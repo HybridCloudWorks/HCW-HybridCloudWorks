@@ -1238,7 +1238,17 @@ absolute source-system URLs that legacy documents still hold.
 
 ---
 
-### T-501 — SHA-pin every GitHub Action reference
+### ~~T-501 — SHA-pin every GitHub Action reference~~ RESOLVED
+
+Resolved 2026-08-18 (PR #119): all 35 `uses:` lines across all 12 workflows
+carry a 40-character commit SHA with the version it was cut from as a
+trailing comment. SHAs were resolved with `git ls-remote`, dereferencing
+annotated tags to their commit. Fixed one dangling reference found in the
+process — `Azure/functions-action@v2` does not exist (newest tag `v1.5.7`,
+release branch `releases/v1`), so `deploy-functions.yml` would have failed
+with "Unable to resolve action" the first time it ran. Original item retained
+below for context.
+
 **Files:** `.github/workflows/*.yml`
 
 The repository mixes pinning styles: `repository-policy.yml` pins

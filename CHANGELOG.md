@@ -15,6 +15,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Security
+
+- **Every GitHub Actions reference pinned to a commit SHA** — 35 `uses:`
+  lines across all 12 workflows. A tag is a mutable pointer: whoever controls
+  the action's repository can move `@v4` to different code at any time, and
+  the March 2026 Aqua incident that broke this repository's Trivy step was
+  exactly that. CodeQL's Actions pack raises one alert per unpinned
+  third-party reference, so this closes that class of finding as well as the
+  real supply-chain exposure. Each pin carries the version it was cut from as
+  a trailing comment (`@ff2f1c6… # v4`), because a bare 40-character hex
+  string tells a reviewer nothing; Dependabot's `github-actions` ecosystem
+  was already configured and keeps SHA pins current the same way it keeps
+  tags current. The repository standard already required this — one
+  `actions/checkout` reference had been pinned and the other eleven had not.
+
+### Fixed
+
+- **`Azure/functions-action@v2` does not exist.** Found while resolving tags
+  to SHAs: that action's newest tag is `v1.5.7` and its release branch is
+  `releases/v1`, so `deploy-functions.yml` carried a reference that resolves
+  to nothing and would have failed with "Unable to resolve action" the first
+  time the workflow was enabled. Pinned to `v1.5.7`. The workflow is still
+  `if: false`, which is why no run had ever surfaced it.
+
 ### Added
 
 - **The HCP Terraform → Azure bootstrap, which existed nowhere.**
