@@ -94,12 +94,28 @@ param(
   [string] $TfcWorkspace = 'hybridcloudworks-azure',
   [string] $ResourceGroupName = 'rg-hcw-bootstrap',
   [string] $IdentityName = 'id-hcw-terraform',
-  [string] $Location = 'eastus2',
+  [string] $Location = 'southcentralus',
   [switch] $ElevateAccess,
   [switch] $DeviceCode
 )
 
 $ErrorActionPreference = 'Stop'
+
+# The seven tags the IaC Repository Standard requires on every resource. They
+# mirror infra/variables.tf's `tags` default so the bootstrap resources are
+# governed identically to the Terraform-managed ones — with one deliberate
+# difference: managedBy is 'bootstrap-script', not 'terraform'. That tag is the
+# only in-portal signal that this resource group is NOT in Terraform state and
+# must not be reconciled into it.
+$BootstrapTags = @(
+  'workload=hybridcloudworks'
+  'environment=prod'
+  'owner=platform'
+  'costCenter=content-platform'
+  'managedBy=bootstrap-script'
+  'criticality=high'
+  'dataClassification=internal'
+)
 
 # ---------------------------------------------------------------------------
 # Output helpers. Every line the operator reads is one of these four shapes, so
@@ -341,11 +357,7 @@ $existingGroup = Invoke-Az @('group', 'show', '-n', $ResourceGroupName, '-o', 'j
 if ($existingGroup) {
   Write-Ok "Exists in $($existingGroup.location)"
 } elseif ($PSCmdlet.ShouldProcess($ResourceGroupName, 'create resource group')) {
-  Invoke-Az @(
-    'group', 'create', '-n', $ResourceGroupName, '-l', $Location,
-    '--tags', 'workload=hybridcloudworks', 'environment=prod', 'managedBy=bootstrap-script',
-    'criticality=high', 'dataClassification=internal'
-  ) | Out-Null
+  Invoke-Az (@('group', 'create', '-n', $ResourceGroupName, '-l', $Location, '--tags') + $BootstrapTags) | Out-Null
   Write-Act "Created in $Location"
 } else {
   Write-Act "Would create in $Location"
@@ -360,7 +372,7 @@ $identity = Invoke-Az @('identity', 'show', '-n', $IdentityName, '-g', $Resource
 if ($identity) {
   Write-Ok "Exists (client id $($identity.clientId))"
 } elseif ($PSCmdlet.ShouldProcess($IdentityName, 'create user-assigned managed identity')) {
-  $identity = Invoke-Az @('identity', 'create', '-n', $IdentityName, '-g', $ResourceGroupName, '-l', $Location, '-o', 'json')
+  $identity = Invoke-Az (@('identity', 'create', '-n', $IdentityName, '-g', $ResourceGroupName, '-l', $Location, '-o', 'json', '--tags') + $BootstrapTags)
   Write-Act "Created (client id $($identity.clientId))"
   # Entra replicates the new service principal asynchronously; a role
   # assignment issued immediately fails with PrincipalNotFound.

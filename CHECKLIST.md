@@ -222,6 +222,35 @@ Bootstrap procedure — including the two federated credentials on
 `id-hcw-terraform` that these variables depend on — is section 0 of the
 [Deployment Runbook](.github/wiki/Deployment-Runbook.md).
 
+**The Azure half of §8 was provisioned 2026-08-18** by
+`scripts/bootstrap-terraform-oidc.ps1` against subscription `8f3c6d82…`
+("Azure subscription 1", *not* the Visual Studio Enterprise subscription that
+is the account's default). Verified present after the run:
+
+- `rg-hcw-bootstrap` in `southcentralus`, and `id-hcw-terraform` within it —
+  both carrying all seven standard tags with `managedBy=bootstrap-script`,
+  which is the only in-portal signal that they are deliberately **not** in
+  Terraform state.
+- Federated credentials `tfc-plan` and `tfc-apply`, issuer
+  `https://app.terraform.io`, audience `api://AzureADTokenExchange`.
+- `Contributor` + `Role Based Access Control Administrator` at subscription
+  scope. Deliberately not Owner: RBAC Administrator can assign roles but
+  cannot grant Owner or User Access Administrator, so the Terraform identity
+  cannot escalate itself.
+
+All four variables above nonetheless remain `Missing`, because none has been
+entered in the HCP Terraform workspace yet — that is a manual step in the UI
+and is what still blocks the first run.
+
+One unverified assumption is baked into both federated credentials: the
+project segment of the subject is `Default Project`, which was not confirmed
+against the workspace. `backend.tf` declares only organization and workspace,
+so the project name appears nowhere in this repository. If the first
+speculative plan fails with AADSTS70021, that is the cause and the only cause
+— re-run the script with `-TfcProject` set to the exact string from the
+workspace's Settings page. The script replaces a credential whose subject has
+drifted, so re-running is safe and idempotent.
+
 ---
 
 ## Related
