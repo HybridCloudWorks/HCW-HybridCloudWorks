@@ -104,6 +104,22 @@ describe('updateContentItem', () => {
     expect(auditCall[1].details.updatedFields).toContain('Title');
   });
 
+  it('writes content BEFORE the version snapshot — the accepted sequential contract', async () => {
+    // Owner decision 2026-08-18 (option (a), Site-Main TODO §2): no
+    // cross-container batch exists, so the writes are sequential and the
+    // ordering IS the durability contract — a crash between them loses one
+    // snapshot, while the reverse order could record history for an edit
+    // that never happened. See the migration manifest's EXCEPTION ONE notes.
+    const store = makeStore();
+    const h = createContentUpdateHandler({ guard: guardAs('editor'), store, ...fixed });
+    await h(makeRequest({ contentId: 'c1', updates: { Title: 'T' } }), context);
+
+    const patchOrder = store.patchDoc.mock.invocationCallOrder[0];
+    const versionIdx = store.upsertDoc.mock.calls.findIndex(([c]) => c === 'content_versions');
+    const versionOrder = store.upsertDoc.mock.invocationCallOrder[versionIdx];
+    expect(patchOrder).toBeLessThan(versionOrder);
+  });
+
   it('version doc falls back to current data for fields not in the update', async () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({ id: 'c1', Title: 'Old', summary: 'Old summary', blogDraft: 'Old draft' })),

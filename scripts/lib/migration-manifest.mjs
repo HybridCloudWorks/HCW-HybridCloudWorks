@@ -93,6 +93,20 @@
  *   export time, but that is a permanent runtime constraint, not just a
  *   migration one.
  *
+ *   Atomicity, settled 2026-08-18 (owner decision, option (a) of the choice
+ *   recorded in Site-Main TODO §2): the post-and-its-history all-or-nothing
+ *   guarantee the Firestore transaction gave does NOT carry over — a Cosmos
+ *   TransactionalBatch cannot span containers, and versions deliberately
+ *   live in their own container for the reasons above. The accepted contract
+ *   is SEQUENTIAL writes with the content write FIRST (see
+ *   functions/src/lib/cms/content-update.js's header for the full rationale):
+ *   a crash between the content write and the version upsert loses that one
+ *   snapshot, and the reverse order could record history for an edit that
+ *   never happened. All three writers (content-update.js,
+ *   content-workflow.js, publish.js) follow this ordering today; keep any
+ *   future version writer on it. Co-locating versions inside `content` to
+ *   buy the batch back was considered and declined.
+ *
  * EXCEPTION TWO — `admin_config` is partitioned on `/configScope`, a
  * CONSTANT (every document carries `configScope: 'admin_config'`):
  *
