@@ -18,8 +18,8 @@ let database = null;
  * Containers whose partition key is NOT `/id`.
  *
  * `readDoc`, `patchDoc` and `deleteDoc` default the partition key to the
- * document id, which is correct for 67 of the 71 containers and silently wrong
- * for these four. Wrong in the worst way: a point read against the wrong
+ * document id, which is correct for 66 of the 71 containers and silently wrong
+ * for these five. Wrong in the worst way: a point read against the wrong
  * logical partition does not error, it returns nothing — and `readDoc` maps
  * that to `null`. The first person to write a `content_versions` reader would
  * have got `null` forever with no indication why (TODO.md T-313).
@@ -29,10 +29,12 @@ let database = null;
  * the manifest without adding it here fails CI.
  *
  * Note for anyone comparing against T-313 as written: it named three
- * exceptions. There are four — `listen_and_learn_episodes` (`/setId`) was
- * missing from the finding.
+ * exceptions. There are five — `listen_and_learn_episodes` (`/setId`) was
+ * missing from the finding, and `admin_config` (`/configScope`, a constant)
+ * was added 2026-08-18 for the forge save's transactional batch.
  */
 export const PARTITION_KEY_PATHS = Object.freeze({
+  admin_config: '/configScope',
   content_versions: '/contentId',
   image_prompt_sets_prompts: '/setName',
   image_prompts_sets: '/pageId',
@@ -40,9 +42,19 @@ export const PARTITION_KEY_PATHS = Object.freeze({
 });
 
 /**
+ * The one legal partition key value for `admin_config` — a CONSTANT, so the
+ * ContentForge save (forge_profile + forge_prompts, one all-or-nothing write)
+ * can port to a Cosmos TransactionalBatch, which only spans one container and
+ * one logical partition (owner decision 2026-08-17, Site-Main TODO §2).
+ * Every `admin_config` document must carry `configScope: ADMIN_CONFIG_PARTITION`
+ * on create, and every point operation passes it explicitly.
+ */
+export const ADMIN_CONFIG_PARTITION = 'admin_config';
+
+/**
  * Resolve the partition key for a point operation.
  *
- * Throws rather than guessing for the four containers above: an explicit
+ * Throws rather than guessing for the five containers above: an explicit
  * failure at the call site is recoverable, a silent `null` is not.
  *
  * @param {string} containerName

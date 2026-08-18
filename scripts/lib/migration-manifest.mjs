@@ -34,7 +34,8 @@
  * ---------------------------------------------------------------------------
  * Partition keys
  * ---------------------------------------------------------------------------
- * Every container is partitioned on `/id` except `content_versions`. The
+ * Every container is partitioned on `/id` except `content_versions` and
+ * `admin_config`. The
  * evidence, from the Site-Main source rather than from the shape of the target:
  *
  *   1. The query load does not group by anything. All 18 Firestore composite
@@ -73,7 +74,7 @@
  * callers at all, and the only affected line today is the `deleteDoc('content')`
  * at `functions/src/functions/cms-http.js:85`.
  *
- * THE EXCEPTION — `content_versions` is partitioned on `/contentId`:
+ * EXCEPTION ONE — `content_versions` is partitioned on `/contentId`:
  *
  *   Every access to version history is scoped to one parent content document —
  *   `VersionHistoryDialog.jsx:33` reads `content/{blogId}/versions`, and
@@ -91,6 +92,23 @@
  *   logical partitions and coexist. The migrator detects such collisions at
  *   export time, but that is a permanent runtime constraint, not just a
  *   migration one.
+ *
+ * EXCEPTION TWO — `admin_config` is partitioned on `/configScope`, a
+ * CONSTANT (every document carries `configScope: 'admin_config'`):
+ *
+ *   Decided 2026-08-17 by the owner, recorded in Site-Main TODO §2: the
+ *   ContentForge save writes `forge_profile` and `forge_prompts` as one
+ *   all-or-nothing Firestore transaction, and a Cosmos TransactionalBatch
+ *   only spans one container AND one logical partition. Under `/id` those
+ *   two documents land in different partitions and the save loses its
+ *   atomicity at the port. A constant key puts every `admin_config` document
+ *   in one logical partition, so the forge save ports to a batch unchanged.
+ *
+ *   The knock-on, accepted in the same decision: everything in
+ *   `admin_config` shares that single logical partition. That is fine at
+ *   this container's size and nature — a handful of config documents
+ *   (forge_profile, forge_prompts, forge_stats), not content — and nowhere
+ *   near the 20 GB logical-partition cap.
  *
  * A partition key path is immutable once the container exists. Changing one
  * later means recreating the container and re-importing, so this needs sign-off
@@ -272,7 +290,16 @@ export const COLLECTIONS = [
       blocks: 'cutover',
     },
   },
-  { name: 'admin_config', disposition: 'migrate', note: 'ContentForge config (forge_profile, forge_prompts).' },
+  {
+    name: 'admin_config',
+    disposition: 'migrate',
+    // Constant key — see EXCEPTION TWO in the partition-key notes above. The
+    // migrator stamps `configScope` on every document it copies; runtime
+    // writers set it on create (cosmos-client exports the constant).
+    partitionKey: '/configScope',
+    partitionKeyConstant: 'admin_config',
+    note: 'ContentForge config (forge_profile, forge_prompts, forge_stats). Constant partition key so the forge save stays one transactional batch — owner decision 2026-08-17; the whole container deliberately shares one logical partition.',
+  },
   { name: 'admin_settings', disposition: 'migrate' },
   { name: 'site_settings', disposition: 'migrate' },
   { name: 'system', disposition: 'migrate' },
@@ -452,6 +479,7 @@ export const PROVISIONED_DISPOSITIONS = new Set(['migrate', 'reseed', 'regenerat
  *   disposition: string,
  *   partitionKey: string,
  *   partitionKeyFromParent: string|null,
+ *   partitionKeyConstant: string|null,
  *   note?: string
  * }>}
  */
@@ -471,6 +499,7 @@ export function flattenManifest({ includeNonMigrated = false } = {}) {
         disposition: entry.disposition,
         partitionKey: entry.partitionKey ?? DEFAULT_PARTITION_KEY,
         partitionKeyFromParent: null,
+        partitionKeyConstant: entry.partitionKeyConstant ?? null,
         note: entry.note,
       });
     }
@@ -489,6 +518,7 @@ export function flattenManifest({ includeNonMigrated = false } = {}) {
         disposition: entry.disposition,
         partitionKey: sub.partitionKey ?? DEFAULT_PARTITION_KEY,
         partitionKeyFromParent: sub.partitionKeyFromParent ?? null,
+        partitionKeyConstant: null,
         note: sub.note,
       });
     }

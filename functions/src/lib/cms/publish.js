@@ -25,6 +25,7 @@
  *     ("ugly but always unique" — a lookup failure must not block a publish).
  */
 import { randomUUID } from 'node:crypto';
+import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { buildContentQualityReport, buildImageReadinessReport } from './content-quality.js';
 import { normalizePublishTarget, SUPPORTED_PUBLISH_TARGETS } from './publish-targets.js';
 import {
@@ -225,16 +226,27 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
 
   async function bumpForgeStats(formatKey) {
     try {
-      const doc = (await store.readDoc('admin_config', 'forge_stats', 'forge_stats')) || {};
+      const doc =
+        (await store.readDoc('admin_config', 'forge_stats', ADMIN_CONFIG_PARTITION)) || {};
       const totals = { ...(doc.totals || {}) };
       totals.published = (totals.published || 0) + 1;
       const formats = { ...(doc.formats || {}) };
       formats[formatKey] = { ...(formats[formatKey] || {}) };
       formats[formatKey].published = (formats[formatKey].published || 0) + 1;
       if (doc.id) {
-        await store.patchDoc('admin_config', 'forge_stats', { totals, formats });
+        await store.patchDoc(
+          'admin_config',
+          'forge_stats',
+          { totals, formats },
+          { partitionKey: ADMIN_CONFIG_PARTITION }
+        );
       } else {
-        await store.upsertDoc('admin_config', { id: 'forge_stats', totals, formats });
+        await store.upsertDoc('admin_config', {
+          id: 'forge_stats',
+          configScope: ADMIN_CONFIG_PARTITION,
+          totals,
+          formats,
+        });
       }
     } catch {
       // Stats are best-effort; a failed bump must not fail the publish.

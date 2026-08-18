@@ -222,6 +222,17 @@ describe('migration manifest', () => {
     }
   });
 
+  it('partitions admin_config on a constant, so the forge save can be one batch', () => {
+    // Owner decision 2026-08-17 (Site-Main TODO §2): forge_profile and
+    // forge_prompts save as one all-or-nothing write, and a Cosmos
+    // TransactionalBatch spans one container AND one logical partition. A
+    // constant key puts every admin_config document in that one partition.
+    const adminConfig = flattenManifest().find((t) => t.container === 'admin_config');
+    expect(adminConfig.partitionKey).toBe('/configScope');
+    expect(adminConfig.partitionKeyConstant).toBe('admin_config');
+    expect(adminConfig.partitionKeyFromParent).toBeNull();
+  });
+
   it('partitions everything else on /id', () => {
     const parentKeyed = new Set([
       'content_versions',
@@ -229,9 +240,13 @@ describe('migration manifest', () => {
       'image_prompt_sets_prompts',
       'listen_and_learn_episodes',
     ]);
-    const others = flattenManifest().filter((t) => !parentKeyed.has(t.container));
+    const constantKeyed = new Set(['admin_config']);
+    const others = flattenManifest().filter(
+      (t) => !parentKeyed.has(t.container) && !constantKeyed.has(t.container)
+    );
     expect([...new Set(others.map((t) => t.partitionKey))]).toEqual([DEFAULT_PARTITION_KEY]);
     expect(others.every((t) => t.partitionKeyFromParent === null)).toBe(true);
+    expect(others.every((t) => t.partitionKeyConstant === null)).toBe(true);
   });
 
   it('does not migrate the social_* collections that have no writer', () => {

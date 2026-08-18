@@ -140,7 +140,9 @@ function pickSample(docs, n) {
  * a pass.
  */
 function identityOf(doc, target) {
-  const partitionValue = target.partitionKeyFromParent ? doc[target.partitionKeyFromParent] : doc.id;
+  const partitionValue =
+    target.partitionKeyConstant ??
+    (target.partitionKeyFromParent ? doc[target.partitionKeyFromParent] : doc.id);
   return { partitionValue, key: `${partitionValue}\u0000${doc.id}` };
 }
 
