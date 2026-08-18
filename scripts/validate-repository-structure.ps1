@@ -10,7 +10,13 @@ $errors = [System.Collections.Generic.List[string]]::new()
 # them and they are excluded from the Markdown scan entirely.
 $harnessDirectories = @('.agents', '.claude')
 
-$allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent') + $harnessDirectories
+# .vscode is the Azure Functions dev loop — the tasks.json that runs
+# `func host start` against functions/, and the launch.json that attaches the
+# debugger to it. The Azure Functions extension generates them and expects
+# them tracked, so they are source-controlled rather than gitignored. Note
+# this check enumerates the live filesystem with -Force, not the git index:
+# gitignoring .vscode would not have quieted it, only allowlisting does.
+$allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
@@ -28,6 +34,7 @@ $allowedDirectories = @('.azure', '.github', 'frontend', 'functions', 'infra', '
 # back.
 $allowedRootFiles = @(
   '.gitignore',
+  '.gitattributes',
   '.editorconfig',
   'README.md',
   'Architecture_Plan.md',
@@ -47,7 +54,12 @@ $allowedRootFiles = @(
 $casingSensitiveNames = @('REVIEW.md', 'TODO.md', 'CHECKLIST.md', 'CHANGELOG.md')
 
 # Directory names never walked by the Markdown scan, at any depth.
-$unscannedDirectories = @('.git', 'node_modules') + $harnessDirectories
+#
+# .terraform holds vendored provider plugins, several of which ship their own
+# CHANGELOG.md. It is gitignored, so CI never sees it — but this scan walks the
+# filesystem, not the git index, so without this entry the gate fails for any
+# developer who has run `terraform init`. Same for build and coverage output.
+$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage') + $harnessDirectories
 $unscannedPattern = '(^|/)(' + (($unscannedDirectories | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')/'
 
 $actualDirectories = Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |

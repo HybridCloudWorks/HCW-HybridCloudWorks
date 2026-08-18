@@ -45,8 +45,8 @@ export default defineConfig(({ mode }) => {
   // 2. Variables from the current secrets path
   // 3. Variables from legacy infrastructure path
   // 4. Standard Vite .env files in workspace root
-  const secretsEnvDir = path.resolve(__dirname, 'secrets/env');
-  const infrastructureEnvDir = path.resolve(__dirname, 'infrastructure/secrets/env');
+  const secretsEnvDir = path.resolve(import.meta.dirname, 'secrets/env');
+  const infrastructureEnvDir = path.resolve(import.meta.dirname, 'infrastructure/secrets/env');
   const env = {
     ...process.env,
     ...loadEnv(mode, secretsEnvDir, ''), // Current custom path (all vars)
@@ -113,7 +113,7 @@ export default defineConfig(({ mode }) => {
     logLevel: mode === 'production' ? 'warn' : 'info',
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './src'),
+        '@': path.resolve(import.meta.dirname, './src'),
       },
     },
     define: defineConf,
@@ -130,8 +130,21 @@ export default defineConfig(({ mode }) => {
               if (id.includes('@radix-ui')) {
                 return 'vendor-radix';
               }
-              if (id.includes('framer-motion')) {
+              // framer-motion v13 ships its engine as the separate motion-dom /
+              // motion-utils packages. Matching only 'framer-motion' let ~337 kB
+              // of engine fall through to the catch-all vendor chunk, which is
+              // what pushed that chunk past the 500 kB warning threshold.
+              if (
+                id.includes('framer-motion') ||
+                id.includes('node_modules/motion-dom/') ||
+                id.includes('node_modules/motion-utils/')
+              ) {
                 return 'vendor-framer';
+              }
+              // MSAL is only reached on the admin/auth path, so it has no
+              // business in the chunk every public route downloads.
+              if (id.includes('node_modules/@azure/msal-')) {
+                return 'vendor-msal';
               }
               if (id.includes('lucide-react')) {
                 return 'vendor-lucide';
@@ -149,6 +162,17 @@ export default defineConfig(({ mode }) => {
               }
               if (id.includes('react-hook-form')) {
                 return 'vendor-forms';
+              }
+              // The React runtime: needed on every route, but it changes far
+              // less often than application code, so it earns its own
+              // long-lived cache entry. Anchored on the '/' package boundary so
+              // it does not swallow other react-* packages.
+              if (
+                id.includes('node_modules/react/') ||
+                id.includes('node_modules/react-dom/') ||
+                id.includes('node_modules/scheduler/')
+              ) {
+                return 'vendor-react';
               }
               return 'vendor'; // all other node_modules
             }

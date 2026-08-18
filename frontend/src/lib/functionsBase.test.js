@@ -137,7 +137,7 @@ describe('no module reads the API base outside this resolver', () => {
 
   it('reads VITE_AZURE_FUNCTIONS_URL only in functionsBase.js', async () => {
     const { readFileSync, readdirSync, statSync } = await import('node:fs');
-    const { join } = await import('node:path');
+    const { join, sep } = await import('node:path');
 
     const readers = [];
     const walk = (dir) => {
@@ -150,7 +150,10 @@ describe('no module reads the API base outside this resolver', () => {
         if (!/\.(js|jsx)$/.test(entry)) continue;
         if (full.endsWith('functionsBase.test.js')) continue;
         if (readFileSync(full, 'utf8').includes('import.meta.env.VITE_AZURE_FUNCTIONS_URL')) {
-          readers.push(full.replace(join(process.cwd(), 'src'), ''));
+          // join() yields the platform separator, so normalize to POSIX before
+          // comparing — otherwise this asserts \lib\functionsBase.js on Windows and
+          // fails there while passing on Linux CI.
+          readers.push(full.replace(join(process.cwd(), 'src'), '').split(sep).join('/'));
         }
       }
     };

@@ -37,24 +37,22 @@ resource "azurerm_user_assigned_identity" "github_deploy" {
 # github_deploy_ref are load-bearing — a mismatch fails at azure/login with
 # AADSTS70021 and no indication of which component was wrong.
 resource "azurerm_federated_identity_credential" "github_branch" {
-  name                = "github-${var.github_repo}-branch"
-  resource_group_name = azurerm_resource_group.hcw.name
-  parent_id           = azurerm_user_assigned_identity.github_deploy.id
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = "https://token.actions.githubusercontent.com"
-  subject             = "repo:${var.github_org}/${var.github_repo}:ref:${var.github_deploy_ref}"
+  name                      = "github-${var.github_repo}-branch"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_org}/${var.github_repo}:ref:${var.github_deploy_ref}"
 }
 
 # The data-migration workflow runs under a GitHub Environment, which changes the
 # subject claim shape — an environment token is not a branch token, so the
 # branch credential above does not cover it.
 resource "azurerm_federated_identity_credential" "github_data_migration" {
-  name                = "github-${var.github_repo}-env-data-migration"
-  resource_group_name = azurerm_resource_group.hcw.name
-  parent_id           = azurerm_user_assigned_identity.github_deploy.id
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = "https://token.actions.githubusercontent.com"
-  subject             = "repo:${var.github_org}/${var.github_repo}:environment:data-migration"
+  name                      = "github-${var.github_repo}-env-data-migration"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_org}/${var.github_repo}:environment:data-migration"
 }
 
 # ---------------------------------------------------------------------------

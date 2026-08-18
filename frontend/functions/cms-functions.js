@@ -3892,6 +3892,57 @@ function validateGalleryImageMetadataRequest(body) {
   };
 }
 
+/**
+ * Build the partial update for a gallery image.
+ *
+ * This is a PATCH, not a PUT: a field absent from the request must stay
+ * untouched in Firestore, which is why every field is guarded on undefined
+ * rather than merely falsy — a caller clearing a title to "" is a real edit and
+ * has to be distinguishable from not mentioning the title at all. Note slot
+ * checks undefined only, so an explicit null clears it; that asymmetry is
+ * preserved from the inline version.
+ */
+function buildGalleryMetadataUpdate({ provider, slot, title, folder, customTags }, user) {
+  const updateData = {
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: user.email || user.uid || 'admin',
+  };
+
+  if (provider !== undefined && provider !== null) {
+    updateData.provider = String(provider || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  if (slot !== undefined) {
+    updateData.slot = String(slot || '').trim();
+  }
+
+  if (title !== undefined && title !== null) {
+    updateData.title = String(title || '').trim() || 'Uploaded image';
+  }
+
+  if (folder !== undefined && folder !== null) {
+    updateData.folder = String(folder || 'default')
+      .trim()
+      .toLowerCase();
+  }
+
+  if (customTags !== undefined && customTags !== null) {
+    updateData.customTags = Array.isArray(customTags)
+      ? customTags
+          .map((tag) =>
+            String(tag || '')
+              .trim()
+              .toLowerCase()
+          )
+          .filter(Boolean)
+      : [];
+  }
+
+  return updateData;
+}
+
 exports.updateGalleryImageMetadata = onRequest(
   { region: 'us-central1', timeoutSeconds: 60, memory: '256MiB' },
   async (req, res) => {
@@ -3915,49 +3966,10 @@ exports.updateGalleryImageMetadata = onRequest(
       return res.status(404).json({ error: `${galleryCollection}/${imageId} not found` });
     }
 
-    const updateData = {
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedBy: user.email || user.uid || 'admin',
-    };
-
-    // Only update provider if provided
-    if (provider !== undefined && provider !== null) {
-      updateData.provider = String(provider || '')
-        .trim()
-        .toLowerCase();
-    }
-
-    // Only update slot if provided
-    if (slot !== undefined) {
-      updateData.slot = String(slot || '').trim();
-    }
-
-    // Only update title if provided
-    if (title !== undefined && title !== null) {
-      updateData.title = String(title || '').trim() || 'Uploaded image';
-    }
-
-    // Only update folder if provided
-    if (folder !== undefined && folder !== null) {
-      updateData.folder = String(folder || 'default')
-        .trim()
-        .toLowerCase();
-    }
-
-    // Only update customTags if provided
-    if (customTags !== undefined && customTags !== null) {
-      if (Array.isArray(customTags)) {
-        updateData.customTags = customTags
-          .map((tag) =>
-            String(tag || '')
-              .trim()
-              .toLowerCase()
-          )
-          .filter(Boolean);
-      } else {
-        updateData.customTags = [];
-      }
-    }
+    const updateData = buildGalleryMetadataUpdate(
+      { provider, slot, title, folder, customTags },
+      user
+    );
 
     await imageRef.update(updateData);
 
@@ -5721,8 +5733,9 @@ async function tryScrapeArticleOgImage({ articleUrl, articleId }) {
 
 // F10 (May 24, 2026) — Deprecated in favor of default fallback cover.
 // AI generation was too expensive and slow for articles without og:image.
-// Kept for potential future re-enablement if needed.
-async function generateCuratedAiImage({
+// Kept for potential future re-enablement if needed — the leading underscore
+// marks it as intentionally unreferenced for no-unused-vars.
+async function _generateCuratedAiImage({
   basePrompt,
   articleTitle,
   articleSummary,
@@ -5747,6 +5760,56 @@ Create a visually unique composition that reflects this specific article's conte
   return uploadGeneratedImage(buffer, filename);
 }
 
+/** Request fields for a curated-image generation, with the documented defaults. */
+function readCuratedImageRequest(body) {
+  const {
+    articleTitle = '',
+    basePrompt = '',
+    provider = 'AWS',
+    articleId = '',
+    articleUrl = '',
+  } = body || {};
+  return { articleTitle, basePrompt, provider, articleId, articleUrl };
+}
+
+/** Cached image document for an article, or null when there is no usable cache entry. */
+async function readCuratedImageCache(db, articleId) {
+  if (!articleId) return null;
+  const cacheDoc = await db.collection('curated_article_images').doc(articleId).get();
+  if (!cacheDoc.exists) return null;
+  return cacheDoc.data();
+}
+
+/**
+ * Persist a resolved cover image for an article.
+ *
+ * The fallback cover is deliberately never cached: it is the same URL for every
+ * article, so caching it would write one useless document per article and, worse,
+ * pin articles to the fallback even after they later gain an og:image. The
+ * DEFAULT check therefore comes first, matching the original branch precedence.
+ */
+async function cacheCuratedImage(db, { articleId, imageUrl, provider }) {
+  if (imageUrl === DEFAULT_FALLBACK_COVER_URL) {
+    logger.info(
+      `[generateCuratedArticleImage] Skipping cache for ${articleId} (using default fallback)`
+    );
+    return;
+  }
+  if (!articleId || !imageUrl) return;
+
+  await db
+    .collection('curated_article_images')
+    .doc(articleId)
+    .set({
+      imageUrl,
+      provider: provider || 'unknown',
+      slot: 'rss',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      articleId,
+    });
+  logger.info(`[generateCuratedArticleImage] Cached custom image for ${articleId}`);
+}
+
 exports.generateCuratedArticleImage = onRequest(
   { region: 'us-central1', timeoutSeconds: 120, memory: '512MiB', secrets: [replicateApiKey] },
   async (req, res) => {
@@ -5762,14 +5825,8 @@ exports.generateCuratedArticleImage = onRequest(
     const actor = await requireAdmin(req, res, 'editor');
     if (!actor) return;
 
-    const {
-      articleTitle = '',
-      articleSummary = '',
-      basePrompt = '',
-      provider = 'AWS',
-      articleId = '',
-      articleUrl = '',
-    } = req.body || {};
+    const { articleTitle, basePrompt, provider, articleId, articleUrl } =
+      readCuratedImageRequest(req.body);
 
     if (!basePrompt.trim() || !articleTitle.trim()) {
       return res.status(400).json({ error: 'basePrompt and articleTitle are required' });
@@ -5778,13 +5835,10 @@ exports.generateCuratedArticleImage = onRequest(
     try {
       // Check Firestore cache first (admin SDK bypasses security rules)
       const db = admin.firestore();
-      if (articleId) {
-        const cacheDoc = await db.collection('curated_article_images').doc(articleId).get();
-        if (cacheDoc.exists) {
-          const cached = cacheDoc.data();
-          logger.info(`[generateCuratedArticleImage] Cache hit for ${articleId}`);
-          return res.json({ success: true, imageUrl: cached.imageUrl });
-        }
+      const cached = await readCuratedImageCache(db, articleId);
+      if (cached) {
+        logger.info(`[generateCuratedArticleImage] Cache hit for ${articleId}`);
+        return res.json({ success: true, imageUrl: cached.imageUrl });
       }
 
       let resolvedImageUrl = await tryScrapeArticleOgImage({
@@ -5805,23 +5859,7 @@ exports.generateCuratedArticleImage = onRequest(
       // Persist to Firestore cache using admin SDK (bypasses security rules)
       // Skip caching if using default fallback to avoid creating unnecessary cache entries
       // for every article. The default fallback URL is returned directly without caching.
-      if (articleId && resolvedImageUrl && resolvedImageUrl !== DEFAULT_FALLBACK_COVER_URL) {
-        await db
-          .collection('curated_article_images')
-          .doc(articleId)
-          .set({
-            imageUrl: resolvedImageUrl,
-            provider: provider || 'unknown',
-            slot: 'rss',
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            articleId,
-          });
-        logger.info(`[generateCuratedArticleImage] Cached custom image for ${articleId}`);
-      } else if (resolvedImageUrl === DEFAULT_FALLBACK_COVER_URL) {
-        logger.info(
-          `[generateCuratedArticleImage] Skipping cache for ${articleId} (using default fallback)`
-        );
-      }
+      await cacheCuratedImage(db, { articleId, imageUrl: resolvedImageUrl, provider });
 
       res.json({ success: true, imageUrl: resolvedImageUrl });
     } catch (err) {
@@ -5897,7 +5935,7 @@ exports.publerProxy = onRequest(
       let bodyStr;
       try {
         bodyStr = JSON.stringify(publerBody);
-      } catch (e) {
+      } catch {
         return res.status(400).json({ error: 'Invalid request body' });
       }
       if (bodyStr.length > 50000) {
