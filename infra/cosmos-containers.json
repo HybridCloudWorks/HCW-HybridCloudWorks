@@ -414,6 +414,17 @@
       ]
     },
     {
+      "name": "content_stats_markers",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "default_ttl": null,
+      "note": null
+    },
+    {
       "name": "content_templates",
       "partition_key_path": "/id",
       "included_paths": [
