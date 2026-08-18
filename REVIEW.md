@@ -11,7 +11,8 @@ belong here* — it belongs in [TODO.md](TODO.md).
 Required inputs and configuration inventory are in [CHECKLIST.md](CHECKLIST.md).
 Completed work is in [CHANGELOG.md](CHANGELOG.md).
 
-Last updated 2026-08-09, against `main` @ `e4873b8`.
+Last updated 2026-08-18 (§8 added by the resource validation pass);
+previously 2026-08-09 against `main` @ `e4873b8`.
 
 > **Reclassification notice.** This file predates the SOP and previously mixed
 > human blockers with engineering work. Sections describing code to be written
@@ -741,3 +742,52 @@ creatable with the permissions this deployment actually runs under.
 
 `github_org` and `github_repo` were stale (`saulpatinojr`) and consumed by nothing. They now compose
 the federated `subject`, so the drift would have surfaced as an opaque `AADSTS70021` at first deploy.
+
+---
+
+## 8. Decisions raised by the 2026-08-18 resource validation
+
+Evidence: Wiki **Resource-Validation-Report** (external-surface run
+[#32083341003](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32083341003)
+plus a full plan-vs-code parity comparison). Engineering-tractable follow-ups
+are TODO.md T-504 (Cosmos hardening) and T-505 (observability layer); these
+two items need a human.
+
+### 8.1 Cloudflare access for synthetic validation
+
+Every request from a GitHub-hosted runner — frontend and `/api/*` alike —
+receives a Cloudflare bot challenge (HTTP 403) before reaching the origin.
+So `validate-deployed.yml` can verify DNS, TLS, and that the edge is up, but
+nothing about the application, and its "admin guards refuse anonymous
+callers" check passes vacuously (a challenge 403 is indistinguishable from
+an app refusal). The standard fix is a WAF custom rule: *skip challenge when
+a request carries a secret header*, with the secret stored as a GitHub
+Actions secret the workflow sends. Needs someone with Cloudflare zone
+access; until then, origin-level validation exists only when an operator
+runs the smoke suite from a residential IP.
+
+**Unblocked by:** creating the WAF skip rule + repo secret, or an explicit
+decision that synthetic origin validation is not wanted.
+
+### 8.2 The approved plan no longer describes the system
+
+`.azure/infrastructure-plan.json` (v0.1-approved) and `infra/*.tf` have
+diverged into two independently-evolved documents: ~40% of planned resources
+are implemented, the three-way API/worker/labs isolation is collapsed to one
+app, the observability layer is absent, security controls the plan requires
+are off (Cosmos firewall/local-auth, ZRS, purge protection, keyless OpenAI),
+and the implementation contains material resources the plan never approved
+(CI runner, 71 Cosmos containers, two hardcoded model deployments) under a
+naming scheme sharing zero names with the plan. Repository policy CI
+meanwhile asserts the plan "must remain approved."
+
+**The decision:** either (a) reconcile the implementation toward the plan
+(costs real money and rework), or (b) supersede v0.1 with an as-built v0.2
+plan whose deviations are each recorded as ADRs — the AVM question (TODO
+T-502) folds into the same act. Until one is chosen, the "approved" status
+the structure validator enforces is describing a document, not the system.
+
+**Unblocked by:** workload-owner choice of (a) or (b), and for (b) an
+explicit ratification (or removal) of the never-planned resources —
+particularly the Azure OpenAI account, which the plan feature-gated behind
+capacity/content-filter/budget approvals that were never recorded.

@@ -17,6 +17,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Resource validation pass, first execution (2026-08-18)** — results
+  published as the Wiki **Resource-Validation-Report** page (staged in
+  `.github/wiki/`, linked from Home and the sidebar). External surface:
+  edge live, TLS healthy to 2026-09-28, `www`/`api-azure` NXDOMAIN
+  (consistent with same-origin), but Cloudflare bot challenge blocks all
+  datacenter-IP validation of the origin. Plan-vs-code parity: ~40% of the
+  approved plan's resources implemented, with material security-posture
+  deviations (Cosmos open to the internet with key auth on, LRS vs ZRS,
+  purge protection defaulted off, ungated keyed OpenAI) and material
+  never-planned resources (CI runner, 71 containers, model deployments).
+  Follow-ups filed: TODO T-504 (Cosmos hardening), T-505 (observability
+  control layer); human decisions REVIEW §8.1 (Cloudflare synthetic-access
+  rule) and §8.2 (reconcile implementation to plan, or supersede the plan
+  as-built). (PR #106)
+
 - **`validate-deployed.yml` — on-demand deployed-surface validation** — a
   `workflow_dispatch` workflow running the externally observable half of the
   Deployment Runbook's §4 verification from a GitHub-hosted runner: DNS for

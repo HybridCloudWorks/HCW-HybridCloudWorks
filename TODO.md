@@ -17,10 +17,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 8 |
+| Open items | 10 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 6 |
+| Medium | 8 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
 | Last updated | 2026-08-17 — IaC standardization pass added T-501, T-502 |
@@ -1289,6 +1289,42 @@ network-allowed path); then set `default_action = "Deny"` with
 `bypass = ["AzureServices"]` and the subnet rule, and delete the ignore.
 Verify with a functions deploy AND a cold-start invocation before calling it
 done — the failure mode is a deploy that succeeds against stale state.
+
+### T-504 — Cosmos DB network firewall and key-auth hardening
+**Files:** `infra/main.tf` (`azurerm_cosmosdb_account.hcw`)
+
+The 2026-08-18 resource validation (Wiki: Resource-Validation-Report)
+confirmed the approved plan's Cosmos controls are unimplemented: the account
+has **no network rules** (answers the public internet) and **local key auth
+enabled**, while the plan — and ADR-001's Private-Link trade-off — require a
+service firewall allowing only the Functions integration subnet, and
+`localAuthenticationDisabled: true`. Implementation notes:
+
+- Add `is_virtual_network_filter_enabled = true` +
+  `virtual_network_rule { id = azurerm_subnet.functions_integration.id }`,
+  and add `Microsoft.AzureCosmosDB` to the subnet's `service_endpoints` —
+  without the endpoint the rule is inert (same trap as Key Vault,
+  documented at the subnet).
+- Sequence with REVIEW §0.2 (rotation decision) and REVIEW §8: flipping
+  `local_authentication_disabled = true` breaks anything still using keys —
+  verify the app path is MI-only first (it is, per `cosmos-client.js`
+  posture) and that the migration scripts are done needing keys.
+- The heal-computed-properties workflow and TFC runs reach Cosmos from
+  outside the VNet — confirm what identity/path they use before Deny, or
+  they join the firewall's casualty list.
+
+### T-505 — Implement the plan's observability control layer
+**Files:** `infra/main.tf` (new resources)
+
+Also from the 2026-08-18 validation: the approved plan's operational alarm
+wiring has no implementation. Add, in one PR: an
+`azurerm_monitor_action_group` (`ag-hcw-ops-prod`, common alert schema);
+re-point the budget notifications at it and restore the approved thresholds
+50/75/90/100 with a forecast-type alert; `daily_quota_gb = 0.25` on the Log
+Analytics workspace; and diagnostic settings for Cosmos, both storage
+accounts, and Key Vault (`AuditEvent`) into that workspace. All additive —
+no destroy risk. Alert *rules* (error rate, queue age) can follow once the
+action group exists.
 
 ## LOW
 
