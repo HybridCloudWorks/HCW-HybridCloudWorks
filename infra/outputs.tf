@@ -41,8 +41,22 @@ output "cosmos_database" {
 # Storage
 # -----------------------------------------------------------------------------
 output "storage_account" {
-  description = "Azure Storage account name"
+  description = "Content storage account name (NOT the Functions host account — see functions_storage_account)"
   value       = azurerm_storage_account.hcw.name
+}
+
+output "functions_storage_account" {
+  description = "Functions host storage account — the FUNCTIONS_STORAGE_ACCOUNT repository variable whose firewall deploy-functions.yml opens and closes per run (T-503)"
+  value       = azurerm_storage_account.functions.name
+}
+
+# Taken from the storage account's own attribute rather than the resource
+# group resource, so this output and functions_storage_account can never name
+# a mismatched pair — RESOURCE_GROUP exists solely to scope the firewall
+# window on that exact account.
+output "web_resource_group" {
+  description = "Resource group holding the Function App and its host storage account — the RESOURCE_GROUP repository variable deploy-functions.yml scopes its per-run firewall window to (T-503)"
+  value       = azurerm_storage_account.functions.resource_group_name
 }
 
 output "blob_endpoint" {
