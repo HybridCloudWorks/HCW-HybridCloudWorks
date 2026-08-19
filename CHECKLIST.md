@@ -38,8 +38,8 @@ by any code, and listed so it is not reintroduced).
 | Unverified | 26 |
 | Missing | 36 |
 | Placeholder | 0 |
-| Retired | 2 |
-| Last updated | 2026-08-19 (second pass) — HCP Terraform coordinates corrected against the live API: organization is `hcw` (not `HybridCloudWorks`), the declared workspace never existed, and a new empty `hcw-azure` workspace was created in the `Site` project. The federated credentials still carry the old subject and must be replaced by re-running the bootstrap. Earlier that day — GitHub variables remediated: `SUBSCRIPTION_ID` corrected to the application LZ, `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` set to their deterministic values, the `CLIENT_ID`/`APP_HOSTNAME` stubs deleted (unset fails legibly; values exist only after the first apply). No `Placeholder` entries remain. 2026-08-18 (third pass) — live Azure reconciliation: four ALZ subscriptions observed, the earlier bootstrap's artifacts observed GONE (§8 superseded, run order inverted to bootstrap-first), `SUBSCRIPTION_ID` found pointing at Connectivity instead of the application LZ (reclassified `Placeholder`), `TENANT_ID` corroborated against the live directory. Second pass: `AZURE_FUNCTIONS_URL` renamed to `FUNCTIONS_URL` (§7), stale variable references corrected. First pass: §7 reconciled against live repository config and §7b added. Every `secrets.*`, `vars.*` and `environment:` reference in `.github/workflows/**` was enumerated and checked against the repository: 8 secrets absent (the repository has none at all), 7 variables absent, 2 environments absent. Five §7 variables previously recorded `Missing` are now set — three of them to one-character stubs, hence the new `Placeholder` status |
+| Retired | 6 |
+| Last updated | 2026-08-19 (third pass) — first real apply run. Azure OpenAI retired entirely (§4): AI moves to external provider APIs, so `infra/openai.tf` and `outputs-openai.tf` are deleted along with the account, its diagnostic setting and the `ai` resource group. Forced by two apply-time facts — zero gpt-4o TPM quota in every SKU, and no DALL-E model in southcentralus at all. Key Vault renamed `kv-site-prod-scus-01` (the unsuffixed name is held by an unrelated Azure customer). Same pass: HCP Terraform coordinates corrected against the live API: organization is `hcw` (not `HybridCloudWorks`), the declared workspace never existed, and a new empty `hcw-azure` workspace was created in the `Site` project. The federated credentials still carry the old subject and must be replaced by re-running the bootstrap. Earlier that day — GitHub variables remediated: `SUBSCRIPTION_ID` corrected to the application LZ, `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` set to their deterministic values, the `CLIENT_ID`/`APP_HOSTNAME` stubs deleted (unset fails legibly; values exist only after the first apply). No `Placeholder` entries remain. 2026-08-18 (third pass) — live Azure reconciliation: four ALZ subscriptions observed, the earlier bootstrap's artifacts observed GONE (§8 superseded, run order inverted to bootstrap-first), `SUBSCRIPTION_ID` found pointing at Connectivity instead of the application LZ (reclassified `Placeholder`), `TENANT_ID` corroborated against the live directory. Second pass: `AZURE_FUNCTIONS_URL` renamed to `FUNCTIONS_URL` (§7), stale variable references corrected. First pass: §7 reconciled against live repository config and §7b added. Every `secrets.*`, `vars.*` and `environment:` reference in `.github/workflows/**` was enumerated and checked against the repository: 8 secrets absent (the repository has none at all), 7 variables absent, 2 environments absent. Five §7 variables previously recorded `Missing` are now set — three of them to one-character stubs, hence the new `Placeholder` status |
 
 Nothing is `Verified` *from an engineering session*: no Azure control plane
 has been reachable from any session to date (REVIEW.md §1.1–§1.2). Operator
@@ -104,16 +104,28 @@ Not environment variables, but required for any of the above to work:
 
 ## 4. Azure Functions — AI Providers
 
-Consumed by the 17 unimplemented AI RPCs (see [TODO.md](TODO.md) T-207). All
-`Missing`; the RPCs cannot be ported until these exist. **16 of those RPCs have
-live frontend call sites and are 404ing in the admin UI today.**
+**The Azure OpenAI path was retired 2026-08-19.** Model calls go to external
+provider APIs, keyed by the `*_API_KEY` app settings that resolve from Key
+Vault (§2 and `infra/main.tf`), so the four names below must stay unset — the
+account they described no longer exists in the configuration.
+
+The 17 AI RPCs remain unimplemented (see [TODO.md](TODO.md) T-207), and **16
+of them have live frontend call sites that are 404ing in the admin UI today**.
+That is unchanged by this: it was never these variables blocking them, and
+whoever ports the RPCs writes them against the provider APIs rather than an
+Azure endpoint.
+
+Two facts drove the decision, both discovered at apply time: the subscription
+holds **zero TPM quota for gpt-4o in every SKU**, and southcentralus offers no
+DALL-E model at all. Requesting quota would have unblocked a path nothing
+consumed.
 
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint | Yes | Azure resource | AI RPC set | `XXXXX!//XXXXXXX.XXXXXX.XXX!` | Missing | |
-| `AZURE_OPENAI_KEY` | Azure OpenAI API key | Yes | Key Vault | AI RPC set | `XXXXX00000!!!!!XXXXX` | Missing | |
-| `AZURE_OPENAI_GPT_DEPLOYMENT` | Text deployment name | Yes | Azure OpenAI | AI RPC set | `XXXXX-XXXXX` | Missing | |
-| `AZURE_OPENAI_DALLE_DEPLOYMENT` | Image deployment name | Yes | Azure OpenAI | AI RPC set | `XXXXX-XXXXX` | Missing | |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint | **No — must not exist** | — | No consumer | `XXXXX!//XXXXXXX.XXXXXX.XXX!` | **Retired** | 2026-08-19: AI moved to external provider APIs, and `infra/openai.tf` was deleted with the account. Nothing derives this any more |
+| `AZURE_OPENAI_KEY` | Azure OpenAI API key | **No — must not exist** | — | No consumer | `XXXXX00000!!!!!XXXXX` | **Retired** | Was already absent by design (the account was keyless); now moot — there is no account |
+| `AZURE_OPENAI_GPT_DEPLOYMENT` | Text deployment name | **No — must not exist** | — | No consumer | `XXXXX-XXXXX` | **Retired** | gpt-4o had zero TPM quota in every SKU in this subscription, which is what surfaced the decision |
+| `AZURE_OPENAI_DALLE_DEPLOYMENT` | Image deployment name | **No — must not exist** | — | No consumer | `XXXXX-XXXXX` | **Retired** | southcentralus offers no DALL-E model at all; image generation goes through the provider API |
 
 ## 5. Azure Functions — Runtime and Feature Flags
 

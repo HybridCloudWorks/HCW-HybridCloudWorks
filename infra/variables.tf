@@ -53,8 +53,9 @@ variable "azure_resource_providers" {
   description = "Resource providers Terraform registers on each target subscription; empty the list when registration is centrally governed"
   type        = list(string)
   default = [
-    "Microsoft.App",                 # Flex Consumption subnet delegation (Microsoft.App/environments)
-    "Microsoft.CognitiveServices",   # Azure OpenAI account and deployments
+    "Microsoft.App", # Flex Consumption subnet delegation (Microsoft.App/environments)
+    # No Microsoft.CognitiveServices: AI runs on external provider APIs, so
+    # this subscription hosts no Azure OpenAI account to register it for.
     "Microsoft.DocumentDB",          # Cosmos DB
     "Microsoft.Insights",            # Application Insights, diagnostic settings, action groups
     "Microsoft.KeyVault",            # Key Vault

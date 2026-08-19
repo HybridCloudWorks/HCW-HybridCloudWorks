@@ -100,22 +100,6 @@ resource "azurerm_monitor_diagnostic_setting" "content_blob" {
   }
 }
 
-# Azure OpenAI — audit and request/response, per the plan's diagnostics list.
-# Volume is bounded by the account's own tiny deployment capacity.
-resource "azurerm_monitor_diagnostic_setting" "openai" {
-  name                       = "diag-openai-to-logs"
-  target_resource_id         = azurerm_cognitive_account.openai.id
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
-
-  enabled_log {
-    category = "Audit"
-  }
-
-  enabled_log {
-    category = "RequestResponse"
-  }
-
-  enabled_metric {
-    category = "AllMetrics"
-  }
-}
+# There is no Azure OpenAI diagnostic setting, because there is no Azure
+# OpenAI account: model calls go to external provider APIs (see the app
+# settings in main.tf). Their request logs live with the provider, not here.

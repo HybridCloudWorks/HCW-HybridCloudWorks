@@ -36,7 +36,9 @@ locals {
     stor = "Content storage account and its blob containers — prevent_destroy"
     sec  = "Key Vault — prevent_destroy"
     conn = "Spoke virtual network and the Functions integration subnet"
-    ai   = "Azure OpenAI account and its model deployments"
+    # No `ai` group. It held the Azure OpenAI account, which was removed when
+    # AI moved to external provider APIs — a group with nothing in it is a
+    # group someone will put something unrelated into.
   }
 }
 
@@ -163,9 +165,20 @@ resource "azurerm_cosmosdb_account" "hcw" {
     consistency_level = "Session"
   }
 
+  # zone_redundant is EXPLICIT, not left to the provider default, because the
+  # default put this account in the availability-zone pool and South Central US
+  # had no AZ capacity to give: creation failed with ServiceUnavailable and a
+  # message about "zonal redundant (Availability Zones) accounts" — a capacity
+  # message, not a configuration error, and one that would recur unpredictably.
+  #
+  # False is also the correct setting on its own merits here. The account is
+  # serverless and single-region by deliberate design (see the capacity note
+  # above), and zone redundancy costs more while protecting against a failure
+  # mode a single-region account has already accepted.
   geo_location {
     location          = azurerm_resource_group.app["db"].location
     failover_priority = 0
+    zone_redundant    = false
   }
 
   # T-504: the service firewall ADR-001/ADR-0008 traded Private Link away for.
@@ -796,12 +809,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 
     # AI generation — content drafting, scoring and image pipelines.
     #
-    # Azure OpenAI is keyless (T-506): endpoint only, no AZURE_OPENAI_KEY —
-    # when lib/openai-client.js is wired for real it must authenticate with
-    # DefaultAzureCredential against this endpoint, not a key. The *_API_KEY
-    # settings below are third-party SaaS keys, a different thing.
-    "AZURE_OPENAI_ENDPOINT" = azurerm_cognitive_account.openai.endpoint
-
+    # Every model call goes to an EXTERNAL provider API with a key from Key
+    # Vault. There is deliberately no AZURE_OPENAI_ENDPOINT and no Azure
+    # OpenAI account behind it: the platform-hosted path was removed once the
+    # decision landed that both text and image generation use the providers'
+    # own APIs. Re-adding an Azure OpenAI account would be a second, unused
+    # route to the same capability — and in this region it could not be used
+    # regardless, since the subscription holds zero model quota.
     "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
     "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
     "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
