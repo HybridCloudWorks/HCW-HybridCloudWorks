@@ -45,7 +45,9 @@ resource "azurerm_resource_group" "platform_conn" {
 resource "azurerm_virtual_network" "hub" {
   provider = azurerm.conn
 
-  name                = "vnet-hub-${var.environment}-${var.region_abbreviation}"
+  # `plat` in the workload slot: the org token belongs in management-group IDs
+  # only, and platform resources take `plat` (Naming-Convention wiki page).
+  name                = "vnet-plat-hub-${var.environment}-${var.region_abbreviation}"
   location            = azurerm_resource_group.platform_conn.location
   resource_group_name = azurerm_resource_group.platform_conn.name
   address_space       = [var.hub_address_space]
@@ -57,7 +59,7 @@ resource "azurerm_virtual_network" "hub" {
 resource "azurerm_subnet" "hub_shared" {
   provider = azurerm.conn
 
-  name                 = "snet-shared-${var.environment}-${var.region_abbreviation}"
+  name                 = "snet-plat-shared-${var.environment}-${var.region_abbreviation}"
   resource_group_name  = azurerm_resource_group.platform_conn.name
   virtual_network_name = azurerm_virtual_network.hub.name
   address_prefixes     = [var.hub_shared_subnet_prefix]
@@ -70,7 +72,7 @@ resource "azurerm_subnet" "hub_shared" {
 resource "azurerm_network_security_group" "hub_shared" {
   provider = azurerm.conn
 
-  name                = "nsg-shared-${var.environment}-${var.region_abbreviation}"
+  name                = "nsg-plat-shared-${var.environment}-${var.region_abbreviation}"
   location            = azurerm_resource_group.platform_conn.location
   resource_group_name = azurerm_resource_group.platform_conn.name
   tags                = var.tags
@@ -91,7 +93,9 @@ resource "azurerm_subnet_network_security_group_association" "hub_shared" {
 resource "azurerm_route_table" "hub" {
   provider = azurerm.conn
 
-  name                = "rt-hub-${var.environment}-${var.region_abbreviation}"
+  # Named for its job — routing SPOKE traffic through a future hub firewall —
+  # which is the row the Naming-Convention Connectivity table gives it.
+  name                = "rt-plat-spoke-${var.environment}-${var.region_abbreviation}"
   location            = azurerm_resource_group.platform_conn.location
   resource_group_name = azurerm_resource_group.platform_conn.name
   tags                = var.tags

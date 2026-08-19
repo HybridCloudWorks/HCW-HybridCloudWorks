@@ -19,7 +19,7 @@
 # to leak) — but they stay `sensitive` to keep subscription IDs out of CI logs.
 # -----------------------------------------------------------------------------
 variable "subscription_app" {
-  description = "Application landing zone: the HCWSite workload (sub-app-site-prod-scus)"
+  description = "Application landing zone: the HCWSite workload (display name sub-app-hcwsite-prod-scus; Naming-Convention specifies sub-app-site-prod-scus — rename pending)"
   type        = string
   sensitive   = true
 }
@@ -177,7 +177,10 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  default     = "cosmos-site-prod"
+  # Region included like every other region-qualified name: 21 chars, well
+  # inside Cosmos's 44-char limit, and this prevent_destroy account is the
+  # most expensive name in the estate to regret.
+  default = "cosmos-site-prod-scus"
 }
 
 variable "cosmos_local_auth_disabled" {
