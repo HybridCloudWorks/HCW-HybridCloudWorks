@@ -69,16 +69,26 @@ reason: nothing in `infra/` can reach it.
 
 ```powershell
 # Dry run first — prints every change without making one.
-# -IdentitySubscriptionId is where the identity itself lives (Management);
-# -TargetSubscriptionIds is every subscription Terraform must deploy into —
-# a subscription absent from the list is one Terraform cannot touch. With a
-# single subscription, pass it as both and omit -TargetSubscriptionIds.
-./scripts/bootstrap-terraform-oidc.ps1 `
-    -TenantId <tenant-guid> `
-    -IdentitySubscriptionId <mgmt-subscription-guid> `
-    -TargetSubscriptionIds <app-guid>,<mgmt-guid>,<conn-guid> `
-    -WhatIf
+./scripts/bootstrap-terraform-oidc.ps1 -WhatIf
 ```
+
+**No arguments, by design.** Every value the three deployment scripts need is
+a GUID, and GUIDs passed as flags go wrong in ways that surface later as
+something else: they land in shell history, one transposed character reads as
+a permissions problem, and the operator has to know which of four similar
+subscription IDs belongs in which slot from a terminal that cannot show them
+the list. So the scripts *discover* what Azure already knows, offer a numbered
+list where there is a real choice — with the subscription matching the naming
+convention preselected — and prompt only for what cannot be found. Everything
+resolved is printed for one confirmation before anything is written.
+
+Here that means the tenant comes from your `az` sign-in, the identity's home
+is matched from `sub-plat-mgmt-*`, and the deployment targets default to the
+three subscriptions the configuration actually targets (app, mgmt, conn —
+Identity is deliberately excluded, since that landing zone holds nothing).
+
+Parameters still exist for every value, so CI can supply them; they are simply
+never required. `-DeviceCode` remains for a session with no browser.
 
 The script is idempotent, so re-running it is how you repair a broken
 handshake, not just how you create one. It preflights before it proposes
@@ -135,12 +145,19 @@ These four names come from HashiCorp and Microsoft and are exempt from the
 names. Terraform *variables* for the same workspace are listed in
 `CHECKLIST.md` section 7.
 
-Both seeding halves are scripted — prefer the scripts over the UI forms:
+Both seeding halves are scripted — prefer the scripts over the UI forms, and
+both take no arguments for the reasons given in section 0:
 
 - `scripts/set-tfc-variables.ps1` writes all twelve HCP Terraform workspace
   values (the four environment variables above plus the eight Terraform
   variables) in one idempotent run, and reads back the workspace's real
   project name — the value the federated-credential subject must contain.
+  It finds the Terraform identity's client id by reading the identity the
+  bootstrap created, so that value is never copied by hand out of a
+  scrolled-away console; the subscriptions come from `az`; the Cloudflare zone
+  is chosen from the zones the token can actually see, after prompting for the
+  token itself. Only the app-registration audience and the Cloudflare token
+  are typed, and only when they cannot be discovered.
 - `scripts/set-github-variables.ps1` seeds the GitHub repository variables
   and secrets. Run it once **before** the first apply — that seeds only
   `TENANT_ID` and `SUBSCRIPTION_ID`, the two values that are inputs *to*

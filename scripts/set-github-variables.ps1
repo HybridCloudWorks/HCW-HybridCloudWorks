@@ -85,10 +85,9 @@
       -SubscriptionApp 00000000-0000-0000-0000-000000000000
 
 .EXAMPLE
-  # After the first apply — same invocation; wave 2 now finds the outputs.
-  ./scripts/set-github-variables.ps1 `
-      -TenantId 00000000-0000-0000-0000-000000000000 `
-      -SubscriptionApp 00000000-0000-0000-0000-000000000000
+  # No arguments. The tenant and application subscription are read from the
+  # Azure CLI sign-in; anything ambiguous is offered as a numbered list.
+  ./scripts/set-github-variables.ps1
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -97,24 +96,16 @@ param(
   [string] $Workspace = 'hybridcloudworks-azure',
   [securestring] $TfcToken,
 
-  [Parameter(Mandatory = $true)][string] $TenantId,
-  [Parameter(Mandatory = $true)][string] $SubscriptionApp,
+  # Optional. Omit them and they are discovered from the Azure CLI sign-in —
+  # see lib/deploy-console.ps1 for why nothing here is a required flag.
+  [string] $TenantId,
+  [string] $SubscriptionApp,
   [switch] $SetTfApiToken
 )
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Step { param($Message) Write-Host "`n=== $Message" -ForegroundColor Cyan }
-function Write-Ok { param($Message) Write-Host "  [ok]     $Message" -ForegroundColor Green }
-function Write-Act { param($Message) Write-Host "  [write]  $Message" -ForegroundColor Yellow }
-function Write-Info { param($Message) Write-Host "  $Message" -ForegroundColor DarkGray }
-
-function Stop-WithGuidance {
-  param([string] $Problem, [string[]] $Fix)
-  Write-Host "`n  [stop] $Problem" -ForegroundColor Red
-  foreach ($line in $Fix) { Write-Host "         $line" -ForegroundColor Red }
-  exit 1
-}
+. (Join-Path $PSScriptRoot 'lib/deploy-console.ps1')
 
 # gh writes progress to stderr, which PowerShell 7 escalates under 'Stop'.
 # Judge success by exit code, same pattern as Invoke-Az in the bootstrap.
@@ -191,8 +182,55 @@ Write-Ok 'gh authenticated'
 Invoke-Gh @('repo', 'view', $Repository, '--json', 'nameWithOwner') | Out-Null
 Write-Ok "Repository: $Repository"
 
-$existingVariables = @((Invoke-Gh @('variable', 'list', '-R', $Repository, '--json', 'name') | ConvertFrom-Json).name)
-$existingSecrets = @((Invoke-Gh @('secret', 'list', '-R', $Repository, '--json', 'name') | ConvertFrom-Json).name)
+# ForEach-Object rather than .name: the repository legitimately has no secrets
+# at all today, and an empty result must read as "none" rather than throwing.
+$existingVariables = @(Invoke-Gh @('variable', 'list', '-R', $Repository, '--json', 'name') |
+    ConvertFrom-Json | ForEach-Object { $_.name })
+$existingSecrets = @(Invoke-Gh @('secret', 'list', '-R', $Repository, '--json', 'name') |
+    ConvertFrom-Json | ForEach-Object { $_.name })
+
+# ===========================================================================
+# 1b. Discover the two wave-1 values
+# ===========================================================================
+# Both come from the Azure CLI sign-in. Neither is prompted for as a GUID
+# unless Azure cannot supply it, because a hand-typed subscription id is the
+# defect this script exists to stop repeating.
+if (-not $TenantId -or -not $SubscriptionApp) {
+  Write-Step 'Discovering the tenant and application subscription'
+
+  if (-not (Test-AzInstalled)) {
+    Stop-WithGuidance 'The Azure CLI (az) is not installed, and no values were supplied.' @(
+      'Either install it (https://learn.microsoft.com/cli/azure/install-azure-cli)',
+      'and sign in, or pass -TenantId and -SubscriptionApp explicitly.'
+    )
+  }
+
+  $account = Invoke-Az @('account', 'show', '-o', 'json') -AllowFailure
+  if (-not $account) {
+    Stop-WithGuidance 'Not signed in to Azure.' @(
+      'Run: az login', 'Then re-run this script.'
+    )
+  }
+
+  if (-not $TenantId) {
+    $TenantId = $account.tenantId
+    Write-Ok "Tenant: $TenantId  (from the current sign-in)"
+  }
+
+  if (-not $SubscriptionApp) {
+    $subscriptions = Get-AzSubscriptionList
+    if ($subscriptions.Count -eq 0) {
+      Stop-WithGuidance 'The sign-in can see no enabled subscriptions.' @(
+        'Check with: az account list --all -o table'
+      )
+    }
+    # The application landing zone: where the Function App lives, and so the
+    # subscription azure/login must target. NOT a platform subscription.
+    $chosen = Select-Subscription -Purpose 'Application landing zone (SUBSCRIPTION_ID)' -Pattern 'sub-app-*' `
+      -Subscriptions $subscriptions
+    $SubscriptionApp = $chosen.id
+  }
+}
 
 function Set-RepoVariable {
   [CmdletBinding(SupportsShouldProcess = $true)]
@@ -223,6 +261,15 @@ function Set-RepoSecret {
 # ===========================================================================
 # 2. Wave 1 — known before the first apply
 # ===========================================================================
+$proceed = Confirm-Plan -Title 'About to write these repository variables' -Force:$WhatIfPreference -Order @(
+  'Repository', 'TENANT_ID', 'SUBSCRIPTION_ID'
+) -Values @{
+  'Repository'      = $Repository
+  'TENANT_ID'       = $TenantId
+  'SUBSCRIPTION_ID' = $SubscriptionApp
+}
+if (-not $proceed) { Write-Info 'Cancelled — nothing was written.'; exit 0 }
+
 Write-Step 'Wave 1: values known before the first apply'
 
 Set-RepoVariable -Name 'TENANT_ID' -Value $TenantId

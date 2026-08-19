@@ -82,16 +82,11 @@
   writing anything.
 
 .EXAMPLE
-  ./scripts/set-tfc-variables.ps1 `
-      -TerraformClientId 00000000-0000-0000-0000-000000000000 `
-      -TenantId 00000000-0000-0000-0000-000000000000 `
-      -SubscriptionApp 00000000-0000-0000-0000-000000000000 `
-      -SubscriptionMgmt 00000000-0000-0000-0000-000000000000 `
-      -SubscriptionConn 00000000-0000-0000-0000-000000000000 `
-      -EntraApiAudience api://00000000-0000-0000-0000-000000000000 `
-      -BudgetAlertEmail ops@example.com `
-      -CloudflareZoneId 0000000000000000000000000000000000 `
-      -WhatIf
+  # No arguments. The Terraform identity, tenant and subscriptions come from
+  # Azure; the Cloudflare zone is picked from the zones the token can see; the
+  # rest is prompted for once and shown for confirmation before anything is
+  # written.
+  ./scripts/set-tfc-variables.ps1 -WhatIf
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -99,30 +94,31 @@ param(
   [string] $Workspace = 'hybridcloudworks-azure',
   [securestring] $TfcToken,
 
-  [Parameter(Mandatory = $true)][string] $TerraformClientId,
-  [Parameter(Mandatory = $true)][string] $TenantId,
-  [Parameter(Mandatory = $true)][string] $SubscriptionApp,
-  [Parameter(Mandatory = $true)][string] $SubscriptionMgmt,
-  [Parameter(Mandatory = $true)][string] $SubscriptionConn,
-  [Parameter(Mandatory = $true)][string] $EntraApiAudience,
-  [Parameter(Mandatory = $true)][string] $BudgetAlertEmail,
-  [Parameter(Mandatory = $true)][string] $CloudflareZoneId,
-  [securestring] $CloudflareApiToken
+  # Every one of these is optional and discovered or prompted for when
+  # omitted — see lib/deploy-console.ps1 for why none is a required flag.
+  [string] $TerraformClientId,
+  [string] $TenantId,
+  [string] $SubscriptionApp,
+  [string] $SubscriptionMgmt,
+  [string] $SubscriptionConn,
+  [string] $EntraApiAudience,
+  [string] $BudgetAlertEmail,
+  [string] $CloudflareZoneId,
+  [securestring] $CloudflareApiToken,
+
+  # Where the bootstrap script puts the Terraform identity. Only used to find
+  # its client id automatically.
+  [string] $BootstrapResourceGroup = 'rg-hcw-bootstrap',
+  [string] $BootstrapIdentityName = 'id-hcw-terraform',
+
+  # Matched against the zones the Cloudflare token can see, so the zone id is
+  # chosen rather than pasted. Mirrors infra/variables.tf's `domain` default.
+  [string] $Domain = 'hybridcloudworks.com'
 )
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Step { param($Message) Write-Host "`n=== $Message" -ForegroundColor Cyan }
-function Write-Ok { param($Message) Write-Host "  [ok]     $Message" -ForegroundColor Green }
-function Write-Act { param($Message) Write-Host "  [write]  $Message" -ForegroundColor Yellow }
-function Write-Info { param($Message) Write-Host "  $Message" -ForegroundColor DarkGray }
-
-function Stop-WithGuidance {
-  param([string] $Problem, [string[]] $Fix)
-  Write-Host "`n  [stop] $Problem" -ForegroundColor Red
-  foreach ($line in $Fix) { Write-Host "         $line" -ForegroundColor Red }
-  exit 1
-}
+. (Join-Path $PSScriptRoot 'lib/deploy-console.ps1')
 
 # ---------------------------------------------------------------------------
 # Token resolution, cheapest source first. `terraform login` already wrote a
@@ -163,9 +159,10 @@ function Resolve-TfcToken {
     }
   }
 
-  Write-Info 'No stored token found. Create one at:'
-  Write-Info '  https://app.terraform.io/app/settings/tokens'
-  return (Read-Host -Prompt '  HCP Terraform API token' -AsSecureString)
+  return (Read-SecretValue -Prompt 'HCP Terraform API token' -Hint @(
+      'No stored token found. Either run `terraform login`, which stores one,',
+      'or create a token at https://app.terraform.io/app/settings/tokens'
+    ))
 }
 
 function Invoke-Tfc {
@@ -230,19 +227,166 @@ if ($projectId) {
 # ===========================================================================
 # 2. The variables
 # ===========================================================================
+# ---------------------------------------------------------------------------
+# 2a. Discover everything Azure and Cloudflare already know
+# ---------------------------------------------------------------------------
+$azureAvailable = (Test-AzInstalled) -and (Invoke-Az @('account', 'show', '-o', 'json') -AllowFailure)
+
+if (-not $azureAvailable -and -not ($TenantId -and $SubscriptionApp -and $SubscriptionMgmt -and $SubscriptionConn)) {
+  Stop-WithGuidance 'Not signed in to Azure, and the subscription values were not all supplied.' @(
+    'Run: az login', 'Then re-run this script.'
+  )
+}
+
+if ($azureAvailable) {
+  Write-Step 'Discovering from Azure'
+  $account = Invoke-Az @('account', 'show', '-o', 'json')
+
+  if (-not $TenantId) {
+    $TenantId = $account.tenantId
+    Write-Ok "Tenant: $TenantId  (from the current sign-in)"
+  }
+
+  $visible = Get-AzSubscriptionList
+  if (-not $SubscriptionMgmt) {
+    $SubscriptionMgmt = (Select-Subscription -Purpose 'Platform Management (subscription_mgmt)' `
+        -Pattern 'sub-plat-mgmt-*' -Subscriptions $visible).id
+  }
+  if (-not $SubscriptionApp) {
+    $SubscriptionApp = (Select-Subscription -Purpose 'Application landing zone (subscription_app)' `
+        -Pattern 'sub-app-*' -Subscriptions $visible).id
+  }
+  if (-not $SubscriptionConn) {
+    $SubscriptionConn = (Select-Subscription -Purpose 'Platform Connectivity (subscription_conn)' `
+        -Pattern 'sub-plat-conn-*' -Subscriptions $visible).id
+  }
+
+  # The client id of the identity bootstrap-terraform-oidc.ps1 created. This is
+  # the value operators previously copied out of a scrolled-away console or a
+  # gitignored report; it is readable straight from the identity instead.
+  if (-not $TerraformClientId) {
+    $identity = Invoke-Az @(
+      'identity', 'show', '-n', $BootstrapIdentityName, '-g', $BootstrapResourceGroup,
+      '--subscription', $SubscriptionMgmt, '-o', 'json'
+    ) -AllowFailure
+    if ($identity) {
+      $TerraformClientId = $identity.clientId
+      Write-Ok "Terraform identity: $BootstrapIdentityName ($TerraformClientId)"
+    } else {
+      Write-Warn "$BootstrapIdentityName not found in $BootstrapResourceGroup."
+      Write-Info 'That identity is what HCP Terraform authenticates as, and only'
+      Write-Info 'bootstrap-terraform-oidc.ps1 creates it. Run that first, or paste'
+      Write-Info 'the client id if the identity lives somewhere else.'
+      $TerraformClientId = Read-Value -Prompt 'TFC_AZURE_RUN_CLIENT_ID' `
+        -Validate { param($v) Test-Guid $v } -ValidationMessage 'Expected a GUID.'
+    }
+  }
+
+  # The budget notification address defaults to whoever is running this, which
+  # is right far more often than not for a one-person platform.
+  if (-not $BudgetAlertEmail) {
+    $signedInEmail = Invoke-Az @('ad', 'signed-in-user', 'show', '--query', 'mail', '-o', 'tsv') -AllowFailure
+    if (-not $signedInEmail) { $signedInEmail = $account.user.name }
+    $BudgetAlertEmail = Read-Value -Prompt 'Budget alert email' -Default $signedInEmail `
+      -Validate { param($v) $v -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' } `
+      -ValidationMessage 'Expected an email address.'
+  }
+
+  # The API app registration exposing api://<id>. Offered as a list of the
+  # registrations this account owns rather than asked for as a URI, because
+  # getting it wrong means sign-in succeeds and every API call 401s.
+  if (-not $EntraApiAudience) {
+    $apps = @(Invoke-Az @('ad', 'app', 'list', '--show-mine', '-o', 'json') -AllowFailure |
+        Where-Object { $_.identifierUris -and $_.identifierUris.Count -gt 0 })
+    if ($apps.Count -gt 0) {
+      $chosen = Select-Option -Title 'API app registration (entra_api_audience)' -Options $apps `
+        -Label { param($a) "$($a.displayName)  $($a.identifierUris[0])" } -AutoSelectSingle `
+        -AutoSelectNote 'only registration exposing an application ID URI'
+      $EntraApiAudience = $chosen.identifierUris[0]
+    } else {
+      Write-Info 'No app registration with an application ID URI was found for this'
+      Write-Info 'account. It is created by hand (REVIEW.md 4.1) and must match the'
+      Write-Info "SPA's requested scope, or every authenticated call is rejected."
+      $EntraApiAudience = Read-Value -Prompt 'entra_api_audience' `
+        -Validate { param($v) $v -match '^(api://|https://)' } `
+        -ValidationMessage 'Expected api://<guid> or an https:// identifier URI.'
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 2b. Cloudflare — token first, then the zone chosen from what it can see
+# ---------------------------------------------------------------------------
+if (-not $CloudflareApiToken) {
+  if ($WhatIfPreference) {
+    # A dry run writes nothing, so do not ask the operator to produce a secret
+    # it will never use. The empty SecureString keeps the pipeline type-safe.
+    Write-Info 'Dry run — not prompting for the Cloudflare API token.'
+    $CloudflareApiToken = [securestring]::new()
+  } else {
+    Write-Step 'Cloudflare'
+    $CloudflareApiToken = Read-SecretValue -Prompt 'Cloudflare API token' -Hint @(
+      'Zone:Read + DNS:Edit, scoped to the domain. Create one at:',
+      '  https://dash.cloudflare.com/profile/api-tokens'
+    )
+  }
+}
+
+if (-not $CloudflareZoneId) {
+  $plainToken = [System.Net.NetworkCredential]::new('', $CloudflareApiToken).Password
+  $zones = @()
+  if ($plainToken) {
+    try {
+      $response = Invoke-RestMethod -Method GET -Uri 'https://api.cloudflare.com/client/v4/zones?per_page=50' `
+        -Headers @{ Authorization = "Bearer $plainToken" }
+      if ($response.success) { $zones = @($response.result) }
+    } catch {
+      Write-Info 'Could not list zones with that token (Zone:Read may be missing).'
+    }
+  }
+
+  if ($zones.Count -gt 0) {
+    # Prefer the configured domain, so the common case needs no interaction.
+    $match = @($zones | Where-Object { $_.name -eq $Domain })
+    $candidates = if ($match.Count -eq 1) { $match } else { $zones }
+    $zone = Select-Option -Title 'Cloudflare zone (cloudflare_zone_id)' -Options $candidates `
+      -Label { param($z) "$($z.name)  [$($z.id)]" } -AutoSelectSingle -AutoSelectNote "matches $Domain"
+    $CloudflareZoneId = $zone.id
+  } elseif ($WhatIfPreference) {
+    $CloudflareZoneId = '<zone id — re-run without -WhatIf>'
+  } else {
+    $CloudflareZoneId = Read-Value -Prompt 'cloudflare_zone_id' -Hint @(
+      'Dashboard -> the domain -> Overview -> API section, bottom right.'
+    )
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 2c. Confirm before writing
+# ---------------------------------------------------------------------------
+$summary = [ordered]@{
+  'Workspace'               = "$Organization/$Workspace"
+  'TFC_AZURE_RUN_CLIENT_ID' = $TerraformClientId
+  'ARM_TENANT_ID'           = $TenantId
+  'subscription_app'        = $SubscriptionApp
+  'subscription_mgmt'       = $SubscriptionMgmt
+  'subscription_conn'       = $SubscriptionConn
+  'entra_api_audience'      = $EntraApiAudience
+  'budget_alert_email'      = $BudgetAlertEmail
+  'cloudflare_zone_id'      = $CloudflareZoneId
+  'cloudflare_api_token'    = '(not shown)'
+}
+if (-not (Confirm-Plan -Title 'About to write these workspace variables' -Values $summary `
+      -Order @($summary.Keys) -Force:$WhatIfPreference)) {
+  Write-Info 'Cancelled — nothing was written.'
+  exit 0
+}
+
 # ARM_* and TFC_AZURE_* are category 'env' because the provider and HCP
 # Terraform's dynamic-credentials machinery read them from the process
 # environment. As Terraform variables they are accepted, ignored, and the run
 # fails saying no credentials were supplied.
-$plainCloudflareToken = if ($CloudflareApiToken) {
-  $CloudflareApiToken
-} elseif ($WhatIfPreference) {
-  # A dry run writes nothing, so do not ask the operator to produce a secret
-  # it will never use. The empty SecureString keeps the pipeline type-safe.
-  [securestring]::new()
-} else {
-  Read-Host -Prompt '  Cloudflare API token' -AsSecureString
-}
+$plainCloudflareToken = $CloudflareApiToken
 
 $variables = @(
   # --- Environment: how the run authenticates -----------------------------
