@@ -467,6 +467,121 @@ function Format-Subscription {
   return "$($Subscription.name)  [$($Subscription.id)]"
 }
 
+# ---------------------------------------------------------------------------
+# Entra — the API app registration behind entra_api_audience
+# ---------------------------------------------------------------------------
+# Graph is called directly rather than through `az ad app`, because the pieces
+# this registration needs (an exposed scope, app roles, v2 access tokens) are
+# nested JSON that the CLI's --set syntax mangles on Windows.
+function Get-GraphToken {
+  $token = Invoke-Az @('account', 'get-access-token', '--resource', 'https://graph.microsoft.com', '-o', 'json') -AllowFailure
+  if (-not $token) { return $null }
+  return $token.accessToken
+}
+
+function Invoke-Graph {
+  param(
+    [Parameter(Mandatory)][string] $Path,
+    [string] $Method = 'GET',
+    [hashtable] $Body,
+    [Parameter(Mandatory)][string] $AccessToken,
+    [switch] $AllowFailure
+  )
+  $arguments = @{
+    Method  = $Method
+    Uri     = "https://graph.microsoft.com/v1.0$Path"
+    Headers = @{ Authorization = "Bearer $AccessToken"; 'Content-Type' = 'application/json' }
+  }
+  if ($Body) { $arguments.Body = ($Body | ConvertTo-Json -Depth 20) }
+  try { return Invoke-RestMethod @arguments } catch {
+    if ($AllowFailure) { return $null }
+    throw
+  }
+}
+
+# Create the API app registration the Functions host validates tokens against.
+#
+# DECISION 3 (infra/variables.tf) requires this to be a SEPARATE registration
+# from the SPA: with one registration, an ID token minted for the browser
+# carries aud = <client-id>, indistinguishable from an access token for the
+# API, so a token the browser was never meant to send would be accepted.
+#
+# Created with, because a second manual pass over the same object is how these
+# end up half-configured:
+#   - identifierUris = api://<appId>, which IS entra_api_audience;
+#   - requestedAccessTokenVersion 2, so tokens carry the v2 claims MSAL issues;
+#   - the access_as_admin delegated scope the SPA requests (REVIEW 4.5 step 1);
+#   - the Admin and LabAgent app roles — deliberately disjoint guards, one for
+#     admin users and one for lab agent hosts (REVIEW 4.5 step 4, CHECKLIST 2b);
+#   - a service principal, without which no role can be assigned to anyone.
+function New-EntraApiRegistration {
+  param(
+    [Parameter(Mandatory)][string] $DisplayName,
+    [Parameter(Mandatory)][string] $AccessToken
+  )
+
+  $scopeId = [guid]::NewGuid().ToString()
+  $application = Invoke-Graph -Path '/applications' -Method POST -AccessToken $AccessToken -Body @{
+    displayName    = $DisplayName
+    signInAudience = 'AzureADMyOrg'
+    api            = @{
+      requestedAccessTokenVersion = 2
+      oauth2PermissionScopes      = @(
+        @{
+          id                      = $scopeId
+          value                   = 'access_as_admin'
+          type                    = 'User'
+          isEnabled               = $true
+          adminConsentDisplayName = 'Access the HCWSite API as an admin'
+          adminConsentDescription = 'Allows the signed-in admin to call the HCWSite API on their behalf.'
+          userConsentDisplayName  = 'Access the HCWSite API'
+          userConsentDescription  = 'Allows the app to call the HCWSite API on your behalf.'
+        }
+      )
+    }
+    appRoles       = @(
+      @{
+        id                 = [guid]::NewGuid().ToString()
+        value              = 'Admin'
+        displayName        = 'Admin'
+        description        = 'Gate 1 of the admin guard. Gate 2 is the admins/{oid} registry.'
+        allowedMemberTypes = @('User')
+        isEnabled          = $true
+      }
+      @{
+        id                 = [guid]::NewGuid().ToString()
+        value              = 'LabAgent'
+        displayName        = 'LabAgent'
+        description        = 'Gate 1 of the agent guard. Deliberately disjoint from Admin.'
+        allowedMemberTypes = @('Application')
+        isEnabled          = $true
+      }
+    )
+  }
+
+  # identifierUris cannot be set at creation: it embeds the appId, which the
+  # directory only assigns once the object exists.
+  $audience = "api://$($application.appId)"
+  Invoke-Graph -Path "/applications/$($application.id)" -Method PATCH -AccessToken $AccessToken -Body @{
+    identifierUris = @($audience)
+  } | Out-Null
+
+  # Entra replicates the new application asynchronously; creating the service
+  # principal immediately can 404 on an appId the directory has not caught up
+  # with yet.
+  Start-Sleep -Seconds 10
+  Invoke-Graph -Path '/servicePrincipals' -Method POST -AccessToken $AccessToken -Body @{
+    appId = $application.appId
+  } -AllowFailure | Out-Null
+
+  return [pscustomobject]@{
+    AppId    = $application.appId
+    ObjectId = $application.id
+    Audience = $audience
+    Scope    = "$audience/access_as_admin"
+  }
+}
+
 # Resolve one subscription slot: filter by the naming convention, auto-select
 # an unambiguous match, fall back to a picker over everything otherwise. The
 # pattern is a hint, never a requirement — a tenant that has not adopted the

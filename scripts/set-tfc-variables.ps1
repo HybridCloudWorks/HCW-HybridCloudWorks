@@ -81,7 +81,13 @@
 .PARAMETER EntraApiAudience
   Audience the Functions host validates access tokens against, e.g.
   api://<api-app-id>. Must match VITE_ENTRA_API_SCOPE's app id or every
-  authenticated call is rejected.
+  authenticated call is rejected. Discovered from the app registrations this
+  account owns; if none exposes an application ID URI, the script offers to
+  create the API registration (separate from the SPA, per DECISION 3) with the
+  access_as_admin scope and the Admin and LabAgent app roles.
+
+.PARAMETER EntraAppDisplayName
+  Display name used when creating that registration. Default: HCWSite API.
 
 .PARAMETER BudgetAlertEmail
   Where budget threshold notifications go.
@@ -130,6 +136,9 @@ param(
   # its client id automatically.
   [string] $BootstrapResourceGroup = 'rg-hcw-bootstrap',
   [string] $BootstrapIdentityName = 'id-hcw-terraform',
+
+  # Display name for the API app registration, used only when creating one.
+  [string] $EntraAppDisplayName = 'HCWSite API',
 
   # Matched against the zones the Cloudflare token can see, so the zone id is
   # chosen rather than pasted. Mirrors infra/variables.tf's `domain` default.
@@ -380,12 +389,43 @@ if ($azureAvailable) {
         -AutoSelectNote 'only registration exposing an application ID URI'
       $EntraApiAudience = $chosen.identifierUris[0]
     } else {
-      Write-Info 'No app registration with an application ID URI was found for this'
-      Write-Info 'account. It is created by hand (REVIEW.md 4.1) and must match the'
-      Write-Info "SPA's requested scope, or every authenticated call is rejected."
-      $EntraApiAudience = Read-Value -Prompt 'entra_api_audience' `
-        -Validate { param($v) $v -match '^(api://|https://)' } `
-        -ValidationMessage 'Expected api://<guid> or an https:// identifier URI.'
+      Write-Info 'No app registration exposing an application ID URI exists yet.'
+      Write-Info 'This is the API the Functions host validates tokens against, and'
+      Write-Info 'it must be SEPARATE from the SPA registration (DECISION 3): with'
+      Write-Info 'one registration an ID token minted for the browser is'
+      Write-Info 'indistinguishable from an access token for the API.'
+
+      if ($WhatIfPreference) {
+        Write-Act "would create the API app registration '$EntraAppDisplayName'"
+        $EntraApiAudience = '<api://… — re-run without -WhatIf>'
+      } else {
+        $graphToken = Get-GraphToken
+        if (-not $graphToken) {
+          Stop-WithGuidance 'Could not get a Microsoft Graph token.' @(
+            'Sign in again: az login', 'Then re-run this script.'
+          )
+        }
+        if (Confirm-Plan -Title 'Create the API app registration?' -Values ([ordered]@{
+              'Display name' = $EntraAppDisplayName
+              'Identifier'   = 'api://<new app id>  → becomes entra_api_audience'
+              'Scope'        = 'access_as_admin (delegated, what the SPA requests)'
+              'App roles'    = 'Admin (users), LabAgent (applications)'
+              'Tenant'       = $TenantId
+            })) {
+          $registration = New-EntraApiRegistration -DisplayName $EntraAppDisplayName -AccessToken $graphToken
+          $EntraApiAudience = $registration.Audience
+          Write-Act "created  $EntraAppDisplayName ($($registration.AppId))"
+          Write-Info "VITE_ENTRA_API_SCOPE for the frontend build is $($registration.Scope)"
+          Write-Info 'Assign the Admin role to each admin user in Entra:'
+          Write-Info '  Enterprise applications -> Users and groups'
+        } else {
+          # Declined: fall back to a paste, because the value is mandatory and
+          # an operator may have created the registration elsewhere.
+          $EntraApiAudience = Read-Value -Prompt 'entra_api_audience' `
+            -Validate { param($v) $v -match '^(api://|https://)' } `
+            -ValidationMessage 'Expected api://<guid> or an https:// identifier URI.'
+        }
+      }
     }
   }
 }
