@@ -35,8 +35,10 @@ jobs:
       - name: Generate public data (certifications, speakerevents)
         run: npm run build:data
         env:
-          # Data generation reads from the API — no direct Cosmos access from CI
-          AZURE_FUNCTIONS_URL: ${{ secrets.AZURE_FUNCTIONS_URL }}
+          # Data generation reads from the API — no direct Cosmos access from CI.
+          # FUNCTIONS_URL is a repository VARIABLE (a public API base URL, not a
+          # secret), named per the variable standard: 2 words, no provider prefix.
+          AZURE_FUNCTIONS_URL: ${{ vars.FUNCTIONS_URL }}
 
       - name: Build
         run: npm run build
@@ -45,7 +47,7 @@ jobs:
           REQUIRE_API_BASE: 'true'
           # Must include the Functions route prefix, e.g. https://<host>/api,
           # or "/api" when the SPA and the Function App share an origin.
-          VITE_AZURE_FUNCTIONS_URL: ${{ secrets.AZURE_FUNCTIONS_URL }}
+          VITE_AZURE_FUNCTIONS_URL: ${{ vars.FUNCTIONS_URL }}
           # Entra ID — public client registration values (not secrets)
           VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}

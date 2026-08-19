@@ -13,9 +13,15 @@
 # which is why this exists as automation rather than a runbook note.
 #
 # Auth: the OIDC deploy identity, which infra/oidc.tf grants Cosmos Built-in
-# Data Contributor scoped to exactly these two containers. Until that role
-# assignment is applied, this workflow FAILS — loudly, on a schedule — which
-# still beats silence: a red run every six hours is the reminder.
+# Data Contributor scoped to exactly these two containers.
+#
+# Self-arming: the job is skipped while vars.CLIENT_ID is unset — before the
+# first terraform apply there is no identity to log in as, and a red run every
+# six hours reads as a permissions bug while actually meaning "not deployed
+# yet". Setting CLIENT_ID from the `client_id` Terraform output (the step the
+# deploy runbook already requires) arms this workflow automatically; nothing
+# needs re-enabling by hand. After arming, a failure is a real signal again —
+# most likely the role assignment lagging the identity.
 
 name: Heal Cosmos computed properties
 
@@ -38,6 +44,9 @@ permissions:
 
 jobs:
   heal:
+    # Skipped until CLIENT_ID is provisioned from the Terraform output — see
+    # the self-arming note in the header.
+    if: ${{ vars.CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     defaults:
       run:

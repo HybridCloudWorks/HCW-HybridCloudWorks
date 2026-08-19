@@ -69,10 +69,13 @@ jobs:
             --output none
           sleep 30
 
+      # app-name is the `function_app_name` Terraform variable's value
+      # (infra/variables.tf) — the app this configuration creates, not the
+      # legacy hcw-functions-prod estate.
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@c5060b3b8bb1ebbcb531abd00c822ecbaa8ea656 # v1.5.7
         with:
-          app-name: hcw-functions-prod
+          app-name: func-site-prod-scus
           package: functions/
           respect-funcignore: true
 
