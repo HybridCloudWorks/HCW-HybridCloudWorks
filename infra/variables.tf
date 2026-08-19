@@ -19,7 +19,7 @@
 # to leak) — but they stay `sensitive` to keep subscription IDs out of CI logs.
 # -----------------------------------------------------------------------------
 variable "subscription_app" {
-  description = "Application landing zone: the HCWSite workload (sub-app-hcwsite-prod-scus)"
+  description = "Application landing zone: the HCWSite workload (sub-app-site-prod-scus)"
   type        = string
   sensitive   = true
 }
@@ -105,7 +105,7 @@ variable "cosmos_database_name" {
 variable "workload_name" {
   description = "Workload token in resource names — the application, not the organization (Naming-Convention wiki page)"
   type        = string
-  default     = "web"
+  default     = "site"
 }
 
 # Microsoft publishes no official region abbreviations, so this is a local
@@ -177,7 +177,7 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  default     = "cosmos-web-prod"
+  default     = "cosmos-site-prod"
 }
 
 variable "cosmos_local_auth_disabled" {
@@ -246,13 +246,13 @@ variable "functions_storage_admin_ip_rules" {
 variable "functions_storage_account_name" {
   description = "Functions host storage account (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string
-  default     = "stwebfuncprodscus"
+  default     = "stsitefuncprodscus"
 }
 
 variable "storage_account_name" {
   description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string
-  default     = "stwebprodscus"
+  default     = "stsiteprodscus"
 }
 
 # -----------------------------------------------------------------------------
@@ -261,7 +261,7 @@ variable "storage_account_name" {
 variable "function_app_name" {
   description = "Azure Function App name (globally unique)"
   type        = string
-  default     = "func-web-prod-scus"
+  default     = "func-site-prod-scus"
 }
 
 # -----------------------------------------------------------------------------
@@ -270,7 +270,7 @@ variable "function_app_name" {
 variable "key_vault_name" {
   description = "Azure Key Vault name (globally unique, 3-24 chars)"
   type        = string
-  default     = "kv-web-prod-scus"
+  default     = "kv-site-prod-scus"
 }
 
 variable "purge_protection_enabled" {

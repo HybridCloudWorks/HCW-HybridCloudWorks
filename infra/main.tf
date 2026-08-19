@@ -40,16 +40,10 @@ locals {
   }
 }
 
-# The workload token is deliberately absent from resource-group names. A
-# resource group only has to be unique within its subscription, and an
-# application subscription holds exactly one workload — so repeating it here
-# would say nothing the subscription has not already said. It would also
-# collide: the workload token is `web`, and `web` is simultaneously the Azure
-# category segment for Web & Mobile, which would produce `rg-web-web-prod-scus`.
 resource "azurerm_resource_group" "app" {
   for_each = local.app_resource_groups
 
-  name     = "rg-${each.key}-${var.environment}-${var.region_abbreviation}"
+  name     = "rg-${each.key}-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
   tags     = var.tags
 }
