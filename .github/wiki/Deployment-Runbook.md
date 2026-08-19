@@ -69,9 +69,14 @@ reason: nothing in `infra/` can reach it.
 
 ```powershell
 # Dry run first — prints every change without making one.
+# -IdentitySubscriptionId is where the identity itself lives (Management);
+# -TargetSubscriptionIds is every subscription Terraform must deploy into —
+# a subscription absent from the list is one Terraform cannot touch. With a
+# single subscription, pass it as both and omit -TargetSubscriptionIds.
 ./scripts/bootstrap-terraform-oidc.ps1 `
     -TenantId <tenant-guid> `
-    -SubscriptionId <subscription-guid> `
+    -IdentitySubscriptionId <mgmt-subscription-guid> `
+    -TargetSubscriptionIds <app-guid>,<mgmt-guid>,<conn-guid> `
     -WhatIf
 ```
 
@@ -129,6 +134,25 @@ These four names come from HashiCorp and Microsoft and are exempt from the
 [2-word variable rule](IaC-Repository-Standard#variable-naming) as contractual
 names. Terraform *variables* for the same workspace are listed in
 `CHECKLIST.md` section 7.
+
+Both seeding halves are scripted — prefer the scripts over the UI forms:
+
+- `scripts/set-tfc-variables.ps1` writes all twelve HCP Terraform workspace
+  values (the four environment variables above plus the eight Terraform
+  variables) in one idempotent run, and reads back the workspace's real
+  project name — the value the federated-credential subject must contain.
+- `scripts/set-github-variables.ps1` seeds the GitHub repository variables
+  and secrets. Run it once **before** the first apply — that seeds only
+  `TENANT_ID` and `SUBSCRIPTION_ID`, the two values that are inputs *to*
+  Terraform rather than products of it — and once **after**, when it reads
+  `CLIENT_ID`, `APP_HOSTNAME`, `FUNCTIONS_URL`, `RESOURCE_GROUP`,
+  `FUNCTIONS_STORAGE_ACCOUNT` and the `COSMOS_ENDPOINT` secret straight from
+  the workspace's state outputs over the HCP Terraform API. Outputs rather
+  than hardcoded copies on purpose: a copy drifts silently when the code
+  changes, an applied output cannot. The corollary is directional — **re-run
+  the script after any apply that changes an output** (a renamed group, a
+  new hostname), or the GitHub-side copies go stale. The first post-apply
+  run is also what arms the self-skipping heal-computed-properties schedule.
 
 ### Verify
 

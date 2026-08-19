@@ -578,7 +578,7 @@ the `CI_RUNNER` repository variable. Everything below is operator work this envi
    `lifecycle.ignore_changes` protects everything set here):
 
    ```bash
-   RG=<resource-group> JOB=hcw-ci-runner
+   RG=<resource-group> JOB=caj-plat-ci-prod-scus
    az containerapp job secret set -g $RG --name $JOB \
      --secrets gh-app-private-key="$(cat app-key.pem)" dockerhub-token='<token>'
    az containerapp job registry set -g $RG --name $JOB \

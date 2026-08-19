@@ -116,9 +116,9 @@ it on that basis, not on cost.
 - Total saving: **$31.20/month**
 
 **What replaces them:**
-- Cosmos DB: service firewall scoped to `snet-functions-integration` CIDR
-- Storage (Blob + Queue): storage firewall scoped to `snet-functions-integration` CIDR
-- Key Vault: Key Vault firewall scoped to `snet-functions-integration` CIDR + trusted-services bypass for Azure Monitor
+- Cosmos DB: service firewall scoped to `snet-site-func-prod` CIDR
+- Storage (Blob + Queue): storage firewall scoped to `snet-site-func-prod` CIDR
+- Key Vault: Key Vault firewall scoped to `snet-site-func-prod` CIDR + trusted-services bypass for Azure Monitor
 - Authentication boundary: managed identity + Entra RBAC — unchanged
 
 **Why this is defensible:**

@@ -35,11 +35,11 @@ by any code, and listed so it is not reintroduced).
 | Total entries | 64 |
 | Critical config defects | 3 (§8 as a set, `VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_API_SCOPE`) |
 | Verified | 0 |
-| Unverified | 24 |
-| Missing | 35 |
-| Placeholder | 3 (`CLIENT_ID`, `APP_HOSTNAME`, `RESOURCE_GROUP`) |
+| Unverified | 26 |
+| Missing | 36 |
+| Placeholder | 0 |
 | Retired | 2 |
-| Last updated | 2026-08-18 — §7 reconciled against live repository config and §7b added. Every `secrets.*`, `vars.*` and `environment:` reference in `.github/workflows/**` was enumerated and checked against the repository: 8 secrets absent (the repository has none at all), 7 variables absent, 2 environments absent. Five §7 variables previously recorded `Missing` are now set — three of them to one-character stubs, hence the new `Placeholder` status |
+| Last updated | 2026-08-19 — GitHub variables remediated: `SUBSCRIPTION_ID` corrected to the application LZ, `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` set to their deterministic values, the `CLIENT_ID`/`APP_HOSTNAME` stubs deleted (unset fails legibly; values exist only after the first apply). No `Placeholder` entries remain. 2026-08-18 (third pass) — live Azure reconciliation: four ALZ subscriptions observed, the earlier bootstrap's artifacts observed GONE (§8 superseded, run order inverted to bootstrap-first), `SUBSCRIPTION_ID` found pointing at Connectivity instead of the application LZ (reclassified `Placeholder`), `TENANT_ID` corroborated against the live directory. Second pass: `AZURE_FUNCTIONS_URL` renamed to `FUNCTIONS_URL` (§7), stale variable references corrected. First pass: §7 reconciled against live repository config and §7b added. Every `secrets.*`, `vars.*` and `environment:` reference in `.github/workflows/**` was enumerated and checked against the repository: 8 secrets absent (the repository has none at all), 7 variables absent, 2 environments absent. Five §7 variables previously recorded `Missing` are now set — three of them to one-character stubs, hence the new `Placeholder` status |
 
 Nothing is `Verified` *from an engineering session*: no Azure control plane
 has been reachable from any session to date (REVIEW.md §1.1–§1.2). Operator
@@ -148,6 +148,16 @@ Names follow the variable naming standard (Wiki: IaC-Repository-Standard):
 UPPER_SNAKE_CASE, max 2 words (3 only to break a collision), no provider
 prefixes. Contractual names (`VITE_*`, `GITHUB_TOKEN`) are exempt.
 
+Seeding is scripted: `scripts/set-github-variables.ps1` sets `TENANT_ID` and
+`SUBSCRIPTION_ID` immediately (the two values that are inputs *to* Terraform),
+and on a re-run after the first apply pulls `CLIENT_ID`, `APP_HOSTNAME`,
+`FUNCTIONS_URL`, `RESOURCE_GROUP`, `FUNCTIONS_STORAGE_ACCOUNT` and
+`COSMOS_ENDPOINT` from the workspace's Terraform state outputs — applied
+reality, not a hardcoded copy that drifts. Re-run it after any apply that
+changes an output. What it deliberately does not set is listed in its header
+(the SWA token is fetched at deploy time, `COSMOS_KEY` stays unset,
+`VITE_ENTRA_*` come from the manual Entra registrations).
+
 
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -155,15 +165,15 @@ prefixes. Contractual names (`VITE_*`, `GITHUB_TOKEN`) are exempt.
 | `DOCKERHUB_USERNAME` | Registry account for the runner image | Yes (runner build) | GitHub secret | `build-runner-image.yml` (3 references) | `XXXXXXXXX` | Missing | Confirmed absent 2026-08-18 |
 | `DOCKERHUB_TOKEN` | Registry push credential | Yes (runner build) | GitHub secret | `build-runner-image.yml` | `XXXXX00000!!!!!XXXXX` | Missing | Confirmed absent 2026-08-18 |
 | GitHub App id / private key | Runner JIT registration | Yes (runner) | GitHub App | `infra/runner-image/entrypoint.sh` | `000000` / `XXXXX00000!!!!!XXXXX` | Missing | Needs Administration: Read & write |
-| `CLIENT_ID` | Deploy identity client id for OIDC login | **Yes** | Terraform output `client_id` | `heal-computed-properties.yml`, `deploy-functions.yml` | `00000000-0000-0000-0000-000000000000` | **Placeholder** | Now set, but to a one-character stub, not a GUID (observed 2026-08-18 via `gh variable list`). This changed the failure mode rather than fixing it: `azure/login` no longer says "client-id and tenant-id not supplied", it fails authenticating an invalid client, which reads like a permissions problem. Renamed from AZURE_CLIENT_ID before ever being set, per the variable naming standard |
-| `TENANT_ID` | Entra tenant for OIDC login | **Yes** | Entra directory | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Set, and GUID-shaped (observed 2026-08-18). Never exercised by a successful run, so not `Verified` |
-| `SUBSCRIPTION_ID` | Target subscription for OIDC login | **Yes** | Azure subscription | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Set, and GUID-shaped (observed 2026-08-18). Never exercised by a successful run, so not `Verified` |
-| `APP_HOSTNAME` | Function App default hostname for the post-deploy health check | Yes (functions deploy) | Azure resource | `.github/workflows/deploy-functions.yml` | `XXX-XXXXXXXXX-XXXX.XXXXXXXXXXXXX.XXX` | **Placeholder** | Set to a one-character stub (observed 2026-08-18). The post-deploy health check will resolve nothing and fail. Renamed from FUNCTION_APP_HOSTNAME per the naming standard |
-| `RESOURCE_GROUP` | Resource group for the T-503 storage firewall window | Yes (functions deploy) | GitHub repo variable | `.github/workflows/deploy-functions.yml` | `XX-XXXXXXXXXXXXX-XXXX` | **Placeholder** | Set to a one-character stub (observed 2026-08-18), so the firewall window opens against a resource group that does not exist. Value must be the `resource_group_name` Terraform variable |
-| `FUNCTIONS_STORAGE_ACCOUNT` | Host storage account for the T-503 firewall window | Yes (functions deploy) | GitHub repo variable | `.github/workflows/deploy-functions.yml` | `XXXXXXXXXXXXXXXX` | Missing | Confirmed absent 2026-08-18. The `${project_name minus hyphens}funcsa` account |
+| `CLIENT_ID` | Deploy identity client id for OIDC login | **Yes** | Terraform output `client_id` | `heal-computed-properties.yml`, `deploy-functions.yml` | `00000000-0000-0000-0000-000000000000` | **Missing** | One-character stub deleted 2026-08-19: unset fails with a clear "not supplied", the stub failed like a permissions problem. Deliberately absent until the first apply produces the `client_id` output. While unset, the healer's schedule job self-skips (its `if:` guard). Renamed from AZURE_CLIENT_ID before ever being set, per the variable naming standard |
+| `TENANT_ID` | Entra tenant for OIDC login | **Yes** | Entra directory | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Set, GUID-shaped, and confirmed to match the directory holding the four ALZ subscriptions (observed 2026-08-18 via `az account show`). Never exercised by a successful run, so not `Verified` |
+| `SUBSCRIPTION_ID` | Target subscription for OIDC login | **Yes** | Azure subscription | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Corrected 2026-08-19: was the id of `sub-plat-conn-prod-scus` — the wrong subscription, which would have failed as an authorization error after login — now `sub-app-hcwsite-prod-scus`'s id, the landing zone the consumers deploy into. Never exercised by a successful run, so not `Verified` |
+| `APP_HOSTNAME` | Function App default hostname for the post-deploy health check | Yes (functions deploy) | Azure resource | `.github/workflows/deploy-functions.yml` | `XXX-XXXXXXXXX-XXXX.XXXXXXXXXXXXX.XXX` | **Missing** | One-character stub deleted 2026-08-19 — the value is the `function_hostname` Terraform output and cannot exist before the first apply. Renamed from FUNCTION_APP_HOSTNAME per the naming standard |
+| `RESOURCE_GROUP` | Resource group for the T-503 storage firewall window | Yes (functions deploy) | Terraform output `web_resource_group` | `.github/workflows/deploy-functions.yml` | `XX-XXX-XXXX-XXXX-XXXX` | **Unverified** | Was a one-character stub; set 2026-08-19 to the Function App's group. Authoritative source is the `web_resource_group` output — `set-github-variables.ps1` wave 2 re-copies it from applied state, so the value cannot drift from code. Not `Verified` until a deploy exercises it |
+| `FUNCTIONS_STORAGE_ACCOUNT` | Host storage account for the T-503 firewall window | Yes (functions deploy) | Terraform output `functions_storage_account` | `.github/workflows/deploy-functions.yml` | `XXXXXXXXXXXXXXXX` | **Unverified** | Set 2026-08-19. Authoritative source is the `functions_storage_account` output — `set-github-variables.ps1` wave 2 re-copies it from applied state. Paired with `RESOURCE_GROUP` by construction: that output reads the group off this account's own attribute. Not `Verified` until a deploy exercises it |
 | `TF_API_TOKEN` | HCP Terraform API token the gated infra workflow authenticates its run with | Yes (infra delivery) | HCP Terraform user/team token | `deploy-infra.yml` | `XXXXX00000!!!!!XXXXX` | Missing | Confirmed absent 2026-08-18. Distinct from everything in §8: §8 is how Terraform reaches *Azure*, this is how the workflow reaches *Terraform* |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | Deployment token for the Static Web App | Yes (frontend deploy) | Azure Static Web App resource | `deploy-azure-frontend.yml` | `XXXXX00000!!!!!XXXXX` | Missing | Confirmed absent 2026-08-18 |
-| `AZURE_FUNCTIONS_URL` | API base URL injected into the frontend build | Yes (frontend deploy) | Azure Function App | `deploy-azure-frontend.yml` (2 references) | `XXXXX!//XXX-XXXXXXXXX-XXXX.XXXXXXXXXXXXX.XXX/XXX` | Missing | Confirmed absent 2026-08-18. Referenced as a **secret**, though a public API base URL is not sensitive — it belongs in a repository variable alongside the `VITE_*` entries below. Feeds `VITE_AZURE_FUNCTIONS_URL` (§6) |
+| `FUNCTIONS_URL` | API base URL injected into the frontend build | Yes (frontend deploy) | Azure Function App | `deploy-azure-frontend.yml` (2 references) | `XXXXX!//XXX-XXXXXXXXX-XXXX.XXXXXXXXXXXXX.XXX/XXX` | Missing | Confirmed absent 2026-08-18. Repository **variable**, not a secret — a public API base URL is not sensitive. Renamed 2026-08-18 from `AZURE_FUNCTIONS_URL` (provider prefix, 3 words) per the variable naming standard, before ever being provisioned. Feeds `VITE_AZURE_FUNCTIONS_URL` (§6) |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Source-side credential for the Firestore export | Yes (data migration) | Firebase service account | `migrate-data.yml` | `!XXXXX! XXXXX!!!!!XXXXX!` | Missing | Confirmed absent 2026-08-18. Whole-JSON credential; the migration workflow is `if: false` and must stay so until this is provisioned and scoped read-only |
 | `COSMOS_ENDPOINT` (secret) | Target account endpoint for migration and healing | Yes (migration, healing) | Azure resource | `migrate-data.yml`, `heal-computed-properties.yml` | `XXXXX!//XXXXXXX.XXXXXX.XXXXX.XXX!` | Missing | Confirmed absent 2026-08-18. Same value as the §2 runtime `COSMOS_ENDPOINT`, but a separate GitHub-side reference |
 | `COSMOS_KEY` | Optional account key for the migration import | **No — must stay unset** | Azure resource (scratch accounts only) | `migrate-data.yml` → `scripts/lib/cli.mjs` | `XXXXX00000!!!!!XXXXX` | Missing (correctly) | Confirmed absent 2026-08-18, which is the required state. `connectCosmos()` uses a key only when this is non-empty and otherwise falls through to `DefaultAzureCredential`; an unset secret interpolates to the empty string, so the workflow already takes the Entra path. **Do not provision it to silence the linter**: `cosmos_local_auth_disabled` defaults `true`, so key auth is off on the real account and setting this would switch the client to a key path that the account rejects. It exists for the throwaway-account rehearsal in Migration_Plan §5 |
@@ -216,31 +226,48 @@ All four names are dictated by HashiCorp and Microsoft and are therefore
 | `TFC_AZURE_PROVIDER_AUTH` | Switches the workspace to dynamic provider credentials | **Yes** | HCP Terraform workspace | HCP Terraform run environment | `true` | **Missing** | Absent ⇒ HCP Terraform never mints an OIDC token and the provider finds no credential |
 | `TFC_AZURE_RUN_CLIENT_ID` | Client id of `id-hcw-terraform`, the identity HCP Terraform assumes | **Yes** | `scripts/bootstrap-terraform-oidc.ps1` output | HCP Terraform run environment | `00000000-0000-0000-0000-000000000000` | **Missing** | Distinct from §7 `CLIENT_ID`, which is the GitHub Actions identity created by `infra/oidc.tf` |
 | `ARM_TENANT_ID` | Entra tenant for the token exchange | **Yes** | Entra directory | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `entra_tenant_id` Terraform variable |
-| `ARM_SUBSCRIPTION_ID` | Target subscription | **Yes** | Azure subscription | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `azure_subscription_id` Terraform variable |
+| `ARM_SUBSCRIPTION_ID` | Target subscription | **Yes** | Azure subscription | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `subscription_app` Terraform variable. Fallback only: every provider pins `subscription_id` in HCL (`infra/providers.tf`), so this never decides where resources land |
 
 Bootstrap procedure — including the two federated credentials on
 `id-hcw-terraform` that these variables depend on — is section 0 of the
 [Deployment Runbook](.github/wiki/Deployment-Runbook.md).
 
-**The Azure half of §8 was provisioned 2026-08-18** by
-`scripts/bootstrap-terraform-oidc.ps1` against subscription `8f3c6d82…`
-("Azure subscription 1", *not* the Visual Studio Enterprise subscription that
-is the account's default). Verified present after the run:
+**The 2026-08-18 bootstrap run is SUPERSEDED — its artifacts no longer
+exist.** That run provisioned `rg-hcw-bootstrap` and `id-hcw-terraform` in
+the subscription then named "Azure subscription 1". Observed later the same
+day: that subscription is now `sub-plat-conn-prod-scus` (renamed during the
+ALZ re-shape), and **all four ALZ subscriptions hold zero resource groups** —
+the bootstrap resource group, the identity, its federated credentials and its
+role assignments are gone. There is currently no Terraform identity at all.
 
-- `rg-hcw-bootstrap` in `southcentralus`, and `id-hcw-terraform` within it —
-  both carrying all seven standard tags with `managedBy=bootstrap-script`,
-  which is the only in-portal signal that they are deliberately **not** in
-  Terraform state.
-- Federated credentials `tfc-plan` and `tfc-apply`, issuer
-  `https://app.terraform.io`, audience `api://AzureADTokenExchange`.
-- `Contributor` + `Role Based Access Control Administrator` at subscription
-  scope. Deliberately not Owner: RBAC Administrator can assign roles but
-  cannot grant Owner or User Access Administrator, so the Terraform identity
-  cannot escalate itself.
+Consequently the run order INVERTS from the earlier plan — bootstrap must run
+FIRST, because `set-tfc-variables.ps1` requires the client id that only
+bootstrap produces:
 
-All four variables above nonetheless remain `Missing`, because none has been
-entered in the HCP Terraform workspace yet — that is a manual step in the UI
-and is what still blocks the first run.
+1. `bootstrap-terraform-oidc.ps1` with `-IdentitySubscriptionId` =
+   `sub-plat-mgmt-prod-scus` (the identity is platform automation and belongs
+   in Management, per the script's own doc) and `-TargetSubscriptionIds` =
+   app + mgmt + conn. A target absent from that list is a subscription
+   Terraform cannot deploy into.
+2. `set-tfc-variables.ps1` with the new client id and the three subscription
+   ids. It also reads back the workspace's real project name — re-run
+   bootstrap with `-TfcProject` if it prints anything but `Default Project`.
+3. Speculative `terraform plan` (the human-review gate), then apply.
+
+All four variables above remain `Missing`, because none has been entered in
+the HCP Terraform workspace yet — and the client id half cannot exist until
+step 1 runs again.
+
+**The topology is settled: four ALZ subscriptions exist** (observed
+2026-08-18 via `az account list`): `sub-app-hcwsite-prod-scus`,
+`sub-plat-conn-prod-scus`, `sub-plat-ident-prod-scus`,
+`sub-plat-mgmt-prod-scus`. The configuration's three no-default subscription
+variables (`subscription_app/mgmt/conn`) map to the first, second and fourth;
+Identity deliberately has no variable. One naming note: the application
+subscription's display name embeds the org token (`hcwsite`), which the
+Naming-Convention page's own rule drops — a display-name rename to
+`sub-app-site-prod-scus` is free if wanted, and until then the real name is
+what operators must select.
 
 One unverified assumption is baked into both federated credentials: the
 project segment of the subject is `Default Project`, which was not confirmed

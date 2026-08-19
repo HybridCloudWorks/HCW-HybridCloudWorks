@@ -108,7 +108,13 @@ These four exist:
 | `sub-plat-ident-prod-scus` | `mg-hcw-platform-identity` |
 | `sub-plat-mgmt-prod-scus` | `mg-hcw-platform-management` |
 | `sub-plat-conn-prod-scus` | `mg-hcw-platform-connectivity` |
-| `sub-app-site-prod-scus` | `mg-hcw-landingzones-online` |
+| `sub-app-site-prod-scus` † | `mg-hcw-landingzones-online` |
+
+† The live subscription's display name is `sub-app-hcwsite-prod-scus`
+(observed 2026-08-18) — it embeds the org token this scheme drops. Display
+names are mutable at zero cost; this row is the target name, and renaming the
+subscription to it is a one-line portal/CLI change. Until that happens,
+operators selecting a subscription must look for `hcwsite`.
 
 The `<function>` segment uses the same category vocabulary as resource groups
 below (`conn`, `mgmt`, `ident`), so one abbreviation means one thing at every
@@ -183,26 +189,38 @@ resource `vm-hcw-dc-prod-scus-01` and the OS computer name `vmhcwdc01`.
 | Storage account *(archive/logs)* | `stplatprodscus` |
 | Data collection rule | `dcr-plat-vminsights-prod` |
 | Action group | `ag-plat-prod-scus` |
+| Container Apps environment *(CI runner)* | `cae-plat-ci-prod-scus` |
+| Container Apps job *(CI runner)* | `caj-plat-ci-prod-scus` |
+
+`caj` is a **local** abbreviation, recorded here to be a convention at all:
+CAF publishes `cae` for a Container Apps environment and `ca` for a container
+app, but nothing for a Container Apps *job*.
 
 `log-plat-prod-scus` is the workspace Runbook §7 step 5 re-points
 diagnostics to. Additive — it does not replace the workload's local workspace.
 
 ## Platform — Connectivity
 
+Connectivity resources take `plat` in the workload slot, like every other
+platform resource: the org token appears in management-group IDs only (the
+component table above), and an earlier revision of this table that embedded
+`hcw` contradicted it. `plat` is the reading the Management table already
+uses (`log-plat-prod-scus`), so it is the one that survives.
+
 | Resource | Name |
 | --- | --- |
 | Resource group | `rg-conn-hub-prod-scus` |
-| Hub virtual network | `vnet-hcw-hub-prod-scus` |
-| Azure Firewall | `afw-hcw-hub-prod-scus` |
-| Firewall policy | `afwp-hcw-prod-scus` |
-| Public IP (firewall) | `pip-hcw-afw-prod-scus` |
-| Bastion | `bas-hcw-hub-prod-scus` |
-| Public IP (bastion) | `pip-hcw-bas-prod-scus` |
-| VPN gateway | `vgw-hcw-hub-prod-scus` |
-| ExpressRoute gateway | `ergw-hcw-hub-prod-scus` |
-| Route table | `rt-hcw-spoke-prod-scus` |
-| Network security group | `nsg-hcw-<subnet>-prod-scus` |
-| DDoS protection plan | `ddos-hcw-prod-scus` |
+| Hub virtual network | `vnet-plat-hub-prod-scus` |
+| Azure Firewall | `afw-plat-hub-prod-scus` |
+| Firewall policy | `afwp-plat-prod-scus` |
+| Public IP (firewall) | `pip-plat-afw-prod-scus` |
+| Bastion | `bas-plat-hub-prod-scus` |
+| Public IP (bastion) | `pip-plat-bas-prod-scus` |
+| VPN gateway | `vgw-plat-hub-prod-scus` |
+| ExpressRoute gateway | `ergw-plat-hub-prod-scus` |
+| Route table | `rt-plat-spoke-prod-scus` |
+| Network security group | `nsg-plat-<subnet>-prod-scus` |
+| DDoS protection plan | `ddos-plat-prod-scus` |
 
 **Two categories here cannot be named by this scheme.**
 
@@ -212,7 +230,7 @@ makes the service undeployable:
 `GatewaySubnet` · `AzureFirewallSubnet` · `AzureFirewallManagementSubnet` ·
 `AzureBastionSubnet` · `RouteServerSubnet`
 
-Every other subnet takes `snet-hcw-<purpose>-prod-scus`.
+Every other subnet takes `snet-plat-<purpose>-prod-scus`.
 
 *Private DNS zones.* The name **is** the resolution target and is dictated by
 the service: `privatelink.documents.azure.com`,
@@ -221,18 +239,22 @@ prefix them.
 
 ## Application landing zone — HCWSite
 
-Subscription `sub-app-site-prod-scus`, under `mg-hcw-landingzones-online`.
+Subscription `sub-app-site-prod-scus` (live display name
+`sub-app-hcwsite-prod-scus` — see the † note in the Subscriptions table),
+under `mg-hcw-landingzones-online`.
 
-Four resource groups, drawn on destroy semantics rather than on the number of
-categories in play. The `web` group is redeployable; the other three hold
-things whose deletion is a decision.
+Six resource groups, drawn on destroy semantics rather than on the number of
+categories in play (the split `infra/main.tf` implements). The `web` group is
+redeployable; the others hold things whose deletion is a decision.
 
 | Resource group | Segment rationale | Contents |
 | --- | --- | --- |
-| `rg-web-site-prod-scus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, the Function App's managed identity |
+| `rg-web-site-prod-scus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, deploy identity, and the Functions host storage account, which is recreated with the app |
 | `rg-db-site-prod-scus` | Databases | Cosmos account, SQL database, containers — `prevent_destroy` |
-| `rg-sec-site-prod-scus` | Security | Key Vault, and the storage accounts whose contents outlive a redeploy — `prevent_destroy` |
-| `rg-conn-site-prod-scus` | Networking | Spoke VNet, Functions integration subnet, NSG, route table |
+| `rg-stor-site-prod-scus` | Storage | Content storage account and its blob containers — `prevent_destroy` |
+| `rg-sec-site-prod-scus` | Security | Key Vault — `prevent_destroy` |
+| `rg-conn-site-prod-scus` | Networking | Spoke VNet, Functions integration subnet |
+| `rg-ai-site-prod-scus` | AI + Machine Learning | Azure OpenAI account and its model deployments — deployed models are not free to recreate |
 
 | Resource | Name | Global? |
 | --- | --- | --- |
@@ -241,14 +263,22 @@ things whose deletion is a decision.
 | Static Web App | `stapp-site-prod-scus` | |
 | Function App | `func-site-prod-scus` | ✔ |
 | App Service plan | `asp-site-prod-scus` | |
-| Cosmos DB account | `cosmos-site-prod` | ✔ |
+| Cosmos DB account | `cosmos-site-prod-scus` | ✔ |
 | Key Vault | `kv-site-prod-scus` | ✔ |
-| Storage account | `stsiteprodscus` | ✔ |
+| Storage account (content) | `stsiteprodscus` | ✔ |
+| Storage account (Functions host) | `stsitefuncprodscus` | ✔ |
+| Azure OpenAI account | `oai-site-prod-scus` | ✔ |
 | Application Insights | `appi-site-prod-scus` | |
 | Managed identity (Function App) | `id-site-func-prod` | |
+| Managed identity (GitHub deploy) | `id-site-github-deploy-prod` | |
 | Private endpoint (Cosmos) | `pep-web-cosmos-prod-scus` | |
 | Network security group | `nsg-web-func-prod-scus` | |
 | Route table | `rt-site-prod-scus` | |
+
+Subnets and managed identities omit the region: both are children of (or bound
+to) a resource that already carries it. Everything else region-qualifies,
+including Cosmos — an earlier revision listed `cosmos-site-prod`, an
+unexplained exception this page no longer makes.
 
 There is no application Log Analytics workspace: telemetry goes to the central
 one in Management (`log-plat-prod-scus`), and Application Insights is
