@@ -399,14 +399,34 @@ if ($missingRights.Count -gt 0) {
     }
 
     # Leaving root-scope UAA in place is a standing tenant-wide privilege with
-    # no owner and no expiry. Remove it now that its one job is done.
+    # no owner and no expiry. Remove it now that its one job is done — and
+    # VERIFY the removal rather than asserting it: the delete is allowed to
+    # fail quietly (propagation lag, assignee resolution), and a script that
+    # prints "removed" over a grant that is still there is worse than one that
+    # says so.
     Invoke-Az @(
       'role', 'assignment', 'delete',
       '--assignee', $signedInObjectId,
       '--role', 'User Access Administrator',
       '--scope', '/'
     ) -AllowFailure | Out-Null
-    Write-Act 'Root-scope elevation removed'
+
+    $rootGrant = Invoke-Az @(
+      'role', 'assignment', 'list',
+      '--assignee', $signedInObjectId,
+      '--role', 'User Access Administrator',
+      '--scope', '/',
+      '-o', 'json'
+    ) -AllowFailure
+    if ($rootGrant) {
+      Write-Host '  [warn] Root-scope User Access Administrator is STILL ASSIGNED.' -ForegroundColor Red
+      Write-Host '         This is a standing tenant-wide privilege. Remove it by hand:' -ForegroundColor Red
+      Write-Host "         az role assignment delete --assignee $signedInObjectId --role 'User Access Administrator' --scope /" -ForegroundColor Red
+      Write-Host '         Then confirm with:' -ForegroundColor Red
+      Write-Host "         az role assignment list --assignee $signedInObjectId --scope / -o table" -ForegroundColor Red
+    } else {
+      Write-Act 'Root-scope elevation removed (verified by reading assignments back)'
+    }
 
     Start-Sleep -Seconds 10
     foreach ($id in $TargetSubscriptionIds) {
@@ -582,15 +602,18 @@ Write-Host @"
     TFC_AZURE_PROVIDER_AUTH   true
     TFC_AZURE_RUN_CLIENT_ID   $clientId
     ARM_TENANT_ID             $TenantId
-    ARM_SUBSCRIPTION_ID       $IdentitySubscriptionId
+    ARM_SUBSCRIPTION_ID       <the APPLICATION subscription>
 
   These four names are set by HashiCorp and Microsoft, so they are exempt from
   the repository's 2-word variable rule (see the IaC Repository Standard).
 
-  ARM_SUBSCRIPTION_ID is the DEFAULT provider's subscription only. Every other
-  subscription is reached through an aliased provider, and each alias takes its
-  id from its own Terraform variable — so this one value does not decide where
-  resources land, and changing it will not move them.
+  Prefer scripts/set-tfc-variables.ps1 over typing these into the UI — it sets
+  all twelve workspace values in one run, and it writes ARM_SUBSCRIPTION_ID as
+  the application subscription. Any target subscription would in fact work:
+  every provider pins subscription_id in HCL (infra/providers.tf), so this
+  value is only the provider's fallback and never decides where resources
+  land. It is stated here as the application subscription so the two scripts
+  agree rather than inviting a "correction".
 
   Then, as TERRAFORM variables in the same workspace, one per subscription the
   aliased providers target (CHECKLIST.md section 7):
@@ -699,7 +722,12 @@ if (-not $WhatIfPreference) {
   & $add '| `TFC_AZURE_PROVIDER_AUTH` | Environment | `true` |'
   & $add "| ``TFC_AZURE_RUN_CLIENT_ID`` | Environment | ``$clientId`` |"
   & $add "| ``ARM_TENANT_ID`` | Environment | ``$TenantId`` |"
-  & $add "| ``ARM_SUBSCRIPTION_ID`` | Environment | ``$IdentitySubscriptionId`` |"
+  & $add '| `ARM_SUBSCRIPTION_ID` | Environment | the APPLICATION subscription |'
+  & $add ''
+  & $add 'Prefer `scripts/set-tfc-variables.ps1`, which seeds all twelve workspace'
+  & $add 'values and writes ARM_SUBSCRIPTION_ID as the application subscription. The'
+  & $add 'value is only the provider fallback — every provider pins subscription_id'
+  & $add 'in HCL — but the two scripts should state the same thing.'
   & $add ''
   & $add 'Then verify, before any apply:'
   & $add ''

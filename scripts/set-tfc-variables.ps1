@@ -54,7 +54,7 @@
   provider and the other is consumed by the configuration.
 
 .PARAMETER SubscriptionApp
-  Application landing zone (sub-app-site-prod-scus). Also becomes
+  Application landing zone (display name sub-app-hcwsite-prod-scus). Also becomes
   ARM_SUBSCRIPTION_ID, the default provider's subscription.
 
 .PARAMETER SubscriptionMgmt
@@ -236,6 +236,10 @@ if ($projectId) {
 # fails saying no credentials were supplied.
 $plainCloudflareToken = if ($CloudflareApiToken) {
   $CloudflareApiToken
+} elseif ($WhatIfPreference) {
+  # A dry run writes nothing, so do not ask the operator to produce a secret
+  # it will never use. The empty SecureString keeps the pipeline type-safe.
+  [securestring]::new()
 } else {
   Read-Host -Prompt '  Cloudflare API token' -AsSecureString
 }
@@ -246,14 +250,17 @@ $variables = @(
     description = 'Switches the workspace to dynamic provider credentials' }
   @{ key = 'TFC_AZURE_RUN_CLIENT_ID'; value = $TerraformClientId; category = 'env'; sensitive = $false
     description = 'Client id of id-hcw-terraform, from bootstrap-terraform-oidc.ps1' }
-  @{ key = 'ARM_TENANT_ID'; value = $TenantId; category = 'env'; sensitive = $false
+  # Sensitive to match their Terraform-category twins below: the same value
+  # must not be hidden in one category and readable in the other, or the
+  # "keep IDs out of logs" intent (variables.tf) is defeated by the copy.
+  @{ key = 'ARM_TENANT_ID'; value = $TenantId; category = 'env'; sensitive = $true
     description = 'Entra tenant for the OIDC token exchange' }
-  @{ key = 'ARM_SUBSCRIPTION_ID'; value = $SubscriptionApp; category = 'env'; sensitive = $false
+  @{ key = 'ARM_SUBSCRIPTION_ID'; value = $SubscriptionApp; category = 'env'; sensitive = $true
     description = 'Default provider subscription; aliases override it per-resource' }
 
   # --- Terraform: what the configuration declares -------------------------
   @{ key = 'subscription_app'; value = $SubscriptionApp; category = 'terraform'; sensitive = $true
-    description = 'Application landing zone (sub-app-site-prod-scus)' }
+    description = 'Application landing zone (sub-app-hcwsite-prod-scus)' }
   @{ key = 'subscription_mgmt'; value = $SubscriptionMgmt; category = 'terraform'; sensitive = $true
     description = 'Platform Management (sub-plat-mgmt-prod-scus)' }
   @{ key = 'subscription_conn'; value = $SubscriptionConn; category = 'terraform'; sensitive = $true
