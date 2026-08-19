@@ -128,8 +128,12 @@ resource "azurerm_static_web_app" "hcw" {
 # Single-region: East US 2 (matches us-central1 audience location).
 # =============================================================================
 resource "azurerm_cosmosdb_account" "hcw" {
-  name                = var.cosmos_db_account_name
-  location            = azurerm_resource_group.app["db"].location
+  name = var.cosmos_db_account_name
+  # NOT the resource group's location — this subscription has no Cosmos region
+  # access to southcentralus (see var.cosmos_location). The resource group
+  # stays where the rest of the estate is; a group's location is only where its
+  # metadata lives and does not constrain what is inside it.
+  location            = var.cosmos_location
   resource_group_name = azurerm_resource_group.app["db"].name
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
@@ -176,9 +180,12 @@ resource "azurerm_cosmosdb_account" "hcw" {
   # above), and zone redundancy costs more while protecting against a failure
   # mode a single-region account has already accepted.
   geo_location {
-    location          = azurerm_resource_group.app["db"].location
+    location          = var.cosmos_location
     failover_priority = 0
-    zone_redundant    = false
+    # False is required here, not merely chosen: southcentralus2 offers no
+    # availability zones at all. It is also right on its own merits for a
+    # serverless, single-region account — see the capacity note above.
+    zone_redundant = false
   }
 
   # T-504: the service firewall ADR-001/ADR-0008 traded Private Link away for.

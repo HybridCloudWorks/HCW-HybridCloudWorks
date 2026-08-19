@@ -93,6 +93,31 @@ variable "static_web_app_location" {
   }
 }
 
+# Cosmos is the second resource that cannot sit in azure_location, for a
+# different reason than the Static Web App: this SUBSCRIPTION has no Cosmos
+# region access to southcentralus at all. Both flags say so —
+#
+#   az cosmosdb locations list --query "[?name=='South Central US'].properties"
+#     isSubscriptionRegionAccessAllowedForRegular : false
+#     isSubscriptionRegionAccessAllowedForAz      : false
+#
+# — and the failure it produces does not say that. It reports
+# ServiceUnavailable and "high demand ... for the zonal redundant
+# (Availability Zones) accounts", which reads as transient capacity and sent
+# the first investigation at zone_redundant, where the answer was not.
+#
+# southcentralus2 is allowed, and is the nearest permitted region: same metro,
+# so the Function App's data-plane latency is close to unchanged. It offers no
+# availability zones, which matches zone_redundant = false on the account.
+#
+# Requesting access to southcentralus (aka.ms/cosmosdbquota) would let this
+# fold back into azure_location; it is a human review, not a config change.
+variable "cosmos_location" {
+  description = "Region for the Cosmos account — southcentralus is not accessible to this subscription, so it cannot follow azure_location"
+  type        = string
+  default     = "southcentralus2"
+}
+
 variable "environment" {
   description = "Environment name (prod, staging, dev)"
   type        = string
@@ -198,10 +223,14 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  # Region included like every other region-qualified name: 21 chars, well
-  # inside Cosmos's 44-char limit, and this prevent_destroy account is the
-  # most expensive name in the estate to regret.
-  default = "cosmos-site-prod-scus"
+  # `scus2`, not `scus`, because this one names where the DATA actually lives.
+  # That is the opposite call from the Static Web App, which keeps `scus` while
+  # running in centralus — and the difference is the point: a Static Web App's
+  # region is a control-plane detail (content serves from the global edge),
+  # whereas a database's region IS data residency, and the first thing anyone
+  # debugging latency or compliance needs to know. A name that lies about that
+  # is worse than one that breaks the estate's pattern.
+  default = "cosmos-site-prod-scus2"
 }
 
 variable "cosmos_local_auth_disabled" {

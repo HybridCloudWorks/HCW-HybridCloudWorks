@@ -44,6 +44,7 @@ convention and must be recorded here to be a convention at all.
 | Region | Abbreviation |
 | --- | --- |
 | southcentralus | `scus` |
+| southcentralus2 | `scus2` |
 | eastus | `eus` |
 | eastus2 | `eus2` |
 | westus2 | `wus2` |
@@ -261,7 +262,7 @@ redeployable; the others hold things whose deletion is a decision.
 | Static Web App | `stapp-site-prod-scus` | |
 | Function App | `func-site-prod-scus` | ✔ |
 | App Service plan | `asp-site-prod-scus` | |
-| Cosmos DB account | `cosmos-site-prod-scus` | ✔ |
+| Cosmos DB account | `cosmos-site-prod-scus2` § | ✔ |
 | Key Vault | `kv-site-prod-scus-01` ‡ | ✔ |
 | Storage account (content) | `stsiteprodscus` | ✔ |
 | Storage account (Functions host) | `stsitefuncprodscus` | ✔ |
@@ -286,14 +287,34 @@ pattern and reads as the first of its kind. Discovered at apply time on
 2026-08-19, which is the expensive way to find out; for any globally-unique
 name, check availability before the first apply, not during it.
 
-**The Static Web App is the one resource that does not sit in
-`azure_location`.** Static Web Apps is offered in five regions only —
-`centralus`, `eastus2`, `westus2`, `westeurope`, `eastasia` — and
-`southcentralus` is not among them, so `stapp-site-prod-scus` is created in
-`centralus` (the nearest). The name keeps the `scus` token deliberately: it
-names the estate the resource belongs to, not the control-plane region one
-service happens to require. The site is served from Azure's global edge
-regardless, so the region does not decide where users are served from.
+### Two resources cannot sit in `azure_location`, and they are named differently on purpose
+
+Both were discovered at apply time, and the contrast between them is the rule
+worth carrying forward: **name a resource for the region only when the region
+is a fact about the resource, not an accident of where the service is offered.**
+
+**Static Web App — keeps `scus`.** Static Web Apps exists in five regions only
+(`centralus`, `eastus2`, `westus2`, `westeurope`, `eastasia`), so
+`stapp-site-prod-scus` runs in `centralus`. The name still says `scus` because
+the region here is a control-plane detail: the site is served from Azure's
+global edge, so `centralus` says nothing about where users are served from or
+where anything rests. The name records the estate the resource belongs to.
+
+**§ Cosmos DB — takes `scus2`.** This subscription has no Cosmos region access
+to `southcentralus` at all (`isSubscriptionRegionAccessAllowedForRegular` and
+`...ForAz` are both false), so the account runs in `southcentralus2`, the
+nearest permitted region. Here the region is *data residency* — the first
+thing anyone debugging latency or answering a compliance question needs — so
+the name must be honest about it. `cosmos-site-prod-scus` would have been
+actively misleading, which is worse than breaking the estate's pattern.
+
+Check a globally-unique or region-constrained name **before** the first apply:
+
+```bash
+az cosmosdb locations list --query "[?name=='South Central US'].properties"
+az cognitiveservices model list -l <region>      # model + version availability
+az cosmosdb check-name-exists --name <name>      # false = free
+```
 
 There is no application Log Analytics workspace: telemetry goes to the central
 one in Management (`log-plat-prod-scus`), and Application Insights is
