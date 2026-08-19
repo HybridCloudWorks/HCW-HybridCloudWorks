@@ -8,12 +8,62 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Azure Subscription
+# Subscriptions — one per platform/application landing zone
+#
+# The platform is split across four subscriptions and each is reached through
+# its own provider alias (providers.tf). Nothing here has a default: a wrong
+# guess would silently deploy the workload into a platform subscription, so an
+# unset value must fail the plan rather than pick something.
+#
+# These are IDs, not credentials — the identity is federated (no secret exists
+# to leak) — but they stay `sensitive` to keep subscription IDs out of CI logs.
 # -----------------------------------------------------------------------------
-variable "azure_subscription_id" {
-  description = "Azure subscription ID for all resources"
+variable "subscription_app" {
+  description = "Application landing zone: the HCWSite workload (sub-app-hcwsite-prod-scus)"
   type        = string
   sensitive   = true
+}
+
+variable "subscription_mgmt" {
+  description = "Platform Management: central Log Analytics, action groups, and the Terraform identity's own resource group (sub-plat-mgmt-prod-scus)"
+  type        = string
+  sensitive   = true
+}
+
+variable "subscription_conn" {
+  description = "Platform Connectivity: hub network and, later, centralized private DNS zones (sub-plat-conn-prod-scus)"
+  type        = string
+  sensitive   = true
+}
+
+variable "subscription_ident" {
+  description = "Platform Identity: reserved. Empty today — HCWSite authenticates against Entra ID, whose app registrations are tenant objects rather than subscription resources (sub-plat-ident-prod-scus)"
+  type        = string
+  sensitive   = true
+}
+
+# Exactly the resource providers this configuration's resources need, and no
+# more. azurerm 5.0 registers none by default, and an unregistered provider
+# fails at apply with MissingSubscriptionRegistration rather than at plan.
+#
+# Set this to [] when ALZ absorption takes registration over centrally: the
+# deploy identity would then no longer need the /register/action permission,
+# and re-registering under a policy that governs it is at best redundant.
+variable "azure_resource_providers" {
+  description = "Resource providers Terraform registers on each target subscription; empty the list when registration is centrally governed"
+  type        = list(string)
+  default = [
+    "Microsoft.App",                 # Flex Consumption subnet delegation (Microsoft.App/environments)
+    "Microsoft.CognitiveServices",   # Azure OpenAI account and deployments
+    "Microsoft.DocumentDB",          # Cosmos DB
+    "Microsoft.Insights",            # Application Insights, diagnostic settings, action groups
+    "Microsoft.KeyVault",            # Key Vault
+    "Microsoft.ManagedIdentity",     # user-assigned identities
+    "Microsoft.Network",             # virtual network and subnets
+    "Microsoft.OperationalInsights", # Log Analytics workspace
+    "Microsoft.Storage",             # both storage accounts
+    "Microsoft.Web",                 # Function App, service plan, static web app
+  ]
 }
 
 variable "azure_location" {
@@ -56,6 +106,20 @@ variable "functions_subnet_prefix" {
   description = "Address prefix for the Functions Flex integration subnet"
   type        = string
   default     = "10.40.0.0/24"
+}
+
+# Every entry here is load-bearing for a firewall rule elsewhere in this
+# configuration, not a convenience: Key Vault, Cosmos and Storage all set
+# default_action = "Deny" and allow this subnet by VNet rule, and a VNet rule
+# without the matching service endpoint is inert. Removing an entry does not
+# loosen access, it silently denies the Function App.
+#
+# This empties out when the account it fronts moves to a private endpoint,
+# which is why it is an input rather than a literal.
+variable "functions_subnet_service_endpoints" {
+  description = "Service endpoints on the Functions integration subnet; each one backs a VNet rule on the matching service"
+  type        = list(string)
+  default     = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB", "Microsoft.Storage"]
 }
 
 # -----------------------------------------------------------------------------

@@ -491,7 +491,18 @@ resource "azurerm_subnet" "functions_integration" {
   # (content account, and the Functions host account since T-503): without
   # the endpoint the rule is inert and the firewall denies the Function App
   # along with everyone else.
-  service_endpoints = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB", "Microsoft.Storage"]
+  #
+  # azurerm 5.0 removed the service_endpoints list in favour of repeated
+  # service_endpoint blocks. Generated from a variable rather than written out
+  # three times: the set is a deployment input — a private-endpoint migration
+  # empties it, and a new VNet-ruled service appends to it — so it belongs
+  # somewhere a tfvars file can reach.
+  dynamic "service_endpoint" {
+    for_each = toset(var.functions_subnet_service_endpoints)
+    content {
+      service = service_endpoint.value
+    }
+  }
 
   delegation {
     name = "flex-consumption"
