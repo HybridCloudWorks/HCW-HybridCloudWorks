@@ -212,7 +212,7 @@ async function tierCosmos() {
   const { DefaultAzureCredential } = await import('@azure/identity');
   const client = new CosmosClient({ endpoint, aadCredentials: new DefaultAzureCredential() });
   const container = client
-    .database(process.env.COSMOS_DATABASE || 'hybridcloudworks')
+    .database(process.env.COSMOS_DATABASE || 'hcw')
     .container('submission_quota');
 
   const id = `smoke-conditional-patch-${Date.now()}`;

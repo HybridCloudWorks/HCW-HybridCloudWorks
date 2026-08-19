@@ -23,7 +23,7 @@ examples for Azure resources*.
 | Component | This tenant | Notes |
 | --- | --- | --- |
 | Organization token | `hcw` | Used in management-group IDs only. Subscriptions and resource groups drop it — they already sit inside exactly one tenant |
-| Workload token | `hcw` for platform, `hcwsite` for the application | The workload slot, not the org, for application resources |
+| Workload token | `plat` for platform resources, `web` for the application | The workload slot, not the org. `web` because HCWSite is the one web workload in its subscription |
 | Environment | `prod` · `dev` · `test` · `stage` · `dr` · `sbx` | |
 | Region | `scus` (southcentralus) | See the region table below |
 | Instance | `01`, `02` | Only when more than one of a kind exists in the same scope |
@@ -108,7 +108,7 @@ These four exist:
 | `sub-plat-ident-prod-scus` | `mg-hcw-platform-identity` |
 | `sub-plat-mgmt-prod-scus` | `mg-hcw-platform-management` |
 | `sub-plat-conn-prod-scus` | `mg-hcw-platform-connectivity` |
-| `sub-app-hcwsite-prod-scus` | `mg-hcw-landingzones-online` |
+| `sub-app-web-prod-scus` | `mg-hcw-landingzones-online` |
 
 The `<function>` segment uses the same category vocabulary as resource groups
 below (`conn`, `mgmt`, `ident`), so one abbreviation means one thing at every
@@ -162,10 +162,10 @@ other.
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-id-platform-prod-scus` |
-| Key Vault | `kv-platform-id-prod` |
+| Resource group | `rg-id-plat-prod-scus` |
+| Key Vault | `kv-plat-id-prod` |
 | Managed identity | `id-hcw-<purpose>-prod` |
-| Log Analytics workspace | `log-platform-id-prod-scus` |
+| Log Analytics workspace | `log-plat-id-prod-scus` |
 | Domain controller VM *(only if AD DS)* | `vmhcwdc01` |
 
 The VM name breaks the pattern on purpose: a Windows computer name is capped
@@ -176,15 +176,15 @@ resource `vm-hcw-dc-prod-scus-01` and the OS computer name `vmhcwdc01`.
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-mgmt-platform-prod-scus` |
-| Log Analytics workspace *(central)* | `log-platform-prod-scus` |
-| Automation account | `aa-platform-prod-scus` |
-| Recovery Services vault | `rsv-platform-prod-scus` |
-| Storage account *(archive/logs)* | `stplatformprodscus` |
-| Data collection rule | `dcr-platform-vminsights-prod` |
-| Action group | `ag-platform-prod-scus` |
+| Resource group | `rg-mgmt-plat-prod-scus` |
+| Log Analytics workspace *(central)* | `log-plat-prod-scus` |
+| Automation account | `aa-plat-prod-scus` |
+| Recovery Services vault | `rsv-plat-prod-scus` |
+| Storage account *(archive/logs)* | `stplatprodscus` |
+| Data collection rule | `dcr-plat-vminsights-prod` |
+| Action group | `ag-plat-prod-scus` |
 
-`log-platform-prod-scus` is the workspace Runbook §7 step 5 re-points
+`log-plat-prod-scus` is the workspace Runbook §7 step 5 re-points
 diagnostics to. Additive — it does not replace the workload's local workspace.
 
 ## Platform — Connectivity
@@ -221,7 +221,7 @@ prefix them.
 
 ## Application landing zone — HCWSite
 
-Subscription `sub-app-hcwsite-prod-scus`, under `mg-hcw-landingzones-online`.
+Subscription `sub-app-web-prod-scus`, under `mg-hcw-landingzones-online`.
 
 Four resource groups, drawn on destroy semantics rather than on the number of
 categories in play. The `web` group is redeployable; the other three hold
@@ -229,40 +229,53 @@ things whose deletion is a decision.
 
 | Resource group | Segment rationale | Contents |
 | --- | --- | --- |
-| `rg-web-hcwsite-prod-scus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, the Function App's managed identity |
-| `rg-db-hcwsite-prod-scus` | Databases | Cosmos account, SQL database, containers — `prevent_destroy` |
-| `rg-sec-hcwsite-prod-scus` | Security | Key Vault, and the storage accounts whose contents outlive a redeploy — `prevent_destroy` |
-| `rg-conn-hcwsite-prod-scus` | Networking | Spoke VNet, Functions integration subnet, NSG, route table |
+| `rg-web-prod-scus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, the Function App's managed identity |
+| `rg-db-prod-scus` | Databases | Cosmos account, SQL database, containers — `prevent_destroy` |
+| `rg-sec-prod-scus` | Security | Key Vault, and the storage accounts whose contents outlive a redeploy — `prevent_destroy` |
+| `rg-conn-prod-scus` | Networking | Spoke VNet, Functions integration subnet, NSG, route table |
 
 | Resource | Name | Global? |
 | --- | --- | --- |
-| Spoke virtual network | `vnet-hcwsite-prod-scus` | |
-| Subnet (Functions integration) | `snet-hcwsite-func-prod` | |
-| Static Web App | `stapp-hcwsite-prod-scus` | |
-| Function App | `func-hcwsite-prod-scus` | ✔ |
-| App Service plan | `asp-hcwsite-prod-scus` | |
-| Cosmos DB account | `cosmos-hcwsite-prod` | ✔ |
-| Key Vault | `kv-hcwsite-prod-scus` | ✔ |
-| Storage account | `sthcwsiteprodscus` | ✔ |
-| Application Insights | `appi-hcwsite-prod-scus` | |
-| Managed identity (Function App) | `id-hcwsite-func-prod` | |
-| Private endpoint (Cosmos) | `pep-hcwsite-cosmos-prod-scus` | |
-| Network security group | `nsg-hcwsite-func-prod-scus` | |
-| Route table | `rt-hcwsite-prod-scus` | |
+| Spoke virtual network | `vnet-web-prod-scus` | |
+| Subnet (Functions integration) | `snet-web-func-prod` | |
+| Static Web App | `stapp-web-prod-scus` | |
+| Function App | `func-web-prod-scus` | ✔ |
+| App Service plan | `asp-web-prod-scus` | |
+| Cosmos DB account | `cosmos-web-prod` | ✔ |
+| Key Vault | `kv-web-prod-scus` | ✔ |
+| Storage account | `stwebprodscus` | ✔ |
+| Application Insights | `appi-web-prod-scus` | |
+| Managed identity (Function App) | `id-web-func-prod` | |
+| Private endpoint (Cosmos) | `pep-web-cosmos-prod-scus` | |
+| Network security group | `nsg-web-func-prod-scus` | |
+| Route table | `rt-web-prod-scus` | |
 
 There is no application Log Analytics workspace: telemetry goes to the central
-one in Management (`log-platform-prod-scus`), and Application Insights is
+one in Management (`log-plat-prod-scus`), and Application Insights is
 workspace-based against it across the subscription boundary. Split the
 workspace out only when a second workload onboards or app and platform logs
 need different RBAC.
 
-Azure OpenAI would take `rg-ai-hcwsite-prod-scus` on the same rule — it is a
+Azure OpenAI would take `rg-ai-prod-scus` on the same rule — it is a
 separate category *and* holds deployed models whose recreation is not free.
 
-The workload token is `hcwsite`, not `hcw-hcwsite`. The org token belongs in
-the subscription and management-group names; repeating it per-resource inside
-a subscription that is already scoped to the workload adds four characters and
-no information.
+The workload token is `web`. The org token belongs in the management-group
+names; repeating it per-resource inside a subscription already scoped to one
+workload adds characters and no information.
+
+**Resource-group names drop the workload token entirely** — `rg-web-prod-scus`,
+not `rg-web-web-prod-scus`. A resource group only has to be unique inside its
+subscription, and an application subscription holds exactly one workload, so
+the token would restate what the subscription already says. It would also read
+badly: `web` is simultaneously the workload token and the Azure category
+segment for Web & Mobile, and a name that repeats a word for two different
+reasons teaches the reader nothing about either.
+
+That collision is worth knowing about rather than working around. In
+`rg-web-prod-scus` the `web` is the **category**; in `stapp-web-prod-scus` it
+is the **workload**. They coincide here because this workload is a web
+application. They would not coincide for a data-processing workload, whose
+group would still be `rg-web-*` only if it published a web front end.
 
 **These are not the live names.** Today's estate is `hcw-functions-prod`,
 `hcw-cosmos-prod`, `hcw-keyvault-prod`, `hcwstorageprod` in
@@ -279,7 +292,7 @@ ones that actually bite:
 
 | Resource | Limit | Consequence |
 | --- | --- | --- |
-| Storage account | 3–24, **lowercase alphanumeric only**, global | No hyphens at all — `sthcwsiteprodscus`, not `st-hcwsite-prod-scus` |
+| Storage account | 3–24, **lowercase alphanumeric only**, global | No hyphens at all — `stwebprodscus`, not `st-web-prod-scus` |
 | Key Vault | 3–24, alphanumeric + hyphen, must start with a letter, global | `kv-hcw-connectivity-prod-scus` is 29 — it does not fit |
 | Cosmos DB | 3–44, lowercase, global | |
 | Function / Web App | 2–60, global across `azurewebsites.net` | |

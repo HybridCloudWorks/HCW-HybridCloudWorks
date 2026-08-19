@@ -83,7 +83,7 @@ export function getCosmosDb() {
   if (database) return database;
 
   const endpoint = process.env.COSMOS_ENDPOINT;
-  const databaseId = process.env.COSMOS_DATABASE || 'hybridcloudworks';
+  const databaseId = process.env.COSMOS_DATABASE || 'hcw';
 
   if (!endpoint) {
     throw new Error('Missing COSMOS_ENDPOINT environment variable');

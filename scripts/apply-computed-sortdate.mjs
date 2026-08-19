@@ -73,7 +73,7 @@ async function getClient() {
   const { CosmosClient } = await import('@azure/cosmos');
   const { DefaultAzureCredential } = await import('@azure/identity');
   const client = new CosmosClient({ endpoint, aadCredentials: new DefaultAzureCredential() });
-  return client.database(process.env.COSMOS_DATABASE || 'hybridcloudworks');
+  return client.database(process.env.COSMOS_DATABASE || 'hcw');
 }
 
 async function inspect() {

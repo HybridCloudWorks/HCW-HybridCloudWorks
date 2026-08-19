@@ -82,21 +82,30 @@ variable "environment" {
 # Naming
 # -----------------------------------------------------------------------------
 # A data-plane identifier, NOT an Azure resource name, and therefore outside
-# the CAF convention. Three code paths fall back to this literal when
-# COSMOS_DATABASE is unset — functions/src/lib/cosmos-client.js,
-# scripts/lib/cli.mjs and scripts/apply-computed-sortdate.mjs — so changing it
-# here without changing them there points those paths at a database that does
-# not exist, and the failure reads as a permissions problem.
+# the CAF resource-naming convention.
+#
+# FOUR code paths hard-code this value as their fallback when COSMOS_DATABASE
+# is unset, and all four must change together:
+#
+#   functions/src/lib/cosmos-client.js
+#   scripts/lib/cli.mjs
+#   scripts/apply-computed-sortdate.mjs
+#   scripts/smoke-deployed.mjs
+#
+# Change it here without changing them there and those paths connect to a
+# database that does not exist — which surfaces as an authorization error,
+# not a "no such database" one, because the Cosmos SDK cannot distinguish
+# "absent" from "not permitted" for a caller whose RBAC is scoped per-database.
 variable "cosmos_database_name" {
   description = "Cosmos SQL database name. Data-plane contract shared with the Functions and scripts workspaces; change only in coordination with them"
   type        = string
-  default     = "hybridcloudworks"
+  default     = "hcw"
 }
 
 variable "workload_name" {
   description = "Workload token in resource names — the application, not the organization (Naming-Convention wiki page)"
   type        = string
-  default     = "hcwsite"
+  default     = "web"
 }
 
 # Microsoft publishes no official region abbreviations, so this is a local
@@ -168,7 +177,7 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  default     = "cosmos-hcwsite-prod"
+  default     = "cosmos-web-prod"
 }
 
 variable "cosmos_local_auth_disabled" {
@@ -237,13 +246,13 @@ variable "functions_storage_admin_ip_rules" {
 variable "functions_storage_account_name" {
   description = "Functions host storage account (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string
-  default     = "sthcwsitefuncprodscus"
+  default     = "stwebfuncprodscus"
 }
 
 variable "storage_account_name" {
   description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string
-  default     = "sthcwsiteprodscus"
+  default     = "stwebprodscus"
 }
 
 # -----------------------------------------------------------------------------
@@ -252,7 +261,7 @@ variable "storage_account_name" {
 variable "function_app_name" {
   description = "Azure Function App name (globally unique)"
   type        = string
-  default     = "func-hcwsite-prod-scus"
+  default     = "func-web-prod-scus"
 }
 
 # -----------------------------------------------------------------------------
@@ -261,7 +270,7 @@ variable "function_app_name" {
 variable "key_vault_name" {
   description = "Azure Key Vault name (globally unique, 3-24 chars)"
   type        = string
-  default     = "kv-hcwsite-prod-scus"
+  default     = "kv-web-prod-scus"
 }
 
 variable "purge_protection_enabled" {
