@@ -595,8 +595,14 @@ resource "azurerm_subnet" "functions_integration" {
   delegation {
     name = "flex-consumption"
     service_delegation {
-      name    = "Microsoft.App/environments"
-      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+      name = "Microsoft.App/environments"
+      # `join/action`, which is what Azure actually assigns for this
+      # delegation — the action set belongs to the service, not to us. Naming
+      # anything else produces a plan that never converges: Terraform writes
+      # the value, Azure replaces it with its own, and the next plan proposes
+      # the same in-place update forever. Verify with:
+      #   az network vnet subnet show ... --query "delegations[].actions"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
   }
 }
