@@ -262,7 +262,7 @@ redeployable; the others hold things whose deletion is a decision.
 | Function App | `func-site-prod-scus` | ✔ |
 | App Service plan | `asp-site-prod-scus` | |
 | Cosmos DB account | `cosmos-site-prod-scus` | ✔ |
-| Key Vault | `kv-site-prod-scus` | ✔ |
+| Key Vault | `kv-site-prod-scus-01` ‡ | ✔ |
 | Storage account (content) | `stsiteprodscus` | ✔ |
 | Storage account (Functions host) | `stsitefuncprodscus` | ✔ |
 | Azure OpenAI account | `oai-site-prod-scus` | ✔ |
@@ -277,6 +277,23 @@ Subnets and managed identities omit the region: both are children of (or bound
 to) a resource that already carries it. Everything else region-qualifies,
 including Cosmos — an earlier revision listed `cosmos-site-prod`, an
 unexplained exception this page no longer makes.
+
+‡ **The instance suffix, used in earnest.** `kv-site-prod-scus` is taken by an
+unrelated Azure customer — vault names are global — and it is not soft-deleted
+in this tenant, so it cannot be recovered. This is precisely the case the
+"Global" note below anticipates, and `-01` is the fallback: it stays on the
+pattern and reads as the first of its kind. Discovered at apply time on
+2026-08-19, which is the expensive way to find out; for any globally-unique
+name, check availability before the first apply, not during it.
+
+**The Static Web App is the one resource that does not sit in
+`azure_location`.** Static Web Apps is offered in five regions only —
+`centralus`, `eastus2`, `westus2`, `westeurope`, `eastasia` — and
+`southcentralus` is not among them, so `stapp-site-prod-scus` is created in
+`centralus` (the nearest). The name keeps the `scus` token deliberately: it
+names the estate the resource belongs to, not the control-plane region one
+service happens to require. The site is served from Azure's global edge
+regardless, so the region does not decide where users are served from.
 
 There is no application Log Analytics workspace: telemetry goes to the central
 one in Management (`log-plat-prod-scus`), and Application Insights is

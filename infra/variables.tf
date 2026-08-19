@@ -72,6 +72,26 @@ variable "azure_location" {
   default     = "southcentralus"
 }
 
+# Static Web Apps is offered in FIVE regions only — centralus, eastus2,
+# westus2, westeurope, eastasia — and southcentralus is not among them, so it
+# cannot follow azure_location like everything else. Deploying to the wrong one
+# fails at apply with LocationNotAvailableForResourceType.
+#
+# This is a control-plane location only. The site itself is served from Azure's
+# global edge network, so the choice does not decide where users are served
+# from; centralus is simply the nearest available region to southcentralus,
+# which keeps the resource close to the rest of the estate.
+variable "static_web_app_location" {
+  description = "Region for the Static Web App — must be one of the five that offer it, independent of azure_location"
+  type        = string
+  default     = "centralus"
+
+  validation {
+    condition     = contains(["centralus", "eastus2", "westus2", "westeurope", "eastasia"], var.static_web_app_location)
+    error_message = "Static Web Apps is only available in centralus, eastus2, westus2, westeurope or eastasia."
+  }
+}
+
 variable "environment" {
   description = "Environment name (prod, staging, dev)"
   type        = string
@@ -273,7 +293,12 @@ variable "function_app_name" {
 variable "key_vault_name" {
   description = "Azure Key Vault name (globally unique, 3-24 chars)"
   type        = string
-  default     = "kv-site-prod-scus"
+  # The unsuffixed `kv-site-prod-scus` is taken by an unrelated Azure customer
+  # — vault names are global, and it is not soft-deleted in any subscription
+  # of this tenant, so it is not recoverable. The `-01` instance suffix is the
+  # fallback the Naming-Convention page reserves for exactly this case. 20
+  # characters, inside the 24-character limit.
+  default = "kv-site-prod-scus-01"
 }
 
 variable "purge_protection_enabled" {
@@ -294,6 +319,20 @@ variable "budget_amount_usd" {
 variable "budget_alert_email" {
   description = "Email address for budget alert notifications"
   type        = string
+}
+
+# Must be the first of the current month or later, in UTC — Azure rejects
+# anything earlier for a monthly budget. Update it when a first apply into a
+# new subscription lands in a later month than this default.
+variable "budget_start_date" {
+  description = "Budget period start (RFC3339, first of a month). Azure rejects a start date before the current month"
+  type        = string
+  default     = "2026-08-01T00:00:00Z"
+
+  validation {
+    condition     = can(regex("^\\d{4}-\\d{2}-01T00:00:00Z$", var.budget_start_date))
+    error_message = "budget_start_date must be the first of a month, e.g. 2026-08-01T00:00:00Z."
+  }
 }
 
 # -----------------------------------------------------------------------------

@@ -41,6 +41,14 @@ resource "azurerm_role_assignment" "func_openai" {
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
+# Model versions are region-specific AND time-limited: Azure retires a version
+# on a published date, after which creating a deployment of it fails with
+# ServiceModelDeprecated rather than falling back to a newer one. 2024-05-13
+# was retired 2026-03-31 and failed the first apply here.
+#
+# Check what the region actually offers before changing this:
+#   az cognitiveservices model list -l southcentralus \
+#     --query "[?model.name=='gpt-4o'].model.version" -o tsv
 resource "azurerm_cognitive_deployment" "gpt4o" {
   name                 = "gpt-4o"
   cognitive_account_id = azurerm_cognitive_account.openai.id
@@ -48,7 +56,7 @@ resource "azurerm_cognitive_deployment" "gpt4o" {
   model {
     format  = "OpenAI"
     name    = "gpt-4o"
-    version = "2024-05-13" # Or whatever latest version is available in eastus2
+    version = "2024-11-20" # newest offered in southcentralus, verified 2026-08-19
   }
 
   sku {
@@ -57,18 +65,9 @@ resource "azurerm_cognitive_deployment" "gpt4o" {
   }
 }
 
-resource "azurerm_cognitive_deployment" "dalle3" {
-  name                 = "dall-e-3"
-  cognitive_account_id = azurerm_cognitive_account.openai.id
-
-  model {
-    format  = "OpenAI"
-    name    = "dall-e-3"
-    version = "3.0"
-  }
-
-  sku {
-    name     = "Standard"
-    capacity = 1
-  }
-}
+# There is deliberately no DALL-E deployment. Image generation goes through the
+# OpenAI.com API using the OPENAI_API_KEY app setting (main.tf, sourced from
+# Key Vault) — not through this Azure OpenAI account. A dall-e-3 deployment
+# here would be a second, unused path to the same capability, and it cannot be
+# created in southcentralus anyway: the region offers no DALL-E model at all,
+# so the attempt fails with SpecialFeatureOrQuotaIdRequired.

@@ -105,8 +105,12 @@ resource "azurerm_application_insights" "hcw" {
 #   - 100 GB bandwidth/month included
 # =============================================================================
 resource "azurerm_static_web_app" "hcw" {
-  name                = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
-  location            = azurerm_resource_group.app["web"].location
+  name = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  # NOT the resource group's location: Static Web Apps is offered in five
+  # regions and southcentralus is not one of them (see the variable's comment).
+  # The name keeps the `scus` token because it belongs to the estate, not to
+  # the control-plane region this one resource happens to require.
+  location            = var.static_web_app_location
   resource_group_name = azurerm_resource_group.app["web"].name
   sku_tier            = "Standard"
   sku_size            = "Standard"
@@ -415,9 +419,20 @@ resource "azurerm_storage_account" "hcw" {
 
   blob_properties {
     cors_rule {
-      allowed_headers    = ["*"]
-      allowed_methods    = ["GET", "HEAD", "OPTIONS"]
-      allowed_origins    = ["https://${var.domain}", "https://*.${var.domain}", "http://localhost:*"]
+      allowed_headers = ["*"]
+      allowed_methods = ["GET", "HEAD", "OPTIONS"]
+      # EXACT origins only. Azure Storage CORS accepts a literal "*" or fully
+      # qualified origins — it does not accept partial wildcards, so the
+      # previous `https://*.<domain>` and `http://localhost:*` were rejected
+      # with "The value for one of the XML nodes is not in the correct
+      # format", an error that names neither the field nor the value.
+      # Port is part of an origin, hence localhost:5173 (Vite's default) and
+      # not bare localhost.
+      allowed_origins = [
+        "https://${var.domain}",
+        "https://www.${var.domain}",
+        "http://localhost:5173",
+      ]
       exposed_headers    = ["Content-Length", "Content-Type"]
       max_age_in_seconds = 3600
     }
@@ -1004,8 +1019,18 @@ resource "azurerm_consumption_budget_subscription" "hcw" {
   amount          = var.budget_amount_usd
   time_grain      = "Monthly"
 
+  # Azure rejects a monthly budget whose start date is before the current
+  # month (400: "Start date for monthly time grain should not be prior to
+  # current month"), so this is not a free-form "when we started" field — it
+  # goes stale and breaks the NEXT first-apply into a fresh subscription.
+  # Existing budgets are unaffected: the constraint is checked on create.
+  #
+  # A variable rather than a literal so a later deployment can set it without
+  # editing this file. Terraform has no "current month" function that would be
+  # stable across plans, and a timestamp() here would propose a diff on every
+  # run.
   time_period {
-    start_date = "2026-07-01T00:00:00Z"
+    start_date = var.budget_start_date
   }
 
   # T-505: the approved threshold ladder (50/75/90/100 actual + forecast),
