@@ -53,10 +53,13 @@
   GitHub repository, owner/name. Default: HybridCloudWorks/HCW-HybridCloudWorks.
 
 .PARAMETER Organization
-  HCP Terraform organization, for the wave-2 state read. Default: hcw.
+  HCP Terraform organization, for the wave-2 state read. Read from
+  infra/backend.tf when omitted.
 
 .PARAMETER Workspace
-  HCP Terraform workspace. Default: hcw-azure.
+  HCP Terraform workspace holding the state to read. Read from
+  infra/backend.tf when omitted, so this cannot target a different workspace
+  than Terraform writes to.
 
 .PARAMETER TfcToken
   HCP Terraform API token as a SecureString, for reading state outputs. Omit
@@ -93,8 +96,10 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
   [string] $Repository = 'HybridCloudWorks/HCW-HybridCloudWorks',
-  [string] $Organization = 'hcw',
-  [string] $Workspace = 'hcw-azure',
+  # Read from infra/backend.tf when omitted — one place names the workspace,
+  # so the wave-2 state read cannot target a different one than Terraform uses.
+  [string] $Organization,
+  [string] $Workspace,
   [securestring] $TfcToken,
 
   # Optional. Omit them and they are discovered from the Azure CLI sign-in —
@@ -284,6 +289,14 @@ if (-not $script:tfcToken) {
   Write-Info 'FUNCTIONS_URL, RESOURCE_GROUP, FUNCTIONS_STORAGE_ACCOUNT and'
   Write-Info 'COSMOS_ENDPOINT.'
 } else {
+  if (-not $Organization -or -not $Workspace) {
+    $backend = Get-BackendConfig -BackendPath (Join-Path $PSScriptRoot '../infra/backend.tf')
+    if ($backend) {
+      if (-not $Organization) { $Organization = $backend.Organization }
+      if (-not $Workspace) { $Workspace = $backend.Workspace }
+      Write-Info "From infra/backend.tf: $Organization/$Workspace"
+    }
+  }
   try {
     $workspaceId = (Invoke-Tfc "/organizations/$Organization/workspaces/$Workspace").data.id
     $state = Invoke-Tfc "/workspaces/$workspaceId/current-state-version?include=outputs"

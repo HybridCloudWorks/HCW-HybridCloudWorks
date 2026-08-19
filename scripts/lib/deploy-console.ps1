@@ -252,6 +252,179 @@ function Get-StoredTfcToken {
   return $null
 }
 
+function Invoke-TfcApi {
+  param(
+    [Parameter(Mandatory)][string] $Path,
+    [string] $Method = 'GET',
+    [hashtable] $Body,
+    [Parameter(Mandatory)][securestring] $Token,
+    [switch] $AllowFailure
+  )
+  $arguments = @{
+    Method = $Method
+    Uri    = "https://app.terraform.io/api/v2$Path"
+    # The JSON:API media type is not optional — HCP Terraform rejects
+    # application/json with a 415 that does not explain itself.
+    Headers        = @{ 'Content-Type' = 'application/vnd.api+json' }
+    Authentication = 'Bearer'
+    Token          = $Token
+  }
+  if ($Body) { $arguments.Body = ($Body | ConvertTo-Json -Depth 10) }
+  try { return Invoke-RestMethod @arguments } catch {
+    if ($AllowFailure) { return $null }
+    throw
+  }
+}
+
+# infra/backend.tf is the source of truth for which organization and workspace
+# this configuration belongs to — it is what `terraform` itself obeys. Parsing
+# it, rather than keeping a second copy in script defaults, is what stops the
+# two drifting apart. They had: the backend named an organization that did not
+# exist and a workspace that had never been created, while the scripts happily
+# defaulted to the same wrong pair.
+function Get-BackendConfig {
+  param([Parameter(Mandatory)][string] $BackendPath)
+
+  if (-not (Test-Path $BackendPath)) { return $null }
+  $text = Get-Content $BackendPath -Raw
+
+  $organization = [regex]::Match($text, '(?m)^\s*organization\s*=\s*"([^"]+)"').Groups[1].Value
+  # `name` inside the workspaces block. Matched after the block opens so a
+  # `name` elsewhere in the file cannot be picked up by accident.
+  $workspace = [regex]::Match($text, '(?s)workspaces\s*\{.*?name\s*=\s*"([^"]+)"').Groups[1].Value
+
+  if (-not $organization -or -not $workspace) { return $null }
+  return [pscustomobject]@{ Organization = $organization; Workspace = $workspace; Path = $BackendPath }
+}
+
+function Format-TfcWorkspace {
+  param($Workspace)
+  $count = $Workspace.attributes.'resource-count'
+  $vcs = $Workspace.attributes.'vcs-repo-identifier'
+  $notes = @()
+  if ($count -gt 0) { $notes += "$count resources" } else { $notes += 'empty' }
+  if ($vcs) { $notes += "VCS: $vcs" }
+  return "$($Workspace.attributes.name)  ($($notes -join ', '))"
+}
+
+# Resolve the workspace infra/backend.tf names, creating it when it does not
+# exist. Returns the workspace object, or $null if the caller declined.
+#
+# The safety rail here is the point. A workspace that already holds resources
+# belonging to a DIFFERENT configuration is the most expensive mistake
+# available at this step: pointing this configuration at it makes the first
+# plan propose destroying everything in it. So an existing non-empty workspace
+# is reported with its resource count and VCS repository and requires an
+# explicit confirmation, rather than being adopted silently.
+function Resolve-TfcWorkspace {
+  param(
+    [Parameter(Mandatory)][string] $Organization,
+    [Parameter(Mandatory)][string] $WorkspaceName,
+    [Parameter(Mandatory)][securestring] $Token,
+    [string] $TerraformVersion,
+    [string] $ProjectName,
+    [switch] $WhatIfMode
+  )
+
+  $organizations = @((Invoke-TfcApi -Path '/organizations' -Token $Token -AllowFailure).data)
+  if ($organizations.Count -eq 0) {
+    Stop-WithGuidance 'This token can see no HCP Terraform organizations.' @(
+      'The token may be expired, or scoped to nothing.',
+      'Create a new one: https://app.terraform.io/app/settings/tokens'
+    )
+  }
+  if ($organizations.id -notcontains $Organization) {
+    Stop-WithGuidance "Organization '$Organization' is not visible to this token." @(
+      "infra/backend.tf names it, so either the backend is wrong or the token is.",
+      "Visible: $($organizations.id -join ', ')",
+      'Fix backend.tf to name a real organization, then re-run.'
+    )
+  }
+
+  $existing = Invoke-TfcApi -Path "/organizations/$Organization/workspaces/$WorkspaceName" -Token $Token -AllowFailure
+  if ($existing) {
+    $count = $existing.data.attributes.'resource-count'
+    if ($count -gt 0) {
+      Write-Warn "$Organization/$WorkspaceName already holds $count resources."
+      $vcs = $existing.data.attributes.'vcs-repo-identifier'
+      if ($vcs) { Write-Info "It is VCS-connected to $vcs." }
+      Write-Info 'If those resources belong to a different configuration, the first'
+      Write-Info 'plan from here will propose DESTROYING them. Only continue if this'
+      Write-Info 'workspace is genuinely the state for infra/ in this repository.'
+      if (-not $WhatIfMode -and -not (Confirm-Plan -Title 'Use this existing workspace?' -Values ([ordered]@{
+              Workspace = "$Organization/$WorkspaceName"
+              Resources = $count
+              VCS       = if ($vcs) { $vcs } else { '(none)' }
+            }))) {
+        return $null
+      }
+    }
+    return $existing.data
+  }
+
+  # Not found — create it, choosing a project first, because the project name
+  # becomes a segment of the OIDC subject the federated credentials must match.
+  Write-Warn "Workspace '$WorkspaceName' does not exist in organization '$Organization'."
+  Write-Info 'This is the workspace the configuration runs in, so nothing can'
+  Write-Info 'plan or apply until it exists.'
+
+  $projects = @((Invoke-TfcApi -Path "/organizations/$Organization/projects" -Token $Token -AllowFailure).data)
+  if ($projects.Count -eq 0) {
+    Stop-WithGuidance "No project available in organization '$Organization'." @(
+      'Create one in the HCP Terraform UI, then re-run.'
+    )
+  }
+
+  $project = $null
+  if ($ProjectName) {
+    $project = $projects | Where-Object { $_.attributes.name -eq $ProjectName } | Select-Object -First 1
+    if (-not $project) {
+      Stop-WithGuidance "No project named '$ProjectName' in organization '$Organization'." @(
+        "Available: $(($projects | ForEach-Object { $_.attributes.name }) -join ', ')"
+      )
+    }
+    Write-Ok "Project: $ProjectName (from -Project)"
+  } else {
+    Write-Info 'The project name becomes a segment of the OIDC subject the'
+    Write-Info 'federated credentials must match, so choose deliberately.'
+    $project = Select-Option -Title 'Which project should it live in?' -Options $projects `
+      -Label { param($p) $p.attributes.name } -AutoSelectSingle -AutoSelectNote 'only project'
+  }
+  if (-not $project) { return $null }
+
+  $attributes = @{
+    name             = $WorkspaceName
+    description      = 'Azure platform for HCWSite (infra/). Created by scripts/set-tfc-variables.ps1.'
+    'execution-mode' = 'remote'
+    'auto-apply'     = $false
+  }
+  if ($TerraformVersion) { $attributes['terraform-version'] = $TerraformVersion }
+
+  $label = "$Organization/$WorkspaceName in project '$($project.attributes.name)'"
+  if ($WhatIfMode) {
+    Write-Act "would create workspace  $label"
+    return $null
+  }
+  if (-not (Confirm-Plan -Title 'Create this workspace?' -Values ([ordered]@{
+          Organization = $Organization
+          Workspace    = $WorkspaceName
+          Project      = $project.attributes.name
+          'Auto-apply' = 'off'
+        }))) {
+    return $null
+  }
+
+  $created = Invoke-TfcApi -Path "/organizations/$Organization/workspaces" -Method POST -Token $Token -Body @{
+    data = @{
+      type          = 'workspaces'
+      attributes    = $attributes
+      relationships = @{ project = @{ data = @{ type = 'projects'; id = $project.id } } }
+    }
+  }
+  Write-Act "created workspace  $label"
+  return $created.data
+}
+
 # ---------------------------------------------------------------------------
 # Azure
 # ---------------------------------------------------------------------------

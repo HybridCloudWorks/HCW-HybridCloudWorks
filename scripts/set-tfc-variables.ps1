@@ -34,10 +34,23 @@
   summary shows key names and outcomes only. Nothing is written to disk.
 
 .PARAMETER Organization
-  HCP Terraform organization. Default: hcw.
+  HCP Terraform organization. Read from infra/backend.tf when omitted, because
+  that file is what `terraform` itself obeys — a second copy in this script
+  could seed a workspace the configuration does not use.
 
 .PARAMETER Workspace
-  HCP Terraform workspace. Default: hcw-azure.
+  HCP Terraform workspace. Read from infra/backend.tf when omitted. If it does
+  not exist yet, the script offers to create it, asking which project it
+  belongs in — the project name is a segment of the OIDC subject the federated
+  credentials must match. An existing workspace that already holds resources
+  requires an explicit confirmation, because adopting another configuration's
+  workspace makes the first plan propose destroying its contents.
+
+.PARAMETER Project
+  HCP Terraform project, used only when the workspace has to be created.
+  Offered as a numbered list when omitted. An existing workspace keeps the
+  project it already has — moving it would change the OIDC subject and break
+  authentication until the bootstrap is re-run.
 
 .PARAMETER TfcToken
   API token for HCP Terraform, as a SecureString. Omit it and the script reads
@@ -92,8 +105,13 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-  [string] $Organization = 'hcw',
-  [string] $Workspace = 'hcw-azure',
+  # No defaults on purpose: infra/backend.tf supplies both, so there is exactly
+  # one place naming the workspace. Pass them only to override the backend.
+  [string] $Organization,
+  [string] $Workspace,
+  # Only consulted when the workspace has to be CREATED — an existing one
+  # already has a project, and moving it would break the OIDC subject.
+  [string] $Project,
   [securestring] $TfcToken,
 
   # Every one of these is optional and discovered or prompted for when
@@ -183,36 +201,63 @@ function Invoke-Tfc {
 }
 
 # ===========================================================================
-# 1. Resolve the workspace
+# 1. Resolve the workspace, creating it if infra/backend.tf names one that
+#    does not exist yet
 # ===========================================================================
 Write-Step 'Workspace'
 $script:token = Resolve-TfcToken -Supplied $TfcToken
 
-try {
-  $workspaceResponse = Invoke-Tfc -Method GET -Path "/organizations/$Organization/workspaces/$Workspace"
-} catch {
-  Stop-WithGuidance "Could not read workspace $Organization/$Workspace." @(
-    'Check the organization and workspace names — both are case-sensitive.',
-    'A 401 means the token is wrong or expired; a 404 means the name is.',
-    "Underlying error: $($_.Exception.Message)"
-  )
+# backend.tf is what `terraform` itself obeys, so it decides which workspace
+# these variables belong in. Reading it here means the script cannot seed the
+# wrong workspace, and cannot drift from the backend the way a second copy of
+# the names in script defaults did.
+if (-not $Organization -or -not $Workspace) {
+  $backend = Get-BackendConfig -BackendPath (Join-Path $PSScriptRoot '../infra/backend.tf')
+  if (-not $backend) {
+    Stop-WithGuidance 'Could not read the organization and workspace from infra/backend.tf.' @(
+      'That file is the source of truth for which workspace these variables',
+      'belong in. Either fix its cloud block, or pass -Organization and',
+      '-Workspace explicitly.'
+    )
+  }
+  # Name only what actually came from the file: saying "from backend.tf" about
+  # a value that arrived as a parameter sends the next debugger to the wrong
+  # place.
+  $fromBackend = @()
+  if (-not $Organization) { $Organization = $backend.Organization; $fromBackend += "organization $Organization" }
+  if (-not $Workspace) { $Workspace = $backend.Workspace; $fromBackend += "workspace $Workspace" }
+  if ($fromBackend) { Write-Info "From infra/backend.tf: $($fromBackend -join ', ')" }
 }
 
-$workspaceId = $workspaceResponse.data.id
+$workspaceData = Resolve-TfcWorkspace -Organization $Organization -WorkspaceName $Workspace `
+  -Token $script:token -TerraformVersion '1.15.8' -ProjectName $Project -WhatIfMode:$WhatIfPreference
+if (-not $workspaceData) {
+  if ($WhatIfPreference) {
+    Write-Info 'Dry run — the workspace does not exist yet, so there is nothing'
+    Write-Info 'further to resolve. Re-run without -WhatIf to create it and seed it.'
+    exit 0
+  }
+  Write-Info 'Cancelled — nothing was written.'
+  exit 0
+}
+
+$workspaceId = $workspaceData.id
 Write-Ok "$Organization/$Workspace ($workspaceId)"
 
-# The project the workspace belongs to is the value the bootstrap script had to
-# guess for the federated credential subject. Surfacing it here turns an
-# AADSTS70021 investigation into a glance, because this is the one place the
-# real name is available without opening the UI.
-$projectId = $workspaceResponse.data.relationships.project.data.id
+# The project is a segment of the OIDC subject the federated credentials must
+# match exactly, so reading the real name here is what turns an AADSTS70021
+# investigation into a glance.
+$projectId = $workspaceData.relationships.project.data.id
 if ($projectId) {
-  try {
-    $project = Invoke-Tfc -Method GET -Path "/projects/$projectId"
-    $projectName = $project.data.attributes.name
+  # NOT $project: that is the [string] parameter above, and PowerShell keeps a
+  # parameter's type constraint on the variable, so assigning the response to
+  # it silently stringifies the object and every property read returns null.
+  $projectResponse = Invoke-TfcApi -Path "/projects/$projectId" -Token $script:token -AllowFailure
+  if ($projectResponse) {
+    $projectName = $projectResponse.data.attributes.name
     Write-Ok "Project: $projectName"
     Write-Info 'This is the value the federated credential subject must contain.'
-  } catch {
+  } else {
     Write-Info 'Could not read the project name (token may lack project scope).'
   }
 }
