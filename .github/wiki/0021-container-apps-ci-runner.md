@@ -1,6 +1,6 @@
 # ADR 0021: Container Apps self-hosted CI runner failover
 
-**Status:** Accepted
+**Status:** Superseded — deferred 2026-08-18 (see *Deferral* below). The resources remain in `infra/ci-runner.tf`, gated off by `ci_runner_enabled = false`.
 **Decision date:** 2026-08-18
 **Owners:** Workload owner and architecture owner
 
@@ -55,3 +55,45 @@ Ratify the Container Apps runner as the CI failover path, with its boundaries st
 
 - [ADR 0018](0018-as-built-plan-v02) · REVIEW §4.4 (failover runbook)
 - `infra/ci-runner.tf`, `infra/runner-image/`, `.github/workflows/build-runner-image.yml`
+
+---
+
+## Deferral (2026-08-18)
+
+Ratified and deferred the same day, on facts the original decision did not
+check. Not a reversal of the reasoning — a correction of its inputs.
+
+**The cost driver did not exist.** "Cost ceiling: a scale-to-zero Consumption
+job costs nothing idle" answers a question nobody asked. This repository is
+**public**, so GitHub-hosted runners are unlimited and free. There was no
+runner cost to avoid, and therefore no saving to weigh the trust surface
+against.
+
+**The failover path cannot run.** All three prerequisites are absent
+(CHECKLIST §7): `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, and the GitHub App id
+and private key that mint the short-lived registration token. The image cannot
+be pushed and a runner cannot register. The failover has never been exercised
+because it has never been executable.
+
+**What it protects against is smaller than it looks.** A GitHub-hosted runner
+outage stops the gates — CI, repository policy, IaC validation, wiki sync —
+for the duration of the incident. The delivery workflows are `if: ${{ false }}`
+and gated on a protected Environment, so nothing production-facing is blocked.
+The exposure is merge friction, measured in hours, not a delivery freeze.
+
+Against that: a Container Apps environment and job, a Docker Hub account and
+push token, a GitHub App holding `Administration: Read & write` tenant-wide,
+an image build pipeline — and this ADR's own accepted risk, *"workflow code
+executed on the runner runs inside the subscription's network fabric"*.
+
+### Decision
+
+`ci_runner_enabled` defaults to `false`. `infra/ci-runner.tf` is retained in
+full and gated, so reviving this is one variable, not an archaeology exercise.
+`CI_RUNNER` remains unset across all seven workflows, which was already the
+steady state.
+
+The original **revisit trigger stands unchanged**: if the runner is needed
+routinely, this ADR's risk analysis is void and must be redone — with the full
+hardening pass (egress restriction, image signing) and the three secrets
+provisioned, in that order.
