@@ -22,7 +22,7 @@ examples for Azure resources*.
 
 | Component | This tenant | Notes |
 | --- | --- | --- |
-| Organization token | `hcw` | Matches the live globally-unique resources (`hcw-cosmos-prod`, `hcw-functions-prod`, `hcw-keyvault-prod`) |
+| Organization token | `hcw` | Used in management-group IDs only. Subscriptions and resource groups drop it — they already sit inside exactly one tenant |
 | Workload token | `hcw` for platform, `hcwsite` for the application | The workload slot, not the org, for application resources |
 | Environment | `prod` · `dev` · `test` · `stage` · `dr` · `sbx` | |
 | Region | `scus` (southcentralus) | See the region table below |
@@ -92,15 +92,69 @@ Three points worth stating:
 ## Subscriptions
 
 ```
-sub-<org>-<function>-<environment>
+sub-<tier>-<function>-<environment>-<region>
 ```
+
+`tier` is `plat` or `app` — it answers "is this the platform or a workload?"
+before the name says anything else, which is the question that decides who
+owns the subscription and what policy applies to it. The org token is dropped:
+a subscription is already inside exactly one tenant, so repeating the
+organization in every name buys nothing.
+
+These four exist:
 
 | Subscription | Management group |
 | --- | --- |
-| `sub-hcw-identity-prod` | `mg-hcw-platform-identity` |
-| `sub-hcw-management-prod` | `mg-hcw-platform-management` |
-| `sub-hcw-connectivity-prod` | `mg-hcw-platform-connectivity` |
-| `sub-hcw-hcwsite-prod` | `mg-hcw-landingzones-online` |
+| `sub-plat-ident-prod-scus` | `mg-hcw-platform-identity` |
+| `sub-plat-mgmt-prod-scus` | `mg-hcw-platform-management` |
+| `sub-plat-conn-prod-scus` | `mg-hcw-platform-connectivity` |
+| `sub-app-hcwsite-prod-scus` | `mg-hcw-landingzones-online` |
+
+The `<function>` segment uses the same category vocabulary as resource groups
+below (`conn`, `mgmt`, `ident`), so one abbreviation means one thing at every
+level of the hierarchy.
+
+---
+
+## Resource groups
+
+```
+rg-<segment>-<workload>-<environment>-<region>
+```
+
+A subscription is the blast-radius, quota and policy boundary. A **resource
+group is the lifecycle and RBAC boundary** — it is what someone deletes when
+they mean "remove this". `<segment>` names the Azure service category it
+groups:
+
+| Azure category | Segment | | Azure category | Segment |
+| --- | --- | --- | --- | --- |
+| AI + Machine Learning | `ai` | | Management & Governance | `mgmt` |
+| Analytics | `log` | | Migration | `mig` |
+| Compute | `comp` | | Monitor | `mon` |
+| Containers | `cont` | | Networking | `conn` |
+| Databases | `db` | | Security | `sec` |
+| DevOps | `dev` | | Storage | `stor` |
+| Hybrid + Multicloud | `hyb` | | Web & Mobile | `web` |
+| Identity | `id` | | Integration | `int` |
+| Internet of Things | `iot` | | | |
+
+`conn` and `web` cover most of what this workload deploys. The rest of the
+table exists so the less obvious services have a defined home rather than an
+improvised one — the point is that two engineers reach the same answer for
+Azure OpenAI (`ai`) or Key Vault (`sec`) without discussing it.
+
+### Split by lifecycle, not by inventory
+
+The segment names a group; it does not oblige you to create seventeen of them.
+Two resources in the same category share a group. Two resources with different
+**destroy semantics** do not, even in the same category.
+
+That is the rule that matters, because a resource group is a deletion unit.
+Anything carrying `prevent_destroy` — Cosmos, Key Vault, the storage accounts
+— should not sit in the same group as things that get torn down and
+redeployed, or the lifecycle protection on one blocks routine work on the
+other.
 
 ---
 
@@ -108,10 +162,10 @@ sub-<org>-<function>-<environment>
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-hcw-identity-prod-scus` |
-| Key Vault | `kv-hcw-identity-prod` |
+| Resource group | `rg-id-platform-prod-scus` |
+| Key Vault | `kv-platform-id-prod` |
 | Managed identity | `id-hcw-<purpose>-prod` |
-| Log Analytics workspace | `log-hcw-identity-prod-scus` |
+| Log Analytics workspace | `log-platform-id-prod-scus` |
 | Domain controller VM *(only if AD DS)* | `vmhcwdc01` |
 
 The VM name breaks the pattern on purpose: a Windows computer name is capped
@@ -122,22 +176,22 @@ resource `vm-hcw-dc-prod-scus-01` and the OS computer name `vmhcwdc01`.
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-hcw-management-prod-scus` |
-| Log Analytics workspace *(central)* | `log-hcw-management-prod-scus` |
-| Automation account | `aa-hcw-management-prod-scus` |
-| Recovery Services vault | `rsv-hcw-management-prod-scus` |
-| Storage account *(archive/logs)* | `sthcwmgmtprodscus` |
-| Data collection rule | `dcr-hcw-vminsights-prod` |
-| Action group | `ag-hcw-platform-prod` |
+| Resource group | `rg-mgmt-platform-prod-scus` |
+| Log Analytics workspace *(central)* | `log-platform-prod-scus` |
+| Automation account | `aa-platform-prod-scus` |
+| Recovery Services vault | `rsv-platform-prod-scus` |
+| Storage account *(archive/logs)* | `stplatformprodscus` |
+| Data collection rule | `dcr-platform-vminsights-prod` |
+| Action group | `ag-platform-prod-scus` |
 
-`log-hcw-management-prod-scus` is the workspace Runbook §7 step 5 re-points
+`log-platform-prod-scus` is the workspace Runbook §7 step 5 re-points
 diagnostics to. Additive — it does not replace the workload's local workspace.
 
 ## Platform — Connectivity
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-hcw-connectivity-prod-scus` |
+| Resource group | `rg-conn-hub-prod-scus` |
 | Hub virtual network | `vnet-hcw-hub-prod-scus` |
 | Azure Firewall | `afw-hcw-hub-prod-scus` |
 | Firewall policy | `afwp-hcw-prod-scus` |
@@ -167,11 +221,21 @@ prefix them.
 
 ## Application landing zone — HCWSite
 
-Subscription `sub-hcw-hcwsite-prod`, under `mg-hcw-landingzones-online`.
+Subscription `sub-app-hcwsite-prod-scus`, under `mg-hcw-landingzones-online`.
+
+Four resource groups, drawn on destroy semantics rather than on the number of
+categories in play. The `web` group is redeployable; the other three hold
+things whose deletion is a decision.
+
+| Resource group | Segment rationale | Contents |
+| --- | --- | --- |
+| `rg-web-hcwsite-prod-scus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, the Function App's managed identity |
+| `rg-db-hcwsite-prod-scus` | Databases | Cosmos account, SQL database, containers — `prevent_destroy` |
+| `rg-sec-hcwsite-prod-scus` | Security | Key Vault, and the storage accounts whose contents outlive a redeploy — `prevent_destroy` |
+| `rg-conn-hcwsite-prod-scus` | Networking | Spoke VNet, Functions integration subnet, NSG, route table |
 
 | Resource | Name | Global? |
 | --- | --- | --- |
-| Resource group | `rg-hcwsite-prod-scus` | |
 | Spoke virtual network | `vnet-hcwsite-prod-scus` | |
 | Subnet (Functions integration) | `snet-hcwsite-func-prod` | |
 | Static Web App | `stapp-hcwsite-prod-scus` | |
@@ -181,11 +245,19 @@ Subscription `sub-hcw-hcwsite-prod`, under `mg-hcw-landingzones-online`.
 | Key Vault | `kv-hcwsite-prod-scus` | ✔ |
 | Storage account | `sthcwsiteprodscus` | ✔ |
 | Application Insights | `appi-hcwsite-prod-scus` | |
-| Log Analytics workspace | `log-hcwsite-prod-scus` | |
 | Managed identity (Function App) | `id-hcwsite-func-prod` | |
 | Private endpoint (Cosmos) | `pep-hcwsite-cosmos-prod-scus` | |
 | Network security group | `nsg-hcwsite-func-prod-scus` | |
 | Route table | `rt-hcwsite-prod-scus` | |
+
+There is no application Log Analytics workspace: telemetry goes to the central
+one in Management (`log-platform-prod-scus`), and Application Insights is
+workspace-based against it across the subscription boundary. Split the
+workspace out only when a second workload onboards or app and platform logs
+need different RBAC.
+
+Azure OpenAI would take `rg-ai-hcwsite-prod-scus` on the same rule — it is a
+separate category *and* holds deployed models whose recreation is not free.
 
 The workload token is `hcwsite`, not `hcw-hcwsite`. The org token belongs in
 the subscription and management-group names; repeating it per-resource inside
