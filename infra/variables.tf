@@ -93,29 +93,35 @@ variable "static_web_app_location" {
   }
 }
 
-# Cosmos is the second resource that cannot sit in azure_location, for a
-# different reason than the Static Web App: this SUBSCRIPTION has no Cosmos
-# region access to southcentralus at all. Both flags say so —
+# Cosmos cannot sit in azure_location, and picking where it CAN sit takes two
+# independent checks that disagree with each other. Both must pass:
 #
-#   az cosmosdb locations list --query "[?name=='South Central US'].properties"
-#     isSubscriptionRegionAccessAllowedForRegular : false
-#     isSubscriptionRegionAccessAllowedForAz      : false
+#   1. Is the resource type deployable in the region at all? ARM decides, and
+#      it is the list in the LocationNotAvailableForResourceType error:
+#        az provider show --namespace Microsoft.DocumentDB \
+#          --query "resourceTypes[?resourceType=='databaseAccounts'].locations"
+#   2. Is THIS subscription cleared for that region? Cosmos decides, separately:
+#        az cosmosdb locations list \
+#          --query "[?properties.isSubscriptionRegionAccessAllowedForRegular]"
 #
-# — and the failure it produces does not say that. It reports
-# ServiceUnavailable and "high demand ... for the zonal redundant
-# (Availability Zones) accounts", which reads as transient capacity and sent
-# the first investigation at zone_redundant, where the answer was not.
+# southcentralus passes (1) and fails (2) — the subscription has no region
+# access, reported as ServiceUnavailable and "high demand ... for the zonal
+# redundant (Availability Zones) accounts", which reads as transient capacity
+# and sends you to zone_redundant, where the answer is not.
 #
-# southcentralus2 is allowed, and is the nearest permitted region: same metro,
-# so the Function App's data-plane latency is close to unchanged. It offers no
-# availability zones, which matches zone_redundant = false on the account.
+# southcentralus2 passes (2) and fails (1) — Cosmos is simply not offered
+# there, reported as LocationNotAvailableForResourceType.
 #
-# Requesting access to southcentralus (aka.ms/cosmosdbquota) would let this
-# fold back into azure_location; it is a human review, not a config change.
+# centralus passes both. It is the nearest region to southcentralus that does,
+# it supports availability zones, and it is already the Static Web App's
+# region, so this keeps the estate at two regions rather than three.
+#
+# Requesting access to southcentralus (aka.ms/cosmosdbquota) would fold this
+# back into azure_location; it is a human review, not a config change.
 variable "cosmos_location" {
-  description = "Region for the Cosmos account — southcentralus is not accessible to this subscription, so it cannot follow azure_location"
+  description = "Region for the Cosmos account — must be both ARM-deployable and subscription-allowed, which southcentralus is not"
   type        = string
-  default     = "southcentralus2"
+  default     = "centralus"
 }
 
 variable "environment" {
@@ -223,14 +229,14 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  # `scus2`, not `scus`, because this one names where the DATA actually lives.
+  # `cus` (centralus), not `scus`, because this one names where the DATA lives.
   # That is the opposite call from the Static Web App, which keeps `scus` while
   # running in centralus — and the difference is the point: a Static Web App's
   # region is a control-plane detail (content serves from the global edge),
   # whereas a database's region IS data residency, and the first thing anyone
   # debugging latency or compliance needs to know. A name that lies about that
   # is worse than one that breaks the estate's pattern.
-  default = "cosmos-site-prod-scus2"
+  default = "cosmos-site-prod-cus"
 }
 
 variable "cosmos_local_auth_disabled" {

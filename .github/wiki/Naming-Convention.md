@@ -44,7 +44,6 @@ convention and must be recorded here to be a convention at all.
 | Region | Abbreviation |
 | --- | --- |
 | southcentralus | `scus` |
-| southcentralus2 | `scus2` |
 | eastus | `eus` |
 | eastus2 | `eus2` |
 | westus2 | `wus2` |
@@ -262,7 +261,7 @@ redeployable; the others hold things whose deletion is a decision.
 | Static Web App | `stapp-site-prod-scus` | |
 | Function App | `func-site-prod-scus` | ✔ |
 | App Service plan | `asp-site-prod-scus` | |
-| Cosmos DB account | `cosmos-site-prod-scus2` § | ✔ |
+| Cosmos DB account | `cosmos-site-prod-cus` § | ✔ |
 | Key Vault | `kv-site-prod-scus-01` ‡ | ✔ |
 | Storage account (content) | `stsiteprodscus` | ✔ |
 | Storage account (Functions host) | `stsitefuncprodscus` | ✔ |
@@ -300,20 +299,36 @@ the region here is a control-plane detail: the site is served from Azure's
 global edge, so `centralus` says nothing about where users are served from or
 where anything rests. The name records the estate the resource belongs to.
 
-**§ Cosmos DB — takes `scus2`.** This subscription has no Cosmos region access
-to `southcentralus` at all (`isSubscriptionRegionAccessAllowedForRegular` and
-`...ForAz` are both false), so the account runs in `southcentralus2`, the
-nearest permitted region. Here the region is *data residency* — the first
-thing anyone debugging latency or answering a compliance question needs — so
-the name must be honest about it. `cosmos-site-prod-scus` would have been
-actively misleading, which is worse than breaking the estate's pattern.
+**§ Cosmos DB — takes `cus`.** The account runs in `centralus`, so its name
+says `cus`. Here the region is *data residency* — the first thing anyone
+debugging latency or answering a compliance question needs — so the name must
+be honest about it. `cosmos-site-prod-scus` would have been actively
+misleading, which is worse than breaking the estate's pattern.
 
-Check a globally-unique or region-constrained name **before** the first apply:
+Finding that region took two checks that **disagree with each other**, and
+either one alone gives a wrong answer:
+
+| Check | Owner | southcentralus | southcentralus2 | centralus |
+| --- | --- | --- | --- | --- |
+| Resource type deployable in region | ARM | ✅ | ❌ | ✅ |
+| Subscription cleared for region | Cosmos | ❌ | ✅ | ✅ |
+
+Trusting only the second sent the first attempt to `southcentralus2`, which
+ARM then rejected outright. Both must pass.
+
+Check region and name constraints **before** the first apply, not during it:
 
 ```bash
-az cosmosdb locations list --query "[?name=='South Central US'].properties"
-az cognitiveservices model list -l <region>      # model + version availability
-az cosmosdb check-name-exists --name <name>      # false = free
+# 1. is the resource type deployable there at all?
+az provider show --namespace Microsoft.DocumentDB \
+  --query "resourceTypes[?resourceType=='databaseAccounts'].locations"
+# 2. is this subscription cleared for the region?
+az cosmosdb locations list \
+  --query "[?properties.isSubscriptionRegionAccessAllowedForRegular].name"
+# 3. is the global name free?  (false = free)
+az cosmosdb check-name-exists --name <name>
+# and for AI, model + version availability is regional AND time-limited:
+az cognitiveservices model list -l <region>
 ```
 
 There is no application Log Analytics workspace: telemetry goes to the central

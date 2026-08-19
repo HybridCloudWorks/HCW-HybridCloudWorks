@@ -182,9 +182,10 @@ resource "azurerm_cosmosdb_account" "hcw" {
   geo_location {
     location          = var.cosmos_location
     failover_priority = 0
-    # False is required here, not merely chosen: southcentralus2 offers no
-    # availability zones at all. It is also right on its own merits for a
-    # serverless, single-region account — see the capacity note above.
+    # centralus does support availability zones, so this is a choice rather
+    # than a constraint: a serverless, single-region account has already
+    # accepted the failure mode zone redundancy protects against, and zones
+    # cost more.
     zone_redundant = false
   }
 
