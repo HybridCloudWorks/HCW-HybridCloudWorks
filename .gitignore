@@ -30,3 +30,7 @@ keys.txt
 export/
 reports/
 **/firebase-service-account.json
+
+# Bootstrap run reports — hold real subscription and client ids.
+# CHECKLIST.md keeps real values out of tracked files; this is not an exception.
+scripts/.reports/

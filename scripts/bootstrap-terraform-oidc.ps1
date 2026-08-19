@@ -82,6 +82,15 @@
   the wrong account and keeps silently reusing it. The script falls back to it
   automatically if the interactive sign-in fails.
 
+.PARAMETER ReportPath
+  Markdown report written at the end of a real run, recording what was created,
+  which subscriptions the identity can actually deploy into, and the workspace
+  variables still to be set by hand. Defaults under scripts/.reports/, which is
+  gitignored — the report holds real subscription and client ids, and
+  CHECKLIST.md's rule is that real values never enter tracked files.
+
+  Skipped under -WhatIf: there would be nothing true to report.
+
 .PARAMETER WhatIf
   Print every change without making one. Signing in still happens — it reads
   your directory, it does not change it, and nothing can be inspected without
@@ -118,7 +127,8 @@ param(
   [string] $IdentityName = 'id-hcw-terraform',
   [string] $Location = 'southcentralus',
   [switch] $ElevateAccess,
-  [switch] $DeviceCode
+  [switch] $DeviceCode,
+  [string] $ReportPath = (Join-Path $PSScriptRoot ".reports/bootstrap-oidc-$(Get-Date -Format 'yyyyMMdd-HHmmss').md")
 )
 
 $ErrorActionPreference = 'Stop'
@@ -601,6 +611,106 @@ $(($TargetSubscriptionIds | Where-Object { $_ -ne $IdentitySubscriptionId } | Fo
   including capitalisation and spaces.
 
 "@ -ForegroundColor White
+
+# ===========================================================================
+# 7. Report
+# ===========================================================================
+# The console output scrolls away and the client id it printed is needed later,
+# in another tool, by someone who may not be the person who ran this. The
+# report is the durable record of what this run actually asserted.
+#
+# It re-reads role assignments from Azure rather than echoing what section 5
+# intended, so the report states what is true after the run and not what the
+# script meant to do. That difference is the entire point of writing one.
+#
+# Deliberately gitignored: it holds real subscription and client ids. Those are
+# identifiers rather than credentials — the identity is federated and no secret
+# exists — but CHECKLIST.md's rule is that real values never enter tracked
+# files, and a report is not an exception to it.
+if (-not $WhatIfPreference) {
+  Write-Step 'Report'
+
+  $reportDirectory = Split-Path -Parent $ReportPath
+  if ($reportDirectory -and -not (Test-Path $reportDirectory)) {
+    New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
+  }
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $add = { param($text) $lines.Add($text) }
+
+  & $add "# Terraform OIDC bootstrap report"
+  & $add ''
+  & $add "Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz') by ``scripts/bootstrap-terraform-oidc.ps1``."
+  & $add "Run by $($account.user.name) in tenant ``$TenantId``."
+  & $add ''
+  & $add '## Identity'
+  & $add ''
+  & $add '| | |'
+  & $add '| --- | --- |'
+  & $add "| Managed identity | ``$IdentityName`` |"
+  & $add "| Resource group | ``$ResourceGroupName`` |"
+  & $add "| Subscription | $($subscriptionNames[$IdentitySubscriptionId]) (``$IdentitySubscriptionId``) |"
+  & $add "| Region | ``$Location`` |"
+  & $add "| Client id | ``$clientId`` |"
+  & $add "| Principal id | ``$(if ($identity) { $identity.principalId } else { 'n/a' })`` |"
+  & $add ''
+  & $add '## Federated credentials'
+  & $add ''
+  & $add 'Issuer `https://app.terraform.io`, audience `api://AzureADTokenExchange`.'
+  & $add ''
+  & $add '| Name | Subject |'
+  & $add '| --- | --- |'
+  foreach ($credentialName in ($subjects.Keys | Sort-Object)) {
+    & $add "| ``$credentialName`` | ``$($subjects[$credentialName])`` |"
+  }
+  & $add ''
+  & $add "The ``project`` segment is ``$TfcProject``. If a speculative plan fails with"
+  & $add 'AADSTS70021, this is the value to check first — Entra matches the subject as an'
+  & $add 'exact, case-sensitive string with no wildcards.'
+  & $add ''
+  & $add '## Role assignments'
+  & $add ''
+  & $add 'Read back from Azure after the run, not copied from what was requested.'
+  & $add ''
+  & $add '| Subscription | Roles held |'
+  & $add '| --- | --- |'
+  foreach ($id in $TargetSubscriptionIds) {
+    $observed = 'none'
+    if ($identity -and $identity.principalId) {
+      $found = Invoke-Az @(
+        'role', 'assignment', 'list',
+        '--assignee', $identity.principalId,
+        '--scope', "/subscriptions/$id",
+        '--subscription', $id, '-o', 'json'
+      ) -AllowFailure
+      $names = @($found | ForEach-Object { $_.roleDefinitionName }) | Sort-Object -Unique
+      if ($names) { $observed = ($names -join ', ') }
+    }
+    $flag = if ($observed -eq 'none') { ' **← Terraform cannot deploy here**' } else { '' }
+    & $add "| $($subscriptionNames[$id]) | $observed$flag |"
+  }
+  & $add ''
+  & $add '## Still to do by hand'
+  & $add ''
+  & $add "In HCP Terraform, workspace ``$TfcOrganization / $TfcWorkspace``:"
+  & $add ''
+  & $add '| Variable | Kind | Value |'
+  & $add '| --- | --- | --- |'
+  & $add '| `TFC_AZURE_PROVIDER_AUTH` | Environment | `true` |'
+  & $add "| ``TFC_AZURE_RUN_CLIENT_ID`` | Environment | ``$clientId`` |"
+  & $add "| ``ARM_TENANT_ID`` | Environment | ``$TenantId`` |"
+  & $add "| ``ARM_SUBSCRIPTION_ID`` | Environment | ``$IdentitySubscriptionId`` |"
+  & $add ''
+  & $add 'Then verify, before any apply:'
+  & $add ''
+  & $add '```'
+  & $add 'cd infra && terraform login && terraform plan'
+  & $add '```'
+  & $add ''
+
+  Set-Content -Path $ReportPath -Value ($lines -join "`n") -Encoding utf8NoBOM
+  Write-Ok "Written to $ReportPath"
+}
 
 Write-Host "  Bootstrap complete.`n" -ForegroundColor Green
 
