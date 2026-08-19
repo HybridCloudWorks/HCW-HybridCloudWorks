@@ -10,6 +10,7 @@
 - [Deployment runbook](Deployment-Runbook)
 - [IaC repository standard](IaC-Repository-Standard)
 - [Naming convention](Naming-Convention)
+- [Variables and secrets](Variables-And-Secrets)
 - [Resource validation report](Resource-Validation-Report)
 - [Cost analysis](Cost-Analysis)
 - [Implementation plan](Implementation-Plan)

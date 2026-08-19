@@ -17,6 +17,7 @@ tooling.
 - [Deployment runbook](Deployment-Runbook) — Terraform lifecycle: validate, plan, apply, verify, rollback, day-2, ALZ absorption
 - [IaC repository standard](IaC-Repository-Standard) — the baseline every HybridCloudWorks infrastructure repository conforms to
 - [Naming convention](Naming-Convention) — CAF names for the ALZ target estate: management groups, subscriptions, the three platform landing zones, and HCWSite
+- [Variables and secrets](Variables-And-Secrets) — where each value is stored (Key Vault, HCP Terraform, GitHub variables, GitHub secrets) and what it is named
 - [Resource validation report](Resource-Validation-Report) — 2026-08-18 pass: external surface, plan-vs-code parity, operator to-dos
 - [Cost analysis](Cost-Analysis)
 
