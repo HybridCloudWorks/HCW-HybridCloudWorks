@@ -64,6 +64,12 @@ resource "azurerm_resource_group" "platform_mgmt" {
 # Log Analytics Workspace (required by Application Insights)
 # =============================================================================
 resource "azurerm_log_analytics_workspace" "hcw" {
+  # Same subscription as the resource group it lives in. resource_group_name
+  # is only a string — the provider's subscription decides where the ARM call
+  # goes, and without this alias the workspace lands in the application
+  # subscription, where rg-mgmt-plat does not exist.
+  provider = azurerm.mgmt
+
   name                = "log-plat-${var.environment}-${var.region_abbreviation}"
   location            = azurerm_resource_group.platform_mgmt.location
   resource_group_name = azurerm_resource_group.platform_mgmt.name
@@ -513,7 +519,9 @@ resource "azurerm_virtual_network" "hcw" {
 }
 
 resource "azurerm_subnet" "functions_integration" {
-  name                 = "snet-functions-integration"
+  # No region token: a subnet is a child of its VNet, which already carries it
+  # (the Naming-Convention wiki's HCWSite table names this subnet exactly).
+  name                 = "snet-${var.workload_name}-func-${var.environment}"
   resource_group_name  = azurerm_resource_group.app["conn"].name
   virtual_network_name = azurerm_virtual_network.hcw.name
   address_prefixes     = [var.functions_subnet_prefix]
@@ -983,6 +991,13 @@ resource "azurerm_role_assignment" "terraform_kv_secrets" {
 # and silently ignoring the other five — a budget that under-reports is worse
 # than none, because it reads as reassurance. The application subscription is
 # now the boundary that means "this workload", so that is what it watches.
+#
+# contact_groups crosses a subscription boundary: the budget lives in App,
+# the action group in Management. Cross-subscription action groups on budgets
+# are doubtfully supported by the ARM API. If the apply rejects this
+# reference, the fallback is a second action group in the App subscription —
+# contact_emails below is an independent path either way, so alerting
+# degrades rather than disappears.
 resource "azurerm_consumption_budget_subscription" "hcw" {
   name            = "${var.workload_name}-monthly-budget"
   subscription_id = "/subscriptions/${var.subscription_app}"

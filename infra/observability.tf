@@ -15,6 +15,11 @@
 # One ops action group; the budget and future alert rules all route here so
 # changing who gets paged is one edit, not five.
 resource "azurerm_monitor_action_group" "ops" {
+  # Follows its resource group into the Management subscription — without the
+  # alias the ARM call goes to the application subscription and fails with
+  # ResourceGroupNotFound.
+  provider = azurerm.mgmt
+
   name                = "ag-plat-${var.environment}-${var.region_abbreviation}"
   resource_group_name = azurerm_resource_group.platform_mgmt.name
   short_name          = "hcw-ops"

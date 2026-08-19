@@ -62,8 +62,13 @@ variable "ci_runner_max_executions" {
 }
 
 resource "azurerm_container_app_environment" "ci_runner" {
+  # In the Management subscription with its resource group — platform
+  # automation, not workload (and without the alias the ARM call goes to the
+  # application subscription, where rg-mgmt-plat does not exist).
+  provider = azurerm.mgmt
+
   count                      = var.ci_runner_enabled ? 1 : 0
-  name                       = "hcw-ci-runner-env"
+  name                       = "cae-plat-ci-${var.environment}-${var.region_abbreviation}"
   location                   = azurerm_resource_group.platform_mgmt.location
   resource_group_name        = azurerm_resource_group.platform_mgmt.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
@@ -71,8 +76,13 @@ resource "azurerm_container_app_environment" "ci_runner" {
 }
 
 resource "azurerm_container_app_job" "ci_runner" {
-  count                        = var.ci_runner_enabled ? 1 : 0
-  name                         = "hcw-ci-runner"
+  provider = azurerm.mgmt
+
+  count = var.ci_runner_enabled ? 1 : 0
+  # `caj` is a local abbreviation — CAF publishes `cae` for the environment
+  # but nothing for a Container Apps job. Recorded in the Naming-Convention
+  # wiki page, which is what makes it a convention.
+  name                         = "caj-plat-ci-${var.environment}-${var.region_abbreviation}"
   location                     = azurerm_resource_group.platform_mgmt.location
   resource_group_name          = azurerm_resource_group.platform_mgmt.name
   container_app_environment_id = azurerm_container_app_environment.ci_runner[0].id
