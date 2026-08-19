@@ -19,7 +19,7 @@
 # to leak) — but they stay `sensitive` to keep subscription IDs out of CI logs.
 # -----------------------------------------------------------------------------
 variable "subscription_app" {
-  description = "Application landing zone: the HCWSite workload (display name sub-app-hcwsite-prod-scus; Naming-Convention specifies sub-app-site-prod-scus — rename pending)"
+  description = "Application landing zone: the HCWSite workload (sub-app-site-prod-scus)"
   type        = string
   sensitive   = true
 }

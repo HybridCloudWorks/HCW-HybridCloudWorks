@@ -638,9 +638,17 @@ Write-Host @"
   Then, as TERRAFORM variables in the same workspace, one per subscription the
   aliased providers target (CHECKLIST.md section 7):
 
-    subscription_mgmt         $IdentitySubscriptionId
-$(($TargetSubscriptionIds | Where-Object { $_ -ne $IdentitySubscriptionId } | ForEach-Object {
-    "    subscription_<role>       $_   # $($subscriptionNames[$_])"
+$(($TargetSubscriptionIds | ForEach-Object {
+    # Name the variable from the subscription's own name rather than printing
+    # a <role> placeholder: the convention already says which is which, and an
+    # operator copying these should not have to work it out.
+    $role = switch -Wildcard ($subscriptionNames[$_]) {
+      'sub-app-*'       { 'subscription_app' }
+      'sub-plat-mgmt-*' { 'subscription_mgmt' }
+      'sub-plat-conn-*' { 'subscription_conn' }
+      default           { 'subscription_<role>' }
+    }
+    "    {0,-24}  {1}   # {2}" -f $role, $_, $subscriptionNames[$_]
   }) -join "`n")
 
   Verify with a speculative plan before touching apply:

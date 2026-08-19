@@ -54,7 +54,7 @@
   provider and the other is consumed by the configuration.
 
 .PARAMETER SubscriptionApp
-  Application landing zone (display name sub-app-hcwsite-prod-scus). Also becomes
+  Application landing zone (sub-app-site-prod-scus). Also becomes
   ARM_SUBSCRIPTION_ID, the default provider's subscription.
 
 .PARAMETER SubscriptionMgmt
@@ -404,7 +404,7 @@ $variables = @(
 
   # --- Terraform: what the configuration declares -------------------------
   @{ key = 'subscription_app'; value = $SubscriptionApp; category = 'terraform'; sensitive = $true
-    description = 'Application landing zone (sub-app-hcwsite-prod-scus)' }
+    description = 'Application landing zone (sub-app-site-prod-scus)' }
   @{ key = 'subscription_mgmt'; value = $SubscriptionMgmt; category = 'terraform'; sensitive = $true
     description = 'Platform Management (sub-plat-mgmt-prod-scus)' }
   @{ key = 'subscription_conn'; value = $SubscriptionConn; category = 'terraform'; sensitive = $true

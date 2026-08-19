@@ -167,7 +167,7 @@ changes an output. What it deliberately does not set is listed in its header
 | GitHub App id / private key | Runner JIT registration | Yes (runner) | GitHub App | `infra/runner-image/entrypoint.sh` | `000000` / `XXXXX00000!!!!!XXXXX` | Missing | Needs Administration: Read & write |
 | `CLIENT_ID` | Deploy identity client id for OIDC login | **Yes** | Terraform output `client_id` | `heal-computed-properties.yml`, `deploy-functions.yml` | `00000000-0000-0000-0000-000000000000` | **Missing** | One-character stub deleted 2026-08-19: unset fails with a clear "not supplied", the stub failed like a permissions problem. Deliberately absent until the first apply produces the `client_id` output. While unset, the healer's schedule job self-skips (its `if:` guard). Renamed from AZURE_CLIENT_ID before ever being set, per the variable naming standard |
 | `TENANT_ID` | Entra tenant for OIDC login | **Yes** | Entra directory | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Set, GUID-shaped, and confirmed to match the directory holding the four ALZ subscriptions (observed 2026-08-18 via `az account show`). Never exercised by a successful run, so not `Verified` |
-| `SUBSCRIPTION_ID` | Target subscription for OIDC login | **Yes** | Azure subscription | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Corrected 2026-08-19: was the id of `sub-plat-conn-prod-scus` — the wrong subscription, which would have failed as an authorization error after login — now `sub-app-hcwsite-prod-scus`'s id, the landing zone the consumers deploy into. Never exercised by a successful run, so not `Verified` |
+| `SUBSCRIPTION_ID` | Target subscription for OIDC login | **Yes** | Azure subscription | same workflows | `00000000-0000-0000-0000-000000000000` | **Unverified** | Corrected 2026-08-19: was the id of `sub-plat-conn-prod-scus` — the wrong subscription, which would have failed as an authorization error after login — now `sub-app-site-prod-scus`'s id, the landing zone the consumers deploy into. Never exercised by a successful run, so not `Verified` |
 | `APP_HOSTNAME` | Function App default hostname for the post-deploy health check | Yes (functions deploy) | Azure resource | `.github/workflows/deploy-functions.yml` | `XXX-XXXXXXXXX-XXXX.XXXXXXXXXXXXX.XXX` | **Missing** | One-character stub deleted 2026-08-19 — the value is the `function_hostname` Terraform output and cannot exist before the first apply. Renamed from FUNCTION_APP_HOSTNAME per the naming standard |
 | `RESOURCE_GROUP` | Resource group for the T-503 storage firewall window | Yes (functions deploy) | Terraform output `web_resource_group` | `.github/workflows/deploy-functions.yml` | `XX-XXX-XXXX-XXXX-XXXX` | **Unverified** | Was a one-character stub; set 2026-08-19 to the Function App's group. Authoritative source is the `web_resource_group` output — `set-github-variables.ps1` wave 2 re-copies it from applied state, so the value cannot drift from code. Not `Verified` until a deploy exercises it |
 | `FUNCTIONS_STORAGE_ACCOUNT` | Host storage account for the T-503 firewall window | Yes (functions deploy) | Terraform output `functions_storage_account` | `.github/workflows/deploy-functions.yml` | `XXXXXXXXXXXXXXXX` | **Unverified** | Set 2026-08-19. Authoritative source is the `functions_storage_account` output — `set-github-variables.ps1` wave 2 re-copies it from applied state. Paired with `RESOURCE_GROUP` by construction: that output reads the group off this account's own attribute. Not `Verified` until a deploy exercises it |
@@ -259,15 +259,15 @@ the HCP Terraform workspace yet — and the client id half cannot exist until
 step 1 runs again.
 
 **The topology is settled: four ALZ subscriptions exist** (observed
-2026-08-18 via `az account list`): `sub-app-hcwsite-prod-scus`,
+2026-08-19 via `az account list`): `sub-app-site-prod-scus`,
 `sub-plat-conn-prod-scus`, `sub-plat-ident-prod-scus`,
-`sub-plat-mgmt-prod-scus`. The configuration's three no-default subscription
-variables (`subscription_app/mgmt/conn`) map to the first, second and fourth;
-Identity deliberately has no variable. One naming note: the application
-subscription's display name embeds the org token (`hcwsite`), which the
-Naming-Convention page's own rule drops — a display-name rename to
-`sub-app-site-prod-scus` is free if wanted, and until then the real name is
-what operators must select.
+`sub-plat-mgmt-prod-scus`. All four match the Naming-Convention page exactly
+— the application subscription was renamed 2026-08-19 from
+`sub-app-hcwsite-prod-scus`, which embedded the org token the scheme drops.
+The configuration's three no-default subscription variables
+(`subscription_app/mgmt/conn`) map to the first, second and fourth; Identity
+deliberately has no variable, and the bootstrap script correctly leaves it
+out of the preselected deployment targets.
 
 One unverified assumption is baked into both federated credentials: the
 project segment of the subject is `Default Project`, which was not confirmed

@@ -67,7 +67,7 @@
   Entra tenant GUID. Becomes the TENANT_ID repository variable.
 
 .PARAMETER SubscriptionApp
-  Application landing zone subscription GUID (sub-app-hcwsite-prod-scus).
+  Application landing zone subscription GUID (sub-app-site-prod-scus).
   Becomes SUBSCRIPTION_ID — the subscription azure/login targets, which is
   where the Function App lives.
 

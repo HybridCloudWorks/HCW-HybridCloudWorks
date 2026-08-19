@@ -108,13 +108,13 @@ These four exist:
 | `sub-plat-ident-prod-scus` | `mg-hcw-platform-identity` |
 | `sub-plat-mgmt-prod-scus` | `mg-hcw-platform-management` |
 | `sub-plat-conn-prod-scus` | `mg-hcw-platform-connectivity` |
-| `sub-app-site-prod-scus` † | `mg-hcw-landingzones-online` |
+| `sub-app-site-prod-scus` | `mg-hcw-landingzones-online` |
 
-† The live subscription's display name is `sub-app-hcwsite-prod-scus`
-(observed 2026-08-18) — it embeds the org token this scheme drops. Display
-names are mutable at zero cost; this row is the target name, and renaming the
-subscription to it is a one-line portal/CLI change. Until that happens,
-operators selecting a subscription must look for `hcwsite`.
+All four names above are live as written, verified 2026-08-19 against
+`az account list`. The application subscription briefly carried
+`sub-app-hcwsite-prod-scus`, which embedded the org token this scheme drops;
+it was renamed rather than documented as an exception, which is the right
+call while a display name is still free to change.
 
 The `<function>` segment uses the same category vocabulary as resource groups
 below (`conn`, `mgmt`, `ident`), so one abbreviation means one thing at every
@@ -239,9 +239,7 @@ prefix them.
 
 ## Application landing zone — HCWSite
 
-Subscription `sub-app-site-prod-scus` (live display name
-`sub-app-hcwsite-prod-scus` — see the † note in the Subscriptions table),
-under `mg-hcw-landingzones-online`.
+Subscription `sub-app-site-prod-scus`, under `mg-hcw-landingzones-online`.
 
 Six resource groups, drawn on destroy semantics rather than on the number of
 categories in play (the split `infra/main.tf` implements). The `web` group is
