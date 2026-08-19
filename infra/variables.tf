@@ -1,7 +1,7 @@
 # =============================================================================
 # variables.tf — Azure infrastructure variables
 # All sensitive values are set as workspace variables in HCP Terraform Cloud
-# Org: HybridCloudWorks | Workspace: hybridcloudworks-azure
+# Org: hcw | Project: Site | Workspace: hcw-azure
 #
 # Variable names here MUST match TF Cloud workspace variable keys exactly.
 # See Variables.md at the repository root for the full variables/secrets catalog.

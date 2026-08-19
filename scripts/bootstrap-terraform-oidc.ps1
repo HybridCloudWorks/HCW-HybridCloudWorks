@@ -60,8 +60,9 @@
   HCP Terraform organization name, case-sensitive. Default: HybridCloudWorks.
 
 .PARAMETER TfcProject
-  HCP Terraform project name, case-sensitive. A workspace created without
-  choosing a project lives in "Default Project" — including the space.
+  HCP Terraform project name, case-sensitive. Defaults to Site, which is where
+  the hcw-azure workspace lives. A workspace created without choosing a project
+  lands in "Default Project" instead — including the space.
 
 .PARAMETER TfcWorkspace
   HCP Terraform workspace name, case-sensitive.
@@ -114,9 +115,15 @@ param(
   [string] $TenantId,
   [string] $IdentitySubscriptionId,
   [string[]] $TargetSubscriptionIds = @(),
-  [string] $TfcOrganization = 'HybridCloudWorks',
-  [string] $TfcProject = 'Default Project',
-  [string] $TfcWorkspace = 'hybridcloudworks-azure',
+  # These three compose the federated credential subject, which Entra matches
+  # as an exact, case-sensitive string. They are the live values, verified
+  # against the HCP Terraform API on 2026-08-19 — every one of them was wrong
+  # before that (org HybridCloudWorks, workspace hybridcloudworks-azure and
+  # project "Default Project" were assumptions, and the first two named things
+  # that do not exist).
+  [string] $TfcOrganization = 'hcw',
+  [string] $TfcProject = 'Site',
+  [string] $TfcWorkspace = 'hcw-azure',
   [string] $ResourceGroupName = 'rg-hcw-bootstrap',
   [string] $IdentityName = 'id-hcw-terraform',
   [string] $Location = 'southcentralus',

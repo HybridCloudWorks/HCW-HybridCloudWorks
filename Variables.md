@@ -8,7 +8,7 @@ Legend: 🔴 Secret (sensitive) | 🟡 Variable (non-sensitive) | 🟢 Derived (
 
 ---
 
-## Terraform Cloud Workspace — `hybridcloudworks-azure`
+## Terraform Cloud Workspace — `hcw-azure`
 
 Set these in the HCP Terraform Cloud workspace under **Variables**.
 

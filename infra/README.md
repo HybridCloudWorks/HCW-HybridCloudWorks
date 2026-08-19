@@ -17,7 +17,7 @@ before any plan or apply.
 - **One environment: production.** There is no dev/staging state (ADR-0009).
   `var.environment` exists for naming, not for a second workspace.
 - **State lives in HCP Terraform Cloud** — org `HybridCloudWorks`, workspace
-  `hybridcloudworks-azure` (`backend.tf`). State, saved plans, and
+  `hcw-azure` (`backend.tf`). State, saved plans, and
   `*.tfvars` with real values never enter Git.
 - **Applies are gated.** The GitHub workflow (`.github/workflows/deploy-infra.yml`)
   is hard-disabled; production applies happen through HCP Terraform with

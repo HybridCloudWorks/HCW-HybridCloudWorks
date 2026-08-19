@@ -1,7 +1,7 @@
 #requires -Version 7.0
 <#
 .SYNOPSIS
-  Sets every variable the hybridcloudworks-azure workspace needs, in HCP
+  Sets every variable the hcw-azure workspace needs, in HCP
   Terraform, idempotently.
 
 .DESCRIPTION
@@ -34,15 +34,17 @@
   summary shows key names and outcomes only. Nothing is written to disk.
 
 .PARAMETER Organization
-  HCP Terraform organization. Default: HybridCloudWorks.
+  HCP Terraform organization. Default: hcw.
 
 .PARAMETER Workspace
-  HCP Terraform workspace. Default: hybridcloudworks-azure.
+  HCP Terraform workspace. Default: hcw-azure.
 
 .PARAMETER TfcToken
   API token for HCP Terraform, as a SecureString. Omit it and the script reads
-  $env:TFE_TOKEN, then ~/.terraform.d/credentials.tfrc.json (what
-  `terraform login` writes), and prompts only if both are absent.
+  $env:TFE_TOKEN, then the credentials file `terraform login` writes
+  (%APPDATA%\terraform.d\credentials.tfrc.json on Windows,
+  ~/.terraform.d/credentials.tfrc.json elsewhere), and prompts only if both
+  are absent.
 
 .PARAMETER TerraformClientId
   Client id of id-hcw-terraform, printed by bootstrap-terraform-oidc.ps1 and
@@ -90,8 +92,8 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-  [string] $Organization = 'HybridCloudWorks',
-  [string] $Workspace = 'hybridcloudworks-azure',
+  [string] $Organization = 'hcw',
+  [string] $Workspace = 'hcw-azure',
   [securestring] $TfcToken,
 
   # Every one of these is optional and discovered or prompted for when
@@ -146,17 +148,10 @@ function Resolve-TfcToken {
     return (ConvertTo-SecureString $env:TFE_TOKEN -AsPlainText -Force)
   }
 
-  $credentialsPath = Join-Path $HOME '.terraform.d/credentials.tfrc.json'
-  if (Test-Path $credentialsPath) {
-    try {
-      $stored = (Get-Content $credentialsPath -Raw | ConvertFrom-Json).credentials.'app.terraform.io'.token
-      if ($stored) {
-        Write-Info "Token: $credentialsPath (written by ``terraform login``)"
-        return (ConvertTo-SecureString $stored -AsPlainText -Force)
-      }
-    } catch {
-      Write-Info "Could not parse $credentialsPath — falling through to prompt."
-    }
+  $stored = Get-StoredTfcToken
+  if ($stored) {
+    Write-Info "Token: $($stored.Path) (written by ``terraform login``)"
+    return (ConvertTo-SecureString $stored.Token -AsPlainText -Force)
   }
 
   return (Read-SecretValue -Prompt 'HCP Terraform API token' -Hint @(
@@ -217,8 +212,6 @@ if ($projectId) {
     $projectName = $project.data.attributes.name
     Write-Ok "Project: $projectName"
     Write-Info 'This is the value the federated credential subject must contain.'
-    Write-Info 'If it is not "Default Project", re-run bootstrap-terraform-oidc.ps1'
-    Write-Info "with -TfcProject '$projectName' or every plan fails AADSTS70021."
   } catch {
     Write-Info 'Could not read the project name (token may lack project scope).'
   }
@@ -272,6 +265,44 @@ if ($azureAvailable) {
     if ($identity) {
       $TerraformClientId = $identity.clientId
       Write-Ok "Terraform identity: $BootstrapIdentityName ($TerraformClientId)"
+
+      # Verify the federated credentials actually match THIS workspace. This
+      # script is the only place that knows both halves — the real org,
+      # project and workspace from the API above, and the subjects Entra will
+      # match against — so it is the only place that can catch a mismatch
+      # before a run does. Entra compares the subject as an exact,
+      # case-sensitive string, and a mismatch surfaces as AADSTS70021 ("no
+      # matching federated identity record found"), which names none of the
+      # three segments that could be wrong.
+      if ($projectName) {
+        $expected = @{
+          'tfc-plan'  = "organization:${Organization}:project:${projectName}:workspace:${Workspace}:run_phase:plan"
+          'tfc-apply' = "organization:${Organization}:project:${projectName}:workspace:${Workspace}:run_phase:apply"
+        }
+        $actual = @{}
+        foreach ($credential in @(Invoke-Az @(
+              'identity', 'federated-credential', 'list',
+              '--identity-name', $BootstrapIdentityName, '-g', $BootstrapResourceGroup,
+              '--subscription', $SubscriptionMgmt, '-o', 'json'
+            ) -AllowFailure)) {
+          $actual[$credential.name] = $credential.subject
+        }
+
+        $wrong = @($expected.Keys | Where-Object { $actual[$_] -ne $expected[$_] } | Sort-Object)
+        if ($wrong.Count -eq 0 -and $actual.Count -gt 0) {
+          Write-Ok 'Federated credentials match this workspace'
+        } elseif ($actual.Count -gt 0) {
+          Write-Warn "$($wrong.Count) federated credential(s) do NOT match this workspace."
+          foreach ($name in $wrong) {
+            Write-Info "  $name"
+            Write-Info "    is    $($actual[$name])"
+            Write-Info "    needs $($expected[$name])"
+          }
+          Write-Info 'Every plan and apply fails AADSTS70021 until these agree. Fix by'
+          Write-Info 're-running the bootstrap, which replaces a drifted subject:'
+          Write-Info "  ./scripts/bootstrap-terraform-oidc.ps1 -TfcOrganization '$Organization' -TfcProject '$projectName' -TfcWorkspace '$Workspace'"
+        }
+      }
     } else {
       Write-Warn "$BootstrapIdentityName not found in $BootstrapResourceGroup."
       Write-Info 'That identity is what HCP Terraform authenticates as, and only'

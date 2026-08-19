@@ -218,6 +218,41 @@ function Test-Guid {
 }
 
 # ---------------------------------------------------------------------------
+# HCP Terraform
+# ---------------------------------------------------------------------------
+
+# Where `terraform login` stores its token. This is PLATFORM-SPECIFIC and the
+# difference is not cosmetic: on Windows Terraform writes to
+# %APPDATA%\terraform.d\, NOT ~/.terraform.d\. Checking only the Unix path
+# meant a Windows operator who had just run `terraform login` was still asked
+# to paste a token — and pasting the wrong one produces a 401 that reads as an
+# expired credential rather than "we looked in the wrong file".
+function Get-TfcCredentialPath {
+  $candidates = @()
+  if ($env:APPDATA) { $candidates += (Join-Path $env:APPDATA 'terraform.d/credentials.tfrc.json') }
+  $candidates += (Join-Path $HOME '.terraform.d/credentials.tfrc.json')
+  foreach ($path in $candidates) {
+    if (Test-Path $path) { return $path }
+  }
+  return $null
+}
+
+# The token `terraform login` stored, as plaintext, or $null. Callers convert
+# to SecureString; this returns the raw value because that is what the file
+# holds and what the API needs.
+function Get-StoredTfcToken {
+  $path = Get-TfcCredentialPath
+  if (-not $path) { return $null }
+  try {
+    $token = (Get-Content $path -Raw | ConvertFrom-Json).credentials.'app.terraform.io'.token
+    if ($token) { return [pscustomobject]@{ Token = $token; Path = $path } }
+  } catch {
+    Write-Info "Could not parse $path."
+  }
+  return $null
+}
+
+# ---------------------------------------------------------------------------
 # Azure
 # ---------------------------------------------------------------------------
 

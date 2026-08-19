@@ -53,15 +53,16 @@
   GitHub repository, owner/name. Default: HybridCloudWorks/HCW-HybridCloudWorks.
 
 .PARAMETER Organization
-  HCP Terraform organization, for the wave-2 state read. Default: HybridCloudWorks.
+  HCP Terraform organization, for the wave-2 state read. Default: hcw.
 
 .PARAMETER Workspace
-  HCP Terraform workspace. Default: hybridcloudworks-azure.
+  HCP Terraform workspace. Default: hcw-azure.
 
 .PARAMETER TfcToken
   HCP Terraform API token as a SecureString, for reading state outputs. Omit
-  it and the script reads $env:TFE_TOKEN, then ~/.terraform.d/credentials.tfrc.json,
-  and skips wave 2 with a notice if neither exists.
+  it and the script reads $env:TFE_TOKEN, then the credentials file
+  `terraform login` writes (%APPDATA%\terraform.d\ on Windows,
+  ~/.terraform.d/ elsewhere), and skips wave 2 with a notice if neither exists.
 
 .PARAMETER TenantId
   Entra tenant GUID. Becomes the TENANT_ID repository variable.
@@ -92,8 +93,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
   [string] $Repository = 'HybridCloudWorks/HCW-HybridCloudWorks',
-  [string] $Organization = 'HybridCloudWorks',
-  [string] $Workspace = 'hybridcloudworks-azure',
+  [string] $Organization = 'hcw',
+  [string] $Workspace = 'hcw-azure',
   [securestring] $TfcToken,
 
   # Optional. Omit them and they are discovered from the Azure CLI sign-in —
@@ -144,17 +145,10 @@ function Resolve-TfcToken {
     Write-Info 'TFC token: $env:TFE_TOKEN'
     return (ConvertTo-SecureString $env:TFE_TOKEN -AsPlainText -Force)
   }
-  $credentialsPath = Join-Path $HOME '.terraform.d/credentials.tfrc.json'
-  if (Test-Path $credentialsPath) {
-    try {
-      $stored = (Get-Content $credentialsPath -Raw | ConvertFrom-Json).credentials.'app.terraform.io'.token
-      if ($stored) {
-        Write-Info "TFC token: $credentialsPath (written by ``terraform login``)"
-        return (ConvertTo-SecureString $stored -AsPlainText -Force)
-      }
-    } catch {
-      Write-Info "Could not parse $credentialsPath."
-    }
+  $stored = Get-StoredTfcToken
+  if ($stored) {
+    Write-Info "TFC token: $($stored.Path) (written by ``terraform login``)"
+    return (ConvertTo-SecureString $stored.Token -AsPlainText -Force)
   }
   return $null
 }

@@ -102,7 +102,7 @@ control layer) regardless of that decision.
 
 ## 3. What still needs an operator
 
-1. **Empty-plan check:** run a plan in the `hybridcloudworks-azure` HCP
+1. **Empty-plan check:** run a plan in the `hcw-azure` HCP
    Terraform workspace. Expected: empty (the standardization changes are
    plan-neutral: `lifecycle` blocks and fmt only). Anything non-empty is
    drift to investigate before any deploy.

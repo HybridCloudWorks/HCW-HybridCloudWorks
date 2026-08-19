@@ -39,7 +39,7 @@ by any code, and listed so it is not reintroduced).
 | Missing | 36 |
 | Placeholder | 0 |
 | Retired | 2 |
-| Last updated | 2026-08-19 — GitHub variables remediated: `SUBSCRIPTION_ID` corrected to the application LZ, `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` set to their deterministic values, the `CLIENT_ID`/`APP_HOSTNAME` stubs deleted (unset fails legibly; values exist only after the first apply). No `Placeholder` entries remain. 2026-08-18 (third pass) — live Azure reconciliation: four ALZ subscriptions observed, the earlier bootstrap's artifacts observed GONE (§8 superseded, run order inverted to bootstrap-first), `SUBSCRIPTION_ID` found pointing at Connectivity instead of the application LZ (reclassified `Placeholder`), `TENANT_ID` corroborated against the live directory. Second pass: `AZURE_FUNCTIONS_URL` renamed to `FUNCTIONS_URL` (§7), stale variable references corrected. First pass: §7 reconciled against live repository config and §7b added. Every `secrets.*`, `vars.*` and `environment:` reference in `.github/workflows/**` was enumerated and checked against the repository: 8 secrets absent (the repository has none at all), 7 variables absent, 2 environments absent. Five §7 variables previously recorded `Missing` are now set — three of them to one-character stubs, hence the new `Placeholder` status |
+| Last updated | 2026-08-19 (second pass) — HCP Terraform coordinates corrected against the live API: organization is `hcw` (not `HybridCloudWorks`), the declared workspace never existed, and a new empty `hcw-azure` workspace was created in the `Site` project. The federated credentials still carry the old subject and must be replaced by re-running the bootstrap. Earlier that day — GitHub variables remediated: `SUBSCRIPTION_ID` corrected to the application LZ, `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` set to their deterministic values, the `CLIENT_ID`/`APP_HOSTNAME` stubs deleted (unset fails legibly; values exist only after the first apply). No `Placeholder` entries remain. 2026-08-18 (third pass) — live Azure reconciliation: four ALZ subscriptions observed, the earlier bootstrap's artifacts observed GONE (§8 superseded, run order inverted to bootstrap-first), `SUBSCRIPTION_ID` found pointing at Connectivity instead of the application LZ (reclassified `Placeholder`), `TENANT_ID` corroborated against the live directory. Second pass: `AZURE_FUNCTIONS_URL` renamed to `FUNCTIONS_URL` (§7), stale variable references corrected. First pass: §7 reconciled against live repository config and §7b added. Every `secrets.*`, `vars.*` and `environment:` reference in `.github/workflows/**` was enumerated and checked against the repository: 8 secrets absent (the repository has none at all), 7 variables absent, 2 environments absent. Five §7 variables previously recorded `Missing` are now set — three of them to one-character stubs, hence the new `Placeholder` status |
 
 Nothing is `Verified` *from an engineering session*: no Azure control plane
 has been reachable from any session to date (REVIEW.md §1.1–§1.2). Operator
@@ -213,7 +213,7 @@ OIDC login with AADSTS70021.
 ## 8. HCP Terraform workspace — environment variables
 
 How Terraform itself authenticates to Azure. These are set in the
-`hybridcloudworks-azure` workspace as **environment** variables, not in
+`hcw-azure` workspace as **environment** variables, not in
 GitHub and not as Terraform variables. Without them no run can reach Azure at
 all, which makes every other `Missing` entry in this file unreachable rather
 than merely unset — this is the first thing to provision, not the last.
@@ -249,14 +249,13 @@ bootstrap produces:
    in Management, per the script's own doc) and `-TargetSubscriptionIds` =
    app + mgmt + conn. A target absent from that list is a subscription
    Terraform cannot deploy into.
-2. `set-tfc-variables.ps1` with the new client id and the three subscription
-   ids. It also reads back the workspace's real project name — re-run
-   bootstrap with `-TfcProject` if it prints anything but `Default Project`.
+2. `set-tfc-variables.ps1`, which discovers the client id off that identity
+   and compares the federated credential subjects against the live
+   organization, project and workspace, warning if they disagree.
 3. Speculative `terraform plan` (the human-review gate), then apply.
 
 All four variables above remain `Missing`, because none has been entered in
-the HCP Terraform workspace yet — and the client id half cannot exist until
-step 1 runs again.
+the HCP Terraform workspace yet.
 
 **The topology is settled: four ALZ subscriptions exist** (observed
 2026-08-19 via `az account list`): `sub-app-site-prod-scus`,
@@ -269,14 +268,31 @@ The configuration's three no-default subscription variables
 deliberately has no variable, and the bootstrap script correctly leaves it
 out of the preselected deployment targets.
 
-One unverified assumption is baked into both federated credentials: the
-project segment of the subject is `Default Project`, which was not confirmed
-against the workspace. `backend.tf` declares only organization and workspace,
-so the project name appears nowhere in this repository. If the first
-speculative plan fails with AADSTS70021, that is the cause and the only cause
-— re-run the script with `-TfcProject` set to the exact string from the
-workspace's Settings page. The script replaces a credential whose subject has
-drifted, so re-running is safe and idempotent.
+**The HCP Terraform coordinates were wrong in every segment until 2026-08-19,
+and the federated credentials still carry the old ones.** Verified against the
+HCP Terraform API that day: the organization is `hcw`, not `HybridCloudWorks`;
+the workspace `hybridcloudworks-azure` never existed. A new empty workspace
+`hcw-azure` was created in the `Site` project for this configuration, and
+`backend.tf` now names all three.
+
+The one pre-existing workspace, `hcw/HCW`, must never be this configuration's
+target: it holds 85 GCP/Firebase/VPS resources driven by the
+`saulpatinojr/Personal-Site_HCW` repository, so a plan from `infra/` would
+propose destroying all of them.
+
+The federated credentials created by the earlier bootstrap run still read
+`organization:HybridCloudWorks:project:Default Project:workspace:hybridcloudworks-azure`
+— wrong in all three segments, which fails every run with AADSTS70021.
+Re-running `bootstrap-terraform-oidc.ps1` replaces a drifted subject and is
+safe and idempotent; `set-tfc-variables.ps1` now detects the mismatch and
+prints the exact command rather than leaving it to a failed plan.
+
+Related, and deliberately NOT fixed here:
+`frontend/platform/terraform/backend.tf` names the same non-existent
+organization and a workspace `Personal-Site_HCW` (the live one is `HCW`).
+That stack's authoritative configuration lives in another repository, so this
+copy may be stale — repointing it at a live 85-resource workspace without
+first confirming the two match would risk a destructive plan.
 
 ---
 

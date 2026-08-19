@@ -36,7 +36,7 @@ one wins.
 | # | Store | Holds | Read by | Written by |
 | --- | --- | --- | --- | --- |
 | 1 | **Azure Key Vault** `kv-site-prod-scus` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings or `src/lib/key-vault.js` | A human, out-of-band, during a seeding window |
-| 2 | **HCP Terraform workspace** `hybridcloudworks-azure` | What Terraform needs to authenticate and to plan | The run environment and the `azurerm` / `cloudflare` providers | An operator in the workspace UI |
+| 2 | **HCP Terraform workspace** `hcw-azure` | What Terraform needs to authenticate and to plan | The run environment and the `azurerm` / `cloudflare` providers | An operator in the workspace UI |
 | 3 | **GitHub Actions variables** | Non-sensitive CI/CD configuration | `${{ vars.* }}` in workflows | `gh variable set`, or the repository settings UI |
 | 4 | **GitHub Actions secrets** | Last resort — credentials to systems that offer no federation | `${{ secrets.* }}` in workflows | `gh secret set` |
 

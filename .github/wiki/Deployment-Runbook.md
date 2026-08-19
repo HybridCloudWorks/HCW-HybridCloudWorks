@@ -16,7 +16,7 @@ roles table.
 | Concern | Where |
 | --- | --- |
 | Terraform source | `infra/` on `main` in HCW-HybridCloudWorks |
-| State and variables | HCP Terraform Cloud — org `HybridCloudWorks`, workspace `hybridcloudworks-azure` |
+| State and variables | HCP Terraform Cloud — org `hcw`, project `Site`, workspace `hcw-azure` |
 | Required inputs (names, formats, consumers — never values) | `CHECKLIST.md` and `Variables.md` at the repository root |
 | Terraform's own identity | `id-hcw-terraform`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
@@ -130,7 +130,7 @@ and is not one.
 
 ### Then set the workspace variables
 
-In HCP Terraform → `hybridcloudworks-azure` → **Variables**, as *environment*
+In HCP Terraform → `hcw-azure` → **Variables**, as *environment*
 variables (the script prints these with the values filled in):
 
 | Name | Value |
@@ -211,7 +211,7 @@ Bootstrap is done when a plan authenticates. Continue from section 1.
 Plans run in HCP Terraform Cloud, where the state and the workspace variables
 live — not on laptops, not on GitHub-hosted runners holding tokens.
 
-1. Open a run in the `hybridcloudworks-azure` workspace (VCS-triggered or
+1. Open a run in the `hcw-azure` workspace (VCS-triggered or
    CLI-triggered from the merged commit).
 2. The infrastructure operator reviews the plan **in TFC**, checking:
    - zero destroy/create pairs on stateful resources (Cosmos, storage
