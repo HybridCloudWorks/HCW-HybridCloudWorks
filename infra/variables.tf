@@ -81,25 +81,65 @@ variable "environment" {
 # -----------------------------------------------------------------------------
 # Naming
 # -----------------------------------------------------------------------------
-variable "project_name" {
-  description = "Project name used in resource naming"
+# A data-plane identifier, NOT an Azure resource name, and therefore outside
+# the CAF convention. Three code paths fall back to this literal when
+# COSMOS_DATABASE is unset — functions/src/lib/cosmos-client.js,
+# scripts/lib/cli.mjs and scripts/apply-computed-sortdate.mjs — so changing it
+# here without changing them there points those paths at a database that does
+# not exist, and the failure reads as a permissions problem.
+variable "cosmos_database_name" {
+  description = "Cosmos SQL database name. Data-plane contract shared with the Functions and scripts workspaces; change only in coordination with them"
   type        = string
   default     = "hybridcloudworks"
 }
 
-variable "resource_group_name" {
-  description = "Azure resource group name"
+variable "workload_name" {
+  description = "Workload token in resource names — the application, not the organization (Naming-Convention wiki page)"
   type        = string
-  default     = "rg-hybridcloudworks-prod"
+  default     = "hcwsite"
+}
+
+# Microsoft publishes no official region abbreviations, so this is a local
+# convention and lives in the Naming-Convention wiki page's table. It is a
+# variable because a second region must not require editing every name.
+variable "region_abbreviation" {
+  description = "Short form of azure_location used in resource names (scus = southcentralus)"
+  type        = string
+  default     = "scus"
 }
 
 # -----------------------------------------------------------------------------
 # Networking
 # -----------------------------------------------------------------------------
 variable "vnet_address_space" {
-  description = "Address space for the workload VNet"
+  description = "Address space for the workload (spoke) VNet"
   type        = string
   default     = "10.40.0.0/16"
+}
+
+# The hub must not overlap any spoke: peering rejects overlapping address
+# space, and the failure arrives when the SECOND spoke is peered, long after
+# the first choice looks fine. 10.0.0.0/16 for the hub and 10.40.0.0/16 for
+# HCWSite leaves 10.1–10.39 for future spokes without re-addressing anything.
+#
+# Room is reserved inside the hub for the gateway, firewall and Bastion
+# subnets even though none is created — subnets cannot be resized after
+# creation, and a hub with no room for a firewall is a hub that gets rebuilt:
+#
+#   10.0.0.0/26   GatewaySubnet        (reserved, not created)
+#   10.0.0.64/26  AzureFirewallSubnet  (reserved, not created — /26 minimum)
+#   10.0.0.128/26 AzureBastionSubnet   (reserved, not created — /26 minimum)
+#   10.0.1.0/24   shared services      (created)
+variable "hub_address_space" {
+  description = "Address space for the platform hub VNet; must not overlap any spoke"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "hub_shared_subnet_prefix" {
+  description = "Shared-services subnet in the hub. Deliberately above the /26 ranges reserved for GatewaySubnet, AzureFirewallSubnet and AzureBastionSubnet"
+  type        = string
+  default     = "10.0.1.0/24"
 }
 
 variable "functions_subnet_prefix" {
@@ -128,7 +168,7 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  default     = "hcw-cosmos-prod"
+  default     = "cosmos-hcwsite-prod"
 }
 
 variable "cosmos_local_auth_disabled" {
@@ -190,10 +230,20 @@ variable "functions_storage_admin_ip_rules" {
   }
 }
 
+# The Functions host storage account. Was derived from project_name with the
+# hyphens stripped; now explicit, because a name a reader cannot predict from
+# the convention should not be computed. 21 characters, inside the 24-character
+# limit, lowercase alphanumeric only — storage accounts take no hyphens.
+variable "functions_storage_account_name" {
+  description = "Functions host storage account (globally unique, 3-24 chars, lowercase alphanumeric)"
+  type        = string
+  default     = "sthcwsitefuncprodscus"
+}
+
 variable "storage_account_name" {
   description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string
-  default     = "hcwstorageprod"
+  default     = "sthcwsiteprodscus"
 }
 
 # -----------------------------------------------------------------------------
@@ -202,7 +252,7 @@ variable "storage_account_name" {
 variable "function_app_name" {
   description = "Azure Function App name (globally unique)"
   type        = string
-  default     = "hcw-functions-prod"
+  default     = "func-hcwsite-prod-scus"
 }
 
 # -----------------------------------------------------------------------------
@@ -211,7 +261,7 @@ variable "function_app_name" {
 variable "key_vault_name" {
   description = "Azure Key Vault name (globally unique, 3-24 chars)"
   type        = string
-  default     = "hcw-keyvault-prod"
+  default     = "kv-hcwsite-prod-scus"
 }
 
 variable "purge_protection_enabled" {

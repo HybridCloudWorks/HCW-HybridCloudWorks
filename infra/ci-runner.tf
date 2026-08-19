@@ -64,8 +64,8 @@ variable "ci_runner_max_executions" {
 resource "azurerm_container_app_environment" "ci_runner" {
   count                      = var.ci_runner_enabled ? 1 : 0
   name                       = "hcw-ci-runner-env"
-  location                   = azurerm_resource_group.hcw.location
-  resource_group_name        = azurerm_resource_group.hcw.name
+  location                   = azurerm_resource_group.platform_mgmt.location
+  resource_group_name        = azurerm_resource_group.platform_mgmt.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
   tags                       = var.tags
 }
@@ -73,8 +73,8 @@ resource "azurerm_container_app_environment" "ci_runner" {
 resource "azurerm_container_app_job" "ci_runner" {
   count                        = var.ci_runner_enabled ? 1 : 0
   name                         = "hcw-ci-runner"
-  location                     = azurerm_resource_group.hcw.location
-  resource_group_name          = azurerm_resource_group.hcw.name
+  location                     = azurerm_resource_group.platform_mgmt.location
+  resource_group_name          = azurerm_resource_group.platform_mgmt.name
   container_app_environment_id = azurerm_container_app_environment.ci_runner[0].id
   tags                         = var.tags
 
