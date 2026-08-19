@@ -22,8 +22,40 @@ data "azurerm_client_config" "current" {}
 # =============================================================================
 # Resource Group
 # =============================================================================
-resource "azurerm_resource_group" "hcw" {
-  name     = var.resource_group_name
+# Resource groups are the lifecycle and RBAC boundary, and each one names the
+# Azure service category it groups (Naming-Convention wiki page). The split is
+# drawn on destroy semantics, not on inventory: `web` is redeployable, and
+# everything carrying prevent_destroy is kept out of it, because a group is
+# what someone deletes when they mean "remove the app" and lifecycle
+# protection on one resource must not block routine work on another.
+locals {
+  # segment => what lives there, for the reader. The key is the name segment.
+  app_resource_groups = {
+    web  = "Static Web App, Function App, plan, Application Insights, and the Functions host storage account, which is recreated with the app"
+    db   = "Cosmos account, database and containers — prevent_destroy"
+    stor = "Content storage account and its blob containers — prevent_destroy"
+    sec  = "Key Vault — prevent_destroy"
+    conn = "Spoke virtual network and the Functions integration subnet"
+    ai   = "Azure OpenAI account and its model deployments"
+  }
+}
+
+resource "azurerm_resource_group" "app" {
+  for_each = local.app_resource_groups
+
+  name     = "rg-${each.key}-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  location = var.azure_location
+  tags     = var.tags
+}
+
+# Platform Management. Holds the central Log Analytics workspace every other
+# subscription ships diagnostics to, and the action group those alerts route
+# through — both platform concerns rather than workload ones, which is why
+# they sit outside the application subscription entirely.
+resource "azurerm_resource_group" "platform_mgmt" {
+  provider = azurerm.mgmt
+
+  name     = "rg-mgmt-plat-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
   tags     = var.tags
 }
@@ -32,9 +64,9 @@ resource "azurerm_resource_group" "hcw" {
 # Log Analytics Workspace (required by Application Insights)
 # =============================================================================
 resource "azurerm_log_analytics_workspace" "hcw" {
-  name                = "${var.project_name}-logs-${var.environment}"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "log-plat-${var.environment}-${var.region_abbreviation}"
+  location            = azurerm_resource_group.platform_mgmt.location
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
   # T-505: the plan's telemetry cost ceiling. When the cap trips, ingestion
@@ -48,9 +80,9 @@ resource "azurerm_log_analytics_workspace" "hcw" {
 # Application Insights (replaces Cloud Logging + Firebase Performance)
 # =============================================================================
 resource "azurerm_application_insights" "hcw" {
-  name                = "${var.project_name}-appinsights-${var.environment}"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "appi-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
   workspace_id        = azurerm_log_analytics_workspace.hcw.id
   application_type    = "Node.JS"
   tags                = var.tags
@@ -67,9 +99,9 @@ resource "azurerm_application_insights" "hcw" {
 #   - 100 GB bandwidth/month included
 # =============================================================================
 resource "azurerm_static_web_app" "hcw" {
-  name                = "${var.project_name}-swa-${var.environment}"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
   sku_tier            = "Standard"
   sku_size            = "Standard"
   tags                = var.tags
@@ -85,8 +117,8 @@ resource "azurerm_static_web_app" "hcw" {
 # =============================================================================
 resource "azurerm_cosmosdb_account" "hcw" {
   name                = var.cosmos_db_account_name
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  location            = azurerm_resource_group.app["db"].location
+  resource_group_name = azurerm_resource_group.app["db"].name
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
 
@@ -122,7 +154,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
   }
 
   geo_location {
-    location          = azurerm_resource_group.hcw.location
+    location          = azurerm_resource_group.app["db"].location
     failover_priority = 0
   }
 
@@ -179,8 +211,20 @@ resource "azurerm_cosmosdb_account" "hcw" {
 
 # Cosmos DB SQL Database
 resource "azurerm_cosmosdb_sql_database" "hcw" {
-  name                = var.project_name
-  resource_group_name = azurerm_resource_group.hcw.name
+  # Deliberately NOT renamed to the CAF convention. This is a data-plane
+  # identifier, not an Azure resource name: functions/src/lib/cosmos-client.js,
+  # scripts/lib/cli.mjs and scripts/apply-computed-sortdate.mjs all fall back
+  # to the literal "hybridcloudworks" when COSMOS_DATABASE is unset, and
+  # COSMOS_DATABASE is currently unset everywhere outside the Function App's
+  # own settings. Renaming it would leave those three paths connecting to a
+  # database that does not exist, and the failure would look like a
+  # permissions problem.
+  #
+  # It is its own variable rather than borrowing project_name so that the
+  # coupling is explicit and changing it is a deliberate act coordinated with
+  # those three files.
+  name                = var.cosmos_database_name
+  resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
 }
 
@@ -227,7 +271,7 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
   for_each = local.cosmos_containers
 
   name                = each.value.name
-  resource_group_name = azurerm_resource_group.hcw.name
+  resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
   database_name       = azurerm_cosmosdb_sql_database.hcw.name
   partition_key_paths = [each.value.partition_key_path]
@@ -348,8 +392,8 @@ moved {
 # =============================================================================
 resource "azurerm_storage_account" "hcw" {
   name                     = var.storage_account_name
-  resource_group_name      = azurerm_resource_group.hcw.name
-  location                 = azurerm_resource_group.hcw.location
+  resource_group_name      = azurerm_resource_group.app["stor"].name
+  location                 = azurerm_resource_group.app["stor"].location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   account_kind             = "StorageV2"
@@ -461,16 +505,16 @@ resource "azurerm_storage_management_policy" "cleanup" {
 # to this subnet's CIDR (ADR-001, 2026-07-30).
 # =============================================================================
 resource "azurerm_virtual_network" "hcw" {
-  name                = "${var.project_name}-vnet-${var.environment}"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "vnet-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  location            = azurerm_resource_group.app["conn"].location
+  resource_group_name = azurerm_resource_group.app["conn"].name
   address_space       = [var.vnet_address_space]
   tags                = var.tags
 }
 
 resource "azurerm_subnet" "functions_integration" {
   name                 = "snet-functions-integration"
-  resource_group_name  = azurerm_resource_group.hcw.name
+  resource_group_name  = azurerm_resource_group.app["conn"].name
   virtual_network_name = azurerm_virtual_network.hcw.name
   address_prefixes     = [var.functions_subnet_prefix]
 
@@ -491,7 +535,18 @@ resource "azurerm_subnet" "functions_integration" {
   # (content account, and the Functions host account since T-503): without
   # the endpoint the rule is inert and the firewall denies the Function App
   # along with everyone else.
-  service_endpoints = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB", "Microsoft.Storage"]
+  #
+  # azurerm 5.0 removed the service_endpoints list in favour of repeated
+  # service_endpoint blocks. Generated from a variable rather than written out
+  # three times: the set is a deployment input — a private-endpoint migration
+  # empties it, and a new VNet-ruled service appends to it — so it belongs
+  # somewhere a tfvars file can reach.
+  dynamic "service_endpoint" {
+    for_each = toset(var.functions_subnet_service_endpoints)
+    content {
+      service = service_endpoint.value
+    }
+  }
 
   delegation {
     name = "flex-consumption"
@@ -504,9 +559,9 @@ resource "azurerm_subnet" "functions_integration" {
 
 
 resource "azurerm_storage_account" "functions" {
-  name                     = "${replace(var.project_name, "-", "")}funcsa"
-  resource_group_name      = azurerm_resource_group.hcw.name
-  location                 = azurerm_resource_group.hcw.location
+  name                     = var.functions_storage_account_name
+  resource_group_name      = azurerm_resource_group.app["web"].name
+  location                 = azurerm_resource_group.app["web"].location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
@@ -547,9 +602,9 @@ resource "azurerm_storage_account" "functions" {
 }
 
 resource "azurerm_service_plan" "hcw" {
-  name                = "${var.project_name}-asp-${var.environment}"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "asp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
   os_type             = "Linux"
   sku_name            = "FC1" # Flex Consumption — VNet integration, scales to zero
   tags                = var.tags
@@ -591,8 +646,8 @@ resource "azurerm_storage_container" "function_releases" {
 # =============================================================================
 resource "azurerm_function_app_flex_consumption" "hcw" {
   name                = var.function_app_name
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
   service_plan_id     = azurerm_service_plan.hcw.id
 
   storage_container_type      = "blobContainer"
@@ -825,7 +880,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 # as a replace, so a duplicated name silently REMOVES the Function App's
 # access rather than erroring.
 resource "azurerm_cosmosdb_sql_role_assignment" "func_cosmos" {
-  resource_group_name = azurerm_resource_group.hcw.name
+  resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
@@ -871,8 +926,8 @@ resource "azurerm_role_assignment" "func_host_storage" {
 # =============================================================================
 resource "azurerm_key_vault" "hcw" {
   name                       = var.key_vault_name
-  location                   = azurerm_resource_group.hcw.location
-  resource_group_name        = azurerm_resource_group.hcw.name
+  location                   = azurerm_resource_group.app["sec"].location
+  resource_group_name        = azurerm_resource_group.app["sec"].name
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = "standard"
   soft_delete_retention_days = 90
@@ -922,11 +977,17 @@ resource "azurerm_role_assignment" "terraform_kv_secrets" {
 # =============================================================================
 # Budget Alert (replaces GCP billing export + budget alert)
 # =============================================================================
-resource "azurerm_consumption_budget_resource_group" "hcw" {
-  name              = "${var.project_name}-monthly-budget"
-  resource_group_id = azurerm_resource_group.hcw.id
-  amount            = var.budget_amount_usd
-  time_grain        = "Monthly"
+# Scoped to the SUBSCRIPTION, not a resource group. It was resource-group
+# scoped while the workload was one group; splitting into six by service
+# category would have left the budget watching whichever one it was pinned to
+# and silently ignoring the other five — a budget that under-reports is worse
+# than none, because it reads as reassurance. The application subscription is
+# now the boundary that means "this workload", so that is what it watches.
+resource "azurerm_consumption_budget_subscription" "hcw" {
+  name            = "${var.workload_name}-monthly-budget"
+  subscription_id = "/subscriptions/${var.subscription_app}"
+  amount          = var.budget_amount_usd
+  time_grain      = "Monthly"
 
   time_period {
     start_date = "2026-07-01T00:00:00Z"
@@ -969,7 +1030,7 @@ resource "azurerm_consumption_budget_resource_group" "hcw" {
 # account with no processor polling it.
 resource "azurerm_cosmosdb_sql_container" "leases" {
   name                = "leases"
-  resource_group_name = azurerm_resource_group.hcw.name
+  resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
   database_name       = azurerm_cosmosdb_sql_database.hcw.name
   partition_key_paths = ["/id"]

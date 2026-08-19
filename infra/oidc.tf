@@ -24,9 +24,9 @@
 # =============================================================================
 
 resource "azurerm_user_assigned_identity" "github_deploy" {
-  name                = "id-${var.project_name}-github-deploy"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "id-${var.workload_name}-github-deploy-${var.environment}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
   tags                = var.tags
 }
 
@@ -119,7 +119,7 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # another identity's assignment instead of erroring.
 
 resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_content" {
-  resource_group_name = azurerm_resource_group.hcw.name
+  resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
@@ -127,7 +127,7 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_content" {
 }
 
 resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
-  resource_group_name = azurerm_resource_group.hcw.name
+  resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id

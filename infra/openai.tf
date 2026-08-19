@@ -5,9 +5,9 @@
 # Note: Ensure the subscription is approved for Azure OpenAI access.
 # =============================================================================
 resource "azurerm_cognitive_account" "openai" {
-  name                = "${var.project_name}-openai-${var.environment}"
-  location            = azurerm_resource_group.hcw.location
-  resource_group_name = azurerm_resource_group.hcw.name
+  name                = "ai-${var.workload_name}-openai-${var.environment}"
+  location            = azurerm_resource_group.app["ai"].location
+  resource_group_name = azurerm_resource_group.app["ai"].name
   kind                = "OpenAI"
   sku_name            = "S0"
 
@@ -18,7 +18,7 @@ resource "azurerm_cognitive_account" "openai" {
   # account is stateless, and functions/src/lib/openai-client.js has zero
   # importers, so no runtime path exists to break. The endpoint moves from
   # the regional URL to https://<subdomain>.openai.azure.com/.
-  custom_subdomain_name = "${var.project_name}-openai-${var.environment}"
+  custom_subdomain_name = "ai-${var.workload_name}-openai-${var.environment}"
 
   # Keys off, permanently. The only consumers this account will ever have
   # authenticate as the Function App's managed identity (role below). Note:

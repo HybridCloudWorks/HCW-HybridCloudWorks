@@ -59,7 +59,7 @@ $casingSensitiveNames = @('REVIEW.md', 'TODO.md', 'CHECKLIST.md', 'CHANGELOG.md'
 # CHANGELOG.md. It is gitignored, so CI never sees it — but this scan walks the
 # filesystem, not the git index, so without this entry the gate fails for any
 # developer who has run `terraform init`. Same for build and coverage output.
-$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage') + $harnessDirectories
+$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage', '.reports') + $harnessDirectories
 $unscannedPattern = '(^|/)(' + (($unscannedDirectories | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')/'
 
 $actualDirectories = Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |

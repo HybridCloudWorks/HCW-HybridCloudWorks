@@ -8,12 +8,62 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Azure Subscription
+# Subscriptions — one per platform/application landing zone
+#
+# The platform is split across four subscriptions and each is reached through
+# its own provider alias (providers.tf). Nothing here has a default: a wrong
+# guess would silently deploy the workload into a platform subscription, so an
+# unset value must fail the plan rather than pick something.
+#
+# These are IDs, not credentials — the identity is federated (no secret exists
+# to leak) — but they stay `sensitive` to keep subscription IDs out of CI logs.
 # -----------------------------------------------------------------------------
-variable "azure_subscription_id" {
-  description = "Azure subscription ID for all resources"
+variable "subscription_app" {
+  description = "Application landing zone: the HCWSite workload (sub-app-site-prod-scus)"
   type        = string
   sensitive   = true
+}
+
+variable "subscription_mgmt" {
+  description = "Platform Management: central Log Analytics, action groups, and the Terraform identity's own resource group (sub-plat-mgmt-prod-scus)"
+  type        = string
+  sensitive   = true
+}
+
+variable "subscription_conn" {
+  description = "Platform Connectivity: hub network and, later, centralized private DNS zones (sub-plat-conn-prod-scus)"
+  type        = string
+  sensitive   = true
+}
+
+# There is no subscription_ident. The Identity landing zone
+# (sub-plat-ident-prod-scus) holds nothing: HCWSite authenticates against Entra
+# ID, and app registrations are tenant objects rather than subscription
+# resources. Declaring the variable would require a value for a subscription
+# nothing deploys into — see the note in providers.tf.
+
+# Exactly the resource providers this configuration's resources need, and no
+# more. azurerm 5.0 registers none by default, and an unregistered provider
+# fails at apply with MissingSubscriptionRegistration rather than at plan.
+#
+# Set this to [] when ALZ absorption takes registration over centrally: the
+# deploy identity would then no longer need the /register/action permission,
+# and re-registering under a policy that governs it is at best redundant.
+variable "azure_resource_providers" {
+  description = "Resource providers Terraform registers on each target subscription; empty the list when registration is centrally governed"
+  type        = list(string)
+  default = [
+    "Microsoft.App",                 # Flex Consumption subnet delegation (Microsoft.App/environments)
+    "Microsoft.CognitiveServices",   # Azure OpenAI account and deployments
+    "Microsoft.DocumentDB",          # Cosmos DB
+    "Microsoft.Insights",            # Application Insights, diagnostic settings, action groups
+    "Microsoft.KeyVault",            # Key Vault
+    "Microsoft.ManagedIdentity",     # user-assigned identities
+    "Microsoft.Network",             # virtual network and subnets
+    "Microsoft.OperationalInsights", # Log Analytics workspace
+    "Microsoft.Storage",             # both storage accounts
+    "Microsoft.Web",                 # Function App, service plan, static web app
+  ]
 }
 
 variable "azure_location" {
@@ -31,25 +81,74 @@ variable "environment" {
 # -----------------------------------------------------------------------------
 # Naming
 # -----------------------------------------------------------------------------
-variable "project_name" {
-  description = "Project name used in resource naming"
+# A data-plane identifier, NOT an Azure resource name, and therefore outside
+# the CAF resource-naming convention.
+#
+# FOUR code paths hard-code this value as their fallback when COSMOS_DATABASE
+# is unset, and all four must change together:
+#
+#   functions/src/lib/cosmos-client.js
+#   scripts/lib/cli.mjs
+#   scripts/apply-computed-sortdate.mjs
+#   scripts/smoke-deployed.mjs
+#
+# Change it here without changing them there and those paths connect to a
+# database that does not exist — which surfaces as an authorization error,
+# not a "no such database" one, because the Cosmos SDK cannot distinguish
+# "absent" from "not permitted" for a caller whose RBAC is scoped per-database.
+variable "cosmos_database_name" {
+  description = "Cosmos SQL database name. Data-plane contract shared with the Functions and scripts workspaces; change only in coordination with them"
   type        = string
-  default     = "hybridcloudworks"
+  default     = "hcw"
 }
 
-variable "resource_group_name" {
-  description = "Azure resource group name"
+variable "workload_name" {
+  description = "Workload token in resource names — the application, not the organization (Naming-Convention wiki page)"
   type        = string
-  default     = "rg-hybridcloudworks-prod"
+  default     = "site"
+}
+
+# Microsoft publishes no official region abbreviations, so this is a local
+# convention and lives in the Naming-Convention wiki page's table. It is a
+# variable because a second region must not require editing every name.
+variable "region_abbreviation" {
+  description = "Short form of azure_location used in resource names (scus = southcentralus)"
+  type        = string
+  default     = "scus"
 }
 
 # -----------------------------------------------------------------------------
 # Networking
 # -----------------------------------------------------------------------------
 variable "vnet_address_space" {
-  description = "Address space for the workload VNet"
+  description = "Address space for the workload (spoke) VNet"
   type        = string
   default     = "10.40.0.0/16"
+}
+
+# The hub must not overlap any spoke: peering rejects overlapping address
+# space, and the failure arrives when the SECOND spoke is peered, long after
+# the first choice looks fine. 10.0.0.0/16 for the hub and 10.40.0.0/16 for
+# HCWSite leaves 10.1–10.39 for future spokes without re-addressing anything.
+#
+# Room is reserved inside the hub for the gateway, firewall and Bastion
+# subnets even though none is created — subnets cannot be resized after
+# creation, and a hub with no room for a firewall is a hub that gets rebuilt:
+#
+#   10.0.0.0/26   GatewaySubnet        (reserved, not created)
+#   10.0.0.64/26  AzureFirewallSubnet  (reserved, not created — /26 minimum)
+#   10.0.0.128/26 AzureBastionSubnet   (reserved, not created — /26 minimum)
+#   10.0.1.0/24   shared services      (created)
+variable "hub_address_space" {
+  description = "Address space for the platform hub VNet; must not overlap any spoke"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "hub_shared_subnet_prefix" {
+  description = "Shared-services subnet in the hub. Deliberately above the /26 ranges reserved for GatewaySubnet, AzureFirewallSubnet and AzureBastionSubnet"
+  type        = string
+  default     = "10.0.1.0/24"
 }
 
 variable "functions_subnet_prefix" {
@@ -58,13 +157,27 @@ variable "functions_subnet_prefix" {
   default     = "10.40.0.0/24"
 }
 
+# Every entry here is load-bearing for a firewall rule elsewhere in this
+# configuration, not a convenience: Key Vault, Cosmos and Storage all set
+# default_action = "Deny" and allow this subnet by VNet rule, and a VNet rule
+# without the matching service endpoint is inert. Removing an entry does not
+# loosen access, it silently denies the Function App.
+#
+# This empties out when the account it fronts moves to a private endpoint,
+# which is why it is an input rather than a literal.
+variable "functions_subnet_service_endpoints" {
+  description = "Service endpoints on the Functions integration subnet; each one backs a VNet rule on the matching service"
+  type        = list(string)
+  default     = ["Microsoft.KeyVault", "Microsoft.AzureCosmosDB", "Microsoft.Storage"]
+}
+
 # -----------------------------------------------------------------------------
 # Cosmos DB
 # -----------------------------------------------------------------------------
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  default     = "hcw-cosmos-prod"
+  default     = "cosmos-site-prod"
 }
 
 variable "cosmos_local_auth_disabled" {
@@ -126,10 +239,20 @@ variable "functions_storage_admin_ip_rules" {
   }
 }
 
+# The Functions host storage account. Was derived from project_name with the
+# hyphens stripped; now explicit, because a name a reader cannot predict from
+# the convention should not be computed. 21 characters, inside the 24-character
+# limit, lowercase alphanumeric only — storage accounts take no hyphens.
+variable "functions_storage_account_name" {
+  description = "Functions host storage account (globally unique, 3-24 chars, lowercase alphanumeric)"
+  type        = string
+  default     = "stsitefuncprodscus"
+}
+
 variable "storage_account_name" {
   description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric)"
   type        = string
-  default     = "hcwstorageprod"
+  default     = "stsiteprodscus"
 }
 
 # -----------------------------------------------------------------------------
@@ -138,7 +261,7 @@ variable "storage_account_name" {
 variable "function_app_name" {
   description = "Azure Function App name (globally unique)"
   type        = string
-  default     = "hcw-functions-prod"
+  default     = "func-site-prod-scus"
 }
 
 # -----------------------------------------------------------------------------
@@ -147,7 +270,7 @@ variable "function_app_name" {
 variable "key_vault_name" {
   description = "Azure Key Vault name (globally unique, 3-24 chars)"
   type        = string
-  default     = "hcw-keyvault-prod"
+  default     = "kv-site-prod-scus"
 }
 
 variable "purge_protection_enabled" {

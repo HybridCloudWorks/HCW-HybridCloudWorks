@@ -40,8 +40,21 @@
   Entra tenant (directory) ID. Required — it is also the ARM_TENANT_ID you set
   in the HCP Terraform workspace.
 
-.PARAMETER SubscriptionId
-  Target Azure subscription. Required.
+.PARAMETER IdentitySubscriptionId
+  Subscription that HOLDS the bootstrap resource group and managed identity.
+  This is the Management platform subscription: the Terraform identity is
+  platform automation, not workload, and it must not live in a subscription it
+  is about to deploy into. Required.
+
+.PARAMETER TargetSubscriptionIds
+  Every subscription Terraform must be able to deploy into. The identity is
+  granted Contributor + Role Based Access Control Administrator on each one,
+  separately — there is no management group in this tenant to inherit from, so
+  a subscription absent from this list is a subscription Terraform cannot
+  touch. Defaults to IdentitySubscriptionId alone.
+
+  Pass all four platform/application subscriptions in the normal case. Order
+  does not matter and duplicates are ignored.
 
 .PARAMETER TfcOrganization
   HCP Terraform organization name, case-sensitive. Default: HybridCloudWorks.
@@ -69,37 +82,82 @@
   the wrong account and keeps silently reusing it. The script falls back to it
   automatically if the interactive sign-in fails.
 
+.PARAMETER ReportPath
+  Markdown report written at the end of a real run, recording what was created,
+  which subscriptions the identity can actually deploy into, and the workspace
+  variables still to be set by hand. Defaults under scripts/.reports/, which is
+  gitignored — the report holds real subscription and client ids, and
+  CHECKLIST.md's rule is that real values never enter tracked files.
+
+  Skipped under -WhatIf: there would be nothing true to report.
+
 .PARAMETER WhatIf
   Print every change without making one. Signing in still happens — it reads
   your directory, it does not change it, and nothing can be inspected without
   it.
 
 .EXAMPLE
+  # Preview. The identity lands in Management; all four subscriptions become
+  # deployment targets.
   ./scripts/bootstrap-terraform-oidc.ps1 `
       -TenantId 00000000-0000-0000-0000-000000000000 `
-      -SubscriptionId 11111111-1111-1111-1111-111111111111 -WhatIf
+      -IdentitySubscriptionId 22222222-2222-2222-2222-222222222222 `
+      -TargetSubscriptionIds 11111111-1111-1111-1111-111111111111, `
+                             22222222-2222-2222-2222-222222222222, `
+                             33333333-3333-3333-3333-333333333333, `
+                             44444444-4444-4444-4444-444444444444 `
+      -WhatIf
 
 .EXAMPLE
-  # No browser on this machine, or the wrong account keeps being reused.
+  # Single-subscription tenant: the identity's own subscription is the only
+  # target, so -TargetSubscriptionIds can be omitted entirely.
   ./scripts/bootstrap-terraform-oidc.ps1 `
       -TenantId 00000000-0000-0000-0000-000000000000 `
-      -SubscriptionId 11111111-1111-1111-1111-111111111111 -DeviceCode
+      -IdentitySubscriptionId 22222222-2222-2222-2222-222222222222 -DeviceCode
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
   [Parameter(Mandatory = $true)][string] $TenantId,
-  [Parameter(Mandatory = $true)][string] $SubscriptionId,
+  [Parameter(Mandatory = $true)][string] $IdentitySubscriptionId,
+  [string[]] $TargetSubscriptionIds = @(),
   [string] $TfcOrganization = 'HybridCloudWorks',
   [string] $TfcProject = 'Default Project',
   [string] $TfcWorkspace = 'hybridcloudworks-azure',
   [string] $ResourceGroupName = 'rg-hcw-bootstrap',
   [string] $IdentityName = 'id-hcw-terraform',
-  [string] $Location = 'eastus2',
+  [string] $Location = 'southcentralus',
   [switch] $ElevateAccess,
-  [switch] $DeviceCode
+  [switch] $DeviceCode,
+  [string] $ReportPath = (Join-Path $PSScriptRoot ".reports/bootstrap-oidc-$(Get-Date -Format 'yyyyMMdd-HHmmss').md")
 )
 
 $ErrorActionPreference = 'Stop'
+
+# The identity's own subscription is always a deployment target: Terraform
+# creates the central Log Analytics workspace and the platform action group in
+# Management, which is where the identity itself lives. Deduplicated, so
+# passing it explicitly in -TargetSubscriptionIds is harmless.
+$TargetSubscriptionIds = @(
+  @($TargetSubscriptionIds) + $IdentitySubscriptionId |
+    Where-Object { $_ } |
+    Select-Object -Unique
+)
+
+# The seven tags the IaC Repository Standard requires on every resource. They
+# mirror infra/variables.tf's `tags` default so the bootstrap resources are
+# governed identically to the Terraform-managed ones — with one deliberate
+# difference: managedBy is 'bootstrap-script', not 'terraform'. That tag is the
+# only in-portal signal that this resource group is NOT in Terraform state and
+# must not be reconciled into it.
+$BootstrapTags = @(
+  'workload=hybridcloudworks'
+  'environment=prod'
+  'owner=platform'
+  'costCenter=content-platform'
+  'managedBy=bootstrap-script'
+  'criticality=high'
+  'dataClassification=internal'
+)
 
 # ---------------------------------------------------------------------------
 # Output helpers. Every line the operator reads is one of these four shapes, so
@@ -226,17 +284,31 @@ if ($account.tenantId -ne $TenantId) {
 }
 Write-Ok "Signed in as $($account.user.name) in tenant $TenantId"
 
-$subscription = Invoke-Az @('account', 'show', '--subscription', $SubscriptionId, '-o', 'json') -AllowFailure
-if (-not $subscription) {
-  Stop-WithGuidance "Subscription $SubscriptionId is not visible to this sign-in." @(
-    'Either the ID is wrong, or it belongs to a different directory, or your',
-    'account has no Azure RBAC on it yet. `az account list -o table` shows what',
-    'you can see. If the list is empty but you administer this tenant, that is',
-    'the Global-Administrator-with-no-RBAC case — re-run with -ElevateAccess.'
-  )
+# Resolve every subscription up front. A name that resolves here is one the
+# sign-in can see; failing now names the offending GUID, where failing later
+# surfaces as an opaque role-assignment error halfway through the run.
+$subscriptionNames = @{}
+foreach ($id in $TargetSubscriptionIds) {
+  $resolved = Invoke-Az @('account', 'show', '--subscription', $id, '-o', 'json') -AllowFailure
+  if (-not $resolved) {
+    Stop-WithGuidance "Subscription $id is not visible to this sign-in." @(
+      'Either the ID is wrong, or it belongs to a different directory, or your',
+      'account has no Azure RBAC on it yet. `az account list -o table` shows what',
+      'you can see. If the list is empty but you administer this tenant, that is',
+      'the Global-Administrator-with-no-RBAC case — re-run with -ElevateAccess.',
+      '',
+      'A subscription created after this session signed in is invisible until the',
+      'token is refreshed: az account list --refresh'
+    )
+  }
+  $subscriptionNames[$id] = $resolved.name
+  Write-Ok "Target subscription: $($resolved.name)"
 }
-Invoke-Az @('account', 'set', '--subscription', $SubscriptionId) | Out-Null
-Write-Ok "Subscription: $($subscription.name)"
+
+# The identity's own subscription is the CLI context for every resource this
+# script creates.
+Invoke-Az @('account', 'set', '--subscription', $IdentitySubscriptionId) | Out-Null
+Write-Ok "Identity lands in: $($subscriptionNames[$IdentitySubscriptionId])"
 
 # Who am I, in the form role assignments use.
 $signedInObjectId = (Invoke-Az @('ad', 'signed-in-user', 'show', '--query', 'id', '-o', 'tsv'))
@@ -246,13 +318,12 @@ if (-not $signedInObjectId) {
   )
 }
 
-$subscriptionScope = "/subscriptions/$SubscriptionId"
-
-function Get-MyRoles {
+function Get-MyRole {
+  param([Parameter(Mandatory)][string] $SubscriptionId)
   $assignments = Invoke-Az @(
     'role', 'assignment', 'list',
     '--assignee', $signedInObjectId,
-    '--scope', $subscriptionScope,
+    '--scope', "/subscriptions/$SubscriptionId",
     '--include-inherited', '--include-groups',
     '-o', 'json'
   ) -AllowFailure
@@ -260,26 +331,46 @@ function Get-MyRoles {
   return @($assignments | ForEach-Object { $_.roleDefinitionName })
 }
 
-$myRoles = Get-MyRoles
 # Terraform will create role assignments (infra/oidc.tf, main.tf), and granting
 # a role you do not hold is itself privileged. Owner covers both halves; the
 # split alternative is Contributor plus a role-assignment writer.
-$canAssignRoles = $myRoles -contains 'Owner' -or $myRoles -contains 'User Access Administrator' -or $myRoles -contains 'Role Based Access Control Administrator'
+function Test-CanAssignRoles {
+  param([string[]] $Roles)
+  return ($Roles -contains 'Owner') -or
+         ($Roles -contains 'User Access Administrator') -or
+         ($Roles -contains 'Role Based Access Control Administrator')
+}
 
-if (-not $canAssignRoles) {
+# Every target is checked before anything is elevated or created. A run that
+# can reach three subscriptions out of four is worse than one that refuses:
+# Terraform would authenticate, plan, and then fail partway through an apply.
+$rolesBySubscription = @{}
+foreach ($id in $TargetSubscriptionIds) {
+  $rolesBySubscription[$id] = Get-MyRole -SubscriptionId $id
+}
+
+$missingRights = @($TargetSubscriptionIds | Where-Object { -not (Test-CanAssignRoles $rolesBySubscription[$_]) })
+
+if ($missingRights.Count -gt 0) {
   if (-not $ElevateAccess) {
-    Stop-WithGuidance "You hold no role-assignment rights on $SubscriptionId (found: $(if ($myRoles) { $myRoles -join ', ' } else { 'none' }))." @(
-      'This script must grant roles to the Terraform identity, so it needs',
-      'Owner (or User Access Administrator) on the subscription.',
-      '',
-      'If you just created this tenant: being Global Administrator in Entra does',
-      'NOT give you Azure RBAC. They are separate permission systems. Re-run with',
-      '-ElevateAccess to take the documented one-time root-scope elevation, grant',
-      'yourself Owner on this subscription, and drop the root grant again:',
-      '',
-      "  ./scripts/bootstrap-terraform-oidc.ps1 -TenantId $TenantId -SubscriptionId $SubscriptionId -ElevateAccess",
-      '',
-      'Otherwise, ask whoever owns the subscription for Owner and re-run.'
+    $detail = $missingRights | ForEach-Object {
+      $found = if ($rolesBySubscription[$_]) { $rolesBySubscription[$_] -join ', ' } else { 'none' }
+      "  $($subscriptionNames[$_]) [$_] — found: $found"
+    }
+    Stop-WithGuidance "You hold no role-assignment rights on $($missingRights.Count) of $($TargetSubscriptionIds.Count) target subscriptions." (
+      @(
+        'This script must grant roles to the Terraform identity, so it needs',
+        'Owner (or User Access Administrator) on every target subscription:',
+        ''
+      ) + $detail + @(
+        '',
+        'If you just created this tenant: being Global Administrator in Entra does',
+        'NOT give you Azure RBAC. They are separate permission systems. Re-run with',
+        '-ElevateAccess to take the documented one-time root-scope elevation, grant',
+        'yourself Owner on each of them, and drop the root grant again.',
+        '',
+        'Otherwise, ask whoever owns those subscriptions for Owner and re-run.'
+      )
     )
   }
 
@@ -294,14 +385,18 @@ if (-not $canAssignRoles) {
     # Entra takes a few seconds to make the elevation usable.
     Start-Sleep -Seconds 15
 
-    Invoke-Az @(
-      'role', 'assignment', 'create',
-      '--assignee-object-id', $signedInObjectId,
-      '--assignee-principal-type', 'User',
-      '--role', 'Owner',
-      '--scope', $subscriptionScope
-    ) | Out-Null
-    Write-Act "Owner granted on $SubscriptionId"
+    # Grant Owner everywhere it is missing while the elevation is live — it is
+    # removed immediately below, so there is no second chance to use it.
+    foreach ($id in $missingRights) {
+      Invoke-Az @(
+        'role', 'assignment', 'create',
+        '--assignee-object-id', $signedInObjectId,
+        '--assignee-principal-type', 'User',
+        '--role', 'Owner',
+        '--scope', "/subscriptions/$id"
+      ) | Out-Null
+      Write-Act "Owner granted on $($subscriptionNames[$id])"
+    }
 
     # Leaving root-scope UAA in place is a standing tenant-wide privilege with
     # no owner and no expiry. Remove it now that its one job is done.
@@ -314,10 +409,16 @@ if (-not $canAssignRoles) {
     Write-Act 'Root-scope elevation removed'
 
     Start-Sleep -Seconds 10
-    $myRoles = Get-MyRoles
+    foreach ($id in $TargetSubscriptionIds) {
+      $rolesBySubscription[$id] = Get-MyRole -SubscriptionId $id
+    }
   }
 }
-Write-Ok "Subscription roles: $(if ($myRoles) { $myRoles -join ', ' } else { '(none — -WhatIf run)' })"
+
+foreach ($id in $TargetSubscriptionIds) {
+  $found = if ($rolesBySubscription[$id]) { $rolesBySubscription[$id] -join ', ' } else { '(none — -WhatIf run)' }
+  Write-Ok "$($subscriptionNames[$id]): $found"
+}
 
 # Managed identities and federated credentials both live behind this provider.
 # On a subscription nobody has deployed to, it is unregistered, and the failure
@@ -341,11 +442,7 @@ $existingGroup = Invoke-Az @('group', 'show', '-n', $ResourceGroupName, '-o', 'j
 if ($existingGroup) {
   Write-Ok "Exists in $($existingGroup.location)"
 } elseif ($PSCmdlet.ShouldProcess($ResourceGroupName, 'create resource group')) {
-  Invoke-Az @(
-    'group', 'create', '-n', $ResourceGroupName, '-l', $Location,
-    '--tags', 'workload=hybridcloudworks', 'environment=prod', 'managedBy=bootstrap-script',
-    'criticality=high', 'dataClassification=internal'
-  ) | Out-Null
+  Invoke-Az (@('group', 'create', '-n', $ResourceGroupName, '-l', $Location, '--tags') + $BootstrapTags) | Out-Null
   Write-Act "Created in $Location"
 } else {
   Write-Act "Would create in $Location"
@@ -360,7 +457,7 @@ $identity = Invoke-Az @('identity', 'show', '-n', $IdentityName, '-g', $Resource
 if ($identity) {
   Write-Ok "Exists (client id $($identity.clientId))"
 } elseif ($PSCmdlet.ShouldProcess($IdentityName, 'create user-assigned managed identity')) {
-  $identity = Invoke-Az @('identity', 'create', '-n', $IdentityName, '-g', $ResourceGroupName, '-l', $Location, '-o', 'json')
+  $identity = Invoke-Az (@('identity', 'create', '-n', $IdentityName, '-g', $ResourceGroupName, '-l', $Location, '-o', 'json', '--tags') + $BootstrapTags)
   Write-Act "Created (client id $($identity.clientId))"
   # Entra replicates the new service principal asynchronously; a role
   # assignment issued immediately fails with PrincipalNotFound.
@@ -435,30 +532,39 @@ Write-Step 'Subscription role assignments'
 
 $requiredRoles = @('Contributor', 'Role Based Access Control Administrator')
 
-if ($identity -and $identity.principalId) {
+# Assigned per subscription rather than once at a management group: this tenant
+# has no management group hierarchy yet. When the ALZ exists, these collapse
+# into a single assignment at the intermediate root and this loop goes away.
+foreach ($id in $TargetSubscriptionIds) {
+  $scope = "/subscriptions/$id"
+  $label = $subscriptionNames[$id]
+
+  if (-not ($identity -and $identity.principalId)) {
+    foreach ($role in $requiredRoles) { Write-Act "Would assign $role on $label" }
+    continue
+  }
+
   $held = Invoke-Az @(
-    'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $subscriptionScope, '-o', 'json'
+    'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope, '-o', 'json'
   ) -AllowFailure
   $heldNames = @($held | ForEach-Object { $_.roleDefinitionName })
 
   foreach ($role in $requiredRoles) {
     if ($heldNames -contains $role) {
-      Write-Ok "$role"
-    } elseif ($PSCmdlet.ShouldProcess($IdentityName, "assign $role at subscription scope")) {
+      Write-Ok "$label — $role"
+    } elseif ($PSCmdlet.ShouldProcess("$IdentityName on $label", "assign $role at subscription scope")) {
       Invoke-Az @(
         'role', 'assignment', 'create',
         '--assignee-object-id', $identity.principalId,
         '--assignee-principal-type', 'ServicePrincipal',
         '--role', $role,
-        '--scope', $subscriptionScope
+        '--scope', $scope
       ) | Out-Null
-      Write-Act "$role assigned"
+      Write-Act "$label — $role assigned"
     } else {
-      Write-Act "Would assign $role"
+      Write-Act "Would assign $role on $label"
     }
   }
-} else {
-  foreach ($role in $requiredRoles) { Write-Act "Would assign $role" }
 }
 
 # ===========================================================================
@@ -476,14 +582,23 @@ Write-Host @"
     TFC_AZURE_PROVIDER_AUTH   true
     TFC_AZURE_RUN_CLIENT_ID   $clientId
     ARM_TENANT_ID             $TenantId
-    ARM_SUBSCRIPTION_ID       $SubscriptionId
+    ARM_SUBSCRIPTION_ID       $IdentitySubscriptionId
 
   These four names are set by HashiCorp and Microsoft, so they are exempt from
   the repository's 2-word variable rule (see the IaC Repository Standard).
 
-  Then, as TERRAFORM variables in the same workspace, the inputs listed in
-  CHECKLIST.md section 7 — azure_subscription_id and entra_tenant_id take the
-  same two values as above.
+  ARM_SUBSCRIPTION_ID is the DEFAULT provider's subscription only. Every other
+  subscription is reached through an aliased provider, and each alias takes its
+  id from its own Terraform variable — so this one value does not decide where
+  resources land, and changing it will not move them.
+
+  Then, as TERRAFORM variables in the same workspace, one per subscription the
+  aliased providers target (CHECKLIST.md section 7):
+
+    subscription_mgmt         $IdentitySubscriptionId
+$(($TargetSubscriptionIds | Where-Object { $_ -ne $IdentitySubscriptionId } | ForEach-Object {
+    "    subscription_<role>       $_   # $($subscriptionNames[$_])"
+  }) -join "`n")
 
   Verify with a speculative plan before touching apply:
 
@@ -497,4 +612,110 @@ Write-Host @"
 
 "@ -ForegroundColor White
 
+# ===========================================================================
+# 7. Report
+# ===========================================================================
+# The console output scrolls away and the client id it printed is needed later,
+# in another tool, by someone who may not be the person who ran this. The
+# report is the durable record of what this run actually asserted.
+#
+# It re-reads role assignments from Azure rather than echoing what section 5
+# intended, so the report states what is true after the run and not what the
+# script meant to do. That difference is the entire point of writing one.
+#
+# Deliberately gitignored: it holds real subscription and client ids. Those are
+# identifiers rather than credentials — the identity is federated and no secret
+# exists — but CHECKLIST.md's rule is that real values never enter tracked
+# files, and a report is not an exception to it.
+if (-not $WhatIfPreference) {
+  Write-Step 'Report'
+
+  $reportDirectory = Split-Path -Parent $ReportPath
+  if ($reportDirectory -and -not (Test-Path $reportDirectory)) {
+    New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
+  }
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $add = { param($text) $lines.Add($text) }
+
+  & $add "# Terraform OIDC bootstrap report"
+  & $add ''
+  & $add "Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz') by ``scripts/bootstrap-terraform-oidc.ps1``."
+  & $add "Run by $($account.user.name) in tenant ``$TenantId``."
+  & $add ''
+  & $add '## Identity'
+  & $add ''
+  & $add '| | |'
+  & $add '| --- | --- |'
+  & $add "| Managed identity | ``$IdentityName`` |"
+  & $add "| Resource group | ``$ResourceGroupName`` |"
+  & $add "| Subscription | $($subscriptionNames[$IdentitySubscriptionId]) (``$IdentitySubscriptionId``) |"
+  & $add "| Region | ``$Location`` |"
+  & $add "| Client id | ``$clientId`` |"
+  & $add "| Principal id | ``$(if ($identity) { $identity.principalId } else { 'n/a' })`` |"
+  & $add ''
+  & $add '## Federated credentials'
+  & $add ''
+  & $add 'Issuer `https://app.terraform.io`, audience `api://AzureADTokenExchange`.'
+  & $add ''
+  & $add '| Name | Subject |'
+  & $add '| --- | --- |'
+  foreach ($credentialName in ($subjects.Keys | Sort-Object)) {
+    & $add "| ``$credentialName`` | ``$($subjects[$credentialName])`` |"
+  }
+  & $add ''
+  & $add "The ``project`` segment is ``$TfcProject``. If a speculative plan fails with"
+  & $add 'AADSTS70021, this is the value to check first — Entra matches the subject as an'
+  & $add 'exact, case-sensitive string with no wildcards.'
+  & $add ''
+  & $add '## Role assignments'
+  & $add ''
+  & $add 'Read back from Azure after the run, not copied from what was requested.'
+  & $add ''
+  & $add '| Subscription | Roles held |'
+  & $add '| --- | --- |'
+  foreach ($id in $TargetSubscriptionIds) {
+    $observed = 'none'
+    if ($identity -and $identity.principalId) {
+      $found = Invoke-Az @(
+        'role', 'assignment', 'list',
+        '--assignee', $identity.principalId,
+        '--scope', "/subscriptions/$id",
+        '--subscription', $id, '-o', 'json'
+      ) -AllowFailure
+      $names = @($found | ForEach-Object { $_.roleDefinitionName }) | Sort-Object -Unique
+      if ($names) { $observed = ($names -join ', ') }
+    }
+    $flag = if ($observed -eq 'none') { ' **← Terraform cannot deploy here**' } else { '' }
+    & $add "| $($subscriptionNames[$id]) | $observed$flag |"
+  }
+  & $add ''
+  & $add '## Still to do by hand'
+  & $add ''
+  & $add "In HCP Terraform, workspace ``$TfcOrganization / $TfcWorkspace``:"
+  & $add ''
+  & $add '| Variable | Kind | Value |'
+  & $add '| --- | --- | --- |'
+  & $add '| `TFC_AZURE_PROVIDER_AUTH` | Environment | `true` |'
+  & $add "| ``TFC_AZURE_RUN_CLIENT_ID`` | Environment | ``$clientId`` |"
+  & $add "| ``ARM_TENANT_ID`` | Environment | ``$TenantId`` |"
+  & $add "| ``ARM_SUBSCRIPTION_ID`` | Environment | ``$IdentitySubscriptionId`` |"
+  & $add ''
+  & $add 'Then verify, before any apply:'
+  & $add ''
+  & $add '```'
+  & $add 'cd infra && terraform login && terraform plan'
+  & $add '```'
+  & $add ''
+
+  Set-Content -Path $ReportPath -Value ($lines -join "`n") -Encoding utf8NoBOM
+  Write-Ok "Written to $ReportPath"
+}
+
 Write-Host "  Bootstrap complete.`n" -ForegroundColor Green
+
+# Explicit, because the script ends on Write-Host and would otherwise return
+# whatever $LASTEXITCODE the last `az` call left behind — including the
+# non-zero codes the -AllowFailure probes produce on purpose. Reaching this
+# line at all means every check passed; say so in the only way a caller reads.
+exit 0

@@ -26,6 +26,29 @@
 #     Azure NAT egress otherwise trips).
 # =============================================================================
 
+# Deferred, not deleted — ADR 0021 ratified this runner as CI failover, and
+# this flag is the thing that supersedes it rather than a code deletion.
+#
+# It stays off because the case for it did not survive being checked: the
+# repository is public, so GitHub-hosted runners are unlimited and free, and
+# ADR 0021's "scale-to-zero costs nothing idle" driver was answering a cost
+# problem that does not exist. Meanwhile all three prerequisites are absent
+# (DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, and the GitHub App for JIT runner
+# registration — CHECKLIST §7), so the failover path cannot register a runner
+# today regardless. What it buys is a few hours of merge friction avoided
+# during a GitHub incident; what it costs is a Container Apps environment, a
+# Docker Hub account, a GitHub App holding Administration: Read & write, and
+# ADR 0021's own flagged risk — repository workflow code executing inside the
+# production subscription.
+#
+# Flip to true only alongside provisioning those three secrets. ADR 0021's
+# revisit trigger (the runner being needed routinely) is the reason to.
+variable "ci_runner_enabled" {
+  description = "Deploy the Container Apps CI runner. Off: GitHub-hosted runners are free for this public repository and the runner's prerequisites are unprovisioned"
+  type        = bool
+  default     = false
+}
+
 variable "ci_runner_image" {
   description = "Fully-qualified runner image reference (Docker Hub)"
   type        = string
@@ -39,18 +62,20 @@ variable "ci_runner_max_executions" {
 }
 
 resource "azurerm_container_app_environment" "ci_runner" {
+  count                      = var.ci_runner_enabled ? 1 : 0
   name                       = "hcw-ci-runner-env"
-  location                   = azurerm_resource_group.hcw.location
-  resource_group_name        = azurerm_resource_group.hcw.name
+  location                   = azurerm_resource_group.platform_mgmt.location
+  resource_group_name        = azurerm_resource_group.platform_mgmt.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
   tags                       = var.tags
 }
 
 resource "azurerm_container_app_job" "ci_runner" {
+  count                        = var.ci_runner_enabled ? 1 : 0
   name                         = "hcw-ci-runner"
-  location                     = azurerm_resource_group.hcw.location
-  resource_group_name          = azurerm_resource_group.hcw.name
-  container_app_environment_id = azurerm_container_app_environment.ci_runner.id
+  location                     = azurerm_resource_group.platform_mgmt.location
+  resource_group_name          = azurerm_resource_group.platform_mgmt.name
+  container_app_environment_id = azurerm_container_app_environment.ci_runner[0].id
   tags                         = var.tags
 
   replica_timeout_in_seconds = 1800 # generous ceiling; CI legs finish in minutes
@@ -151,6 +176,6 @@ resource "azurerm_container_app_job" "ci_runner" {
 }
 
 output "runner_job" {
-  description = "Container Apps job name for the CI runner (used by the seeding runbook)"
-  value       = azurerm_container_app_job.ci_runner.name
+  description = "Container Apps job name for the CI runner, or null while ci_runner_enabled is false (used by the seeding runbook)"
+  value       = one(azurerm_container_app_job.ci_runner[*].name)
 }

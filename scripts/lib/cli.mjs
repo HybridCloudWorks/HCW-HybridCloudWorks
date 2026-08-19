@@ -119,7 +119,7 @@ export const log = {
  */
 export function connectCosmos() {
   const endpoint = process.env.COSMOS_ENDPOINT;
-  const databaseId = process.env.COSMOS_DATABASE || 'hybridcloudworks';
+  const databaseId = process.env.COSMOS_DATABASE || 'hcw';
   const key = process.env.COSMOS_KEY;
 
   if (!endpoint) {

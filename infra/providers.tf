@@ -8,7 +8,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 4.0"
+      version = "~> 5.0"
     }
     # Cloudflare remains for DNS management
     cloudflare = {
@@ -33,14 +33,69 @@ terraform {
 # create the credential Terraform authenticates with. See the Bootstrap section
 # of the Deployment Runbook. The GitHub Actions identity in oidc.tf is a
 # different handshake and is managed here.
+# One provider per subscription. The default (unaliased) provider is the
+# APPLICATION subscription because the overwhelming majority of resources are
+# the workload; only the handful that belong to a platform landing zone carry
+# an explicit `provider = azurerm.<alias>`. That way the common case cannot be
+# got wrong by forgetting an argument.
+#
+# subscription_id is set in HCL on every provider, so it does not depend on
+# ARM_SUBSCRIPTION_ID. That variable remains the provider's fallback and is
+# what HCP Terraform's dynamic credentials export, but it no longer decides
+# where anything lands — an explicit value here always wins.
+#
+# azurerm 5.0 changed resource-provider registration from `legacy` (roughly 60
+# providers registered at startup) to `none`. On a subscription nobody has
+# deployed to, that surfaces at apply time as MissingSubscriptionRegistration,
+# which does not say what to do about it. The registration list is therefore
+# explicit — and a variable, so it can be emptied in one place when ALZ
+# absorption moves registration to central governance.
 provider "azurerm" {
   features {
     key_vault {
       purge_soft_delete_on_destroy = false
     }
   }
-  subscription_id = var.azure_subscription_id
+  subscription_id                 = var.subscription_app
+  resource_provider_registrations = "none"
+  resource_providers_to_register  = var.azure_resource_providers
 }
+
+provider "azurerm" {
+  alias = "mgmt"
+  features {
+    key_vault {
+      purge_soft_delete_on_destroy = false
+    }
+  }
+  subscription_id                 = var.subscription_mgmt
+  resource_provider_registrations = "none"
+  resource_providers_to_register  = var.azure_resource_providers
+}
+
+provider "azurerm" {
+  alias = "conn"
+  features {
+    key_vault {
+      purge_soft_delete_on_destroy = false
+    }
+  }
+  subscription_id                 = var.subscription_conn
+  resource_provider_registrations = "none"
+  resource_providers_to_register  = var.azure_resource_providers
+}
+
+# There is deliberately no `ident` alias. The Identity landing zone is empty —
+# HCWSite authenticates against Entra ID, and app registrations are tenant
+# objects rather than subscription resources — so an alias for it would be a
+# declaration with nothing to declare. tflint flags exactly that
+# (terraform_unused_declarations), and it is right to: an unused alias also
+# forces subscription_ident to be supplied for no benefit, which is one more
+# value that must be correct before a plan can run and one more chance to get
+# it wrong.
+#
+# Add it, and its variable, in the same change that adds the first Identity
+# resource. That is a five-line addition, not a refactor.
 
 provider "cloudflare" {
   api_token = var.cloudflare_api_token
