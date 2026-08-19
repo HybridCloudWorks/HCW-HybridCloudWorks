@@ -339,7 +339,7 @@ dictated by HashiCorp and Microsoft and are contractual.
 
 | Value | Why store 2 | `sensitive` |
 | --- | --- | --- |
-| `subscription_app`, `subscription_mgmt`, `subscription_conn`, `subscription_ident` | Provider targets. No defaults on purpose: a wrong guess deploys the workload into a platform subscription, so an unset value must fail the plan | yes (log hygiene) |
+| `subscription_app`, `subscription_mgmt`, `subscription_conn` | Provider targets. No defaults on purpose: a wrong guess deploys the workload into a platform subscription, so an unset value must fail the plan. There is deliberately no `subscription_ident` — the Identity zone is empty, so an alias for it would be an unused declaration and one more value that has to be right before a plan can run | yes (log hygiene) |
 | `entra_tenant_id` | Feeds the `ENTRA_TENANT_ID` app setting and JWT validation | yes (log hygiene) |
 | `entra_api_audience` | Validated as the JWT `aud`. Empty silently disables audience validation, hence the non-empty validation block | no |
 | `cloudflare_api_token` | A genuine credential, and the reason it is here rather than in Key Vault: as a provider argument it never enters state, whereas a vault data-source read would put it there | yes |

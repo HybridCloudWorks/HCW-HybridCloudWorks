@@ -85,20 +85,17 @@ provider "azurerm" {
   resource_providers_to_register  = var.azure_resource_providers
 }
 
-# Declared though nothing targets it yet. An alias costs nothing until a
-# resource references it, and having it here means adding the first Identity
-# resource is a one-line change rather than a provider refactor.
-provider "azurerm" {
-  alias = "ident"
-  features {
-    key_vault {
-      purge_soft_delete_on_destroy = false
-    }
-  }
-  subscription_id                 = var.subscription_ident
-  resource_provider_registrations = "none"
-  resource_providers_to_register  = var.azure_resource_providers
-}
+# There is deliberately no `ident` alias. The Identity landing zone is empty —
+# HCWSite authenticates against Entra ID, and app registrations are tenant
+# objects rather than subscription resources — so an alias for it would be a
+# declaration with nothing to declare. tflint flags exactly that
+# (terraform_unused_declarations), and it is right to: an unused alias also
+# forces subscription_ident to be supplied for no benefit, which is one more
+# value that must be correct before a plan can run and one more chance to get
+# it wrong.
+#
+# Add it, and its variable, in the same change that adds the first Identity
+# resource. That is a five-line addition, not a refactor.
 
 provider "cloudflare" {
   api_token = var.cloudflare_api_token

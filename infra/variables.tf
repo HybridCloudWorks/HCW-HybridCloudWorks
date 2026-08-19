@@ -36,11 +36,11 @@ variable "subscription_conn" {
   sensitive   = true
 }
 
-variable "subscription_ident" {
-  description = "Platform Identity: reserved. Empty today — HCWSite authenticates against Entra ID, whose app registrations are tenant objects rather than subscription resources (sub-plat-ident-prod-scus)"
-  type        = string
-  sensitive   = true
-}
+# There is no subscription_ident. The Identity landing zone
+# (sub-plat-ident-prod-scus) holds nothing: HCWSite authenticates against Entra
+# ID, and app registrations are tenant objects rather than subscription
+# resources. Declaring the variable would require a value for a subscription
+# nothing deploys into — see the note in providers.tf.
 
 # Exactly the resource providers this configuration's resources need, and no
 # more. azurerm 5.0 registers none by default, and an unregistered provider
