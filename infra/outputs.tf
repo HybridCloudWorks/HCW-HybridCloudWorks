@@ -75,8 +75,31 @@ output "function_hostname" {
 }
 
 output "function_url" {
-  description = "Full HTTPS URL for the Function App"
+  description = "Full HTTPS URL for the Function App ORIGIN. Not reachable by browsers or CI while the origin lock is on — see api_base_url"
   value       = "https://${azurerm_function_app_flex_consumption.hcw.default_hostname}"
+}
+
+# The address every CLIENT must use: browsers, CI smoke tests, anything that is
+# not Cloudflare itself.
+#
+# This exists because function_url is a trap once functions_origin_lock_enabled
+# is true. That output names the azurewebsites.net origin, which is exactly the
+# thing the ip_restriction rules refuse — a browser or a GitHub-hosted runner
+# gets 403, and the 403 says nothing about why. Anything that fed
+# function_hostname into a client-facing setting was building a URL guaranteed
+# to fail the moment the lock came on.
+#
+# Route: browser -> api-azure.<domain> (Cloudflare, proxied) -> origin. The
+# late-transform rule stamps x-hcw-origin-secret on the way through, which is
+# what lets client-identity.js trust CF-Connecting-IP.
+#
+# Consumers: VITE_AZURE_FUNCTIONS_URL (frontend build), the FUNCTIONS_URL
+# GitHub variable, deploy-functions.yml's smoke test, and the connect-src
+# entry in frontend/staticwebapp.config.json — which must name this host, since
+# CSP is enforced against the URL the browser actually calls.
+output "api_base_url" {
+  description = "Public API base URL through Cloudflare — the only address clients can reach while the origin lock is on"
+  value       = "https://${cloudflare_record.azure_functions.name}.${var.domain}/api"
 }
 
 output "app_principal_id" {

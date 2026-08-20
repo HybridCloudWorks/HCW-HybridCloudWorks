@@ -320,9 +320,17 @@ if ($outputs) {
   $waveTwo = @(
     @{ output = 'client_id'; kind = 'variable'; name = 'CLIENT_ID'; transform = { param($v) $v } }
     @{ output = 'function_hostname'; kind = 'variable'; name = 'APP_HOSTNAME'; transform = { param($v) $v } }
-    # The route prefix is load-bearing: a base without /api 404s uniformly
-    # (CHECKLIST §6, VITE_AZURE_FUNCTIONS_URL).
-    @{ output = 'function_hostname'; kind = 'variable'; name = 'FUNCTIONS_URL'; transform = { param($v) "https://$v/api" } }
+    # api_base_url, NOT function_hostname. This was built from the
+    # azurewebsites.net origin until 2026-08-20, which stopped working the
+    # moment functions_origin_lock_enabled came on: the origin refuses every
+    # address that is not a Cloudflare range, so the browser and this
+    # repository's own smoke test would both have taken a 403 that names
+    # nothing. api_base_url is the proxied Cloudflare host and already carries
+    # the /api prefix.
+    #
+    # The route prefix is load-bearing either way: a base without /api 404s
+    # uniformly (CHECKLIST §6, VITE_AZURE_FUNCTIONS_URL).
+    @{ output = 'api_base_url'; kind = 'variable'; name = 'FUNCTIONS_URL'; transform = { param($v) $v } }
     @{ output = 'web_resource_group'; kind = 'variable'; name = 'RESOURCE_GROUP'; transform = { param($v) $v } }
     @{ output = 'functions_storage_account'; kind = 'variable'; name = 'FUNCTIONS_STORAGE_ACCOUNT'; transform = { param($v) $v } }
     @{ output = 'cosmos_endpoint'; kind = 'secret'; name = 'COSMOS_ENDPOINT'; transform = { param($v) $v } }
