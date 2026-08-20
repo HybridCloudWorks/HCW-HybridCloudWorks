@@ -822,7 +822,27 @@ Function App's `site_config` grows Cloudflare-only `ip_restriction` rules
 ending in an explicit Deny. Both are inert until switched on, and the plan is
 empty with them off.
 
-Enabling has a hard prerequisite and a hard order:
+**ENABLED 2026-08-20 — both halves are live.** Proof, before and after:
+
+| Path | Before | After |
+| --- | --- | --- |
+| `func-site-prod-cus-01.azurewebsites.net` direct | 404 | **403 — refused** |
+| `api-azure.hybridcloudworks.com` via Cloudflare | 404 | **404 — still reaches the app** |
+
+Both were 404 before because the Function App holds **zero deployed functions**
+— the rebuild recreated the shell and no code has been deployed to it yet.
+That is also why the header could not be verified end-to-end: there is no
+application to observe it arriving. The rule was verified structurally
+instead — phase `http_request_late_transform`, scoped to the `api-azure` host,
+`x-hcw-origin-secret` with operation `set` and a non-empty value.
+
+Two things learned doing it, both recorded in the commits: the API token
+needed **Zone → Transform Rules:Edit** and, contrary to the documentation
+trail, did **not** need Account → Rulesets:Read; and `cloudflare_ruleset`
+failed with `Authentication error (10000)` while every `cloudflare_record`
+applied cleanly, which reads as broken HCL rather than a short credential.
+
+The original enablement order, kept because a rotation repeats it:
 
 1. Set `cloudflare_origin_secret` as a **sensitive** workspace variable in HCP
    Terraform, to **exactly** the `CF-ORIGIN-SECRET` value in Key Vault. A

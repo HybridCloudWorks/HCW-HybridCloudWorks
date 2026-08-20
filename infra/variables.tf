@@ -597,10 +597,18 @@ variable "cloudflare_origin_secret" {
 # Enable only when cloudflare_origin_secret is set AND the vault holds the same
 # value. Enabling with an empty secret locks the origin without giving
 # Cloudflare a way to identify itself.
+# Enabled 2026-08-20, after cloudflare_ruleset.origin_secret was created and
+# verified: phase http_request_late_transform, scoped to the api-azure host,
+# stamping x-hcw-origin-secret from the same value the vault holds.
+#
+# Set false to roll back in one step. That is the whole reason this is a
+# variable and not a hardcoded block — the failure it guards against
+# (Cloudflare ranges change, or a legitimate caller needs the origin) is a
+# same-day problem, not a next-sprint one.
 variable "functions_origin_lock_enabled" {
   description = "Restrict the Function App to Cloudflare IP ranges. Requires cloudflare_origin_secret to match Key Vault"
   type        = bool
-  default     = false
+  default     = true
 }
 
 # Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4).
