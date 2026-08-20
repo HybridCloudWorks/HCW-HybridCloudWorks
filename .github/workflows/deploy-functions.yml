@@ -1,10 +1,21 @@
-name: DISABLED - Prototype Functions Deployment
+name: Deploy Functions
 
+# ENABLED 2026-08-20, manual-dispatch only.
+#
+# The push trigger is deliberately commented out rather than deleted. Enabling
+# this workflow and enabling auto-deploy-on-merge are two separate decisions,
+# and only the first has been made: the Function App has never held code, so
+# the first deploys are the ones most likely to need watching. Restore the push
+# trigger once a dispatch run has succeeded end to end and the smoke test is
+# trusted — not before, because a red auto-deploy on main is discovered by
+# whoever next visits the site.
+#
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - 'functions/**'
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'functions/**'
   workflow_dispatch:
 
 # id-token: write is what lets the runner request a GitHub OIDC token. Without
@@ -15,7 +26,6 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ false }}
     name: Deploy to Azure Functions
     runs-on: ubuntu-latest
     steps:
@@ -69,13 +79,19 @@ jobs:
             --output none
           sleep 30
 
-      # app-name is the `function_app_name` Terraform variable's value
-      # (infra/variables.tf) — the app this configuration creates, not the
-      # legacy hcw-functions-prod estate.
+      # A repository VARIABLE, seeded from the `function_app_name` Terraform
+      # output by scripts/set-github-variables.ps1 — never a literal here.
+      #
+      # It was a literal until 2026-08-20 and had gone stale twice over: this
+      # step read `func-site-prod-scus` and functions/package.json read
+      # `hcw-functions-prod`, an estate older still. Neither app exists, so the
+      # first deploy would have failed on "app not found" — which reads as a
+      # permissions or wrong-subscription problem long before it reads as a
+      # name that was renamed out from under a hardcoded string.
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@c5060b3b8bb1ebbcb531abd00c822ecbaa8ea656 # v1.5.7
         with:
-          app-name: func-site-prod-scus
+          app-name: ${{ vars.FUNCTION_APP_NAME }}
           package: functions/
           respect-funcignore: true
 

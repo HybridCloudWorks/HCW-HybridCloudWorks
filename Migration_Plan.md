@@ -234,6 +234,29 @@ load-bearing and must be ported.
 
 ## 4. Phase 3 — porting 117 functions
 
+> **Read before writing any handler — the four constraints the infrastructure now imposes.**
+>
+> 1. **The API is reachable only at `https://api-azure.hybridcloudworks.com/api`.** The
+>    `azurewebsites.net` origin is restricted to Cloudflare IP ranges and returns `403` to your
+>    laptop, a GitHub runner and a browser alike. A 403 from a cross-origin fetch reads as an auth
+>    or CORS fault, so this costs an afternoon if you meet it without knowing.
+> 2. **Every backing store denies by default.** Cosmos, Key Vault and both storage accounts admit
+>    the Functions integration subnet and nothing else. Local development against them needs an
+>    `*_admin_ip_rules` window: populate → apply → work → empty → apply. The Function App itself is
+>    already inside the subnet, so deployed code needs nothing.
+> 3. **There are no keys.** Cosmos key authentication is disabled, storage SAS is user-delegation
+>    signed via managed identity, and secrets resolve from Key Vault. `DefaultAzureCredential` and
+>    `az login` are the whole local story — if a handler wants a connection string, the design has
+>    gone wrong.
+> 4. **AI handlers write against external provider APIs.** There is no Azure OpenAI account, no
+>    `AZURE_OPENAI_*` setting, and `openai-client.js` was deleted. The `*_API_KEY` app settings
+>    resolve from Key Vault and are what the 17 AI RPCs should use.
+>
+> **The first deploy is worth doing before the first handler.** It settles whether the rebuilt
+> identity authenticates, whether the smoke test passes through Cloudflare, and whether the
+> origin-secret handshake works — three unknowns that otherwise surface in the middle of debugging
+> business logic.
+
 Do not port 117 endpoints one by one in isolation. Group them:
 
 | Group                                    | Count (approx) | Notes                                                                  |
@@ -392,12 +415,23 @@ exactly what a short soak will miss.
 Reuse what exists. This repository's baseline is:
 
 ```bash
-npx vitest run src/          # 361 pass / 44 files
-npx eslint src functions     # 0 errors
-npm run build                # 90 HTML documents pre-rendered
+cd functions && npx vitest run   # 822 pass / 50 files
+cd frontend  && npx vitest run src/   # 105 pass / 14 files
+cd frontend  && npx eslint src        # 0 errors
+npm run build                         # 90 HTML documents pre-rendered
 ```
 
+Infrastructure has its own gates, all currently green: `terraform fmt -check`,
+`terraform validate`, an empty `terraform plan`, and
+`scripts/validate-repository-structure.ps1`. CI additionally runs `tflint` and a
+Trivy IaC scan, neither of which is installed locally — so an IaC change is not
+fully checked until it has been pushed.
+
 Add for the migration:
+
+- **Test against the Cloudflare host, never the origin.** `scripts/smoke-deployed.mjs --base
+  https://api-azure.hybridcloudworks.com/api`. Pointing any check at `azurewebsites.net` produces a
+  403 that looks like a broken deployment and is not.
 
 - **Endpoint parity.** Every one of the 117 endpoints answers with the same shape as Firebase.
   Record the Firebase responses **before** cutover; they are the fixtures.

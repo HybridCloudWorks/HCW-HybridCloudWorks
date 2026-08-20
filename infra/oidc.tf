@@ -58,6 +58,56 @@ resource "azurerm_federated_identity_credential" "github_data_migration" {
 }
 
 # ---------------------------------------------------------------------------
+# The SAME two subjects again, in GitHub's immutable-identifier form.
+#
+# GitHub now composes the subject with numeric org and repository IDs embedded:
+#
+#   repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+#
+# rather than the documented repo:<org>/<repo>:ref:<ref>. Confirmed on
+# 2026-08-20 from a real token — the first dispatch of deploy-functions.yml
+# failed with AADSTS700213 and the presented subject in the error, and
+# `GET /repos/{owner}/{repo}/actions/oidc/customization/sub` reports
+# `sub_claim_prefix` in the ID form while `use_default` is true. So this is
+# GitHub's default now, not a customization anyone here made.
+#
+# Both forms are trusted rather than swapping to the new one, for two reasons.
+# The rollout is GitHub's to reverse, and a credential that stops matching
+# fails every deploy at login with an error naming nothing that changed. And
+# the two are not redundant in the way they look: the name form survives an org
+# rename breaking the IDs' association, the ID form survives a rename outright.
+# Federated credentials are free and capped at 20; four is not a cost.
+#
+# Delete the name-form pair once the ID form has been stable for a release or
+# two — not before, and not because it looks duplicated.
+#
+# The IDs are hardcoded deliberately. They are immutable by definition: that is
+# the entire point of GitHub embedding them, and a variable would invite
+# someone to "fix" them to something readable.
+# ---------------------------------------------------------------------------
+locals {
+  # repo:<org>@<org-id>/<repo>@<repo-id> — verified against the GitHub API,
+  # not copied out of the error message.
+  github_immutable_prefix = "repo:${var.github_org}@312844660/${var.github_repo}@1268997852"
+}
+
+resource "azurerm_federated_identity_credential" "github_branch_immutable" {
+  name                      = "github-${var.github_repo}-branch-immutable"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_immutable_prefix}:ref:${var.github_deploy_ref}"
+}
+
+resource "azurerm_federated_identity_credential" "github_data_migration_immutable" {
+  name                      = "github-${var.github_repo}-env-data-migration-immutable"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_immutable_prefix}:environment:data-migration"
+}
+
+# ---------------------------------------------------------------------------
 # Roles for the deployment identity — scoped, not subscription Contributor
 # ---------------------------------------------------------------------------
 
@@ -164,5 +214,7 @@ output "federated_subjects" {
   value = [
     azurerm_federated_identity_credential.github_branch.subject,
     azurerm_federated_identity_credential.github_data_migration.subject,
+    azurerm_federated_identity_credential.github_branch_immutable.subject,
+    azurerm_federated_identity_credential.github_data_migration_immutable.subject,
   ]
 }

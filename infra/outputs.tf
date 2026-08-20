@@ -4,7 +4,7 @@
 #
 # SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
 # omitted. All runtime access uses managed identity + RBAC; no static key
-# is passed to application code. See Variables.md for the full secrets catalog.
+# is passed to application code. See REVIEW.md Part 4 for the full secrets catalog.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -72,6 +72,19 @@ output "blob_endpoint" {
 output "function_hostname" {
   description = "Default hostname of the Azure Function App (also the Cloudflare CNAME target)"
   value       = azurerm_function_app_flex_consumption.hcw.default_hostname
+}
+
+# The bare resource name, which is what `func azure functionapp publish` and
+# Azure/functions-action's `app-name` take — neither accepts a hostname or a URL.
+#
+# It exists as an output because it was hardcoded in two places and both went
+# stale: deploy-functions.yml carried `func-site-prod-scus` and
+# functions/package.json carried `hcw-functions-prod`, an estate older still.
+# Neither app exists, so a deploy would have failed on "app not found" — which
+# reads as a permissions or subscription problem before it reads as a typo.
+output "function_app_name" {
+  description = "Function App resource name — what a deploy targets. Not the hostname; see function_hostname for that"
+  value       = azurerm_function_app_flex_consumption.hcw.name
 }
 
 output "function_url" {

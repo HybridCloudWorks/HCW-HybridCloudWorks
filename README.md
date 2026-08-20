@@ -49,12 +49,16 @@ documentation — the Wiki explains the system, these record its current state.
 | Document | Holds | Read it when |
 | --- | --- | --- |
 | [TODO.md](TODO.md) | Actionable engineering work | Deciding what to pick up next. An empty list means no known outstanding work |
-| [REVIEW.md](REVIEW.md) | Blockers only a human can resolve — approvals, access, credential ownership, business decisions | Something is stalled and code cannot unstick it |
-| [CHECKLIST.md](CHECKLIST.md) | Required inputs: variables, secret references, keys, APIs, certificates. Never actual values | Preparing a deployment or provisioning an environment |
+| [REVIEW.md](REVIEW.md) | **Start here.** What is already done, blockers only a human can resolve, and every required input — variables, secrets, keys, certificates. Never actual values | Something is stalled, or you are preparing a deployment |
 | [CHANGELOG.md](CHANGELOG.md) | Completed and released work | Establishing what has already shipped |
 
-`scripts/validate-repository-structure.ps1` enforces that all four exist and are
+`scripts/validate-repository-structure.ps1` enforces that all three exist and are
 spelled exactly as above; CI fails if one is missing or its casing drifts.
+
+`CHECKLIST.md` and `Variables.md` were merged into REVIEW.md on 2026-08-20 and
+deleted. Three documents were describing one thing — the input inventory, the
+variable catalogue, and the blockers depending on both — and disagreeing with
+each other about it. REVIEW.md Part 4 is the single inventory now.
 
 ## Repository layout
 

@@ -39,6 +39,20 @@ This project has not cut a tagged release; entries are grouped under
   time the workflow was enabled. Pinned to `v1.5.7`. The workflow is still
   `if: false`, which is why no run had ever surfaced it.
 
+- **`frontend/.env.example` rewritten against the real environment surface**
+  (T-403). `VITE_ENTRA_API_SCOPE` was required and undocumented — without it
+  every token is acquired for no scope, so sign-in succeeds and every API call
+  fails on audience. The file meanwhile documented `VITE_OWNER_ADMIN_EMAIL` /
+  `_UID`, which nothing reads, and carried Firebase secret-set instructions for
+  decommissioned tooling. Rewritten against the actual `import.meta.env`
+  references.
+
+- **`queryDocs` does not discard the continuation token** (T-311) — recorded
+  because the opposite was asserted in review, and a wrong finding costs more
+  than none. `fetchAll()` consumes the token rather than dropping it: the SDK's
+  `toArrayImplementation` loops `while (hasMoreResults())`, accumulating every
+  page. No change was made because none was needed.
+
 ### Added
 
 - **The HCP Terraform → Azure bootstrap, which existed nowhere.**

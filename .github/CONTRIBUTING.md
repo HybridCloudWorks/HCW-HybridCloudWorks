@@ -9,7 +9,7 @@ review discipline — read this before your first pull request.
 | Content | Home |
 | --- | --- |
 | Narrative documentation (architecture, runbooks, ADRs, analysis) | [GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki) — never free-floating in-repo Markdown. Operational pages that deserve PR review (runbooks, standards) are staged in `.github/wiki/` and auto-synced to the Wiki on merge |
-| Review state (work, blockers, inputs, completed) | `TODO.md`, `REVIEW.md`, `CHECKLIST.md`, `CHANGELOG.md` at the root |
+| Review state (work, blockers, inputs, completed) | `TODO.md`, `REVIEW.md`, `CHANGELOG.md` at the root |
 | Tooling-adjacent docs (this file, `infra/README.md`, templates) | Next to the tooling, allowlisted in `scripts/validate-repository-structure.ps1` |
 
 CI enforces this via the Repository Policy workflow. If you add a Markdown
@@ -21,7 +21,7 @@ not to extend the allowlist.
 1. Branch from `main`. No direct pushes to `main`.
 2. Keep the four SOP documents true: new work lands in `TODO.md`, completed
    work moves to `CHANGELOG.md`, human blockers to `REVIEW.md`, new required
-   inputs to `CHECKLIST.md`.
+   inputs to `REVIEW.md` Part 4.
 3. Open a PR using the template; fill the verification section with what you
    actually ran.
 4. CI must be green: build/test, CodeQL, repository policy, and — for
@@ -41,6 +41,6 @@ The environment is **live production** with state in HCP Terraform Cloud.
 
 ## Security
 
-Never commit secrets. `CHECKLIST.md` holds references and formats only; a real
+Never commit secrets. `REVIEW.md` Part 4 holds references and formats only; a real
 value appearing anywhere in Git history is treated as disclosed and rotated.
 Report vulnerabilities per [SECURITY.md](SECURITY.md).

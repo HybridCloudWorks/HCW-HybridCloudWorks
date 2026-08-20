@@ -8,7 +8,7 @@
 - [ ] Application code (`frontend/`, `functions/`, `vps-agent/`)
 - [ ] Infrastructure (`infra/`) — **attach or link the Terraform plan output**
 - [ ] CI / repository policy (`.github/`, `scripts/validate-repository-structure.ps1`)
-- [ ] Documentation / SOP files (`README.md`, `TODO.md`, `REVIEW.md`, `CHECKLIST.md`, `CHANGELOG.md`, Wiki)
+- [ ] Documentation / SOP files (`README.md`, `TODO.md`, `REVIEW.md`, `CHANGELOG.md`, Wiki)
 
 ## Infrastructure changes only
 
@@ -18,7 +18,7 @@
 - [ ] No resource addresses renamed without `moved` blocks
 - [ ] No secrets, state, saved plans, or real tfvars values introduced
 - [ ] Tags (`var.tags`) preserved on any new resource
-- [ ] `CHECKLIST.md` updated if a new required input was introduced
+- [ ] `REVIEW.md` Part 4 updated if a new required input was introduced
 
 ## Verification
 

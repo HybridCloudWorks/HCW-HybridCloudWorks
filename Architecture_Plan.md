@@ -2,14 +2,48 @@
 
 **Audience:** engineers implementing the Azure platform in
 [HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks). **Status:**
-recommendation. Written 2026-07-30 against the approved `.azure/infrastructure-plan.json` and the
-measured state of this repository. **Companion:** [Migration_Plan.md](Migration_Plan.md) —
-sequencing and execution.
+recommendation, **now largely built** — see the box below. Written 2026-07-30 against the approved
+`.azure/infrastructure-plan.json` and the measured state of this repository; status box added
+2026-08-20. **Companion:** [Migration_Plan.md](Migration_Plan.md) — sequencing and execution.
 
 This document exists to do one thing the approved plan does not: reconcile it with the **USD 150 per
 month design ceiling**. The plan is architecturally sound and enterprise-shaped. The problem is that
 enterprise shape and this budget are in direct conflict, and the conflict is resolvable only by
 choosing which properties to keep.
+
+> ## ✅ BUILT — what this document recommended, and what was actually deployed
+>
+> **The infrastructure recommended below exists.** 129 resources in `centralus`, applied
+> 2026-08-19, `terraform plan` clean. Every §3 recommendation was adopted. Read the rest of this
+> document for the *reasoning*; read this box for what is running.
+>
+> | §3 recommendation | Built? |
+> | --- | --- |
+> | 3.1 Flex Consumption instead of three Elastic Premium plans | **Yes** — one Flex Consumption app, 2048 MB, max 20 instances, zero always-ready |
+> | 3.2 Collapse three Functions apps to two | **Went further — one app.** ADR-0019 supersedes ADR-0004 |
+> | 3.3 Defer Private Endpoints | **Yes** — service endpoints + VNet rules instead (ADR-001) |
+> | 3.4 Cosmos serverless, single region, session consistency | **Yes** — `cosmos-site-prod-cus`, serverless, `zone_redundant = false` |
+> | 3.5 Four storage accounts to two | **Yes** — `stsiteprodcus01` (content), `stsitefuncprodcus01` (Functions host) |
+> | 3.6 Keep Static Web Apps and the frontend architecture | **Yes** |
+>
+> **Three things were decided differently from the options §7 offered:**
+>
+> - **AI inference goes to external provider APIs, not Azure OpenAI and not Vertex.** Forced at
+>   apply time: this subscription holds zero gpt-4o TPM quota in every SKU, and DALL-E was not
+>   offered in the region at all. Requesting quota would have unblocked a path nothing consumed —
+>   `openai-client.js` had no importers. The account, its resource group and the module were all
+>   removed; the model router was already provider-abstracted, which is what made this cheap.
+> - **The topology is cross-origin, by construction rather than by preference.** The Function App
+>   origin is restricted to Cloudflare IP ranges, so the API is reachable only at
+>   `https://api-azure.hybridcloudworks.com/api`. §7's "two apps or three" and the same-origin
+>   option are both closed by this.
+> - **The estate is single-region `centralus`.** `southcentralus` was the original choice and cost
+>   three apply-time failures — Cosmos has no subscription region access there and Static Web Apps
+>   is not offered there. Region availability is now checked before an apply, not during one.
+>
+> **What is NOT built:** the application. The Function App holds zero deployed functions, all 73
+> Cosmos containers are empty, and no data has been migrated. §5's three hard problems are all
+> still ahead.
 
 ---
 
@@ -172,7 +206,7 @@ The plan already specifies `publicContent: "Vike-prerendered static output"` and
 | Object storage       | Firebase Storage                             | Blob Storage                                     | Medium      |
 | Secrets              | Secret Manager (+ `defineSecret`)            | Key Vault + managed identity                     | Medium      |
 | Scheduling infra     | Cloud Scheduler                              | Timer triggers (no separate service)             | Low         |
-| AI inference         | Vertex / `@google/genai`                     | Decide: keep Vertex cross-cloud, or Azure OpenAI | Medium      |
+| AI inference         | Vertex / `@google/genai`                     | **External provider APIs**, keyed from Key Vault — neither Vertex nor Azure OpenAI | Medium      |
 | Labs runner          | Self-hosted agent + `lab_jobs` polling       | Same pattern; agent re-pointed at Azure queue    | Medium      |
 | Edge                 | Cloudflare                                   | Cloudflare retained                              | Low         |
 
@@ -244,18 +278,27 @@ build-adjacent change required is the routing config (§4), and that is a new fi
 
 ## 7. Decisions the team must make before implementation
 
-1. **Two Functions apps or three?** Decide on the labs runner's network/timeout needs (§3.2).
-2. **Private endpoints now or later?** §3.3 recommends later. This is a security posture decision
-   and should be recorded as an ADR either way.
-3. **Auth model** — MSAL or SWA built-in (§5.2). Recommendation: MSAL.
-4. **AI provider** — keep Vertex cross-cloud, or move to Azure OpenAI. Note that the model router
-   (`functions/lib/ai-model-router.js`) is already provider-abstracted, so this is a smaller
-   decision than it looks; cross-cloud egress and a second cloud's credentials are the real
-   considerations.
-5. **Cosmos partition-key strategy per collection** — must be decided before any data is written.
-   `content` (947 docs) is the only collection where it materially matters.
-6. **What happens to `blogs`** — 242 documents, legacy, read only through a fallback path. Migrating
-   it carries the legacy forward. Consider whether cutover is the moment to retire it instead.
+**Four of these six are now closed.** Kept with their outcomes rather than deleted, because the
+reasoning is what makes the next similar decision cheaper.
+
+1. ~~**Two Functions apps or three?**~~ **DECIDED — one.** ADR-0019 supersedes ADR-0004. The labs
+   runner's needs did not justify a second app, and one app is one cold-start budget, one
+   deployment, one identity.
+2. ~~**Private endpoints now or later?**~~ **DECIDED — later** (ADR-001, 2026-07-30). Service
+   endpoints and VNet rules carry the posture at zero monthly cost. Revisit if the workload ever
+   holds regulated data.
+3. ~~**Auth model — MSAL or SWA built-in?**~~ **DECIDED — MSAL.** Implemented; `firebase/auth` is
+   gone from the admin surface. The remaining work is Entra registration, not code — REVIEW.md §2.2.
+4. ~~**AI provider — Vertex or Azure OpenAI?**~~ **DECIDED — neither.** External provider APIs,
+   keyed from Key Vault. The decision was forced by quota rather than chosen: zero gpt-4o TPM in
+   every SKU, no DALL-E in region. The provider-abstracted model router is what kept the cost of
+   being wrong low, which is the transferable lesson.
+5. **Cosmos partition-key strategy per collection** — **still open, and now urgent.** All 73
+   containers exist and are empty, so this is the last moment it is free. `content` (947 docs) is
+   the only collection where it materially matters. After the first import it is a migration.
+6. **What happens to `blogs`** — **still open.** 242 documents, legacy, read only through a
+   fallback path. Migrating it carries the legacy forward. Cutover is the natural moment to retire
+   it instead.
 
 ---
 

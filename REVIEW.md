@@ -1,584 +1,394 @@
-# REVIEW — human blockers
+# REVIEW — the working document
 
-**Blockers only a human can resolve.**
+**This is the single document for what needs a human.** It absorbed
+`CHECKLIST.md` (required-input inventory) and `Variables.md` (variable and
+secret catalogue) on 2026-08-20; both files were deleted, and everything they
+contained is below.
 
-**Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
-file holds missing approvals, missing requirements, missing access, missing
-credential ownership, and business, architecture, vendor, legal, or compliance
-decisions. *If an engineer can resolve it without human input, it does not
-belong here* — it belongs in [TODO.md](TODO.md).
+**Read Part 1 first.** It lists what is already finished and verified, so the
+most expensive mistake available here — redoing completed work, or re-deciding
+a settled question — is the one hardest to make.
 
-Required inputs and configuration inventory are in [CHECKLIST.md](CHECKLIST.md).
+| Part | What it holds |
+| --- | --- |
+| **[1](#part-1--done-do-not-redo)** | **Done and verified. Do not redo.** |
+| [2](#part-2--decisions-only-you-can-make) | Decisions only you can make |
+| [3](#part-3--operator-tasks-not-yet-done) | Provisioning work an operator must perform |
+| [4](#part-4--required-inputs) | Required inputs: every variable, secret and setting, with live status |
+| [5](#part-5--deferred-not-blocking) | Deferred — real, but nothing waits on them |
+| [6](#part-6--historical-record) | Historical record and corrections |
+
+Engineering work an engineer can finish without you is in [TODO.md](TODO.md).
 Completed work is in [CHANGELOG.md](CHANGELOG.md).
 
-Last updated 2026-08-18 (§8 added by the resource validation pass);
-previously 2026-08-09 against `main` @ `e4873b8`.
-
-> **Reclassification notice.** This file predates the SOP and previously mixed
-> human blockers with engineering work. Sections describing code to be written
-> have moved to [TODO.md](TODO.md) as items T-001 through T-005. Section 5.0,
-> which described the frontend as "still a Firebase client — this is the
-> Go-Live blocker", is **obsolete**: the decoupling completed in PRs #61–#66 and
-> the file counts it cited are now zero. It is retained below, struck through,
-> until the next review confirms removal.
+**Last updated 2026-08-20**, after the centralus rebuild, the origin lock, and
+the consolidation of CHECKLIST and Variables into this file.
 
 ---
 
-## 0. Decisions required by the 2026-08-09 code review
+## Status at a glance
 
-Raised by the SOP review run. Tracked engineering work is in [TODO.md](TODO.md).
-
-**Status:** §0.1, §0.4 and §0.5 no longer block engineering work — each was
-resolved in code, and what remains is configuration or provisioning. §0.2 and
-§0.3 still need you: they require portal or live-data access that no code change
-can supply.
-
-### 0.1 Deployment topology — same-origin or cross-origin?
-
-**No longer blocks any engineering work.** It was raised as gating T-101 and
-T-102; both were instead resolved so that the topology is a configuration
-value rather than a code path, and both are now closed:
-
-- **API base** — `VITE_AZURE_FUNCTIONS_URL=/api` selects same-origin, an
-  absolute origin ending in `/api` selects cross-origin. One resolver
-  (`frontend/src/lib/functionsBase.js`) serves both.
-- **CORS** — applied to all 59 routes by `lib/auth/http-route.js`. Same-origin
-  requests carry either no `Origin` or the site's own, which is already
-  allowlisted; a different SPA hostname is added through `CORS_ALLOWED_ORIGINS`.
-- **Image URLs** — stored site-relative, so the decision cannot invalidate rows
-  already written to Cosmos.
-
-What remains is a **deployment choice you still have to make and configure**, not
-a blocker: set `VITE_AZURE_FUNCTIONS_URL` and, if cross-origin,
-`CORS_ALLOWED_ORIGINS`. One consequence is tracked as TODO.md T-318 — if
-cross-origin is chosen, ~30 image render sites must call `resolveMediaUrl()`.
-
-The decision is still recorded nowhere. `infra/main.tf` removed the platform
-CORS block on the reasoning that CORS lives in code, which implies cross-origin,
-but no `azurerm_static_web_app_function_app_registration` exists either.
-
-The two shapes, for the record:
-
-- **Same-origin:** serve the API through the Static Web App via a linked backend
-  or a `staticwebapp.config.json` `/api/*` rewrite. Set
-  `VITE_AZURE_FUNCTIONS_URL=/api`.
-- **Cross-origin:** keep `api-azure.hybridcloudworks.com` separate. Set
-  `VITE_AZURE_FUNCTIONS_URL=https://api-azure.hybridcloudworks.com/api`, add the
-  SPA origin to `CORS_ALLOWED_ORIGINS` if it is not `hybridcloudworks.com`, and
-  do T-318.
-
-**Unblocked by:** an architecture decision — which now selects configuration
-rather than gating code.
-
-### 0.2 Was a Cosmos key ever deployed? (rotation decision)
-
-`frontend/.env.example:16-18` instructs operators to set `VITE_COSMOS_ENDPOINT`,
-`VITE_COSMOS_READ_KEY` and `VITE_COSMOS_DATABASE`. Anything `VITE_`-prefixed is
-compiled into the public browser bundle, and the SWA CSP still permits
-`https://*.documents.azure.com` — so a populated value would be a published,
-account-scoped read key over all 71 containers, including `admins`,
-`admin_audit_logs`, `mcp_servers` (oauthToken) and every unpublished draft.
-
-No file in `frontend/src` reads these variables, so this is a latent instruction
-rather than an active leak. Removing the lines is engineering work (TODO.md
-T-403/T-404). **The decision is whether rotation is required**, which depends on
-whether the value was ever set in a real `.env`, in CI, or in Static Web App
-application settings.
-
-**Unblocked by:** someone with portal/CI access checking. If it was ever set:
-rotate the Cosmos account keys and set `local_authentication_disabled = true`.
-
-### 0.3 Authorize inspection of live container contents
-
-Three findings cannot be closed from source and need one query each against the
-deployed data:
-
-| Question | Bears on |
+| | |
 | --- | --- |
-| Document count in `content` and `blogs` | TODO.md T-206 — whether the 1000-row window is already truncating |
-| `SELECT DISTINCT VALUE c.contentStatus FROM c WHERE STARTSWITH(c.contentStatus, 'published')` | Whether the four-value public allowlist hides legacy documents the old prefix match admitted |
-| Contents of `podcasts`, `rss_cache`, `ai_insights`, `_snapshots` | TODO.md T-201/T-202 — the actual exposure of the unfiltered anonymous reads |
+| Azure infrastructure | **Deployed** — 129 resources, `centralus`, plan clean |
+| Function App code | **Zero functions deployed** — the app is an empty shell |
+| Terraform authentication | **Working** — `id-plat-terraform-prod-cus-01` |
+| HCP Terraform variables | **All 13 set** |
+| GitHub repository variables | **All 7 set and cross-checked against Terraform outputs** |
+| GitHub repository secrets | **1 of 5 set** — see §4.3 |
+| Key Vault | **19 of 21 secrets seeded** — two runtime-read secrets outstanding, §3.1 |
+| Origin lock | **On** — origin returns 403 to everything that is not Cloudflare |
+| Data migration | **Not started** — 73 containers exist and are empty |
 
-**Unblocked by:** read access to the deployed Cosmos account.
-
-### 0.4 Credential model for the VPS agent
-
-**Decided and implemented — API-only.** What remains here is provisioning, not
-a decision.
-
-`vps-agent/index.js:16` used a Cosmos **account primary key** — full read/write
-on all 71 containers — deployed to a third-party VPS. This section offered two
-alternatives. One of them does not work:
-
-- **A brokered resource token is not viable.** Resource tokens are minted from
-  the SQL API's users/permissions model, which requires the master key to
-  create, and `disableLocalAuth` admits "only MSI and AAD" — it disables
-  resource tokens along with keys. Brokering them would mean the Functions app
-  holds the master key and the account can never turn local auth off, which is
-  what TODO.md T-315 exists to make possible. It would have traded one
-  permanent key for another.
-- **A workload identity via Azure Arc** remains viable, and was not chosen. It
-  would still leave the VPS holding read/write over both lab containers,
-  including other agents' rows, and it puts an Arc agent on a host you do not
-  fully control.
-
-**What was built instead:** the agent holds no database credential. It
-authenticates to the Functions API with an Entra certificate credential and can
-reach exactly three endpoints, each further constrained server-side (TODO.md
-T-401). A stolen VPS credential buys those three operations, not two
-containers.
-
-**What you still have to provision** — none of it expressible in this
-repository's Terraform, since it is Entra directory configuration:
-
-1. An app registration per agent host, confidential client, with a certificate
-   whose **private key is generated on the VPS and never transmitted**.
-2. A `LabAgent` App Role on the API app registration, assigned to that
-   registration's service principal.
-3. A `lab_agents/{agentId}` document per agent, carrying `oid` (the agent
-   service principal's object id), `active: true`, and the `capabilities` array
-   that decides which job types it may claim.
-
-Revocation is `active: false` on the registry document, which takes effect on
-the agent's next call — there is no cache to wait out.
-
-**Unblocked by:** someone with Entra directory access performing the three
-steps above. Required inputs are itemised in [CHECKLIST.md](CHECKLIST.md).
-
-### 0.6 Republish the snapshots after the first deploy — REQUIRED, not optional
-
-**Action for you, not a decision.** It cannot be done from an agent session:
-`publishSnapshot` is an authenticated endpoint on a deployed Function App, and
-no environment has ever existed (§1.1, §1.2).
-
-TODO.md T-201 fixed what `publishSnapshot` **writes**. It does not touch what is
-already written. If a `_snapshots/speakerevents` document exists from before the
-fix, it still contains every admin email that ever touched an event, plus any
-`display: false` records — and `GET public/snapshots/speakerevents` will keep
-serving them until the document is regenerated.
-
-So the moment there is a deployed environment holding pre-fix snapshot data:
-
-1. Sign in as an admin with `editor` or above.
-2. `POST {api-base}/publishSnapshot` with the Entra bearer token. The admin UI's
-   PublishSnapshotButton does the same thing.
-3. Confirm `GET {api-base}/public/snapshots/speakerevents` contains no `@`
-   addresses and no `display: false` entries.
-
-If instead the account is provisioned fresh with no pre-fix data, there is
-nothing to clean and step 3 is just a check.
-
-Related but separate: §0.3 asks for the contents of `_snapshots` so the *size*
-of the historical exposure is known. Republishing removes the data; only reading
-it first tells you what was published, for how long.
-
-### 0.5 Media delivery — keep the account closed, or open it behind a CDN?
-
-**Not blocking.** T-105 is resolved in the closed configuration; this decides
-whether to change it later.
-
-Uploaded images are served by
-`GET /api/public/media/{container}/{*path}`, reading blobs through the Function
-App's managed identity. The storage account stays closed to the internet
-(`allow_nested_items_to_be_public = false`, `network_rules default_action =
-"Deny"`), no new Azure resource is provisioned, and no security setting is
-reversed. Responses are `immutable` with ETag support, so repeat views do not
-reach the function.
-
-The alternative the review preferred — open the account and front it with
-Cloudflare or Azure Front Door — trades two security settings and a monthly
-service floor for edge caching and bytes that never touch compute. Against a USD
-150 design ceiling that is a spend decision.
-
-Worth revisiting if image egress through the Function App turns out to dominate
-invocation cost. Nothing in the delivered implementation forecloses it: the
-route can sit behind a CDN unchanged, and stored URLs are site-relative.
-
-**Unblocked by:** a cost/exposure decision, once there is real traffic data.
+**The single most useful fact in this document:** the public API base is
+`https://api-azure.hybridcloudworks.com/api`. The `azurewebsites.net` origin is
+firewalled to Cloudflare IP ranges and answers **403** to browsers, CI runners
+and your laptop alike. A 403 from a cross-origin fetch reads as an auth or CORS
+fault, so this is worth knowing before it costs you an afternoon.
 
 ---
 
-## 1. Blocked by this environment
+# PART 1 — DONE. Do not redo.
 
-These cannot be done from an agent session regardless of scope or approval.
+Everything in this part was completed and verified. Each entry says what proved
+it, because "it should work" and "it was observed working" are different claims.
 
-### 1.1 Terraform `validate`, `plan` and `apply` — never run
+## 1.1 Infrastructure — deployed, and rebuilt into one region
 
-No Terraform binary is available in this environment, and no Terraform Cloud credentials.
-**Every infrastructure change in this repository has been reasoned from configuration and checked
-only for structure** — brace balance, resource references, argument names against provider docs.
+**Done 2026-08-19.** The estate was torn down and rebuilt to consolidate into
+`centralus` and adopt the CAF instance-number convention: 125 destroyed, 125
+created, 129 resources in state.
 
-This matters more than it normally would. Commit `7338db9` established that `terraform validate`
-passes on a Function App configuration that can never apply, because validate checks schema, not
-provider/API compatibility. A passing validate would not have been evidence either. **The only
-meaningful check is `terraform plan` against the real provider**, and it has never been run against
-this configuration.
+| Resource | Name |
+| --- | --- |
+| Function App origin | `func-site-prod-cus-01.azurewebsites.net` |
+| **Public API base** | **`https://api-azure.hybridcloudworks.com/api`** |
+| Static Web App | `stapp-site-prod-cus-01` → `calm-ground-0d0e6a010.7.azurestaticapps.net` |
+| Cosmos | `cosmos-site-prod-cus`, database `hcw`, 73 containers |
+| Key Vault | `kv-site-prod-cus-01` |
+| Storage | `stsiteprodcus01` (content) · `stsitefuncprodcus01` (Functions host) |
+| Resource groups | `rg-{web,db,stor,sec,conn}-site-prod-cus`, `rg-mgmt-plat-prod-cus`, `rg-conn-hub-prod-cus` |
+| Bootstrap identity | `id-plat-terraform-prod-cus-01` in `rg-mgmt-boot-prod-cus` |
 
-Treat all infra work here as unverified until someone runs a plan.
+**Proved by:** `terraform plan` → *"No changes."* · a sweep of all three
+subscriptions returning zero resources in `southcentralus` · `fmt`, `validate`
+and the repository-structure gate all passing · CI green on PR #122 including
+tflint and Trivy.
 
-**Unblocked by:** running `terraform plan` from Terraform Cloud, or locally with credentials.
+**This supersedes the old §1.1 and §1.2**, which recorded that Terraform had
+never been run and no cloud control plane was reachable. Both are now false.
+Every infrastructure claim in this repository has been checked against a real
+plan.
 
-### 1.2 Azure, Cloudflare and GCP control planes — no access
+## 1.2 The bootstrap handshake — Terraform can authenticate
 
-No credentials for any cloud account. Nothing has been provisioned, no secret has been written to
-Key Vault, no DNS record inspected, no Firestore data read.
+**Done.** `scripts/bootstrap-terraform-oidc.ps1` created
+`id-plat-terraform-prod-cus-01`, two federated credentials against
+`https://app.terraform.io` (`run_phase:plan` and `run_phase:apply` — Entra
+matches subjects exactly, so one credential is not enough), and Contributor +
+Role Based Access Control Administrator on all three target subscriptions.
 
-**Unblocked by:** an operator with Azure Owner / GitHub Owner performing the steps, using runbooks
-prepared here.
+The identity was renamed and moved on 2026-08-20: `id-hcw-terraform` in
+`rg-hcw-bootstrap` (southcentralus) broke the naming convention four ways.
+The swap ran create → repoint `TFC_AZURE_RUN_CLIENT_ID` → verify a plan
+authenticates → strip the old role assignments → delete the old group.
+Reversing that order locks the workspace out with `AADSTS70021`.
 
-### 1.3 The Wiki — outside the authorized repository set
+**Two design decisions worth not re-litigating:**
 
-`HCW-HybridCloudWorks.wiki` is not in this session's repository scope, so pushes are refused by the
-git proxy. Two consequences:
+- **The bootstrap identity is deliberately outside Terraform state.** If
+  `infra/` managed the identity it authenticates with, a destroy or a bad plan
+  would lock the workspace out irrecoverably. It will therefore never appear in
+  a drift plan.
+- **Managed identity, not app registration.** App registrations need
+  Application Administrator in Entra, which Azure Owner does not grant — the two
+  are separate permission planes. A user-assigned managed identity is an
+  ordinary Azure resource, so an Azure Owner can build the whole chain with no
+  directory role.
 
-- The merged Implementation TODO from #37 is **prepared but unpushed**. It rewrites
-  `Implementation-TODO.md`, deletes `Implementation-Plan.md`, and updates `Home.md` and `_Sidebar.md`.
-- The **Phase 4 data-migration write-up does not exist anywhere.** `35d3076` removed it from the
-  repository "per the documentation policy", but it was never created in the Wiki. `README.md` and
-  `Migration_Plan.md` both cite it as authoritative for the migration's findings and runbook.
+**Proved by:** a plan authenticating through the new identity, and Terraform
+correctly moving `azurerm_role_assignment.terraform_kv_secrets` to the new
+principal.
 
-**Unblocked by:** granting the session wiki access, or a manual paste.
+## 1.3 Variables and secrets — seeded
 
-### 1.4 `pwsh` unavailable — repository policy checked by hand
+**HCP Terraform workspace (`hcw/hcw-azure`, project `Site`): all set.** The four
+contractual environment variables plus every Terraform variable without a
+default. Full inventory in §4.1.
 
-`scripts/validate-repository-structure.ps1` is the only gate that runs on every PR, and it cannot be
-executed locally. Its constraints have been checked by reading the script and comparing by hand. CI
-runs it for real on every PR, so this is low risk, but local checks are not equivalent.
+**GitHub repository variables: all seven set**, each sourced from a Terraform
+output and cross-checked afterwards. Full inventory in §4.2.
 
-### 1.5 MCP connectors not authorized
+**Key Vault: 19 secrets seeded 2026-08-19** and diffed against the
+`@Microsoft.KeyVault(...)` references in `infra/main.tf` — exact match, nothing
+missing, nothing stray. Two runtime-read secrets remain outstanding; see §3.1.
 
-`Firecrawl_Search` and `Notion` require OAuth, which cannot be completed from a non-interactive
-session. Notion is no longer relevant — it was retired as a secret source in #35. Firecrawl is
-declared in `functions/package.json` and used by the scrape path; no work here depended on it.
+The seeding window was opened and closed with `az keyvault network-rule
+add/remove`, and access required assigning the operator **Key Vault Secrets
+Officer** — RBAC authorization is on, so subscription Owner alone carries no
+read or write access to secret data. That surprise is worth remembering.
 
-**Unblocked by:** authorizing them in claude.ai connector settings.
+## 1.4 Security posture — closed by default
 
----
-
-## 2. Blocked on a decision, not on capability
-
-### 2.1 Dependabot #17 — eslint 9 → 10
-
-**Upstream blocked. Nothing to do on our side.**
-
-eslint 10 crashes `eslint-plugin-react`:
-
-```
-TypeError: contextOrFilename.getFilename is not a function
-  at resolveBasedir (eslint-plugin-react/lib/util/version.js:31)
-```
-
-`npm run lint` goes from working to exit 2. Both `eslint-plugin-react` (peer `≤9.7`) and
-`eslint-plugin-jsx-a11y` (peer `≤9`) cap below 10.
-
-**Unblocked by:** both plugins shipping eslint-10 peer support. Then the bump and both plugin
-upgrades land together. Monitor only.
-
-### 2.2 react-router — 2 HIGH advisories, deliberately not fixed
-
-GHSA-qwww-vcr4-c8h2, "RSC Mode CSRF Bypass". **Assessed as not applicable**: the advisory is specific
-to React Server Components mode, and this is a plain Vite SPA using only `useNavigate` / `Link` /
-`useLocation` with no RSC entry points.
-
-There is also no fixed version *above* the current one — the advisory range is 7.12.0 – 8.2.0 and
-npm's only proposed remedy is a **downgrade** to 7.11.0, losing seven minor versions to mitigate a
-code path the app does not execute.
-
-The "not reachable" conclusion rests on a source scan for RSC entry points. **If RSC adoption is ever
-planned, this flips.**
-
-**Unblocked by:** an upstream fix above 8.2.0, or a decision to adopt RSC (which would make it real).
-
-### 2.3 GCP Secret Manager stack — 8 unreferenced secrets
-
-`frontend/platform/terraform/gcp-secrets/` still defines `cloudflare-dns-api-token`,
-`postgres-db-password`, `n8n-encryption-key`, `n8n-admin-password`, `grafana-admin-password`,
-`openai-api-key`, `perplexity-api-key`, `anthropic-api-key`. Nothing active references the stack.
-
-Left alone deliberately: the README requires **explicit approval for GCP decommissioning**, and if
-that state is still live those secrets exist in GCP.
-
-**Unblocked by:** a decommissioning decision.
-
-### 2.4 Six pre-existing test failures — gate covers a subset
-
-CI runs `test:admin` (5 files, green). The full `vitest run` has **6 failing tests across 3 files**
-on `main`, including `App.routes.test.jsx` timeouts. Confirmed pre-existing by baselining with and
-without changes — identical both ways.
-
-The CI gate therefore validates a subset. Widening it to the full suite requires fixing those six
-first — the same "clear it, then enforce it" sequence used for lint and format in #35.
-
-**Unblocked by:** a decision to spend time on them.
-
-### 2.5 Thirteen non-executing workflows in `frontend/.github/`
-
-GitHub only runs workflows from the repository root. `frontend/.github/workflows/` holds 13 that
-never execute, including five Notion secret workflows that now reference **scripts deleted in #35**.
-
-A shadow CI directory that looks real and is not. Not touched because deleting 13 files is a wider
-change than any request so far covered.
-
-**Unblocked by:** a decision to delete or relocate them.
-
-### 2.6 ~~Genuinely removing the `frontend/scripts` package boundary~~ — MOVED to TODO.md
-
-> **Moved to [TODO.md](TODO.md).** Engineer-resolvable refactoring.
-
-`frontend/scripts/package.json` has no dependencies and no scripts, but **is load-bearing**: with no
-`"type"` field it marks that directory CommonJS inside an ESM parent, and nine `.js` helpers there
-use `require()`. Deleting it breaks them:
-
-```
-ReferenceError: require is not defined in ES module scope
-    at frontend/scripts/validate-routes.js:1:12
-```
-
-#36 removed it from Dependabot and the CI matrix but kept the file. Removing it properly is a real
-refactor: convert nine files to ESM or rename to `.cjs`, and update every reference.
-
-**Unblocked by:** a decision that the refactor is worth it.
-
----
-
-## 3. Carried forward from the pricing / Flex Consumption work
-
-Recorded by the author of `#38`, still open.
-
-### 3.1 `ip_restriction` to Cloudflare ranges
-
-Explicitly deferred: *"still needs the current range list and is not in this commit."* Until it
-lands, `CF_ORIGIN_SECRET` is the only thing establishing that a request arrived through Cloudflare
-rather than directly at the origin.
-
-**Unblocked by:** pulling the current Cloudflare IP range list and deciding on a refresh mechanism —
-the list changes, so a hardcoded copy goes stale silently.
-
-### 3.2 Turn on `local_authentication_disabled` for Cosmos
-
-**The application side is done.** `COSMOS_CONNECTION_STRING` — which carried the account primary
-key — has been removed from app settings along with the change-feed triggers that were its only
-consumer (TODO.md T-315). No application code path uses a Cosmos key.
-
-What remains is a decision, not a refactor. `.github/workflows/migrate-data.yml` still passes an
-optional `COSMOS_KEY` secret to the migration scripts; they accept Entra credentials instead
-(`scripts/lib/cli.mjs`), but the key path is still wired. Setting
-`local_authentication_disabled = true` on the account breaks that path for anyone relying on it, and
-it must be set *after* the data migration, not before.
-
-Note this also disables Cosmos **resource tokens**, which require the master key — confirmed against
-the Cosmos documentation, which describes the setting as admitting "only MSI and AAD". Nothing in
-this repository issues resource tokens today; the constraint is recorded so a future design does not
-assume they remain available.
-
-**Unblocked by:** confirming the data migration is complete and that no operator workflow depends on
-`COSMOS_KEY`, then setting `local_authentication_disabled = true` and rotating the keys (§0.2).
-
-### 3.3 Two unconvertible pricing unit mismatches
-
-`compute-serverless` and `database-nosql` baselines measure different meters than their live paths:
-
-| Service | Baseline unit | Live unit |
+| Control | State | Note |
 | --- | --- | --- |
-| `compute-serverless` | million invocations | normalized request workload |
-| `database-nosql` | hour (provisioned) | million operations (on-demand) |
+| Origin lock (`ip_restriction`) | **On** | 15 Cloudflare ranges + terminating `Deny 0.0.0.0/0`. This closes the old §3.1 |
+| Cloudflare origin secret | **On** | `cloudflare_ruleset.origin_secret` stamps `x-hcw-origin-secret` |
+| `https_only` | **On** | |
+| Key Vault firewall | **Deny** | Functions subnet only, no IP rules |
+| Cosmos firewall | **Deny** | Functions subnet only |
+| Both storage accounts | **Deny** | Functions subnet + per-run CI window |
+| Cosmos key authentication | **Disabled** | `cosmos_local_auth_disabled = true` |
+| `prevent_destroy` guards | **On** | Cosmos, both storage accounts, Key Vault |
 
-Recorded in `KNOWN_UNIT_MISMATCHES` with a test that fails if a third appears. Choosing replacement
-baselines is a pricing-catalog decision, not a refactor.
+**The Cosmos key-rotation question is closed by construction.** The old §0.2
+asked whether a Cosmos read key had ever been published, and whether rotation
+was needed. The account was destroyed and recreated in the rebuild, and key
+authentication is disabled on the new one — so no key exists to rotate and none
+would work if it did. The old §3.2 ("turn on `local_authentication_disabled`")
+is likewise satisfied.
 
-**Unblocked by:** someone picking the replacement figures.
+**One caveat on the origin lock.** The IP half is proved: the origin went from
+`404` to `403` for a direct call while the Cloudflare path stayed reachable.
+The *header* half — Cloudflare stamping `x-hcw-origin-secret` and
+`client-identity.js` accepting it — is **structurally verified but not observed
+end to end**, because the Function App has no deployed code to observe it. If
+anonymous rate-limited endpoints throw after the first deploy, the secret is
+mismatched; rollback is `functions_origin_lock_enabled = false`.
+
+## 1.5 Questions that no longer need answering
+
+| Was | Now |
+| --- | --- |
+| §0.1 Deployment topology — same-origin or cross-origin? | **Settled: cross-origin.** The origin lock makes it the only working shape. `VITE_AZURE_FUNCTIONS_URL` = the Cloudflare base, and `staticwebapp.config.json`'s `connect-src` names the same host |
+| §0.2 Was a Cosmos key ever deployed? | **Moot** — account recreated, key auth disabled |
+| §0.3 Inspect live container contents | **Moot for now** — all 73 containers are empty. Becomes live again once data migrates |
+| §0.6 Republish snapshots after first deploy | **Moot** — no pre-fix data exists to republish. Fresh account |
+| §3.2 Turn on Cosmos `local_authentication_disabled` | **Done** — defaults `true` |
+| §4.7 Computed-property healer's role grant | **Done** — both `azurerm_cosmosdb_sql_role_assignment` grants are in state |
+| §8.2 The approved plan no longer describes the system | **Decided 2026-08-18** — option (b), superseded as-built by ADR-0018 through ADR-0021 |
+| CodeQL alerts from `.claude/skills/**` | **Moot** — `.claude/` was removed from the repository on 2026-08-20, so the files that produced every open alert are gone |
 
 ---
 
-## 4. Deployment prerequisites — configuration that does not exist yet
+# PART 2 — DECISIONS ONLY YOU CAN MAKE
 
-Not blocked work so much as **things an operator must do**, recorded so nothing is discovered at
-cutover.
+These block work. Each says what it unblocks.
 
-### 4.0 The bootstrap handshake — the prerequisite to every other item in this section
+## 2.1 Entra provisioning for the VPS agent
 
-**Status: open. This is the first thing an operator must do, and until 2026-08-18 it was written
-down nowhere.**
+**Decided and built — API-only. What remains is provisioning, not a decision.**
 
-`infra/providers.tf` declares the `azurerm` provider with no credential. That is correct — runs
-execute in HCP Terraform under dynamic provider credentials, which inject `ARM_CLIENT_ID`,
-`ARM_OIDC_TOKEN` and `ARM_USE_OIDC` into the run environment. But the identity those credentials
-assume has to exist first, and **nothing in this repository could create it**: `infra/oidc.tf`
-creates the *GitHub Actions* identity, which only comes into being after a successful apply.
-Terraform cannot create the credential Terraform authenticates with.
+The agent holds no database credential. It authenticates to the Functions API
+with an Entra certificate credential and can reach exactly three endpoints, each
+further constrained server-side. A stolen VPS credential buys those three
+operations, not two containers.
 
-A repository-wide grep for `ARM_CLIENT_ID`, `TFC_AZURE_*` or `app.terraform.io` returned nothing
-across `.tf`, `.yml` and `.md` before this entry. The gap was invisible in review because every
-individual file was correct; only the join between them was missing.
+Two alternatives were rejected and should stay rejected:
 
-**Resolved in the repository** by `scripts/bootstrap-terraform-oidc.ps1` plus section 0 of the
-Deployment Runbook and CHECKLIST §8. The script creates `rg-mgmt-boot-prod-cus`, the `id-plat-terraform-prod-cus-01`
-user-assigned managed identity, two federated credentials against `https://app.terraform.io`
-(`run_phase:plan` and `run_phase:apply` — Entra matches subjects exactly, so one credential is not
-enough), and Contributor + Role Based Access Control Administrator at subscription scope.
+- **A brokered Cosmos resource token is not viable.** Resource tokens are minted
+  from the SQL API's users/permissions model, which requires the master key, and
+  `disableLocalAuth` admits "only MSI and AAD" — it disables resource tokens
+  along with keys. Brokering them would mean the Functions app holds the master
+  key permanently.
+- **A workload identity via Azure Arc** is viable but was not chosen. It leaves
+  the VPS with read/write over both lab containers including other agents' rows,
+  and puts an Arc agent on a host you do not fully control.
 
-**Still requires an operator:** running it, and setting the four workspace environment variables it
-prints. Two decisions are recorded here rather than assumed:
+**What you must provision** — none of it expressible in this repository's
+Terraform, because it is Entra directory configuration:
 
-- **The bootstrap identity is not in Terraform state, by design.** If `infra/` managed it, a
-  destroy or a bad plan would lock the workspace out of the subscription irrecoverably. It also
-  means the identity will not appear in a drift plan — it is operator-owned infrastructure, and
-  the resource group name is the only handle on it.
-- **Managed identity, not app registration** — same reasoning as `infra/oidc.tf`: app registrations
-  need Application Administrator in Entra, which Azure Owner does not grant. Entra supports
-  federating a user-assigned managed identity to an arbitrary external issuer, so the whole chain
-  is creatable by an Azure Owner with no directory role.
+1. An app registration **per agent host**, confidential client, with a
+   certificate whose **private key is generated on the VPS and never
+   transmitted**.
+2. A `LabAgent` App Role on the API app registration, assigned to that
+   registration's service principal. Deliberately disjoint from `Admin`.
+3. A `lab_agents/{agentId}` document per agent carrying `oid` (the agent service
+   principal's object id), `active: true`, and the `capabilities` array
+   deciding which job types it may claim — the agent cannot set its own.
 
-**Consequence for every "Verified" claim in this file and in CHECKLIST.md:** if this handshake has
-never been completed, no apply has ever run against this subscription and the platform does not
-exist yet, regardless of what the live site serves. The operator must confirm which state the
-subscription is actually in before section 4.2 (Key Vault seeding) or 4.3 (enabling the workflows)
-can start. Section 1.1 already records that no session has ever been able to check.
+Revocation is `active: false` on the registry document, effective on the agent's
+next call. There is no cache to wait out.
 
-### 4.1 Required Terraform variables with no default
+**Unblocks:** the labs runner path. **Inputs:** §4.7.
 
-Apply fails without all six. Three are sensitive and belong in Terraform Cloud workspace variables.
+## 2.2 Entra SPA registration for admin sign-in
 
-| Variable | Sensitive |
-| --- | --- |
-| `azure_subscription_id` | yes |
-| `entra_tenant_id` | yes |
-| `cloudflare_api_token` | yes |
-| `entra_api_audience` | no — but validated non-empty |
-| `cloudflare_zone_id` | no |
-| `budget_alert_email` | no |
+The admin frontend authenticates with Entra via MSAL; `firebase/auth` is gone
+from the admin surface. Before any admin can sign in:
 
-`entra_api_audience` needs a **second Entra app registration** (the API, exposing `api://<guid>`),
-separate from the SPA. `verify-token.js` refuses to start without it — deliberately, because
-`jsonwebtoken` *skips* audience validation when the audience is unset rather than failing, which
-would accept any Microsoft-signed token in the tenant.
+1. **Expose an API scope** on the API app registration (the one whose URI is
+   `ENTRA_API_AUDIENCE`): *Expose an API → Add a scope*, e.g. `access_as_admin`.
+   Full value: `api://<api-app-client-id>/access_as_admin`.
+2. **SPA app registration** (or a SPA platform on the same registration):
+   *Authentication → Add platform → Single-page application*, redirect URIs =
+   the site origins (production + `http://localhost:5173`). Grant delegated
+   permission to the scope from step 1 plus openid/profile/email, and
+   admin-consent it.
+3. **Build variables**: `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`,
+   `VITE_ENTRA_API_SCOPE`. Without the last, the SPA requests a token the
+   backend rejects on audience.
+4. **App Roles**: the API registration carries the `Admin` role (guard gate 1) —
+   assign it per admin user. Gate 2 is the `admins/{oid}` registry, seeded via
+   `CMS_BOOTSTRAP_ALLOWED_UIDS` or `CMS_BOOTSTRAP_ALLOWED_EMAILS`.
+5. **MFA** is an Entra Conditional Access policy, not app code.
 
-### 4.2 Key Vault seeding runbook
+> **The highest-risk mismatch in the whole system.** If `ENTRA_API_AUDIENCE` and
+> `VITE_ENTRA_API_SCOPE` disagree, sign-in *succeeds* and every API call 401s.
+> The failure looks like a broken API, not a misconfigured scope.
 
-**Twenty-one secrets**, seeded **by hand as Azure Owner**. Deliberately not managed by Terraform: the
-values would otherwise live in both Terraform Cloud and Terraform state, and several of them (an AWS
-secret key, a GCP service-account JSON, a GitHub App RSA key) do not warrant that blast radius.
+**Unblocks:** every authenticated endpoint, and the admin UI entirely.
 
-_Was five. The other sixteen are Firebase `defineSecret` bindings that Site-Main's `functions/`
-declares and this repository had no home for: it declares 18, and before this change exactly two —
-the AWS pair — existed here. A handler reaching for an unbound secret deploys green and dies on
-first invocation in production, and no test reproduces it because no test binds secrets._
+## 2.3 Cloudflare WAF rule for synthetic validation
 
-**Platform secrets** — needed before the Function App is useful at all:
+Every request from a GitHub-hosted runner receives a Cloudflare bot challenge
+(403) before reaching the origin. `validate-deployed.yml` can therefore verify
+DNS, TLS and that the edge is up — but nothing about the application. Its "admin
+guards refuse anonymous callers" check passes **vacuously**: a challenge 403 is
+indistinguishable from an application refusal.
 
-| Secret | Consumed by |
-| --- | --- |
-| `AWS-ACCESS-KEY-ID` | AWS pricing, via app-setting Key Vault reference |
-| `AWS-SECRET-ACCESS-KEY` | same — scope the IAM policy to `pricing:GetProducts` only |
-| `CF-ORIGIN-SECRET` | `client-identity.js`, fails closed in production without it |
-| `CLIENT-IP-SALT` | `client-identity.js`, rate-limit key derivation |
-| `GCP-SERVICE-ACCOUNT-JSON` | `gcp.js`, read at runtime via `getSecret()` |
+**This matters more now than when it was written.** With the origin lock on,
+going around Cloudflare is no longer an option — the origin refuses runners too.
+The Cloudflare path is the only path, so validating it is the only validation
+available.
 
-**Ported CMS secrets** — needed before `FEATURE_FLAG_SCHEDULERS` goes true or any CMS handler is
-ported. All reach the app as app-setting Key Vault references except the last, which is read at
-runtime:
+Standard fix: a WAF custom rule that skips the challenge when a request carries
+a secret header, with the secret stored as a GitHub Actions secret the workflow
+sends.
 
-| Secret | Consumed by |
-| --- | --- |
-| `ANTHROPIC-API-KEY` | AI drafting, WAF scoring, architecture generation |
-| `OPENAI-API-KEY` | AI generation fallback |
-| `PERPLEXITY-API-KEY` | research/enrichment |
-| `REPLICATE-API-KEY` | image generation |
-| `FIRECRAWL-API-KEY` | URL ingestion and scraping |
-| `LINKIE-API-KEY` | Linkie proxy |
-| `YOUTUBE-API-KEY` | `youtubeChannelStats` |
-| `PUBLER-API-KEY` | social scheduling proxy and calendar sync |
-| `PUBLER-WORKSPACE-ID` | same — identifier, travels with the key |
-| `KLAVIYO-PRIVATE-KEY` | newsletter subscribe, weekly digest |
-| `KLAVIYO-LIST-ID` | same — identifier, travels with the key |
-| `TELEGRAM-BOT-TOKEN` | notifications; webhook secret derives as `sha256(token)` |
-| `TELEGRAM-CHAT-ID` | same |
-| `GITHUB-APP-INSTALLATION-ID` | site-rebuild trigger |
-| `HOSTINGER-API-TOKEN` | VPS control |
-| `GITHUB-APP-PRIVATE-KEY` | **runtime read only** — multi-line RSA PEM signed into a JWT, so it is kept out of app settings for the same reason as the GCP JSON |
+**Unblocked by:** creating the rule and repository secret, or deciding synthetic
+origin validation is not wanted.
 
-The vault denies by default and Terraform Cloud runners cannot reach it, so seeding needs a
-temporary network opening:
+## 2.4 Enabling the deployment workflows
 
-1. Set `admin_ip_rules = ["<your.public.ip>"]` in the Terraform Cloud workspace and apply.
-2. Seed each secret. Note the names use hyphens — Key Vault secret names cannot contain underscores:
+`deploy-azure-frontend`, `deploy-functions`, `deploy-infra` and `migrate-data`
+are each guarded by `if: ${{ false }}`. Enabling them is a deliberate act.
+`migrate-data` in particular reads the whole production Firestore database.
+
+Two GitHub Environments must exist **with protection rules** before the
+corresponding workflows are enabled — see §4.4. Creating them without reviewers
+would satisfy the linter while removing the gate, which is worse than the
+current state.
+
+**Unblocks:** deploying anything. This is the immediate blocker on the
+application layer.
+
+---
+
+# PART 3 — OPERATOR TASKS NOT YET DONE
+
+Not decisions. Work that needs someone with access.
+
+## 3.1 Two Key Vault secrets are still missing
+
+19 of 21 are seeded. The two outstanding are both **runtime-read** — resolved by
+`getSecret()` at execution time rather than through an app-setting
+`@Microsoft.KeyVault(...)` reference, because they are multi-line blobs that do
+not belong in app settings:
+
+| Secret | Consumed by | Why it is runtime-read |
+| --- | --- | --- |
+| `GCP-SERVICE-ACCOUNT-JSON` | `gcp.js` | Multi-line JSON blob |
+| `GITHUB-APP-PRIVATE-KEY` | site-rebuild trigger | Multi-line RSA PEM signed into a JWT |
+
+They are not in the 19 precisely because the diff that verified those 19 checked
+app-setting references, and these two have none. Seed them with `--file`, not
+`--value`.
+
+**Names follow §4.0**, and both already do — `UPPER-KEBAB-CASE`, hyphens not
+underscores. Neither has an app-setting counterpart to map to, so nothing else
+needs to change when they land.
+
+**Seed them only here.** Both are read by the application at runtime, so Key
+Vault is the one store that needs them. Neither belongs in GitHub secrets, and
+neither belongs in the Terraform workspace — a GitHub App private key in
+Terraform state is exactly the blast radius the hand-seeding decision exists to
+avoid.
+
+**Neither is urgent.** Their consumers are unported: the site-rebuild trigger
+and `gcp.js` are both stubs today. Seed them when you next have a firewall
+window open for another reason, rather than opening one for these alone.
+
+**Procedure** — the vault denies by default, so this needs a window:
+
+```bash
+VAULT=kv-site-prod-cus-01
+RG=rg-sec-site-prod-cus
+
+# 1. Grant yourself data-plane access (once). Subscription Owner is NOT enough.
+az role assignment create --role "Key Vault Secrets Officer" \
+  --assignee <your-object-id> \
+  --scope /subscriptions/<app-sub>/resourceGroups/$RG/providers/Microsoft.KeyVault/vaults/$VAULT
+
+# 2. Open a window
+az keyvault network-rule add --name $VAULT --resource-group $RG --ip-address "$(curl -s ifconfig.me)"
+
+# 3. Seed — multi-line, so --file
+az keyvault secret set --vault-name $VAULT --name GCP-SERVICE-ACCOUNT-JSON --file ./gcp-sa.json
+az keyvault secret set --vault-name $VAULT --name GITHUB-APP-PRIVATE-KEY    --file ./github-app.pem
+
+# 4. Verify, then close
+az keyvault secret list --vault-name $VAULT --query "length(@)"   # expect 21
+az keyvault network-rule remove --name $VAULT --resource-group $RG --ip-address "$(curl -s ifconfig.me)"
+```
+
+Empty `ipRules` is the correct resting state: reachable only by the Function App
+over its subnet.
+
+## 3.2 Four GitHub repository secrets are missing
+
+Only `COSMOS_ENDPOINT` is set. See §4.3 for the full table and what each blocks.
+
+## 3.3 Deploy the function code
+
+**The Function App holds zero deployed functions.** The rebuild recreated the
+shell and nothing has been deployed to it. Both `/api/health` paths answer 404
+for that reason, not because of routing.
+
+A single deploy run settles three open questions at once:
+
+1. Whether the rebuilt GitHub deploy identity authenticates (`CLIENT_ID` points
+   at it; its federated credentials were recreated with it, but only a run
+   proves it).
+2. Whether the smoke test passes through the Cloudflare host.
+3. Whether the origin-secret handshake works end to end — the one part of the
+   origin lock still unproven.
+
+**This is the natural first move of the application layer.**
+
+## 3.4 Enable secret scanning and push protection
+
+**Settings → Advanced Security** → enable **Secret scanning**, then **Push
+protection**. The repository is public, so both are free. Push protection turns
+"a credential was committed, now rotate it" into "the push was refused."
+
+## 3.5 Self-hosted CI runner — deferred, not deleted
+
+`infra/ci-runner.tf` defines an Azure Container Apps event-driven Job running
+ephemeral GitHub runners (KEDA `github-runner` scaler, scale-to-zero — idle days
+cost $0, active days ≈ $10/mo). It is a **fallback** for GitHub-hosted runner
+outages, selected per-run by the `CI_RUNNER` repository variable.
+
+`ci_runner_enabled = false`, so none of it is deployed. The setup below applies
+only if you turn it on.
+
+<details>
+<summary>One-time setup, in order</summary>
+
+1. **GitHub App** (org settings → Developer settings → GitHub Apps → New): no
+   webhook, repository permission **Administration: Read & write** only. Install
+   on `HCW-HybridCloudWorks` only. Record App ID, Installation ID, and a
+   generated private key. A GitHub App rather than a PAT, so tokens are
+   short-lived and not person-bound.
+2. **Docker Hub**: create repository `hcw-runner` and a read/write token scoped
+   to it. Add `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` as repository secrets,
+   then run `Build runner image` once via `workflow_dispatch`.
+3. **Terraform**: set `ci_runner_enabled = true` and apply.
+4. **Seed the job's secrets and config** — the values Terraform deliberately
+   does not manage; `lifecycle.ignore_changes` protects everything set here:
 
    ```bash
-   V=hcw-keyvault-prod
-
-   # Platform
-   az keyvault secret set --vault-name $V --name AWS-ACCESS-KEY-ID        --value '...'
-   az keyvault secret set --vault-name $V --name AWS-SECRET-ACCESS-KEY    --value '...'
-   az keyvault secret set --vault-name $V --name CF-ORIGIN-SECRET         --value "$(openssl rand -hex 32)"
-   az keyvault secret set --vault-name $V --name CLIENT-IP-SALT           --value "$(openssl rand -hex 32)"
-   az keyvault secret set --vault-name $V --name GCP-SERVICE-ACCOUNT-JSON --file ./gcp-sa.json
-
-   # Ported CMS secrets
-   az keyvault secret set --vault-name $V --name ANTHROPIC-API-KEY          --value '...'
-   az keyvault secret set --vault-name $V --name OPENAI-API-KEY             --value '...'
-   az keyvault secret set --vault-name $V --name PERPLEXITY-API-KEY         --value '...'
-   az keyvault secret set --vault-name $V --name REPLICATE-API-KEY          --value '...'
-   az keyvault secret set --vault-name $V --name FIRECRAWL-API-KEY          --value '...'
-   az keyvault secret set --vault-name $V --name LINKIE-API-KEY             --value '...'
-   az keyvault secret set --vault-name $V --name YOUTUBE-API-KEY            --value '...'
-   az keyvault secret set --vault-name $V --name PUBLER-API-KEY             --value '...'
-   az keyvault secret set --vault-name $V --name PUBLER-WORKSPACE-ID        --value '...'
-   az keyvault secret set --vault-name $V --name KLAVIYO-PRIVATE-KEY        --value '...'
-   az keyvault secret set --vault-name $V --name KLAVIYO-LIST-ID            --value '...'
-   az keyvault secret set --vault-name $V --name TELEGRAM-BOT-TOKEN         --value '...'
-   az keyvault secret set --vault-name $V --name TELEGRAM-CHAT-ID           --value '...'
-   az keyvault secret set --vault-name $V --name GITHUB-APP-INSTALLATION-ID --value '...'
-   az keyvault secret set --vault-name $V --name HOSTINGER-API-TOKEN        --value '...'
-   # Multi-line PEM — use --file, not --value.
-   az keyvault secret set --vault-name $V --name GITHUB-APP-PRIVATE-KEY     --file ./github-app.pem
-   ```
-
-3. Confirm the app can read them — `KEY_VAULT_URI` resolves and `getSecret` returns a value.
-4. Reset `admin_ip_rules = []` and apply again. Steady state is: reachable only by the Function App
-   over its subnet.
-
-**This only works because the subnet now carries the `Microsoft.KeyVault` service endpoint.** Without
-it the VNet rule is inert and the vault denies the Function App too — see §6.
-
-`secret-sync-keyvault.yml` was removed rather than finished. It was disabled, its mapping was a
-literal `TODO`, it held the last static `AZURE_CREDENTIALS` reference, and pushing GitHub secrets
-into Key Vault would duplicate every value into a second store. This runbook replaces it.
-
-### 4.3 All four deployment workflows are disabled
-
-`deploy-azure-frontend`, `deploy-functions`, `deploy-infra`, `migrate-data` are each guarded by
-`if: ${{ false }}`. `secret-sync-keyvault` is disabled **and** unimplemented — its mapping is a
-literal `TODO`.
-
-Enabling them is a deliberate act, not a side effect. `migrate-data` in particular reads the whole
-production Firestore database.
-
-### 4.4 Self-hosted CI runner — operator setup and failover runbook
-
-`infra/ci-runner.tf` defines an Azure Container Apps event-driven Job running ephemeral GitHub
-runners (KEDA `github-runner` scaler, scale-to-zero — idle days cost $0, active days ≈ $10/mo for
-this repo's CI volume). It is a **fallback** for GitHub-hosted runner outages, selected per-run by
-the `CI_RUNNER` repository variable. Everything below is operator work this environment cannot do.
-
-**One-time setup, in order:**
-
-1. **GitHub App** (org settings → Developer settings → GitHub Apps → New): no webhook, repository
-   permission **Administration: Read & write** (self-hosted runner registration) only. Install it
-   on `HCW-HybridCloudWorks` only. Record: App ID, Installation ID, and a generated private key
-   (PEM). A GitHub App is used instead of a PAT so tokens are short-lived and not person-bound.
-2. **Docker Hub**: create repository `hcw-runner` and a **read/write access token scoped to that
-   repository** (Captain/Pro account — authenticated pulls are unlimited, which is what sidesteps
-   the per-IP anonymous rate limit on Azure's shared NAT egress). Add `DOCKERHUB_USERNAME` /
-   `DOCKERHUB_TOKEN` as repository secrets, then run the `Build runner image` workflow once
-   (`workflow_dispatch`) to publish the image (it Scout-gates critical/high CVEs before push and
-   pushes a GHCR mirror tag as break-glass).
-3. **Terraform**: `terraform apply` picks up `ci-runner.tf` (environment + job). Placeholders ship
-   in state, never real secrets.
-4. **Seed the job's secrets and config** (the values Terraform deliberately does not manage —
-   `lifecycle.ignore_changes` protects everything set here):
-
-   ```bash
-   RG=<resource-group> JOB=caj-plat-ci-prod-cus-01
+   RG=rg-mgmt-plat-prod-cus JOB=caj-plat-ci-prod-cus-01
    az containerapp job secret set -g $RG --name $JOB \
      --secrets gh-app-private-key="$(cat app-key.pem)" dockerhub-token='<token>'
    az containerapp job registry set -g $RG --name $JOB \
@@ -586,306 +396,527 @@ the `CI_RUNNER` repository variable. Everything below is operator work this envi
    az containerapp job update -g $RG --name $JOB \
      --set-env-vars GH_APP_ID=<app-id> GH_APP_INSTALLATION_ID=<installation-id> \
        GH_REPO_OWNER=HybridCloudWorks GH_REPO_NAME=HCW-HybridCloudWorks
-   # Scaler metadata (applicationID/installationID) — az CLI cannot patch scale-rule
-   # metadata in place; re-run `az containerapp job update` with
-   # --scale-rule-name github-runner --scale-rule-type github-runner \
-   # --scale-rule-metadata owner=HybridCloudWorks repos=HCW-HybridCloudWorks \
-   #   runnerScope=repo labels=aca targetWorkflowQueueLength=1 \
-   #   applicationID=<app-id> installationID=<installation-id> \
-   # --scale-rule-auth appKey=gh-app-private-key
    ```
 
-5. **Smoke test**: set the repo variable and start any workflow run —
-   `gh variable set CI_RUNNER --body '["self-hosted","aca"]'` — watch a job execution appear in the
-   Container Apps job, then flip back.
+5. **Smoke test**: `gh variable set CI_RUNNER --body '["self-hosted","aca"]'`,
+   start a run, watch a job execution appear, then flip back.
 
-**Failover runbook (during a GitHub-hosted runner outage):**
+**Failover during an outage:**
 
 ```bash
 gh variable set CI_RUNNER --body '["self-hosted","aca"]'   # fail over
-gh variable delete CI_RUNNER                                # restore hosted runners
+gh variable delete CI_RUNNER                                # restore
 ```
 
-Applies to runs created after the change; already-queued runs keep their original target. Caveat
-recorded from the 2026-08-06 outage: its second phase stalled workflow-run **creation** itself —
-no runner, self-hosted or otherwise, helps when the control plane is down. This fallback covers
-hosted-runner-capacity outages (phase one, jobs queued with no runner).
+Applies to runs created after the change. Caveat from the 2026-08-06 outage: its
+second phase stalled workflow-run *creation*, and no runner helps when the
+control plane is down. This covers hosted-runner-capacity outages only.
 
-**Deliberate security posture** (do not "improve" these without reading `infra/ci-runner.tf`'s
-header): no managed identity on the runner job, no VNet, JIT ephemeral runners via
-`generate-jitconfig`, secrets out-of-band of Terraform state, `runner-image` rebuilt weekly on
-GitHub-hosted runners so a broken runner image cannot brick its own rebuild.
+**Deliberate security posture** — do not "improve" these without reading
+`infra/ci-runner.tf`'s header: no managed identity on the runner job, no VNet,
+JIT ephemeral runners via `generate-jitconfig`, secrets out-of-band of Terraform
+state, runner image rebuilt weekly on GitHub-hosted runners so a broken image
+cannot brick its own rebuild.
 
-### 4.5 Frontend auth swap (MSAL) — SPA app registration runbook
+</details>
 
-The admin frontend now authenticates with Entra ID via MSAL (`lib/entraAuth.js`); firebase/auth is
-gone from the admin surface. Before an admin can sign in, an operator must create the SPA side of
-the single-registration model:
+---
 
-1. **Expose an API scope on the API app registration** (the one whose id/URI is
-   `ENTRA_API_AUDIENCE` on the Function App): *Expose an API → Add a scope*, e.g.
-   `access_as_admin`. Full scope value: `api://<api-app-client-id>/access_as_admin`.
-2. **SPA app registration** (or a SPA platform on the same registration): *Authentication → Add
-   platform → Single-page application*, redirect URIs = the site origin(s) (prod + `http://localhost:5173`
-   for dev). Grant it delegated permission to the scope from step 1 (+ openid/profile/email) and
-   admin-consent it.
-3. **Static Web App build env vars**: `VITE_ENTRA_CLIENT_ID` (SPA registration client id),
-   `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE` (the full scope value from step 1). Without
-   `VITE_ENTRA_API_SCOPE` the SPA requests a token the backend rejects on audience.
-4. **App Roles + assignment**: the API registration carries the `Admin` app role (guard gate 1) —
-   assign it to each admin user in *Enterprise applications → Users and groups*. Gate 2 is the
-   `admins/{oid}` registry, seeded via the bootstrap flow (allowlist env vars on the Function App:
-   `CMS_BOOTSTRAP_ALLOWED_UIDS` = Entra object ids, or `CMS_BOOTSTRAP_ALLOWED_EMAILS`).
-5. **MFA** is an Entra Conditional Access policy, not app code — the Firebase phone-MFA/reCAPTCHA
-   flow was deleted with nothing to configure in the SPA.
+# PART 4 — REQUIRED INPUTS
 
-Not yet swapped (still Firebase): the PUBLIC site's sign-in (`submitPublicLabJob` / LabRunner) and
-the 34 files reading Firestore directly — those are the frontend rewiring phase.
+Every variable, secret and setting the workload needs, with live status.
+Absorbed from `CHECKLIST.md` and `Variables.md`.
 
-### 4.6b Disable CodeQL **default setup** — it is the source of every open alert
+> **This section must never contain actual values.** Formats use placeholders
+> only: `X` = letter, `0` = number, `!` = special. If a real value ever appears
+> here, treat it as disclosed and rotate it.
 
-**Status: open. Nothing in the repository can fix this; it is a repository setting.**
+**Status vocabulary:** `SET` (present and confirmed) · `VERIFIED` (observed
+working in the deployed system) · `MISSING` (consumed by code, not provisioned)
+· `RETIRED` (no longer read by anything; listed so it is not reintroduced).
 
-Confirmed 2026-08-18 by enumerating the open alerts: every single one is in
-`.claude/skills/**/scripts/*.py` — vendored Claude Code harness bundles whose
-`scripts/*.py` are security *demonstration* code (a hash-cracking skill that
-hashes with MD5, a TLS skill that enables legacy protocols in order to show
-them off). They are not imported or executed by the application or by CI, and
-`scripts/validate-repository-structure.ps1` already classifies `.claude/` and
-`.agents/` as the agent harness rather than the site.
+## 4.0 Naming and placement — read before adding anything
 
-`.github/codeql/codeql-config.yml` already excludes both directories, and the
-advanced matrix scans only `javascript-typescript` and `actions`. **Python is
-not in the matrix at all** — which is the proof that these alerts are not
-produced by `codeql.yml`. They come from GitHub's **default setup**, which
-picks languages automatically and ignores `config-file` entirely. The two
-setups are mutually exclusive by design; default setup is still enabled, so it
-is still scanning, still choosing its own languages, and still ignoring the
-exclusions.
+### The rule: one secret, one store
 
-Confirm the source before changing anything — `analysis_key` names the
-configuration that produced each alert:
+**A secret lives in exactly one store — the one whose consumer needs it.** Not
+"the one that was convenient", and never two.
+
+Duplication is not a tidiness problem. A value in two stores has two rotation
+paths, and rotating one of them produces a system that half-works: the half
+still holding the old value fails in whatever way that component fails, which is
+rarely "authentication error" and is usually something further downstream. It
+also doubles the leak surface for no benefit.
+
+| Store | Holds | Never holds |
+| --- | --- | --- |
+| **Key Vault** | Runtime secrets the *application* reads | Anything Terraform needs, anything only a workflow needs |
+| **HCP Terraform workspace** | Values Terraform needs to *build* infrastructure | Runtime application secrets |
+| **GitHub secrets** | Credentials a *workflow* needs that Terraform cannot output | Runtime application secrets; anything non-sensitive |
+| **GitHub variables** | Non-sensitive identifiers workflows need — resource names, client IDs | Anything sensitive |
+
+The test when adding one: **name the consumer.** If the answer is "the Function
+App at runtime" it is a Key Vault secret. If it is "the provider, during an
+apply" it is a workspace variable. If it is "a workflow step" it is a GitHub
+secret. If two consumers want it, one of them is usually wrong — see the
+exceptions below before assuming yours is the third case.
+
+### Naming, per store
+
+The stores disagree about legal characters, so the same value has two spellings
+and the mapping has to be mechanical rather than remembered.
+
+| Store | Convention | Example |
+| --- | --- | --- |
+| Key Vault secret | `UPPER-KEBAB-CASE` | `ANTHROPIC-API-KEY` |
+| Function App setting | `UPPER_SNAKE_CASE` | `ANTHROPIC_API_KEY` |
+| GitHub secret / variable | `UPPER_SNAKE_CASE`, **max 2 words** (3 only to break a collision), no provider prefix | `FUNCTIONS_URL`, not `AZURE_FUNCTIONS_URL` |
+| Terraform variable | `lower_snake_case` | `cloudflare_origin_secret` |
+| Terraform output | `lower_snake_case`, named for the consumer | `api_base_url` |
+
+> **Key Vault forbids underscores.** That is the whole reason for two spellings.
+> The mapping is exact: an app setting `X_Y_Z` resolves the vault secret
+> `X-Y-Z`. Get it wrong and the reference silently resolves to nothing — the app
+> deploys clean and a missing credential presents as missing *data*.
+
+**Contractual names are exempt from all of the above and must never be
+"corrected":** `ARM_*`, `TFC_AZURE_*` (HashiCorp and Microsoft), `VITE_*`
+(Vite), `GITHUB_TOKEN`. Renaming one breaks the tool that reads it.
+
+### The exceptions, and why each is real
+
+Three values legitimately appear twice. They are listed so nobody "fixes" them,
+and so a fourth is scrutinised rather than assumed.
+
+| Value | Where | Why it is not duplication |
+| --- | --- | --- |
+| Origin secret | Key Vault `CF-ORIGIN-SECRET` + workspace `cloudflare_origin_secret` | The two ends of a shared secret are configured by different systems, and neither can read the other's copy: Terraform configures Cloudflare, the app reads the vault. **They must match exactly** — a mismatch means every anonymous request is treated as bypassing Cloudflare and throws |
+| Tenant id | `ARM_TENANT_ID` (env) + `entra_tenant_id` (terraform) | Same value, two categories. One configures the provider, one is consumed by the configuration. The categories are not interchangeable |
+| Subscription id | `ARM_SUBSCRIPTION_ID` (env) + `subscription_app` (terraform) | As above. `ARM_SUBSCRIPTION_ID` is the provider's fallback only — every provider pins `subscription_id` in HCL, so it never decides where resources land |
+
+**Tenant and subscription IDs are `sensitive` in the workspace and plain
+variables in GitHub. That is deliberate, not drift.** They are identifiers, not
+credentials — nothing is authorized by knowing one. The workspace marks them
+sensitive to keep them out of run logs, which is defensive rather than
+necessary; GitHub holds them as variables because a workflow that cannot echo
+its own subscription id is a workflow nobody can debug.
+
+### Two placements to fix
+
+**`COSMOS_ENDPOINT` is a GitHub *secret* and is not sensitive.** It holds
+`https://<account>.documents.azure.com:443/` — a public endpoint, and a
+non-sensitive Terraform output. Storing a non-secret as a secret costs three
+things: it is masked in logs so failures are harder to read, it cannot be
+verified in the UI, and it dilutes what "secret" means for the values that are.
+It should be a repository **variable**.
+
+**The seventeen provider API keys are seeded but nothing consumes them yet.**
+The AI endpoints behind them are unimplemented stubs. That is not wrong — the
+vault was seeded in one pass during a firewall window, and a second window later
+costs more than seeding early — but it means "19 of 21 secrets present" is not
+the same claim as "19 secrets in use". Only `CF-ORIGIN-SECRET`, `CLIENT-IP-SALT`
+and the AWS pair have live consumers today.
+
+### When to seed
+
+Seed a secret when the thing that reads it exists, or when you already have a
+firewall window open and closing it means opening another one later. Both stores
+that hold runtime secrets deny by default, so windows are the expensive part,
+not the writes.
+
+Do **not** seed a placeholder to make a linter quiet. An unset input usually
+fails with a clear "not supplied"; a stubbed one fails as an authentication or
+resolution error that reads like a permissions or networking problem. The two
+cost very different amounts to diagnose. `COSMOS_KEY` in §4.3 is the worked
+example — it must stay unset, and setting it would switch the client to a key
+path the account rejects.
+
+## 4.1 HCP Terraform workspace — `hcw/hcw-azure`, project `Site`
+
+**All set.** Confirmed against the HCP Terraform API 2026-08-20.
+
+**Environment variables** — how Terraform authenticates to Azure. These four
+names are dictated by HashiCorp and Microsoft, so they are contractual: exempt
+from the repository's 2-word variable rule, never renamed. Category matters —
+set as *Terraform* variables instead of *environment* variables they are
+silently ignored and the run fails claiming no credentials were supplied.
+
+| Name | Status | Notes |
+| --- | --- | --- |
+| `TFC_AZURE_PROVIDER_AUTH` | **SET** (`true`) | Absent ⇒ no OIDC token is minted and the provider finds no credential |
+| `TFC_AZURE_RUN_CLIENT_ID` | **SET** | Client id of `id-plat-terraform-prod-cus-01`. Distinct from §4.2's `CLIENT_ID`, which is the GitHub Actions identity |
+| `ARM_TENANT_ID` | **SET** (sensitive) | Same value as the `entra_tenant_id` Terraform variable |
+| `ARM_SUBSCRIPTION_ID` | **SET** (sensitive) | Fallback only — every provider pins `subscription_id` in HCL, so this never decides where resources land |
+
+**Terraform variables** — no defaults, so an apply fails without them:
+
+| Name | Sensitive | Status | Notes |
+| --- | --- | --- | --- |
+| `subscription_app` | yes | **SET** | Application landing zone (`sub-app-site-prod-cus`) |
+| `subscription_mgmt` | yes | **SET** | Platform Management (`sub-plat-mgmt-prod-cus`) |
+| `subscription_conn` | yes | **SET** | Platform Connectivity (`sub-plat-conn-prod-cus`) |
+| `entra_tenant_id` | yes | **SET** | |
+| `cloudflare_api_token` | yes | **SET** | **Four scopes:** Zone:Read, DNS:Edit, Zone → Transform Rules:Edit, and (only if rulesets fail) Account → Rulesets:Read. A DNS-only token applies every record fine and fails on the ruleset alone with `Authentication error (10000)` |
+| `cloudflare_origin_secret` | yes | **SET** | Must equal Key Vault's `CF-ORIGIN-SECRET` exactly. A mismatch is not partial — every anonymous request throws |
+| `cloudflare_zone_id` | no | **SET** | |
+| `entra_api_audience` | no | **SET** | Validated non-empty. `verify-token.js` refuses to start without it, deliberately: `jsonwebtoken` *skips* audience validation when unset rather than failing, which would accept any Microsoft-signed token in the tenant |
+| `budget_alert_email` | no | **SET** | |
+
+**Terraform variables with defaults** — override only with reason:
+
+| Name | Default | Notes |
+| --- | --- | --- |
+| `azure_location` | `centralus` | Whole estate, single region since 2026-08-19 |
+| `region_abbreviation` | `cus` | Must agree with `azure_location` |
+| `instance` | `01` | CAF instance number, applied per resource type — not to everything |
+| `cosmos_location` / `static_web_app_location` | `centralus` | Equal to `azure_location` today; kept separate because their constraints have not gone away, only been satisfied |
+| `functions_origin_lock_enabled` | `true` | The origin lock. `false` is the one-step rollback |
+| `cloudflare_ip_ranges` | 15 ranges | A literal list, not an http data source — a fetch failing mid-apply would silently rewrite the allow-list of the only door into the app |
+| `cosmos_local_auth_disabled` | `true` | Key auth off; AAD only |
+| `budget_amount_usd` | `150` | |
+| `purge_protection_enabled` | `false` | Set `true` before production secrets matter |
+| `ci_runner_enabled` | `false` | §3.5 |
+| `vnet_address_space` / `functions_subnet_prefix` | `10.40.0.0/16` · `/24` | |
+| `domain` | `hybridcloudworks.com` | |
+| `admin_ip_rules` / `cosmos_admin_ip_rules` / `functions_storage_admin_ip_rules` | `[]` | Empty is the correct resting state. Populate → apply → work → empty → apply |
+| `cosmos_db_account_name` · `storage_account_name` · `functions_storage_account_name` · `function_app_name` · `key_vault_name` | see `infra/variables.tf` | All globally unique; all verified free before the rebuild |
+
+## 4.2 GitHub repository variables
+
+**All seven set 2026-08-20**, each from the matching `terraform output` and
+cross-checked afterwards.
+
+| Name | Status | Value source | Notes |
+| --- | --- | --- | --- |
+| `FUNCTIONS_URL` | **SET** | output `api_base_url` | **The Cloudflare host, not the origin.** Feeds `VITE_AZURE_FUNCTIONS_URL`. Built from `function_hostname` until 2026-08-20, which the origin lock broke |
+| `APP_HOSTNAME` | **SET** | output `function_hostname` | The origin. Diagnostics only — do not call it |
+| `CLIENT_ID` | **SET** | output `client_id` | Deploy identity for OIDC login. Distinct from `TFC_AZURE_RUN_CLIENT_ID` |
+| `TENANT_ID` | **SET** | Entra directory | |
+| `SUBSCRIPTION_ID` | **SET** | Application landing zone | |
+| `RESOURCE_GROUP` | **SET** | output `web_resource_group` | For the storage firewall window in `deploy-functions.yml` |
+| `FUNCTIONS_STORAGE_ACCOUNT` | **SET** | output `functions_storage_account` | Paired with `RESOURCE_GROUP` by construction |
+
+Still needed for the frontend build, sourced from the Entra registrations in
+§2.2 rather than Terraform:
+
+| Name | Status | Notes |
+| --- | --- | --- |
+| `VITE_ENTRA_CLIENT_ID` | **MISSING** | SPA registration client id. A variable, not a secret |
+| `VITE_ENTRA_TENANT_ID` | **MISSING** | A variable, not a secret |
+| `VITE_ENTRA_API_SCOPE` | **MISSING** | Must correspond to `entra_api_audience` — see the warning in §2.2 |
+| `VITE_SOCIAL_X_URL` · `VITE_SOCIAL_LINKEDIN_URL` · `VITE_SOCIAL_GITHUB_URL` | **MISSING** | Cosmetic; absence renders an empty link target |
+| `CI_RUNNER` | **Deliberately absent** | Absence ⇒ `ubuntu-latest`, which is normal operation. This is why the Actions extension reports "Context access might be invalid" on its references — expected, and must not be "fixed" by setting the variable |
+
+Re-run `scripts/set-github-variables.ps1` after any apply that changes an
+output. It sources from applied state, not a hardcoded copy that drifts.
+
+## 4.3 GitHub repository secrets
+
+**One of five set.**
+
+| Name | Status | Blocks | Notes |
+| --- | --- | --- | --- |
+| `COSMOS_ENDPOINT` | **SET — but misplaced** | — | Migration and healing workflows. **Should be a repository *variable*, not a secret**: it holds a public endpoint URL and is a non-sensitive Terraform output. See §4.0, "Two placements to fix" |
+| `AZURE_STATIC_WEB_APPS_API_TOKEN` | **MISSING** | Frontend deploy | Terraform output `swa_token`. **Reissued by the rebuild** — any previously recorded value is dead |
+| `TF_API_TOKEN` | **MISSING** | Gated infra workflow | How the *workflow* reaches Terraform. Distinct from §4.1, which is how *Terraform* reaches Azure |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | **MISSING** | Data migration | Whole-JSON credential; scope it read-only. `migrate-data.yml` is `if: false` and must stay so until this exists |
+| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | **MISSING** | Runner image build only | Needed only if §3.5 is turned on |
+| `COSMOS_KEY` | **MISSING — correctly** | — | **Do not provision it to silence a linter.** `cosmos_local_auth_disabled = true`, so key auth is off on the account; setting this switches the client to a key path the account rejects. It exists only for the throwaway-account rehearsal |
+
+## 4.4 GitHub environments
+
+Neither exists. Both referencing jobs are `if: ${{ false }}`, so nothing fails
+today — but an environment is where required reviewers live, and
+`deploy-infra.yml` is the workflow that applies production infrastructure. The
+environment **is** the human-review gate.
+
+| Environment | Purpose | Protection expected | Status |
+| --- | --- | --- | --- |
+| `production-infra` | Review gate for production applies | Required reviewers; restrict to the deploy ref | **MISSING** |
+| `data-migration` | Gate for the one-shot Firestore → Cosmos migration | Required reviewers | **MISSING** |
+
+> `data-migration` is **load-bearing in two places**. `infra/oidc.tf` pins a
+> federated credential to the subject
+> `repo:<org>/<repo>:environment:data-migration`. Renaming the environment
+> breaks OIDC login with `AADSTS70021`.
+
+Create them **with reviewers before** flipping `if: false`, not after.
+
+## 4.5 Function App settings — Terraform-managed
+
+Set automatically by `infra/main.tf`. Listed for reference and local dev; do not
+set by hand.
+
+| Setting | Purpose |
+| --- | --- |
+| `COSMOS_ENDPOINT` · `COSMOS_DATABASE` | Cosmos account endpoint and database name |
+| `STORAGE_ACCOUNT_NAME` · `STORAGE_BLOB_ENDPOINT` · `STORAGE_QUEUE_ENDPOINT` | Blob endpoint preferred over account name — it carries the correct suffix for the account's cloud |
+| `KEY_VAULT_URI` | Vault the app resolves secrets from |
+| `ENTRA_TENANT_ID` · `ENTRA_CLIENT_ID` · `ENTRA_API_AUDIENCE` | JWT validation |
+| `CF_ORIGIN_SECRET` · `CLIENT_IP_SALT` | Anti-abuse; both resolve from Key Vault |
+| `FEATURE_FLAG_SCHEDULERS` | **Must stay `false`.** One flag arms four timers, one of which deletes blobs with an unimplemented body — TODO T-302 |
+| `NODE_ENV` | `production` |
+| `*_API_KEY` and friends | All resolve from Key Vault by reference |
+
+**Retired — must not exist.** Listed so they are not reintroduced:
+
+| Setting | Why |
+| --- | --- |
+| `STORAGE_ACCOUNT_KEY` · `STORAGE_CONNECTION_STRING` | SAS tokens are user-delegation, signed via managed identity. A test asserts these names cannot return to the module |
+| `AZURE_OPENAI_ENDPOINT` · `AZURE_OPENAI_KEY` · `AZURE_OPENAI_GPT_DEPLOYMENT` · `AZURE_OPENAI_DALLE_DEPLOYMENT` | Azure OpenAI retired 2026-08-19: zero gpt-4o TPM quota in every SKU, no DALL-E in region, and nothing consumed it. `functions/src/lib/openai-client.js` and the `@azure/openai` dependency were deleted 2026-08-20 |
+| `COSMOS_CONNECTION_STRING` | Carried the account primary key. Removed with the change-feed triggers that were its only consumer |
+
+## 4.6 Key Vault secrets — `kv-site-prod-cus-01`
+
+Accessed by the Function App via managed identity as app-setting
+`@Microsoft.KeyVault(SecretUri=…)` references, except where marked runtime-read.
+Naming and placement rules are in **§4.0** — in short, `UPPER-KEBAB-CASE` here
+because Key Vault forbids underscores, mapping mechanically to the app setting's
+`UPPER_SNAKE_CASE`: `OPENAI_API_KEY` resolves `OPENAI-API-KEY`.
+
+**This store holds runtime application secrets and nothing else.** A value
+Terraform needs belongs in the workspace (§4.1); a value only a workflow needs
+belongs in GitHub secrets (§4.3). The single documented overlap is
+`CF-ORIGIN-SECRET`, and §4.0 explains why it is real.
+
+**Seeded by hand.** Deliberately not Terraform-managed: the values would
+otherwise live in both the workspace and Terraform state, and several of them
+(an AWS secret key, a GCP service-account JSON, a GitHub App RSA key) do not
+warrant that blast radius. There is no `secret-sync-keyvault.yml` — it was
+removed rather than finished, and will not return.
+
+**Platform**
+
+| Secret | Status | Consumed by |
+| --- | --- | --- |
+| `AWS-ACCESS-KEY-ID` | **SET** | AWS pricing — scope the IAM policy to `pricing:GetProducts` only |
+| `AWS-SECRET-ACCESS-KEY` | **SET** | same |
+| `CF-ORIGIN-SECRET` | **SET** | `client-identity.js`; fails closed in production without it |
+| `CLIENT-IP-SALT` | **SET** | Rate-limit key derivation. Rotating it resets all live quota counters |
+| `GCP-SERVICE-ACCOUNT-JSON` | **MISSING** | `gcp.js` — **runtime read**, §3.1 |
+
+**Ported from Site-Main's `defineSecret` bindings**
+
+| Secret | Status | Consumed by |
+| --- | --- | --- |
+| `ANTHROPIC-API-KEY` | **SET** | AI drafting, WAF scoring, architecture generation |
+| `OPENAI-API-KEY` | **SET** | AI generation fallback |
+| `PERPLEXITY-API-KEY` | **SET** | Research and enrichment |
+| `REPLICATE-API-KEY` | **SET** | Image generation |
+| `FIRECRAWL-API-KEY` | **SET** | URL ingestion and scraping |
+| `LINKIE-API-KEY` | **SET** | Linkie proxy |
+| `YOUTUBE-API-KEY` | **SET** | `youtubeChannelStats` |
+| `PUBLER-API-KEY` | **SET** | Social scheduling proxy and calendar sync |
+| `PUBLER-WORKSPACE-ID` | **SET** | Identifier; travels with the key rather than splitting across two stores |
+| `KLAVIYO-PRIVATE-KEY` | **SET** | Newsletter subscribe, weekly digest |
+| `KLAVIYO-LIST-ID` | **SET** | Identifier; as above |
+| `TELEGRAM-BOT-TOKEN` | **SET** | Notifications; webhook secret derives as `sha256(token)` |
+| `TELEGRAM-CHAT-ID` | **SET** | Notification target |
+| `GITHUB-APP-INSTALLATION-ID` | **SET** | Site-rebuild trigger |
+| `HOSTINGER-API-TOKEN` | **SET** | VPS control |
+| `GITHUB-APP-PRIVATE-KEY` | **MISSING** | **Runtime read**, §3.1 |
+
+**Names that do not exist** — recorded because earlier revisions of the
+catalogue invented them:
+
+- `KLAVIYO-API-KEY` — Site-Main declares `KLAVIYO_PRIVATE_KEY` **and** `KLAVIYO_LIST_ID`.
+- `GITHUB-APP-TOKEN` — there is no single "app token"; it is installation id + private key.
+- `PLAUD-API-KEY` — Plaud is an **MCP server entry**; its credentials live in the `mcp_servers` container as admin-configured data and migrate as data, not as a deploy secret.
+- `SESSIONIZE-API-KEY` — Sessionize is a **public profile URL** in site settings. There is no API key.
+
+> Add new secrets here **and** to `infra/main.tf`'s `app_settings` before adding
+> them to the vault. Ground truth until Site-Main is retired:
+> `grep -rhoE "defineSecret\(['\"][A-Z0-9_]+" functions/`
+
+## 4.7 VPS agent (Hostinger) — `.env`, never committed
+
+**The agent holds no database credential.** If anything in this table ever grows
+a `COSMOS_*` entry, something has gone wrong — see §2.1.
+
+| Variable | Status | Notes |
+| --- | --- | --- |
+| `LABS_AGENT_API_BASE` | **MISSING** | The **Cloudflare** API base including `/api`. Same shape as `VITE_AZURE_FUNCTIONS_URL`, same `/api` requirement, and same origin-lock constraint |
+| `LABS_AGENT_TENANT_ID` | **MISSING** | |
+| `LABS_AGENT_CLIENT_ID` | **MISSING** | **One registration per agent host**, so a compromised VPS is revoked alone rather than fleet-wide |
+| `LABS_AGENT_CERT_PATH` | **MISSING** | PEM holding certificate and private key. Generate the key **on the host**; upload only the public certificate. Root-owned, `0600`, outside the repository |
+| `LABS_AGENT_API_SCOPE` | **MISSING** | Audience must match `entra_api_audience` |
+| `LABS_AGENT_ID` | **MISSING** | Defaults to the hostname. A wrong value fails closed — the server refuses it unless the registry document's `oid` matches this credential |
+
+Not environment variables, but required for any of the above:
+
+| Input | Status | Notes |
+| --- | --- | --- |
+| `LabAgent` App Role | **MISSING** | On the API app registration, assigned per agent service principal. Disjoint from `Admin` |
+| `lab_agents/{agentId}` document | **MISSING** | `{oid, active, capabilities[]}`. `active: false` revokes immediately |
+
+## 4.8 Frontend build-time variables
+
+Vite inlines `VITE_*` at build time. **Everything here ships to the browser and
+is publicly readable — no secret may ever be added.**
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `VITE_AZURE_FUNCTIONS_URL` | **Yes** | **Must end in `/api`** — routes are registered relative to it, so a base without it 404s uniformly. Must be the Cloudflare host, and must agree with `staticwebapp.config.json`'s `connect-src`. Read by exactly one module, `frontend/src/lib/functionsBase.js`, enforced by test. A deploy build without it fails (`REQUIRE_API_BASE=true`) |
+| `VITE_ENTRA_CLIENT_ID` · `VITE_ENTRA_TENANT_ID` · `VITE_ENTRA_API_SCOPE` | Yes | §2.2 |
+| `VITE_TRANSLATIONS` · `VITE_DEFAULT_LANGUAGE` · `VITE_NEWS_ENABLE_INSIGHTS` | No | Feature toggles |
+| `VITE_SOCIAL_*` | No | Public URLs, not secrets |
+
+## 4.9 Local development
 
 ```bash
-gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/code-scanning/alerts --paginate \
-  --jq '.[] | select(.state=="open") | "\(.tool.name)\t\(.most_recent_instance.analysis_key)"' \
-  | sort | uniq -c | sort -rn
+# az login — DefaultAzureCredential picks it up. No COSMOS_KEY needed, and none works.
+COSMOS_ENDPOINT=https://cosmos-site-prod-cus.documents.azure.com:443/
+COSMOS_DATABASE=hcw
+KEY_VAULT_URI=https://kv-site-prod-cus-01.vault.azure.net/
+ENTRA_TENANT_ID=<tenant-id>
+ENTRA_CLIENT_ID=<client-id>
+FEATURE_FLAG_SCHEDULERS=false
 ```
 
-`dynamic/github-code-scanning/codeql` is default setup.
-`.github/workflows/codeql.yml:analyze` is the advanced workflow.
+Reaching Cosmos or Key Vault from a laptop needs a firewall window — both deny
+by default. The same populate/apply/work/empty cycle as §3.1.
 
-**Fix:** Settings → Code security → CodeQL analysis → Default setup → disable.
-Removing a configuration closes the alerts it raised, so this resolves the
-backlog rather than requiring alerts to be dismissed one at a time. Dismissing
-them individually would be wrong anyway: it records a security judgement about
-demonstration code instead of removing the scanner that should never have been
-looking at it.
+## 4.10 Terraform outputs
 
-**Then, in a follow-up PR:** add a `pull_request:` trigger to `codeql.yml`.
-It is deliberately absent because the workflow's upload step fails with
-"analyses from advanced configurations cannot be processed when the default
-setup is enabled" while both are live. Once default setup is off, PR scanning
-should be turned on — until then the repository has no CodeQL coverage on pull
-requests.
+`terraform output` after any apply.
 
-### 4.6 Enable secret scanning + push protection (free — repo is public)
-
-Two toggles in repository settings, unreachable from any session tooling:
-**Settings → Advanced Security** (`/settings/security_analysis`) → enable **Secret scanning**, then
-**Push protection** beneath it. The repository is public, so both are provided free — no billing
-prompt, no Advanced Security license. Push protection turns "a credential was committed, now
-rotate it" into "the push was refused"; given that §0.2's rotation question exists at all, the
-cheaper failure mode is worth two clicks.
-
-### 4.7 Computed-property healer — the role grant it fails without
-
-`heal-computed-properties.yml` (PR #94) re-applies `cp_sortDate` after any Terraform apply that
-touches the `content`/`blogs` containers — on push, every six hours, and on dispatch. Two
-operator-visible consequences, both by design:
-
-1. **The workflow runs red every six hours until Terraform Cloud applies the two
-   `azurerm_cosmosdb_sql_role_assignment` grants in `infra/oidc.tf`** (Data Contributor, scoped to
-   exactly those two containers). The red run *is* the reminder that the grant is pending — do not
-   silence the schedule to make it green.
-2. **The first run after the grant lands is also the RBAC test.** Container-scoped Data
-   Contributor should cover `container.replace`, but container-level metadata writes are a newer
-   corner of Cosmos data-plane RBAC. If that run 403s, widen the two grants' `scope` from
-   `…/colls/<name>` to the database — the first debugging step documented in `oidc.tf`.
-
----
-
-## 5. Not started — the remaining migration itself
-
-### 5.0 ~~The frontend is still a Firebase client — this is the Go-Live blocker~~ — RESOLVED 2026-08-09
-
-> **RESOLVED in PRs #61–#66.** Every count in this section is now zero and the
-> production bundle contains no Firebase chunk. `useFirestore.js`,
-> `firebaseConfig.js` and `firebaseStorage.js` are deleted. Firebase *can* now be
-> decommissioned at Go-Live, contradicting the conclusion below. Retained for
-> historical context only; delete at the next review.
-
-Measured against `Site-Main` @ `4560130` and `main` @ `a10ee9d`. **Porting the backend handlers alone
-does not produce a working Azure site**, because the browser does not call the backend for most
-content — it talks to Firestore directly.
-
-| Coupling | Count |
+| Output | Use |
 | --- | --- |
-| Frontend files importing `firebase/firestore` | **34** |
-| Frontend files importing `firebase/auth` | 5 |
-| Frontend files importing `firebase/storage` | 4 |
-| Direct Firestore data calls in `frontend/src` | ~115 (`getDocs` 26, `collection` 39, `getDoc` 13, `onSnapshot` 7, `setDoc` 8, `addDoc` 8, `updateDoc` 7, `deleteDoc` 7) |
-| Frontend files referencing the Azure backend | **1** (`azureConfig.js`, 24 lines, two helpers) |
+| **`api_base_url`** | **The public API base. Feeds `FUNCTIONS_URL` and every client** |
+| `function_hostname` / `function_url` | The origin. **Not client-reachable** — diagnostics only |
+| `swa_token` | GitHub secret `AZURE_STATIC_WEB_APPS_API_TOKEN` |
+| `swa_hostname` | Static Web App default hostname |
+| `client_id` | GitHub variable `CLIENT_ID` |
+| `cosmos_endpoint` · `cosmos_database` | Migration scripts, VPS agent |
+| `vault_uri` · `vault_name` | Local dev, seeding |
+| `blob_endpoint` · `storage_account` · `functions_storage_account` | Storage clients and CI firewall windows |
+| `web_resource_group` | GitHub variable `RESOURCE_GROUP` |
+| `workspace_id` | Log Analytics, for diagnostic settings |
+| `app_principal_id` · `deploy_principal_id` | Granting additional RBAC |
+| `subnet_id` | Additional service firewall rules |
+| `federated_subjects` | Diagnosing `AADSTS70021` |
 
-The coupling is not confined to admin screens. **Public pages read Firestore in the browser**:
-`pages/{aws,azure,gcp,finops,vmware}/ArchitecturePage.jsx`, `pages/shared/AboutPage.jsx`, the blog /
-architecture / framework detail templates, and all four `pages/submissions/*` forms.
+---
 
-The static-projection path that would avoid this — `publicData.js` reading `build:data` output —
-currently covers **two collections** (`certifications`, `speakerevents`) consumed by **two files**.
+# PART 5 — DEFERRED, NOT BLOCKING
 
-`azureConfig.js` states the constraint plainly: *"The browser must not instantiate a Cosmos DB
-data-plane client or receive a Cosmos access key."* So every one of those 34 files needs an API
-endpoint to call instead. That makes the backend port a **prerequisite** for the frontend port, not
-an alternative to it.
+Real, but nothing waits on them.
 
-**Consequence for cutover:** pointing DNS at an Azure-hosted frontend today yields a site that either
-still depends on Firebase, or breaks. Firebase cannot be decommissioned at Go Live; it has to stay
-warm until the frontend is ported.
+## 5.1 Media delivery — keep the account closed, or front it with a CDN?
 
-**Unblocked by:** nothing external. This is scope, and it is much larger than the TODO count in §5.1
-suggests — the TODOs mark where the backend logic goes, not the frontend rewiring that has to follow.
+Uploaded images are served by `GET /api/public/media/{container}/{*path}`,
+reading blobs through the Function App's managed identity. The storage account
+stays closed, no new resource is provisioned, no security setting is reversed.
+Responses are `immutable` with ETag support, so repeat views do not reach the
+function.
 
-### 5.1 ~~Fourteen TODOs across four handler files~~ — MOVED to TODO.md
+The alternative — open the account behind Cloudflare or Front Door — trades two
+security settings and a monthly service floor for edge caching. Against a USD
+150 ceiling that is a spend decision.
 
-> **Moved to [TODO.md](TODO.md) T-001, T-002, T-003.** This is engineering work,
-> not a human blocker. The count is also stale: 6 TODOs remain, not 14 —
-> `labs-http.js` was completed and the `cms-http.js` match is prose.
+Worth revisiting if image egress dominates invocation cost. Nothing forecloses
+it: the route can sit behind a CDN unchanged, and stored URLs are site-relative.
 
-The Azure Functions scaffold exposes routes whose bodies are stubs:
+## 5.2 Dependabot #17 — eslint 9 → 10
 
-| File | TODOs |
+**Upstream blocked.** eslint 10 crashes `eslint-plugin-react`
+(`contextOrFilename.getFilename is not a function`). Both `eslint-plugin-react`
+(peer ≤9.7) and `eslint-plugin-jsx-a11y` (peer ≤9) cap below 10. Monitor only;
+the bump and both plugin upgrades land together or not at all.
+
+## 5.3 react-router — 2 HIGH advisories, deliberately not fixed
+
+GHSA-qwww-vcr4-c8h2, "RSC Mode CSRF Bypass". **Assessed as not applicable**:
+specific to React Server Components mode, and this is a plain Vite SPA using
+only `useNavigate` / `Link` / `useLocation` with no RSC entry points. There is
+also no fixed version *above* the current one — npm's only remedy is a
+downgrade losing seven minor versions.
+
+**If RSC adoption is ever planned, this flips.**
+
+## 5.4 GCP Secret Manager stack — 8 unreferenced secrets
+
+`frontend/platform/terraform/gcp-secrets/` still defines eight secrets nothing
+active references. Left alone deliberately: the README requires explicit
+approval for GCP decommissioning, and if that state is live those secrets exist.
+
+## 5.5 Six pre-existing test failures — the gate covers a subset
+
+CI runs `test:admin` (green). The full `vitest run` has 6 failing tests across 3
+files on `main`, including `App.routes.test.jsx` timeouts. Confirmed
+pre-existing. Widening the gate requires fixing those six first — the same
+"clear it, then enforce it" sequence used for lint and format.
+
+## 5.6 Thirteen non-executing workflows in `frontend/.github/`
+
+GitHub only runs workflows from the repository root. Thirteen there never
+execute, including five Notion secret workflows referencing deleted scripts. A
+shadow CI directory that looks real and is not.
+
+## 5.7 Two unconvertible pricing unit mismatches
+
+`compute-serverless` and `database-nosql` baselines measure different meters
+than their live paths (million invocations vs normalized request workload; hour
+provisioned vs million operations on-demand). Recorded in
+`KNOWN_UNIT_MISMATCHES` with a test that fails if a third appears. Choosing
+replacement baselines is a pricing-catalog decision.
+
+---
+
+# PART 6 — HISTORICAL RECORD
+
+Kept so the reasoning survives, and so stale assessments are not mistaken for
+current ones.
+
+## 6.1 Corrections to earlier claims
+
+- **`claude/site-main-migration-prep-5fka2q` was reported as safe to delete. It
+  was not.** It carried 1,337 lines of unmerged feature work, pushed after the
+  earlier check. Verified before acting; preserved, and became #38.
+- **A CI matrix simulation was reported as passing when the environment was
+  contaminated.** The `frontend` leg passed locally only because
+  `frontend/functions/node_modules` was present from an earlier step. A clean
+  checkout failed. Every simulation since deletes every `node_modules` first.
+- **`frontend/scripts/package.json` was described as an empty, vestigial
+  package.** Its contents are empty; its function is not — with no `"type"`
+  field it marks that directory CommonJS inside an ESM parent, and nine `.js`
+  helpers there use `require()`. Deleting it breaks them.
+- **The post-deploy smoke test was described as going "through the proxied
+  Cloudflare record" when it did not.** It was pointed at `FUNCTIONS_URL`, which
+  at the time named the origin. Corrected 2026-08-20 by making `FUNCTIONS_URL`
+  the Cloudflare base at its source, the `api_base_url` output.
+
+## 6.2 Fixed, with the reasoning retained
+
+**Key Vault was unreachable by everyone, including the app.** The vault set
+`default_action = "Deny"` and allowed the Functions subnet — but that subnet
+carried no `Microsoft.KeyVault` service endpoint, and a Key Vault VNet rule is
+inert without one. Silent by construction: the app deploys clean, then a missing
+credential presents as missing data. Nothing in CI could catch it and
+`terraform validate` would have passed. Fixed by adding the service endpoint.
+
+**Deploys used a static service principal against the repository's own
+guardrail.** `deploy-functions.yml` authenticated with a long-lived
+service-principal JSON while the README requires OIDC. Replaced with a
+user-assigned managed identity and federated credentials — deliberately not an
+app registration, because those need Entra directory permissions that Azure
+Owner does not confer.
+
+**The frontend was a Firebase client, and it was the Go-Live blocker.** Resolved
+in PRs #61–#66: `useFirestore.js`, `firebaseConfig.js` and `firebaseStorage.js`
+are deleted and the production bundle contains no Firebase chunk. The counts
+that section cited — 34 files importing `firebase/firestore`, ~115 direct
+Firestore calls — are now zero.
+
+## 6.3 Environment limitations that no longer apply
+
+Recorded because they qualified a great deal of earlier work:
+
+| Was | Now |
 | --- | --- |
-| `functions/src/functions/cms-http.js` | 6 |
-| `functions/src/functions/schedulers.js` | 4 |
-| `functions/src/functions/cosmos-triggers.js` | 2 |
-| `functions/src/functions/labs-http.js` | 2 |
+| No Terraform binary, no Terraform Cloud credentials — every infra change reasoned from configuration only | Terraform runs, applies, and is verified against the real provider |
+| No Azure, Cloudflare or GCP control-plane access | Azure and Cloudflare both reachable and exercised |
+| `pwsh` unavailable — repository policy checked by hand | Runs locally |
 
-Each says *"Port the business logic from Personal-Site_HCW/..."*. That source is now
-`hybridcloudworks/Main-Site` in this org, so this is **no longer blocked** — it is simply large, and
-is the next phase of active work rather than a deferred item.
-
-### 5.2 ~~`vps-agent` — Azure scaffold incomplete~~ — MOVED to TODO.md
-
-> **Moved to [TODO.md](TODO.md) T-004.** Engineering work, not a human blocker.
-
-Three TODOs: port the original logic, implement the change-feed listener or polling loop, start the
-heartbeat interval. The README already marks it *"Incomplete; source agent contract still requires
-migration"*.
-
----
-
-## 6. Corrections to earlier claims in this work
-
-Recorded because a stale assessment is worse than no assessment.
-
-- **`claude/site-main-migration-prep-5fka2q` was reported as safe to delete. It was not.** It carried
-  1,337 lines of unmerged feature work, pushed after the earlier check. Verified before acting; the
-  branch was preserved and became #38.
-- **A CI matrix simulation was reported as passing when the environment was contaminated.** The
-  `frontend` leg passed locally only because `frontend/functions/node_modules` was present from an
-  earlier step. A clean checkout failed. Fixed in #35, and every simulation since deletes every
-  `node_modules` in the repository first.
-- **`frontend/scripts/package.json` was described as an empty, vestigial package.** Its contents are
-  empty; its function is not. See §2.6.
-
----
-
-## 7. Fixed since this file was written
-
-Kept rather than deleted, so the reasoning survives.
-
-### 7.1 Key Vault was unreachable by everyone, including the app
-
-The vault set `default_action = "Deny"` and allowed the Functions subnet — but that subnet carried
-**no `Microsoft.KeyVault` service endpoint**, and a Key Vault VNet rule is inert without one. So the
-app's own `@Microsoft.KeyVault(...)` references and `getSecret()` calls would have been denied.
-
-Silent by construction: the app deploys clean, then a missing credential presents as missing data.
-Nothing in CI could catch it, and `terraform validate` would have passed.
-
-Fixed by adding the service endpoint, plus `admin_ip_rules` for the seeding path in §4.2.
-
-### 7.2 Deploys used a static service principal against the repo's own guardrail
-
-`deploy-functions.yml` authenticated with `secrets.AZURE_CREDENTIALS` — a long-lived
-service-principal JSON — while the README requires OIDC and forbids committed static cloud
-credentials.
-
-Replaced with a **user-assigned managed identity** and federated credentials, deliberately rather
-than the usual Entra app registration: app registrations need Entra directory permissions, which
-Azure **Owner** does not confer. A UAMI is an ordinary Azure resource, so the whole thing is
-creatable with the permissions this deployment actually runs under.
-
-`github_org` and `github_repo` were stale (`saulpatinojr`) and consumed by nothing. They now compose
-the federated `subject`, so the drift would have surfaced as an opaque `AADSTS70021` at first deploy.
-
----
-
-## 8. Decisions raised by the 2026-08-18 resource validation
-
-Evidence: Wiki **Resource-Validation-Report** (external-surface run
-[#32083341003](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32083341003)
-plus a full plan-vs-code parity comparison). Engineering-tractable follow-ups
-are TODO.md T-504 (Cosmos hardening) and T-505 (observability layer); these
-two items need a human.
-
-### 8.1 Cloudflare access for synthetic validation
-
-Every request from a GitHub-hosted runner — frontend and `/api/*` alike —
-receives a Cloudflare bot challenge (HTTP 403) before reaching the origin.
-So `validate-deployed.yml` can verify DNS, TLS, and that the edge is up, but
-nothing about the application, and its "admin guards refuse anonymous
-callers" check passes vacuously (a challenge 403 is indistinguishable from
-an app refusal). The standard fix is a WAF custom rule: *skip challenge when
-a request carries a secret header*, with the secret stored as a GitHub
-Actions secret the workflow sends. Needs someone with Cloudflare zone
-access; until then, origin-level validation exists only when an operator
-runs the smoke suite from a residential IP.
-
-**Unblocked by:** creating the WAF skip rule + repo secret, or an explicit
-decision that synthetic origin validation is not wanted.
-
-### 8.2 The approved plan no longer describes the system — DECIDED 2026-08-18
-
-**Decision: option (b), supersede as-built** — chosen by the workload owner
-on 2026-08-18 and implemented the same day: plan **v0.2-as-built** replaces
-v0.1 in `.azure/infrastructure-plan.json`, with the deviations dispositioned
-in **ADR-0018** (umbrella + ratification table), **ADR-0019** (single
-Function App, supersedes ADR-0004), **ADR-0020** (native flat root module,
-supersedes ADR-0005's AVM clause, closes TODO T-502), and **ADR-0021** (CI
-runner ratified). Security/observability gaps were deliberately NOT ratified
-— they remain tracked debt (T-503–T-506, purge protection). The never-planned
-OpenAI provisioning is ratified retroactively with keyless hardening as
-T-506. Nothing left here needs a human; retained below for the record.
-
-`.azure/infrastructure-plan.json` (v0.1-approved) and `infra/*.tf` have
-diverged into two independently-evolved documents: ~40% of planned resources
-are implemented, the three-way API/worker/labs isolation is collapsed to one
-app, the observability layer is absent, security controls the plan requires
-are off (Cosmos firewall/local-auth, ZRS, purge protection, keyless OpenAI),
-and the implementation contains material resources the plan never approved
-(CI runner, 71 Cosmos containers, two hardcoded model deployments) under a
-naming scheme sharing zero names with the plan. Repository policy CI
-meanwhile asserts the plan "must remain approved."
-
-**The decision:** either (a) reconcile the implementation toward the plan
-(costs real money and rework), or (b) supersede v0.1 with an as-built v0.2
-plan whose deviations are each recorded as ADRs — the AVM question (TODO
-T-502) folds into the same act. Until one is chosen, the "approved" status
-the structure validator enforces is describing a document, not the system.
-
-**Unblocked by:** workload-owner choice of (a) or (b), and for (b) an
-explicit ratification (or removal) of the never-planned resources —
-particularly the Azure OpenAI account, which the plan feature-gated behind
-capacity/content-filter/budget approvals that were never recorded.
+The Wiki remains outside the authorized repository set, so
+`.github/wiki/**` is edited here and pushed by `sync-wiki.yml`.
