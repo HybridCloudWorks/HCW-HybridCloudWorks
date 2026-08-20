@@ -815,6 +815,42 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
   }
 
   app_settings = {
+    # ---------------------------------------------------------------------------
+    # The Functions HOST's own storage — timers, singleton locks, SyncTriggers.
+    #
+    # This is NOT the same thing as storage_authentication_type above. That
+    # argument governs how the platform fetches the deployment PACKAGE; this
+    # governs how the running host reaches storage for its own state. Setting
+    # the first and assuming it covered the second is what broke the first
+    # deploy (2026-08-20): the app deployed successfully, reported 80 functions,
+    # and then served the App Service 404 page for every route.
+    #
+    # The evidence, from Application Insights:
+    #
+    #   [exception] Server failed to authenticate the request. Make sure the
+    #               value of Authorization header is formed correctly including
+    #               the signature.
+    #   [trace]     SyncTriggers operation failed.
+    #   [trace]     Process reporting unhealthy: Unhealthy
+    #
+    # An AzureWebJobsStorage connection string was present with an EMPTY
+    # AccountKey — shared-key auth with no key, so every storage call failed the
+    # signature check, SyncTriggers never completed, and the host never became
+    # healthy enough to route a request. Nothing in this configuration wrote
+    # that setting; it arrived with the deploy.
+    #
+    # `__accountName` is the identity-based form: the host constructs the blob,
+    # queue and table endpoints from the account name and authenticates with its
+    # own managed identity, which already holds Storage Blob Data Owner here.
+    # Declaring it in this map also means Terraform owns it, so a deploy tool
+    # cannot reintroduce a connection string without the next plan showing it.
+    #
+    # The failure mode is worth remembering: a keyless connection string does
+    # not fail at deploy, and does not fail as "storage". It fails as a 404 on
+    # every route, which reads as a routing or build problem.
+    # ---------------------------------------------------------------------------
+    "AzureWebJobsStorage__accountName" = azurerm_storage_account.functions.name
+
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
     "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
