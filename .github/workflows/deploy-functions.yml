@@ -104,45 +104,48 @@ jobs:
             --ip-address "${{ steps.fw.outputs.runner_ip }}" \
             --output none
 
+      # Probe the ORIGIN through a temporary firewall window, not Cloudflare.
+      #
+      # Going through Cloudflare does not work and cannot be made to work on
+      # this plan. A GitHub-hosted runner asking for /api/health is served
+      # Cloudflare's "Just a moment..." interstitial and a 403, and that
+      # challenge comes from Bot Fight Mode, which does not run on the Ruleset
+      # Engine — so WAF custom rules, skip actions and page rules have no
+      # effect on it. A skip rule was built, applied, and confirmed inert
+      # before this approach replaced it.
+      #
+      # The alternative was turning Bot Fight Mode off zone-wide, which would
+      # have removed protection from the public site to make one CI check pass.
+      #
+      # So the runner is admitted to the origin the same way it is already
+      # admitted to the host storage account: add its IP, probe, remove it in
+      # an always-run cleanup. Authorized by the deploy identity's Website
+      # Contributor role on this app.
+      #
+      # WHAT THIS DOES NOT TEST, deliberately recorded: the Cloudflare path.
+      # It proves the app is healthy, not that the proxied route works. The
+      # origin-lock assertion below is what keeps that from being a blind spot
+      # — if Cloudflare were not the only way in, that check would fail.
+      - name: Open origin firewall window for this runner
+        id: appfw
+        run: |
+          set -euo pipefail
+          RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
+          echo "runner_ip=${RUNNER_IP}" >> "$GITHUB_OUTPUT"
+          az functionapp config access-restriction add \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.FUNCTION_APP_NAME }}" \
+            --rule-name "ci-smoke-${{ github.run_id }}" \
+            --action Allow --ip-address "${RUNNER_IP}/32" --priority 300 \
+            --output none
+          sleep 20
+
       - name: Post-deploy smoke test
         run: |
-          echo "## 🚀 Azure Functions Deploy Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          URL="https://${{ vars.APP_HOSTNAME }}/api/health"
+          echo "GET $URL  (origin, via the temporary window)"
 
-          # Through Cloudflare, NOT the azurewebsites.net origin.
-          #
-          # Two reasons, and the second is the one that bites. It tests the path
-          # real traffic takes — origin lock, WAF, transform rules and all —
-          # rather than a path only CI uses. And once
-          # functions_origin_lock_enabled is true, the origin refuses everything
-          # outside Cloudflare's ranges: a GitHub-hosted runner has a public
-          # dynamic IP, so curling APP_HOSTNAME directly would fail on every
-          # deploy, reported as a health-check failure rather than as the
-          # firewall doing its job.
-          #
-          # FUNCTIONS_URL is the proxied api-azure.<domain> record and already
-          # carries the /api suffix.
-          # Capture the body as well as the code, and print BOTH to the step log.
-          #
-          # This used to report only into $GITHUB_STEP_SUMMARY, so a failure
-          # produced a red step with an empty log and a status code visible
-          # only on the summary tab. The three plausible causes here — the app
-          # is down, the origin lock refused us, or Cloudflare served a bot
-          # challenge — are indistinguishable without the body, and they need
-          # completely different fixes.
-          URL="${{ vars.FUNCTIONS_URL }}/health"
-          echo "GET $URL"
-
-          # x-hcw-ci-probe tells Cloudflare this runner is ours, so it is not
-          # served the "Just a moment..." bot challenge. Without it this step
-          # gets a 403 challenge page and reports a healthy app as broken.
-          #
-          # This is NOT the origin secret and must never be set to the same
-          # value: that one is stamped by Cloudflare on the way to the origin
-          # and is what the app trusts. This one travels the other way.
-          BODY=$(curl -sS -m 30 -w $'\n%{http_code}' \
-                   -H "x-hcw-ci-probe: ${{ secrets.CI_PROBE_SECRET }}" \
-                   "$URL" 2>&1 || true)
+          BODY=$(curl -sS -m 30 -w $'\n%{http_code}' "$URL" 2>&1 || true)
           STATUS=$(printf '%s' "$BODY" | tail -n1)
           BODY=$(printf '%s' "$BODY" | sed '$d')
 
@@ -155,18 +158,38 @@ jobs:
             echo "\`GET $URL\` → **HTTP $STATUS**"
           } >> $GITHUB_STEP_SUMMARY
 
-          if [ "$STATUS" = "200" ]; then
-            echo "✅ Health check: **PASSED**" >> $GITHUB_STEP_SUMMARY
-          else
+          if [ "$STATUS" != "200" ]; then
             {
               echo "❌ Health check: **FAILED**"
               echo ""
               echo "\`\`\`"
               echo "${BODY:0:800}"
               echo "\`\`\`"
-              echo ""
-              echo "A Cloudflare challenge page means the runner was bot-filtered"
-              echo "(REVIEW.md §2.3) — not that the app is down."
             } >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
+
+          echo "✅ Health check: **PASSED**" >> $GITHUB_STEP_SUMMARY
+
+          # The origin lock must still refuse everyone else. Without this the
+          # window above would quietly become a way to pass the check while the
+          # lock was open — a green test asserting the opposite of what it
+          # claims. Cloudflare's challenge is what a non-allowlisted caller
+          # gets, and a challenge is itself proof the request never reached
+          # Azure.
+          CF=$(curl -sS -m 30 -o /dev/null -w "%{http_code}" "${{ vars.FUNCTIONS_URL }}/health" || echo "000")
+          echo "non-allowlisted path returned: $CF"
+          if [ "$CF" = "200" ]; then
+            echo "❌ Origin lock: **NOT ENFORCING** — an unlisted caller got 200" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "✅ Origin lock: **enforcing** (unlisted caller got HTTP $CF)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Close origin firewall window
+        if: ${{ always() && steps.appfw.outputs.runner_ip != '' }}
+        run: |
+          az functionapp config access-restriction remove \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.FUNCTION_APP_NAME }}" \
+            --rule-name "ci-smoke-${{ github.run_id }}" \
+            --output none
