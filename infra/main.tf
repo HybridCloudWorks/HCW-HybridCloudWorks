@@ -812,7 +812,43 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
         description = "Everything that did not match a Cloudflare range above"
       }
     }
+
+    # The rule above is NOT sufficient on its own, and assuming it was is the
+    # kind of mistake that leaves a lock looking closed while it is open.
+    #
+    # `0.0.0.0/0` is an IPv4 CIDR and matches no IPv6 source, so an IPv6 request
+    # matches no rule at all and falls through to the unmatched-request action.
+    # That action defaults to ALLOW — verified on the live app, which reported
+    # `ipSecurityRestrictionsDefaultAction: Allow` while every IPv4 request was
+    # correctly refused with 403.
+    #
+    # No AAAA record is published for the origin today and a direct IPv6 attempt
+    # failed to connect, so this was not demonstrably exploitable — but the
+    # posture depends on that remaining true, which is not a property this
+    # configuration controls. Deny is the supported way to say what the
+    # `0.0.0.0/0` rule was trying to say.
+    ip_restriction_default_action = var.functions_origin_lock_enabled ? "Deny" : "Allow"
+
+    # SCM is deliberately NOT locked by IP, and that is a live gap rather than a
+    # decision — see REVIEW.md. The Flex Consumption deploy runs THROUGH Kudu
+    # ("Will use Kudu https://<scmsite>/api/publish to deploy since Flex
+    # consumption plan is detected"), and GitHub-hosted runners have no stable
+    # egress IPs, so denying SCM breaks every deploy. Closing it properly needs
+    # either a per-run SCM firewall window like the storage account already
+    # gets, or the self-hosted runner in ci-runner.tf.
+    #
+    # What IS closed below is basic authentication on that endpoint, which is
+    # the credential half of the exposure and costs nothing here: this app
+    # deploys with OIDC and a federated identity, and has never used a
+    # publish profile.
+    scm_ip_restriction_default_action = "Allow"
   }
+
+  # Kudu and FTP username/password publishing, off. Anyone reaching the SCM
+  # endpoint now has to present an Entra token rather than a static credential,
+  # so the publicly-reachable SCM site stops being an authentication surface
+  # even while it stays publicly reachable.
+  webdeploy_publish_basic_authentication_enabled = false
 
   app_settings = {
     # ---------------------------------------------------------------------------
@@ -1340,6 +1376,70 @@ resource "azurerm_app_service_custom_hostname_binding" "api" {
   # Azure reads the TXT record at bind time, so it has to exist first. The
   # dependency is not inferable from the arguments above.
   depends_on = [cloudflare_record.azure_functions_domain_verification]
+}
+
+# =============================================================================
+# Let the CI smoke test through the bot challenge
+#
+# A GitHub-hosted runner asking for /api/health gets Cloudflare's "Just a
+# moment..." page and a 403, so the post-deploy check fails while the app is
+# perfectly healthy. Verified 2026-08-20 from the runner's own log:
+#
+#   GET https://api-azure.<domain>/api/health
+#   status: 403
+#   body:   <!DOCTYPE html>...<title>Just a moment...</title>
+#
+# This rule skips the challenge for requests carrying x-hcw-ci-probe with the
+# right value, scoped to the API hostname.
+#
+# NOT THE SAME SECRET as x-hcw-origin-secret, and pointed the other way. That
+# one is stamped BY Cloudflare on its way to the origin, and proves to the app
+# that a request came through the CDN. This one is sent BY the runner INTO
+# Cloudflare, and proves to Cloudflare that a request is ours. Sharing one value
+# between them would mean the header the app trusts is a header any client can
+# set.
+#
+# The skip is narrow deliberately: one hostname, one header, and only the
+# challenge-issuing products. It does not skip the WAF's managed rules, so a CI
+# runner presenting this header still gets the same protection everything else
+# does — it simply is not asked to prove it is a browser.
+#
+# count-gated on a non-empty secret for the same reason as the origin rule: a
+# rule matching an empty header value would skip the challenge for every
+# request that omits the header, which is all of them.
+# =============================================================================
+resource "cloudflare_ruleset" "ci_probe_challenge_skip" {
+  count = var.cloudflare_ci_probe_secret == "" ? 0 : 1
+
+  zone_id = var.cloudflare_zone_id
+  name    = "Skip the bot challenge for the CI smoke test"
+  kind    = "zone"
+  phase   = "http_request_firewall_custom"
+
+  rules {
+    action      = "skip"
+    description = "CI smoke test presenting x-hcw-ci-probe is not a browser and should not be asked to prove it is"
+    enabled     = true
+    expression  = "(http.host eq \"api-azure.${var.domain}\" and http.request.headers[\"x-hcw-ci-probe\"][0] eq \"${var.cloudflare_ci_probe_secret}\")"
+
+    action_parameters {
+      # Only the products that issue the interstitial. The managed WAF is
+      # deliberately absent — this makes CI not-a-browser, not exempt.
+      products = ["bic", "hot", "securityLevel", "uaBlock", "zoneLockdown"]
+    }
+
+    # Declared because Cloudflare sets it on skip rules whether or not it is
+    # sent. Omitting it makes the provider fail every apply with "Provider
+    # produced inconsistent result after apply: .rules[0].logging: block count
+    # changed from 0 to 1" — the rule is created, then tainted, so the next
+    # plan proposes destroying and recreating a rule that is already correct.
+    #
+    # Keeping it on is also what you want: a skip rule that leaves no log entry
+    # is a hole you cannot audit.
+    logging {
+      enabled = true
+    }
+  }
 }
 
 resource "cloudflare_ruleset" "origin_secret" {

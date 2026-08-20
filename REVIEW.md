@@ -259,6 +259,98 @@ sends.
 **Unblocked by:** creating the rule and repository secret, or deciding synthetic
 origin validation is not wanted.
 
+## 2.3b Edge security review — findings, verified against the live estate
+
+An adversarial review of the origin lock, origin secret, hostname binding and
+CI challenge-skip was run on 2026-08-20 against published Cloudflare and Azure
+guidance. **Every finding below was re-tested against the running system rather
+than accepted**, and two of them did not survive that contact intact.
+
+### Fixed the same day
+
+**The origin lock had an unmatched-request hole.** `Deny 0.0.0.0/0` is an IPv4
+CIDR, so an IPv6 source matches no rule and falls through to the
+unmatched-request action — which was `Allow`, confirmed on the live app while
+every IPv4 request was correctly refused. Not demonstrably exploitable (no AAAA
+is published and a direct IPv6 attempt failed to connect), but the posture
+depended on that staying true, which is not a property this configuration
+controls. `ip_restriction_default_action = "Deny"` now says what the rule was
+trying to say.
+
+**Static publishing credentials were enabled.** SCM basic auth is now off, so
+reaching that endpoint requires an Entra token rather than a username and
+password. Costs nothing here — this app deploys with OIDC and has never used a
+publish profile.
+
+### Corrected — the review overstated this one
+
+**SCM is reachable, but not anonymously usable.** The review reported the Kudu
+site as "publicly reachable... the Kudu console, and the file system", which
+tested as too strong: `https://<app>.scm.azurewebsites.net` and
+`/api/settings` both return **the Entra sign-in page**, `text/html`, not
+content. It is behind directory authentication, and now behind Entra
+authentication *only*.
+
+The residual exposure is real but narrower than stated: the endpoint accepts
+connections from any IP, so it is a surface for credential attacks rather than
+an open door.
+
+### Open, and blocked on a genuine conflict
+
+**SCM cannot simply be IP-restricted, because the deploy runs through it.** The
+Flex Consumption deploy logs `Will use Kudu https://<scmsite>/api/publish to
+deploy since Flex consumption plan is detected`, and GitHub-hosted runners have
+no stable egress IPs. Denying SCM breaks every deploy. Closing it properly needs
+one of:
+
+- a per-run SCM firewall window, exactly as the host storage account already
+  gets in `deploy-functions.yml`; or
+- the self-hosted runner in `infra/ci-runner.tf`, which has a stable address.
+
+The first is a small change to a workflow that already does this once. The
+second is §3.5 and costs money.
+
+**FTP basic auth is still enabled** (`ftpsState: FtpsOnly`). The
+`azurerm_function_app_flex_consumption` resource exposes no argument for it —
+only `webdeploy_publish_basic_authentication_enabled`, which covers SCM. Needs
+an `azapi` resource or a CLI step.
+
+### Worth doing, not yet done
+
+| Finding | Why it matters |
+| --- | --- |
+| **Cloudflare TLS mode is not in code** | No `cloudflare_zone_settings_override` anywhere. The certificate-less hostname binding is only safe under **Full (strict)**; under "Flexible" Cloudflare would speak plain HTTP to an origin with `https_only = true`, producing a redirect loop and bearer tokens in cleartext on the last hop. The invariant is currently assumed, not enforced |
+| **Origin-secret rotation is not atomic** | `CF_ORIGIN_SECRET` is a versionless Key Vault reference, and App Service caches those for up to 24h. Rotating flips Cloudflare instantly while the app compares the old value — every anonymous request throws until the cache turns over. Accept a list of valid secrets during overlap |
+| **Non-constant-time secret comparison** | `client-identity.js` uses `===`. The comment argues a timing oracle yields nothing an attacker cannot get by reaching the origin directly — which was circular while the origin *was* directly reachable. `timingSafeEqual` is three lines |
+| **Allowlisting Cloudflare admits every Cloudflare customer** | Anyone can point a zone at this origin hostname. The origin secret is what makes the design work at all — this is the argument for never weakening it |
+| **No IP-range drift detection** | The 15 CIDRs are hardcoded, which is correct — an `http` data source would make `plan` network-dependent and let an upstream change silently rewrite the firewall. What is missing is a scheduled diff against Cloudflare's published list that opens a PR |
+
+### Confirmed sound
+
+- **No ordering problem between the skip rule and the header stamp.**
+  `http_request_firewall_custom` is phase 8, `http_request_late_transform` is
+  phase 14. The skip passes only `products`, which targets features outside the
+  Ruleset Engine, so header stamping is untouched. **If anyone ever adds
+  `phases` to that skip and includes the late-transform phase, the origin secret
+  silently stops being stamped** and every request starts throwing at the origin.
+- **`operation = "set"` rather than `add`** on the header means a
+  client-supplied `x-hcw-origin-secret` is overwritten rather than appended.
+  Deliberate, and worth keeping.
+- **Hardcoded IP ranges are defensible.** Cloudflare adds ranges to the
+  published list before putting them into production, so a stale list fails by
+  rejecting new Cloudflare egress rather than by admitting strangers.
+
+### The one to weigh properly
+
+The review's strongest structural point: Cloudflare rates IP allowlisting and
+header validation as *moderately* secure, and Authenticated Origin Pulls,
+Tunnel and mTLS as *very* secure. This design stacks the two moderate ones,
+which beats either alone but is not the recommended tier. Flex Consumption
+supports inbound private endpoints, so **private endpoint + Cloudflare Tunnel
+removes the public origin entirely** and makes most of this section moot. That
+is a real architectural option on the current plans, not an enterprise upsell —
+worth costing before adding more rules to the current approach.
+
 ## 2.4 Enabling the deployment workflows
 
 `deploy-azure-frontend`, `deploy-functions`, `deploy-infra` and `migrate-data`
