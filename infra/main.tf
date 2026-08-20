@@ -36,7 +36,9 @@ locals {
     stor = "Content storage account and its blob containers — prevent_destroy"
     sec  = "Key Vault — prevent_destroy"
     conn = "Spoke virtual network and the Functions integration subnet"
-    ai   = "Azure OpenAI account and its model deployments"
+    # No `ai` group. It held the Azure OpenAI account, which was removed when
+    # AI moved to external provider APIs — a group with nothing in it is a
+    # group someone will put something unrelated into.
   }
 }
 
@@ -64,7 +66,13 @@ resource "azurerm_resource_group" "platform_mgmt" {
 # Log Analytics Workspace (required by Application Insights)
 # =============================================================================
 resource "azurerm_log_analytics_workspace" "hcw" {
-  name                = "log-plat-${var.environment}-${var.region_abbreviation}"
+  # Same subscription as the resource group it lives in. resource_group_name
+  # is only a string — the provider's subscription decides where the ARM call
+  # goes, and without this alias the workspace lands in the application
+  # subscription, where rg-mgmt-plat does not exist.
+  provider = azurerm.mgmt
+
+  name                = "log-plat-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.platform_mgmt.location
   resource_group_name = azurerm_resource_group.platform_mgmt.name
   sku                 = "PerGB2018"
@@ -80,7 +88,7 @@ resource "azurerm_log_analytics_workspace" "hcw" {
 # Application Insights (replaces Cloud Logging + Firebase Performance)
 # =============================================================================
 resource "azurerm_application_insights" "hcw" {
-  name                = "appi-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  name                = "appi-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
   workspace_id        = azurerm_log_analytics_workspace.hcw.id
@@ -99,8 +107,14 @@ resource "azurerm_application_insights" "hcw" {
 #   - 100 GB bandwidth/month included
 # =============================================================================
 resource "azurerm_static_web_app" "hcw" {
-  name                = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
-  location            = azurerm_resource_group.app["web"].location
+  name = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  # Still a separate variable from azure_location even though the two now hold
+  # the same value: Static Web Apps is offered in five regions only, and the
+  # validation on static_web_app_location catches a bad region at plan time
+  # instead of at apply time. This resource used to be the estate's odd one
+  # out — running in centralus while named for southcentralus — and the move
+  # to a single region is what retired that exception.
+  location            = var.static_web_app_location
   resource_group_name = azurerm_resource_group.app["web"].name
   sku_tier            = "Standard"
   sku_size            = "Standard"
@@ -113,11 +127,16 @@ resource "azurerm_static_web_app" "hcw" {
 # Serverless: pay-per-RU, no provisioned throughput.
 # Ideal for variable/low traffic pre-launch workloads.
 # Consistency: Session (default, matches Firestore's per-client consistency).
-# Single-region: East US 2 (matches us-central1 audience location).
+# Single-region: centralus, the same region as the rest of the estate.
 # =============================================================================
 resource "azurerm_cosmosdb_account" "hcw" {
-  name                = var.cosmos_db_account_name
-  location            = azurerm_resource_group.app["db"].location
+  name = var.cosmos_db_account_name
+  # Kept as its own variable rather than folded into azure_location: where a
+  # Cosmos account MAY be created is governed by two APIs that disagree, and
+  # both must be re-checked for any future region (see var.cosmos_location).
+  # It resolves to the same region as everything else today — this account was
+  # the reason the estate moved to centralus rather than the exception to it.
+  location            = var.cosmos_location
   resource_group_name = azurerm_resource_group.app["db"].name
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
@@ -153,9 +172,24 @@ resource "azurerm_cosmosdb_account" "hcw" {
     consistency_level = "Session"
   }
 
+  # zone_redundant is EXPLICIT, not left to the provider default, because the
+  # default put this account in the availability-zone pool and South Central US
+  # had no AZ capacity to give: creation failed with ServiceUnavailable and a
+  # message about "zonal redundant (Availability Zones) accounts" — a capacity
+  # message, not a configuration error, and one that would recur unpredictably.
+  #
+  # False is also the correct setting on its own merits here. The account is
+  # serverless and single-region by deliberate design (see the capacity note
+  # above), and zone redundancy costs more while protecting against a failure
+  # mode a single-region account has already accepted.
   geo_location {
-    location          = azurerm_resource_group.app["db"].location
+    location          = var.cosmos_location
     failover_priority = 0
+    # centralus does support availability zones, so this is a choice rather
+    # than a constraint: a serverless, single-region account has already
+    # accepted the failure mode zone redundancy protects against, and zones
+    # cost more.
+    zone_redundant = false
   }
 
   # T-504: the service firewall ADR-001/ADR-0008 traded Private Link away for.
@@ -202,6 +236,12 @@ resource "azurerm_cosmosdb_account" "hcw" {
 
   # This account holds all migrated production data. A plan that wants to
   # replace it must fail until a human removes this guard in a reviewed PR.
+  #
+  # Lifted once, for the centralus rebuild on 2026-08-19, and restored the same
+  # day once the rebuild applied. That window was safe only because
+  # Migration_Plan §4 had not run and every container was empty. It will not be
+  # safe again: from the first migrated document onward this guard is the
+  # difference between a typo and a data-loss incident.
   lifecycle {
     prevent_destroy = true
   }
@@ -409,9 +449,20 @@ resource "azurerm_storage_account" "hcw" {
 
   blob_properties {
     cors_rule {
-      allowed_headers    = ["*"]
-      allowed_methods    = ["GET", "HEAD", "OPTIONS"]
-      allowed_origins    = ["https://${var.domain}", "https://*.${var.domain}", "http://localhost:*"]
+      allowed_headers = ["*"]
+      allowed_methods = ["GET", "HEAD", "OPTIONS"]
+      # EXACT origins only. Azure Storage CORS accepts a literal "*" or fully
+      # qualified origins — it does not accept partial wildcards, so the
+      # previous `https://*.<domain>` and `http://localhost:*` were rejected
+      # with "The value for one of the XML nodes is not in the correct
+      # format", an error that names neither the field nor the value.
+      # Port is part of an origin, hence localhost:5173 (Vite's default) and
+      # not bare localhost.
+      allowed_origins = [
+        "https://${var.domain}",
+        "https://www.${var.domain}",
+        "http://localhost:5173",
+      ]
       exposed_headers    = ["Content-Length", "Content-Type"]
       max_age_in_seconds = 3600
     }
@@ -429,6 +480,9 @@ resource "azurerm_storage_account" "hcw" {
 
   # Holds all migrated production media. Same guard rationale as the Cosmos
   # account: replacement must be an explicit, reviewed decision.
+  #
+  # Lifted for the centralus rebuild on 2026-08-19 and restored the same day.
+  # The account was empty then; it will not be next time.
   lifecycle {
     prevent_destroy = true
   }
@@ -505,7 +559,7 @@ resource "azurerm_storage_management_policy" "cleanup" {
 # to this subnet's CIDR (ADR-001, 2026-07-30).
 # =============================================================================
 resource "azurerm_virtual_network" "hcw" {
-  name                = "vnet-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  name                = "vnet-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["conn"].location
   resource_group_name = azurerm_resource_group.app["conn"].name
   address_space       = [var.vnet_address_space]
@@ -513,7 +567,13 @@ resource "azurerm_virtual_network" "hcw" {
 }
 
 resource "azurerm_subnet" "functions_integration" {
-  name                 = "snet-functions-integration"
+  # This used to omit the region on the reasoning that a subnet is a child of
+  # its VNet, which already carries it. CAF disagrees, and CAF wins here: its
+  # example format is snet-<purpose>-<region>-<###>, region included, for the
+  # same reason vnet carries it — subnet names show up in firewall rules, VNet
+  # rules and support tickets detached from their parent, and a reader should
+  # not have to walk up the tree to learn where the thing is.
+  name                 = "snet-${var.workload_name}-func-${var.environment}-${var.region_abbreviation}-${var.instance}"
   resource_group_name  = azurerm_resource_group.app["conn"].name
   virtual_network_name = azurerm_virtual_network.hcw.name
   address_prefixes     = [var.functions_subnet_prefix]
@@ -551,8 +611,14 @@ resource "azurerm_subnet" "functions_integration" {
   delegation {
     name = "flex-consumption"
     service_delegation {
-      name    = "Microsoft.App/environments"
-      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+      name = "Microsoft.App/environments"
+      # `join/action`, which is what Azure actually assigns for this
+      # delegation — the action set belongs to the service, not to us. Naming
+      # anything else produces a plan that never converges: Terraform writes
+      # the value, Azure replaces it with its own, and the next plan proposes
+      # the same in-place update forever. Verify with:
+      #   az network vnet subnet show ... --query "delegations[].actions"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
   }
 }
@@ -596,13 +662,17 @@ resource "azurerm_storage_account" "functions" {
 
   # Function host state and release packages live here; replacing it takes the
   # API down until a redeploy. Guarded like the other stateful accounts.
+  #
+  # Lifted for the centralus rebuild on 2026-08-19 and restored the same day.
+  # The cost of replacement was a redeploy rather than an outage only because
+  # Migration_Plan §6 cutover had not run.
   lifecycle {
     prevent_destroy = true
   }
 }
 
 resource "azurerm_service_plan" "hcw" {
-  name                = "asp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  name                = "asp-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
   os_type             = "Linux"
@@ -666,6 +736,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
   # silently degrade to trusting a spoofable header.
   https_only = true
 
+
   # ---------------------------------------------------------------------------
   # Scale — every one of these was a silent platform default before.
   # ---------------------------------------------------------------------------
@@ -704,6 +775,43 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # makes the platform intercept OPTIONS preflights itself, so the in-code
     # preflight would never run — and this is a bearer-token API, not a cookie
     # API.
+
+    # -------------------------------------------------------------------------
+    # The Azure half of the origin lock (DECISION 6). Off by default — see
+    # var.functions_origin_lock_enabled for what turning it on breaks, and why
+    # the ranges are a literal list rather than an http data source.
+    #
+    # These blocks live INSIDE this site_config rather than in a conditional
+    # one of their own: the resource takes a single site_config, so a second
+    # block is a configuration error that only surfaces when the flag is
+    # turned on — a plan-time failure hiding behind a false default.
+    #
+    # The Deny is last by construction. App Service evaluates ip_restriction
+    # entries by priority and applies an implicit "allow all" only when the
+    # list is EMPTY, so this is either absent entirely (open, today) or ends in
+    # an explicit Deny. There is no half-written state that quietly allows
+    # everything.
+    # -------------------------------------------------------------------------
+    dynamic "ip_restriction" {
+      for_each = var.functions_origin_lock_enabled ? var.cloudflare_ip_ranges : []
+      content {
+        action     = "Allow"
+        ip_address = ip_restriction.value
+        name       = "cloudflare-${replace(replace(ip_restriction.value, ".", "-"), "/", "-")}"
+        priority   = 100 + index(var.cloudflare_ip_ranges, ip_restriction.value)
+      }
+    }
+
+    dynamic "ip_restriction" {
+      for_each = var.functions_origin_lock_enabled ? [1] : []
+      content {
+        action      = "Deny"
+        ip_address  = "0.0.0.0/0"
+        name        = "deny-all-non-cloudflare"
+        priority    = 65000
+        description = "Everything that did not match a Cloudflare range above"
+      }
+    }
   }
 
   app_settings = {
@@ -773,12 +881,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 
     # AI generation — content drafting, scoring and image pipelines.
     #
-    # Azure OpenAI is keyless (T-506): endpoint only, no AZURE_OPENAI_KEY —
-    # when lib/openai-client.js is wired for real it must authenticate with
-    # DefaultAzureCredential against this endpoint, not a key. The *_API_KEY
-    # settings below are third-party SaaS keys, a different thing.
-    "AZURE_OPENAI_ENDPOINT" = azurerm_cognitive_account.openai.endpoint
-
+    # Every model call goes to an EXTERNAL provider API with a key from Key
+    # Vault. There is deliberately no AZURE_OPENAI_ENDPOINT and no Azure
+    # OpenAI account behind it: the platform-hosted path was removed once the
+    # decision landed that both text and image generation use the providers'
+    # own APIs. Re-adding an Azure OpenAI account would be a second, unused
+    # route to the same capability — and in this region it could not be used
+    # regardless, since the subscription holds zero model quota.
     "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
     "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
     "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
@@ -953,6 +1062,18 @@ resource "azurerm_key_vault" "hcw" {
 
   # Secrets are seeded by hand and exist nowhere else in managed form.
   # Replacement must be an explicit, reviewed decision.
+  #
+  # Of the four guards lifted for the centralus rebuild on 2026-08-19, this was
+  # the only one whose contents Terraform cannot rebuild. Destroying this vault
+  # destroys every secret in it, and the failure mode afterwards is quiet: the
+  # app deploys clean and its @Microsoft.KeyVault(...) references resolve to
+  # nothing, so a missing credential presents as missing data (see the note on
+  # the integration subnet above).
+  #
+  # That rebuild was safe only because the secret values were held outside
+  # Azure and re-seeded by hand afterwards. Guard restored the same day. Any
+  # future plan that replaces this vault must export first — the Deployment
+  # Runbook's export procedure is a prerequisite, not a suggestion.
   lifecycle {
     prevent_destroy = true
   }
@@ -983,14 +1104,31 @@ resource "azurerm_role_assignment" "terraform_kv_secrets" {
 # and silently ignoring the other five — a budget that under-reports is worse
 # than none, because it reads as reassurance. The application subscription is
 # now the boundary that means "this workload", so that is what it watches.
+#
+# contact_groups crosses a subscription boundary: the budget lives in App,
+# the action group in Management. Cross-subscription action groups on budgets
+# are doubtfully supported by the ARM API. If the apply rejects this
+# reference, the fallback is a second action group in the App subscription —
+# contact_emails below is an independent path either way, so alerting
+# degrades rather than disappears.
 resource "azurerm_consumption_budget_subscription" "hcw" {
   name            = "${var.workload_name}-monthly-budget"
   subscription_id = "/subscriptions/${var.subscription_app}"
   amount          = var.budget_amount_usd
   time_grain      = "Monthly"
 
+  # Azure rejects a monthly budget whose start date is before the current
+  # month (400: "Start date for monthly time grain should not be prior to
+  # current month"), so this is not a free-form "when we started" field — it
+  # goes stale and breaks the NEXT first-apply into a fresh subscription.
+  # Existing budgets are unaffected: the constraint is checked on create.
+  #
+  # A variable rather than a literal so a later deployment can set it without
+  # editing this file. Terraform has no "current month" function that would be
+  # stable across plans, and a timestamp() here would propose a diff on every
+  # run.
   time_period {
-    start_date = "2026-07-01T00:00:00Z"
+    start_date = var.budget_start_date
   }
 
   # T-505: the approved threshold ladder (50/75/90/100 actual + forecast),
@@ -1068,4 +1206,49 @@ resource "cloudflare_record" "azure_functions" {
   proxied = true
   ttl     = 1
   comment = "Azure Functions API endpoint (migration)"
+}
+
+# =============================================================================
+# Origin lock, Cloudflare half (DECISION 6)
+#
+# Stamps x-hcw-origin-secret onto every request Cloudflare proxies to the
+# origin. functions/src/lib/auth/client-identity.js compares it against the
+# CF-ORIGIN-SECRET it reads from Key Vault and, in production, throws when it
+# does not match rather than trusting a spoofable CF-Connecting-IP.
+#
+# Phase is http_request_late_transform, not http_request_transform: the late
+# phase runs AFTER any customer transform rules and after Cloudflare's own
+# managed headers, so nothing downstream can strip or overwrite the header
+# before it reaches the origin.
+#
+# Created only when a secret is supplied. An empty string means "the lock is
+# not configured yet", and creating a rule that stamps an empty header would
+# make viaCloudflare() compare "" to "" and pass for everyone — the exact
+# silent degradation this design exists to prevent.
+# =============================================================================
+resource "cloudflare_ruleset" "origin_secret" {
+  count = var.cloudflare_origin_secret == "" ? 0 : 1
+
+  zone_id = var.cloudflare_zone_id
+  name    = "Origin secret for the Azure Functions origin"
+  kind    = "zone"
+  phase   = "http_request_late_transform"
+
+  rules {
+    action      = "rewrite"
+    description = "Stamp x-hcw-origin-secret on requests proxied to the Functions origin"
+    enabled     = true
+    # Scoped to the Functions hostname rather than the whole zone: the Static
+    # Web App shares this zone and has no use for the header, and a secret is
+    # safest where it is not sent to things that do not need it.
+    expression = "(http.host eq \"api-azure.${var.domain}\")"
+
+    action_parameters {
+      headers {
+        name      = "x-hcw-origin-secret"
+        operation = "set"
+        value     = var.cloudflare_origin_secret
+      }
+    }
+  }
 }

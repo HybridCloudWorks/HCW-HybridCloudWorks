@@ -17,10 +17,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 8 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 5 |
+| Medium | 6 |
 | Low | 2 |
 | Resolved since the review | 38 (T-101 – T-105, T-201 – T-210, T-301, T-303 – T-310, T-312 – T-317, T-320, T-401 – T-407) + T-311 corrected as not-a-defect, T-406 verified as already-resolved; T-302 part-resolved; T-408's last residue closed with T-320 |
 | Last updated | 2026-08-18 — naming sweep standardized all Terraform outputs; T-507 filed for the coordinated input-variable rename |
@@ -759,6 +759,164 @@ caching a miss at the hit TTL fails two, and dropping the trim fails two.
 ---
 
 ## MEDIUM
+
+### T-321 — Finish the post-rebuild re-pointing (rebuild and guards DONE)
+
+**Status 2026-08-19:** the rebuild **applied** — 112 added, 1 changed, 1
+destroyed, 129 resources in state, `terraform plan` empty and drift synced. All
+four `prevent_destroy` guards are **restored to `true`**. The four subscription
+display names were renamed to `-cus` by hand. One snag worth recording: the
+first apply failed destroying `rg-web-site-prod-scus` because Application
+Insights auto-creates an `Application Insights Smart Detection` action group
+that Terraform does not manage, and the provider refuses to delete a resource
+group containing unmanaged resources. Deleting that one object and re-applying
+cleared it — preferable to setting `prevent_deletion_if_contains_resources =
+false`, which would disable that protection for every resource group forever.
+
+**Vault re-seeded 2026-08-19.** All 19 secrets restored to
+`kv-site-prod-cus-01` and diffed against the `@Microsoft.KeyVault(...)`
+references in `main.tf` — exact match, nothing missing, nothing stray. The
+seeding window was opened and closed with `az keyvault network-rule
+add/remove` rather than the `admin_ip_rules` variable, so no Terraform apply
+was involved; the end state is identical (`defaultAction = Deny`, no IP rules,
+the Functions subnet as the only VNet rule) and `terraform plan` is empty.
+Data-plane access was granted by assigning the operator **Key Vault Secrets
+Officer** on the vault — RBAC authorization is on, so subscription Owner alone
+carries no read/write access to secrets.
+
+`CF-ORIGIN-SECRET` and `CLIENT-IP-SALT` were regenerated rather than restored:
+the salt only keyed rate-limit buckets that the rebuild destroyed, and the
+origin secret has no counterpart yet (see below).
+
+**Deployment variables reconciled 2026-08-19.** Only the GitHub side was
+stale, and only five of its seven variables: `APP_HOSTNAME`, `CLIENT_ID`,
+`FUNCTIONS_URL`, `RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT`, each set
+from the matching `terraform output` and cross-checked afterwards.
+`SUBSCRIPTION_ID` and `TENANT_ID` were already correct — the rebuild changed
+resource names, not subscription GUIDs.
+
+**The HCP Terraform workspace needed nothing.** Its twelve variables hold
+subscription GUIDs, tenant, Cloudflare and budget values, none of which the
+rebuild touched, and `TFC_AZURE_RUN_CLIENT_ID` was repointed during the
+identity swap. Running `set-tfc-variables.ps1` would have rewritten correct
+values with identical ones.
+
+**Bootstrap identity replaced 2026-08-19.** `id-hcw-terraform` in
+`rg-hcw-bootstrap` (southcentralus) broke the convention four ways — `hcw` is
+the org token, and there was no environment, region or instance segment. Now
+`id-plat-terraform-prod-cus-01` in `rg-mgmt-boot-prod-cus`, centralus. Order
+was create → repoint `TFC_AZURE_RUN_CLIENT_ID` → verify a plan authenticates →
+strip the old identity's six role assignments → delete the old group, because
+reversing it locks the workspace out with `AADSTS70021`. Terraform correctly
+moved `azurerm_role_assignment.terraform_kv_secrets` to the new principal.
+
+Both seeding scripts carried the old identity as hardcoded parameter defaults;
+`set-tfc-variables.ps1` would have reported "not found" and fallen through to
+prompting for a client id by hand, which reads as a permissions problem rather
+than a rename. Fixed in the same change.
+
+**Origin lock written 2026-08-20, deliberately NOT enabled.** Both halves now
+exist in `infra/`: `cloudflare_ruleset.origin_secret` stamps
+`x-hcw-origin-secret` on requests proxied to `api-azure.<domain>`, and the
+Function App's `site_config` grows Cloudflare-only `ip_restriction` rules
+ending in an explicit Deny. Both are inert until switched on, and the plan is
+empty with them off.
+
+**ENABLED 2026-08-20 — both halves are live.** Proof, before and after:
+
+| Path | Before | After |
+| --- | --- | --- |
+| `func-site-prod-cus-01.azurewebsites.net` direct | 404 | **403 — refused** |
+| `api-azure.hybridcloudworks.com` via Cloudflare | 404 | **404 — still reaches the app** |
+
+Both were 404 before because the Function App holds **zero deployed functions**
+— the rebuild recreated the shell and no code has been deployed to it yet.
+That is also why the header could not be verified end-to-end: there is no
+application to observe it arriving. The rule was verified structurally
+instead — phase `http_request_late_transform`, scoped to the `api-azure` host,
+`x-hcw-origin-secret` with operation `set` and a non-empty value.
+
+Two things learned doing it, both recorded in the commits: the API token
+needed **Zone → Transform Rules:Edit** and, contrary to the documentation
+trail, did **not** need Account → Rulesets:Read; and `cloudflare_ruleset`
+failed with `Authentication error (10000)` while every `cloudflare_record`
+applied cleanly, which reads as broken HCL rather than a short credential.
+
+The original enablement order, kept because a rotation repeats it:
+
+1. Set `cloudflare_origin_secret` as a **sensitive** workspace variable in HCP
+   Terraform, to **exactly** the `CF-ORIGIN-SECRET` value in Key Vault. A
+   mismatch is not a partial failure — every anonymous request is treated as
+   bypassing Cloudflare and throws. The rule is `count`-gated on a non-empty
+   secret so an empty value cannot create a rule that stamps `""` and makes
+   `viaCloudflare()` pass for everyone.
+2. Apply, and confirm the header arrives.
+3. Only then set `functions_origin_lock_enabled = true`.
+
+Rollback is one variable back to `false`.
+
+Fixed alongside it: `deploy-functions.yml` smoke-tested
+`https://<APP_HOSTNAME>/api/health` — the azurewebsites.net origin — from a
+GitHub-hosted runner. Enabling the lock would have failed that step on every
+deploy and reported it as a health-check failure rather than as the firewall
+working. It now goes through `FUNCTIONS_URL`, the proxied Cloudflare record,
+which is also the path real traffic takes.
+
+**Still outstanding:**
+
+- **Telegram webhook — nothing to re-register yet.** Listing this as a
+  post-rebuild task was wrong: `functions/src` contains no HTTP-triggered
+  Telegram function and nothing calls `api.telegram.org`. The
+  `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` app settings and vault secrets are
+  staged for an integration that has not been ported. Any live webhook points
+  at the Firebase deployment, which this rebuild did not touch. It becomes a
+  real task at Migration_Plan §3 (port the API) and again at §6 (cutover), and
+  the risk register already tracks it there.
+- Enable the origin lock, per the three steps above.
+- Verify the GitHub deploy identity still authenticates. `CLIENT_ID` now points
+  at the rebuilt identity and its federated credentials were recreated with it;
+  the only proof is a workflow run.
+
+---
+
+<details>
+<summary>Original ticket — execute the centralus rebuild, then restore the guards</summary>
+
+**Files:** `infra/variables.tf`, `infra/main.tf`, `infra/hub.tf`, `infra/observability.tf`, `infra/oidc.tf`, `infra/ci-runner.tf`, `.github/wiki/Deployment-Runbook.md` §1b
+
+`infra/` now describes a **different estate from the one running**: everything
+consolidated into `centralus`, and the CAF instance number adopted per resource
+type. Both force replacement — Azure names and regions are immutable — so the
+plan is **125 to add, 3 to change, 125 to destroy**. It has been planned clean
+(zero errors) and **not applied**.
+
+Doing it now is the cheap moment and that is the whole argument for the
+sequencing: Migration_Plan §4 has not run, so all 73 Cosmos containers and both
+storage accounts are empty. The same change after data lands is a migration.
+
+Three things make this more than "run apply":
+
+1. **Export the Key Vault secrets first.** ~24 secrets, seeded by hand, exist
+   nowhere else in managed form; Terraform cannot recreate them. The vault
+   firewall is default-Deny, so listing them at all needs an `admin_ip_rules`
+   window. Runbook §1b Step 1 carries the commands. Skipping this produces an
+   app that deploys clean and fails quietly — a missing credential presents as
+   missing data.
+2. **Four `prevent_destroy` guards are lifted** (Cosmos account, both storage
+   accounts, Key Vault) because the plan is impossible with them on. Each
+   carries a `GUARD TEMPORARILY LIFTED` comment naming this ticket's follow-up.
+   **Restore all four to `true` immediately after the rebuild applies** — until
+   then the estate has no protection against a careless plan.
+3. **Re-point what does not follow automatically.** Cloudflare DNS does (both
+   records were in the plan as in-place updates). GitHub and TFC variables need
+   their seeding scripts re-run; the Telegram webhook needs re-registering
+   against the new Function App hostname; the four `sub-*-prod-scus`
+   subscription display names still name a region that will hold nothing.
+
+**Exit criterion:** rebuild applied, secret count matches the pre-teardown
+checksum, `terraform plan` empty, all four guards back to `true`.
+
+</details>
 
 ### ~~T-301 — `scheduledPublishDate` never publishes (write side complete, read side empty)~~ RESOLVED
 **Files:** `functions/src/lib/scheduled-publish.js` (new), `functions/src/functions/schedulers.js`, `functions/src/lib/cms/publish.js`, `functions/src/lib/cosmos-client.js`

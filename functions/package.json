@@ -19,7 +19,6 @@
     "@azure/functions": "^4.7.0",
     "@azure/identity": "^4.8.0",
     "@azure/keyvault-secrets": "^4.9.0",
-    "@azure/openai": "^2.0.0",
     "@azure/storage-blob": "^12.27.0",
     "cheerio": "^1.2.0",
     "google-auth-library": "^11.0.2",

@@ -1,7 +1,94 @@
 # Migration Plan — Personal-Site_HCW → HCW-HybridCloudWorks (Azure)
 
-**Audience:** engineers executing the migration. **Status:** plan. Written 2026-07-30.
+**Audience:** engineers executing the migration. **Status:** plan — Phase 2 executed and rebuilt; see the note below.
+**Written** 2026-07-30; deployment note added 2026-08-19, updated 2026-08-20 after the centralus rebuild.
 **Companion:** [Architecture_Plan.md](Architecture_Plan.md) — the target and why.
+
+> ## ⚠️ PLEASE NOTE — what is *actually* deployed, as of 2026-08-20
+>
+> **Everything below this box is the plan as written on 2026-07-30. It describes what was designed
+> to be deployed. It is not a description of the running estate.**
+>
+> **Migration_Plan §2 Phase 2 has since been executed.** The Azure infrastructure is live: **129
+> resources**, applied from `infra/` through HCP Terraform (org `hcw`, project `Site`, workspace
+> `hcw-azure`). As of 2026-08-20 `terraform fmt`, `terraform validate` and `terraform plan` are all
+> clean — _"No changes. Your infrastructure matches the configuration."_
+>
+> Reaching that took a run of apply-time failures, and **fixing them changed the target**. Read the
+> plan for intent and sequencing; read this box for what exists. Where the two disagree, this box
+> wins.
+>
+> ### ✅ Rebuilt into centralus on 2026-08-19 — these are the live names
+>
+> The estate was torn down and rebuilt to consolidate every resource into `centralus` and adopt the
+> CAF instance-number convention. Azure names and regions are both immutable, so this was a
+> replacement rather than an edit: **125 destroyed, 125 created**. Nothing of this workload remains
+> in `southcentralus`.
+>
+> | | |
+> | --- | --- |
+> | API (public) | `https://api-azure.hybridcloudworks.com/api` — **the only address clients can reach** |
+> | Function App origin | `func-site-prod-cus-01.azurewebsites.net` — locked to Cloudflare, returns **403** to everything else |
+> | Static Web App | `stapp-site-prod-cus-01` → `calm-ground-0d0e6a010.7.azurestaticapps.net` |
+> | Cosmos | `cosmos-site-prod-cus`, database `hcw`, 73 containers, **empty** |
+> | Key Vault | `kv-site-prod-cus-01`, 19 secrets |
+> | Storage | `stsiteprodcus01` (content) · `stsitefuncprodcus01` (Functions host) |
+> | Resource groups | `rg-{web,db,stor,sec,conn}-site-prod-cus` |
+>
+> **The origin lock changes how §4 must be written.** The Function App refuses every caller outside
+> Cloudflare's IP ranges. Anything that talks to the API — the SPA, a port-verification script, a
+> smoke test, a local `curl` — must use `api-azure.hybridcloudworks.com`, never the
+> `azurewebsites.net` hostname. A direct call returns `403` with nothing in the body explaining why.
+> Cloudflare stamps `x-hcw-origin-secret` on the way through, which is what lets
+> `functions/src/lib/auth/client-identity.js` trust `CF-Connecting-IP` for rate limiting.
+>
+> **The Function App holds zero deployed functions.** The rebuild recreated the shell; no code has
+> been deployed to it. Both `/api/health` paths answer `404` for that reason, not because of
+> routing. §5 below is therefore still entirely ahead.
+>
+> | The plan implies                                        | What is actually deployed                                                               | Why it changed                                                                                                                                             |
+> | ------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | Cosmos in the estate region, `southcentralus`           | `cosmos-site-prod-cus` in **`centralus`** — serverless, single-region, `zone_redundant = false` | Two Azure APIs govern Cosmos placement and they disagree. `southcentralus` is ARM-deployable but this subscription has **no Cosmos region access**; `southcentralus2` has access but ARM does not offer Cosmos there. `centralus` is the nearest region that passes both. |
+> | An Azure OpenAI account behind the AI endpoints         | **Nothing. Retired entirely** — no account, no role assignment, no diagnostic setting, no `ai` resource group, no `AZURE_OPENAI_*` app settings | The pinned `gpt-4o` version was retired 2026-03-31, this subscription holds **zero TPM quota** for `gpt-4o` in every SKU, and DALL-E is not offered in the region. Nothing consumed it. |
+> | Key Vault `kv-site-prod-scus`                           | **`kv-site-prod-cus-01`**                                                                | The unsuffixed name is globally taken by an unrelated tenant and is not soft-deleted anywhere in this tenant, so it is unrecoverable. `-01` is the instance suffix the Naming-Convention page reserves for exactly this. |
+> | Static Web App in the estate region                     | `stapp-site-prod-cus-01`, running in **`centralus`** like everything else                                        | `southcentralus` does not offer `Microsoft.Web/staticSites` — only five regions do, and this was the estate's one naming exception until the centralus consolidation retired it. The whole estate is now the region this resource always ran in. |
+> | Phase 2 exit: applied to a **non-production** subscription | **Applied to the production subscriptions**, across three: Application `b9e02281…`, Management `02dfb8ad…`, Connectivity `8f3c6d82…` | There is no non-production subscription. The Identity landing zone is deliberately empty. Cost control is the budget resource — `budget_amount_usd` (default 150 USD) from `budget_start_date`. **The §7 cost gate still applies and has not been run.** |
+> | Data living in Cosmos                                    | The `hcw` database and all **73 containers exist and are EMPTY**                          | Phase 4 has not run. The 1,395 documents are still only in Firestore.                                                                                       |
+> | Wildcard CORS origins on storage                         | **Exact origins only, ports included**                                                    | Azure Storage accepts a literal `*` or fully-qualified origins and nothing in between; `https://*.<domain>` and `http://localhost:*` are rejected outright.  |
+> | A CI runner                                              | **Not deployed** — `ci_runner_enabled = false`                                            | Deferred; ADR 0021 superseded.                                                                                                                              |
+>
+> **Two of these change how you work, not just what you read:**
+>
+> **The AI endpoints have no Azure backing service.** The 17 AI RPCs are no more blocked than they
+> were, but whoever ports them writes against **external provider APIs, keyed from Key Vault** via
+> the existing `*_API_KEY` app settings. `functions/src/lib/openai-client.js` used to shadow that
+> decision — it imported `@azure/openai` and read `AZURE_OPENAI_*` settings that no longer exist,
+> while having no importers of its own. It was **deleted on 2026-08-20**, along with the
+> `@azure/openai` dependency it was the only consumer of, so nobody ports the AI RPCs by wiring up
+> a service that is not there. Do not re-add the Azure OpenAI account to unblock Phase 3; the
+> absence is commented in `infra/main.tf` where someone would otherwise restore it.
+>
+> **The network is closed by default.** Cosmos, both storage accounts and Key Vault all default to
+> `Deny`, scoped to the Functions integration subnet `snet-site-func-prod-cus-01`. GitHub-hosted runners
+> have public dynamic IPs, so `deploy-functions.yml` opens a per-run firewall window and closes it
+> again. **A deploy or a data-migration run from anywhere else needs an operator IP window** (the
+> `*_admin_ip_rules` variables) or it fails on a network denial that does not announce itself as one.
+>
+> **Also worth knowing before you touch `infra/`:**
+>
+> - The backend **must** resolve to workspace `hcw-azure`. The other workspace in this org, `HCW`,
+>   holds 85 GCP/Firebase/VPS resources belonging to `saulpatinojr/Personal-Site_HCW` — a plan
+>   pointed there proposes **destroying all of them**.
+> - The HCP Terraform **project name `Site` is a segment of the OIDC subject** the federated
+>   credentials must match. Moving the workspace between projects breaks authentication with
+>   `AADSTS70021` until `scripts/bootstrap-terraform-oidc.ps1` is re-run with the new `-TfcProject`.
+> - State was re-synced on 2026-08-19 with `terraform apply -refresh-only`: the subnet delegation
+>   action recorded in state (`.../subnets/action`) was stale against what Azure actually assigns
+>   (`.../subnets/join/action`). No infrastructure changed; the record caught up to reality.
+>
+> **What has not changed:** Phases 3, 4, 5 and 6 are all still ahead — port the 117 endpoints,
+> migrate the data, cut over, decommission. §0's overlap problem remains the highest-probability
+> cause of failure, and every day both repositories stay live it gets worse.
 
 This repository becomes **archival** at the end of this plan. Until it does, it is the **source of
 truth**, and that is the single most important operational fact below.
@@ -42,7 +129,7 @@ deployed to Azure.
 | ----- | ---------------------------------------- | ------------- | --------------------------------------------------------------- |
 | 0     | Reconcile the two repositories           | Both          | `frontend/` is a byte-faithful copy of this repo at a known SHA |
 | 1     | Decouple from Firebase behind interfaces | **This repo** | Zero direct `firebase/*` imports outside an adapter layer       |
-| 2     | Stand up Azure infrastructure            | Target repo   | Terraform applied to a non-production subscription, costed      |
+| 2     | Stand up Azure infrastructure            | Target repo   | **DONE 2026-08-19** — 129 resources applied to the *production* subscriptions; see the note at the top |
 | 3     | Port the API and workers                 | Target repo   | All 117 endpoints answering, parity-tested                      |
 | 4     | Migrate data                             | Scripts       | 1,395 documents in Cosmos, reconciled                           |
 | 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |

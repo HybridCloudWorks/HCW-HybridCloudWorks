@@ -76,12 +76,22 @@ describe('Content-Security-Policy', () => {
   });
 
   it('permits the API in both deployment topologies', () => {
-    // `'self'` covers a same-origin `/api` base; the wildcard covers the
-    // cross-origin one. The second can be dropped once REVIEW.md §0.1 settles
-    // on same-origin — not before.
+    // `'self'` covers a same-origin `/api` base; the named Cloudflare host
+    // covers the cross-origin one.
+    //
+    // This used to be `https://*.azurewebsites.net`, and that is now the one
+    // address the browser CANNOT use: the Function App origin is restricted to
+    // Cloudflare IP ranges (infra: functions_origin_lock_enabled), so a direct
+    // call answers 403. Traffic goes through api-azure.<domain>, and CSP is
+    // enforced against the URL the browser actually requests — so the host
+    // named here has to be the proxied one, not the origin behind it.
+    //
+    // Narrower as a side effect worth keeping: the wildcard admitted every
+    // Azure Websites host on the internet, this admits exactly one name.
     const connect = directive('connect-src');
     expect(connect).toContain("'self'");
-    expect(connect).toContain('https://*.azurewebsites.net');
+    expect(connect).toContain('https://api-azure.hybridcloudworks.com');
+    expect(connect).not.toContain('https://*.azurewebsites.net');
   });
 
   it('keeps the third-party origins the app still calls', () => {

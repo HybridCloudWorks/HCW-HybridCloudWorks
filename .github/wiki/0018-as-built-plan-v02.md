@@ -70,7 +70,7 @@ which describes the implemented environment. Deviations are dispositioned exactl
 ## Validation and revisit triggers
 
 - Validated by the 2026-08-18 parity comparison; final confirmation is an empty `terraform plan`
-  against the `hybridcloudworks-azure` workspace (operator, Runbook §4).
+  against the `hcw-azure` workspace (operator, Runbook §4).
 - **Revisit LRS→ZRS** when Firebase decommission removes the second copy, or when media becomes
   irreproducible.
 - **Revisit zone redundancy** if measured availability misses the static-first expectations of ADR 0007.

@@ -15,7 +15,12 @@
 # One ops action group; the budget and future alert rules all route here so
 # changing who gets paged is one edit, not five.
 resource "azurerm_monitor_action_group" "ops" {
-  name                = "ag-plat-${var.environment}-${var.region_abbreviation}"
+  # Follows its resource group into the Management subscription — without the
+  # alias the ARM call goes to the application subscription and fails with
+  # ResourceGroupNotFound.
+  provider = azurerm.mgmt
+
+  name                = "ag-plat-${var.environment}-${var.region_abbreviation}-${var.instance}"
   resource_group_name = azurerm_resource_group.platform_mgmt.name
   short_name          = "hcw-ops"
 
@@ -95,22 +100,6 @@ resource "azurerm_monitor_diagnostic_setting" "content_blob" {
   }
 }
 
-# Azure OpenAI — audit and request/response, per the plan's diagnostics list.
-# Volume is bounded by the account's own tiny deployment capacity.
-resource "azurerm_monitor_diagnostic_setting" "openai" {
-  name                       = "diag-openai-to-logs"
-  target_resource_id         = azurerm_cognitive_account.openai.id
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
-
-  enabled_log {
-    category = "Audit"
-  }
-
-  enabled_log {
-    category = "RequestResponse"
-  }
-
-  enabled_metric {
-    category = "AllMetrics"
-  }
-}
+# There is no Azure OpenAI diagnostic setting, because there is no Azure
+# OpenAI account: model calls go to external provider APIs (see the app
+# settings in main.tf). Their request logs live with the provider, not here.

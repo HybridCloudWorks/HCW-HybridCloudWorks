@@ -60,8 +60,9 @@
   HCP Terraform organization name, case-sensitive. Default: HybridCloudWorks.
 
 .PARAMETER TfcProject
-  HCP Terraform project name, case-sensitive. A workspace created without
-  choosing a project lives in "Default Project" — including the space.
+  HCP Terraform project name, case-sensitive. Defaults to Site, which is where
+  the hcw-azure workspace lives. A workspace created without choosing a project
+  lands in "Default Project" instead — including the space.
 
 .PARAMETER TfcWorkspace
   HCP Terraform workspace name, case-sensitive.
@@ -97,35 +98,50 @@
   it.
 
 .EXAMPLE
-  # Preview. The identity lands in Management; all four subscriptions become
-  # deployment targets.
-  ./scripts/bootstrap-terraform-oidc.ps1 `
-      -TenantId 00000000-0000-0000-0000-000000000000 `
-      -IdentitySubscriptionId 22222222-2222-2222-2222-222222222222 `
-      -TargetSubscriptionIds 11111111-1111-1111-1111-111111111111, `
-                             22222222-2222-2222-2222-222222222222, `
-                             33333333-3333-3333-3333-333333333333, `
-                             44444444-4444-4444-4444-444444444444 `
-      -WhatIf
+  # Preview, no arguments. The tenant comes from the Azure CLI sign-in, and
+  # the subscriptions are offered as numbered lists with the ones matching the
+  # naming convention preselected.
+  ./scripts/bootstrap-terraform-oidc.ps1 -WhatIf
 
 .EXAMPLE
-  # Single-subscription tenant: the identity's own subscription is the only
-  # target, so -TargetSubscriptionIds can be omitted entirely.
-  ./scripts/bootstrap-terraform-oidc.ps1 `
-      -TenantId 00000000-0000-0000-0000-000000000000 `
-      -IdentitySubscriptionId 22222222-2222-2222-2222-222222222222 -DeviceCode
+  # Same, on a machine with no browser of its own.
+  ./scripts/bootstrap-terraform-oidc.ps1 -DeviceCode
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-  [Parameter(Mandatory = $true)][string] $TenantId,
-  [Parameter(Mandatory = $true)][string] $IdentitySubscriptionId,
+  # All three are optional and discovered interactively when omitted — see
+  # lib/deploy-console.ps1 for why none of them is a required flag. Supplying
+  # one skips its discovery step, which is what keeps CI use possible.
+  [string] $TenantId,
+  [string] $IdentitySubscriptionId,
   [string[]] $TargetSubscriptionIds = @(),
-  [string] $TfcOrganization = 'HybridCloudWorks',
-  [string] $TfcProject = 'Default Project',
-  [string] $TfcWorkspace = 'hybridcloudworks-azure',
-  [string] $ResourceGroupName = 'rg-hcw-bootstrap',
-  [string] $IdentityName = 'id-hcw-terraform',
-  [string] $Location = 'southcentralus',
+  # These three compose the federated credential subject, which Entra matches
+  # as an exact, case-sensitive string. They are the live values, verified
+  # against the HCP Terraform API on 2026-08-19 — every one of them was wrong
+  # before that (org HybridCloudWorks, workspace hybridcloudworks-azure and
+  # project "Default Project" were assumptions, and the first two named things
+  # that do not exist).
+  [string] $TfcOrganization = 'hcw',
+  [string] $TfcProject = 'Site',
+  [string] $TfcWorkspace = 'hcw-azure',
+  # Named to the convention as of 2026-08-19. The originals were
+  # rg-hcw-bootstrap / id-hcw-terraform / southcentralus, which predated the
+  # Naming-Convention page and broke it three ways: `hcw` is the ORG token, and
+  # the page reserves that for management-group IDs (the workload slot takes
+  # `plat`); there was no environment or region segment; and there was no
+  # instance number, which CAF assigns to managed identities.
+  #
+  # The resource group cannot be rg-mgmt-plat-prod-cus — that name belongs to
+  # Terraform's own Management group, and the whole point of this one is that
+  # nothing in infra/ can reach it. `boot` in the workload slot keeps it
+  # separate and says what it is.
+  #
+  # Location matters more than it looks: leaving this at southcentralus meant
+  # the next bootstrap run would recreate the region drift that the centralus
+  # consolidation removed.
+  [string] $ResourceGroupName = 'rg-mgmt-boot-prod-cus',
+  [string] $IdentityName = 'id-plat-terraform-prod-cus-01',
+  [string] $Location = 'centralus',
   [switch] $ElevateAccess,
   [switch] $DeviceCode,
   [string] $ReportPath = (Join-Path $PSScriptRoot ".reports/bootstrap-oidc-$(Get-Date -Format 'yyyyMMdd-HHmmss').md")
@@ -133,15 +149,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# The identity's own subscription is always a deployment target: Terraform
-# creates the central Log Analytics workspace and the platform action group in
-# Management, which is where the identity itself lives. Deduplicated, so
-# passing it explicitly in -TargetSubscriptionIds is harmless.
-$TargetSubscriptionIds = @(
-  @($TargetSubscriptionIds) + $IdentitySubscriptionId |
-    Where-Object { $_ } |
-    Select-Object -Unique
-)
+. (Join-Path $PSScriptRoot 'lib/deploy-console.ps1')
 
 # The seven tags the IaC Repository Standard requires on every resource. They
 # mirror infra/variables.tf's `tags` default so the bootstrap resources are
@@ -159,41 +167,8 @@ $BootstrapTags = @(
   'dataClassification=internal'
 )
 
-# ---------------------------------------------------------------------------
-# Output helpers. Every line the operator reads is one of these four shapes, so
-# a long run stays scannable: what is fine, what changed, what needs them.
-# ---------------------------------------------------------------------------
-function Write-Step { param($Message) Write-Host "`n=== $Message" -ForegroundColor Cyan }
-function Write-Ok { param($Message) Write-Host "  [ok]   $Message" -ForegroundColor Green }
-function Write-Act { param($Message) Write-Host "  [make] $Message" -ForegroundColor Yellow }
-function Write-Info { param($Message) Write-Host "  $Message" -ForegroundColor DarkGray }
-
-function Stop-WithGuidance {
-  param([string] $Problem, [string[]] $Fix)
-  Write-Host "`n  [stop] $Problem" -ForegroundColor Red
-  foreach ($line in $Fix) { Write-Host "         $line" -ForegroundColor Red }
-  exit 1
-}
-
-# az writes progress and warnings to stderr, which PowerShell 7 promotes to a
-# terminating error under $ErrorActionPreference = 'Stop'. Route everything
-# through one wrapper that judges success by exit code instead.
-function Invoke-Az {
-  param([Parameter(Mandatory)][string[]] $Arguments, [switch] $AllowFailure)
-  # 2>&1 on a native command turns stderr into ErrorRecords, and under
-  # 'Stop' PowerShell 7 raises those as NativeCommandError before the exit
-  # code is ever read. Relax the preference for the call itself only.
-  $previous = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
-  try { $output = & az @Arguments 2>&1 } finally { $ErrorActionPreference = $previous }
-  if ($LASTEXITCODE -ne 0) {
-    if ($AllowFailure) { return $null }
-    throw "az $($Arguments -join ' ') failed:`n$output"
-  }
-  $text = ($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
-  if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-  try { return $text | ConvertFrom-Json } catch { return $text }
-}
+# Console output, prompting and Invoke-Az live in lib/deploy-console.ps1, so
+# all three deployment scripts read and behave identically.
 
 # Sign-in is the one az call that must NOT be captured. The device-code flow
 # prints the code and URL you have to act on, and the interactive flow prints
@@ -201,9 +176,13 @@ function Invoke-Az {
 # staring at a hung prompt. So this runs az directly and lets it own the
 # console.
 function Invoke-AzLogin {
-  param([switch] $UseDeviceCode)
+  param([switch] $UseDeviceCode, [string] $Tenant)
 
-  $loginArgs = @('login', '--tenant', $TenantId, '--only-show-errors')
+  # No --tenant on the very first sign-in of a discovery run: the tenant is
+  # what we are about to learn, and pinning it to a value we do not have yet
+  # is how this used to require the GUID up front.
+  $loginArgs = @('login', '--only-show-errors')
+  if ($Tenant) { $loginArgs += @('--tenant', $Tenant) }
   if ($UseDeviceCode) {
     $loginArgs += '--use-device-code'
     Write-Info 'Device-code sign-in — open the URL below and enter the code:'
@@ -236,7 +215,7 @@ $account = Invoke-Az @('account', 'show', '-o', 'json') -AllowFailure
 
 if (-not $account) {
   Write-Act 'Not signed in — starting sign-in'
-} elseif ($account.tenantId -ne $TenantId) {
+} elseif ($TenantId -and $account.tenantId -ne $TenantId) {
   # A stale session in the wrong directory is the normal state for anyone who
   # works across tenants, and it is not the operator's mistake to correct by
   # hand. Switching also changes which subscriptions are visible, so re-read
@@ -246,7 +225,7 @@ if (-not $account) {
 }
 
 if (-not $account) {
-  $signedIn = Invoke-AzLogin -UseDeviceCode:$DeviceCode
+  $signedIn = Invoke-AzLogin -UseDeviceCode:$DeviceCode -Tenant $TenantId
 
   # An interactive sign-in fails for environmental reasons far more often than
   # for credential ones: no browser on the box, no display, a browser that
@@ -254,12 +233,12 @@ if (-not $account) {
   # rather than making the operator discover the flag from an error message.
   if (-not $signedIn -and -not $DeviceCode) {
     Write-Info 'Interactive sign-in did not complete — retrying with a device code.'
-    $signedIn = Invoke-AzLogin -UseDeviceCode
+    $signedIn = Invoke-AzLogin -UseDeviceCode -Tenant $TenantId
   }
 
   if (-not $signedIn) {
     Stop-WithGuidance 'Sign-in failed.' @(
-      "Run it by hand and read the error: az login --tenant $TenantId --use-device-code",
+      'Run it by hand and read the error: az login --use-device-code',
       'If it reports the tenant does not exist, check the tenant GUID.',
       'If it reports no subscriptions found, the sign-in worked — you have no',
       'Azure RBAC yet, which this script can fix. Re-run it with -ElevateAccess.'
@@ -276,7 +255,9 @@ if (-not $account) {
   )
 }
 
-if ($account.tenantId -ne $TenantId) {
+if (-not $TenantId) {
+  $TenantId = $account.tenantId
+} elseif ($account.tenantId -ne $TenantId) {
   Stop-WithGuidance "Still signed in to tenant $($account.tenantId) after sign-in, not $TenantId." @(
     'The sign-in most likely landed on a cached account in the other directory.',
     "Clear it and try again: az logout; az login --tenant $TenantId --use-device-code"
@@ -284,9 +265,61 @@ if ($account.tenantId -ne $TenantId) {
 }
 Write-Ok "Signed in as $($account.user.name) in tenant $TenantId"
 
-# Resolve every subscription up front. A name that resolves here is one the
-# sign-in can see; failing now names the offending GUID, where failing later
-# surfaces as an opaque role-assignment error halfway through the run.
+# ===========================================================================
+# 1b. Choose the subscriptions
+# ===========================================================================
+# The two decisions this script cannot make alone, offered as lists rather
+# than demanded as GUIDs. The naming convention narrows both to one obvious
+# answer in this tenant; a tenant that has not adopted it still gets a picker
+# over everything the sign-in can see.
+$visible = Get-AzSubscriptionList
+if ($visible.Count -eq 0) {
+  Stop-WithGuidance 'The sign-in can see no enabled subscriptions.' @(
+    'Check with: az account list --all -o table',
+    'If the list is empty but you administer this tenant, that is the',
+    'Global-Administrator-with-no-RBAC case — re-run with -ElevateAccess.',
+    '',
+    'A subscription created after this session signed in is invisible until',
+    'the token is refreshed: az account list --refresh'
+  )
+}
+
+if (-not $IdentitySubscriptionId) {
+  Write-Step 'Where the Terraform identity lives'
+  Write-Info 'Platform automation belongs in Management — not in a subscription'
+  Write-Info 'it is about to deploy into.'
+  $IdentitySubscriptionId = (Select-Subscription -Purpose 'Identity home (Management)' `
+      -Pattern 'sub-plat-mgmt-*' -Subscriptions $visible).id
+}
+
+if ($TargetSubscriptionIds.Count -eq 0) {
+  Write-Step 'Which subscriptions Terraform must deploy into'
+  Write-Info 'The identity is granted Contributor + RBAC Administrator on each.'
+  Write-Info 'A subscription missing here is one Terraform cannot touch, and the'
+  Write-Info 'failure arrives partway through an apply rather than at plan.'
+  # Preselect exactly what the configuration targets: the three subscriptions
+  # behind the default, mgmt and conn providers. Identity is deliberately not
+  # among them — that landing zone holds nothing (providers.tf).
+  $preselected = @($visible | Where-Object {
+      $_.name -like 'sub-app-*' -or $_.name -like 'sub-plat-mgmt-*' -or $_.name -like 'sub-plat-conn-*'
+    })
+  $TargetSubscriptionIds = @((Select-OptionSet -Title 'Deployment targets' -Options $visible `
+        -Label ${function:Format-Subscription} -Preselected $preselected).id)
+}
+
+# The identity's own subscription is always a deployment target: Terraform
+# creates the central Log Analytics workspace and the platform action group in
+# Management, which is where the identity itself lives. Deduplicated, so
+# choosing it explicitly above is harmless.
+$TargetSubscriptionIds = @(
+  @($TargetSubscriptionIds) + $IdentitySubscriptionId |
+    Where-Object { $_ } |
+    Select-Object -Unique
+)
+
+# Resolve every subscription. A name that resolves here is one the sign-in can
+# see; failing now names the offending GUID, where failing later surfaces as an
+# opaque role-assignment error halfway through the run.
 $subscriptionNames = @{}
 foreach ($id in $TargetSubscriptionIds) {
   $resolved = Invoke-Az @('account', 'show', '--subscription', $id, '-o', 'json') -AllowFailure
@@ -302,13 +335,22 @@ foreach ($id in $TargetSubscriptionIds) {
     )
   }
   $subscriptionNames[$id] = $resolved.name
-  Write-Ok "Target subscription: $($resolved.name)"
 }
 
 # The identity's own subscription is the CLI context for every resource this
 # script creates.
 Invoke-Az @('account', 'set', '--subscription', $IdentitySubscriptionId) | Out-Null
-Write-Ok "Identity lands in: $($subscriptionNames[$IdentitySubscriptionId])"
+
+$plan = [ordered]@{
+  'Tenant'          = $TenantId
+  'Signed in as'    = $account.user.name
+  'Identity'        = "$IdentityName in $ResourceGroupName ($($subscriptionNames[$IdentitySubscriptionId]))"
+  'Region'          = $Location
+  'Deploy targets'  = ($TargetSubscriptionIds | ForEach-Object { $subscriptionNames[$_] }) -join ', '
+  'TFC subject'     = "organization:$TfcOrganization`:project:$TfcProject`:workspace:$TfcWorkspace"
+}
+$proceed = Confirm-Plan -Title 'Bootstrap plan' -Values $plan -Order @($plan.Keys) -Force:$WhatIfPreference
+if (-not $proceed) { Write-Info 'Cancelled — nothing was created.'; exit 0 }
 
 # Who am I, in the form role assignments use.
 $signedInObjectId = (Invoke-Az @('ad', 'signed-in-user', 'show', '--query', 'id', '-o', 'tsv'))
@@ -399,14 +441,34 @@ if ($missingRights.Count -gt 0) {
     }
 
     # Leaving root-scope UAA in place is a standing tenant-wide privilege with
-    # no owner and no expiry. Remove it now that its one job is done.
+    # no owner and no expiry. Remove it now that its one job is done — and
+    # VERIFY the removal rather than asserting it: the delete is allowed to
+    # fail quietly (propagation lag, assignee resolution), and a script that
+    # prints "removed" over a grant that is still there is worse than one that
+    # says so.
     Invoke-Az @(
       'role', 'assignment', 'delete',
       '--assignee', $signedInObjectId,
       '--role', 'User Access Administrator',
       '--scope', '/'
     ) -AllowFailure | Out-Null
-    Write-Act 'Root-scope elevation removed'
+
+    $rootGrant = Invoke-Az @(
+      'role', 'assignment', 'list',
+      '--assignee', $signedInObjectId,
+      '--role', 'User Access Administrator',
+      '--scope', '/',
+      '-o', 'json'
+    ) -AllowFailure
+    if ($rootGrant) {
+      Write-Host '  [warn] Root-scope User Access Administrator is STILL ASSIGNED.' -ForegroundColor Red
+      Write-Host '         This is a standing tenant-wide privilege. Remove it by hand:' -ForegroundColor Red
+      Write-Host "         az role assignment delete --assignee $signedInObjectId --role 'User Access Administrator' --scope /" -ForegroundColor Red
+      Write-Host '         Then confirm with:' -ForegroundColor Red
+      Write-Host "         az role assignment list --assignee $signedInObjectId --scope / -o table" -ForegroundColor Red
+    } else {
+      Write-Act 'Root-scope elevation removed (verified by reading assignments back)'
+    }
 
     Start-Sleep -Seconds 10
     foreach ($id in $TargetSubscriptionIds) {
@@ -582,22 +644,33 @@ Write-Host @"
     TFC_AZURE_PROVIDER_AUTH   true
     TFC_AZURE_RUN_CLIENT_ID   $clientId
     ARM_TENANT_ID             $TenantId
-    ARM_SUBSCRIPTION_ID       $IdentitySubscriptionId
+    ARM_SUBSCRIPTION_ID       <the APPLICATION subscription>
 
   These four names are set by HashiCorp and Microsoft, so they are exempt from
   the repository's 2-word variable rule (see the IaC Repository Standard).
 
-  ARM_SUBSCRIPTION_ID is the DEFAULT provider's subscription only. Every other
-  subscription is reached through an aliased provider, and each alias takes its
-  id from its own Terraform variable — so this one value does not decide where
-  resources land, and changing it will not move them.
+  Prefer scripts/set-tfc-variables.ps1 over typing these into the UI — it sets
+  all twelve workspace values in one run, and it writes ARM_SUBSCRIPTION_ID as
+  the application subscription. Any target subscription would in fact work:
+  every provider pins subscription_id in HCL (infra/providers.tf), so this
+  value is only the provider's fallback and never decides where resources
+  land. It is stated here as the application subscription so the two scripts
+  agree rather than inviting a "correction".
 
   Then, as TERRAFORM variables in the same workspace, one per subscription the
   aliased providers target (CHECKLIST.md section 7):
 
-    subscription_mgmt         $IdentitySubscriptionId
-$(($TargetSubscriptionIds | Where-Object { $_ -ne $IdentitySubscriptionId } | ForEach-Object {
-    "    subscription_<role>       $_   # $($subscriptionNames[$_])"
+$(($TargetSubscriptionIds | ForEach-Object {
+    # Name the variable from the subscription's own name rather than printing
+    # a <role> placeholder: the convention already says which is which, and an
+    # operator copying these should not have to work it out.
+    $role = switch -Wildcard ($subscriptionNames[$_]) {
+      'sub-app-*'       { 'subscription_app' }
+      'sub-plat-mgmt-*' { 'subscription_mgmt' }
+      'sub-plat-conn-*' { 'subscription_conn' }
+      default           { 'subscription_<role>' }
+    }
+    "    {0,-24}  {1}   # {2}" -f $role, $_, $subscriptionNames[$_]
   }) -join "`n")
 
   Verify with a speculative plan before touching apply:
@@ -699,7 +772,12 @@ if (-not $WhatIfPreference) {
   & $add '| `TFC_AZURE_PROVIDER_AUTH` | Environment | `true` |'
   & $add "| ``TFC_AZURE_RUN_CLIENT_ID`` | Environment | ``$clientId`` |"
   & $add "| ``ARM_TENANT_ID`` | Environment | ``$TenantId`` |"
-  & $add "| ``ARM_SUBSCRIPTION_ID`` | Environment | ``$IdentitySubscriptionId`` |"
+  & $add '| `ARM_SUBSCRIPTION_ID` | Environment | the APPLICATION subscription |'
+  & $add ''
+  & $add 'Prefer `scripts/set-tfc-variables.ps1`, which seeds all twelve workspace'
+  & $add 'values and writes ARM_SUBSCRIPTION_ID as the application subscription. The'
+  & $add 'value is only the provider fallback — every provider pins subscription_id'
+  & $add 'in HCL — but the two scripts should state the same thing.'
   & $add ''
   & $add 'Then verify, before any apply:'
   & $add ''

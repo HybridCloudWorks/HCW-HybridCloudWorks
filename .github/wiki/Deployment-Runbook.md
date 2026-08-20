@@ -16,9 +16,9 @@ roles table.
 | Concern | Where |
 | --- | --- |
 | Terraform source | `infra/` on `main` in HCW-HybridCloudWorks |
-| State and variables | HCP Terraform Cloud — org `HybridCloudWorks`, workspace `hybridcloudworks-azure` |
+| State and variables | HCP Terraform Cloud — org `hcw`, project `Site`, workspace `hcw-azure` |
 | Required inputs (names, formats, consumers — never values) | `CHECKLIST.md` and `Variables.md` at the repository root |
-| Terraform's own identity | `id-hcw-terraform`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
+| Terraform's own identity | `id-plat-terraform-prod-cus-01`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
 | Working rules for the directory | `infra/README.md` |
 
@@ -39,7 +39,7 @@ Confusing these is the most common way to get stuck, because both are called
 | --- | --- | --- |
 | Who authenticates | Terraform runs in HashiCorp's cloud | The deploy workflows |
 | Created by | `scripts/bootstrap-terraform-oidc.ps1` (manual, once) | `infra/oidc.tf` (Terraform) |
-| Identity | `id-hcw-terraform` in `rg-hcw-bootstrap` | `id-hybridcloudworks-github-deploy` |
+| Identity | `id-plat-terraform-prod-cus-01` in `rg-mgmt-boot-prod-cus` | `id-site-github-deploy-prod-cus-01` in `rg-web-site-prod-cus` |
 | Issuer | `https://app.terraform.io` | `https://token.actions.githubusercontent.com` |
 | Exists when | After you run the script | After the first successful apply |
 | Consumed as | `TFC_AZURE_RUN_CLIENT_ID` in the workspace | `CLIENT_ID` repository variable |
@@ -69,11 +69,26 @@ reason: nothing in `infra/` can reach it.
 
 ```powershell
 # Dry run first — prints every change without making one.
-./scripts/bootstrap-terraform-oidc.ps1 `
-    -TenantId <tenant-guid> `
-    -SubscriptionId <subscription-guid> `
-    -WhatIf
+./scripts/bootstrap-terraform-oidc.ps1 -WhatIf
 ```
+
+**No arguments, by design.** Every value the three deployment scripts need is
+a GUID, and GUIDs passed as flags go wrong in ways that surface later as
+something else: they land in shell history, one transposed character reads as
+a permissions problem, and the operator has to know which of four similar
+subscription IDs belongs in which slot from a terminal that cannot show them
+the list. So the scripts *discover* what Azure already knows, offer a numbered
+list where there is a real choice — with the subscription matching the naming
+convention preselected — and prompt only for what cannot be found. Everything
+resolved is printed for one confirmation before anything is written.
+
+Here that means the tenant comes from your `az` sign-in, the identity's home
+is matched from `sub-plat-mgmt-*`, and the deployment targets default to the
+three subscriptions the configuration actually targets (app, mgmt, conn —
+Identity is deliberately excluded, since that landing zone holds nothing).
+
+Parameters still exist for every value, so CI can supply them; they are simply
+never required. `-DeviceCode` remains for a session with no browser.
 
 The script is idempotent, so re-running it is how you repair a broken
 handshake, not just how you create one. It preflights before it proposes
@@ -100,7 +115,7 @@ role and carries zero Azure RBAC. Re-run with `-ElevateAccess`, which takes
 the documented one-time root-scope elevation, grants you Owner on the target
 subscription, and removes the root-scope grant again.
 
-It creates: `rg-hcw-bootstrap`, the `id-hcw-terraform` managed identity, two
+It creates: `rg-mgmt-boot-prod-cus`, the `id-plat-terraform-prod-cus-01` managed identity, two
 federated credentials, and two subscription role assignments (Contributor to
 create resources, Role Based Access Control Administrator to create the role
 assignments `infra/` declares — Contributor alone cannot, and RBAC
@@ -115,13 +130,13 @@ and is not one.
 
 ### Then set the workspace variables
 
-In HCP Terraform → `hybridcloudworks-azure` → **Variables**, as *environment*
+In HCP Terraform → `hcw-azure` → **Variables**, as *environment*
 variables (the script prints these with the values filled in):
 
 | Name | Value |
 | --- | --- |
 | `TFC_AZURE_PROVIDER_AUTH` | `true` |
-| `TFC_AZURE_RUN_CLIENT_ID` | client ID of `id-hcw-terraform` |
+| `TFC_AZURE_RUN_CLIENT_ID` | client ID of `id-plat-terraform-prod-cus-01` |
 | `ARM_TENANT_ID` | tenant GUID |
 | `ARM_SUBSCRIPTION_ID` | subscription GUID |
 
@@ -129,6 +144,32 @@ These four names come from HashiCorp and Microsoft and are exempt from the
 [2-word variable rule](IaC-Repository-Standard#variable-naming) as contractual
 names. Terraform *variables* for the same workspace are listed in
 `CHECKLIST.md` section 7.
+
+Both seeding halves are scripted — prefer the scripts over the UI forms, and
+both take no arguments for the reasons given in section 0:
+
+- `scripts/set-tfc-variables.ps1` writes all twelve HCP Terraform workspace
+  values (the four environment variables above plus the eight Terraform
+  variables) in one idempotent run, and reads back the workspace's real
+  project name — the value the federated-credential subject must contain.
+  It finds the Terraform identity's client id by reading the identity the
+  bootstrap created, so that value is never copied by hand out of a
+  scrolled-away console; the subscriptions come from `az`; the Cloudflare zone
+  is chosen from the zones the token can actually see, after prompting for the
+  token itself. Only the app-registration audience and the Cloudflare token
+  are typed, and only when they cannot be discovered.
+- `scripts/set-github-variables.ps1` seeds the GitHub repository variables
+  and secrets. Run it once **before** the first apply — that seeds only
+  `TENANT_ID` and `SUBSCRIPTION_ID`, the two values that are inputs *to*
+  Terraform rather than products of it — and once **after**, when it reads
+  `CLIENT_ID`, `APP_HOSTNAME`, `FUNCTIONS_URL`, `RESOURCE_GROUP`,
+  `FUNCTIONS_STORAGE_ACCOUNT` and the `COSMOS_ENDPOINT` secret straight from
+  the workspace's state outputs over the HCP Terraform API. Outputs rather
+  than hardcoded copies on purpose: a copy drifts silently when the code
+  changes, an applied output cannot. The corollary is directional — **re-run
+  the script after any apply that changes an output** (a renamed group, a
+  new hostname), or the GitHub-side copies go stale. The first post-apply
+  run is also what arms the self-skipping heal-computed-properties schedule.
 
 ### Verify
 
@@ -170,12 +211,15 @@ Bootstrap is done when a plan authenticates. Continue from section 1.
 Plans run in HCP Terraform Cloud, where the state and the workspace variables
 live — not on laptops, not on GitHub-hosted runners holding tokens.
 
-1. Open a run in the `hybridcloudworks-azure` workspace (VCS-triggered or
+1. Open a run in the `hcw-azure` workspace (VCS-triggered or
    CLI-triggered from the merged commit).
 2. The infrastructure operator reviews the plan **in TFC**, checking:
    - zero destroy/create pairs on stateful resources (Cosmos, storage
      accounts, Key Vault carry `prevent_destroy` — a plan that wants to
-     replace them fails; treat any attempt as a defect, not an obstacle);
+     replace them fails; treat any attempt as a defect, not an obstacle).
+     They were lifted exactly once, for the centralus rebuild on 2026-08-19,
+     and restored the same day. If a plan proposes replacing a stateful
+     resource and no one has deliberately lifted a guard, stop;
    - every change traceable to the merged diff;
    - cost-relevant changes against the **USD 150/month ceiling**
      ([Cost analysis](Cost-Analysis)).

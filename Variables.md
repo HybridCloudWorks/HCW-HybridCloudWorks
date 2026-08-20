@@ -8,7 +8,7 @@ Legend: 🔴 Secret (sensitive) | 🟡 Variable (non-sensitive) | 🟢 Derived (
 
 ---
 
-## Terraform Cloud Workspace — `hybridcloudworks-azure`
+## Terraform Cloud Workspace — `hcw-azure`
 
 Set these in the HCP Terraform Cloud workspace under **Variables**.
 
@@ -16,11 +16,13 @@ Set these in the HCP Terraform Cloud workspace under **Variables**.
 |------|------|-----------|-------------|
 | `azure_subscription_id` | Terraform | 🔴 Yes | Azure subscription ID |
 | `entra_tenant_id` | Terraform | 🔴 Yes | Entra ID tenant ID |
-| `cloudflare_api_token` | Terraform | 🔴 Yes | Cloudflare token: Zone:Read + DNS:Edit |
+| `cloudflare_api_token` | Terraform | 🔴 Yes | Cloudflare token. **Four scopes, not two:** Zone:Read, DNS:Edit, Zone → Transform Rules:Edit, Account → Rulesets:Read. The last two were added 2026-08-20 for `cloudflare_ruleset.origin_secret`; a DNS-only token applies every record fine and fails on the ruleset alone, with `Authentication error (10000)` — which names neither the token nor the missing permission |
 | `budget_alert_email` | Terraform | 🟡 No | Email for budget threshold alerts |
 | `entra_client_id` | Terraform | 🟡 No | Entra app registration client ID |
 | `cloudflare_zone_id` | Terraform | 🟡 No | Cloudflare Zone ID for the domain |
-| `azure_location` | Terraform | 🟡 No | Default: `southcentralus` |
+| `azure_location` | Terraform | 🟡 No | Default: `centralus` — the whole estate, single region since 2026-08-19 |
+| `region_abbreviation` | Terraform | 🟡 No | Default: `cus` — must agree with `azure_location` (see the Naming-Convention region table) |
+| `instance` | Terraform | 🟡 No | Default: `01` — the CAF instance number. Applied per resource type, not to everything; see Naming-Convention, "Which resources take an instance number" |
 | `budget_amount_usd` | Terraform | 🟡 No | Default: `150` |
 | `purge_protection_enabled` | Terraform | 🟡 No | Default: `false` — set `true` before first prod secret write |
 | `vnet_address_space` | Terraform | 🟡 No | Default: `10.40.0.0/16` |

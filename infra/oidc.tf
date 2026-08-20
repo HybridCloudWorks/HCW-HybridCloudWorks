@@ -24,7 +24,9 @@
 # =============================================================================
 
 resource "azurerm_user_assigned_identity" "github_deploy" {
-  name                = "id-${var.workload_name}-github-deploy-${var.environment}"
+  # CAF's managed-identity format carries both region and instance:
+  # id-<app or service name>-<environment>-<region>-<###>.
+  name                = "id-${var.workload_name}-github-deploy-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
   tags                = var.tags
@@ -118,12 +120,20 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # generates a stable GUID, and a duplicated hardcoded name silently REPLACES
 # another identity's assignment instead of erroring.
 
+# The container segment of each scope comes from the CONTAINER RESOURCE, not a
+# string literal. A literal "colls/content" is correct text but carries no
+# dependency edge, so on a fresh apply Terraform ordered these before the
+# containers existed and Cosmos rejected them with "The collection with name
+# [content] ... could not be found". Referencing the resource makes the
+# ordering explicit and breaks if the container is ever renamed or removed —
+# both improvements over failing at apply time.
+
 resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_content" {
   resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/content"
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["content"].name}"
 }
 
 resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
@@ -131,7 +141,7 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
   account_name        = azurerm_cosmosdb_account.hcw.name
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/blogs"
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["blogs"].name}"
 }
 
 # ---------------------------------------------------------------------------

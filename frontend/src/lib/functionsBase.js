@@ -22,8 +22,20 @@
  * - **Same-origin** (Static Web Apps linked backend, or a reverse proxy in
  *   front of both the SPA and the Function App):
  *   `VITE_AZURE_FUNCTIONS_URL=/api`
- * - **Cross-origin** (Function App on its own hostname):
- *   `VITE_AZURE_FUNCTIONS_URL=https://hcw-functions-prod.azurewebsites.net/api`
+ * - **Cross-origin** (Function App reached through Cloudflare):
+ *   `VITE_AZURE_FUNCTIONS_URL=https://api-azure.hybridcloudworks.com/api`
+ *
+ * The cross-origin value is the **Cloudflare** hostname, never
+ * `<app>.azurewebsites.net`. The Function App origin is restricted to
+ * Cloudflare's IP ranges (`functions_origin_lock_enabled` in `infra/`), so a
+ * browser calling the origin directly gets a bare `403` — and because the
+ * origin lock is invisible from the client, that reads as an auth or CORS
+ * problem rather than a network one. `infra/outputs.tf` exposes the correct
+ * value as `api_base_url`, which is what seeds the `FUNCTIONS_URL` GitHub
+ * variable this build reads.
+ *
+ * `frontend/staticwebapp.config.json`'s `connect-src` must name the same host:
+ * CSP is enforced against the URL the browser actually requests.
  *
  * The value must include the Functions host route prefix. That prefix is `api`
  * — `functions/host.json` does not override it — and every route in

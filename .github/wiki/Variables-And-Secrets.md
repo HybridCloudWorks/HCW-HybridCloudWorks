@@ -35,8 +35,8 @@ one wins.
 
 | # | Store | Holds | Read by | Written by |
 | --- | --- | --- | --- | --- |
-| 1 | **Azure Key Vault** `kv-site-prod-scus` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings or `src/lib/key-vault.js` | A human, out-of-band, during a seeding window |
-| 2 | **HCP Terraform workspace** `hybridcloudworks-azure` | What Terraform needs to authenticate and to plan | The run environment and the `azurerm` / `cloudflare` providers | An operator in the workspace UI |
+| 1 | **Azure Key Vault** `kv-site-prod-cus-01` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings or `src/lib/key-vault.js` | A human, out-of-band, during a seeding window |
+| 2 | **HCP Terraform workspace** `hcw-azure` | What Terraform needs to authenticate and to plan | The run environment and the `azurerm` / `cloudflare` providers | An operator in the workspace UI |
 | 3 | **GitHub Actions variables** | Non-sensitive CI/CD configuration | `${{ vars.* }}` in workflows | `gh variable set`, or the repository settings UI |
 | 4 | **GitHub Actions secrets** | Last resort — credentials to systems that offer no federation | `${{ secrets.* }}` in workflows | `gh secret set` |
 
@@ -180,10 +180,12 @@ things:
   disagreement between the storage mechanism and the truth, and the mechanism
   usually wins the argument.
 
-This is exactly the `AZURE_FUNCTIONS_URL` defect (CHECKLIST §7): a public API
+This was exactly the `AZURE_FUNCTIONS_URL` defect (CHECKLIST §7): a public API
 base URL referenced as `${{ secrets.AZURE_FUNCTIONS_URL }}` and fed straight
-into `VITE_AZURE_FUNCTIONS_URL`. It belongs alongside the `VITE_*` repository
-variables that sit five lines below it in the same workflow.
+into `VITE_AZURE_FUNCTIONS_URL`. Fixed 2026-08-18 while the value was still
+unset everywhere: the workflow now reads `${{ vars.FUNCTIONS_URL }}` — a
+repository variable alongside the `VITE_*` entries five lines below it, with
+the provider prefix dropped per the naming rule.
 
 **The rule:** if the value ends up in a public artefact — a JS bundle, a
 container image layer, an HTML page, a public DNS record — it is not a secret,
@@ -239,7 +241,7 @@ Both cloud handshakes in this estate are federated, and neither has a secret:
 
 | Handshake | Identity | Trust anchor | Created by |
 | --- | --- | --- | --- |
-| HCP Terraform → Azure | `id-hcw-terraform` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
+| HCP Terraform → Azure | `id-plat-terraform-prod-cus-01` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
 | GitHub Actions → Azure | the `github_deploy` user-assigned identity | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref and to the `data-migration` environment | `infra/oidc.tf` |
 
 Neither mints anything longer-lived than a per-run token. So the **correct count
@@ -377,7 +379,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | `DOCKERHUB_TOKEN` | §7 | Docker Hub | Registry push credential. A scoped access token, never an account password | Justified only while Docker Hub is a publish target — see below |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned. Must be scoped read-only, and deleted the day the migration completes | Justified, with an expiry |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None available — see below | **Wrong store** |
-| `AZURE_FUNCTIONS_URL` | §7 | — | A public API base URL | **Wrong store** |
+| `AZURE_FUNCTIONS_URL` | §7 | — | A public API base URL | **Resolved 2026-08-18** — now `vars.FUNCTIONS_URL`, store 3 |
 | `COSMOS_ENDPOINT` (GitHub-side) | §7 | — | A public hostname; with `local_auth_disabled = true` it grants nothing | **Wrong store** |
 | `DOCKERHUB_USERNAME` | §7 | — | An account name, published as part of every image tag | **Wrong store** |
 | `COSMOS_KEY` | §7 | — | Must stay unset | Correctly absent |
@@ -417,13 +419,13 @@ exposes the same token as the `swa_token` output, which means the value is also
 in Terraform state — if the run-time fetch lands, that output has no remaining
 consumer and should go with it.
 
-**2. `AZURE_FUNCTIONS_URL` is a public URL in store 4.** Already flagged in
-CHECKLIST §7. It feeds `VITE_AZURE_FUNCTIONS_URL`, which is inlined into the
-public bundle, so nothing is being protected — and masking it makes every
-build-time API failure read as `***`. Correct store: **3**, alongside the
-`VITE_*` variables five lines below it in the same workflow. While it is being
-moved, the name should lose its provider prefix per the naming rule; it is unset
-today, so this is a safe-now rename rather than a coordinated one.
+**2. `AZURE_FUNCTIONS_URL` was a public URL in store 4 — resolved 2026-08-18.**
+It fed `VITE_AZURE_FUNCTIONS_URL`, which is inlined into the public bundle, so
+nothing was being protected — and masking it made every build-time API failure
+read as `***`. The workflow now reads `${{ vars.FUNCTIONS_URL }}` (store 3,
+provider prefix dropped per the naming rule). The rename was safe-now: the
+value was unset everywhere when it happened. The variable itself remains to be
+provisioned (CHECKLIST §7).
 
 **3. `COSMOS_ENDPOINT` is in store 4 on the GitHub side.** An account endpoint
 is a public hostname, derivable from the account name, and with
@@ -557,8 +559,9 @@ Note what is **not** contractual, because that is where the mistakes are made:
 - `AZURE_STATIC_WEB_APPS_API_TOKEN` — the *action input* is
   `azure_static_web_apps_api_token`; the secret name feeding it is ours, and
   five words long. Unset today, so it is a safe rename if it survives at all.
-- `AZURE_FUNCTIONS_URL` — ours, three words, with a provider prefix. Unset
-  today.
+- `FUNCTIONS_URL` — ours. Renamed 2026-08-18 from `AZURE_FUNCTIONS_URL`
+  (three words, provider prefix) while unset everywhere — the safe-now case
+  below, exercised.
 - `FIREBASE_SERVICE_ACCOUNT_JSON` — ours, four words, and the `_JSON` suffix
   encodes an encoding rather than a meaning.
 - `VITE_AZURE_FUNCTIONS_URL` — the `VITE_` prefix is contractual, the rest is
@@ -571,7 +574,7 @@ Every name sorts into exactly one:
 
 | Bucket | Meaning | Currently |
 | --- | --- | --- |
-| **Safe now** | Unset everywhere, or read only by code changed in the same PR | `AZURE_FUNCTIONS_URL`, `AZURE_STATIC_WEB_APPS_API_TOKEN`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `DOCKERHUB_USERNAME` — all `Missing` |
+| **Safe now** | Unset everywhere, or read only by code changed in the same PR | `AZURE_STATIC_WEB_APPS_API_TOKEN`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `DOCKERHUB_USERNAME` — all `Missing`. (`AZURE_FUNCTIONS_URL` → `FUNCTIONS_URL` already exercised this path, 2026-08-18) |
 | **Coordinated** | Already set in HCP Terraform or GitHub, or already read by shipped code. Report it; never rename silently | `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `APP_HOSTNAME`, `RESOURCE_GROUP`, `VITE_AZURE_FUNCTIONS_URL` |
 | **Contractual** | Never touched | The table above |
 

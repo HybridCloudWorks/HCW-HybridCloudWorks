@@ -17,7 +17,7 @@ before any plan or apply.
 - **One environment: production.** There is no dev/staging state (ADR-0009).
   `var.environment` exists for naming, not for a second workspace.
 - **State lives in HCP Terraform Cloud** — org `HybridCloudWorks`, workspace
-  `hybridcloudworks-azure` (`backend.tf`). State, saved plans, and
+  `hcw-azure` (`backend.tf`). State, saved plans, and
   `*.tfvars` with real values never enter Git.
 - **Applies are gated.** The GitHub workflow (`.github/workflows/deploy-infra.yml`)
   is hard-disabled; production applies happen through HCP Terraform with
@@ -35,7 +35,6 @@ before any plan or apply.
 | `variables.tf` | All inputs; names must match TFC workspace variable keys exactly |
 | `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, observability, budget, DNS |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |
-| `openai.tf` / `outputs-openai.tf` | Azure OpenAI account and model deployments |
 | `ci-runner.tf` | Container Apps job for self-hosted CI runner failover |
 | `outputs.tf` | Root outputs |
 | `cosmos-containers.json` | Generated container manifest (one container per Firestore collection) — regenerate with `scripts/generate-cosmos-container-spec.mjs`, do not hand-edit |

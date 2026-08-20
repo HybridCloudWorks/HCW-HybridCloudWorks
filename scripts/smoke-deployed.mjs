@@ -12,7 +12,10 @@
  *
  *   1. ANONYMOUS API SURFACE — no credentials, no side effects.
  *      Needs --base <url> (or SMOKE_BASE_URL), e.g.
- *        node smoke-deployed.mjs --base https://<app>.azurewebsites.net/api
+ *        node smoke-deployed.mjs --base https://api-azure.hybridcloudworks.com/api
+ *      Use the Cloudflare host, NOT <app>.azurewebsites.net: the Function App
+ *      origin is restricted to Cloudflare IP ranges, so a direct call answers
+ *      403 and every tier below reads as a broken deployment.
  *
  *   2. COSMOS CONDITIONAL PATCH (--cosmos) — THE flagged assumption from
  *      T-204: that a failed patch predicate surfaces through the JS SDK as
@@ -290,7 +293,8 @@ async function tierAuthed(base) {
 const HELP = `Usage: node smoke-deployed.mjs --base <url> [--cosmos]
 
   --base <url>   API base including the /api prefix (or SMOKE_BASE_URL), e.g.
-                 https://<app>.azurewebsites.net/api
+                 https://api-azure.hybridcloudworks.com/api  (the Cloudflare host —
+                 the azurewebsites.net origin is IP-locked and answers 403)
   --cosmos       also run the Cosmos conditional-patch tier
                  (needs COSMOS_ENDPOINT + az login with data-plane RBAC)
 

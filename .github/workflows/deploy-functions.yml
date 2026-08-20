@@ -69,10 +69,13 @@ jobs:
             --output none
           sleep 30
 
+      # app-name is the `function_app_name` Terraform variable's value
+      # (infra/variables.tf) — the app this configuration creates, not the
+      # legacy hcw-functions-prod estate.
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@c5060b3b8bb1ebbcb531abd00c822ecbaa8ea656 # v1.5.7
         with:
-          app-name: hcw-functions-prod
+          app-name: func-site-prod-scus
           package: functions/
           respect-funcignore: true
 
@@ -90,8 +93,20 @@ jobs:
           echo "## 🚀 Azure Functions Deploy Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          FUNC_URL="https://${{ vars.APP_HOSTNAME }}"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FUNC_URL/api/health" || echo "000")
+          # Through Cloudflare, NOT the azurewebsites.net origin.
+          #
+          # Two reasons, and the second is the one that bites. It tests the path
+          # real traffic takes — origin lock, WAF, transform rules and all —
+          # rather than a path only CI uses. And once
+          # functions_origin_lock_enabled is true, the origin refuses everything
+          # outside Cloudflare's ranges: a GitHub-hosted runner has a public
+          # dynamic IP, so curling APP_HOSTNAME directly would fail on every
+          # deploy, reported as a health-check failure rather than as the
+          # firewall doing its job.
+          #
+          # FUNCTIONS_URL is the proxied api-azure.<domain> record and already
+          # carries the /api suffix.
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.FUNCTIONS_URL }}/health" || echo "000")
 
           if [ "$STATUS" = "200" ]; then
             echo "✅ Health check: **PASSED** (HTTP $STATUS)" >> $GITHUB_STEP_SUMMARY
