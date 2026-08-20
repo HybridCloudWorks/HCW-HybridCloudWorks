@@ -24,4 +24,4 @@ labels: bug
 
 <!-- Logs, failing workflow run link, Application Insights query, plan output.
      Never paste secrets, tokens, subscription IDs, or connection strings —
-     CHECKLIST.md treats a pasted value as disclosed and forces rotation. -->
+     REVIEW.md treats a pasted value as disclosed and forces rotation. -->

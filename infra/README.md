@@ -66,7 +66,7 @@ request touching `infra/**` (`.github/workflows/iac-validate.yml`).
 Plans and applies run in HCP Terraform Cloud against the workspace — not from
 laptops, not from GitHub-hosted runners with static tokens. The workspace
 holds all variable values, including the sensitive ones catalogued in
-`Variables.md` and `CHECKLIST.md` at the repository root.
+`REVIEW.md` Part 4 at the repository root.
 
 ## Guardrails
 

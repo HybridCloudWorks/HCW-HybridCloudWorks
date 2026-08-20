@@ -18,6 +18,6 @@ details, tokens, endpoints, or tenant identifiers.
   deployment uses OIDC federated identities (`infra/oidc.tf`). Anything that
   looks like a credential in history is a finding — report it.
 - Any secret value that appears in a commit, issue, log, or the Wiki is
-  treated as disclosed and rotated (`CHECKLIST.md` policy).
+  treated as disclosed and rotated (`REVIEW.md` policy).
 - Dependency vulnerabilities are tracked by Dependabot and CodeQL; accepted
   residual risks are recorded in the root `README.md` and `REVIEW.md`.

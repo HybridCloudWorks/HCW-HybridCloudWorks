@@ -4,7 +4,7 @@
 # Org: hcw | Project: Site | Workspace: hcw-azure
 #
 # Variable names here MUST match TF Cloud workspace variable keys exactly.
-# See Variables.md at the repository root for the full variables/secrets catalog.
+# See REVIEW.md Part 4 at the repository root for the full variables/secrets catalog.
 # =============================================================================
 
 # -----------------------------------------------------------------------------

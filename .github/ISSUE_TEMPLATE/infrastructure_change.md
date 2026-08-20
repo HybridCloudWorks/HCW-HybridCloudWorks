@@ -18,7 +18,7 @@ labels: infrastructure
 - Resources touched:
 - Destroy/create expected? (stateful resources carry `prevent_destroy`):
 - Cost impact vs the USD 150/month ceiling:
-- New required inputs for `CHECKLIST.md`:
+- New required inputs for `REVIEW.md` Part 4:
 
 ## Rollback
 

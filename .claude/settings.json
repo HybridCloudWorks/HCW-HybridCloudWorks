@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform plan:*)",
+      "Bash(terraform output:*)",
+      "Bash(terraform state list:*)",
+      "Bash(terraform state show:*)",
+      "PowerShell(terraform -chdir=infra fmt:*)",
+      "PowerShell(terraform -chdir=infra validate:*)",
+      "PowerShell(terraform -chdir=infra plan:*)",
+      "PowerShell(terraform -chdir=infra output:*)",
+      "PowerShell(terraform -chdir=infra state list:*)",
+      "PowerShell(az account list:*)",
+      "PowerShell(az account show:*)",
+      "PowerShell(az group list:*)",
+      "PowerShell(az resource list:*)",
+      "PowerShell(az identity list:*)",
+      "PowerShell(az identity show:*)",
+      "PowerShell(az role assignment list:*)",
+      "PowerShell(az keyvault show:*)",
+      "PowerShell(az keyvault secret list:*)",
+      "PowerShell(az functionapp list-flexconsumption-locations:*)",
+      "PowerShell(gh variable list:*)",
+      "PowerShell(gh secret list:*)",
+      "PowerShell(gh run list:*)",
+      "PowerShell(gh pr list:*)",
+      "PowerShell(.\\scripts\\validate-repository-structure.ps1)",
+      "Bash(npx vitest run:*)",
+      "Bash(npx eslint:*)"
+    ]
+  }
+}

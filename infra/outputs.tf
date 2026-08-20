@@ -4,7 +4,7 @@
 #
 # SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
 # omitted. All runtime access uses managed identity + RBAC; no static key
-# is passed to application code. See Variables.md for the full secrets catalog.
+# is passed to application code. See REVIEW.md Part 4 for the full secrets catalog.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
