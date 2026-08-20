@@ -133,7 +133,16 @@ jobs:
           URL="${{ vars.FUNCTIONS_URL }}/health"
           echo "GET $URL"
 
-          BODY=$(curl -sS -m 30 -w $'\n%{http_code}' "$URL" 2>&1 || true)
+          # x-hcw-ci-probe tells Cloudflare this runner is ours, so it is not
+          # served the "Just a moment..." bot challenge. Without it this step
+          # gets a 403 challenge page and reports a healthy app as broken.
+          #
+          # This is NOT the origin secret and must never be set to the same
+          # value: that one is stamped by Cloudflare on the way to the origin
+          # and is what the app trusts. This one travels the other way.
+          BODY=$(curl -sS -m 30 -w $'\n%{http_code}' \
+                   -H "x-hcw-ci-probe: ${{ secrets.CI_PROBE_SECRET }}" \
+                   "$URL" 2>&1 || true)
           STATUS=$(printf '%s' "$BODY" | tail -n1)
           BODY=$(printf '%s' "$BODY" | sed '$d')
 

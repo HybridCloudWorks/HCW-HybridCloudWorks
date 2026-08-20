@@ -605,6 +605,30 @@ variable "cloudflare_origin_secret" {
 # variable and not a hardcoded block — the failure it guards against
 # (Cloudflare ranges change, or a legitimate caller needs the origin) is a
 # same-day problem, not a next-sprint one.
+# Shared secret the CI smoke test presents so Cloudflare lets it through
+# without a bot challenge.
+#
+# Synthetic checks from a GitHub-hosted runner receive Cloudflare's "Just a
+# moment..." interstitial — an HTTP 403 carrying a challenge page — before the
+# request reaches Azure at all. That has always been true (REVIEW §2.3) and
+# became blocking once the origin lock landed: with the origin closed to
+# everything but Cloudflare, the proxied path is the only path, so a challenged
+# runner has no way in.
+#
+# The trap this creates is worse than the outage. A challenge 403 and an
+# application refusal are indistinguishable to a check that only looks at the
+# status code, so "admin routes reject anonymous callers" passes whether or not
+# the app is running — a green test asserting nothing.
+#
+# Empty disables the rule entirely (count-gated below), which is the correct
+# state if you would rather have no synthetic validation than a bypass header.
+variable "cloudflare_ci_probe_secret" {
+  description = "Secret the CI smoke test sends as x-hcw-ci-probe so Cloudflare skips the bot challenge; empty disables the skip rule"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "functions_origin_lock_enabled" {
   description = "Restrict the Function App to Cloudflare IP ranges. Requires cloudflare_origin_secret to match Key Vault"
   type        = bool
