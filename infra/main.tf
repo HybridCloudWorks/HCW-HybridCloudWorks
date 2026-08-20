@@ -1262,6 +1262,54 @@ resource "cloudflare_record" "azure_functions" {
 # make viaCloudflare() compare "" to "" and pass for everyone — the exact
 # silent degradation this design exists to prevent.
 # =============================================================================
+# =============================================================================
+# Custom hostname binding — what makes the proxied hostname reach the app
+#
+# App Service routes by HTTP Host header. Cloudflare proxies api-azure.<domain>
+# to the origin but forwards the ORIGINAL Host, so App Service receives
+# `Host: api-azure.<domain>`, finds no site bound to that name, and returns its
+# own "404 Web Site not found" page — before the Functions host is consulted at
+# all. Every route 404s, and the page talks about custom domains rather than
+# routing, which sends you to host.json and the route prefix instead.
+#
+# Two ways to fix it, and the first is not available here:
+#
+#   1. Rewrite the Host at the edge, with a Cloudflare Origin Rule. Rejected:
+#      the API answers `not entitled to use the HostHeader override` — it is a
+#      plan entitlement, not a permission, so no token change reaches it.
+#
+#   2. Bind the hostname on the Azure side, which is this.
+#
+# NO CERTIFICATE IS BOUND, deliberately. An App Service Managed Certificate is
+# issued only when the hostname resolves to the app, and behind a proxied
+# Cloudflare record it resolves to Cloudflare — so managed issuance cannot
+# succeed without un-proxying, which would disable the origin lock. It is also
+# not needed: Cloudflare connects to the origin at its azurewebsites.net name
+# and receives the platform's own wildcard certificate, so the TLS leg is
+# already valid. Only the HTTP Host needed fixing.
+#
+# Verification is the asuid TXT record below rather than a CNAME check, because
+# a CNAME check follows DNS to Cloudflare and fails for the same reason.
+# =============================================================================
+resource "cloudflare_record" "azure_functions_domain_verification" {
+  zone_id = var.cloudflare_zone_id
+  name    = "asuid.api-azure"
+  content = azurerm_function_app_flex_consumption.hcw.custom_domain_verification_id
+  type    = "TXT"
+  ttl     = 300
+  comment = "Azure custom-domain ownership proof for the Functions origin"
+}
+
+resource "azurerm_app_service_custom_hostname_binding" "api" {
+  hostname            = "api-azure.${var.domain}"
+  app_service_name    = azurerm_function_app_flex_consumption.hcw.name
+  resource_group_name = azurerm_resource_group.app["web"].name
+
+  # Azure reads the TXT record at bind time, so it has to exist first. The
+  # dependency is not inferable from the arguments above.
+  depends_on = [cloudflare_record.azure_functions_domain_verification]
+}
+
 resource "cloudflare_ruleset" "origin_secret" {
   count = var.cloudflare_origin_secret == "" ? 0 : 1
 
