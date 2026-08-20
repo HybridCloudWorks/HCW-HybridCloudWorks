@@ -74,6 +74,19 @@ output "function_hostname" {
   value       = azurerm_function_app_flex_consumption.hcw.default_hostname
 }
 
+# The bare resource name, which is what `func azure functionapp publish` and
+# Azure/functions-action's `app-name` take — neither accepts a hostname or a URL.
+#
+# It exists as an output because it was hardcoded in two places and both went
+# stale: deploy-functions.yml carried `func-site-prod-scus` and
+# functions/package.json carried `hcw-functions-prod`, an estate older still.
+# Neither app exists, so a deploy would have failed on "app not found" — which
+# reads as a permissions or subscription problem before it reads as a typo.
+output "function_app_name" {
+  description = "Function App resource name — what a deploy targets. Not the hostname; see function_hostname for that"
+  value       = azurerm_function_app_flex_consumption.hcw.name
+}
+
 output "function_url" {
   description = "Full HTTPS URL for the Function App ORIGIN. Not reachable by browsers or CI while the origin lock is on — see api_base_url"
   value       = "https://${azurerm_function_app_flex_consumption.hcw.default_hostname}"

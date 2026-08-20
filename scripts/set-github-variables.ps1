@@ -331,6 +331,10 @@ if ($outputs) {
     # The route prefix is load-bearing either way: a base without /api 404s
     # uniformly (CHECKLIST §6, VITE_AZURE_FUNCTIONS_URL).
     @{ output = 'api_base_url'; kind = 'variable'; name = 'FUNCTIONS_URL'; transform = { param($v) $v } }
+    # The bare app name the deploy action targets. Hardcoded in the workflow
+    # until 2026-08-20, where it went stale across a rename and would have
+    # failed the first deploy with "app not found".
+    @{ output = 'function_app_name'; kind = 'variable'; name = 'FUNCTION_APP_NAME'; transform = { param($v) $v } }
     @{ output = 'web_resource_group'; kind = 'variable'; name = 'RESOURCE_GROUP'; transform = { param($v) $v } }
     @{ output = 'functions_storage_account'; kind = 'variable'; name = 'FUNCTIONS_STORAGE_ACCOUNT'; transform = { param($v) $v } }
     @{ output = 'cosmos_endpoint'; kind = 'secret'; name = 'COSMOS_ENDPOINT'; transform = { param($v) $v } }

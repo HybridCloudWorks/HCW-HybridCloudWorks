@@ -8,7 +8,7 @@
     "start": "func start",
     "build": "echo 'No build step required'",
     "test": "vitest run",
-    "deploy": "func azure functionapp publish hcw-functions-prod"
+    "deploy": "echo \"Use the deploy-functions workflow, or: func azure functionapp publish $(terraform -chdir=../infra output -raw function_app_name)\" && exit 1"
   },
   "engines": {
     "node": ">=22"
