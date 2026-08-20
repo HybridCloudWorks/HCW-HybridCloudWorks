@@ -24,7 +24,9 @@
 # =============================================================================
 
 resource "azurerm_user_assigned_identity" "github_deploy" {
-  name                = "id-${var.workload_name}-github-deploy-${var.environment}"
+  # CAF's managed-identity format carries both region and instance:
+  # id-<app or service name>-<environment>-<region>-<###>.
+  name                = "id-${var.workload_name}-github-deploy-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
   tags                = var.tags

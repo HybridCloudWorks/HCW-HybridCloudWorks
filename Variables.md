@@ -20,7 +20,9 @@ Set these in the HCP Terraform Cloud workspace under **Variables**.
 | `budget_alert_email` | Terraform | 🟡 No | Email for budget threshold alerts |
 | `entra_client_id` | Terraform | 🟡 No | Entra app registration client ID |
 | `cloudflare_zone_id` | Terraform | 🟡 No | Cloudflare Zone ID for the domain |
-| `azure_location` | Terraform | 🟡 No | Default: `southcentralus` |
+| `azure_location` | Terraform | 🟡 No | Default: `centralus` — the whole estate, single region since 2026-08-19 |
+| `region_abbreviation` | Terraform | 🟡 No | Default: `cus` — must agree with `azure_location` (see the Naming-Convention region table) |
+| `instance` | Terraform | 🟡 No | Default: `01` — the CAF instance number. Applied per resource type, not to everything; see Naming-Convention, "Which resources take an instance number" |
 | `budget_amount_usd` | Terraform | 🟡 No | Default: `150` |
 | `purge_protection_enabled` | Terraform | 🟡 No | Default: `false` — set `true` before first prod secret write |
 | `vnet_address_space` | Terraform | 🟡 No | Default: `10.40.0.0/16` |

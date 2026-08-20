@@ -25,8 +25,41 @@ examples for Azure resources*.
 | Organization token | `hcw` | Used in management-group IDs only. Subscriptions and resource groups drop it — they already sit inside exactly one tenant |
 | Workload token | `plat` for platform resources, `site` for the application | The workload slot, not the org. Never reuse a category segment here — see the note under HCWSite |
 | Environment | `prod` · `dev` · `test` · `stage` · `dr` · `sbx` | |
-| Region | `scus` (southcentralus) | See the region table below |
-| Instance | `01`, `02` | Only when more than one of a kind exists in the same scope |
+| Region | `cus` (centralus) | See the region table below |
+| Instance | `01`, `02` | Per resource type — see "Which resources take an instance number" below. Not a judgement call per resource |
+
+### Which resources take an instance number
+
+The old rule here was "only when more than one of a kind exists in the same
+scope." That sounds disciplined and is unworkable: it makes the name depend on
+a fact that changes after the name is fixed, so the first instance is
+`kv-site-prod-cus` until a second appears — at which point the first cannot be
+renamed, because Azure names are immutable.
+
+CAF answers this differently, and better: the instance number is assigned **per
+resource type**, decided once, in the *Define your naming convention* example
+tables. Follow those tables. Where CAF is silent, apply the instance number if
+the name is **global scope** (it can be taken by an unrelated Azure customer)
+or a second instance is plausible — which is the same reasoning CAF used to
+build its own table.
+
+| Takes `-01` | Does **not** take an instance number |
+| --- | --- |
+| Function app `func`, web app `app`, static web app `stapp` | Resource group `rg` |
+| Storage account `st` (unseparated: `stsiteprodcus01`), container registry `cr` | Cosmos DB account `cosmos` |
+| Virtual network `vnet`, subnet `snet`, NSG `nsg` | Route table `rt` |
+| Managed identity `id`, Key Vault `kv` | Azure SQL database `sqldb`, API Management `apim`, Service Bus `sbns`/`sbq`/`sbt` |
+| App Service plan `asp`, Log Analytics `log`, App Insights `appi`, action group `ag`, Container Apps `cae`/`caj` | |
+
+Two consequences worth stating outright:
+
+- **Storage accounts take no hyphens**, so the number runs straight on:
+  `stsiteprodcus01`. CAF names this shape itself (`st<workload><###>`), so this
+  is the convention followed, not abandoned.
+- **Cosmos carries no instance number**, on CAF's instruction — even though its
+  name is global scope and therefore *can* collide the way
+  `kv-site-prod-scus` did. If that ever happens, append `-01` knowingly. That
+  is different from carrying the suffix by default.
 
 ### On including the region
 
@@ -105,16 +138,22 @@ These four exist:
 
 | Subscription | Management group |
 | --- | --- |
-| `sub-plat-ident-prod-scus` | `mg-hcw-platform-identity` |
-| `sub-plat-mgmt-prod-scus` | `mg-hcw-platform-management` |
-| `sub-plat-conn-prod-scus` | `mg-hcw-platform-connectivity` |
-| `sub-app-site-prod-scus` | `mg-hcw-landingzones-online` |
+| `sub-plat-ident-prod-cus` | `mg-hcw-platform-identity` |
+| `sub-plat-mgmt-prod-cus` | `mg-hcw-platform-management` |
+| `sub-plat-conn-prod-cus` | `mg-hcw-platform-connectivity` |
+| `sub-app-site-prod-cus` | `mg-hcw-landingzones-online` |
 
 All four names above are live as written, verified 2026-08-19 against
 `az account list`. The application subscription briefly carried
 `sub-app-hcwsite-prod-scus`, which embedded the org token this scheme drops;
 it was renamed rather than documented as an exception, which is the right
 call while a display name is still free to change.
+
+All four were renamed from `-scus` to `-cus` on 2026-08-19, by hand in the
+portal, as the last step of the centralus consolidation. Subscription display
+names are editable where management-group IDs are not — which is the whole
+reason this page insists on getting the IDs right the first time and treats
+display names as recoverable.
 
 The `<function>` segment uses the same category vocabulary as resource groups
 below (`conn`, `mgmt`, `ident`), so one abbreviation means one thing at every
@@ -168,35 +207,35 @@ other.
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-id-plat-prod-scus` |
+| Resource group | `rg-id-plat-prod-cus` |
 | Key Vault | `kv-plat-id-prod` |
 | Managed identity | `id-hcw-<purpose>-prod` |
-| Log Analytics workspace | `log-plat-id-prod-scus` |
+| Log Analytics workspace | `log-plat-id-prod-cus-01` |
 | Domain controller VM *(only if AD DS)* | `vmhcwdc01` |
 
 The VM name breaks the pattern on purpose: a Windows computer name is capped
 at **15 characters**, and the full scheme does not fit. Name the Azure
-resource `vm-hcw-dc-prod-scus-01` and the OS computer name `vmhcwdc01`.
+resource `vm-hcw-dc-prod-cus-01` and the OS computer name `vmhcwdc01`.
 
 ## Platform — Management
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-mgmt-plat-prod-scus` |
-| Log Analytics workspace *(central)* | `log-plat-prod-scus` |
-| Automation account | `aa-plat-prod-scus` |
-| Recovery Services vault | `rsv-plat-prod-scus` |
-| Storage account *(archive/logs)* | `stplatprodscus` |
+| Resource group | `rg-mgmt-plat-prod-cus` |
+| Log Analytics workspace *(central)* | `log-plat-prod-cus-01` |
+| Automation account | `aa-plat-prod-cus-01` |
+| Recovery Services vault | `rsv-plat-prod-cus-01` |
+| Storage account *(archive/logs)* | `stplatprodcus01` |
 | Data collection rule | `dcr-plat-vminsights-prod` |
-| Action group | `ag-plat-prod-scus` |
-| Container Apps environment *(CI runner)* | `cae-plat-ci-prod-scus` |
-| Container Apps job *(CI runner)* | `caj-plat-ci-prod-scus` |
+| Action group | `ag-plat-prod-cus-01` |
+| Container Apps environment *(CI runner)* | `cae-plat-ci-prod-cus-01` |
+| Container Apps job *(CI runner)* | `caj-plat-ci-prod-cus-01` |
 
 `caj` is a **local** abbreviation, recorded here to be a convention at all:
 CAF publishes `cae` for a Container Apps environment and `ca` for a container
 app, but nothing for a Container Apps *job*.
 
-`log-plat-prod-scus` is the workspace Runbook §7 step 5 re-points
+`log-plat-prod-cus-01` is the workspace Runbook §7 step 5 re-points
 diagnostics to. Additive — it does not replace the workload's local workspace.
 
 ## Platform — Connectivity
@@ -205,22 +244,22 @@ Connectivity resources take `plat` in the workload slot, like every other
 platform resource: the org token appears in management-group IDs only (the
 component table above), and an earlier revision of this table that embedded
 `hcw` contradicted it. `plat` is the reading the Management table already
-uses (`log-plat-prod-scus`), so it is the one that survives.
+uses (`log-plat-prod-cus-01`), so it is the one that survives.
 
 | Resource | Name |
 | --- | --- |
-| Resource group | `rg-conn-hub-prod-scus` |
-| Hub virtual network | `vnet-plat-hub-prod-scus` |
-| Azure Firewall | `afw-plat-hub-prod-scus` |
-| Firewall policy | `afwp-plat-prod-scus` |
-| Public IP (firewall) | `pip-plat-afw-prod-scus` |
-| Bastion | `bas-plat-hub-prod-scus` |
-| Public IP (bastion) | `pip-plat-bas-prod-scus` |
-| VPN gateway | `vgw-plat-hub-prod-scus` |
-| ExpressRoute gateway | `ergw-plat-hub-prod-scus` |
-| Route table | `rt-plat-spoke-prod-scus` |
-| Network security group | `nsg-plat-<subnet>-prod-scus` |
-| DDoS protection plan | `ddos-plat-prod-scus` |
+| Resource group | `rg-conn-hub-prod-cus` |
+| Hub virtual network | `vnet-plat-hub-prod-cus-01` |
+| Azure Firewall | `afw-plat-hub-prod-cus-01` |
+| Firewall policy | `afwp-plat-prod-cus-01` |
+| Public IP (firewall) | `pip-plat-afw-prod-cus-01` |
+| Bastion | `bas-plat-hub-prod-cus-01` |
+| Public IP (bastion) | `pip-plat-bas-prod-cus-01` |
+| VPN gateway | `vgw-plat-hub-prod-cus-01` |
+| ExpressRoute gateway | `ergw-plat-hub-prod-cus-01` |
+| Route table | `rt-plat-spoke-prod-cus` |
+| Network security group | `nsg-plat-<subnet>-prod-cus-01` |
+| DDoS protection plan | `ddos-plat-prod-cus-01` |
 
 **Two categories here cannot be named by this scheme.**
 
@@ -230,7 +269,7 @@ makes the service undeployable:
 `GatewaySubnet` · `AzureFirewallSubnet` · `AzureFirewallManagementSubnet` ·
 `AzureBastionSubnet` · `RouteServerSubnet`
 
-Every other subnet takes `snet-plat-<purpose>-prod-scus`.
+Every other subnet takes `snet-plat-<purpose>-prod-cus-01`.
 
 *Private DNS zones.* The name **is** the resolution target and is dictated by
 the service: `privatelink.documents.azure.com`,
@@ -239,7 +278,7 @@ prefix them.
 
 ## Application landing zone — HCWSite
 
-Subscription `sub-app-site-prod-scus`, under `mg-hcw-landingzones-online`.
+Subscription `sub-app-site-prod-cus`, under `mg-hcw-landingzones-online`.
 
 Six resource groups, drawn on destroy semantics rather than on the number of
 categories in play (the split `infra/main.tf` implements). The `web` group is
@@ -247,31 +286,31 @@ redeployable; the others hold things whose deletion is a decision.
 
 | Resource group | Segment rationale | Contents |
 | --- | --- | --- |
-| `rg-web-site-prod-scus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, deploy identity, and the Functions host storage account, which is recreated with the app |
-| `rg-db-site-prod-scus` | Databases | Cosmos account, SQL database, containers — `prevent_destroy` |
-| `rg-stor-site-prod-scus` | Storage | Content storage account and its blob containers — `prevent_destroy` |
-| `rg-sec-site-prod-scus` | Security | Key Vault — `prevent_destroy` |
-| `rg-conn-site-prod-scus` | Networking | Spoke VNet, Functions integration subnet |
-| `rg-ai-site-prod-scus` | AI + Machine Learning | Azure OpenAI account and its model deployments — deployed models are not free to recreate |
+| `rg-web-site-prod-cus` | Web & Mobile | Static Web App, Function App, App Service plan, Application Insights, deploy identity, and the Functions host storage account, which is recreated with the app |
+| `rg-db-site-prod-cus` | Databases | Cosmos account, SQL database, containers — `prevent_destroy` |
+| `rg-stor-site-prod-cus` | Storage | Content storage account and its blob containers — `prevent_destroy` |
+| `rg-sec-site-prod-cus` | Security | Key Vault — `prevent_destroy` |
+| `rg-conn-site-prod-cus` | Networking | Spoke VNet, Functions integration subnet |
+| ~~`rg-ai-site-prod-cus`~~ | AI + Machine Learning | **RETIRED 2026-08-19.** Held the Azure OpenAI account; that account was removed entirely (zero gpt-4o quota in this subscription, no consumer in the codebase). Row kept so the decision is not silently re-litigated |
 
 | Resource | Name | Global? |
 | --- | --- | --- |
-| Spoke virtual network | `vnet-site-prod-scus` | |
-| Subnet (Functions integration) | `snet-site-func-prod` | |
-| Static Web App | `stapp-site-prod-scus` | |
-| Function App | `func-site-prod-scus` | ✔ |
-| App Service plan | `asp-site-prod-scus` | |
+| Spoke virtual network | `vnet-site-prod-cus-01` | |
+| Subnet (Functions integration) | `snet-site-func-prod-cus-01` | |
+| Static Web App | `stapp-site-prod-cus-01` | |
+| Function App | `func-site-prod-cus-01` | ✔ |
+| App Service plan | `asp-site-prod-cus-01` | |
 | Cosmos DB account | `cosmos-site-prod-cus` § | ✔ |
-| Key Vault | `kv-site-prod-scus-01` ‡ | ✔ |
-| Storage account (content) | `stsiteprodscus` | ✔ |
-| Storage account (Functions host) | `stsitefuncprodscus` | ✔ |
-| Azure OpenAI account | `oai-site-prod-scus` | ✔ |
-| Application Insights | `appi-site-prod-scus` | |
-| Managed identity (Function App) | `id-site-func-prod` | |
-| Managed identity (GitHub deploy) | `id-site-github-deploy-prod` | |
-| Private endpoint (Cosmos) | `pep-web-cosmos-prod-scus` | |
-| Network security group | `nsg-web-func-prod-scus` | |
-| Route table | `rt-site-prod-scus` | |
+| Key Vault | `kv-site-prod-cus-01` ‡ | ✔ |
+| Storage account (content) | `stsiteprodcus01` | ✔ |
+| Storage account (Functions host) | `stsitefuncprodcus01` | ✔ |
+| ~~Azure OpenAI account~~ | ~~`oai-site-prod-cus`~~ | **RETIRED 2026-08-19** — model calls go to external provider APIs keyed from Key Vault |
+| Application Insights | `appi-site-prod-cus-01` | |
+| Managed identity (Function App) | `id-site-func-prod-cus-01` | |
+| Managed identity (GitHub deploy) | `id-site-github-deploy-prod-cus-01` | |
+| Private endpoint (Cosmos) | `pep-web-cosmos-prod-cus-01` | |
+| Network security group | `nsg-web-func-prod-cus-01` | |
+| Route table | `rt-site-prod-cus` | |
 
 Subnets and managed identities omit the region: both are children of (or bound
 to) a resource that already carries it. Everything else region-qualifies,
@@ -286,27 +325,30 @@ pattern and reads as the first of its kind. Discovered at apply time on
 2026-08-19, which is the expensive way to find out; for any globally-unique
 name, check availability before the first apply, not during it.
 
-### Two resources cannot sit in `azure_location`, and they are named differently on purpose
+### The region exceptions are gone — and why the checks that found them are not
 
-Both were discovered at apply time, and the contrast between them is the rule
-worth carrying forward: **name a resource for the region only when the region
-is a fact about the resource, not an accident of where the service is offered.**
+For a period this estate ran in `southcentralus` with two resources stranded
+outside it: the Static Web App (not offered there) and Cosmos DB (no
+subscription region access). Each was discovered at apply time, and each
+produced a name that disagreed with its neighbours.
 
-**Static Web App — keeps `scus`.** Static Web Apps exists in five regions only
-(`centralus`, `eastus2`, `westus2`, `westeurope`, `eastasia`), so
-`stapp-site-prod-scus` runs in `centralus`. The name still says `scus` because
-the region here is a control-plane detail: the site is served from Azure's
-global edge, so `centralus` says nothing about where users are served from or
-where anything rests. The name records the estate the resource belongs to.
+**Both exceptions were retired on 2026-08-19 by moving the whole estate to
+`centralus`**, the nearest region that hosts every service this workload uses.
+There is now one region, one abbreviation, and no resource whose name has to
+explain itself.
 
-**§ Cosmos DB — takes `cus`.** The account runs in `centralus`, so its name
-says `cus`. Here the region is *data residency* — the first thing anyone
-debugging latency or answering a compliance question needs — so the name must
-be honest about it. `cosmos-site-prod-scus` would have been actively
-misleading, which is worse than breaking the estate's pattern.
+The rule that came out of that period still stands, and applies to the next
+region decision rather than this one: **name a resource for the region only
+when the region is a fact about the resource, not an accident of where the
+service is offered.** Cosmos earns its region token because a database's region
+*is* data residency. A Static Web App's does not — the site serves from the
+global edge — which is why, while the exception lasted, the right call was to
+leave the Static Web App named for the estate rather than for its control
+plane.
 
-Finding that region took two checks that **disagree with each other**, and
-either one alone gives a wrong answer:
+The checks below are the lasting part of this section. Picking `centralus`
+required two that **disagree with each other**, and either one alone gives a
+confident wrong answer:
 
 | Check | Owner | southcentralus | southcentralus2 | centralus |
 | --- | --- | --- | --- | --- |
@@ -332,13 +374,15 @@ az cognitiveservices model list -l <region>
 ```
 
 There is no application Log Analytics workspace: telemetry goes to the central
-one in Management (`log-plat-prod-scus`), and Application Insights is
+one in Management (`log-plat-prod-cus-01`), and Application Insights is
 workspace-based against it across the subscription boundary. Split the
 workspace out only when a second workload onboards or app and platform logs
 need different RBAC.
 
-Azure OpenAI would take `rg-ai-site-prod-scus` on the same rule — it is a
-separate category *and* holds deployed models whose recreation is not free.
+Azure OpenAI *would* take `rg-ai-site-prod-cus` on the same rule — a separate
+category, holding deployed models whose recreation is not free. The rule is
+recorded because it is right; the group is not deployed, because Azure OpenAI
+was retired on 2026-08-19.
 
 The workload token is `site`. The org token belongs in the management-group
 names; repeating it per-resource inside a subscription already scoped to one
@@ -347,9 +391,9 @@ workload adds characters and no information.
 `site` rather than `web` deliberately, and the reason generalizes. **The
 workload token and the category segment occupy different slots of the same
 name, so they must not draw from the same vocabulary.** `web` is already the
-segment for Web & Mobile, so a `web` workload produces `rg-web-web-prod-scus`
+segment for Web & Mobile, so a `web` workload produces `rg-web-web-prod-cus`
 — a name that repeats a word for two unrelated reasons and teaches the reader
-nothing about either. `rg-web-site-prod-scus` reads unambiguously: `web` is
+nothing about either. `rg-web-site-prod-cus` reads unambiguously: `web` is
 the category, `site` is the workload.
 
 The rule to carry forward: **never name a workload after an Azure service
@@ -371,8 +415,8 @@ ones that actually bite:
 
 | Resource | Limit | Consequence |
 | --- | --- | --- |
-| Storage account | 3–24, **lowercase alphanumeric only**, global | No hyphens at all — `stsiteprodscus`, not `st-site-prod-scus` |
-| Key Vault | 3–24, alphanumeric + hyphen, must start with a letter, global | `kv-hcw-connectivity-prod-scus` is 29 — it does not fit |
+| Storage account | 3–24, **lowercase alphanumeric only**, global | No hyphens at all — `stsiteprodcus01`, not `st-site-prod-cus` |
+| Key Vault | 3–24, alphanumeric + hyphen, must start with a letter, global | `kv-hcw-connectivity-prod-cus` is 29 — it does not fit |
 | Cosmos DB | 3–44, lowercase, global | |
 | Function / Web App | 2–60, global across `azurewebsites.net` | |
 | Container registry | 5–50, **alphanumeric only**, global | |
@@ -394,6 +438,6 @@ Repository Standard and is already the ALZ contract — `workload`,
 a name what a tag already carries.
 
 The one name-versus-tag case worth calling out: `managedBy` distinguishes
-`terraform` from `bootstrap-script`. `rg-hcw-bootstrap` and `id-hcw-terraform`
+`terraform` from `bootstrap-script`. `rg-mgmt-boot-prod-cus` and `id-plat-terraform-prod-cus-01`
 are outside Terraform state deliberately, and that tag is the only signal of it
 in the portal.

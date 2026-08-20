@@ -20,7 +20,7 @@ resource "azurerm_monitor_action_group" "ops" {
   # ResourceGroupNotFound.
   provider = azurerm.mgmt
 
-  name                = "ag-plat-${var.environment}-${var.region_abbreviation}"
+  name                = "ag-plat-${var.environment}-${var.region_abbreviation}-${var.instance}"
   resource_group_name = azurerm_resource_group.platform_mgmt.name
   short_name          = "hcw-ops"
 

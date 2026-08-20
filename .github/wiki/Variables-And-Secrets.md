@@ -35,7 +35,7 @@ one wins.
 
 | # | Store | Holds | Read by | Written by |
 | --- | --- | --- | --- | --- |
-| 1 | **Azure Key Vault** `kv-site-prod-scus-01` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings or `src/lib/key-vault.js` | A human, out-of-band, during a seeding window |
+| 1 | **Azure Key Vault** `kv-site-prod-cus-01` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings or `src/lib/key-vault.js` | A human, out-of-band, during a seeding window |
 | 2 | **HCP Terraform workspace** `hcw-azure` | What Terraform needs to authenticate and to plan | The run environment and the `azurerm` / `cloudflare` providers | An operator in the workspace UI |
 | 3 | **GitHub Actions variables** | Non-sensitive CI/CD configuration | `${{ vars.* }}` in workflows | `gh variable set`, or the repository settings UI |
 | 4 | **GitHub Actions secrets** | Last resort — credentials to systems that offer no federation | `${{ secrets.* }}` in workflows | `gh secret set` |
@@ -241,7 +241,7 @@ Both cloud handshakes in this estate are federated, and neither has a secret:
 
 | Handshake | Identity | Trust anchor | Created by |
 | --- | --- | --- | --- |
-| HCP Terraform → Azure | `id-hcw-terraform` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
+| HCP Terraform → Azure | `id-plat-terraform-prod-cus-01` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
 | GitHub Actions → Azure | the `github_deploy` user-assigned identity | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref and to the `data-migration` environment | `infra/oidc.tf` |
 
 Neither mints anything longer-lived than a per-run token. So the **correct count

@@ -412,7 +412,7 @@ across `.tf`, `.yml` and `.md` before this entry. The gap was invisible in revie
 individual file was correct; only the join between them was missing.
 
 **Resolved in the repository** by `scripts/bootstrap-terraform-oidc.ps1` plus section 0 of the
-Deployment Runbook and CHECKLIST §8. The script creates `rg-hcw-bootstrap`, the `id-hcw-terraform`
+Deployment Runbook and CHECKLIST §8. The script creates `rg-mgmt-boot-prod-cus`, the `id-plat-terraform-prod-cus-01`
 user-assigned managed identity, two federated credentials against `https://app.terraform.io`
 (`run_phase:plan` and `run_phase:apply` — Entra matches subjects exactly, so one credential is not
 enough), and Contributor + Role Based Access Control Administrator at subscription scope.
@@ -578,7 +578,7 @@ the `CI_RUNNER` repository variable. Everything below is operator work this envi
    `lifecycle.ignore_changes` protects everything set here):
 
    ```bash
-   RG=<resource-group> JOB=caj-plat-ci-prod-scus
+   RG=<resource-group> JOB=caj-plat-ci-prod-cus-01
    az containerapp job secret set -g $RG --name $JOB \
      --secrets gh-app-private-key="$(cat app-key.pem)" dockerhub-token='<token>'
    az containerapp job registry set -g $RG --name $JOB \

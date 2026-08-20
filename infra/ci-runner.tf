@@ -68,7 +68,7 @@ resource "azurerm_container_app_environment" "ci_runner" {
   provider = azurerm.mgmt
 
   count                      = var.ci_runner_enabled ? 1 : 0
-  name                       = "cae-plat-ci-${var.environment}-${var.region_abbreviation}"
+  name                       = "cae-plat-ci-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location                   = azurerm_resource_group.platform_mgmt.location
   resource_group_name        = azurerm_resource_group.platform_mgmt.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
@@ -82,7 +82,7 @@ resource "azurerm_container_app_job" "ci_runner" {
   # `caj` is a local abbreviation — CAF publishes `cae` for the environment
   # but nothing for a Container Apps job. Recorded in the Naming-Convention
   # wiki page, which is what makes it a convention.
-  name                         = "caj-plat-ci-${var.environment}-${var.region_abbreviation}"
+  name                         = "caj-plat-ci-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location                     = azurerm_resource_group.platform_mgmt.location
   resource_group_name          = azurerm_resource_group.platform_mgmt.name
   container_app_environment_id = azurerm_container_app_environment.ci_runner[0].id

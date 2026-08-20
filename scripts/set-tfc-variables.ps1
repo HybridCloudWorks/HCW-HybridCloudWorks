@@ -60,7 +60,7 @@
   are absent.
 
 .PARAMETER TerraformClientId
-  Client id of id-hcw-terraform, printed by bootstrap-terraform-oidc.ps1 and
+  Client id of id-plat-terraform-prod-cus-01, printed by bootstrap-terraform-oidc.ps1 and
   recorded in its report. Becomes TFC_AZURE_RUN_CLIENT_ID.
 
 .PARAMETER TenantId
@@ -69,14 +69,14 @@
   provider and the other is consumed by the configuration.
 
 .PARAMETER SubscriptionApp
-  Application landing zone (sub-app-site-prod-scus). Also becomes
+  Application landing zone (sub-app-site-prod-cus). Also becomes
   ARM_SUBSCRIPTION_ID, the default provider's subscription.
 
 .PARAMETER SubscriptionMgmt
-  Platform Management (sub-plat-mgmt-prod-scus).
+  Platform Management (sub-plat-mgmt-prod-cus).
 
 .PARAMETER SubscriptionConn
-  Platform Connectivity (sub-plat-conn-prod-scus).
+  Platform Connectivity (sub-plat-conn-prod-cus).
 
 .PARAMETER EntraApiAudience
   Audience the Functions host validates access tokens against, e.g.
@@ -134,8 +134,15 @@ param(
 
   # Where the bootstrap script puts the Terraform identity. Only used to find
   # its client id automatically.
-  [string] $BootstrapResourceGroup = 'rg-hcw-bootstrap',
-  [string] $BootstrapIdentityName = 'id-hcw-terraform',
+  #
+  # These MUST track bootstrap-terraform-oidc.ps1's defaults. They were
+  # rg-hcw-bootstrap / id-hcw-terraform until 2026-08-19, when the identity was
+  # renamed to the convention and moved to centralus; leaving them stale here
+  # would have made this script report "not found" and fall through to
+  # prompting for a client id by hand — the failure would have looked like a
+  # permissions problem rather than a rename.
+  [string] $BootstrapResourceGroup = 'rg-mgmt-boot-prod-cus',
+  [string] $BootstrapIdentityName = 'id-plat-terraform-prod-cus-01',
 
   # Display name for the API app registration, used only when creating one.
   [string] $EntraAppDisplayName = 'HCWSite API',
@@ -509,7 +516,7 @@ $variables = @(
   @{ key = 'TFC_AZURE_PROVIDER_AUTH'; value = 'true'; category = 'env'; sensitive = $false
     description = 'Switches the workspace to dynamic provider credentials' }
   @{ key = 'TFC_AZURE_RUN_CLIENT_ID'; value = $TerraformClientId; category = 'env'; sensitive = $false
-    description = 'Client id of id-hcw-terraform, from bootstrap-terraform-oidc.ps1' }
+    description = 'Client id of id-plat-terraform-prod-cus-01, from bootstrap-terraform-oidc.ps1' }
   # Sensitive to match their Terraform-category twins below: the same value
   # must not be hidden in one category and readable in the other, or the
   # "keep IDs out of logs" intent (variables.tf) is defeated by the copy.
@@ -520,11 +527,11 @@ $variables = @(
 
   # --- Terraform: what the configuration declares -------------------------
   @{ key = 'subscription_app'; value = $SubscriptionApp; category = 'terraform'; sensitive = $true
-    description = 'Application landing zone (sub-app-site-prod-scus)' }
+    description = 'Application landing zone (sub-app-site-prod-cus)' }
   @{ key = 'subscription_mgmt'; value = $SubscriptionMgmt; category = 'terraform'; sensitive = $true
-    description = 'Platform Management (sub-plat-mgmt-prod-scus)' }
+    description = 'Platform Management (sub-plat-mgmt-prod-cus)' }
   @{ key = 'subscription_conn'; value = $SubscriptionConn; category = 'terraform'; sensitive = $true
-    description = 'Platform Connectivity (sub-plat-conn-prod-scus)' }
+    description = 'Platform Connectivity (sub-plat-conn-prod-cus)' }
   @{ key = 'entra_tenant_id'; value = $TenantId; category = 'terraform'; sensitive = $true
     description = 'Same tenant as ARM_TENANT_ID, consumed by the configuration' }
   @{ key = 'entra_api_audience'; value = $EntraApiAudience; category = 'terraform'; sensitive = $false

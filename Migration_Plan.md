@@ -1,7 +1,82 @@
 # Migration Plan — Personal-Site_HCW → HCW-HybridCloudWorks (Azure)
 
-**Audience:** engineers executing the migration. **Status:** plan. Written 2026-07-30.
+**Audience:** engineers executing the migration. **Status:** plan — Phase 2 executed, see the note below.
+**Written** 2026-07-30; deployment note added 2026-08-19.
 **Companion:** [Architecture_Plan.md](Architecture_Plan.md) — the target and why.
+
+> ## ⚠️ PLEASE NOTE — what is *actually* deployed, as of 2026-08-19
+>
+> **Everything below this box is the plan as written on 2026-07-30. It describes what was designed
+> to be deployed. It is not a description of the running estate.**
+>
+> **Migration_Plan §2 Phase 2 has since been executed.** The Azure infrastructure is live: **129
+> resources**, applied from `infra/` through HCP Terraform (org `hcw`, project `Site`, workspace
+> `hcw-azure`). As of 2026-08-19 `terraform fmt`, `terraform validate` and `terraform plan` are all
+> clean — _"No changes. Your infrastructure matches the configuration."_
+>
+> Reaching that took a run of apply-time failures, and **fixing them changed the target**. Read the
+> plan for intent and sequencing; read this box for what exists. Where the two disagree, this box
+> wins.
+>
+> ### ⏳ A rebuild is staged in the repository and has NOT been applied
+>
+> `infra/` currently describes a **different estate from the one running**. The configuration has
+> been changed to consolidate everything into `centralus` and to adopt the CAF instance-number
+> convention; both force replacement, because Azure resource names and regions are immutable. The
+> planned change is **125 to add, 3 to change, 125 to destroy** — verified clean, zero errors, not
+> executed.
+>
+> Until that applies, the names in the table below are what is live. After it applies, every `scus`
+> becomes `cus` and most resources gain an `-01`:
+> `func-site-prod-cus-01`, `kv-site-prod-cus-01`, `stapp-site-prod-cus-01`, `stsiteprodcus01`.
+> `cosmos-site-prod-cus` keeps its name — CAF assigns no instance number to Cosmos.
+>
+> **The rebuild has one hard prerequisite.** The Key Vault holds ~24 secrets that are seeded by hand
+> and exist nowhere else in managed form; Terraform cannot recreate them. They must be exported
+> before the teardown. Deployment Runbook **§1b** is the procedure, and its Step 5 — restoring the
+> four `prevent_destroy` guards that had to be lifted to make this plan possible at all — is not
+> optional.
+>
+> | The plan implies                                        | What is actually deployed                                                               | Why it changed                                                                                                                                             |
+> | ------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | Cosmos in the estate region, `southcentralus`           | `cosmos-site-prod-cus` in **`centralus`** — serverless, single-region, `zone_redundant = false` | Two Azure APIs govern Cosmos placement and they disagree. `southcentralus` is ARM-deployable but this subscription has **no Cosmos region access**; `southcentralus2` has access but ARM does not offer Cosmos there. `centralus` is the nearest region that passes both. |
+> | An Azure OpenAI account behind the AI endpoints         | **Nothing. Retired entirely** — no account, no role assignment, no diagnostic setting, no `ai` resource group, no `AZURE_OPENAI_*` app settings | The pinned `gpt-4o` version was retired 2026-03-31, this subscription holds **zero TPM quota** for `gpt-4o` in every SKU, and DALL-E is not offered in the region. Nothing consumed it. |
+> | Key Vault `kv-site-prod-scus`                           | **`kv-site-prod-scus-01`**                                                                | The unsuffixed name is globally taken by an unrelated tenant and is not soft-deleted anywhere in this tenant, so it is unrecoverable. `-01` is the instance suffix the Naming-Convention page reserves for exactly this. |
+> | Static Web App in the estate region                     | `stapp-site-prod-scus`, running in **`centralus`**                                        | `southcentralus` does not offer `Microsoft.Web/staticSites` — only five regions do. The name keeps its `scus` token on purpose: it records the estate, not the control-plane region one service happens to demand. |
+> | Phase 2 exit: applied to a **non-production** subscription | **Applied to the production subscriptions**, across three: Application `b9e02281…`, Management `02dfb8ad…`, Connectivity `8f3c6d82…` | There is no non-production subscription. The Identity landing zone is deliberately empty. Cost control is the budget resource — `budget_amount_usd` (default 150 USD) from `budget_start_date`. **The §7 cost gate still applies and has not been run.** |
+> | Data living in Cosmos                                    | The `hcw` database and all **73 containers exist and are EMPTY**                          | Phase 4 has not run. The 1,395 documents are still only in Firestore.                                                                                       |
+> | Wildcard CORS origins on storage                         | **Exact origins only, ports included**                                                    | Azure Storage accepts a literal `*` or fully-qualified origins and nothing in between; `https://*.<domain>` and `http://localhost:*` are rejected outright.  |
+> | A CI runner                                              | **Not deployed** — `ci_runner_enabled = false`                                            | Deferred; ADR 0021 superseded.                                                                                                                              |
+>
+> **Two of these change how you work, not just what you read:**
+>
+> **The AI endpoints have no Azure backing service.** The 17 AI RPCs are no more blocked than they
+> were, but whoever ports them writes against **external provider APIs, keyed from Key Vault** via
+> the existing `*_API_KEY` app settings — which is what `functions/src/lib/openai-client.js` (no
+> importers) was always shadowing. Do not re-add the Azure OpenAI account to unblock Phase 3; the
+> absence is commented in `infra/main.tf` where someone would otherwise restore it.
+>
+> **The network is closed by default.** Cosmos, both storage accounts and Key Vault all default to
+> `Deny`, scoped to the Functions integration subnet `snet-site-func-prod`. GitHub-hosted runners
+> have public dynamic IPs, so `deploy-functions.yml` opens a per-run firewall window and closes it
+> again. **A deploy or a data-migration run from anywhere else needs an operator IP window** (the
+> `*_admin_ip_rules` variables) or it fails on a network denial that does not announce itself as one.
+>
+> **Also worth knowing before you touch `infra/`:**
+>
+> - The backend **must** resolve to workspace `hcw-azure`. The other workspace in this org, `HCW`,
+>   holds 85 GCP/Firebase/VPS resources belonging to `saulpatinojr/Personal-Site_HCW` — a plan
+>   pointed there proposes **destroying all of them**.
+> - The HCP Terraform **project name `Site` is a segment of the OIDC subject** the federated
+>   credentials must match. Moving the workspace between projects breaks authentication with
+>   `AADSTS70021` until `scripts/bootstrap-terraform-oidc.ps1` is re-run with the new `-TfcProject`.
+> - State was re-synced on 2026-08-19 with `terraform apply -refresh-only`: the subnet delegation
+>   action recorded in state (`.../subnets/action`) was stale against what Azure actually assigns
+>   (`.../subnets/join/action`). No infrastructure changed; the record caught up to reality.
+>
+> **What has not changed:** Phases 3, 4, 5 and 6 are all still ahead — port the 117 endpoints,
+> migrate the data, cut over, decommission. §0's overlap problem remains the highest-probability
+> cause of failure, and every day both repositories stay live it gets worse.
 
 This repository becomes **archival** at the end of this plan. Until it does, it is the **source of
 truth**, and that is the single most important operational fact below.
@@ -42,7 +117,7 @@ deployed to Azure.
 | ----- | ---------------------------------------- | ------------- | --------------------------------------------------------------- |
 | 0     | Reconcile the two repositories           | Both          | `frontend/` is a byte-faithful copy of this repo at a known SHA |
 | 1     | Decouple from Firebase behind interfaces | **This repo** | Zero direct `firebase/*` imports outside an adapter layer       |
-| 2     | Stand up Azure infrastructure            | Target repo   | Terraform applied to a non-production subscription, costed      |
+| 2     | Stand up Azure infrastructure            | Target repo   | **DONE 2026-08-19** — 129 resources applied to the *production* subscriptions; see the note at the top |
 | 3     | Port the API and workers                 | Target repo   | All 117 endpoints answering, parity-tested                      |
 | 4     | Migrate data                             | Scripts       | 1,395 documents in Cosmos, reconciled                           |
 | 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |

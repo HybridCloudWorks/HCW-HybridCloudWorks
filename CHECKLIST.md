@@ -236,12 +236,12 @@ All four names are dictated by HashiCorp and Microsoft and are therefore
 | Variable Name | Purpose | Required | Source | Consumer | Expected Format | Validation Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `TFC_AZURE_PROVIDER_AUTH` | Switches the workspace to dynamic provider credentials | **Yes** | HCP Terraform workspace | HCP Terraform run environment | `true` | **Missing** | Absent ⇒ HCP Terraform never mints an OIDC token and the provider finds no credential |
-| `TFC_AZURE_RUN_CLIENT_ID` | Client id of `id-hcw-terraform`, the identity HCP Terraform assumes | **Yes** | `scripts/bootstrap-terraform-oidc.ps1` output | HCP Terraform run environment | `00000000-0000-0000-0000-000000000000` | **Missing** | Distinct from §7 `CLIENT_ID`, which is the GitHub Actions identity created by `infra/oidc.tf` |
+| `TFC_AZURE_RUN_CLIENT_ID` | Client id of `id-plat-terraform-prod-cus-01`, the identity HCP Terraform assumes | **Yes** | `scripts/bootstrap-terraform-oidc.ps1` output | HCP Terraform run environment | `00000000-0000-0000-0000-000000000000` | **Missing** | Distinct from §7 `CLIENT_ID`, which is the GitHub Actions identity created by `infra/oidc.tf` |
 | `ARM_TENANT_ID` | Entra tenant for the token exchange | **Yes** | Entra directory | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `entra_tenant_id` Terraform variable |
 | `ARM_SUBSCRIPTION_ID` | Target subscription | **Yes** | Azure subscription | `azurerm` provider | `00000000-0000-0000-0000-000000000000` | **Missing** | Same value as the `subscription_app` Terraform variable. Fallback only: every provider pins `subscription_id` in HCL (`infra/providers.tf`), so this never decides where resources land |
 
 Bootstrap procedure — including the two federated credentials on
-`id-hcw-terraform` that these variables depend on — is section 0 of the
+`id-plat-terraform-prod-cus-01` that these variables depend on — is section 0 of the
 [Deployment Runbook](.github/wiki/Deployment-Runbook.md).
 
 **The 2026-08-18 bootstrap run is SUPERSEDED — its artifacts no longer

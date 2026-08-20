@@ -18,7 +18,7 @@ roles table.
 | Terraform source | `infra/` on `main` in HCW-HybridCloudWorks |
 | State and variables | HCP Terraform Cloud — org `hcw`, project `Site`, workspace `hcw-azure` |
 | Required inputs (names, formats, consumers — never values) | `CHECKLIST.md` and `Variables.md` at the repository root |
-| Terraform's own identity | `id-hcw-terraform`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
+| Terraform's own identity | `id-plat-terraform-prod-cus-01`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
 | Working rules for the directory | `infra/README.md` |
 
@@ -39,7 +39,7 @@ Confusing these is the most common way to get stuck, because both are called
 | --- | --- | --- |
 | Who authenticates | Terraform runs in HashiCorp's cloud | The deploy workflows |
 | Created by | `scripts/bootstrap-terraform-oidc.ps1` (manual, once) | `infra/oidc.tf` (Terraform) |
-| Identity | `id-hcw-terraform` in `rg-hcw-bootstrap` | `id-hybridcloudworks-github-deploy` |
+| Identity | `id-plat-terraform-prod-cus-01` in `rg-mgmt-boot-prod-cus` | `id-site-github-deploy-prod-cus-01` in `rg-web-site-prod-cus` |
 | Issuer | `https://app.terraform.io` | `https://token.actions.githubusercontent.com` |
 | Exists when | After you run the script | After the first successful apply |
 | Consumed as | `TFC_AZURE_RUN_CLIENT_ID` in the workspace | `CLIENT_ID` repository variable |
@@ -115,7 +115,7 @@ role and carries zero Azure RBAC. Re-run with `-ElevateAccess`, which takes
 the documented one-time root-scope elevation, grants you Owner on the target
 subscription, and removes the root-scope grant again.
 
-It creates: `rg-hcw-bootstrap`, the `id-hcw-terraform` managed identity, two
+It creates: `rg-mgmt-boot-prod-cus`, the `id-plat-terraform-prod-cus-01` managed identity, two
 federated credentials, and two subscription role assignments (Contributor to
 create resources, Role Based Access Control Administrator to create the role
 assignments `infra/` declares — Contributor alone cannot, and RBAC
@@ -136,7 +136,7 @@ variables (the script prints these with the values filled in):
 | Name | Value |
 | --- | --- |
 | `TFC_AZURE_PROVIDER_AUTH` | `true` |
-| `TFC_AZURE_RUN_CLIENT_ID` | client ID of `id-hcw-terraform` |
+| `TFC_AZURE_RUN_CLIENT_ID` | client ID of `id-plat-terraform-prod-cus-01` |
 | `ARM_TENANT_ID` | tenant GUID |
 | `ARM_SUBSCRIPTION_ID` | subscription GUID |
 
@@ -216,7 +216,10 @@ live — not on laptops, not on GitHub-hosted runners holding tokens.
 2. The infrastructure operator reviews the plan **in TFC**, checking:
    - zero destroy/create pairs on stateful resources (Cosmos, storage
      accounts, Key Vault carry `prevent_destroy` — a plan that wants to
-     replace them fails; treat any attempt as a defect, not an obstacle);
+     replace them fails; treat any attempt as a defect, not an obstacle).
+     They were lifted exactly once, for the centralus rebuild on 2026-08-19,
+     and restored the same day. If a plan proposes replacing a stateful
+     resource and no one has deliberately lifted a guard, stop;
    - every change traceable to the merged diff;
    - cost-relevant changes against the **USD 150/month ceiling**
      ([Cost analysis](Cost-Analysis)).

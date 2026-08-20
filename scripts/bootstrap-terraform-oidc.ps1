@@ -124,9 +124,24 @@ param(
   [string] $TfcOrganization = 'hcw',
   [string] $TfcProject = 'Site',
   [string] $TfcWorkspace = 'hcw-azure',
-  [string] $ResourceGroupName = 'rg-hcw-bootstrap',
-  [string] $IdentityName = 'id-hcw-terraform',
-  [string] $Location = 'southcentralus',
+  # Named to the convention as of 2026-08-19. The originals were
+  # rg-hcw-bootstrap / id-hcw-terraform / southcentralus, which predated the
+  # Naming-Convention page and broke it three ways: `hcw` is the ORG token, and
+  # the page reserves that for management-group IDs (the workload slot takes
+  # `plat`); there was no environment or region segment; and there was no
+  # instance number, which CAF assigns to managed identities.
+  #
+  # The resource group cannot be rg-mgmt-plat-prod-cus — that name belongs to
+  # Terraform's own Management group, and the whole point of this one is that
+  # nothing in infra/ can reach it. `boot` in the workload slot keeps it
+  # separate and says what it is.
+  #
+  # Location matters more than it looks: leaving this at southcentralus meant
+  # the next bootstrap run would recreate the region drift that the centralus
+  # consolidation removed.
+  [string] $ResourceGroupName = 'rg-mgmt-boot-prod-cus',
+  [string] $IdentityName = 'id-plat-terraform-prod-cus-01',
+  [string] $Location = 'centralus',
   [switch] $ElevateAccess,
   [switch] $DeviceCode,
   [string] $ReportPath = (Join-Path $PSScriptRoot ".reports/bootstrap-oidc-$(Get-Date -Format 'yyyyMMdd-HHmmss').md")

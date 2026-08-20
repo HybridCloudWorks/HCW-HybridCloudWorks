@@ -72,7 +72,7 @@ resource "azurerm_log_analytics_workspace" "hcw" {
   # subscription, where rg-mgmt-plat does not exist.
   provider = azurerm.mgmt
 
-  name                = "log-plat-${var.environment}-${var.region_abbreviation}"
+  name                = "log-plat-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.platform_mgmt.location
   resource_group_name = azurerm_resource_group.platform_mgmt.name
   sku                 = "PerGB2018"
@@ -88,7 +88,7 @@ resource "azurerm_log_analytics_workspace" "hcw" {
 # Application Insights (replaces Cloud Logging + Firebase Performance)
 # =============================================================================
 resource "azurerm_application_insights" "hcw" {
-  name                = "appi-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  name                = "appi-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
   workspace_id        = azurerm_log_analytics_workspace.hcw.id
@@ -107,11 +107,13 @@ resource "azurerm_application_insights" "hcw" {
 #   - 100 GB bandwidth/month included
 # =============================================================================
 resource "azurerm_static_web_app" "hcw" {
-  name = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
-  # NOT the resource group's location: Static Web Apps is offered in five
-  # regions and southcentralus is not one of them (see the variable's comment).
-  # The name keeps the `scus` token because it belongs to the estate, not to
-  # the control-plane region this one resource happens to require.
+  name = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  # Still a separate variable from azure_location even though the two now hold
+  # the same value: Static Web Apps is offered in five regions only, and the
+  # validation on static_web_app_location catches a bad region at plan time
+  # instead of at apply time. This resource used to be the estate's odd one
+  # out — running in centralus while named for southcentralus — and the move
+  # to a single region is what retired that exception.
   location            = var.static_web_app_location
   resource_group_name = azurerm_resource_group.app["web"].name
   sku_tier            = "Standard"
@@ -125,14 +127,15 @@ resource "azurerm_static_web_app" "hcw" {
 # Serverless: pay-per-RU, no provisioned throughput.
 # Ideal for variable/low traffic pre-launch workloads.
 # Consistency: Session (default, matches Firestore's per-client consistency).
-# Single-region: East US 2 (matches us-central1 audience location).
+# Single-region: centralus, the same region as the rest of the estate.
 # =============================================================================
 resource "azurerm_cosmosdb_account" "hcw" {
   name = var.cosmos_db_account_name
-  # NOT the resource group's location — this subscription has no Cosmos region
-  # access to southcentralus (see var.cosmos_location). The resource group
-  # stays where the rest of the estate is; a group's location is only where its
-  # metadata lives and does not constrain what is inside it.
+  # Kept as its own variable rather than folded into azure_location: where a
+  # Cosmos account MAY be created is governed by two APIs that disagree, and
+  # both must be re-checked for any future region (see var.cosmos_location).
+  # It resolves to the same region as everything else today — this account was
+  # the reason the estate moved to centralus rather than the exception to it.
   location            = var.cosmos_location
   resource_group_name = azurerm_resource_group.app["db"].name
   offer_type          = "Standard"
@@ -233,6 +236,12 @@ resource "azurerm_cosmosdb_account" "hcw" {
 
   # This account holds all migrated production data. A plan that wants to
   # replace it must fail until a human removes this guard in a reviewed PR.
+  #
+  # Lifted once, for the centralus rebuild on 2026-08-19, and restored the same
+  # day once the rebuild applied. That window was safe only because
+  # Migration_Plan §4 had not run and every container was empty. It will not be
+  # safe again: from the first migrated document onward this guard is the
+  # difference between a typo and a data-loss incident.
   lifecycle {
     prevent_destroy = true
   }
@@ -471,6 +480,9 @@ resource "azurerm_storage_account" "hcw" {
 
   # Holds all migrated production media. Same guard rationale as the Cosmos
   # account: replacement must be an explicit, reviewed decision.
+  #
+  # Lifted for the centralus rebuild on 2026-08-19 and restored the same day.
+  # The account was empty then; it will not be next time.
   lifecycle {
     prevent_destroy = true
   }
@@ -547,7 +559,7 @@ resource "azurerm_storage_management_policy" "cleanup" {
 # to this subnet's CIDR (ADR-001, 2026-07-30).
 # =============================================================================
 resource "azurerm_virtual_network" "hcw" {
-  name                = "vnet-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  name                = "vnet-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["conn"].location
   resource_group_name = azurerm_resource_group.app["conn"].name
   address_space       = [var.vnet_address_space]
@@ -555,9 +567,13 @@ resource "azurerm_virtual_network" "hcw" {
 }
 
 resource "azurerm_subnet" "functions_integration" {
-  # No region token: a subnet is a child of its VNet, which already carries it
-  # (the Naming-Convention wiki's HCWSite table names this subnet exactly).
-  name                 = "snet-${var.workload_name}-func-${var.environment}"
+  # This used to omit the region on the reasoning that a subnet is a child of
+  # its VNet, which already carries it. CAF disagrees, and CAF wins here: its
+  # example format is snet-<purpose>-<region>-<###>, region included, for the
+  # same reason vnet carries it — subnet names show up in firewall rules, VNet
+  # rules and support tickets detached from their parent, and a reader should
+  # not have to walk up the tree to learn where the thing is.
+  name                 = "snet-${var.workload_name}-func-${var.environment}-${var.region_abbreviation}-${var.instance}"
   resource_group_name  = azurerm_resource_group.app["conn"].name
   virtual_network_name = azurerm_virtual_network.hcw.name
   address_prefixes     = [var.functions_subnet_prefix]
@@ -646,13 +662,17 @@ resource "azurerm_storage_account" "functions" {
 
   # Function host state and release packages live here; replacing it takes the
   # API down until a redeploy. Guarded like the other stateful accounts.
+  #
+  # Lifted for the centralus rebuild on 2026-08-19 and restored the same day.
+  # The cost of replacement was a redeploy rather than an outage only because
+  # Migration_Plan §6 cutover had not run.
   lifecycle {
     prevent_destroy = true
   }
 }
 
 resource "azurerm_service_plan" "hcw" {
-  name                = "asp-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
+  name                = "asp-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
   os_type             = "Linux"
@@ -716,6 +736,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
   # silently degrade to trusting a spoofable header.
   https_only = true
 
+
   # ---------------------------------------------------------------------------
   # Scale — every one of these was a silent platform default before.
   # ---------------------------------------------------------------------------
@@ -754,6 +775,43 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # makes the platform intercept OPTIONS preflights itself, so the in-code
     # preflight would never run — and this is a bearer-token API, not a cookie
     # API.
+
+    # -------------------------------------------------------------------------
+    # The Azure half of the origin lock (DECISION 6). Off by default — see
+    # var.functions_origin_lock_enabled for what turning it on breaks, and why
+    # the ranges are a literal list rather than an http data source.
+    #
+    # These blocks live INSIDE this site_config rather than in a conditional
+    # one of their own: the resource takes a single site_config, so a second
+    # block is a configuration error that only surfaces when the flag is
+    # turned on — a plan-time failure hiding behind a false default.
+    #
+    # The Deny is last by construction. App Service evaluates ip_restriction
+    # entries by priority and applies an implicit "allow all" only when the
+    # list is EMPTY, so this is either absent entirely (open, today) or ends in
+    # an explicit Deny. There is no half-written state that quietly allows
+    # everything.
+    # -------------------------------------------------------------------------
+    dynamic "ip_restriction" {
+      for_each = var.functions_origin_lock_enabled ? var.cloudflare_ip_ranges : []
+      content {
+        action     = "Allow"
+        ip_address = ip_restriction.value
+        name       = "cloudflare-${replace(replace(ip_restriction.value, ".", "-"), "/", "-")}"
+        priority   = 100 + index(var.cloudflare_ip_ranges, ip_restriction.value)
+      }
+    }
+
+    dynamic "ip_restriction" {
+      for_each = var.functions_origin_lock_enabled ? [1] : []
+      content {
+        action      = "Deny"
+        ip_address  = "0.0.0.0/0"
+        name        = "deny-all-non-cloudflare"
+        priority    = 65000
+        description = "Everything that did not match a Cloudflare range above"
+      }
+    }
   }
 
   app_settings = {
@@ -1004,6 +1062,18 @@ resource "azurerm_key_vault" "hcw" {
 
   # Secrets are seeded by hand and exist nowhere else in managed form.
   # Replacement must be an explicit, reviewed decision.
+  #
+  # Of the four guards lifted for the centralus rebuild on 2026-08-19, this was
+  # the only one whose contents Terraform cannot rebuild. Destroying this vault
+  # destroys every secret in it, and the failure mode afterwards is quiet: the
+  # app deploys clean and its @Microsoft.KeyVault(...) references resolve to
+  # nothing, so a missing credential presents as missing data (see the note on
+  # the integration subnet above).
+  #
+  # That rebuild was safe only because the secret values were held outside
+  # Azure and re-seeded by hand afterwards. Guard restored the same day. Any
+  # future plan that replaces this vault must export first — the Deployment
+  # Runbook's export procedure is a prerequisite, not a suggestion.
   lifecycle {
     prevent_destroy = true
   }
@@ -1136,4 +1206,49 @@ resource "cloudflare_record" "azure_functions" {
   proxied = true
   ttl     = 1
   comment = "Azure Functions API endpoint (migration)"
+}
+
+# =============================================================================
+# Origin lock, Cloudflare half (DECISION 6)
+#
+# Stamps x-hcw-origin-secret onto every request Cloudflare proxies to the
+# origin. functions/src/lib/auth/client-identity.js compares it against the
+# CF-ORIGIN-SECRET it reads from Key Vault and, in production, throws when it
+# does not match rather than trusting a spoofable CF-Connecting-IP.
+#
+# Phase is http_request_late_transform, not http_request_transform: the late
+# phase runs AFTER any customer transform rules and after Cloudflare's own
+# managed headers, so nothing downstream can strip or overwrite the header
+# before it reaches the origin.
+#
+# Created only when a secret is supplied. An empty string means "the lock is
+# not configured yet", and creating a rule that stamps an empty header would
+# make viaCloudflare() compare "" to "" and pass for everyone — the exact
+# silent degradation this design exists to prevent.
+# =============================================================================
+resource "cloudflare_ruleset" "origin_secret" {
+  count = var.cloudflare_origin_secret == "" ? 0 : 1
+
+  zone_id = var.cloudflare_zone_id
+  name    = "Origin secret for the Azure Functions origin"
+  kind    = "zone"
+  phase   = "http_request_late_transform"
+
+  rules {
+    action      = "rewrite"
+    description = "Stamp x-hcw-origin-secret on requests proxied to the Functions origin"
+    enabled     = true
+    # Scoped to the Functions hostname rather than the whole zone: the Static
+    # Web App shares this zone and has no use for the header, and a secret is
+    # safest where it is not sent to things that do not need it.
+    expression = "(http.host eq \"api-azure.${var.domain}\")"
+
+    action_parameters {
+      headers {
+        name      = "x-hcw-origin-secret"
+        operation = "set"
+        value     = var.cloudflare_origin_secret
+      }
+    }
+  }
 }

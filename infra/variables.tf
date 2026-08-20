@@ -19,25 +19,25 @@
 # to leak) — but they stay `sensitive` to keep subscription IDs out of CI logs.
 # -----------------------------------------------------------------------------
 variable "subscription_app" {
-  description = "Application landing zone: the HCWSite workload (sub-app-site-prod-scus)"
+  description = "Application landing zone: the HCWSite workload (sub-app-site-prod-cus)"
   type        = string
   sensitive   = true
 }
 
 variable "subscription_mgmt" {
-  description = "Platform Management: central Log Analytics, action groups, and the Terraform identity's own resource group (sub-plat-mgmt-prod-scus)"
+  description = "Platform Management: central Log Analytics, action groups, and the Terraform identity's own resource group (sub-plat-mgmt-prod-cus)"
   type        = string
   sensitive   = true
 }
 
 variable "subscription_conn" {
-  description = "Platform Connectivity: hub network and, later, centralized private DNS zones (sub-plat-conn-prod-scus)"
+  description = "Platform Connectivity: hub network and, later, centralized private DNS zones (sub-plat-conn-prod-cus)"
   type        = string
   sensitive   = true
 }
 
 # There is no subscription_ident. The Identity landing zone
-# (sub-plat-ident-prod-scus) holds nothing: HCWSite authenticates against Entra
+# (sub-plat-ident-prod-cus) holds nothing: HCWSite authenticates against Entra
 # ID, and app registrations are tenant objects rather than subscription
 # resources. Declaring the variable would require a value for a subscription
 # nothing deploys into — see the note in providers.tf.
@@ -67,23 +67,41 @@ variable "azure_resource_providers" {
   ]
 }
 
+# centralus, not southcentralus, and the whole estate is there deliberately.
+#
+# southcentralus was the original choice and it cost three apply-time failures:
+# Cosmos has no subscription region access there, Static Web Apps is not
+# offered there, and each failure was discovered during an apply rather than
+# before one. centralus is the nearest region that hosts every service this
+# workload uses, verified before the move rather than after:
+#
+#   az functionapp list-flexconsumption-locations   # centralus present
+#   az provider show --namespace Microsoft.DocumentDB \
+#     --query "resourceTypes[?resourceType=='databaseAccounts'].locations"
+#   az cosmosdb locations list \
+#     --query "[?properties.isSubscriptionRegionAccessAllowedForRegular]"
+#
+# Consolidating here retires cosmos_location and static_web_app_location as
+# exceptions: they were only ever workarounds for southcentralus, and both now
+# resolve to the same region as everything else.
 variable "azure_location" {
-  description = "Azure region for all resources"
+  description = "Azure region for all resources — centralus hosts every service this workload uses"
   type        = string
-  default     = "southcentralus"
+  default     = "centralus"
 }
 
 # Static Web Apps is offered in FIVE regions only — centralus, eastus2,
-# westus2, westeurope, eastasia — and southcentralus is not among them, so it
-# cannot follow azure_location like everything else. Deploying to the wrong one
-# fails at apply with LocationNotAvailableForResourceType.
+# westus2, westeurope, eastasia. This now holds the SAME value as
+# azure_location, and the variable stays anyway: the constraint has not gone
+# away, it is merely satisfied. Fold it into azure_location and the next region
+# change fails at apply with LocationNotAvailableForResourceType instead of at
+# plan with the validation below.
 #
-# This is a control-plane location only. The site itself is served from Azure's
-# global edge network, so the choice does not decide where users are served
-# from; centralus is simply the nearest available region to southcentralus,
-# which keeps the resource close to the rest of the estate.
+# This is a control-plane location only. The site is served from Azure's global
+# edge network either way, so the region does not decide where users are served
+# from.
 variable "static_web_app_location" {
-  description = "Region for the Static Web App — must be one of the five that offer it, independent of azure_location"
+  description = "Region for the Static Web App — must be one of the five that offer it; equals azure_location today, kept separate because the constraint has not gone away"
   type        = string
   default     = "centralus"
 
@@ -112,14 +130,13 @@ variable "static_web_app_location" {
 # southcentralus2 passes (2) and fails (1) — Cosmos is simply not offered
 # there, reported as LocationNotAvailableForResourceType.
 #
-# centralus passes both. It is the nearest region to southcentralus that does,
-# it supports availability zones, and it is already the Static Web App's
-# region, so this keeps the estate at two regions rather than three.
-#
-# Requesting access to southcentralus (aka.ms/cosmosdbquota) would fold this
-# back into azure_location; it is a human review, not a config change.
+# centralus passes both, which is why the whole estate moved there rather than
+# leaving Cosmos stranded on its own. Like static_web_app_location, this now
+# equals azure_location and stays a separate variable regardless: the two-API
+# disagreement above is a property of Cosmos, not of southcentralus, and any
+# future region change has to clear both checks again.
 variable "cosmos_location" {
-  description = "Region for the Cosmos account — must be both ARM-deployable and subscription-allowed, which southcentralus is not"
+  description = "Region for the Cosmos account — must be both ARM-deployable and subscription-allowed; equals azure_location today, kept separate because both checks must be re-run for any new region"
   type        = string
   default     = "centralus"
 }
@@ -164,9 +181,37 @@ variable "workload_name" {
 # convention and lives in the Naming-Convention wiki page's table. It is a
 # variable because a second region must not require editing every name.
 variable "region_abbreviation" {
-  description = "Short form of azure_location used in resource names (scus = southcentralus)"
+  description = "Short form of azure_location used in resource names (cus = centralus)"
   type        = string
-  default     = "scus"
+  default     = "cus"
+}
+
+# The CAF instance number. Microsoft's "Define your naming convention" lists
+# `01` and `001` as the two accepted forms; this estate uses two digits, which
+# is what kv-site-prod-scus-01 already established.
+#
+# It is NOT applied to every resource. CAF assigns the instance number per
+# resource type, and its example table omits it on resource groups, Cosmos DB
+# and route tables while requiring it on function apps, web apps, storage
+# accounts, virtual networks, subnets, NSGs and managed identities. This
+# configuration follows that table where CAF speaks, and for types CAF does
+# not list (Key Vault, App Service plan, Log Analytics, Application Insights,
+# action groups, Container Apps) applies the instance number where the name is
+# GLOBAL scope or a second instance is plausible — which is the same logic CAF
+# uses to decide its own table.
+#
+# The point of the suffix is not decoration. A global-scope name can be taken
+# by an unrelated Azure customer, and when that happened to kv-site-prod-scus
+# the instance number was the only fallback that did not break the pattern.
+variable "instance" {
+  description = "CAF instance number used in resource names — the fallback when a global-scope name is already taken"
+  type        = string
+  default     = "01"
+
+  validation {
+    condition     = can(regex("^[0-9]{2,3}$", var.instance))
+    error_message = "instance must be two or three digits, e.g. 01 or 001 (CAF: Define your naming convention)."
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -229,13 +274,21 @@ variable "functions_subnet_service_endpoints" {
 variable "cosmos_db_account_name" {
   description = "Cosmos DB account name (globally unique)"
   type        = string
-  # `cus` (centralus), not `scus`, because this one names where the DATA lives.
-  # That is the opposite call from the Static Web App, which keeps `scus` while
-  # running in centralus — and the difference is the point: a Static Web App's
-  # region is a control-plane detail (content serves from the global edge),
-  # whereas a database's region IS data residency, and the first thing anyone
-  # debugging latency or compliance needs to know. A name that lies about that
-  # is worse than one that breaks the estate's pattern.
+  # This name was already correct before the estate moved: `cus` names where
+  # the DATA lives, and a database's region IS data residency rather than a
+  # control-plane detail. The rest of the estate has now caught up to it.
+  #
+  # NO instance number, and that is CAF's call, not an oversight: the "Define
+  # your naming convention" example table gives Cosmos `cosmos-<workload>-
+  # <environment>` with no <###>, the same as SQL database, API Management and
+  # Service Bus. It is one of the three types in this configuration CAF
+  # deliberately leaves unnumbered (the others are resource groups and route
+  # tables).
+  #
+  # The tension worth knowing about: a Cosmos account name is GLOBAL scope, so
+  # it can be taken by an unrelated customer exactly as kv-site-prod-scus was.
+  # If that ever happens here, append `-01` — the pattern accommodates it, and
+  # doing so knowingly is different from carrying the suffix by default.
   default = "cosmos-site-prod-cus"
 }
 
@@ -298,29 +351,42 @@ variable "functions_storage_admin_ip_rules" {
   }
 }
 
-# The Functions host storage account. Was derived from project_name with the
-# hyphens stripped; now explicit, because a name a reader cannot predict from
-# the convention should not be computed. 21 characters, inside the 24-character
-# limit, lowercase alphanumeric only — storage accounts take no hyphens.
+# The two storage accounts are the one place the CAF pattern cannot be read
+# literally: storage account names take NO hyphens and cap at 24 characters, so
+# the delimiters are dropped and the instance number runs straight onto the
+# end. CAF names this shape itself — `st<workload><###>`, e.g. stworkload1data001
+# — so this is the convention followed, not abandoned.
+#
+#   stsitefuncprodcus01   19 chars
+#   stsiteprodcus01       15 chars
+#
+# Both are explicit rather than computed: a name a reader cannot predict from
+# the convention should not be assembled out of it, and these are the names
+# that appear in workflow files and support tickets.
 variable "functions_storage_account_name" {
-  description = "Functions host storage account (globally unique, 3-24 chars, lowercase alphanumeric)"
+  description = "Functions host storage account (globally unique, 3-24 chars, lowercase alphanumeric — no hyphens, so the CAF instance number runs on unseparated)"
   type        = string
-  default     = "stsitefuncprodscus"
+  default     = "stsitefuncprodcus01"
 }
 
 variable "storage_account_name" {
-  description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric)"
+  description = "Azure Storage account name (globally unique, 3-24 chars, lowercase alphanumeric — no hyphens, so the CAF instance number runs on unseparated)"
   type        = string
-  default     = "stsiteprodscus"
+  default     = "stsiteprodcus01"
 }
 
 # -----------------------------------------------------------------------------
 # Function App
 # -----------------------------------------------------------------------------
+# CAF gives the function app an instance number in its own example table
+# (func-<workload>-<environment>-<###>.azurewebsites.net), and the name is
+# global across azurewebsites.net, so the suffix is also the collision
+# fallback. Changing it changes the API hostname — see the Deployment Runbook
+# for what has to be re-pointed.
 variable "function_app_name" {
-  description = "Azure Function App name (globally unique)"
+  description = "Azure Function App name (globally unique across azurewebsites.net)"
   type        = string
-  default     = "func-site-prod-scus"
+  default     = "func-site-prod-cus-01"
 }
 
 # -----------------------------------------------------------------------------
@@ -329,12 +395,18 @@ variable "function_app_name" {
 variable "key_vault_name" {
   description = "Azure Key Vault name (globally unique, 3-24 chars)"
   type        = string
-  # The unsuffixed `kv-site-prod-scus` is taken by an unrelated Azure customer
-  # — vault names are global, and it is not soft-deleted in any subscription
-  # of this tenant, so it is not recoverable. The `-01` instance suffix is the
-  # fallback the Naming-Convention page reserves for exactly this case. 20
-  # characters, inside the 24-character limit.
-  default = "kv-site-prod-scus-01"
+  # `-01` here is the original instance number used in earnest: the unsuffixed
+  # kv-site-prod-scus is held by an unrelated Azure customer — vault names are
+  # global and it is not soft-deleted anywhere in this tenant, so it cannot be
+  # recovered. That incident is why the suffix is now a first-class part of the
+  # convention rather than an improvisation. 19 characters, inside the
+  # 24-character limit.
+  #
+  # NOTE ON REPLACEMENT: the vault this replaces is soft-deleted, not purged
+  # (purge_soft_delete_on_destroy = false in providers.tf), so the OLD name
+  # stays reserved for the retention window. That is harmless here only because
+  # the new name differs. Reusing a destroyed vault's name requires a purge.
+  default = "kv-site-prod-cus-01"
 }
 
 variable "purge_protection_enabled" {
@@ -472,6 +544,89 @@ variable "cloudflare_api_token" {
 variable "cloudflare_zone_id" {
   description = "Cloudflare Zone ID for the domain"
   type        = string
+}
+
+# -----------------------------------------------------------------------------
+# Origin lock (DECISION 6)
+#
+# Two halves that are worthless apart, which is why they land together:
+#
+#   1. Cloudflare stamps every request it proxies with x-hcw-origin-secret.
+#   2. The Function App refuses traffic that did not come from Cloudflare.
+#
+# With only (1), anyone who learns the header value replays it straight at the
+# origin. With only (2), the app cannot tell a Cloudflare request from a
+# direct one and client-identity.js keeps failing closed. Together they make
+# CF-Connecting-IP trustworthy, which is the whole point: rate limiting on a
+# spoofable identifier is not rate limiting.
+# -----------------------------------------------------------------------------
+
+# The SAME value that sits in Key Vault as CF-ORIGIN-SECRET, which the Function
+# App reads at runtime. It is duplicated here because the two ends of a shared
+# secret are configured by different systems and neither can read the other's
+# copy: Terraform configures Cloudflare, the app reads the vault.
+#
+# THE TWO MUST MATCH EXACTLY. A mismatch is not a partial failure — every
+# anonymous request is treated as bypassing Cloudflare and throws.
+#
+# Set as a SENSITIVE workspace variable in HCP Terraform, never in a tfvars
+# file. Rotating it means writing both ends before the next request lands, so
+# do it in a maintenance window, vault first.
+variable "cloudflare_origin_secret" {
+  description = "Shared secret Cloudflare injects as x-hcw-origin-secret; MUST equal the CF-ORIGIN-SECRET value in Key Vault"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# The kill switch. false is the pre-lock posture and the one-step rollback.
+#
+# Turning this on restricts the Function App to Cloudflare's published ranges,
+# so anything reaching the origin directly stops working — including, until it
+# was fixed alongside this variable, the post-deploy smoke test in
+# deploy-functions.yml, which curled the azurewebsites.net hostname from a
+# GitHub-hosted runner. That test now goes through the proxied Cloudflare
+# hostname, which is also the path real traffic takes.
+#
+# Enable only when cloudflare_origin_secret is set AND the vault holds the same
+# value. Enabling with an empty secret locks the origin without giving
+# Cloudflare a way to identify itself.
+variable "functions_origin_lock_enabled" {
+  description = "Restrict the Function App to Cloudflare IP ranges. Requires cloudflare_origin_secret to match Key Vault"
+  type        = bool
+  default     = false
+}
+
+# Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4).
+#
+# A literal list rather than an http data source on purpose: a data source puts
+# a network call and an external dependency inside every plan, and a fetch that
+# fails or returns a truncated body during an apply would silently rewrite the
+# allow-list of the only door into this app. A list changes rarely, is
+# reviewable in a diff, and fails at plan time when wrong.
+#
+# Re-check it when Cloudflare announces a change; the ranges have been stable
+# for years but they are not immutable.
+variable "cloudflare_ip_ranges" {
+  description = "Cloudflare IPv4 ranges allowed to reach the Function App origin when the origin lock is on"
+  type        = list(string)
+  default = [
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/13",
+    "104.24.0.0/14",
+    "172.64.0.0/13",
+    "131.0.72.0/22",
+  ]
 }
 
 # -----------------------------------------------------------------------------
