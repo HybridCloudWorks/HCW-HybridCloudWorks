@@ -16,7 +16,7 @@ Set these in the HCP Terraform Cloud workspace under **Variables**.
 |------|------|-----------|-------------|
 | `azure_subscription_id` | Terraform | 🔴 Yes | Azure subscription ID |
 | `entra_tenant_id` | Terraform | 🔴 Yes | Entra ID tenant ID |
-| `cloudflare_api_token` | Terraform | 🔴 Yes | Cloudflare token: Zone:Read + DNS:Edit |
+| `cloudflare_api_token` | Terraform | 🔴 Yes | Cloudflare token. **Four scopes, not two:** Zone:Read, DNS:Edit, Zone → Transform Rules:Edit, Account → Rulesets:Read. The last two were added 2026-08-20 for `cloudflare_ruleset.origin_secret`; a DNS-only token applies every record fine and fails on the ruleset alone, with `Authentication error (10000)` — which names neither the token nor the missing permission |
 | `budget_alert_email` | Terraform | 🟡 No | Email for budget threshold alerts |
 | `entra_client_id` | Terraform | 🟡 No | Entra app registration client ID |
 | `cloudflare_zone_id` | Terraform | 🟡 No | Cloudflare Zone ID for the domain |

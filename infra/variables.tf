@@ -572,6 +572,12 @@ variable "cloudflare_zone_id" {
 # Set as a SENSITIVE workspace variable in HCP Terraform, never in a tfvars
 # file. Rotating it means writing both ends before the next request lands, so
 # do it in a maintenance window, vault first.
+#
+# THE API TOKEN NEEDS MORE THAN DNS. cloudflare_ruleset requires Zone →
+# Transform Rules:Edit and Account → Rulesets:Read on top of the Zone:Read and
+# DNS:Edit the records need. A DNS-only token applies every cloudflare_record
+# cleanly and fails on the ruleset alone with "Authentication error (10000)",
+# which names neither the token nor the permission.
 variable "cloudflare_origin_secret" {
   description = "Shared secret Cloudflare injects as x-hcw-origin-secret; MUST equal the CF-ORIGIN-SECRET value in Key Vault"
   type        = string
