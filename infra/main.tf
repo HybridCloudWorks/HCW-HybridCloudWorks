@@ -815,6 +815,42 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
   }
 
   app_settings = {
+    # ---------------------------------------------------------------------------
+    # The Functions HOST's own storage — timers, singleton locks, SyncTriggers.
+    #
+    # This is NOT the same thing as storage_authentication_type above. That
+    # argument governs how the platform fetches the deployment PACKAGE; this
+    # governs how the running host reaches storage for its own state. Setting
+    # the first and assuming it covered the second is what broke the first
+    # deploy (2026-08-20): the app deployed successfully, reported 80 functions,
+    # and then served the App Service 404 page for every route.
+    #
+    # The evidence, from Application Insights:
+    #
+    #   [exception] Server failed to authenticate the request. Make sure the
+    #               value of Authorization header is formed correctly including
+    #               the signature.
+    #   [trace]     SyncTriggers operation failed.
+    #   [trace]     Process reporting unhealthy: Unhealthy
+    #
+    # An AzureWebJobsStorage connection string was present with an EMPTY
+    # AccountKey — shared-key auth with no key, so every storage call failed the
+    # signature check, SyncTriggers never completed, and the host never became
+    # healthy enough to route a request. Nothing in this configuration wrote
+    # that setting; it arrived with the deploy.
+    #
+    # `__accountName` is the identity-based form: the host constructs the blob,
+    # queue and table endpoints from the account name and authenticates with its
+    # own managed identity, which already holds Storage Blob Data Owner here.
+    # Declaring it in this map also means Terraform owns it, so a deploy tool
+    # cannot reintroduce a connection string without the next plan showing it.
+    #
+    # The failure mode is worth remembering: a keyless connection string does
+    # not fail at deploy, and does not fail as "storage". It fails as a 404 on
+    # every route, which reads as a routing or build problem.
+    # ---------------------------------------------------------------------------
+    "AzureWebJobsStorage__accountName" = azurerm_storage_account.functions.name
+
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
     "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
@@ -1026,6 +1062,38 @@ resource "azurerm_role_assignment" "func_host_storage" {
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
+# Queue and Table on the same account, because identity-based
+# AzureWebJobsStorage is not a blob-only contract.
+#
+# Blob alone is the intuitive grant and it is not enough. The host's own health
+# probe reports:
+#
+#   "azure.functions.webjobs.storage": { "status": "Unhealthy",
+#     "description": "Unable to access AzureWebJobsStorage",
+#     "errorCode": "AuthenticationFailed" }
+#
+# while web_host.lifecycle and script_host.lifecycle both report Healthy — so
+# the app serves HTTP perfectly and only the storage-backed machinery is down.
+# That is the trap: HTTP routes answer 200, every smoke test passes, and timer
+# triggers, singleton locks and SyncTriggers silently do not run. A scheduled
+# function that never fires produces no error anywhere.
+#
+# Found 2026-08-20, after removing a keyless AzureWebJobsStorage connection
+# string in favour of AzureWebJobsStorage__accountName. The connection string
+# had been failing first, which masked the missing roles behind a different
+# error with the same symptom.
+resource "azurerm_role_assignment" "func_host_storage_queue" {
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "func_host_storage_table" {
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
 # =============================================================================
 # Azure Key Vault — RBAC mode (access policies removed)
 #
@@ -1226,6 +1294,54 @@ resource "cloudflare_record" "azure_functions" {
 # make viaCloudflare() compare "" to "" and pass for everyone — the exact
 # silent degradation this design exists to prevent.
 # =============================================================================
+# =============================================================================
+# Custom hostname binding — what makes the proxied hostname reach the app
+#
+# App Service routes by HTTP Host header. Cloudflare proxies api-azure.<domain>
+# to the origin but forwards the ORIGINAL Host, so App Service receives
+# `Host: api-azure.<domain>`, finds no site bound to that name, and returns its
+# own "404 Web Site not found" page — before the Functions host is consulted at
+# all. Every route 404s, and the page talks about custom domains rather than
+# routing, which sends you to host.json and the route prefix instead.
+#
+# Two ways to fix it, and the first is not available here:
+#
+#   1. Rewrite the Host at the edge, with a Cloudflare Origin Rule. Rejected:
+#      the API answers `not entitled to use the HostHeader override` — it is a
+#      plan entitlement, not a permission, so no token change reaches it.
+#
+#   2. Bind the hostname on the Azure side, which is this.
+#
+# NO CERTIFICATE IS BOUND, deliberately. An App Service Managed Certificate is
+# issued only when the hostname resolves to the app, and behind a proxied
+# Cloudflare record it resolves to Cloudflare — so managed issuance cannot
+# succeed without un-proxying, which would disable the origin lock. It is also
+# not needed: Cloudflare connects to the origin at its azurewebsites.net name
+# and receives the platform's own wildcard certificate, so the TLS leg is
+# already valid. Only the HTTP Host needed fixing.
+#
+# Verification is the asuid TXT record below rather than a CNAME check, because
+# a CNAME check follows DNS to Cloudflare and fails for the same reason.
+# =============================================================================
+resource "cloudflare_record" "azure_functions_domain_verification" {
+  zone_id = var.cloudflare_zone_id
+  name    = "asuid.api-azure"
+  content = azurerm_function_app_flex_consumption.hcw.custom_domain_verification_id
+  type    = "TXT"
+  ttl     = 300
+  comment = "Azure custom-domain ownership proof for the Functions origin"
+}
+
+resource "azurerm_app_service_custom_hostname_binding" "api" {
+  hostname            = "api-azure.${var.domain}"
+  app_service_name    = azurerm_function_app_flex_consumption.hcw.name
+  resource_group_name = azurerm_resource_group.app["web"].name
+
+  # Azure reads the TXT record at bind time, so it has to exist first. The
+  # dependency is not inferable from the arguments above.
+  depends_on = [cloudflare_record.azure_functions_domain_verification]
+}
+
 resource "cloudflare_ruleset" "origin_secret" {
   count = var.cloudflare_origin_secret == "" ? 0 : 1
 
