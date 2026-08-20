@@ -53,9 +53,22 @@ CHANGELOG and REVIEW.md Part 1. What remains:
   which is exactly why the diff that verified the other 19 did not catch them —
   it compared against `@Microsoft.KeyVault(...)` references, and these have
   none. Procedure in REVIEW.md §3.1; seed with `--file`, not `--value`.
-- **Confirm the rebuilt deploy identity authenticates.** `CLIENT_ID` points at
-  it and its federated credentials were recreated with it, but only a workflow
-  run proves it.
+- **Prove the deploy end to end from `main`.** The first dispatch (2026-08-20)
+  got as far as Azure Login and failed with `AADSTS700213` — which exposed a
+  real defect, now fixed: GitHub composes the OIDC subject with numeric org and
+  repository IDs embedded
+  (`repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:...`), not
+  the documented `repo:<org>/<repo>:...`. The identity trusted only the
+  documented form, so **every deploy would have failed at login, including from
+  `main`** — invisible until now because all four deploy workflows were
+  disabled. Both subject forms are trusted as of 2026-08-20.
+
+  Still unproven: deploys are gated to `refs/heads/main`
+  (`github_deploy_ref`), so a dispatch from a feature branch cannot
+  authenticate by design. Merge, then dispatch `deploy-functions.yml` from
+  `main`. If it still fails at login, compare the presented subject in the
+  error against the `federated_subjects` output — that output exists for
+  exactly this comparison.
 - **The origin-secret handshake is unproven end to end.** The IP half is
   demonstrated (origin 403s, Cloudflare path reaches the app); the header half
   is structurally verified only, because there is no deployed code to observe
