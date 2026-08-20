@@ -295,6 +295,20 @@ They are not in the 19 precisely because the diff that verified those 19 checked
 app-setting references, and these two have none. Seed them with `--file`, not
 `--value`.
 
+**Names follow §4.0**, and both already do — `UPPER-KEBAB-CASE`, hyphens not
+underscores. Neither has an app-setting counterpart to map to, so nothing else
+needs to change when they land.
+
+**Seed them only here.** Both are read by the application at runtime, so Key
+Vault is the one store that needs them. Neither belongs in GitHub secrets, and
+neither belongs in the Terraform workspace — a GitHub App private key in
+Terraform state is exactly the blast radius the hand-seeding decision exists to
+avoid.
+
+**Neither is urgent.** Their consumers are unported: the site-rebuild trigger
+and `gcp.js` are both stubs today. Seed them when you next have a firewall
+window open for another reason, rather than opening one for these alone.
+
 **Procedure** — the vault denies by default, so this needs a window:
 
 ```bash
@@ -421,6 +435,102 @@ Absorbed from `CHECKLIST.md` and `Variables.md`.
 working in the deployed system) · `MISSING` (consumed by code, not provisioned)
 · `RETIRED` (no longer read by anything; listed so it is not reintroduced).
 
+## 4.0 Naming and placement — read before adding anything
+
+### The rule: one secret, one store
+
+**A secret lives in exactly one store — the one whose consumer needs it.** Not
+"the one that was convenient", and never two.
+
+Duplication is not a tidiness problem. A value in two stores has two rotation
+paths, and rotating one of them produces a system that half-works: the half
+still holding the old value fails in whatever way that component fails, which is
+rarely "authentication error" and is usually something further downstream. It
+also doubles the leak surface for no benefit.
+
+| Store | Holds | Never holds |
+| --- | --- | --- |
+| **Key Vault** | Runtime secrets the *application* reads | Anything Terraform needs, anything only a workflow needs |
+| **HCP Terraform workspace** | Values Terraform needs to *build* infrastructure | Runtime application secrets |
+| **GitHub secrets** | Credentials a *workflow* needs that Terraform cannot output | Runtime application secrets; anything non-sensitive |
+| **GitHub variables** | Non-sensitive identifiers workflows need — resource names, client IDs | Anything sensitive |
+
+The test when adding one: **name the consumer.** If the answer is "the Function
+App at runtime" it is a Key Vault secret. If it is "the provider, during an
+apply" it is a workspace variable. If it is "a workflow step" it is a GitHub
+secret. If two consumers want it, one of them is usually wrong — see the
+exceptions below before assuming yours is the third case.
+
+### Naming, per store
+
+The stores disagree about legal characters, so the same value has two spellings
+and the mapping has to be mechanical rather than remembered.
+
+| Store | Convention | Example |
+| --- | --- | --- |
+| Key Vault secret | `UPPER-KEBAB-CASE` | `ANTHROPIC-API-KEY` |
+| Function App setting | `UPPER_SNAKE_CASE` | `ANTHROPIC_API_KEY` |
+| GitHub secret / variable | `UPPER_SNAKE_CASE`, **max 2 words** (3 only to break a collision), no provider prefix | `FUNCTIONS_URL`, not `AZURE_FUNCTIONS_URL` |
+| Terraform variable | `lower_snake_case` | `cloudflare_origin_secret` |
+| Terraform output | `lower_snake_case`, named for the consumer | `api_base_url` |
+
+> **Key Vault forbids underscores.** That is the whole reason for two spellings.
+> The mapping is exact: an app setting `X_Y_Z` resolves the vault secret
+> `X-Y-Z`. Get it wrong and the reference silently resolves to nothing — the app
+> deploys clean and a missing credential presents as missing *data*.
+
+**Contractual names are exempt from all of the above and must never be
+"corrected":** `ARM_*`, `TFC_AZURE_*` (HashiCorp and Microsoft), `VITE_*`
+(Vite), `GITHUB_TOKEN`. Renaming one breaks the tool that reads it.
+
+### The exceptions, and why each is real
+
+Three values legitimately appear twice. They are listed so nobody "fixes" them,
+and so a fourth is scrutinised rather than assumed.
+
+| Value | Where | Why it is not duplication |
+| --- | --- | --- |
+| Origin secret | Key Vault `CF-ORIGIN-SECRET` + workspace `cloudflare_origin_secret` | The two ends of a shared secret are configured by different systems, and neither can read the other's copy: Terraform configures Cloudflare, the app reads the vault. **They must match exactly** — a mismatch means every anonymous request is treated as bypassing Cloudflare and throws |
+| Tenant id | `ARM_TENANT_ID` (env) + `entra_tenant_id` (terraform) | Same value, two categories. One configures the provider, one is consumed by the configuration. The categories are not interchangeable |
+| Subscription id | `ARM_SUBSCRIPTION_ID` (env) + `subscription_app` (terraform) | As above. `ARM_SUBSCRIPTION_ID` is the provider's fallback only — every provider pins `subscription_id` in HCL, so it never decides where resources land |
+
+**Tenant and subscription IDs are `sensitive` in the workspace and plain
+variables in GitHub. That is deliberate, not drift.** They are identifiers, not
+credentials — nothing is authorized by knowing one. The workspace marks them
+sensitive to keep them out of run logs, which is defensive rather than
+necessary; GitHub holds them as variables because a workflow that cannot echo
+its own subscription id is a workflow nobody can debug.
+
+### Two placements to fix
+
+**`COSMOS_ENDPOINT` is a GitHub *secret* and is not sensitive.** It holds
+`https://<account>.documents.azure.com:443/` — a public endpoint, and a
+non-sensitive Terraform output. Storing a non-secret as a secret costs three
+things: it is masked in logs so failures are harder to read, it cannot be
+verified in the UI, and it dilutes what "secret" means for the values that are.
+It should be a repository **variable**.
+
+**The seventeen provider API keys are seeded but nothing consumes them yet.**
+The AI endpoints behind them are unimplemented stubs. That is not wrong — the
+vault was seeded in one pass during a firewall window, and a second window later
+costs more than seeding early — but it means "19 of 21 secrets present" is not
+the same claim as "19 secrets in use". Only `CF-ORIGIN-SECRET`, `CLIENT-IP-SALT`
+and the AWS pair have live consumers today.
+
+### When to seed
+
+Seed a secret when the thing that reads it exists, or when you already have a
+firewall window open and closing it means opening another one later. Both stores
+that hold runtime secrets deny by default, so windows are the expensive part,
+not the writes.
+
+Do **not** seed a placeholder to make a linter quiet. An unset input usually
+fails with a clear "not supplied"; a stubbed one fails as an authentication or
+resolution error that reads like a permissions or networking problem. The two
+cost very different amounts to diagnose. `COSMOS_KEY` in §4.3 is the worked
+example — it must stay unset, and setting it would switch the client to a key
+path the account rejects.
+
 ## 4.1 HCP Terraform workspace — `hcw/hcw-azure`, project `Site`
 
 **All set.** Confirmed against the HCP Terraform API 2026-08-20.
@@ -506,7 +616,7 @@ output. It sources from applied state, not a hardcoded copy that drifts.
 
 | Name | Status | Blocks | Notes |
 | --- | --- | --- | --- |
-| `COSMOS_ENDPOINT` | **SET** | — | Migration and healing workflows |
+| `COSMOS_ENDPOINT` | **SET — but misplaced** | — | Migration and healing workflows. **Should be a repository *variable*, not a secret**: it holds a public endpoint URL and is a non-sensitive Terraform output. See §4.0, "Two placements to fix" |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | **MISSING** | Frontend deploy | Terraform output `swa_token`. **Reissued by the rebuild** — any previously recorded value is dead |
 | `TF_API_TOKEN` | **MISSING** | Gated infra workflow | How the *workflow* reaches Terraform. Distinct from §4.1, which is how *Terraform* reaches Azure |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | **MISSING** | Data migration | Whole-JSON credential; scope it read-only. `migrate-data.yml` is `if: false` and must stay so until this exists |
@@ -560,8 +670,14 @@ set by hand.
 
 Accessed by the Function App via managed identity as app-setting
 `@Microsoft.KeyVault(SecretUri=…)` references, except where marked runtime-read.
-Names use **hyphens** — Key Vault secret names cannot contain underscores, so
-`OPENAI_API_KEY` in app settings is `OPENAI-API-KEY` in the vault.
+Naming and placement rules are in **§4.0** — in short, `UPPER-KEBAB-CASE` here
+because Key Vault forbids underscores, mapping mechanically to the app setting's
+`UPPER_SNAKE_CASE`: `OPENAI_API_KEY` resolves `OPENAI-API-KEY`.
+
+**This store holds runtime application secrets and nothing else.** A value
+Terraform needs belongs in the workspace (§4.1); a value only a workflow needs
+belongs in GitHub secrets (§4.3). The single documented overlap is
+`CF-ORIGIN-SECRET`, and §4.0 explains why it is real.
 
 **Seeded by hand.** Deliberately not Terraform-managed: the values would
 otherwise live in both the workspace and Terraform state, and several of them
