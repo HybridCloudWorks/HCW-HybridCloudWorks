@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router-dom';
 import { useBlogData } from '@/hooks/useBlogData';
 import { Skeleton } from '@/components/performance/Skeleton';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ function HeroCarousel({ posts, provider, accentColor, accentBorder }) {
           {post.imageUrl ? (
             <div
               className="absolute inset-0 bg-cover bg-center transition-all duration-700"
-              style={{ backgroundImage: `url('${post.imageUrl}')` }}
+              style={{ backgroundImage: `url('${resolveMediaUrl(post.imageUrl)}')` }}
             />
           ) : (
             <span className="text-7xl material-symbols-outlined text-slate-600">article</span>
@@ -324,7 +325,7 @@ function BlogCard({ post, provider, accentHover }) {
         {post.imageUrl ? (
           <div
             className="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-500 opacity-80"
-            style={{ backgroundImage: `url('${post.imageUrl}')` }}
+            style={{ backgroundImage: `url('${resolveMediaUrl(post.imageUrl)}')` }}
           />
         ) : (
           <span className="text-4xl material-symbols-outlined text-slate-600 group-hover:scale-110 transition-transform duration-300">

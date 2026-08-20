@@ -8,6 +8,7 @@ import { stripHtmlTags } from '@/lib/blogUtils';
 import { useEditor } from '../context/EditorContext';
 import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
+import { resolveMediaUrl } from '../../../lib/functionsBase';
 
 function CollapsibleSection({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -246,7 +247,7 @@ export function MetadataTab() {
                 onClick={() => navigator.clipboard?.writeText(img.imageUrl)}
                 title={img.label}
               >
-                <img src={img.imageUrl} alt={img.label} className="w-full h-14 object-cover" />
+                <img src={resolveMediaUrl(img.imageUrl)} alt={img.label} className="w-full h-14 object-cover" />
               </button>
             ))}
           </div>

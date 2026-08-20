@@ -16,6 +16,7 @@ import ShareVia from '@/components/shared/ShareVia';
 import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
 import NewsletterSignup from '@/components/shared/NewsletterSignup';
 import { normalizePublicImageUrl } from '@/lib/blogUtils';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 const ARTICLE_PROSE_CLASS =
   'prose dark:prose-invert prose-lg max-w-none ' +
@@ -218,12 +219,12 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
           property="og:url"
           content={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
         />
-        {post.imageUrl && <meta property="og:image" content={post.imageUrl} />}
+        {post.imageUrl && <meta property="og:image" content={resolveMediaUrl(post.imageUrl)} />}
         {/* Twitter Card */}
         <meta name="twitter:card" content={post.imageUrl ? 'summary_large_image' : 'summary'} />
         <meta name="twitter:title" content={`${post.title} | HCW`} />
         <meta name="twitter:description" content={post.summary} />
-        {post.imageUrl && <meta name="twitter:image" content={post.imageUrl} />}
+        {post.imageUrl && <meta name="twitter:image" content={resolveMediaUrl(post.imageUrl)} />}
       </Helmet>
 
       {/* Back link */}
@@ -240,7 +241,7 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
         {post.imageUrl && (
           <div className="relative w-full h-72 sm:h-96 rounded-2xl overflow-hidden mb-8 bg-card/40">
             <ResponsiveCoverImage
-              src={post.imageUrl}
+              src={resolveMediaUrl(post.imageUrl)}
               variants={post.imageVariants}
               alt={post.title}
               width="1200"

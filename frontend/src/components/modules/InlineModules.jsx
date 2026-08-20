@@ -10,6 +10,7 @@ import {
   Play,
   X,
 } from 'lucide-react';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 export const SPACER_STYLE_OPTIONS = [
   { key: 'gradient', label: 'Gradient Bar' },
@@ -307,7 +308,7 @@ export function PictureModule({
           {imageUrl && (
             <div className="flex justify-center bg-black/10">
               <img
-                src={imageUrl}
+                src={resolveMediaUrl(imageUrl)}
                 alt={caption || 'Module image'}
                 className="block h-auto w-full object-contain"
               />

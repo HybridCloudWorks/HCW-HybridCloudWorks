@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ZoomIn, ZoomOut, Maximize, RotateCcw } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { motion, AnimatePresence } from 'framer-motion';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 /**
  * Interactive Diagram Component
@@ -57,7 +58,7 @@ export default function InteractiveDiagram({ imageUrl, hotspots = [], onHotspotC
               >
                 <div className="relative w-full h-full flex items-center justify-center">
                   <img
-                    src={imageUrl}
+                    src={resolveMediaUrl(imageUrl)}
                     alt="Architecture Diagram"
                     loading="lazy"
                     decoding="async"

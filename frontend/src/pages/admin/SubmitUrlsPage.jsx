@@ -18,6 +18,7 @@ import {
   BLOG_LANDING_ZONE_OPTIONS,
   ADMIN_ROUTES,
 } from '@/config/admin';
+import { resolveMediaUrl } from '@/lib/functionsBase';
 
 const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
   'You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a structured markdown article draft around 2500-3200 words, and image prompts tailored to the article.';
@@ -442,7 +443,7 @@ function renderGalleryContent({ galleryLoading, galleryItems, deleteGalleryItem 
             </div>
             <a href={item.imageUrl} target="_blank" rel="noreferrer">
               <img
-                src={item.imageUrl}
+                src={resolveMediaUrl(item.imageUrl)}
                 alt={item.slot || 'Saved gallery image'}
                 className="h-32 w-full rounded object-cover"
               />

@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { SPACER_STYLE_OPTIONS } from '@/components/modules/InlineModules';
 import { useEditor } from '../context/EditorContext';
+import { resolveMediaUrl } from '../../../lib/functionsBase';
 
 const MODULE_TYPES = [
   { key: 'fact', label: 'Fact', icon: Lightbulb },
@@ -237,7 +238,7 @@ export function ModuleForm() {
                   onClick={() => setModuleFormField('imageUrl', img.imageUrl)}
                   title={img.label}
                 >
-                  <img src={img.imageUrl} alt={img.label} className="w-full h-10 object-cover" />
+                  <img src={resolveMediaUrl(img.imageUrl)} alt={img.label} className="w-full h-10 object-cover" />
                 </button>
               ))}
             </div>

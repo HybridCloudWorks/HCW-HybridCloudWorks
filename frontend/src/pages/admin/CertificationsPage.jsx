@@ -43,6 +43,7 @@ import {
   getLearnUrl,
   getIssuerColor,
 } from '@/lib/certIssuers';
+import { resolveMediaUrl } from '@/lib/functionsBase';
 
 const COLLECTION = 'certifications';
 
@@ -637,7 +638,7 @@ function CertEditor({ cert, allCerts, onClose, onSaved }) {
                 />
                 {form.imageUrl ? (
                   <img
-                    src={form.imageUrl}
+                    src={resolveMediaUrl(form.imageUrl)}
                     alt="Preview"
                     referrerPolicy="no-referrer"
                     className="h-16 w-16 rounded object-contain bg-white"

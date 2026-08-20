@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useEditor } from '../context/EditorContext';
 import { useDragDrop } from '../hooks/useDragDrop';
+import { resolveMediaUrl } from '../../../lib/functionsBase';
 
 // ── Module type config ────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ function getModulePreview(module) {
       <div className="flex items-center gap-2">
         {module.imageUrl && (
           <img
-            src={module.imageUrl}
+            src={resolveMediaUrl(module.imageUrl)}
             alt={module.caption || ''}
             className="h-10 w-14 object-cover rounded border border-border shrink-0"
           />

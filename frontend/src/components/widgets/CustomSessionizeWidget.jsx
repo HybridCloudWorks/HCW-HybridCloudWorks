@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { loadPublicDataSnapshot } from '@/lib/publicData';
 import { fetchPublicSnapshotItems } from '@/lib/publicApi';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 /**
  * CustomSessionizeWidget: Displays speaking engagements from Sessionize API + Firestore
@@ -648,7 +649,7 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
                   aria-label={`View image for ${displayName}`}
                 >
                   <img
-                    src={imageUrl}
+                    src={resolveMediaUrl(imageUrl)}
                     alt={displayName}
                     loading="lazy"
                     decoding="async"

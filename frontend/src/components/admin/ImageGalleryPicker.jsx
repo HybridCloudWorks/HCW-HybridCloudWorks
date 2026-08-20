@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 export function ImageGalleryPicker({ onSelect, provider = '', title = 'Add From Image Gallery' }) {
   const [items, setItems] = useState([]);
@@ -94,7 +95,7 @@ export function ImageGalleryPicker({ onSelect, provider = '', title = 'Add From 
           {filteredItems.slice(0, 24).map((item) => (
             <div key={item.id} className="rounded-md border border-border p-2 space-y-2">
               <img
-                src={item.imageUrl}
+                src={resolveMediaUrl(item.imageUrl)}
                 alt={item.title || item.articleId}
                 className="h-28 w-full rounded object-cover"
               />
