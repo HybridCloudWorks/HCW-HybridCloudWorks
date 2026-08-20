@@ -1062,6 +1062,38 @@ resource "azurerm_role_assignment" "func_host_storage" {
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
+# Queue and Table on the same account, because identity-based
+# AzureWebJobsStorage is not a blob-only contract.
+#
+# Blob alone is the intuitive grant and it is not enough. The host's own health
+# probe reports:
+#
+#   "azure.functions.webjobs.storage": { "status": "Unhealthy",
+#     "description": "Unable to access AzureWebJobsStorage",
+#     "errorCode": "AuthenticationFailed" }
+#
+# while web_host.lifecycle and script_host.lifecycle both report Healthy — so
+# the app serves HTTP perfectly and only the storage-backed machinery is down.
+# That is the trap: HTTP routes answer 200, every smoke test passes, and timer
+# triggers, singleton locks and SyncTriggers silently do not run. A scheduled
+# function that never fires produces no error anywhere.
+#
+# Found 2026-08-20, after removing a keyless AzureWebJobsStorage connection
+# string in favour of AzureWebJobsStorage__accountName. The connection string
+# had been failing first, which masked the missing roles behind a different
+# error with the same symptom.
+resource "azurerm_role_assignment" "func_host_storage_queue" {
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "func_host_storage_table" {
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
 # =============================================================================
 # Azure Key Vault — RBAC mode (access policies removed)
 #

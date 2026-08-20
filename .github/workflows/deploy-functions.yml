@@ -122,11 +122,42 @@ jobs:
           #
           # FUNCTIONS_URL is the proxied api-azure.<domain> record and already
           # carries the /api suffix.
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.FUNCTIONS_URL }}/health" || echo "000")
+          # Capture the body as well as the code, and print BOTH to the step log.
+          #
+          # This used to report only into $GITHUB_STEP_SUMMARY, so a failure
+          # produced a red step with an empty log and a status code visible
+          # only on the summary tab. The three plausible causes here — the app
+          # is down, the origin lock refused us, or Cloudflare served a bot
+          # challenge — are indistinguishable without the body, and they need
+          # completely different fixes.
+          URL="${{ vars.FUNCTIONS_URL }}/health"
+          echo "GET $URL"
+
+          BODY=$(curl -sS -m 30 -w $'\n%{http_code}' "$URL" 2>&1 || true)
+          STATUS=$(printf '%s' "$BODY" | tail -n1)
+          BODY=$(printf '%s' "$BODY" | sed '$d')
+
+          echo "status: $STATUS"
+          echo "body:   ${BODY:0:400}"
+
+          {
+            echo "## 🚀 Azure Functions Deploy Complete"
+            echo ""
+            echo "\`GET $URL\` → **HTTP $STATUS**"
+          } >> $GITHUB_STEP_SUMMARY
 
           if [ "$STATUS" = "200" ]; then
-            echo "✅ Health check: **PASSED** (HTTP $STATUS)" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Health check: **PASSED**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Health check: **FAILED** (HTTP $STATUS) — check Function App logs" >> $GITHUB_STEP_SUMMARY
+            {
+              echo "❌ Health check: **FAILED**"
+              echo ""
+              echo "\`\`\`"
+              echo "${BODY:0:800}"
+              echo "\`\`\`"
+              echo ""
+              echo "A Cloudflare challenge page means the runner was bot-filtered"
+              echo "(REVIEW.md §2.3) — not that the app is down."
+            } >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
