@@ -734,6 +734,7 @@ a public URL), none set yet:
 | `COSMOS_SCRATCH_ENDPOINT` | **MISSING** | output `cosmos_scratch_endpoint` | Null until `cosmos_scratch_enabled`; the script leaves an absent output's variable unchanged |
 | `STORAGE_SCRATCH_ACCOUNT` · `SCRATCH_RESOURCE_GROUP` | **MISSING** | outputs `storage_scratch_account`, `scratch_resource_group` | Same |
 | `SITE_MAIN_APP_ID` | **MISSING** | GitHub App settings | Only for `mode=inventory-gate`. Absent ⇒ the workflow falls back to `SITE_MAIN_READ_TOKEN` (§4.3) |
+| `PRODUCTION_IMPORT_ENABLED` | **unset — correctly** | operator, per run | The workflow-side lock on `rehearse` / `storage-rehearse` against production. Set to `true` only after `migration_writer_enabled` is applied; unset again when the import is verified. Absence = closed |
 
 Still needed for the frontend build, sourced from the Entra registrations in
 §2.2 rather than Terraform:

@@ -605,8 +605,10 @@ is its own reviewed step (§5.7) — which is also what keeps §6's rollback a p
 
 ### 5.7 Deferred to the production-import phase
 
-Opened by one variable, `migration_writer_enabled = true`, after runbook step 12 is signed. Named
-here so none is forgotten: the `admins` uid → oid remap (mapping file, human review, a `--remap`
+Step 12 was signed on 2026-08-21; the phase opens with `migration_writer_enabled = true` in
+Terraform and `PRODUCTION_IMPORT_ENABLED = true` in GitHub, in that order — the sequence is the
+"production import" section of the [Migration-Runbook](.github/wiki/Migration-Runbook.md). Deferred
+past the import itself, named here so none is forgotten: the `admins` uid → oid remap (mapping file, human review, a `--remap`
 import option, keep `firebaseUid`); the production grants that variable creates; removing the
 workflow's production guard; the write-freeze and delta strategy between export and cutover; the
 media-URL re-pointing and the `published-images` decision; `cp_sortDate` re-application once the

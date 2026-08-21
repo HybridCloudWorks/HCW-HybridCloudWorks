@@ -2,11 +2,14 @@
 #
 # Dispatch only. Every mode is read-only against Firestore and GCS. Against
 # Cosmos and Blob, every mode is read-only EXCEPT `rehearse` and
-# `storage-rehearse`, and those refuse `target=production` outright (the guard
-# step below). Production writes are a later phase, opened by flipping
-# `migration_writer_enabled` in Terraform — until then the deploy identity
-# holds no write role on production, so this file's guard is the second lock,
-# not the only one.
+# `storage-rehearse`. Those write to production only when BOTH locks are open:
+#   1. `migration_writer_enabled = true` in Terraform — grants the deploy
+#      identity its database-scope Cosmos role and blob write on production
+#      (infra/oidc.tf). Without it the identity physically cannot write.
+#   2. repository variable PRODUCTION_IMPORT_ENABLED = 'true' — the guard
+#      step below. Unset it to close the window without touching Terraform.
+# The scratch rehearsal (2026-08-21) ran with both closed; the production
+# import opens them in that order and closes them in reverse.
 #
 # THREE THINGS THIS WORKFLOW NEVER DOES, because the repository is public and
 # its job logs and artifacts are world-readable:
@@ -98,11 +101,11 @@ jobs:
       # ---------------------------------------------------------------------
       # Guards first, before anything costs time or touches a credential.
       # ---------------------------------------------------------------------
-      - name: Refuse write modes against production
-        if: ${{ inputs.target == 'production' && (inputs.mode == 'rehearse' || inputs.mode == 'storage-rehearse') }}
+      - name: Refuse write modes against production unless the import is open
+        if: ${{ inputs.target == 'production' && (inputs.mode == 'rehearse' || inputs.mode == 'storage-rehearse') && vars.PRODUCTION_IMPORT_ENABLED != 'true' }}
         run: |
-          echo "::error::'${MODE}' writes to the target, and target=production is not enabled in this phase."
-          echo "::error::Production writes are opened by migration_writer_enabled=true in Terraform (infra/variables.tf), after the scratch rehearsal is signed off."
+          echo "::error::'${MODE}' writes to the target, and the production import is not open: repository variable PRODUCTION_IMPORT_ENABLED is not 'true'."
+          echo "::error::Two locks, opened in order: migration_writer_enabled=true in Terraform (grants the roles), then PRODUCTION_IMPORT_ENABLED=true here. Close by unsetting the variable; revoke by flipping the Terraform switch."
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
