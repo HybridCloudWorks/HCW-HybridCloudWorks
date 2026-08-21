@@ -131,12 +131,17 @@ Each remaining port is: port the worker, `registerJobType('<kebab-name>',
 { worker, timeoutMs, maxPayloadBytes })`, switch the page to `runJob()`.
 Order by value and entanglement:
 
-1. `batch-inspect` — the other button on `OpsHealthPage.jsx` that 404s
-   today. AI (inspection), so it waits on the provider-routing decision in
-   Migration_Plan §4.4 (Vertex default → direct provider keyed from Key
-   Vault) — which also gates `forge-article`, `generate-weekly-digest` and
-   `generate-listen-and-learn`. Decide the provider first; the four ports
-   then share one client.
+1. **The AI router is in** (`functions/src/lib/ai/router.js`, 2026-08-21):
+   providers by key presence, Anthropic → OpenAI → Gemini, `AI_NOT_CONFIGURED`
+   when none. `batch-inspect` — the other button on `OpsHealthPage.jsx` that
+   404s today — is thin upstream (it flips `inspectTrigger` and the Firestore
+   trigger `inspectAndPopulateContent` does the work, T-324). Port it as one
+   job that BOTH selects flagged `ingested` documents and runs the inspector
+   on them (`inspectArticleSource` / `inspectArchitectureSource` +
+   `buildInspectionUpdateData`, Site-Main index.js ~2300–2720: scrape, then
+   `generateJsonResponse`), staggered 4 s apart as upstream. Then
+   `forge-article`, `generate-weekly-digest`, `generate-listen-and-learn` on
+   the same router.
 2. `refresh-tool-service-cache` — **demoted**: this repo's frontend has no
    Cloud Tools pages at all (no `getToolComparisonData`, no
    `tool_service_*` reads — the vertical post-dates the 2026-07-22 import),

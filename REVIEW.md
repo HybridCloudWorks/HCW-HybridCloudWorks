@@ -844,6 +844,7 @@ removed rather than finished, and will not return.
 | Secret | Status | Consumed by |
 | --- | --- | --- |
 | `ANTHROPIC-API-KEY` | **SET** | AI drafting, WAF scoring, architecture generation |
+| `GEMINI-API-KEY` | **optional, not seeded** | Gemini through the public API. The AI router (`functions/src/lib/ai/router.js`) turns a provider on when its key is present: seed this secret AND add the `GEMINI_API_KEY` `@Microsoft.KeyVault(...)` app setting in `infra/main.tf`. An unresolved reference is read as "no key", so the setting can land before the secret. Vertex is not used on Azure |
 | `OPENAI-API-KEY` | **SET** | AI generation fallback |
 | `PERPLEXITY-API-KEY` | **SET** | Research and enrichment |
 | `REPLICATE-API-KEY` | **SET** | Image generation |

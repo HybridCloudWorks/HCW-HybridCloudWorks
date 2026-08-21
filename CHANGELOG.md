@@ -147,6 +147,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **AI router** (`functions/src/lib/ai/router.js`, T-322 §4.4) — ported from
+  Site-Main's `ai-model-router.js` with the provider model the owner chose on
+  2026-08-21: **a provider is on when its key is present.** Anthropic, OpenAI
+  and Gemini (public API by key; Vertex dropped — ADC is a GCP identity the
+  app cannot hold), resolved in that order or pinned by
+  `CONTENTFORGE_AI_PROVIDER`; an unresolved Key Vault reference counts as no
+  key; no key → `AI_NOT_CONFIGURED` with a sentence naming the three
+  secrets. `fetch` instead of axios; purpose → model table, JSON repair
+  round trip, retry on 408/429/5xx, usage capture with cost estimates and
+  the Anthropic prompt-cache marker all kept. 15 tests, none touching the
+  network; the upstream cost tests came across.
 - **`fetch-rss-feeds` — the first real platform job** (T-322), ported from
   Site-Main's `processRssFeeds`: 20 feeds across 8 providers through
   `rss-parser`, one `rss_cache` document per feed with `items[]` capped at 20
