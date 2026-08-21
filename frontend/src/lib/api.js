@@ -8,7 +8,6 @@ import { requireFunctionsBase } from '@/lib/functionsBase';
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const FUNCTION_TIMEOUT_MS = {
-  fetchRssFeedsManual: 45000,
   batchInspect: 45000,
   generateReviewerDigestManual: 30000,
   deleteRejectedContent: 90000,
@@ -17,7 +16,6 @@ const FUNCTION_TIMEOUT_MS = {
 };
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SAFE_RETRY_FUNCTIONS = new Set([
-  'fetchRssFeedsManual',
   'batchInspect',
   'generateReviewerDigestManual',
   'deleteRejectedContent',

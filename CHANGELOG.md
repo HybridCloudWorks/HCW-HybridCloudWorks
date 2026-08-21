@@ -133,6 +133,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`fetch-rss-feeds` — the first real platform job** (T-322), ported from
+  Site-Main's `processRssFeeds`: 20 feeds across 8 providers through
+  `rss-parser`, one `rss_cache` document per feed with `items[]` capped at 20
+  on write (T-319's write-time cap), new `content` drafts through the
+  existing four-stage dedup (≤ 10 per feed), and the `homepage_feeds/latest`
+  round-robin aggregate. The admin "RSS Fetch" button enqueues it via
+  `runJob()` instead of calling `fetchRssFeedsManual` (which never existed
+  here); the `syncRssFeeds` timer stub now runs the same ingest every two
+  hours behind its flag. TLS failures skip the feed with the reason recorded;
+  one feed failing never abandons the sweep. 17 new tests. Not ported: the
+  Telegram alert on feed errors — errors are in the job result.
 - **Platform jobs — the pattern for every handler over Flex Consumption's
   230 s HTTP cap** (T-322 scaffold). `functions/src/lib/jobs.js`: a job-type
   registry, `POST /api/enqueueJob` (editor; type allowlist, per-type payload

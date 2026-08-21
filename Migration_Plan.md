@@ -365,7 +365,7 @@ the NCRONTAB column below picks one. Change the hour, not the intent.
 | Site-Main export | Schedule | Zone | NCRONTAB here | Status here |
 | --- | --- | --- | --- | --- |
 | `publishScheduledContent` | `*/15 * * * *` | Chicago | `0 */15 * * * *` | **implemented**, flag off |
-| `fetchRssFeeds` | `every 2 hours` | — | `0 0 */2 * * *` | stub (`syncRssFeeds`) |
+| `fetchRssFeeds` | `every 2 hours` | — | `0 0 */2 * * *` | **implemented** (`syncRssFeeds`, shares the `fetch-rss-feeds` job's ingest), flag off |
 | `syncSocialCalendarScheduled` | `every 5 minutes` | Chicago | `0 */5 * * * *` | — |
 | `generateReviewerDigest` | `0 7 * * *` | Chicago | `0 0 7 * * *` | — |
 | `cleanupRejectedContent` | `0 4 * * *` | Chicago | `0 0 4 * * *` | — |

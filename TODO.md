@@ -119,29 +119,35 @@ an etag-conditioned replace, so at-least-once delivery never runs a job
 twice; a job-level failure is recorded, never rethrown. Built-in type `noop`
 proves the path on a deployed app (`runJob('noop', { delayMs: 3000 })`).
 
-**None of the six is ported yet** — not one exists here in any form; the
-frontend already calls `fetchRssFeedsManual` and `batchInspect`
-(`OpsHealthPage.jsx`) and gets 404. Each port is now: port the worker
-function, `registerJobType('<kebab-name>', { worker, timeoutMs,
-maxPayloadBytes })`, switch the page to `runJob()`. Order by value and
-entanglement:
+**First worker ported 2026-08-21: `fetch-rss-feeds`** (`functions/src/lib/rss/`,
+`rss-jobs.js`). The admin "RSS Fetch" button enqueues it through `runJob()`;
+the `syncRssFeeds` timer runs the same ingest every two hours behind
+`FEATURE_FLAG_SYNC_RSS_FEEDS`. It fills `rss_cache` (the public `/feed`
+endpoint) and `homepage_feeds/latest`, and drafts new `content` through the
+four-stage dedup. Not ported with it: the Telegram alert on feed errors (no
+notifier here yet) — errors land in the job result instead.
 
-1. `refresh-tool-service-cache` — no AI; `tool_service_cache` is **empty on
-   Azure** until it runs, so the Cloud Tools pages show nothing. Needs the
-   pricing worker (`ensureServiceCache`, `SERVICE_CATALOG`, AWS Price List +
-   Azure Retail Prices clients — ~700 lines of Site-Main `cloud-tools.js`;
-   `@aws-sdk/client-pricing` is already a dependency). Its scheduled twin is
-   T-323's first timer.
-2. `fetch-rss-feeds` — shares its worker with the `syncRssFeeds` timer stub;
-   fills `rss_cache` (also empty).
-3. `batch-inspect`, `forge-article`, `generate-weekly-digest`,
-   `generate-listen-and-learn` — all AI; blocked on the provider-routing
-   decision in Migration_Plan §4.4 (Vertex default → direct provider keyed
-   from Key Vault).
+Each remaining port is: port the worker, `registerJobType('<kebab-name>',
+{ worker, timeoutMs, maxPayloadBytes })`, switch the page to `runJob()`.
+Order by value and entanglement:
 
-Known gap to close with the first real worker: the document is written before
-the output binding sends the message, so a binding failure leaves a job
-`queued` forever — add a sweeper that re-enqueues stale `queued` jobs. The
+1. `batch-inspect` — the other button on `OpsHealthPage.jsx` that 404s
+   today. AI (inspection), so it waits on the provider-routing decision in
+   Migration_Plan §4.4 (Vertex default → direct provider keyed from Key
+   Vault) — which also gates `forge-article`, `generate-weekly-digest` and
+   `generate-listen-and-learn`. Decide the provider first; the four ports
+   then share one client.
+2. `refresh-tool-service-cache` — **demoted**: this repo's frontend has no
+   Cloud Tools pages at all (no `getToolComparisonData`, no
+   `tool_service_*` reads — the vertical post-dates the 2026-07-22 import),
+   so the cache would feed nothing. It belongs to a Cloud Tools port as a
+   whole (T-410-class scoped project: pricing worker ~1,000 lines incl. AWS
+   SigV4 + bulk offer documents and a GCP column that needs a credential the
+   app cannot hold, plus the read handler and pages).
+
+Known gap, still open: the job document is written before the output binding
+sends the message, so a binding failure leaves a job `queued` forever — add a
+sweeper that re-enqueues stale `queued` jobs. The
 client/server timeout mismatch disappears with `runJob()`: there is no
 per-call timeout left to mismatch. `generateAiCoverOnContentTrigger`'s 540 s
 must still stay under the 900 s rising-edge claim window (T-324).
