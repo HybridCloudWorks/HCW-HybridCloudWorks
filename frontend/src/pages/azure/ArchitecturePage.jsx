@@ -2,6 +2,18 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
+import FeaturedArchitecture from '@/components/architecture/FeaturedArchitecture';
+
+// The two badges the hand-written panel showed, from the blueprint's own fields.
+function featuredBadges(blueprint) {
+  if (!blueprint) return [];
+  return [
+    { icon: 'verified', label: 'Production Ready', tone: 'green' },
+    ...(blueprint.cost
+      ? [{ icon: 'savings', label: blueprint.cost, tone: blueprint.costColor || 'blue' }]
+      : []),
+  ];
+}
 
 function mapComplexityToLevel(complexity) {
   if (complexity === 'High') return '400';
@@ -240,74 +252,8 @@ export default function ArchitecturePage() {
             </p>
           </div>
 
-          {/* Featured Blueprint */}
-          <div className="glass-panel orange-glow rounded-2xl overflow-hidden relative group">
-            <div className="absolute top-0 right-0 p-4 z-20">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary text-black text-xs font-bold uppercase tracking-wide shadow-lg shadow-primary/20">
-                <span className="material-symbols-outlined text-[16px]">star</span> Featured Design
-              </span>
-            </div>
-            <div className="grid md:grid-cols-2 gap-0">
-              <div className="p-8 md:p-10 flex flex-col justify-center relative z-10">
-                <div className="flex items-center gap-2 mb-4 text-primary font-mono text-xs">
-                  <span className="material-symbols-outlined text-[14px]">bolt</span>
-                  MISSION-CRITICAL • LEVEL 400
-                </div>
-                <h2 className="text-3xl font-bold text-white mb-4 leading-tight">
-                  Enterprise Hub-and-Spoke with Zero Trust Edge
-                </h2>
-                <p className="text-slate-300 text-sm leading-relaxed mb-6">
-                  Centralize connectivity, security controls, and policy enforcement while enabling
-                  autonomous landing zones for workload teams across multiple Azure subscriptions.
-                </p>
-                <div className="flex flex-wrap gap-4 mb-8">
-                  <div className="flex items-center gap-2 text-xs text-slate-400 bg-black/20 px-3 py-1.5 rounded-lg border border-white/5">
-                    <span className="material-symbols-outlined text-green-500 text-[16px]">
-                      verified
-                    </span>
-                    Production Ready
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-400 bg-black/20 px-3 py-1.5 rounded-lg border border-white/5">
-                    <span className="material-symbols-outlined text-blue-400 text-[16px]">
-                      savings
-                    </span>
-                    Pay-per-use
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <button
-                    className="bg-primary hover:bg-primary-light text-black font-bold px-6 h-11 rounded-lg transition-all shadow-lg shadow-primary/20 flex items-center gap-2 group-hover:scale-105 transform duration-200"
-                    aria-label="Explore featured blueprint"
-                  >
-                    Explore Blueprint
-                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
-                      arrow_forward
-                    </span>
-                  </button>
-                  <button
-                    className="text-slate-300 hover:text-white font-medium px-4 h-11 flex items-center gap-2 transition-colors"
-                    aria-label="Watch blueprint demo"
-                  >
-                    <span className="material-symbols-outlined" aria-hidden="true">
-                      play_circle
-                    </span>
-                    Watch Demo
-                  </button>
-                </div>
-              </div>
-              <div className="bg-gradient-to-br from-[hsl(var(--hcw-bg-secondary))] to-[hsl(var(--background))] relative overflow-hidden flex items-center justify-center p-8 border-l border-white/5">
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
-                <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-primary/10 rounded-full blur-3xl"></div>
-                <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-border-dark shadow-2xl transform rotate-1 transition-transform group-hover:rotate-0 duration-500">
-                  <div className="w-full h-full flex items-center justify-center bg-[hsl(var(--background))]">
-                    <span className="material-symbols-outlined text-slate-600 text-[64px]">
-                      hub
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* Featured Blueprint — data-driven (T-409): the first blueprint, dynamic before static */}
+          <FeaturedArchitecture design={blueprints[0]} badges={featuredBadges(blueprints[0])} />
 
           {/* Blueprint Gallery */}
           <div>

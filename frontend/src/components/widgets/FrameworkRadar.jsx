@@ -18,7 +18,9 @@ ChartJS.register(RadialLinearScale, PointElement, LineElement, Filler, Tooltip, 
  * Visualizes the 5-6 pillars of a framework (e.g., Well-Architected)
  * Data format: { labels: ['Security', 'Cost', ...], datasets: [{ label: 'Score', data: [5, 4, ...] }] }
  */
-export default function FrameworkRadar({ data, title = 'Framework Maturity Model' }) {
+// `max` is the scale ceiling: 5 for the maturity model, 100 for a stored
+// Well-Architected assessment (components/architecture/WafAssessment.jsx).
+export default function FrameworkRadar({ data, title = 'Framework Maturity Model', max = 5 }) {
   // Default fallback data
   const chartData = data || {
     labels: [
@@ -52,9 +54,9 @@ export default function FrameworkRadar({ data, title = 'Framework Maturity Model
           color: 'rgba(128, 128, 128, 0.2)',
         },
         suggestedMin: 0,
-        suggestedMax: 5,
+        suggestedMax: max,
         ticks: {
-          stepSize: 1,
+          stepSize: max / 5,
           backdropColor: 'transparent',
           display: false, // Hide numbers for cleaner look
         },

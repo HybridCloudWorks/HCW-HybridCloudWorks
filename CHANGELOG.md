@@ -147,6 +147,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The visitor-facing upstream delta (T-409).** From Site-Main 088f458,
+  with their tests: `RichTextBody` (architecture and framework overviews
+  render markdown as markdown, HTML as sanitised HTML), `CoderCornerSnippet`
+  + `CodeBlock` (the snippet, language and repository link the coder_corner
+  contract requires now render; fenced code gets highlighting and a copy
+  button), `WafAssessment` + the vendor Well-Architected pillar sets (a
+  Well-Architected tab when an architecture carries `waf`), `FeaturedArchitecture`
+  + `colorClasses` (the AWS/Azure galleries' featured panel is data-driven),
+  and the Ansible and VMware education data, rendered through a new
+  `EducationTracks` component with level filter, learning paths and resources.
 - **The eleven Firestore triggers as six change-feed functions (T-324).**
   `functions/src/functions/change-feed.js` registers one `app.cosmosDB`
   function per watched container on the identity-based binding

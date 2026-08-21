@@ -50,10 +50,12 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    `refresh-tool-service-cache` is demoted to the Cloud Tools port and
    `generate-listen-and-learn` is deferred to **T-411** (three Google services
    and no frontend here). Next: **T-323**.
-3. **T-323 and T-324 are closed** (2026-08-21): 15 of 16 timers behind their
-   flags, and the 11 triggers as six change-feed functions on the
-   identity-based binding plus the three delete paths. Next: **T-409**, then
-   the cutover sequence (Migration_Plan §6).
+3. **T-323, T-324 and T-409 are closed** (2026-08-21): 15 of 16 timers behind
+   their flags, the 11 triggers as six change-feed functions plus the three
+   delete paths, and the visitor-facing upstream delta. **Nothing engineering
+   remains before the cutover sequence (Migration_Plan §6)** — the open items
+   are the owner gates in REVIEW §2–§4 and the optional scoped projects
+   (T-410 Cloud Tools, T-411 Listen & Learn, the D3 admin cluster).
 4. **T-409** — the visitor-facing upstream delta.
 
 **State to keep in mind:**
@@ -278,6 +280,22 @@ seeds from a scan when the stats doc is missing).
 
 ### T-409 — Port the visitor-facing upstream delta (Site-Main @ `088f458`)
 **Files:** `frontend/src/components/{shared,architecture}/` · `frontend/src/data/{ansible,vmware}/education.js`
+
+**Closed 2026-08-21 (PR "visitor delta").** Ported verbatim with their
+tests: `RichTextBody` (HTML-or-markdown overview body, now used by the
+architecture and framework detail templates — markdown bodies no longer
+render as literal `## Heading` text), `CoderCornerSnippet` + `CodeBlock`
+(the `codeSnippet` / `language` / `repoUrl` fields the coder_corner publish
+contract requires finally render; fenced blocks get syntax highlighting and
+a copy button), `WafAssessment` + `config/wellArchitectedPillars.js` (the
+Well-Architected tab on an architecture detail when the document carries
+`waf`; vendor pillar sets, VMware deliberately absent), `FeaturedArchitecture`
++ `lib/colorClasses.js` (the AWS and Azure galleries' featured panel is now
+the first blueprint instead of one hardcoded design), and the Ansible and
+VMware education data (rendered through a small `EducationTracks` component
+with the level filter, learning paths and resources — the 712-line
+`EducationTemplate` stays unported, D2). `FrameworkRadar` gained a `max`
+prop for the 0–100 scale.
 
 Of the 140 files Site-Main added since the 2026-07-22 import, these are the
 ones a visitor would notice — Firebase-free and small (~590 lines + two data

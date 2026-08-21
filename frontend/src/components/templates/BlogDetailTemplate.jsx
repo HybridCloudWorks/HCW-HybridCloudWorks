@@ -3,6 +3,8 @@ import React, { useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import CoderCornerSnippet from '@/components/shared/CoderCornerSnippet';
+import { markdownCodeComponents } from '@/components/shared/CodeBlock';
 import remarkGfm from 'remark-gfm';
 import DOMPurify from 'dompurify';
 import { usePublicData } from '@/hooks/usePublicData';
@@ -132,6 +134,11 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
       resolvedImageVariants = article.aiImageVariants.hero;
     }
     return {
+      // Coder Corner: the fields the publish contract requires but nothing
+      // rendered (components/shared/CoderCornerSnippet.jsx).
+      codeSnippet: article.codeSnippet || article.code || article.terraformCode || '',
+      language: article.language || article.codeLanguage || '',
+      repoUrl: article.repoUrl || null,
       title: article.Title || article.title || 'Untitled',
       summary: article.Summary || article.summary || article.description || article.excerpt || '',
       // Body: prefer editor draft → raw content → summary fallback
@@ -460,7 +467,12 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
                     />
                   ) : (
                     <div className={ARTICLE_PROSE_CLASS}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{contentToRender}</ReactMarkdown>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={markdownCodeComponents}
+                      >
+                        {contentToRender}
+                      </ReactMarkdown>
                     </div>
                   )}
                 </div>
@@ -477,6 +489,13 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
             </p>
           </div>
         )}
+
+        <CoderCornerSnippet
+          codeSnippet={post.codeSnippet}
+          language={post.language}
+          repoUrl={post.repoUrl}
+          body={post.body}
+        />
 
         {/* Tags row */}
         {post.tags.length > 0 && (
