@@ -831,8 +831,12 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # `__accountName` is the identity-based form: the host constructs the blob,
     # queue and table endpoints from the account name and authenticates with its
     # own managed identity, which already holds Storage Blob Data Owner here.
-    # Declaring it in this map also means Terraform owns it, so a deploy tool
-    # cannot reintroduce a connection string without the next plan showing it.
+    #
+    # Declaring it here does NOT stop the deploy from re-adding the keyless
+    # `AzureWebJobsStorage` string: that key is not in this map and the
+    # provider does not report it in plan, so it came back on 2026-08-21 and
+    # broke SyncTriggers again (83 functions deployed, 80 registered).
+    # deploy-functions.yml now deletes it after every deploy and re-syncs.
     #
     # The failure mode is worth remembering: a keyless connection string does
     # not fail at deploy, and does not fail as "storage". It fails as a 404 on

@@ -467,10 +467,19 @@ export function createPublicReadHandlers({ store }) {
         // finding. `cp_sortDate` is a COMPUTED property (defined on every
         // document, '' when no date alias is present), which is what makes
         // this exempt from rule 2's "never ORDER BY a possibly-missing field":
-        // it cannot be missing. Flip the flag only after
-        // scripts/apply-computed-sortdate.mjs --inspect reports clean and
-        // --apply has run. The in-memory sort below stays either way — it is
-        // the authority on order exactly as isPublicDocument is on visibility.
+        // it cannot be missing.
+        //
+        // Three preconditions, all three required, learned the hard way on
+        // 2026-08-21 when the flag went live and every list call failed with
+        // "The index path corresponding to the specified order-by item is
+        // excluded": (1) apply-computed-sortdate.mjs --inspect clean;
+        // (2) --apply has run, so the property exists; (3) `/cp_sortDate/?` is
+        // an INCLUDED PATH in the container's indexing policy — computed
+        // properties are not covered by the `/*` wildcard (Cosmos docs), and an
+        // ORDER BY on an unindexed property is an error, not a slow query.
+        // infra/cosmos-containers.json carries the path for content and blogs.
+        // The in-memory sort below stays either way — it is the authority on
+        // order exactly as isPublicDocument is on visibility.
         const orderBy =
           process.env.PUBLIC_LIST_SQL_ORDER === '1' ? ' ORDER BY c.cp_sortDate DESC' : '';
         const query = `SELECT TOP ${FETCH_WINDOW} ${LIST_PROJECTION} FROM c WHERE ${clauses.join(' AND ')}${orderBy}`;

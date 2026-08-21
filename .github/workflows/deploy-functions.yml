@@ -107,6 +107,36 @@ jobs:
           package: functions/
           respect-funcignore: true
 
+      # The deploy leaves an `AzureWebJobsStorage` connection string with an EMPTY
+      # AccountKey on the app (nothing in infra/ writes it, and the azurerm
+      # provider does not surface it in plan). The host then tries shared-key
+      # auth with no key for its secret repository, SyncTriggers fails with
+      # "Server failed to authenticate the request", and the new functions are
+      # not registered — the package runs, HTTP routes that already existed
+      # answer, and anything new (a queue trigger, a new route) silently does
+      # not exist. 2026-08-20 (every route 404) and 2026-08-21 (83 functions
+      # deployed, 80 registered) were both this. Identity-based
+      # `AzureWebJobsStorage__accountName` is the setting Terraform owns.
+      - name: Drop the keyless AzureWebJobsStorage the deploy leaves behind, then sync triggers
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          SUB: ${{ vars.SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          if az functionapp config appsettings list -n "$APP" -g "$RG" \
+               --query "[?name=='AzureWebJobsStorage'].name" -o tsv | grep -q .; then
+            echo "removing keyless AzureWebJobsStorage"
+            az functionapp config appsettings delete -n "$APP" -g "$RG" \
+              --setting-names AzureWebJobsStorage --output none
+          fi
+          az rest --method post --output none \
+            --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"
+          sleep 15
+          count=$(az functionapp function list -n "$APP" -g "$RG" --query "length(@)" -o tsv)
+          echo "functions registered after sync: $count"
+          [ "$count" -gt 0 ] || { echo "::error::no functions registered after SyncTriggers"; exit 1; }
+
       - name: Close storage firewall window
         if: ${{ always() && steps.fw.outputs.runner_ip != '' }}
         run: |
