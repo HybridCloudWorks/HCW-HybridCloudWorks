@@ -134,8 +134,7 @@ jobs:
           # sync call can answer 400 "InternalServerError from host runtime"
           # (run 32521270400). Retry before calling it a failure.
           for attempt in 1 2 3 4; do
-            if az rest --method post --output none 
-                 --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"; then
+            if az rest --method post --output none --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"; then
               break
             fi
             [ "$attempt" -lt 4 ] || { echo "::error::syncfunctiontriggers failed after 4 attempts"; exit 1; }
