@@ -278,9 +278,9 @@ describe('non-HTTP triggers', () => {
   it('the scheduler timers stay behind one feature flag', () => {
     // Not an authorization surface, but they are registrations, and one of
     // them deletes blobs with an unimplemented body (TODO.md T-302). The
-    // fourteen are the T-323 timers in schedulers.js; the fifteenth is
+    // seventeen are the T-323 timers in schedulers.js; the eighteenth is
     // platformJobSweeper (jobs-sweeper.js), behind its own flag.
-    expect(timerRegistrations.size).toBe(15);
+    expect(timerRegistrations.size).toBe(18);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
     for (const name of ['cleanupTempStorage', 'cleanupUnusedCertImages']) {
       // The two that delete blobs: registered, and their handlers are the

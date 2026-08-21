@@ -50,8 +50,9 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    `refresh-tool-service-cache` is demoted to the Cloud Tools port and
    `generate-listen-and-learn` is deferred to **T-411** (three Google services
    and no frontend here). Next: **T-323**.
-3. **T-323 / T-324** below — the 16 timers and the 11 triggers, tables in
-   Migration_Plan §4.2 / §4.3.
+3. **T-323 is closed** (2026-08-21): 15 of 16 timers registered behind their
+   flags, all off. Next: **T-324** — the 11 triggers as change-feed functions
+   plus the three delete paths (Migration_Plan §4.3).
 4. **T-409** — the visitor-facing upstream delta.
 
 **State to keep in mind:**
@@ -213,7 +214,7 @@ scaffold (`generate-listen-and-learn`, area-by-area saves as upstream).
 ### T-323 — Port the 16 timers (NCRONTAB + `America/Chicago`)
 **Files:** `functions/src/functions/schedulers.js` · `functions/src/lib/timers/*` · `infra/main.tf` (flags)
 
-**Twelve of sixteen are in (2026-08-21, PR "timers: content ops").** Each is a
+**Fifteen of sixteen are in (2026-08-21, PRs "timers: content ops" and "timers: ingestion"); T-323 is closed.** Each is a
 factory in `lib/timers/` with injected store/fetch/storage, registered in
 `schedulers.js` through one `timer(name, FLAG, ncrontab, run)` helper, behind
 its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_SCHEDULERS` master
@@ -222,18 +223,21 @@ switch (all `"false"` in `main.tf`): `publishScheduledContent`,
 `generateReviewerDigest`, `checkLiveLinks`, `cleanupRejectedContent`,
 `cleanupSoftDeletedContent`, `cleanupTempStorage`, `cleanupUnusedCertImages`,
 `reVerifyCertifications`, `scrapeSkillsHubRss`, `refreshPlaudToken`,
-`checkAgentHealth`. `workflow_digests` / `workflow_alerts` / system audit
+`checkAgentHealth`, `syncSocialCalendarScheduled` (Publer reconcile),
+`fetchBlogListings` (Firecrawl v1 REST, not the SDK), `fetchPodcastFeeds`
+(PodBean). `workflow_digests` / `workflow_alerts` / system audit
 entries are written through `lib/timers/workflow-records.js`. The one UTC
 schedule (`scrapeSkillsHubRss`) is expressed in Chicago time and drifts an
 hour across DST — a weekly scrape does not care. Alerts that upstream relayed
 to Telegram (`notifyOnWorkflowAlertActivation`) sit in `workflow_alerts` until
 T-324.
 
-**Remaining — the external-ingestion three, next PR:** `syncSocialCalendarScheduled`
-(Publer reconcile, `cms/social.js`; the live writer D12 pauses at cutover),
-`fetchBlogListings` (Firecrawl listing scrape → `content`, REST not SDK),
-`fetchPodcastFeeds` (PodBean → `podcasts`). `refreshToolServiceCacheScheduled`
-stays demoted with Cloud Tools (T-322 note). Cutover: turn each flag on one at
+**The sixteenth**, `refreshToolServiceCacheScheduled`, stays demoted with
+Cloud Tools (T-322 note). The three external-ingestion timers skip
+themselves while their keys are Key Vault stubs (`PUBLER_API_KEY` +
+`PUBLER_WORKSPACE_ID`, `FIRECRAWL_API_KEY`; REVIEW §3.1). **D12:**
+`syncSocialCalendarScheduled` is the live writer of `social_posts` — its flag
+stays off until the cutover delta import is done. Cutover: turn each flag on one at
 a time after observing the fire time in App Insights (§6 step 7); the
 `regenerate` / `reseed` collections (`homepage_feeds`, `rss_cache`) fill on
 the first `syncRssFeeds` run.
