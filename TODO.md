@@ -44,9 +44,12 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    (#138 merged, `--inspect` precondition: **clean**, run 32448514462 — 1,142 + 242 documents, every date alias ISO-sortable). Then read
    `https://api-azure.hybridcloudworks.com/api/public/content?limit=8` and
    confirm newest-first; baseline before the flag had 2026-06-08 at the top.
-2. **T-322** below — three of the six are ported (`fetch-rss-feeds`,
-   `batch-inspect`, and the router under them). Next: `forge-article`, then
-   `generate-weekly-digest`, `generate-listen-and-learn`.
+2. **T-322 is closed** (2026-08-21). Four of the six run as jobs
+   (`fetch-rss-feeds`, `batch-inspect`, `forge-article`,
+   `generate-weekly-digest`) and the stale-queued sweeper is in;
+   `refresh-tool-service-cache` is demoted to the Cloud Tools port and
+   `generate-listen-and-learn` is deferred to **T-411** (three Google services
+   and no frontend here). Next: **T-323**.
 3. **T-323 / T-324** below — the 16 timers and the 11 triggers, tables in
    Migration_Plan §4.2 / §4.3.
 4. **T-409** — the visitor-facing upstream delta.
@@ -146,8 +149,31 @@ Order by value and entanglement:
    `CONTENTFORGE_ANALYSIS_MODEL`. **Not ported:** the architecture-diagram
    path (`inspectArchitectureSource`, multimodal) — a `type: 'architecture'`
    document records `inspectError` naming it — and cover-on-inspect (flag
-   only). Next: `forge-article`, `generate-weekly-digest`,
-   `generate-listen-and-learn` on the same router.
+   only).
+   **`forge-article` and `generate-weekly-digest` are in** (2026-08-21,
+   `functions/src/lib/content/{forge,forge-config,forge-pipeline,forge-grader,drafting,digest}.js`,
+   `forge-jobs.js`). The forge pipeline is the upstream one: dedupe against
+   the published corpus (fails open) → `admin_config/forge_profile` +
+   `forge_prompts` (defaults when missing, 5-min cache) → format rotation →
+   master prompt + voice block + forge module instruction + word soup →
+   draft → dash scrub, banned-phrase scan, module validation with mechanical
+   repair → grade (keyword prescreen, then one model call, best-fit weighted
+   overall) → `forge_ready` above the publish threshold and clean, else
+   `editing` → content patch + `content_versions` + `admin_audit_logs` +
+   `forge_stats` counters (three writes, not one transaction — stated in the
+   file header). `forge-article` takes `sourceContentId` or
+   `sourceContentIds` (≤ 10, the upstream bulk loop). `generate-weekly-digest`
+   takes `{ days, dryRun }`; the Mailing List page has the two buttons
+   (preview / draft) upstream had. **No ContentForge page exists here** (it
+   post-dates the import) — the job is reachable through `POST /api/enqueueJob`
+   and the page is part of the T-409/D3 admin port, together with
+   `gradeContentItem`, `assignForgeImages` and the config endpoints.
+   `forgeScheduled` (daily auto-forge) is a T-323 timer.
+   **`generate-listen-and-learn` is deferred → T-411**: it needs Google
+   Text-to-Speech through ADC, a YouTube Data API key and GCS audio uploads,
+   and neither the admin page nor the certification-page player exists in
+   this frontend; porting the worker alone would produce episodes nothing
+   can play.
 2. `refresh-tool-service-cache` — **demoted**: this repo's frontend has no
    Cloud Tools pages at all (no `getToolComparisonData`, no
    `tool_service_*` reads — the vertical post-dates the 2026-07-22 import),
@@ -156,12 +182,33 @@ Order by value and entanglement:
    SigV4 + bulk offer documents and a GCP column that needs a credential the
    app cannot hold, plus the read handler and pages).
 
-Known gap, still open: the job document is written before the output binding
-sends the message, so a binding failure leaves a job `queued` forever — add a
-sweeper that re-enqueues stale `queued` jobs. The
+Known gap, closed 2026-08-21: the job document is written before the output
+binding sends the message, so a binding failure left a job `queued` forever.
+`platformJobSweeper` (`jobs-sweeper.js`, every 15 min, behind
+`FEATURE_FLAG_PLATFORM_JOB_SWEEPER` under the schedulers master switch)
+re-enqueues jobs `queued` for more than 10 minutes and stamps
+`requeuedAt` / `requeueCount`; the worker's etag-conditioned claim makes a
+duplicate delivery harmless. Turn the flag on with the first real job
+traffic. The
 client/server timeout mismatch disappears with `runJob()`: there is no
 per-call timeout left to mismatch. `generateAiCoverOnContentTrigger`'s 540 s
 must still stay under the 900 s rising-edge claim window (T-324).
+
+### T-411 — Port Listen & Learn (study podcasts) as a scoped project
+**Files:** Site-Main `functions/listen-and-learn/*` (2,800 lines incl. tests) · `src/pages/admin/ListenAndLearnPage.jsx` · certification detail pages
+
+Deferred out of T-322 on 2026-08-21. The generator is a five-stage pipeline
+(study guide scrape → skill areas → YouTube videos per area → dialogue script
+→ MP3) with three external services this platform does not hold: Google
+Text-to-Speech (called with `GoogleAuth` application-default credentials —
+Azure has none; Azure AI Speech or a TTS key is a decision), the YouTube
+Data API (`YOUTUBE_API_KEY`, not in Key Vault), and GCS for the audio (blob
+`content/listen-and-learn/` is the obvious home, the `listen_and_learn` +
+`listen_and_learn_episodes` containers already migrated). Nothing renders
+episodes in this frontend — the admin page and the certification-page player
+both post-date the import — so the worker, the two containers' read API, the
+player and the admin page land together or not at all. Run it on the job
+scaffold (`generate-listen-and-learn`, area-by-area saves as upstream).
 
 ### T-323 — Port the 16 timers (NCRONTAB + `America/Chicago`)
 **Files:** `functions/src/functions/schedulers.js` · `functions/host.json` · `infra/main.tf` (flags)

@@ -147,6 +147,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`forge-article` and `generate-weekly-digest` platform jobs; the stale-job
+  sweeper.** ContentForge's pipeline is ported whole
+  (`functions/src/lib/content/forge*.js`, `drafting.js`): dedupe against the
+  published corpus, admin-editable profile and prompts from `admin_config`
+  with code defaults, format rotation, the forge module instruction and word
+  soup, deterministic dash scrub / banned-phrase scan / module repair, the
+  best-fit weighted grader with its keyword prescreen, `forge_ready` vs
+  `editing` routing, version + audit + `forge_stats` writes. The weekly
+  digest drafts from the last N days of live content into `newsletters`
+  (`dryRun` previews); the Mailing List page gained the preview and draft
+  buttons. `platformJobSweeper` (every 15 min, `FEATURE_FLAG_PLATFORM_JOB_SWEEPER`)
+  re-enqueues jobs left `queued` by a failed output binding — the gap
+  lib/jobs.js documented. `generate-listen-and-learn` is deferred to T-411
+  (three Google services, no frontend here), closing T-322.
 - **`batch-inspect` platform job — the article inspector, ported.**
   `functions/src/lib/content/` carries Site-Main's `scrapeArticle`
   (`fetch` + cheerio + turndown; strict TLS; reader and headless fallbacks

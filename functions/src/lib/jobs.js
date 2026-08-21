@@ -400,3 +400,47 @@ export function createJobHandlers({
     },
   };
 }
+
+// ── Stale-queued sweeper ─────────────────────────────────────────────────────
+//
+// The enqueue handler writes the job document and THEN the output binding
+// sends the queue message; a binding failure leaves the job `queued` with no
+// message behind it. The sweeper (functions/jobs-sweeper.js, a timer)
+// re-enqueues those. Duplicates are harmless: runJob's etag-conditioned claim
+// skips a job that already started.
+
+export const STALE_QUEUED_MS = 10 * 60 * 1000;
+export const SWEEP_BATCH = 20;
+
+/**
+ * @param {object} deps
+ * @param {{ queryDocs: Function, patchDoc: Function }} deps.store
+ * @param {() => Date} [deps.now]
+ * @param {{ log?: Function, warn?: Function }} [deps.log]
+ */
+export function createJobSweeper({ store, now = () => new Date(), log = {} }) {
+  return {
+    /** @returns {Promise<{ requeued: {jobId: string, type: string}[] }>} */
+    async sweep() {
+      const cutoff = new Date(now().getTime() - STALE_QUEUED_MS).toISOString();
+      const stale = await store.queryDocs(
+        JOBS_CONTAINER,
+        `SELECT TOP ${SWEEP_BATCH} c.id, c.type, c.requeueCount FROM c WHERE c.status = 'queued' AND c.createdAt < @cutoff AND (NOT IS_DEFINED(c.requeuedAt) OR c.requeuedAt < @cutoff)`,
+        [{ name: '@cutoff', value: cutoff }]
+      );
+      const requeued = [];
+      for (const doc of stale || []) {
+        try {
+          await store.patchDoc(JOBS_CONTAINER, doc.id, {
+            requeuedAt: now().toISOString(),
+            requeueCount: (doc.requeueCount || 0) + 1,
+          });
+          requeued.push({ jobId: doc.id, type: doc.type });
+        } catch (err) {
+          log.warn?.(`sweep: could not stamp job ${doc.id}: ${err?.message || err}`);
+        }
+      }
+      return { requeued };
+    },
+  };
+}

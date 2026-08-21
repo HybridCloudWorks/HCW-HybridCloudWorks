@@ -333,11 +333,11 @@ Firebase" claim is weaker than it looks:
 
 | Handler | Server | Client abort today | Port as |
 | --- | --- | --- | --- |
-| `generateListenAndLearn` | 540 s / 1 GiB | **20 s** (no entry) | async job — episodes already save incrementally |
+| `generateListenAndLearn` | 540 s / 1 GiB | **20 s** (no entry) | **deferred → T-411** (Google TTS via ADC, YouTube key, GCS audio, no frontend here) |
 | `refreshToolServiceCache` | 300 s / **4 GiB** | 120 s | async job; the memory is likely already solved by the Price List Query API move recorded in `main.tf` |
-| `forgeArticle` | 300 s / 1 GiB | 300 s | async job; also called in a sequential bulk loop |
+| `forgeArticle` | 300 s / 1 GiB | 300 s | **ported 2026-08-21** as `forge-article` (`sourceContentIds` ≤ 10 covers the bulk loop) |
 | `fetchRssFeedsManual` | 300 s | 45 s, retried | `202` and reuse the scheduled job |
-| `generateWeeklyDigest` | 300 s | **20 s** (no entry) | async job; the `dryRun` preview needs a fast path |
+| `generateWeeklyDigest` | 300 s | **20 s** (no entry) | **ported 2026-08-21** as `generate-weekly-digest`; `dryRun` is the same job, polled |
 | `batchInspect` | 300 s | 45 s, retried | **ported 2026-08-21** as the `batch-inspect` job — selects and inspects in one pass, 4 s stagger kept |
 
 Reuse the job pattern that already exists on both sides: a `lab_jobs` document plus a client poll at

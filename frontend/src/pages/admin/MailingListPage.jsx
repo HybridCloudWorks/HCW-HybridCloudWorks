@@ -27,8 +27,11 @@ import {
   ExternalLink,
   Users,
   Megaphone,
+  Eye,
+  PenTool,
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
+import { runJob } from '@/lib/jobs';
 
 const TABS = [
   { id: 'lists', label: 'Subscribers / Lists' },
@@ -46,6 +49,19 @@ const kListProfiles = (pageSize = 50) =>
   klaviyoFetch(`/api/profiles/?page[size]=${pageSize}&sort=-created`);
 const kListCampaigns = () =>
   klaviyoFetch(`/api/campaigns/?filter=${encodeURIComponent("equals(messages.channel,'email')")}`);
+
+// ── Weekly digest (a platform job, T-322) ───────────────────────────────────
+// Site-Main called generateWeeklyDigest over HTTP with a 20 s client abort the
+// 300 s handler never met. Here the drafting runs as the
+// `generate-weekly-digest` job and the page polls; dryRun returns the preview
+// without saving to `newsletters`.
+const runWeeklyDigest = async (dryRun) => {
+  const job = await runJob('generate-weekly-digest', { dryRun, days: 7 });
+  if (job.status !== 'succeeded') {
+    throw new Error(job.error || `Digest ${job.status}`);
+  }
+  return job.result || {};
+};
 
 function fmtDate(value) {
   if (!value) return '—';
@@ -180,6 +196,10 @@ function CampaignsTab() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [drafting, setDrafting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [digestNotice, setDigestNotice] = useState(null);
+  const [preview, setPreview] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,6 +214,41 @@ function CampaignsTab() {
     }
   }, []);
 
+  const handleDraftWeeklyDigest = async () => {
+    setDrafting(true);
+    setDigestNotice(null);
+    try {
+      const res = await runWeeklyDigest(false);
+      setDigestNotice({
+        ok: res.success === true,
+        message: res.success
+          ? `Weekly digest drafted from ${res.sourceItemsCount} item(s). Draft id: ${res.draftId}`
+          : res.message || 'No action taken.',
+      });
+    } catch (err) {
+      setDigestNotice({ ok: false, message: err.message });
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const handlePreviewDigest = async () => {
+    setPreviewing(true);
+    setDigestNotice(null);
+    try {
+      const res = await runWeeklyDigest(true);
+      if (res.success) {
+        setPreview(res);
+      } else {
+        setDigestNotice({ ok: false, message: res.message || 'No content to preview.' });
+      }
+    } catch (err) {
+      setDigestNotice({ ok: false, message: err.message });
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       load();
@@ -207,10 +262,68 @@ function CampaignsTab() {
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Megaphone className="h-4 w-4" /> Email Campaigns (read-only)
           </h3>
-          <Button variant="ghost" size="sm" onClick={load} className="gap-1.5 h-7">
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePreviewDigest}
+              disabled={previewing || drafting}
+              className="gap-1.5 h-7"
+            >
+              {previewing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
+              Preview Digest
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDraftWeeklyDigest}
+              disabled={drafting || previewing}
+              className="gap-1.5 h-7"
+            >
+              {drafting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <PenTool className="h-3.5 w-3.5" />
+              )}
+              Draft Weekly Digest
+            </Button>
+            <Button variant="ghost" size="sm" onClick={load} className="gap-1.5 h-7">
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            </Button>
+          </div>
         </div>
+        {digestNotice && (
+          <p
+            className={`text-sm flex items-center gap-2 ${digestNotice.ok ? 'text-emerald-600' : 'text-destructive'}`}
+          >
+            {digestNotice.ok ? (
+              <CheckCircle className="h-4 w-4" />
+            ) : (
+              <AlertCircle className="h-4 w-4" />
+            )}
+            {digestNotice.message}
+          </p>
+        )}
+        {preview && (
+          <Card className="p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">{preview.title}</p>
+              <Button variant="ghost" size="sm" className="h-7" onClick={() => setPreview(null)}>
+                Close
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Preview only, nothing saved. {preview.sourceItemsCount} source item(s).
+            </p>
+            <pre className="text-xs whitespace-pre-wrap max-h-96 overflow-auto rounded-md bg-muted p-3">
+              {preview.content}
+            </pre>
+          </Card>
+        )}
         {campaigns.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No campaigns found. Create campaigns in Klaviyo.
