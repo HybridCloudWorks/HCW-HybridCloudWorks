@@ -28,7 +28,20 @@
       "PowerShell(gh pr list:*)",
       "PowerShell(.\\scripts\\validate-repository-structure.ps1)",
       "Bash(npx vitest run:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git rm *)",
+      "Bash(terraform fmt *)",
+      "Bash(terraform validate *)",
+      "Bash(terraform plan *)",
+      "Bash(gh api *)",
+      "Bash(gh pr list:*)",
+      "Bash(gh run list:*)",
+      "Read(//c/Users/saulp/Workspace/Site-Main/**)",
+      "Bash(git push *)",
+      "Bash(gh pr *)"
     ]
   }
 }

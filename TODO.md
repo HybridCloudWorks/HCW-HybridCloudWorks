@@ -24,28 +24,31 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 10 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 5 |
-| Low | 2 |
+| Medium | 7 |
+| Low | 3 |
 
-**The next move is a function deploy.** The Function App holds zero deployed
-functions, and a single deploy run settles three unknowns at once — whether the
-rebuilt identity authenticates, whether the smoke test passes through
-Cloudflare, and whether the origin-secret handshake works end to end. Nothing
-below is a prerequisite for it.
+**The next move is the data-migration rehearsal.** The function deploy this
+paragraph used to point at happened on 2026-08-20: 80 functions live, the
+rebuilt identity authenticates, the smoke test passes through Cloudflare, and
+the origin-secret handshake is proven by an anonymous rate-limited route
+answering 200 through Cloudflare and 403 at the origin. The
+[Migration-Runbook](.github/wiki/Migration-Runbook.md) carries the sequence
+from here; nothing below is a prerequisite for its first steps.
 
 ---
 
 ## MEDIUM
 
 ### T-321 — Finish the post-rebuild re-pointing
-**Files:** `infra/`, HCP Terraform workspace, Entra directory
+**Files:** Key Vault `kv-site-prod-cus-01`
 
 The centralus rebuild, the CAF renaming, the bootstrap-identity swap, the Key
-Vault re-seed, the origin lock and the client re-pointing are all **done** — see
-CHANGELOG and REVIEW.md Part 1. What remains:
+Vault re-seed, the origin lock, the client re-pointing, the first deploy from
+`main` and the end-to-end origin-secret proof are all **done** — see CHANGELOG
+and REVIEW.md Part 1. What remains:
 
 - **Two runtime-read Key Vault secrets are missing**: `GCP-SERVICE-ACCOUNT-JSON`
   and `GITHUB-APP-PRIVATE-KEY`. Both are multi-line blobs resolved by
@@ -53,27 +56,59 @@ CHANGELOG and REVIEW.md Part 1. What remains:
   which is exactly why the diff that verified the other 19 did not catch them —
   it compared against `@Microsoft.KeyVault(...)` references, and these have
   none. Procedure in REVIEW.md §3.1; seed with `--file`, not `--value`.
-- **Prove the deploy end to end from `main`.** The first dispatch (2026-08-20)
-  got as far as Azure Login and failed with `AADSTS700213` — which exposed a
-  real defect, now fixed: GitHub composes the OIDC subject with numeric org and
-  repository IDs embedded
-  (`repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:...`), not
-  the documented `repo:<org>/<repo>:...`. The identity trusted only the
-  documented form, so **every deploy would have failed at login, including from
-  `main`** — invisible until now because all four deploy workflows were
-  disabled. Both subject forms are trusted as of 2026-08-20.
 
-  Still unproven: deploys are gated to `refs/heads/main`
-  (`github_deploy_ref`), so a dispatch from a feature branch cannot
-  authenticate by design. Merge, then dispatch `deploy-functions.yml` from
-  `main`. If it still fails at login, compare the presented subject in the
-  error against the `federated_subjects` output — that output exists for
-  exactly this comparison.
-- **The origin-secret handshake is unproven end to end.** The IP half is
-  demonstrated (origin 403s, Cloudflare path reaches the app); the header half
-  is structurally verified only, because there is no deployed code to observe
-  it. If anonymous rate-limited endpoints throw after the first deploy, the
-  secret is mismatched — rollback is `functions_origin_lock_enabled = false`.
+  The data migration does **not** need the first one: `migrate-data.yml`
+  authenticates to GCP through Workload Identity Federation and the scripts
+  refuse a service-account key in CI. It is only the ported runtime code paths
+  that still read it.
+
+### T-322 — Six HTTP handlers exceed the Flex Consumption 230 s cap
+**Files:** `functions/src/functions/*` (the six below) · `frontend/src/lib/api.js` · `functions/host.json`
+
+Flex Consumption hard-caps an HTTP response at **230 s** at the load balancer;
+the setting in `host.json` cannot raise it. Non-HTTP triggers are unbounded
+(30 min default). Six of Site-Main's HTTP handlers declare longer server
+timeouts, none of them enqueue, and all of them make the browser wait — and on
+five of them the client's own abort already disagrees with the server:
+
+| Handler | Server | Client abort today | Port as |
+| --- | --- | --- | --- |
+| `generateListenAndLearn` | 540 s / 1 GiB | **20 s** (no entry) | async — episodes already save incrementally |
+| `refreshToolServiceCache` | 300 s / **4 GiB** | 120 s | async; the memory is likely already solved by the Price List Query API move recorded in `main.tf` |
+| `forgeArticle` | 300 s / 1 GiB | 300 s | async; also called in a sequential bulk loop |
+| `fetchRssFeedsManual` | 300 s | 45 s, retried | 202 + reuse the scheduled job |
+| `generateWeeklyDigest` | 300 s | **20 s** (no entry) | async; the `dryRun` preview needs a fast path |
+| `batchInspect` | 300 s | 45 s, retried | async — hardcoded `sleep(4000)` × N |
+
+Reuse the existing job pattern — a `lab_jobs` document plus a client poll at
+5–10 s (`runToolExpertModeValidation`, `enqueueLabJob` already do this). Fix
+the client/server timeout mismatch in the same change. There is no SSE or
+streaming anywhere, so the cap bites only these six. For the background
+handlers set `functionTimeout` ≥ 10 min in `host.json`;
+`generateAiCoverOnContentTrigger`'s 540 s must stay under the 900 s rising-edge
+claim window.
+
+### T-409 — Port the visitor-facing upstream delta (Site-Main @ `088f458`)
+**Files:** `frontend/src/components/{shared,architecture}/` · `frontend/src/data/{ansible,vmware}/education.js`
+
+Of the 140 files Site-Main added since the 2026-07-22 import, these are the
+ones a visitor would notice — Firebase-free and small (~590 lines + two data
+files). Everything else is a refactor the visitor cannot see (D2), a scoped
+project (T-410), or Firebase plumbing that must never come across.
+
+| File | Lines | Visitor gets | Cost |
+| --- | --- | --- | --- |
+| `components/shared/RichTextBody.jsx` | 47 | richer article bodies | needs `CodeBlock`, recover from the deletions |
+| `components/shared/CoderCornerSnippet.jsx` | 78 | code snippets in blogs | same dependency |
+| `components/architecture/WafAssessment.jsx` + `config/wellArchitectedPillars.js` | 114 + 178 | WAF radar and pillar scores | none |
+| `components/architecture/FeaturedArchitecture.jsx` + `lib/colorClasses.js` | 124 + 47 | featured-architecture hero | none |
+| `data/ansible/education.js`, `data/vmware/education.js` | 206 + 199 | **genuinely new content** (95-line stubs here) | copy the data only |
+
+Each wires into a template both sides rewrote (`ArchitectureDetailTemplate`,
+`BlogDetailTemplate`, `FrameworkDetailTemplate`, `pages/{aws,azure}/ArchitecturePage`)
+— hand-wire, do not merge. Five tests ride along. **Never re-sync `frontend/`
+from Site-Main**: it encapsulated Firebase behind `lib/data/` (364 call sites);
+we eliminated it (0 imports). The two are incompatible by construction.
 
 ### T-302 — Blob GC is still unwritten (flag split done)
 **File:** `functions/src/functions/schedulers.js`
@@ -92,25 +127,6 @@ The finding's stated blocker does **not** apply — `queryDocs` does not truncat
 (corrected; see CHANGELOG). The real constraint is that `fetchAll` materialises
 the whole result set, so the enumeration needs a cursor rather than a bigger
 window. **Make the first version dry-run regardless.**
-
-### T-318 — Route image rendering through `resolveMediaUrl()`
-**Files:** ~30 components rendering `imageUrl` / `heroImageUrl` / `aiImageUrls`
-
-**Now unblocked.** This was conditional on the same-origin/cross-origin
-decision. That decision is settled: the origin lock restricts the Function App
-to Cloudflare IP ranges, so the API is reachable only at
-`https://api-azure.hybridcloudworks.com/api` and the topology is **cross-origin
-by construction**, not by preference.
-
-Uploaded-image URLs are stored site-relative (`/api/public/media/...`) so a
-topology change cannot invalidate rows already in Cosmos. Components render them
-straight into `<img src>`, which is correct only in the same-origin shape. Every
-render site must now call `resolveMediaUrl()` from
-`frontend/src/lib/functionsBase.js`; the helper and its tests already exist.
-
-Watch for the legacy case the original note flagged: some documents hold
-absolute source-system URLs. `resolveMediaUrl()` must pass those through
-untouched rather than prefixing them.
 
 ### T-319 — Bound `items[]` within an `rss_cache` document
 **Files:** `functions/src/lib/public-reads.js` (getFeed) · `functions/src/functions/schedulers.js` (syncRssFeeds)
@@ -177,9 +193,50 @@ Sequence it as one PR that renames in code, with the workspace keys renamed in
 the same maintenance window, and a plan run immediately after to prove nothing
 became unset. **Not urgent** — the current names are verbose, not wrong.
 
+### T-508 — `heal-computed-properties` needs an ARM role, not a data-plane one
+**Files:** `.github/workflows/heal-computed-properties.yml` · `scripts/heal-computed-properties.mjs` · `infra/oidc.tf`
+
+Run 32420399977 (2026-08-20) failed with `403 … cannot be authorized by AAD
+token in data plane` on `PUT /dbs/hcw/colls/content`. The healer calls
+`container.replace()` to set `computedProperties`, and that is a
+**control-plane** operation: the deploy identity's container-scoped Cosmos
+Built-in Data Contributor can never satisfy it, no matter the scope.
+
+Two fixes, pick one: grant the identity **Cosmos DB Operator** on the account
+(ARM role, `azurerm_role_assignment`, not `azurerm_cosmosdb_sql_role_assignment`)
+and keep the SDK call; or rewrite the step as
+`az cosmosdb sql container update --idx-policy/--computed-properties` after
+`azure/login`, which uses the ARM token the login already minted. The second
+keeps the identity's data-plane footprint at zero for a job that does not read
+data.
+
+Not urgent: `cp_sortDate` only matters once `content` and `blogs` hold
+documents, which is the production-import phase. The workflow should stay
+dispatch-only until then.
+
 ---
 
 ## LOW
+
+### T-410 — Upstream delta deferred as scoped projects, not cherry-picks
+**Files:** `frontend/src/` (admin)
+
+From the same 140-file inventory as T-409, these are real features that land
+on the conflict set and need design, not a copy:
+
+- **Admin queue cluster** — 11 files, ~2,300 lines, plus `ContentReviewBrowser`
+  (744) and the browser trio. A substantial editor upgrade; touches 5 files
+  both sides rewrote.
+- **`ArchitectureListingPage`** — the one net-new visitor route; depends on the
+  deleted `useArchitectureDesignData` hook.
+- **drawio tooling** — 5 files; only if wanted.
+- **`ListenAndLearn`** — weakest candidate: the most Firebase-entangled, needs
+  an `onSnapshot` → polling rewrite.
+
+Explicitly **not** porting: `EducationTemplate.jsx` (712) and the six other
+`data/*/education.js` — Site-Main extracted content this repo still ships
+inline; the visitor sees nothing change. And never: `lib/data/*` (37) and
+`lib/auth/*` (4), Site-Main's Firebase encapsulation layer.
 
 ### T-408 — `test:admin` names files explicitly rather than globbing
 **File:** `frontend/package.json`
@@ -216,9 +273,8 @@ remains unwritten:
 | Unit | `api.js` with `VITE_BACKEND_PROVIDER=azure` | resolves to `VITE_AZURE_FUNCTIONS_URL` | API base resolution |
 | Unit | `cms-content.list` limit `abc` / `0` / `-5` / `99999` | clamped to [1,500] | Input bounds |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | Partial-update safety |
-| Unit | `resolveMediaUrl()` on a site-relative path and a legacy absolute URL | prefixes the first, passes the second through untouched | T-318 |
+| Integration | the six T-322 handlers as jobs | 202 within 1 s; job document reaches a terminal state | T-322 |
 
-One test worth adding as soon as code is deployed: an anonymous request through
-Cloudflare succeeds while the same request to the `azurewebsites.net` origin
-returns 403. That is the only assertion proving the origin lock end to end, and
-it cannot be written until there is a route to call.
+The origin-lock assertion — an anonymous request through Cloudflare succeeds
+while the same request to the `azurewebsites.net` origin returns 403 — now
+runs on every deploy as the last step of `deploy-functions.yml`.

@@ -13,11 +13,13 @@
     Wave 2 - everything that is a Terraform output, read from the workspace's
              applied state via the HCP Terraform API (the same token
              set-tfc-variables.ps1 resolves): CLIENT_ID (client_id),
-             APP_HOSTNAME (function_hostname), FUNCTIONS_URL (the same
-             hostname plus the /api route prefix), RESOURCE_GROUP
-             (web_resource_group), FUNCTIONS_STORAGE_ACCOUNT
-             (functions_storage_account), and the COSMOS_ENDPOINT secret
-             (cosmos_endpoint). RESOURCE_GROUP and FUNCTIONS_STORAGE_ACCOUNT
+             APP_HOSTNAME (function_hostname), FUNCTIONS_URL (api_base_url),
+             FUNCTION_APP_NAME, RESOURCE_GROUP (web_resource_group),
+             FUNCTIONS_STORAGE_ACCOUNT, STORAGE_ACCOUNT,
+             STORAGE_RESOURCE_GROUP, COSMOS_ENDPOINT (a variable — it is a
+             public URL) and, once infra/scratch.tf is enabled, the three
+             *_SCRATCH_* / SCRATCH_* values the migration rehearsal targets.
+             RESOURCE_GROUP and FUNCTIONS_STORAGE_ACCOUNT
              are deliberately NOT wave-1 parameters even though their values
              are predictable from infra/ defaults: a hardcoded copy drifts
              silently when the code changes, an output cannot — and their
@@ -106,6 +108,15 @@ param(
   # see lib/deploy-console.ps1 for why nothing here is a required flag.
   [string] $TenantId,
   [string] $SubscriptionApp,
+
+  # Wave 1 too, but optional and never discovered: the GCP Workload Identity
+  # Federation provider (projects/<n>/locations/global/workloadIdentityPools/
+  # <pool>/providers/<provider>) and the read-only service-account email that
+  # migrate-data.yml authenticates as. Both are identifiers, not secrets. Set
+  # them once the binding exists (Migration-Runbook step 2); omitted, they
+  # are left alone.
+  [string] $GcpWorkloadIdentityProvider,
+  [string] $GcpServiceAccount,
   [switch] $SetTfApiToken
 )
 
@@ -273,6 +284,12 @@ Write-Step 'Wave 1: values known before the first apply'
 
 Set-RepoVariable -Name 'TENANT_ID' -Value $TenantId
 Set-RepoVariable -Name 'SUBSCRIPTION_ID' -Value $SubscriptionApp
+if ($GcpWorkloadIdentityProvider) {
+  Set-RepoVariable -Name 'GCP_WORKLOAD_IDENTITY_PROVIDER' -Value $GcpWorkloadIdentityProvider
+}
+if ($GcpServiceAccount) {
+  Set-RepoVariable -Name 'GCP_SERVICE_ACCOUNT' -Value $GcpServiceAccount
+}
 
 # ===========================================================================
 # 3. Wave 2 — Terraform outputs, via the workspace's current state
@@ -286,8 +303,10 @@ if (-not $script:tfcToken) {
   Write-Info 'No HCP Terraform token found (TFE_TOKEN, credentials.tfrc.json).'
   Write-Info 'Skipping the state read — run `terraform login` and re-run this'
   Write-Info 'script after the first apply to seed CLIENT_ID, APP_HOSTNAME,'
-  Write-Info 'FUNCTIONS_URL, RESOURCE_GROUP, FUNCTIONS_STORAGE_ACCOUNT and'
-  Write-Info 'COSMOS_ENDPOINT.'
+  Write-Info 'FUNCTIONS_URL, FUNCTION_APP_NAME, RESOURCE_GROUP,'
+  Write-Info 'FUNCTIONS_STORAGE_ACCOUNT, STORAGE_ACCOUNT, STORAGE_RESOURCE_GROUP,'
+  Write-Info 'COSMOS_ENDPOINT and — once the scratch estate is applied —'
+  Write-Info 'COSMOS_SCRATCH_ENDPOINT, STORAGE_SCRATCH_ACCOUNT, SCRATCH_RESOURCE_GROUP.'
 } else {
   if (-not $Organization -or -not $Workspace) {
     $backend = Get-BackendConfig -BackendPath (Join-Path $PSScriptRoot '../infra/backend.tf')
@@ -337,7 +356,26 @@ if ($outputs) {
     @{ output = 'function_app_name'; kind = 'variable'; name = 'FUNCTION_APP_NAME'; transform = { param($v) $v } }
     @{ output = 'web_resource_group'; kind = 'variable'; name = 'RESOURCE_GROUP'; transform = { param($v) $v } }
     @{ output = 'functions_storage_account'; kind = 'variable'; name = 'FUNCTIONS_STORAGE_ACCOUNT'; transform = { param($v) $v } }
-    @{ output = 'cosmos_endpoint'; kind = 'secret'; name = 'COSMOS_ENDPOINT'; transform = { param($v) $v } }
+    # A VARIABLE, not a secret, as of 2026-08-20. It was seeded as a secret
+    # until then, which was wrong twice over: the value is a public endpoint
+    # URL and a non-sensitive Terraform output, and a secret cannot be read
+    # back — so nobody could confirm which account a workflow was pointed at.
+    # The old secret of the same name is removed below so the workflows'
+    # `vars.COSMOS_ENDPOINT` reference cannot silently shadow it.
+    @{ output = 'cosmos_endpoint'; kind = 'variable'; name = 'COSMOS_ENDPOINT'; transform = { param($v) $v } }
+    # The CONTENT storage account and its group — what migrate-data.yml's
+    # storage modes target when target=production (behind the Terraform gate).
+    # Distinct from FUNCTIONS_STORAGE_ACCOUNT / RESOURCE_GROUP, which name the
+    # Functions host account deploy-functions.yml opens a window on.
+    @{ output = 'storage_account'; kind = 'variable'; name = 'STORAGE_ACCOUNT'; transform = { param($v) $v } }
+    @{ output = 'storage_resource_group'; kind = 'variable'; name = 'STORAGE_RESOURCE_GROUP'; transform = { param($v) $v } }
+    # The rehearsal estate (infra/scratch.tf). These outputs are null while
+    # cosmos_scratch_enabled / storage_scratch_enabled are false, and the loop
+    # below leaves an absent output's variable unchanged — so running this
+    # before the scratch apply is harmless, and running it after seeds them.
+    @{ output = 'cosmos_scratch_endpoint'; kind = 'variable'; name = 'COSMOS_SCRATCH_ENDPOINT'; transform = { param($v) $v } }
+    @{ output = 'storage_scratch_account'; kind = 'variable'; name = 'STORAGE_SCRATCH_ACCOUNT'; transform = { param($v) $v } }
+    @{ output = 'scratch_resource_group'; kind = 'variable'; name = 'SCRATCH_RESOURCE_GROUP'; transform = { param($v) $v } }
   )
   foreach ($entry in $waveTwo) {
     $raw = $outputs[$entry.output]
@@ -350,6 +388,18 @@ if ($outputs) {
       Set-RepoVariable -Name $entry.name -Value $value
     } else {
       Set-RepoSecret -Name $entry.name -Value $value
+    }
+  }
+
+  # COSMOS_ENDPOINT was seeded as a SECRET until 2026-08-20 (see the wave-2
+  # comment above). Remove the stale copy so `vars.COSMOS_ENDPOINT` is the
+  # only spelling and nobody later "fixes" a workflow back to `secrets.`.
+  if ($existingSecrets -contains 'COSMOS_ENDPOINT') {
+    if ($PSCmdlet.ShouldProcess('secret COSMOS_ENDPOINT', 'delete the misplaced repository secret')) {
+      Invoke-Gh @('secret', 'delete', 'COSMOS_ENDPOINT', '-R', $Repository) | Out-Null
+      Write-Act 'delete  COSMOS_ENDPOINT secret (it is a variable now)'
+    } else {
+      Write-Act 'would delete  COSMOS_ENDPOINT secret (it is a variable now)'
     }
   }
 }
@@ -378,7 +428,11 @@ Write-Step 'Not set by this script'
 Write-Info 'AZURE_STATIC_WEB_APPS_API_TOKEN - fetch at deploy time after azure/login'
 Write-Info '                (az staticwebapp secrets list); storing it is the'
 Write-Info '                placement error Variables-And-Secrets documents.'
-Write-Info 'COSMOS_KEY    - must stay unset (CHECKLIST §7).'
+Write-Info 'COSMOS_KEY    - must stay unset (REVIEW §4.3); both Cosmos accounts are keyless'
+Write-Info '                and scripts/lib/cli.mjs refuses to start if it is set.'
+Write-Info 'FIREBASE_SERVICE_ACCOUNT_JSON - never. migrate-data.yml authenticates to GCP'
+Write-Info '                through Workload Identity Federation; in CI the scripts'
+Write-Info '                refuse a service-account key file outright.'
 Write-Info 'VITE_ENTRA_*  - from the manual Entra app registrations.'
 Write-Info 'DOCKERHUB_*   - CI-runner prerequisites; the runner is disabled.'
 

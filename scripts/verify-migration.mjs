@@ -23,31 +23,36 @@
  * exactly what was imported.
  *
  * Prerequisites:
- *   COSMOS_ENDPOINT, optionally COSMOS_KEY (omit for Entra/managed identity)
+ *   COSMOS_ENDPOINT; DefaultAzureCredential for auth (COSMOS_KEY is an error)
  *
  * Usage:
  *   node scripts/verify-migration.mjs --from export/
  *   node scripts/verify-migration.mjs --from export/ --sample 25
  *   node scripts/verify-migration.mjs --from export/ --collections content,admins
+ *   node scripts/verify-migration.mjs --from export/ --show-samples   # terminal only
  *
- * Exits non-zero if anything fails to reconcile.
+ * Exits non-zero if anything fails to reconcile. Writes the full report to
+ * --report and a redacted --report.summary.json beside it; the full report
+ * names missing ids and mismatched field values, the summary carries counts.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { flattenManifest } from './lib/migration-manifest.mjs';
-import { parseArgs, splitList, log, connectCosmos, withRetry } from './lib/cli.mjs';
+import { parseArgs, splitList, log, connectCosmos, withRetry, writeReport, showSamples } from './lib/cli.mjs';
 
 // Properties Cosmos DB adds to every document. Not a migration defect.
 const COSMOS_SYSTEM_PROPS = new Set(['_rid', '_self', '_etag', '_attachments', '_ts']);
 
 let args;
+let samples;
 try {
   args = parseArgs(process.argv.slice(2), {
-    flags: [],
+    flags: ['show-samples'],
     options: ['from', 'collections', 'sample', 'report'],
   });
+  samples = showSamples(args.flags['show-samples']);
 } catch (err) {
   log.error(err.message);
   process.exit(1);
@@ -281,13 +286,21 @@ async function main() {
     for (const r of failed) {
       log.warn(`${r.container}:`);
       if (r.error) log.warn(`    error: ${r.error}`);
-      if (r.missingIds?.length) log.warn(`    missing from Cosmos: ${r.missingIds.slice(0, 10).join(', ')}${r.missingIds.length > 10 ? ` … (+${r.missingIds.length - 10})` : ''}`);
-      if (r.extraIds?.length) log.warn(`    present in Cosmos but not in the export: ${r.extraIds.slice(0, 10).join(', ')}${r.extraIds.length > 10 ? ` … (+${r.extraIds.length - 10})` : ''}`);
-      for (const m of (r.fieldMismatches ?? []).slice(0, 5)) {
-        log.warn(`    ${m.id}:`);
-        for (const d of m.differences.slice(0, 5)) {
-          log.warn(`        ${d.path}: expected ${d.expected}, got ${d.actual}`);
+      // Ids and field previews are printed only at a terminal. In CI the
+      // counts are the signal; the full report on the runner has the rest.
+      if (samples) {
+        if (r.missingIds?.length) log.warn(`    missing from Cosmos: ${r.missingIds.slice(0, 10).join(', ')}${r.missingIds.length > 10 ? ` … (+${r.missingIds.length - 10})` : ''}`);
+        if (r.extraIds?.length) log.warn(`    present in Cosmos but not in the export: ${r.extraIds.slice(0, 10).join(', ')}${r.extraIds.length > 10 ? ` … (+${r.extraIds.length - 10})` : ''}`);
+        for (const m of (r.fieldMismatches ?? []).slice(0, 5)) {
+          log.warn(`    ${m.id}:`);
+          for (const d of m.differences.slice(0, 5)) {
+            log.warn(`        ${d.path}: expected ${d.expected}, got ${d.actual}`);
+          }
         }
+      } else {
+        if (r.missingIds?.length) log.warn(`    missing from Cosmos: ${r.missingIds.length}`);
+        if (r.extraIds?.length) log.warn(`    present in Cosmos but not in the export: ${r.extraIds.length}`);
+        if (r.fieldMismatches?.length) log.warn(`    documents with field mismatches: ${r.fieldMismatches.length}`);
       }
     }
   }
@@ -310,9 +323,30 @@ async function main() {
     results,
   };
 
-  mkdirSync(dirname(reportPath), { recursive: true });
-  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-  log.ok(`Report written to ${reportPath}`);
+  const summary = {
+    generatedAt: report.generatedAt,
+    cosmosEndpoint: report.cosmosEndpoint,
+    database: report.database,
+    sampleSize,
+    totals: report.totals,
+    perContainer: Object.fromEntries(
+      results.map((r) => [
+        r.container,
+        {
+          passed: r.passed,
+          sourceCount: r.sourceCount,
+          targetCount: r.targetCount,
+          missing: r.missingIds?.length ?? 0,
+          extra: r.extraIds?.length ?? 0,
+          fieldMismatches: r.fieldMismatches?.length ?? 0,
+          error: r.error ? 'yes' : undefined,
+        },
+      ])
+    ),
+  };
+
+  const { summaryPath } = writeReport(reportPath, report, summary);
+  log.ok(`Report written to ${reportPath} (summary: ${summaryPath})`);
 
   if (failed.length) {
     log.error(`${failed.length} container(s) did not reconcile`);
