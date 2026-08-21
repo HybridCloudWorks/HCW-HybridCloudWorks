@@ -35,6 +35,11 @@
  *               Also: exists in Firestore with neither a rules match nor a
  *               writer at the baseline (legacy residue the 2026-08-21 preflight
  *               surfaced). Not provisioned; the owner decides from the counts.
+ *               OWNER DECISION 2026-08-21 (runbook step 8): none of the fifteen
+ *               probe entries migrates. The ten declared-but-unwritten ones are
+ *               empty in Firestore; the five legacy ones hold seven documents
+ *               between them and nothing reads them. They stay listed so the
+ *               preflight gate passes for a reason rather than by omission.
  *               The preflight decides: 0 docs → drop, >0 docs → promote to
  *               `migrate` and work out where they came from before cutover.
  *

@@ -152,7 +152,7 @@ deployed to Azure.
 | 1     | Decouple from Firebase behind interfaces | Both          | **DONE on both sides** — here: zero `firebase/*` imports; Site-Main: v1.7.0 `lib/data/` + `lib/auth/` encapsulation |
 | 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **80 functions deployed 2026-08-20** |
 | 3     | Port the API and workers                 | This repo     | **In progress** — 65 of 89 HTTP registered, 4 of 16 timers (3 stubs), 0 of 11 triggers; see §4 |
-| 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **Rehearsal verified on scratch 2026-08-21** — 8,023 documents, 62 containers, `failed: 0`, first pass. Remaining exit: the same against production, in the production-import phase |
+| 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **Rehearsal phase complete on scratch 2026-08-21** — Cosmos 8,023 docs / 62 containers / 0 failed; Storage 1,438 objects / 3.17 GiB, idempotent; production proven empty and locked. Remaining exit: the same against production, in the production-import phase (opens with `migration_writer_enabled = true`) |
 | 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |
 | 6     | Decommission and archive                 | Both          | GCP down, Site-Main archived                                    |
 
@@ -594,7 +594,8 @@ compare byte-for-byte — the check that catches a truncated stream.
 | `database/certifications/` `database/blogs/` `database/speakerevents/` | the family's container | `database/` | migrate |
 | `image-gallery/` `character/` `listen-and-learn/` `draft-images/` | `content` | preserved | migrate |
 | `published-images/` | `content` | preserved | migrate — **owner flag**: public in Firebase; `content` is not a public container here. A disclosure decision for the API, not for the copy |
-| `thumbnails/` `content-submissions/` `designs/` | `content` | preserved | probe — `thumbnails/` is empty; `content-submissions/` (3 objects) and `designs/` (1) were surfaced by the 2026-08-21 inventory; owner decides at runbook step 10 |
+| `content-submissions/` `designs/` | `content` | preserved | migrate — surfaced by the 2026-08-21 inventory (3 + 1 objects); owner decision 2026-08-21 |
+| `thumbnails/` | — | — | skip: empty, and nothing on Azure reads thumbnails (owner decision 2026-08-21) |
 | `articles/` | — | — | skip: 90-day scraped images the RSS job regenerates (the Azure lifecycle rule for them is inert until the scraper writes here) |
 | `uploads/` | — | — | skip: per-user temp keyed by Firebase uid |
 

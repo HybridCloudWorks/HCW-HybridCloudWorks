@@ -138,12 +138,12 @@ and `blogs` for the healer, so those two answer on production even without the d
 
 | # | Question | Decided at | Answer |
 | --- | --- | --- | --- |
-| Q1 | The fifteen `probe` entries (D4): which migrate, which are residue? Preflight 2026-08-21: the original ten are **empty**; the five new ones hold 7 documents between them and none has a reader | runbook step 8 | — (recommendation: drop all fifteen) |
-| Q2 | Storage probes: `thumbnails/` (empty — drop), `content-submissions/` (3 objects), `designs/` (1): copy into `content` or drop? | runbook step 10 | — |
-| Q2b | `covers/` is 3.10 GiB of the 3.17 GiB bucket — 1,011 AI/uploaded covers for 1,142 content documents. Copy all, or only covers still referenced by a document? | before step 10 copy | — (recommendation: copy all; referenced-only pruning is a later cleanup with the document set in hand) |
+| Q1 | The fifteen `probe` entries (D4): which migrate, which are residue? Preflight 2026-08-21: the original ten are **empty**; the five new ones hold 7 documents between them and none has a reader | runbook step 8 | **Decided 2026-08-21: none migrates.** Entries stay as `probe` so the gate passes for a reason |
+| Q2 | Storage probes: `thumbnails/` (empty — drop), `content-submissions/` (3 objects), `designs/` (1): copy into `content` or drop? | runbook step 10 | **Decided 2026-08-21:** `thumbnails/` → `skip`; `content-submissions/` and `designs/` → `migrate` into `content`, prefix preserved |
+| Q2b | `covers/` is 3.10 GiB of the 3.17 GiB bucket — 1,011 AI/uploaded covers for 1,142 content documents. Copy all, or only covers still referenced by a document? | before step 10 copy | **Decided 2026-08-21: copy all.** Referenced-only pruning is a later cleanup with the document set in hand |
 | Q3 | `published-images/` public on Azure? | before Go-Live | — |
 | Q4 | Partition-key list (D3) signed? | before step 9 | — |
-| Q5 | Scratch copy lifetime after sign-off? | step 12 | — |
+| Q5 | Scratch copy lifetime after sign-off? | step 12 | **Decided 2026-08-21: keep through the production dress rehearsal.** Flip `cosmos_scratch_enabled` / `storage_scratch_enabled` off after the production import is verified |
 
 ## Evidence log
 
@@ -159,3 +159,8 @@ and `blogs` for the healer, so those two answer on production even without the d
 | 2026-08-21 | 9 | [Run 32437751076](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32437751076) `mode=rehearse target=scratch` — Azure login via the `environment:data-migration` credential; probe reached `content` on Entra auth in 1.3 s; dry-run 8,023 across 62; **import 8,023/8,023, 0 failed**; reconciliation **62 containers, 0 missing, 0 extra, 0 field mismatches**. First pass, no retries. Summaries verified counts-only | **pass** |
 | 2026-08-21 | 10 | [Run 32438131444](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32438131444) `mode=storage-inventory` — **1,438 objects, 3.17 GiB** (`covers/` 1,011 objects / 3.10 GiB); exit 2 on three unmanifested prefixes: `database/{blogs,speakerevents}/` (13 objects, added as `migrate`), `content-submissions/` (3) and `designs/` (1) (added as `probe`). `thumbnails/`, `draft-images/`, `published-images/` are all empty | gate loop |
 | 2026-08-21 | 11 | [Run 32438525274](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32438525274) `mode=verify target=production` — **60 of 62 containers refused `executeQuery`** (no database-scope role); `content` and `blogs` readable through the healer's container grants and **empty** (0 of 1,142 / 0 of 242). Production is empty and locked. Found a probe flaw: it checked `content`, which the healer grant makes readable, so it said OK instead of `rbac` — probe moved to `system` | **pass** (run shows failed by design) |
+| 2026-08-21 | 10 | [Run 32439102543](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32439102543) `mode=storage-inventory` after #131 — **exit 0**, every prefix manifested, 1,438 objects / 3.17 GiB | **pass** |
+| 2026-08-21 | 10 | [Run 32439235702](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32439235702) `mode=storage-rehearse target=scratch` #1 — firewall window opened/closed by the run; **1,438 copied, 0 unchanged**; verify: every prefix matches on count, bytes, stored MD5 and a 5-per-prefix byte compare; 3.17 GiB in 2 min 35 s | **pass** |
+| 2026-08-21 | 10 | [Run 32439595190](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32439595190) `mode=storage-rehearse target=scratch` #2 — **0 copied, 1,438 unchanged** (idempotency by `gcsmd5`); verify identical | **pass** |
+| 2026-08-21 | 6 | `mode=inventory-gate` — **not run**: needs the Site-Main read token (GitHub App or PAT, UI only) | open |
+| — | 12 | Sign-off — Q1, Q2, Q2b, Q5 decided 2026-08-21 (above); Q3 (`published-images` disclosure) and Q4 (partition-key list) still to sign | open |
