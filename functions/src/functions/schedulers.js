@@ -10,11 +10,9 @@
  * (§6 step 7).
  *
  * The clock is `WEBSITE_TIME_ZONE = America/Chicago` (app-wide); the NCRONTAB
- * expressions below are the §4.2 translations. Three timers from the
- * upstream sixteen are not here: `syncSocialCalendarScheduled`,
- * `fetchBlogListings` and `fetchPodcastFeeds` (external ingestion, the second
- * T-323 PR) and `refreshToolServiceCacheScheduled` (demoted with Cloud
- * Tools). Two delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages`
+ * expressions below are the §4.2 translations. One timer from the upstream
+ * sixteen is not here: `refreshToolServiceCacheScheduled` (demoted with Cloud
+ * Tools, T-322). Two delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages`
  * — and both are dry-run until their own `*_DELETE=true` setting (T-302).
  *
  * Every handler builds its dependencies per invocation, not at module load:
@@ -39,6 +37,10 @@ import { createPlaudTokenRefresh } from '../lib/timers/plaud-token.js';
 import { createAgentHealthCheck } from '../lib/timers/agent-health.js';
 import { createTempStorageCleanup } from '../lib/timers/temp-storage.js';
 import { createForgeScheduled } from '../lib/timers/forge-scheduled.js';
+import { findDuplicateContent, buildDedupFields } from '../lib/cms/content-dedup.js';
+import { createPublerClient, createPublerReconcile } from '../lib/timers/publer-sync.js';
+import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
+import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
 
 const masterDisabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'false';
 
@@ -78,6 +80,20 @@ timer('syncRssFeeds', 'SYNC_RSS_FEEDS', '0 0 */2 * * *', async (context) => {
     errors: results.errors.length,
   };
 });
+
+timer('fetchPodcastFeeds', 'FETCH_PODCAST_FEEDS', '0 30 */2 * * *', async (context) =>
+  // Site-Main: `every 2 hours`, offset from syncRssFeeds.
+  createPodcastIngest({ store, parser: await createPodcastParser(), log: context }).run()
+);
+
+timer('fetchBlogListings', 'FETCH_BLOG_LISTINGS', '0 15 */6 * * *', (context) =>
+  // Site-Main: `every 6 hours`. Skips itself while FIRECRAWL_API_KEY is a stub.
+  createBlogListingsScrape({
+    store,
+    dedup: { findDuplicateContent, buildDedupFields },
+    log: context,
+  }).run()
+);
 
 timer('forgeScheduled', 'FORGE_SCHEDULED', '0 30 3 * * *', async (context) => {
   // Site-Main: `every 24 hours`. Off twice over: this flag and the Auto-Forge
@@ -166,6 +182,12 @@ timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 4 * * 5', async (conte
 });
 
 // ── Platform ─────────────────────────────────────────────────────────────────
+
+timer('syncSocialCalendarScheduled', 'SYNC_SOCIAL_CALENDAR', '0 */5 * * * *', (context) =>
+  // Site-Main: `every 5 minutes`. D12: the live writer of social_posts — this
+  // flag stays off until the cutover delta import is done (§6).
+  createPublerReconcile({ store, client: createPublerClient(), log: context }).run()
+);
 
 timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
   createPlaudTokenRefresh({ store, log: context }).run()
