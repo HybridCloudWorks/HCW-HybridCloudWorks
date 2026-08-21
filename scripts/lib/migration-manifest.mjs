@@ -32,6 +32,9 @@
  *   regenerate— cache; a scheduled job refills it. Do not migrate.
  *   transient — in-flight job/quota records with no value after cutover.
  *   probe     — declared in firestore.rules but with no code that writes it.
+ *               Also: exists in Firestore with neither a rules match nor a
+ *               writer at the baseline (legacy residue the 2026-08-21 preflight
+ *               surfaced). Not provisioned; the owner decides from the counts.
  *               The preflight decides: 0 docs → drop, >0 docs → promote to
  *               `migrate` and work out where they came from before cutover.
  *
@@ -491,6 +494,37 @@ export const COLLECTIONS = [
     name: 'azure_frameworks',
     disposition: 'probe',
     note: 'Written by Site-Main scripts/seed_azure_data.js; no rules match, no reader found at 088f458. Preflight decides.',
+  },
+
+  // ── Surfaced by the first preflight against live Firestore, 2026-08-21 ───
+  // Run 32435842524 found these five exist with documents but had no manifest
+  // entry. None has a firestore.rules match at 088f458. Listed so the gate
+  // passes for a reason rather than by omission; every one is the owner's call
+  // at runbook step 8, and `probe` keeps them out of the container spec.
+  {
+    name: '_rowy_',
+    disposition: 'probe',
+    note: '3 docs + populated `schema` and `users` subcollections. Metadata of Rowy, the Firestore admin GUI (its three service accounts still exist in the GCP project). No Site-Main reference of any kind. Expect: drop.',
+  },
+  {
+    name: 'admin_audit_log',
+    disposition: 'probe',
+    note: '1 doc. The SINGULAR name — Site-Main FINDING-07 renamed the writer to `admin_audit_logs` because the singular had no rules entry; this is the document written before that fix. Expect: drop (the plural holds 2,921).',
+  },
+  {
+    name: 'dashboard_stats',
+    disposition: 'probe',
+    note: '1 doc, `dashboard_stats/v1`, derived counters written by Site-Main cms/dashboard.js from the maintainDashboardStats trigger. The Azure port already keeps this document as `system/dashboard_stats_v1` (functions/src/lib/admin-snapshots.js) and the ported trigger recomputes it — so: no container, regenerate on the far side. Expect: drop from the manifest once the trigger port lands.',
+  },
+  {
+    name: 'drafts',
+    disposition: 'probe',
+    note: '1 doc. Site-Main uses "drafts" only as an EditorListPage scope key, never as a collection. Expect: drop.',
+  },
+  {
+    name: 'summaries',
+    disposition: 'probe',
+    note: '1 doc. No Site-Main reference of any kind. Expect: drop.',
   },
 ];
 

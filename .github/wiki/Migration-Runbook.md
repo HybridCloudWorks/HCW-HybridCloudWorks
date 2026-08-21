@@ -74,7 +74,7 @@ Evidence: the TFC run link; `terraform output cosmos_scratch_endpoint` non-null.
 Read-only Firestore inventory. Produces `preflight-inventory.summary.json` — the first real document
 counts since 2026-07-30. Exit 2 means a collection exists in Firestore that the manifest does not
 name at all; the fix is a manifest entry (`migrate`, `regenerate`, `reseed`, `transient` or
-`probe`), never a workflow change. The ten `probe` entries are reported with their counts and do
+`probe`), never a workflow change. The fifteen `probe` entries are reported with their counts and do
 not fail the run — they are the input to step 8.
 
 ### 6. [CI] `mode=inventory-gate`
@@ -91,7 +91,7 @@ show zero `id-collision` warnings; any other warning code is a tally to read, no
 
 ### 8. [OWN] Decide the probes
 
-From the step 5 and 7 numbers, decide each of the ten `probe` entries: content the site reads
+From the step 5 and 7 numbers, decide each of the fifteen `probe` entries: content the site reads
 (→ `migrate`, which adds a container to the spec — a Terraform change) or residue (→ `transient`, or
 drop the entry). `azure_architectures` and `azure_frameworks` are the two most likely to be real;
 the five `social_*` collections and `users` the most likely to be empty. Same question for the

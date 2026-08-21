@@ -55,11 +55,16 @@ dispositions (counts as of 2026-08-20):
   `tool_service_catalog`.
 - **transient** (5) — job and quota records with no value after cutover: `lab_jobs`,
   `tool_export_quota`, `tool_ai_plan_quota`, `submission_quota`, `lab_public_quota`.
-- **probe** (10) — named so the preflight does not flag them as unmanifested, but not provisioned as
+- **probe** (15) — named so the preflight does not flag them as unmanifested, but not provisioned as
   containers and not migrated until someone decides: `articles`, `metadata`, `users`, the five
   `social_*` collections (`social_workspaces`, `social_libraries`, `social_library_items`,
-  `social_schedule_slots`, `social_analytics`), and the two seeder-written ones added 2026-08-20,
-  `azure_architectures` and `azure_frameworks`. Runbook step 8 decides each from its measured count:
+  `social_schedule_slots`, `social_analytics`), the two seeder-written ones added 2026-08-20
+  (`azure_architectures`, `azure_frameworks`), and five the first live preflight surfaced on
+  2026-08-21 — `_rowy_` (3 docs, Rowy GUI metadata), `admin_audit_log` (1, the pre-FINDING-07
+  singular), `dashboard_stats` (1, derived counters from the `maintainDashboardStats` trigger),
+  `drafts` (1), `summaries` (1). **All ten of the original probes are empty in Firestore**, so the
+  real decisions are the five new ones — and none needs a container: our port already keeps the
+  dashboard document as `system/dashboard_stats_v1` and the ported trigger recomputes it. Runbook step 8 decides each from its measured count:
   content the site reads becomes `migrate` and gets a container; anything else becomes `transient`
   or is dropped from the manifest.
 
@@ -142,4 +147,5 @@ the proof that the production lock holds.
 | 2026-08-20 | 1 | [PR #128](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/pull/128) — tooling, scratch.tf, workflow, docs | CI green |
 | 2026-08-20 | 2 | SA `hcw-migration-reader`; provider `github-actions/providers/github-actions-hcw` (repo id 1268997852, `main` only); repo variables `GCP_*` | done |
 | 2026-08-20 | 3 | Environment `data-migration`, reviewer `saulpatinojr`. Site-Main read token: **not yet** (needs the GitHub UI — App or PAT) | partial |
-| 2026-08-20 | 4 | TFC `cosmos_scratch_enabled` / `storage_scratch_enabled` = true; plan = **86 add, 1 change, 0 destroy** | apply pending |
+| 2026-08-20 | 4 | TFC `cosmos_scratch_enabled` / `storage_scratch_enabled` = true; applied: **86 add, 1 change, 0 destroy**; `set-github-variables.ps1` seeded the scratch variables and moved `COSMOS_ENDPOINT` to a variable | done |
+| 2026-08-21 | 5 | [Run 32435842524](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32435842524) `mode=preflight` — WIF proven; **8,064 documents, 8,004 to migrate**; exit 2 on five unmanifested collections (added as `probe`, PR #130). Summary artifact verified: counts only | gate loop |
