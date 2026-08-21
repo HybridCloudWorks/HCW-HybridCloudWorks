@@ -594,7 +594,8 @@ compare byte-for-byte — the check that catches a truncated stream.
 | `database/certifications/` `database/blogs/` `database/speakerevents/` | the family's container | `database/` | migrate |
 | `image-gallery/` `character/` `listen-and-learn/` `draft-images/` | `content` | preserved | migrate |
 | `published-images/` | `content` | preserved | migrate — **owner flag**: public in Firebase; `content` is not a public container here. A disclosure decision for the API, not for the copy |
-| `thumbnails/` `content-submissions/` `designs/` | `content` | preserved | probe — `thumbnails/` is empty; `content-submissions/` (3 objects) and `designs/` (1) were surfaced by the 2026-08-21 inventory; owner decides at runbook step 10 |
+| `content-submissions/` `designs/` | `content` | preserved | migrate — surfaced by the 2026-08-21 inventory (3 + 1 objects); owner decision 2026-08-21 |
+| `thumbnails/` | — | — | skip: empty, and nothing on Azure reads thumbnails (owner decision 2026-08-21) |
 | `articles/` | — | — | skip: 90-day scraped images the RSS job regenerates (the Azure lifecycle rule for them is inert until the scraper writes here) |
 | `uploads/` | — | — | skip: per-user temp keyed by Firebase uid |
 

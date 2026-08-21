@@ -138,12 +138,12 @@ and `blogs` for the healer, so those two answer on production even without the d
 
 | # | Question | Decided at | Answer |
 | --- | --- | --- | --- |
-| Q1 | The fifteen `probe` entries (D4): which migrate, which are residue? Preflight 2026-08-21: the original ten are **empty**; the five new ones hold 7 documents between them and none has a reader | runbook step 8 | — (recommendation: drop all fifteen) |
-| Q2 | Storage probes: `thumbnails/` (empty — drop), `content-submissions/` (3 objects), `designs/` (1): copy into `content` or drop? | runbook step 10 | — |
-| Q2b | `covers/` is 3.10 GiB of the 3.17 GiB bucket — 1,011 AI/uploaded covers for 1,142 content documents. Copy all, or only covers still referenced by a document? | before step 10 copy | — (recommendation: copy all; referenced-only pruning is a later cleanup with the document set in hand) |
+| Q1 | The fifteen `probe` entries (D4): which migrate, which are residue? Preflight 2026-08-21: the original ten are **empty**; the five new ones hold 7 documents between them and none has a reader | runbook step 8 | **Decided 2026-08-21: none migrates.** Entries stay as `probe` so the gate passes for a reason |
+| Q2 | Storage probes: `thumbnails/` (empty — drop), `content-submissions/` (3 objects), `designs/` (1): copy into `content` or drop? | runbook step 10 | **Decided 2026-08-21:** `thumbnails/` → `skip`; `content-submissions/` and `designs/` → `migrate` into `content`, prefix preserved |
+| Q2b | `covers/` is 3.10 GiB of the 3.17 GiB bucket — 1,011 AI/uploaded covers for 1,142 content documents. Copy all, or only covers still referenced by a document? | before step 10 copy | **Decided 2026-08-21: copy all.** Referenced-only pruning is a later cleanup with the document set in hand |
 | Q3 | `published-images/` public on Azure? | before Go-Live | — |
 | Q4 | Partition-key list (D3) signed? | before step 9 | — |
-| Q5 | Scratch copy lifetime after sign-off? | step 12 | — |
+| Q5 | Scratch copy lifetime after sign-off? | step 12 | **Decided 2026-08-21: keep through the production dress rehearsal.** Flip `cosmos_scratch_enabled` / `storage_scratch_enabled` off after the production import is verified |
 
 ## Evidence log
 
