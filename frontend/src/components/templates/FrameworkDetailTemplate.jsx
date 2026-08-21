@@ -1,6 +1,6 @@
 /* eslint-disable complexity */
 import React, { lazy, Suspense } from 'react';
-import DOMPurify from 'dompurify';
+import RichTextBody from '@/components/shared/RichTextBody';
 import { Helmet } from 'react-helmet-async';
 import { useParams, Link } from 'react-router-dom';
 import { usePublicData } from '@/hooks/usePublicData';
@@ -162,9 +162,9 @@ export default function FrameworkDetailTemplate({ provider = 'aws' }) {
         <TabsContent value="overview" className="mt-6">
           <div className="grid md:grid-cols-3 gap-6">
             <div className="md:col-span-2 prose prose-invert max-w-none">
-              {framework.overviewHtml ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(framework.overviewHtml) }}
+              {framework.overviewHtml || framework.postContent || framework.blogDraft ? (
+                <RichTextBody
+                  value={framework.overviewHtml || framework.postContent || framework.blogDraft}
                 />
               ) : (
                 <div className="space-y-4">

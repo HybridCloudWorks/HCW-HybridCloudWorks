@@ -721,7 +721,7 @@ Add for the migration:
 | AI handlers default to Vertex / ADC, which has no Azure equivalent | **High** | §4. The router's `azure` branch has no account behind it; route every AI RPC to a direct provider (Anthropic / OpenAI) keyed from Key Vault before porting the 17 RPCs |
 | Cost overrun from hourly resources                 | **High** | Architecture_Plan §3; cost gate before decommission                 |
 | Collections missed by the migration inventory      | **High** | §5. One manifest drives migrator, verifier and Terraform; `preflight` exits 2 on anything unmanifested; the inventory gate runs Site-Main's own diff |
-| Feature delta never ported — site regresses against what visitors have today | Medium | §0 disposition; T-409 is the list; port before cutover, not after |
+| Feature delta never ported — site regresses against what visitors have today | Closed | §0 disposition; T-409 ported 2026-08-21 (the D1 list, with tests); D2/D3 stay deliberate |
 | Six HTTP handlers exceed the 230 s Flex Consumption cap | Medium | §4 / T-322. Convert to jobs; fix the client/server timeout mismatch in the same change |
 | Change-feed semantics lose delete-driven behaviour | Medium   | §3.5 done upstream; §4 trigger table names the two delete endpoints to write |
 | Cron syntax differences silently disable a job, or time zone shifts it | Medium | §4 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7 scheduled-job proof at the right local time |

@@ -1,6 +1,8 @@
 /* eslint-disable complexity */
 import React from 'react';
-import DOMPurify from 'dompurify';
+import RichTextBody from '@/components/shared/RichTextBody';
+// Lazy: WafAssessment pulls chart.js (vendor-charts) via FrameworkRadar.
+const WafAssessment = React.lazy(() => import('@/components/architecture/WafAssessment'));
 import { Helmet } from 'react-helmet-async';
 import { useParams, Link } from 'react-router-dom';
 import { usePublicData } from '@/hooks/usePublicData';
@@ -149,12 +151,23 @@ export default function ArchitectureDetailTemplate({ provider = 'aws' }) {
 
       {/* Architecture Content */}
       <Tabs defaultValue="diagram" className="mb-12">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className={`grid w-full ${architecture.waf ? 'grid-cols-5' : 'grid-cols-4'}`}>
           <TabsTrigger value="diagram">Diagram</TabsTrigger>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          {architecture.waf && <TabsTrigger value="waf">Well-Architected</TabsTrigger>}
           <TabsTrigger value="implementation">Implementation</TabsTrigger>
           <TabsTrigger value="cost">Cost Analysis</TabsTrigger>
         </TabsList>
+
+        {architecture.waf && (
+          <TabsContent value="waf" className="mt-6">
+            <React.Suspense
+              fallback={<p className="text-sm text-muted-foreground">Loading assessment…</p>}
+            >
+              <WafAssessment waf={architecture.waf} />
+            </React.Suspense>
+          </TabsContent>
+        )}
 
         <TabsContent value="diagram" className="mt-6">
           <Card className="bg-card/40 border-none shadow-none">
@@ -179,9 +192,7 @@ export default function ArchitectureDetailTemplate({ provider = 'aws' }) {
         <TabsContent value="overview" className="mt-6">
           <div className="prose prose-invert max-w-none">
             {architecture.overview ? (
-              <div
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(architecture.overview) }}
-              />
+              <RichTextBody value={architecture.overview} />
             ) : (
               <div className="space-y-4">
                 <h2 className="text-2xl font-bold">Architecture Overview</h2>
