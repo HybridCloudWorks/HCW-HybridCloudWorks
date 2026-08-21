@@ -134,13 +134,30 @@ Record on the Phase-4 page: the summary set from steps 5–11, the TFC run links
 the scratch data copy's lifetime — flip the variables off (destroys the copy), or keep it for the
 production dress rehearsal. Write the date either way.
 
-## After this runbook
+## The production import
 
-The production-import phase starts with a one-variable PR: `migration_writer_enabled = true`. It
-carries its own runbook: admin uid→oid remap, write-freeze and delta strategy, partition-key sign-off
-(the window closes on the first production import), `cp_sortDate` re-application, media-URL
-re-pointing, the Telegram webhook re-registration, and the regenerate jobs. None of that starts until
-step 12 is signed.
+Same workflow, same evidence set, `target=production`. Opened by two locks in this order and closed
+in reverse:
+
+1. **[OWN, HCP Terraform]** `migration_writer_enabled = true` → apply. Plan must show exactly **three
+   adds** — the database-scope Cosmos role, Storage Blob Data Contributor and Storage Account
+   Contributor on `stsiteprodcus01` — and nothing else.
+2. **[OP, GitHub]** repository variable `PRODUCTION_IMPORT_ENABLED = true`. The workflow guard reads it.
+3. **[OWN]** Write-freeze on Site-Main's admin for the duration of steps 4–6 (minutes). Anything
+   written in Firestore after the export starts is not on Azure until the next run — which is safe
+   to repeat: the import is an upsert.
+4. **[CI]** `mode=rehearse target=production` — export → dry-run → import → verify. Expect the probe on
+   `system` to answer (the role is now there), then the same shape as the scratch run:
+   `failed: 0` on 62 containers.
+5. **[CI]** `mode=storage-rehearse target=production` twice — `copied = 1438` then `unchanged = 1438`.
+6. **[CI]** `mode=verify target=production` — read-only reconciliation; must match the export.
+7. **[OP]** Unset `PRODUCTION_IMPORT_ENABLED`. Leave the Terraform switch on only if a delta run is
+   planned before cutover; otherwise flip it back and apply (three destroys).
+
+Not part of this run, by design: the `admins` uid→oid remap (waits on the Entra registrations —
+the documents carry `firebaseUid` meanwhile), media-URL re-pointing (Firebase Storage stays warm),
+`cp_sortDate` (T-508), the regenerate/reseed jobs and the timers (Phase 3), the Telegram webhook
+(cutover, §6). The partition-key window closes at step 4 of this list.
 
 ## Local equivalents
 
