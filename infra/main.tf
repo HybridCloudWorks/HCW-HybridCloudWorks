@@ -957,6 +957,17 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # per-timer table; the ported NCRONTAB expressions assume this setting.
     "WEBSITE_TIME_ZONE" = "America/Chicago"
 
+    # T-206, last step. With "1" the public content list asks Cosmos for the
+    # NEWEST N documents (ORDER BY c.cp_sortDate DESC) instead of an arbitrary
+    # N that is then sorted in memory. cp_sortDate is a computed property the
+    # healer workflow maintains on `content` and `blogs` — present on both as
+    # of 2026-08-21 (run 32448029469) — and it is defined on every document
+    # ("" when no date alias exists), which is what makes ORDER BY safe.
+    # Precondition before flipping: `apply-computed-sortdate.mjs --inspect`
+    # clean (every date alias ISO-sortable). Flip back to "0" if the list
+    # ever comes back empty or mis-ordered; the in-memory sort still runs.
+    "PUBLIC_LIST_SQL_ORDER" = "1"
+
     # Feature flags.
     #
     # One per timer. They previously shared FEATURE_FLAG_SCHEDULERS, so enabling
