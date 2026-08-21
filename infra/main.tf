@@ -992,6 +992,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "FEATURE_FLAG_SYNC_RSS_FEEDS"       = "false"
     "FEATURE_FLAG_CLEANUP_TEMP_STORAGE" = "false"
     "FEATURE_FLAG_CHECK_AGENT_HEALTH"   = "false"
+    # platformJobSweeper (jobs-sweeper.js): re-enqueues jobs left `queued` by a
+    # failed output binding. Turn on with the first real job traffic (T-322).
+    "FEATURE_FLAG_PLATFORM_JOB_SWEEPER" = "false"
   }
 
   identity {
