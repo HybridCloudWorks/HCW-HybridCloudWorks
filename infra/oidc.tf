@@ -172,7 +172,7 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # "cannot be authorized by AAD token in data plane" while holding Data
 # Contributor on exactly those containers. The write now goes through ARM
 # (a PUT on .../sqlDatabases/hcw/containers/{name}), and the authorization
-# for that is this custom role: containers read + write on the account and
+# for that is a custom role: containers read + write on the account and
 # nothing else. Not "Cosmos DB Operator" — that is databaseAccounts/* minus
 # keys, which also covers the firewall, the database and every container's
 # existence, none of which the healer has any business touching.
@@ -180,29 +180,27 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # The two container-scoped DATA-PLANE grants below stay: --inspect reads
 # documents in content and blogs to check the date aliases are ISO-sortable,
 # and that is a data-plane read.
-resource "azurerm_role_definition" "cosmos_container_writer" {
-  name        = "HCW Cosmos Container Definition Writer"
-  scope       = azurerm_cosmosdb_account.hcw.id
-  description = "Read and write SQL container definitions (indexing, computed properties) on this one account. No keys, no data plane, no account settings."
-
-  permissions {
-    actions = [
-      "Microsoft.DocumentDB/databaseAccounts/read",
-      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/read",
-      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/read",
-      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/write",
-      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/operationResults/read",
-      "Microsoft.DocumentDB/locations/operationsStatus/read",
-    ]
-    not_actions = []
-  }
-
-  assignable_scopes = [azurerm_cosmosdb_account.hcw.id]
+# The role DEFINITION is not managed here. Creating one needs
+# Microsoft.Authorization/roleDefinitions/write, which the Terraform run
+# identity deliberately does not hold (it is Contributor + Role Based Access
+# Control Administrator: it may assign roles, not invent them — the first
+# apply of this block proved it with a 403 on 2026-08-21). Same split as the
+# bootstrap identity itself: the owner creates the definition once from the
+# reviewed JSON in infra/roles/, and Terraform consumes it by name and does
+# the assignment.
+#
+#   az role definition create --role-definition @infra/roles/cosmos-container-writer.json
+#
+# To change the permission set: edit the JSON, `az role definition update`,
+# and nothing here moves. A rename is the one change that needs both.
+data "azurerm_role_definition" "cosmos_container_writer" {
+  name  = "HCW Cosmos Container Definition Writer"
+  scope = azurerm_cosmosdb_account.hcw.id
 }
 
 resource "azurerm_role_assignment" "github_deploy_cosmos_container_writer" {
   scope              = azurerm_cosmosdb_account.hcw.id
-  role_definition_id = azurerm_role_definition.cosmos_container_writer.role_definition_resource_id
+  role_definition_id = data.azurerm_role_definition.cosmos_container_writer.id
   principal_id       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 

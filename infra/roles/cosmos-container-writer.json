@@ -1,0 +1,19 @@
+{
+  "Name": "HCW Cosmos Container Definition Writer",
+  "IsCustom": true,
+  "Description": "Read and write SQL container definitions (indexing policy, computed properties) on the cosmos-site-prod-cus account. No keys, no data plane, no account settings. Consumed by infra/oidc.tf for heal-computed-properties.yml; created once by the owner because the Terraform identity deliberately lacks Microsoft.Authorization/roleDefinitions/write.",
+  "Actions": [
+    "Microsoft.DocumentDB/databaseAccounts/read",
+    "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/read",
+    "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/read",
+    "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/write",
+    "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/operationResults/read",
+    "Microsoft.DocumentDB/locations/operationsStatus/read"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/b9e02281-ebb6-49e9-bd7b-f275b1350726/resourceGroups/rg-db-site-prod-cus/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-site-prod-cus"
+  ]
+}
