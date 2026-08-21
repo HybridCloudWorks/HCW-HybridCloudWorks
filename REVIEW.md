@@ -38,7 +38,7 @@ the consolidation of CHECKLIST and Variables into this file.
 | GitHub repository secrets | **1 of 4 set, and that one is moving to variables** — see §4.3 |
 | Key Vault | **19 of 21 secrets seeded** — two runtime-read secrets outstanding, §3.1 |
 | Origin lock | **On and proven end to end** — anonymous rate-limited route 200 via Cloudflare, 403 at the origin |
-| Data migration | **Rehearsal verified on scratch 2026-08-21** — 8,023 documents into 62 containers, 0 failed, 0 mismatches, via WIF + Entra with no keys. Production still empty and locked; storage copy and production-lock proof next ([Migration-Runbook](.github/wiki/Migration-Runbook.md) steps 10–11) |
+| Data migration | **Rehearsal phase complete on scratch 2026-08-21** — Cosmos: 8,023 documents, 62 containers, 0 failed; Storage: 1,438 objects / 3.17 GiB, idempotent on re-run; production proven **empty and locked** (60/62 containers refuse the identity). No key on either cloud. Open: the Site-Main read token for `inventory-gate`, and sign-off Q3/Q4 on the [Phase-4 page](.github/wiki/Phase-4-Data-Migration.md) |
 
 **The single most useful fact in this document:** the public API base is
 `https://api-azure.hybridcloudworks.com/api`. The `azurewebsites.net` origin is
