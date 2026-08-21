@@ -41,7 +41,13 @@ try {
   process.exit(1);
 }
 
-const containerName = args.options.container ?? 'content';
+// `system`, not `content`: the deploy identity holds container-scoped grants on
+// `content` and `blogs` for the healer, so probing either one on PRODUCTION
+// reports OK while the database-scope role is absent — run 32438525274
+// (2026-08-21) did exactly that, then 60 of 62 containers refused the verify.
+// `system` is provisioned everywhere and carries no special grant, so it only
+// answers when the database-scope role is there.
+const containerName = args.options.container ?? 'system';
 const reportPath = args.options.report ?? 'reports/connectivity-probe.json';
 
 async function main() {

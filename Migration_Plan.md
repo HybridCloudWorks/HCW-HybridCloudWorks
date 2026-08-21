@@ -492,7 +492,7 @@ already right. What was wrong was around them:
 Two smaller ones in the same pass: `id-token: write` was missing (no OIDC at all), and a Cosmos 403
 has two unrelated causes — the firewall, or the identity reached Cosmos and lacks a database-scope
 role — that the SDK error does not distinguish. `scripts/migration-probe.mjs` runs one
-`SELECT VALUE COUNT(1)` first and names the cause.
+`SELECT VALUE COUNT(1)` on `system` first and names the cause — `system` rather than `content`, because the healer's container-scoped grant on `content` makes it readable on production without the database-scope role.
 
 ### 5.3 How it runs
 

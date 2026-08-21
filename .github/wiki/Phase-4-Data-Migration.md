@@ -128,9 +128,11 @@ TODO; `cp_sortDate` only matters once `content`/`blogs` hold data, which is the 
 A 403 from Cosmos has two unrelated causes — the runner is not admitted by the firewall, or the
 identity reached Cosmos and lacks a database-scope role — and they are indistinguishable from the
 SDK error. Without the probe, a rehearsal exports everything and fails on the first upsert with an
-error naming neither. `migration-probe.mjs` runs one `SELECT VALUE COUNT(1)` first and classifies
-the failure. In runbook step 11 against production, `cause: rbac` is the *expected* result — it is
-the proof that the production lock holds.
+error naming neither. `migration-probe.mjs` runs one `SELECT VALUE COUNT(1)` against `system` first and classifies
+the failure. `system`, not `content`: the deploy identity holds container-scoped grants on `content`
+and `blogs` for the healer, so those two answer on production even without the database-scope role
+(run 32438525274 proved it). In runbook step 11 against production, `cause: rbac` on `system` is the
+*expected* result — it is the proof that the production lock holds.
 
 ## Open questions (owner)
 
@@ -156,3 +158,4 @@ the proof that the production lock holds.
 | 2026-08-21 | 7 | [Run 32437095217](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32437095217) `mode=export-dry-run` — 8,023 documents across 62 collections (8,004 + 19 subcollection docs); warnings: `id-field-conflict` 60, **`id-collision` 0** | **pass** |
 | 2026-08-21 | 9 | [Run 32437751076](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32437751076) `mode=rehearse target=scratch` — Azure login via the `environment:data-migration` credential; probe reached `content` on Entra auth in 1.3 s; dry-run 8,023 across 62; **import 8,023/8,023, 0 failed**; reconciliation **62 containers, 0 missing, 0 extra, 0 field mismatches**. First pass, no retries. Summaries verified counts-only | **pass** |
 | 2026-08-21 | 10 | [Run 32438131444](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32438131444) `mode=storage-inventory` — **1,438 objects, 3.17 GiB** (`covers/` 1,011 objects / 3.10 GiB); exit 2 on three unmanifested prefixes: `database/{blogs,speakerevents}/` (13 objects, added as `migrate`), `content-submissions/` (3) and `designs/` (1) (added as `probe`). `thumbnails/`, `draft-images/`, `published-images/` are all empty | gate loop |
+| 2026-08-21 | 11 | [Run 32438525274](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32438525274) `mode=verify target=production` — **60 of 62 containers refused `executeQuery`** (no database-scope role); `content` and `blogs` readable through the healer's container grants and **empty** (0 of 1,142 / 0 of 242). Production is empty and locked. Found a probe flaw: it checked `content`, which the healer grant makes readable, so it said OK instead of `rbac` — probe moved to `system` | **pass** (run shows failed by design) |
