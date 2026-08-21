@@ -35,6 +35,13 @@ on:
     # Every six hours, offset from the top of the hour.
     - cron: '17 */6 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "apply re-creates cp_sortDate where missing; inspect only reports non-ISO date values (the precondition for PUBLIC_LIST_SQL_ORDER=1)"
+        required: false
+        type: choice
+        default: apply
+        options: [apply, inspect]
 
 # id-token: write is what lets the runner request a GitHub OIDC token. Without
 # it azure/login has nothing to exchange and fails before reaching Azure.
@@ -71,7 +78,8 @@ jobs:
 
       # DefaultAzureCredential resolves through the CLI session azure/login
       # just established. --apply is a no-op when the property is intact.
-      - name: Re-apply cp_sortDate if missing
+      # `inputs.mode` is empty on push and schedule events, so those apply.
+      - name: Re-apply cp_sortDate if missing (or --inspect on request)
         env:
           # A VARIABLE since 2026-08-20 (it is a public URL; set-github-variables.ps1
           # moved it and deleted the secret). This read `secrets.` until 2026-08-21 and
@@ -83,4 +91,4 @@ jobs:
           # infra/oidc.tf, not by the data-plane grants.
           SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
           COSMOS_RESOURCE_GROUP: ${{ vars.COSMOS_RESOURCE_GROUP }}
-        run: node apply-computed-sortdate.mjs --apply
+        run: node apply-computed-sortdate.mjs --${{ inputs.mode || 'apply' }}

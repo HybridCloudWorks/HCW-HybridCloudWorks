@@ -54,6 +54,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`cp_sortDate` is live on `content` and `blogs`** (healer run 32448029469,
+  2026-08-21, first successful run on this estate) and the healer workflow can
+  now be dispatched with `mode=inspect` to check the precondition for
+  `PUBLIC_LIST_SQL_ORDER=1`, which `infra/main.tf` now sets — the public
+  content list asks Cosmos for the newest N rather than an arbitrary N. T-206's
+  final step. The custom role the healer needs is created once by the owner
+  from `infra/roles/cosmos-container-writer.json` and consumed by data source;
+  the Terraform identity deliberately cannot define roles (#137).
 - **The healer can now actually heal.** `heal-computed-properties.yml` had never
   succeeded on this estate: `cp_sortDate` was absent from both `content` and
   `blogs` on 2026-08-21 with 1,142 documents in `content`. Setting
