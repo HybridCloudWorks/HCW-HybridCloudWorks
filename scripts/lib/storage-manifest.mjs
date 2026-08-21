@@ -57,6 +57,26 @@ export const PREFIXES = Object.freeze([
     blobPrefix: 'database/',
     note: 'Site-Main fix-svg-content-types.js treats this and certifications/ as one family. `database` is not a known container, so the path is kept under the one it belongs to.',
   },
+  // The other two members of the `database/<family>/` pattern, surfaced by the
+  // first live inventory (run 32438131444, 2026-08-21): 13 objects between them.
+  // Same treatment as database/certifications/ — kept under the family's own
+  // container with the `database/` segment preserved, so nothing collides with
+  // the top-level family and nothing is orphaned under a container that does
+  // not exist.
+  {
+    prefix: 'database/blogs/',
+    disposition: 'migrate',
+    container: 'blogs',
+    blobPrefix: 'database/',
+    note: 'Sibling of database/certifications/. Found by the 2026-08-21 inventory; no storage.rules match at 088f458.',
+  },
+  {
+    prefix: 'database/speakerevents/',
+    disposition: 'migrate',
+    container: 'speakerevents',
+    blobPrefix: 'database/',
+    note: 'Sibling of database/certifications/. Found by the 2026-08-21 inventory; no storage.rules match at 088f458.',
+  },
   { prefix: 'covers/', disposition: 'migrate', container: 'covers', blobPrefix: '', note: 'AI and uploaded cover images, served via the public media route.' },
   { prefix: 'blogs/', disposition: 'migrate', container: 'blogs', blobPrefix: '', note: 'Legacy blog images, served via the public media route.' },
   { prefix: 'certifications/', disposition: 'migrate', container: 'certifications', blobPrefix: '', note: 'Certification badges, served via the public media route.' },
@@ -77,6 +97,20 @@ export const PREFIXES = Object.freeze([
     container: 'content',
     blobPrefix: 'published-images/',
     note: 'PUBLIC in Firebase Storage. `content` is NOT in PUBLIC_MEDIA_CONTAINERS (functions/src/lib/blob-paths.js), so these are not anonymously reachable after the copy. That is a disclosure decision for the API layer, not for this tool — flagged so it is made rather than discovered.',
+  },
+  {
+    prefix: 'content-submissions/',
+    disposition: 'probe',
+    container: 'content',
+    blobPrefix: 'content-submissions/',
+    note: '3 objects under hero/ and secondary1/ — images attached to public content submissions. No Site-Main storage.rules match and no reader found at 088f458; the Azure port (functions/src/lib/submissions.js) decides the path it writes. Owner decides at runbook step 10.',
+  },
+  {
+    prefix: 'designs/',
+    disposition: 'probe',
+    container: 'content',
+    blobPrefix: 'designs/',
+    note: '1 object under a single design id — pairs with the 1-document `designs` collection. No storage.rules match at 088f458. Owner decides at runbook step 10.',
   },
   {
     prefix: 'thumbnails/',

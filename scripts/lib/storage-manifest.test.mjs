@@ -29,6 +29,14 @@ describe('storage manifest', () => {
     expect(m).toEqual(expect.objectContaining({ container: 'certifications', blobName: 'database/aws-saa.svg' }));
   });
 
+  it('the whole database/<family>/ pattern lands under the family container with database/ kept', () => {
+    for (const family of ['blogs', 'certifications', 'speakerevents']) {
+      const m = mapObject(`database/${family}/x.svg`);
+      expect(m.container).toBe(family);
+      expect(m.blobName).toBe('database/x.svg');
+    }
+  });
+
   it('the five same-name prefixes strip their prefix', () => {
     expect(mapObject('covers/c1/hero.png')).toEqual(expect.objectContaining({ container: 'covers', blobName: 'c1/hero.png' }));
     expect(mapObject('blogs/b1/img.jpg')).toEqual(expect.objectContaining({ container: 'blogs', blobName: 'b1/img.jpg' }));

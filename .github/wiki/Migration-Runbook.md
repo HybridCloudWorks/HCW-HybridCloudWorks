@@ -122,9 +122,10 @@ which is the idempotency proof.
 
 ### 11. [CI] `mode=verify target=production`
 
-Read-only on both sides. Expected: the probe reports **`cause: rbac`** (the identity reached Cosmos
-and was refused — proving the production lock), and the reconciliation shows zero documents on the
-Azure side. This is the last piece of evidence for the phase: production is still empty and still
+Read-only on both sides. Expected: the probe on `system` reports **`cause: rbac`** (the identity
+reached Cosmos and was refused — proving the production lock); the reconciliation shows `content` and
+`blogs` readable with **0 documents** (the healer's two container-scoped grants) and every other
+container refused. The run shows as *failed* — that is the evidence, not a defect. This is the last piece of evidence for the phase: production is still empty and still
 locked.
 
 ### 12. [OWN] Sign-off

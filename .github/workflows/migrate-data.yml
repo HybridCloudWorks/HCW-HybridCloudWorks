@@ -200,8 +200,13 @@ jobs:
         working-directory: scripts
         env:
           COSMOS_ENDPOINT: ${{ steps.target.outputs.cosmos }}
-        run: node migration-probe.mjs --container content
+        run: node migration-probe.mjs --container system
 
+      # `system`, not `content`: the identity has container-scoped grants on
+      # `content` and `blogs` for the healer, so those answer on production even
+      # without the database-scope role (run 32438525274). `system` has no
+      # special grant — on production it must say `rbac` until
+      # migration_writer_enabled is flipped.
       # The runner has a public dynamic IP and the storage account denies by
       # default: open a window, close it in an always() step. Same pattern as
       # deploy-functions.yml for the Functions host account.

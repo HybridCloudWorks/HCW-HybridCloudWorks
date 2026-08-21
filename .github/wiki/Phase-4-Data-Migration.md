@@ -82,11 +82,13 @@ Not in this phase.
 
 [scripts/lib/storage-manifest.mjs](../../scripts/lib/storage-manifest.mjs) maps each GCS top-level
 prefix to one of the five Terraform blob containers. `covers/`, `blogs/`, `certifications/`,
-`speakerevents/` → same-named container, prefix stripped; `database/certifications/` →
-`certifications` under `database/`; `image-gallery/`, `character/`, `listen-and-learn/`,
+`speakerevents/` → same-named container, prefix stripped; `database/{certifications,blogs,speakerevents}/`
+→ the family's container under `database/`; `image-gallery/`, `character/`, `listen-and-learn/`,
 `draft-images/`, `published-images/` → `content`, prefix preserved. Skipped: `articles/` (90-day
 scraped images the RSS job regenerates — note the Azure lifecycle rule for it is inert until the
-scraper writes here) and `uploads/` (per-user temp keyed by Firebase uid). Probe: `thumbnails/`.
+scraper writes here) and `uploads/` (per-user temp keyed by Firebase uid). Probe: `thumbnails/` (empty),
+`content-submissions/` (3 objects, public-submission images) and `designs/` (1 object) — the last two
+surfaced by the first live inventory on 2026-08-21.
 
 **Flag for the owner:** `published-images/` is publicly readable in Firebase; `content` is not in
 the API's public-media container list here. That is a disclosure decision for the API, not the copy.
@@ -126,16 +128,19 @@ TODO; `cp_sortDate` only matters once `content`/`blogs` hold data, which is the 
 A 403 from Cosmos has two unrelated causes — the runner is not admitted by the firewall, or the
 identity reached Cosmos and lacks a database-scope role — and they are indistinguishable from the
 SDK error. Without the probe, a rehearsal exports everything and fails on the first upsert with an
-error naming neither. `migration-probe.mjs` runs one `SELECT VALUE COUNT(1)` first and classifies
-the failure. In runbook step 11 against production, `cause: rbac` is the *expected* result — it is
-the proof that the production lock holds.
+error naming neither. `migration-probe.mjs` runs one `SELECT VALUE COUNT(1)` against `system` first and classifies
+the failure. `system`, not `content`: the deploy identity holds container-scoped grants on `content`
+and `blogs` for the healer, so those two answer on production even without the database-scope role
+(run 32438525274 proved it). In runbook step 11 against production, `cause: rbac` on `system` is the
+*expected* result — it is the proof that the production lock holds.
 
 ## Open questions (owner)
 
 | # | Question | Decided at | Answer |
 | --- | --- | --- | --- |
-| Q1 | The ten `probe` entries (D4): which migrate, which are residue? | runbook step 8 | — |
-| Q2 | `thumbnails/`: copy or drop? | runbook step 10 | — |
+| Q1 | The fifteen `probe` entries (D4): which migrate, which are residue? Preflight 2026-08-21: the original ten are **empty**; the five new ones hold 7 documents between them and none has a reader | runbook step 8 | — (recommendation: drop all fifteen) |
+| Q2 | Storage probes: `thumbnails/` (empty — drop), `content-submissions/` (3 objects), `designs/` (1): copy into `content` or drop? | runbook step 10 | — |
+| Q2b | `covers/` is 3.10 GiB of the 3.17 GiB bucket — 1,011 AI/uploaded covers for 1,142 content documents. Copy all, or only covers still referenced by a document? | before step 10 copy | — (recommendation: copy all; referenced-only pruning is a later cleanup with the document set in hand) |
 | Q3 | `published-images/` public on Azure? | before Go-Live | — |
 | Q4 | Partition-key list (D3) signed? | before step 9 | — |
 | Q5 | Scratch copy lifetime after sign-off? | step 12 | — |
@@ -149,3 +154,8 @@ the proof that the production lock holds.
 | 2026-08-20 | 3 | Environment `data-migration`, reviewer `saulpatinojr`. Site-Main read token: **not yet** (needs the GitHub UI — App or PAT) | partial |
 | 2026-08-20 | 4 | TFC `cosmos_scratch_enabled` / `storage_scratch_enabled` = true; applied: **86 add, 1 change, 0 destroy**; `set-github-variables.ps1` seeded the scratch variables and moved `COSMOS_ENDPOINT` to a variable | done |
 | 2026-08-21 | 5 | [Run 32435842524](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32435842524) `mode=preflight` — WIF proven; **8,064 documents, 8,004 to migrate**; exit 2 on five unmanifested collections (added as `probe`, PR #130). Summary artifact verified: counts only | gate loop |
+| 2026-08-21 | 5 | [Run 32436854557](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32436854557) `mode=preflight` after #130 — **exit 0**, no unmanifested collections, 8,064 / 8,004 / 60 | **pass** |
+| 2026-08-21 | 7 | [Run 32437095217](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32437095217) `mode=export-dry-run` — 8,023 documents across 62 collections (8,004 + 19 subcollection docs); warnings: `id-field-conflict` 60, **`id-collision` 0** | **pass** |
+| 2026-08-21 | 9 | [Run 32437751076](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32437751076) `mode=rehearse target=scratch` — Azure login via the `environment:data-migration` credential; probe reached `content` on Entra auth in 1.3 s; dry-run 8,023 across 62; **import 8,023/8,023, 0 failed**; reconciliation **62 containers, 0 missing, 0 extra, 0 field mismatches**. First pass, no retries. Summaries verified counts-only | **pass** |
+| 2026-08-21 | 10 | [Run 32438131444](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32438131444) `mode=storage-inventory` — **1,438 objects, 3.17 GiB** (`covers/` 1,011 objects / 3.10 GiB); exit 2 on three unmanifested prefixes: `database/{blogs,speakerevents}/` (13 objects, added as `migrate`), `content-submissions/` (3) and `designs/` (1) (added as `probe`). `thumbnails/`, `draft-images/`, `published-images/` are all empty | gate loop |
+| 2026-08-21 | 11 | [Run 32438525274](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32438525274) `mode=verify target=production` — **60 of 62 containers refused `executeQuery`** (no database-scope role); `content` and `blogs` readable through the healer's container grants and **empty** (0 of 1,142 / 0 of 242). Production is empty and locked. Found a probe flaw: it checked `content`, which the healer grant makes readable, so it said OK instead of `rbac` — probe moved to `system` | **pass** (run shows failed by design) |
