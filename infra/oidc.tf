@@ -158,22 +158,58 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 #   - anything at subscription scope.
 
 # ---------------------------------------------------------------------------
-# The one Cosmos exception: heal-computed-properties.yml
+# heal-computed-properties.yml — a control-plane write, so an ARM role
 # ---------------------------------------------------------------------------
 # azurerm_cosmosdb_sql_container cannot express computedProperties, so any
 # apply that updates the `content` or `blogs` container wipes cp_sortDate —
 # and with PUBLIC_LIST_SQL_ORDER=1 live, that breaks the public content list
-# (TODO.md T-206). The healer workflow re-applies it via
-# scripts/apply-computed-sortdate.mjs, and needs Data Contributor on EXACTLY
-# those two containers — scoped per container, not at the account, keeping
-# the "no Cosmos for the deploy identity" posture as narrow an exception as
-# the job allows. If the healer ever 403s despite these assignments, widening
-# the scope to the database is the first debugging step: container-scoped
-# metadata writes are the newest corner of Cosmos data-plane RBAC.
+# (TODO.md T-206). scripts/apply-computed-sortdate.mjs re-applies it.
 #
-# `name` omitted for the same reason as func_cosmos in main.tf: the provider
-# generates a stable GUID, and a duplicated hardcoded name silently REPLACES
-# another identity's assignment instead of erroring.
+# Setting computedProperties is a CONTROL-PLANE operation. The healer
+# originally did it through the SDK's container.replace(), which goes to the
+# data-plane endpoint, and Cosmos refuses that with an AAD token no matter
+# which roles the identity holds: run 32420399977 (2026-08-20) failed with
+# "cannot be authorized by AAD token in data plane" while holding Data
+# Contributor on exactly those containers. The write now goes through ARM
+# (a PUT on .../sqlDatabases/hcw/containers/{name}), and the authorization
+# for that is this custom role: containers read + write on the account and
+# nothing else. Not "Cosmos DB Operator" — that is databaseAccounts/* minus
+# keys, which also covers the firewall, the database and every container's
+# existence, none of which the healer has any business touching.
+#
+# The two container-scoped DATA-PLANE grants below stay: --inspect reads
+# documents in content and blogs to check the date aliases are ISO-sortable,
+# and that is a data-plane read.
+resource "azurerm_role_definition" "cosmos_container_writer" {
+  name        = "HCW Cosmos Container Definition Writer"
+  scope       = azurerm_cosmosdb_account.hcw.id
+  description = "Read and write SQL container definitions (indexing, computed properties) on this one account. No keys, no data plane, no account settings."
+
+  permissions {
+    actions = [
+      "Microsoft.DocumentDB/databaseAccounts/read",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/read",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/read",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/write",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/operationResults/read",
+      "Microsoft.DocumentDB/locations/operationsStatus/read",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [azurerm_cosmosdb_account.hcw.id]
+}
+
+resource "azurerm_role_assignment" "github_deploy_cosmos_container_writer" {
+  scope              = azurerm_cosmosdb_account.hcw.id
+  role_definition_id = azurerm_role_definition.cosmos_container_writer.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.github_deploy.principal_id
+}
+
+# `name` omitted on the data-plane assignments for the same reason as
+# func_cosmos in main.tf: the provider generates a stable GUID, and a
+# duplicated hardcoded name silently REPLACES another identity's assignment
+# instead of erroring.
 
 # The container segment of each scope comes from the CONTAINER RESOURCE, not a
 # string literal. A literal "colls/content" is correct text but carries no
