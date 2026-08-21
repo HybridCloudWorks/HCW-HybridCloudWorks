@@ -56,7 +56,7 @@ migration tooling 2026-08-20.
 > | Key Vault `kv-site-prod-scus`                           | **`kv-site-prod-cus-01`**                                                                | The unsuffixed name is globally taken by an unrelated tenant and is not soft-deleted anywhere in this tenant, so it is unrecoverable. `-01` is the instance suffix the Naming-Convention page reserves for exactly this. |
 > | Static Web App in the estate region                     | `stapp-site-prod-cus-01`, running in **`centralus`** like everything else                                        | `southcentralus` does not offer `Microsoft.Web/staticSites` — only five regions do, and this was the estate's one naming exception until the centralus consolidation retired it. The whole estate is now the region this resource always ran in. |
 > | Phase 2 exit: applied to a **non-production** subscription | **Applied to the production subscriptions**, across three: Application `b9e02281…`, Management `02dfb8ad…`, Connectivity `8f3c6d82…` | There is no non-production subscription. The Identity landing zone is deliberately empty. Cost control is the budget resource — `budget_amount_usd` (default 150 USD) from `budget_start_date`. **The §7 cost gate still applies and has not been run.** |
-> | Data living in Cosmos                                    | The `hcw` database and all **73 containers exist and are EMPTY**                          | Phase 4 has not run. The 1,395 documents are still only in Firestore.                                                                                       |
+> | Data living in Cosmos                                    | The `hcw` database and all **73 containers exist and are EMPTY**                          | Phase 4 has not run. The **8,064** documents (measured 2026-08-21; the 1,395 figure was the editor's collections only) are still only in Firestore. |
 > | Wildcard CORS origins on storage                         | **Exact origins only, ports included**                                                    | Azure Storage accepts a literal `*` or fully-qualified origins and nothing in between; `https://*.<domain>` and `http://localhost:*` are rejected outright.  |
 > | A CI runner                                              | **Not deployed** — `ci_runner_enabled = false`                                            | Deferred; ADR 0021 superseded.                                                                                                                              |
 >
@@ -445,12 +445,12 @@ otherwise.
 > The document counts in this section are still the 2026-07-30 measurements. Runbook step 5
 > (`mode=preflight`, read-only) replaces them with measured ones; do not plan a cutover on these.
 
-### 5.1 What moves — 68 collections, 75 manifest entries, 73 containers
+### 5.1 What moves — 68 collections, 80 manifest entries, 73 containers
 
 `scripts/lib/migration-manifest.mjs` is the one inventory. It drives the migrator, the verifier and
 Terraform (through the generated `infra/cosmos-containers.json`, checked current in CI), and names
-**75** top-level entries: Site-Main's 68 declared collections plus seven legacy ones that exist in
-Firestore but no longer in its rules. Each carries one of five dispositions:
+**80** top-level entries: Site-Main's 68 declared collections plus twelve legacy ones that exist in
+Firestore but not in its rules. Each carries one of five dispositions:
 
 | Disposition | Entries | Containers | Meaning |
 | --- | --- | --- | --- |
@@ -458,12 +458,23 @@ Firestore but no longer in its rules. Each carries one of five dispositions:
 | `regenerate` | 3 | 3 | `homepage_feeds`, `tool_service_cache`, `rss_cache` — derived; the ported job rebuilds it. Migrating it imports staleness |
 | `reseed` | 2 | 2 | `azure_landing_content`, `tool_service_catalog` — run the seeder on Azure |
 | `transient` | 5 | 5 | `lab_jobs` and four quota collections. The container exists (the change feed on `lab_jobs` is load-bearing, §4.3); the data does not move |
-| `probe` | 10 | 0 | `articles`, `metadata`, `users`, five `social_*`, `azure_architectures`, `azure_frameworks` — named so the preflight does not flag them as unmanifested, not provisioned, **decided from measured counts at runbook step 8** |
+| `probe` | 15 | 0 | `articles`, `metadata`, `users`, five `social_*`, `azure_architectures`, `azure_frameworks` — all **empty** in the 2026-08-21 preflight — plus five that preflight surfaced: `_rowy_` (3), `admin_audit_log` (1), `dashboard_stats` (1), `drafts` (1), `summaries` (1). Named so the preflight does not flag them, not provisioned, **decided at runbook step 8** |
 
-That is 72 generated containers plus `leases` for the change feed: **73**. The last measured counts
-(2026-07-30) were 1,395 documents — 947 in `content`, 242 in `blogs` (§3.6, still open), 110 in
-`certifications` — of which roughly 1,100 migrate. At this volume a run is minutes, which is what
-makes "rehearse until clean" cheap.
+That is 72 generated containers plus `leases` for the change feed: **73**.
+
+**Measured 2026-08-21** (runbook step 5, the first live preflight): **8,064 documents, 8,004 to
+migrate**, 60 skipped as cache/transient. The 2026-07-30 figure of 1,395 was a count of the editor's
+collections, not the database: `audits` (3,090) and `admin_audit_logs` (2,921) are three quarters of
+the volume, `content` is 1,142 (was 947), `blogs` still 242, `certifications` still 110, and
+`content/{id}/versions` holds 12. Shape findings worth carrying into the transform review:
+`certifications.issueDate` / `expDate` are a mix of Firestore `Timestamp` and ISO string,
+`certifications.certState` boolean-or-string, `certifications.issuer` array-or-string,
+`content.Author` string-or-object, `podcasts.duration` number-or-string, and every
+`tool_architecture_plans.pillarAlignment.*` string-or-number. 60 documents carry an `id` field that
+disagrees with the document id (`certifications` 52, `frameworks` 3, `youtubevideos` 5) — the
+transform keeps the document id and moves the field to `dataId` with an `id-field-conflict`
+warning, so the export summary will show exactly 60 of those. Still minutes per run, which is what makes
+"rehearse until clean" cheap.
 
 ### 5.2 The tooling — and the three things that were wrong with it
 
