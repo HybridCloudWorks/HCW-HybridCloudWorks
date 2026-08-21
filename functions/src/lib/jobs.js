@@ -1,0 +1,402 @@
+/**
+ * jobs.js — in-platform asynchronous jobs (TODO.md T-322).
+ *
+ * Flex Consumption caps an HTTP response at 230 seconds at the load balancer,
+ * and nothing in host.json can raise it. Six Site-Main handlers declare
+ * longer timeouts and make the browser wait (generateListenAndLearn 540 s,
+ * refreshToolServiceCache 300 s, forgeArticle 300 s, fetchRssFeedsManual
+ * 300 s, generateWeeklyDigest 300 s, batchInspect 300 s). On Azure each of
+ * them becomes a JOB: the HTTP call returns 202 with a job id in well under a
+ * second, a queue-triggered worker does the work with the non-HTTP timeout
+ * (30 minutes on Flex), and the client polls `getJob` until a terminal state.
+ *
+ * Why not `lab_jobs`: that flow hands jobs to the external VPS agent, which
+ * polls, claims and reports back over its own App Role. These jobs run
+ * INSIDE the Function App, on the Storage Queue the host already owns
+ * (AzureWebJobsStorage, identity-based; the app's managed identity holds
+ * Queue Data Contributor on it), so no new credential and no new service.
+ *
+ * Flow
+ *   POST /api/enqueueJob {type, payload}
+ *     → 202 {jobId}                      (document 'queued' + queue message)
+ *   queue 'platform-jobs' → runJob(message)
+ *     → claim with an etag-conditioned replace ('queued' → 'running'), so a
+ *       duplicate delivery — queues are at-least-once — is a no-op;
+ *     → run the registered worker under the type's own timeout;
+ *     → 'succeeded' | 'failed' | 'timeout', with result or error.
+ *   GET|POST /api/getJob?jobId=…
+ *     → the document, minus Cosmos system fields.
+ *
+ * Worker contract: `worker(payload, { context, job, now })` returns a small,
+ * JSON-serialisable result (the document is the record; large outputs belong
+ * in their own container or in blob storage, with the id in the result). A
+ * thrown error becomes `failed` with its message; it is NOT retried — the
+ * document is the source of truth and an operator re-enqueues deliberately.
+ *
+ * Known gap, on purpose: the document is written before the queue message is
+ * sent by the output binding. If the binding fails after the write, the job
+ * sits 'queued' forever. A sweeper that re-enqueues stale 'queued' jobs is
+ * the first follow-up once a real worker is registered; `noop` is here so the
+ * whole path can be exercised end to end before that.
+ */
+import { randomUUID } from 'node:crypto';
+
+export const JOBS_CONTAINER = 'jobs';
+export const JOBS_QUEUE = 'platform-jobs';
+
+export const JOB_STATUSES = Object.freeze([
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'timeout',
+  'cancelled',
+]);
+export const TERMINAL_JOB_STATUSES = Object.freeze(['succeeded', 'failed', 'timeout', 'cancelled']);
+
+const DEFAULT_MAX_PAYLOAD_BYTES = 64 * 1024;
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_ERROR_CHARS = 2000;
+
+const json = (status, body) => ({
+  status,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+// ---------------------------------------------------------------------------
+// Type registry
+// ---------------------------------------------------------------------------
+
+const registry = new Map();
+
+/**
+ * Register a job type. Called at module load by the feature that owns the
+ * worker; the registry is process-wide because the HTTP function (enqueue)
+ * and the queue function (run) are the same process.
+ *
+ * @param {string} type
+ * @param {object} spec
+ * @param {(payload: any, ctx: {context: object, job: object, now: () => Date}) => Promise<any>} spec.worker
+ * @param {string} [spec.description]
+ * @param {number} [spec.maxPayloadBytes] - JSON bytes of `payload`; default 64 KiB
+ * @param {number} [spec.timeoutMs] - worker budget; default 10 minutes
+ * @param {string} [spec.role] - role required to enqueue; default 'editor'
+ */
+export function registerJobType(type, spec) {
+  if (typeof type !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(type)) {
+    throw new Error(`job type must be kebab-case: got ${JSON.stringify(type)}`);
+  }
+  if (!spec || typeof spec.worker !== 'function') {
+    throw new Error(`job type ${type}: spec.worker must be a function`);
+  }
+  if (registry.has(type)) throw new Error(`job type ${type} is already registered`);
+  registry.set(
+    type,
+    Object.freeze({
+      description: '',
+      maxPayloadBytes: DEFAULT_MAX_PAYLOAD_BYTES,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      role: 'editor',
+      ...spec,
+      type,
+    })
+  );
+  return registry.get(type);
+}
+
+export function getJobType(type) {
+  return registry.get(type) ?? null;
+}
+
+export function listJobTypes() {
+  return [...registry.values()].map(({ type, description, maxPayloadBytes, timeoutMs, role }) => ({
+    type,
+    description,
+    maxPayloadBytes,
+    timeoutMs,
+    role,
+  }));
+}
+
+/** Test seam. Production never calls this. */
+export function resetJobTypes() {
+  registry.clear();
+  registerBuiltins();
+}
+
+function registerBuiltins() {
+  // Exists so the enqueue → queue → worker → poll path can be proven on a
+  // deployed app before any real worker lands. Echoes the payload; optional
+  // `delayMs` (≤ 20 s) lets a poll loop be watched.
+  registerJobType('noop', {
+    description: 'Smoke test — echoes the payload after an optional delayMs (max 20000).',
+    maxPayloadBytes: 1024,
+    timeoutMs: 30_000,
+    worker: async (payload) => {
+      const delay = Math.min(Math.max(Number(payload?.delayMs) || 0, 0), 20_000);
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      return { echoed: payload ?? null, delayedMs: delay };
+    },
+  });
+}
+
+registerBuiltins();
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const SYSTEM_FIELDS = new Set(['_rid', '_self', '_etag', '_attachments', '_ts']);
+
+/** The document as a client sees it. */
+export function publicJob(doc) {
+  const out = {};
+  for (const [k, v] of Object.entries(doc)) if (!SYSTEM_FIELDS.has(k)) out[k] = v;
+  return out;
+}
+
+function truncate(text, max = MAX_ERROR_CHARS) {
+  const s = String(text ?? '');
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+function isPreconditionFailure(err) {
+  const code = err?.code ?? err?.statusCode;
+  return code === 412 || code === 'PreconditionFailed';
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {object} deps
+ * @param {{ requireRole: Function }} deps.guard
+ * @param {{ readDoc: Function, upsertDoc: Function, patchDoc: Function, replaceDocIfMatch: Function }} deps.store
+ * @param {() => Date} [deps.now]
+ * @param {() => string} [deps.uuid]
+ * @param {Map<string, object>} [deps.types] - test seam; defaults to the module registry
+ */
+export function createJobHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+  types = registry,
+}) {
+  return {
+    /**
+     * POST /api/enqueueJob — editor (or the type's own role).
+     * @param {object} request
+     * @param {object} context
+     * @param {{ enqueue: (message: {jobId: string, type: string}) => void }} io - the queue output
+     */
+    async enqueueJob(request, context, { enqueue } = {}) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json(400, { ok: false, error: 'Body must be JSON' });
+      }
+      const type = typeof body?.type === 'string' ? body.type.trim() : '';
+      const spec = types.get(type);
+      if (!spec) {
+        return json(400, {
+          ok: false,
+          error: `Unknown job type. Allowed: ${[...types.keys()].join(', ')}`,
+        });
+      }
+      if (spec.role !== 'editor') {
+        const stricter = await guard.requireRole(request, spec.role);
+        if (stricter.error) return stricter.error;
+      }
+
+      const payload = body.payload === undefined ? {} : body.payload;
+      let payloadBytes;
+      try {
+        payloadBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+      } catch {
+        return json(400, {
+          ok: false,
+          error: 'payload must be JSON-serialisable',
+        });
+      }
+      if (payloadBytes > spec.maxPayloadBytes) {
+        return json(413, {
+          ok: false,
+          error: `Payload too large (${payloadBytes} bytes; max ${spec.maxPayloadBytes} for ${type})`,
+        });
+      }
+      if (typeof enqueue !== 'function') {
+        // Misconfigured route, not a client error: say so loudly rather than
+        // writing a document nothing will ever pick up.
+        context.error?.('enqueueJob: no queue output wired');
+        return json(500, { ok: false, error: 'Job queue is not configured' });
+      }
+
+      const jobId = uuid();
+      const createdAt = now().toISOString();
+      const doc = {
+        id: jobId,
+        type,
+        payload,
+        status: 'queued',
+        createdAt,
+        startedAt: null,
+        finishedAt: null,
+        attempts: 0,
+        requestedBy: {
+          oid: auth.user?.oid ?? null,
+          email: auth.user?.email ?? null,
+        },
+        result: null,
+        error: null,
+      };
+      try {
+        await store.upsertDoc(JOBS_CONTAINER, doc);
+        enqueue({ jobId, type });
+        context.log?.('enqueueJob', jobId, type, `${payloadBytes}B`);
+        return json(202, {
+          ok: true,
+          jobId,
+          type,
+          status: 'queued',
+          poll: `getJob?jobId=${jobId}`,
+        });
+      } catch (error) {
+        context.error?.('enqueueJob failed:', error);
+        return json(500, { ok: false, error: 'Failed to enqueue job' });
+      }
+    },
+
+    /** GET|POST /api/getJob — viewer. `jobId` from the query string or the body. */
+    async getJob(request, context) {
+      const auth = await guard.requireRole(request, 'viewer');
+      if (auth.error) return auth.error;
+
+      let jobId = '';
+      try {
+        jobId = request.query?.get?.('jobId') || '';
+        if (!jobId && request.method !== 'GET') {
+          const body = await request.json().catch(() => ({}));
+          jobId = typeof body?.jobId === 'string' ? body.jobId : '';
+        }
+      } catch {
+        jobId = '';
+      }
+      jobId = String(jobId).trim();
+      if (!jobId) return json(400, { ok: false, error: 'jobId is required' });
+
+      try {
+        const doc = await store.readDoc(JOBS_CONTAINER, jobId, jobId);
+        if (!doc) return json(404, { ok: false, error: 'Job not found' });
+        return json(200, { ok: true, job: publicJob(doc) });
+      } catch (error) {
+        context.error?.('getJob failed:', error);
+        return json(500, { ok: false, error: 'Failed to read job' });
+      }
+    },
+
+    /**
+     * Queue worker. Never throws for a job-level failure: the document is the
+     * record, and a rethrow would only make the queue redeliver the same
+     * message up to the poison threshold.
+     *
+     * @param {{jobId?: string}} message - the parsed queue message
+     * @param {object} context
+     * @returns {Promise<{jobId: string|null, outcome: string}>}
+     */
+    async runJob(message, context) {
+      const jobId = typeof message?.jobId === 'string' ? message.jobId : '';
+      if (!jobId) {
+        context.warn?.('runJob: message without jobId', message);
+        return { jobId: null, outcome: 'ignored' };
+      }
+
+      const doc = await store.readDoc(JOBS_CONTAINER, jobId, jobId);
+      if (!doc) {
+        context.warn?.(`runJob: job ${jobId} has no document`);
+        return { jobId, outcome: 'missing' };
+      }
+      if (doc.status !== 'queued') {
+        // Duplicate delivery, or an operator cancelled it while it waited.
+        context.log?.(`runJob: job ${jobId} is ${doc.status}; skipping`);
+        return { jobId, outcome: 'skipped' };
+      }
+
+      const spec = types.get(doc.type);
+      const startedAt = now().toISOString();
+      if (!spec) {
+        await store.patchDoc(JOBS_CONTAINER, jobId, {
+          status: 'failed',
+          startedAt,
+          finishedAt: startedAt,
+          error: `Unknown job type ${doc.type} (not registered in this deployment)`,
+        });
+        return { jobId, outcome: 'failed' };
+      }
+
+      // Claim. The etag makes two deliveries race safely: the loser gets 412.
+      let claimed;
+      try {
+        claimed = await store.replaceDocIfMatch(JOBS_CONTAINER, {
+          ...doc,
+          status: 'running',
+          startedAt,
+          attempts: (doc.attempts || 0) + 1,
+        });
+      } catch (error) {
+        if (isPreconditionFailure(error)) {
+          context.log?.(`runJob: job ${jobId} claimed elsewhere`);
+          return { jobId, outcome: 'skipped' };
+        }
+        throw error;
+      }
+
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              Object.assign(new Error('job timed out'), {
+                code: 'JOB_TIMEOUT',
+              })
+            ),
+          spec.timeoutMs
+        );
+      });
+      try {
+        const result = await Promise.race([
+          spec.worker(doc.payload, { context, job: claimed, now }),
+          timeout,
+        ]);
+        await store.patchDoc(JOBS_CONTAINER, jobId, {
+          status: 'succeeded',
+          finishedAt: now().toISOString(),
+          result: result === undefined ? null : result,
+          error: null,
+        });
+        context.log?.(`runJob: job ${jobId} (${doc.type}) succeeded`);
+        return { jobId, outcome: 'succeeded' };
+      } catch (error) {
+        const timedOut = error?.code === 'JOB_TIMEOUT';
+        await store.patchDoc(JOBS_CONTAINER, jobId, {
+          status: timedOut ? 'timeout' : 'failed',
+          finishedAt: now().toISOString(),
+          error: truncate(error?.message || String(error)),
+        });
+        context.error?.(
+          `runJob: job ${jobId} (${doc.type}) ${timedOut ? 'timed out' : 'failed'}:`,
+          error?.message
+        );
+        return { jobId, outcome: timedOut ? 'timeout' : 'failed' };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}

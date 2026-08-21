@@ -62,6 +62,7 @@ const INDEXING_OVERRIDES = {
   audits: { included: ['/action/?', '/timestamp/?', '/userId/?'], excluded: ['/*'] },
   admin_audit_logs: { included: ['/action/?', '/timestamp/?', '/userId/?'], excluded: ['/*'] },
   lab_jobs: { included: ['/status/?', '/type/?', '/createdAt/?', '/agentId/?'], excluded: ['/*'] },
+  jobs: { included: ['/status/?', '/type/?', '/createdAt/?'], excluded: ['/*'] },
 };
 
 /**
@@ -109,6 +110,7 @@ const COMPOSITE_INDEXES = {
   lab_jobs: [
     [['status', 'ascending'], ['type', 'ascending'], ['createdAt', 'ascending']],
   ],
+  jobs: [[['status', 'ascending'], ['type', 'ascending'], ['createdAt', 'ascending']]],
 };
 
 /**

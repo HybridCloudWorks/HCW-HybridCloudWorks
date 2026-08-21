@@ -33,7 +33,9 @@ vi.mock('@azure/functions', () => ({
     http: (name, options) => httpRegistrations.set(name, options),
     timer: () => {},
     cosmosDB: () => {},
+    storageQueue: () => {},
   },
+  output: { storageQueue: (options) => options },
 }));
 
 // Handlers are never invoked here, but index.js resolves guards at import.

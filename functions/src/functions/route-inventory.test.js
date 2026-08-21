@@ -37,12 +37,17 @@ import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
 const httpRegistrations = new Map();
 const timerRegistrations = new Map();
 const cosmosRegistrations = new Map();
+const queueRegistrations = new Map();
 
 vi.mock('@azure/functions', () => ({
   app: {
     http: (name, options) => httpRegistrations.set(name, options),
     timer: (name, options) => timerRegistrations.set(name, options),
     cosmosDB: (name, options) => cosmosRegistrations.set(name, options),
+    storageQueue: (name, options) => queueRegistrations.set(name, options),
+  },
+  output: {
+    storageQueue: (options) => ({ type: 'queue', ...options }),
   },
 }));
 
@@ -274,6 +279,15 @@ describe('non-HTTP triggers', () => {
     // Not an authorization surface, but they are registrations, and one of
     // them deletes blobs with an unimplemented body (TODO.md T-302).
     expect(timerRegistrations.size).toBe(4);
+  });
+
+  it('the platform job worker is the only queue trigger, on the identity-based host connection', () => {
+    // lib/jobs.js (T-322). A second queue trigger is a second place long work
+    // can run unreviewed; make adding one a visible act.
+    expect([...queueRegistrations.keys()]).toEqual(['platformJobWorker']);
+    const worker = queueRegistrations.get('platformJobWorker');
+    expect(worker.queueName).toBe('platform-jobs');
+    expect(worker.connection).toBe('AzureWebJobsStorage');
   });
 
   it('registers no change-feed trigger', () => {

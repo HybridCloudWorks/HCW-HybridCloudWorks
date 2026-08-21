@@ -584,6 +584,36 @@
       "note": "subcollection of image_prompts — Deliberately NOT `image_prompt_sets` — that name is already a distinct top-level collection. Ids are set names, unique only within a page."
     },
     {
+      "name": "jobs",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/status/?",
+        "/type/?",
+        "/createdAt/?"
+      ],
+      "excluded_paths": [
+        "/*"
+      ],
+      "composite_indexes": [
+        [
+          {
+            "path": "/status",
+            "order": "ascending"
+          },
+          {
+            "path": "/type",
+            "order": "ascending"
+          },
+          {
+            "path": "/createdAt",
+            "order": "ascending"
+          }
+        ]
+      ],
+      "default_ttl": 2592000,
+      "note": "transient runtime state — written at runtime, not migrated"
+    },
+    {
       "name": "lab_agents",
       "partition_key_path": "/id",
       "included_paths": [
