@@ -411,6 +411,14 @@ exists, and the change feed on it is how `syncToolExpertModeRuns` works, so the 
 
 ### 4.4 AI handlers — the default provider has no Azure equivalent
 
+> **Decided 2026-08-21 (owner): a provider is on when its key is present, nothing more.**
+> `functions/src/lib/ai/router.js` resolves Anthropic → OpenAI → Gemini from `ANTHROPIC_API_KEY`,
+> `OPENAI_API_KEY`, `GEMINI_API_KEY` (an unresolved Key Vault reference counts as absent);
+> `CONTENTFORGE_AI_PROVIDER` pins one when several exist; no key → every AI handler fails with
+> `AI_NOT_CONFIGURED`, a plain sentence. Vertex is gone (ADC is a GCP identity the app cannot hold);
+> Gemini is reached through the public Gemini API by key instead, same model ids. The four AI
+> workers in T-322 share this one door.
+
 Site-Main's `lib/ai-model-router.js` resolves the active provider from
 `CONTENTFORGE_AI_PROVIDER`, **defaulting to `vertex`**, and reaches Vertex through `@google/genai`
 with `vertexai: true` — Application Default Credentials, a GCP identity that a Function App cannot
