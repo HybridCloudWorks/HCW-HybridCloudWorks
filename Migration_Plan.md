@@ -152,7 +152,7 @@ deployed to Azure.
 | 1     | Decouple from Firebase behind interfaces | Both          | **DONE on both sides** — here: zero `firebase/*` imports; Site-Main: v1.7.0 `lib/data/` + `lib/auth/` encapsulation |
 | 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **80 functions deployed 2026-08-20** |
 | 3     | Port the API and workers                 | This repo     | **In progress** — 65 of 89 HTTP registered, 4 of 16 timers (3 stubs), 0 of 11 triggers; see §4 |
-| 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **Rehearsal phase complete on scratch 2026-08-21** — Cosmos 8,023 docs / 62 containers / 0 failed; Storage 1,438 objects / 3.17 GiB, idempotent; production proven empty and locked. Remaining exit: the same against production, in the production-import phase (opens with `migration_writer_enabled = true`) |
+| 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **DONE on production 2026-08-21** — 8,023 documents / 62 containers / 0 failed, reconciled; 1,438 blobs / 3.17 GiB verified. Re-runnable for the delta before cutover (upsert, `gcsmd5`) |
 | 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |
 | 6     | Decommission and archive                 | Both          | GCP down, Site-Main archived                                    |
 
