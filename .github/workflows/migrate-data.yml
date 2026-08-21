@@ -211,8 +211,20 @@ jobs:
       # special grant — on production it must say `rbac` until
       # migration_writer_enabled is flipped.
       # The runner has a public dynamic IP and the storage account denies by
-      # default: open a window, close it in an always() step. Same pattern as
-      # deploy-functions.yml for the Functions host account.
+      # default, so open a window and close it in an always() step.
+      #
+      # An IP rule alone is NOT enough. GitHub-hosted runners are Azure VMs, and
+      # Azure's storage firewall ignores IP rules for requests that originate in
+      # the storage account's own region ("IP network rules have no effect on
+      # requests that originate from the same Azure region" — Storage firewall
+      # limitations). Run 32444649912 (2026-08-21) drew a centralus runner and
+      # the copy 403'd on its first listing; the scratch runs had simply drawn
+      # runners elsewhere. So for the minutes of the copy the account's default
+      # action is set to Allow as well — data-plane access still requires an
+      # Entra token with a blob role (no anonymous containers exist on either
+      # account), and the always() step restores Deny whether the copy
+      # succeeds or not. The IP rule stays so out-of-region runners need no
+      # wider opening than before.
       - name: Open storage firewall window for this runner
         if: ${{ inputs.mode == 'storage-rehearse' }}
         id: fw
@@ -226,6 +238,10 @@ jobs:
           az storage account network-rule add \
             --resource-group "$RG" --account-name "$ACCOUNT" \
             --ip-address "$RUNNER_IP" --output none
+          az storage account update \
+            --resource-group "$RG" --name "$ACCOUNT" \
+            --default-action Allow --output none
+          echo "opened=1" >> "$GITHUB_OUTPUT"
           sleep 30
 
       # ---------------------------------------------------------------------
@@ -304,10 +320,18 @@ jobs:
         env:
           RG: ${{ steps.target.outputs.rg }}
           ACCOUNT: ${{ steps.target.outputs.storage }}
+          RUNNER_IP: ${{ steps.fw.outputs.runner_ip }}
         run: |
+          # Deny first — this is the part that matters if anything below fails.
+          az storage account update \
+            --resource-group "$RG" --name "$ACCOUNT" \
+            --default-action Deny --output none
           az storage account network-rule remove \
             --resource-group "$RG" --account-name "$ACCOUNT" \
-            --ip-address "${{ steps.fw.outputs.runner_ip }}" --output none
+            --ip-address "$RUNNER_IP" --output none
+          az storage account show --resource-group "$RG" --name "$ACCOUNT" \
+            --query "networkRuleSet.defaultAction" -o tsv | grep -qx Deny \
+            || { echo "::error::default action is not Deny after the window closed"; exit 1; }
 
       # Summaries only. Full reports carry document ids, field previews and
       # object paths; on a public repository an artifact is a publication.
