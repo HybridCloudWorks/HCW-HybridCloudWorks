@@ -701,7 +701,11 @@ export default function ImageGalleryPage() {
             <Card key={item.id} className="overflow-hidden">
               <div className="aspect-video bg-muted/40 relative">
                 {imageUrl ? (
-                  <img src={resolveMediaUrl(imageUrl)} alt={item.title} className="h-full w-full object-cover" />
+                  <img
+                    src={resolveMediaUrl(imageUrl)}
+                    alt={item.title}
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
                     No image URL

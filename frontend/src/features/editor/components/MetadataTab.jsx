@@ -247,7 +247,11 @@ export function MetadataTab() {
                 onClick={() => navigator.clipboard?.writeText(img.imageUrl)}
                 title={img.label}
               >
-                <img src={resolveMediaUrl(img.imageUrl)} alt={img.label} className="w-full h-14 object-cover" />
+                <img
+                  src={resolveMediaUrl(img.imageUrl)}
+                  alt={img.label}
+                  className="w-full h-14 object-cover"
+                />
               </button>
             ))}
           </div>
