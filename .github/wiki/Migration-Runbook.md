@@ -150,7 +150,10 @@ in reverse:
    `system` to answer (the role is now there), then the same shape as the scratch run:
    `failed: 0` on 62 containers.
 5. **[CI]** `mode=storage-rehearse target=production` twice — `copied = 1438` then `unchanged = 1438`.
-6. **[CI]** `mode=verify target=production` — read-only reconciliation; must match the export.
+6. **[CI]** `mode=verify target=production` — read-only reconciliation. Expect `social_posts` and
+   `lab_agents` to drift within minutes (Site-Main's 5-minute Publer sync and the VPS agent's
+   heartbeat keep writing them — Phase-4 page D12); everything else must match. `failed: 0` on all
+   62 is reachable only in the cutover delta run, after those two writers are paused.
 7. **[OP]** Unset `PRODUCTION_IMPORT_ENABLED`. Leave the Terraform switch on only if a delta run is
    planned before cutover; otherwise flip it back and apply (three destroys).
 
