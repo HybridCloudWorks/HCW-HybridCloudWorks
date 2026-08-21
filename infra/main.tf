@@ -999,6 +999,10 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "FEATURE_FLAG_SCRAPE_SKILLS_HUB_RSS"        = "false"
     "FEATURE_FLAG_REFRESH_PLAUD_TOKEN"          = "false"
     "FEATURE_FLAG_CHECK_AGENT_HEALTH"           = "false"
+    "FEATURE_FLAG_FETCH_PODCAST_FEEDS"          = "false"
+    "FEATURE_FLAG_FETCH_BLOG_LISTINGS"          = "false"
+    # D12: the live writer of social_posts. Off until the cutover delta import.
+    "FEATURE_FLAG_SYNC_SOCIAL_CALENDAR" = "false"
     # The two that delete blobs stay DRY-RUN even when their flag is on, until
     # the matching *_DELETE setting is "true" (TODO.md T-302).
     "FEATURE_FLAG_CLEANUP_TEMP_STORAGE"       = "false"

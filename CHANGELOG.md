@@ -147,6 +147,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The external-ingestion timers (T-323, closed).** `syncSocialCalendarScheduled`
+  reconciles `social_posts` with Publer (matched posts take Publer's state,
+  vanished ones are marked deleted, unmatched Publer posts become
+  `publer_<id>`); `fetchBlogListings` scrapes eleven non-RSS listing pages
+  through Firecrawl's v1 REST structured extraction into `content` drafts in
+  the RSS shape; `fetchPodcastFeeds` upserts PodBean episodes into
+  `podcasts`. Each skips itself while its key is a Key Vault stub. Three more
+  `FEATURE_FLAG_*` settings, all `"false"`; `SYNC_SOCIAL_CALENDAR` stays off
+  until the cutover delta import (D12). Fifteen of sixteen timers are now
+  registered; `refreshToolServiceCacheScheduled` stays demoted with Cloud
+  Tools.
 - **Twelve of the sixteen timers (T-323).** `functions/src/lib/timers/`
   carries `generateReviewerDigest`, `cleanupRejectedContent` (soft),
   `cleanupSoftDeletedContent` (hard, with linked blogs and `content_versions`
