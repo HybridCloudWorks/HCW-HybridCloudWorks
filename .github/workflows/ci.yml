@@ -54,6 +54,10 @@ jobs:
             test: npm test
           - name: scripts (migration)
             dir: scripts
+            # no-undef is the point: an undefined identifier passes node --check
+            # and every test that never reaches the line. The first preflight
+            # dispatch (2026-08-21) failed on exactly that.
+            lint: npm run lint
             test: npm test
           - name: frontend/functions (legacy)
             dir: frontend/functions

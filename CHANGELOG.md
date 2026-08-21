@@ -54,6 +54,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`preflight-firestore-inventory.mjs` referenced `FIRESTORE_PROJECT_ID` without
+  importing it.** Introduced when the Firestore connection moved into
+  `connectFirestore()`; `node --check` and the 65 tests all passed because an
+  undefined identifier is a runtime error on a line no test reaches. The
+  first `mode=preflight` dispatch from `main` (run 32435060952, 2026-08-21)
+  found it — after proving the GCP Workload Identity Federation chain end to
+  end, which is the part that could not be tested locally. Fixed, and
+  `scripts/` now has an ESLint config with `no-undef` as an error, run by
+  the `scripts (migration)` CI job; a sweep of every script found no other
+  instance.
 - **`migrate-data.yml` carried `COSMOS_KEY` and `COSMOS_DATABASE:
   hybridcloudworks`.** Key auth is disabled on the account and the database is
   `hcw`, so every import would have failed — with an error naming neither.
