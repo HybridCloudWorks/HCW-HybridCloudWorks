@@ -17,7 +17,8 @@
     "storage:verify": "node migrate-storage-to-blob.mjs --verify",
     "spec:check": "node generate-cosmos-container-spec.mjs --check",
     "test": "vitest run",
-    "smoke:deployed": "node smoke-deployed.mjs"
+    "smoke:deployed": "node smoke-deployed.mjs",
+    "lint": "eslint ."
   },
   "engines": {
     "node": ">=22"
@@ -30,6 +31,8 @@
     "firebase-admin": "^14.2.0"
   },
   "devDependencies": {
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
     "vitest": "^4.0.18"
   },
   "overrides": {

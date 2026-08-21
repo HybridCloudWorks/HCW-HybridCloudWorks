@@ -40,7 +40,7 @@
  */
 
 import { COLLECTIONS, knownCollectionIds, findCollection } from './lib/migration-manifest.mjs';
-import { parseArgs, connectFirestore, log, writeReport } from './lib/cli.mjs';
+import { parseArgs, connectFirestore, log, writeReport, FIRESTORE_PROJECT_ID } from './lib/cli.mjs';
 
 let args;
 try {
