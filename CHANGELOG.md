@@ -54,6 +54,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The public content list failed the moment `PUBLIC_LIST_SQL_ORDER` went
+  live** — Cosmos: "The index path corresponding to the specified order-by
+  item is excluded". Computed properties are not covered by the `/*`
+  wildcard (the comment in `public-reads.js` said they were); `/cp_sortDate/?`
+  is now an explicit included path on `content` and `blogs`, applied live
+  through ARM with the property preserved and carried in the generated spec so
+  Terraform agrees. 40 minutes of 500s on the list endpoint, 2026-08-21.
+- **New functions were not registered after the deploy** — SyncTriggers
+  failed on a keyless `AzureWebJobsStorage` connection string the deploy
+  leaves behind (the same cause as the 2026-08-20 every-route-404). 83
+  deployed, 80 registered; `enqueueJob`, `getJob` and the job worker did not
+  exist until the setting was deleted and triggers re-synced by hand.
+  `deploy-functions.yml` now does both after every deploy and fails if the
+  registered count is zero.
 - **`cp_sortDate` is live on `content` and `blogs`** (healer run 32448029469,
   2026-08-21, first successful run on this estate) and the healer workflow can
   now be dispatched with `mode=inspect` to check the precondition for

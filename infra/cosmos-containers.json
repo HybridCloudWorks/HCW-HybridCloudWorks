@@ -139,7 +139,8 @@
       "name": "blogs",
       "partition_key_path": "/id",
       "included_paths": [
-        "/*"
+        "/*",
+        "/cp_sortDate/?"
       ],
       "excluded_paths": [
         "/contentMarkdown/*",
@@ -292,7 +293,8 @@
       "name": "content",
       "partition_key_path": "/id",
       "included_paths": [
-        "/*"
+        "/*",
+        "/cp_sortDate/?"
       ],
       "excluded_paths": [
         "/contentMarkdown/*",

@@ -54,11 +54,23 @@ const LARGE_TEXT_PATHS = [
   '/scraped/*',
 ];
 
+/**
+ * The computed property the public list orders by. Computed properties are NOT
+ * covered by the `/*` wildcard — "Computed properties aren't indexed by default
+ * and aren't covered by wildcard paths" (Cosmos DB docs) — so it has to be an
+ * explicit included path, or `ORDER BY c.cp_sortDate` fails with "The index
+ * path corresponding to the specified order-by item is excluded". That is how
+ * the public content list broke for 40 minutes on 2026-08-21 when
+ * PUBLIC_LIST_SQL_ORDER went to "1". The property itself is still applied by
+ * scripts/apply-computed-sortdate.mjs (see COMPUTED_PROPERTIES_DOC below).
+ */
+const SORT_DATE_INDEX_PATH = '/cp_sortDate/?';
+
 /** Per-container indexing overrides; everything else gets `/*` fully indexed. */
 const INDEXING_OVERRIDES = {
-  content: { included: ['/*'], excluded: LARGE_TEXT_PATHS },
+  content: { included: ['/*', SORT_DATE_INDEX_PATH], excluded: LARGE_TEXT_PATHS },
   content_versions: { included: ['/*'], excluded: LARGE_TEXT_PATHS },
-  blogs: { included: ['/*'], excluded: LARGE_TEXT_PATHS },
+  blogs: { included: ['/*', SORT_DATE_INDEX_PATH], excluded: LARGE_TEXT_PATHS },
   audits: { included: ['/action/?', '/timestamp/?', '/userId/?'], excluded: ['/*'] },
   admin_audit_logs: { included: ['/action/?', '/timestamp/?', '/userId/?'], excluded: ['/*'] },
   lab_jobs: { included: ['/status/?', '/type/?', '/createdAt/?', '/agentId/?'], excluded: ['/*'] },
@@ -85,32 +97,107 @@ const INDEXING_OVERRIDES = {
  */
 const COMPOSITE_INDEXES = {
   content: [
-    [['Live', 'ascending'], ['scheduledPublishDate', 'ascending']],
-    [['type', 'ascending'], ['Live', 'ascending'], ['publishedAt', 'descending']],
-    [['source', 'ascending'], ['fetchedAt', 'descending']],
-    [['contentStatus', 'ascending'], ['updatedAt', 'descending']],
-    [['contentStatus', 'ascending'], ['fetchedAt', 'descending']],
-    [['contentStatus', 'ascending'], ['fetchedAt', 'ascending']],
-    [['Live', 'ascending'], ['contentStatus', 'ascending'], ['blogPublishedAt', 'descending']],
-    [['Live', 'ascending'], ['contentStatus', 'ascending'], ['updatedAt', 'descending']],
-    [['Live', 'ascending'], ['publishedAt', 'descending']],
+    [
+      ['Live', 'ascending'],
+      ['scheduledPublishDate', 'ascending'],
+    ],
+    [
+      ['type', 'ascending'],
+      ['Live', 'ascending'],
+      ['publishedAt', 'descending'],
+    ],
+    [
+      ['source', 'ascending'],
+      ['fetchedAt', 'descending'],
+    ],
+    [
+      ['contentStatus', 'ascending'],
+      ['updatedAt', 'descending'],
+    ],
+    [
+      ['contentStatus', 'ascending'],
+      ['fetchedAt', 'descending'],
+    ],
+    [
+      ['contentStatus', 'ascending'],
+      ['fetchedAt', 'ascending'],
+    ],
+    [
+      ['Live', 'ascending'],
+      ['contentStatus', 'ascending'],
+      ['blogPublishedAt', 'descending'],
+    ],
+    [
+      ['Live', 'ascending'],
+      ['contentStatus', 'ascending'],
+      ['updatedAt', 'descending'],
+    ],
+    [
+      ['Live', 'ascending'],
+      ['publishedAt', 'descending'],
+    ],
   ],
-  episodes: [[['status', 'ascending'], ['order', 'ascending']]],
-  rss_cache: [[['provider', 'ascending'], ['lastFetched', 'descending']]],
+  episodes: [
+    [
+      ['status', 'ascending'],
+      ['order', 'ascending'],
+    ],
+  ],
+  rss_cache: [
+    [
+      ['provider', 'ascending'],
+      ['lastFetched', 'descending'],
+    ],
+  ],
   ai_insights: [
-    [['provider', 'ascending'], ['active', 'ascending'], ['generatedAt', 'descending']],
+    [
+      ['provider', 'ascending'],
+      ['active', 'ascending'],
+      ['generatedAt', 'descending'],
+    ],
   ],
-  podcasts: [[['provider', 'ascending'], ['publishedAt', 'descending']]],
+  podcasts: [
+    [
+      ['provider', 'ascending'],
+      ['publishedAt', 'descending'],
+    ],
+  ],
   certEvents: [
-    [['type', 'ascending'], ['pubDate', 'descending']],
-    [['source', 'ascending'], ['pubDate', 'descending']],
+    [
+      ['type', 'ascending'],
+      ['pubDate', 'descending'],
+    ],
+    [
+      ['source', 'ascending'],
+      ['pubDate', 'descending'],
+    ],
   ],
-  social_posts: [[['status', 'ascending'], ['createdAt', 'descending']]],
-  roadmap_items: [[['archived', 'ascending'], ['sortOrder', 'ascending']]],
+  social_posts: [
+    [
+      ['status', 'ascending'],
+      ['createdAt', 'descending'],
+    ],
+  ],
+  roadmap_items: [
+    [
+      ['archived', 'ascending'],
+      ['sortOrder', 'ascending'],
+    ],
+  ],
   lab_jobs: [
-    [['status', 'ascending'], ['type', 'ascending'], ['createdAt', 'ascending']],
+    [
+      ['status', 'ascending'],
+      ['type', 'ascending'],
+      ['createdAt', 'ascending'],
+    ],
   ],
-  jobs: [[['status', 'ascending'], ['type', 'ascending'], ['createdAt', 'ascending']]],
+  jobs: [
+    [
+      ['status', 'ascending'],
+      ['type', 'ascending'],
+      ['createdAt', 'ascending'],
+    ],
+  ],
 };
 
 /**
@@ -169,7 +256,11 @@ function build() {
 
   for (const entry of COLLECTIONS) {
     if (!PROVISIONED_DISPOSITIONS.has(entry.disposition)) continue;
-    add(entry.name, entry.partitionKey ?? DEFAULT_PARTITION_KEY, DISPOSITION_NOTE[entry.disposition] ?? null);
+    add(
+      entry.name,
+      entry.partitionKey ?? DEFAULT_PARTITION_KEY,
+      DISPOSITION_NOTE[entry.disposition] ?? null
+    );
     for (const sub of entry.subcollections ?? []) {
       // Carry the manifest's own note through — infra/cosmos-containers.json is
       // the file an operator reads, and for a container with a non-default
@@ -198,7 +289,9 @@ const rendered = `${JSON.stringify(build(), null, 2)}\n`;
 if (args.flags.check) {
   const current = existsSync(outPath) ? readFileSync(outPath, 'utf8') : '';
   if (current !== rendered) {
-    log.error('infra/cosmos-containers.json is out of date — run node scripts/generate-cosmos-container-spec.mjs');
+    log.error(
+      'infra/cosmos-containers.json is out of date — run node scripts/generate-cosmos-container-spec.mjs'
+    );
     process.exit(1);
   }
   log.ok('infra/cosmos-containers.json is up to date');
