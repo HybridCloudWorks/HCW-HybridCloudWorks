@@ -174,9 +174,18 @@ const ACTION_CONFIG = {
     runningLabel: 'Inspecting...',
     details:
       'Queues inspection for up to 10 ingested items so metadata is populated before review.',
+    // A platform job (T-322): selects ingested documents and runs the inspector
+    // on each — scrape, analyse, critique — instead of flagging them for a
+    // trigger that does not exist on Azure yet (T-324).
     runner: async () => {
-      const result = await postJSON('batchInspect', { limit: 10 });
-      return `Inspection queued: ${result.triggered || 0}/${result.total || 0} documents.`;
+      const job = await runJob('batch-inspect', { limit: 10 });
+      if (job.status !== 'succeeded') {
+        throw new Error(job.error || `Inspection ${job.status}`);
+      }
+      const r = job.result || {};
+      const rework = r.needsRework ? `, ${r.needsRework} need rework` : '';
+      const failed = r.failed ? `, ${r.failed} failed` : '';
+      return `Inspection complete: ${r.inspected || 0}/${r.total || 0} documents inspected${rework}${failed}.`;
     },
   },
   digest: {

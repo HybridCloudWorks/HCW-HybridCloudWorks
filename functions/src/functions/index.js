@@ -10,6 +10,7 @@ import './cms-http.js';
 import './content-workflow-http.js';
 import './gallery-images-http.js';
 import './image-prompts-http.js';
+import './inspect-jobs.js';
 import './jobs-http.js';
 import './jobs-worker.js';
 import './lab-agent-http.js';

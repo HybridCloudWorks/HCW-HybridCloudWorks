@@ -44,8 +44,9 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    (#138 merged, `--inspect` precondition: **clean**, run 32448514462 — 1,142 + 242 documents, every date alias ISO-sortable). Then read
    `https://api-azure.hybridcloudworks.com/api/public/content?limit=8` and
    confirm newest-first; baseline before the flag had 2026-06-08 at the top.
-2. **T-322** below — the six HTTP handlers over the 230 s cap. First real
-   Phase 3 work; none is mechanical.
+2. **T-322** below — three of the six are ported (`fetch-rss-feeds`,
+   `batch-inspect`, and the router under them). Next: `forge-article`, then
+   `generate-weekly-digest`, `generate-listen-and-learn`.
 3. **T-323 / T-324** below — the 16 timers and the 11 triggers, tables in
    Migration_Plan §4.2 / §4.3.
 4. **T-409** — the visitor-facing upstream delta.
@@ -133,15 +134,20 @@ Order by value and entanglement:
 
 1. **The AI router is in** (`functions/src/lib/ai/router.js`, 2026-08-21):
    providers by key presence, Anthropic → OpenAI → Gemini, `AI_NOT_CONFIGURED`
-   when none. `batch-inspect` — the other button on `OpsHealthPage.jsx` that
-   404s today — is thin upstream (it flips `inspectTrigger` and the Firestore
-   trigger `inspectAndPopulateContent` does the work, T-324). Port it as one
-   job that BOTH selects flagged `ingested` documents and runs the inspector
-   on them (`inspectArticleSource` / `inspectArchitectureSource` +
-   `buildInspectionUpdateData`, Site-Main index.js ~2300–2720: scrape, then
-   `generateJsonResponse`), staggered 4 s apart as upstream. Then
-   `forge-article`, `generate-weekly-digest`, `generate-listen-and-learn` on
-   the same router.
+   when none. **`batch-inspect` is in** (2026-08-21, `functions/src/lib/content/`):
+   one job that selects `ingested` documents (flagged first) and runs the
+   ported inspector on each — scrape (`fetch` + cheerio + turndown, strict
+   TLS, reader/headless fallbacks behind `CONTENTFORGE_SCRAPE_FALLBACK_ENABLED`
+   / `CONTENTFORGE_HEADLESS_FALLBACK_*`), publish-date extraction, format
+   rotation off `scrapedAt`, the verbatim analysis prompt + voice block,
+   critique with one automatic revision (`needs_rework` if still generic),
+   `buildInspectionUpdateData` with its upstream tests. Optional switches,
+   all default off: `CONTENTFORGE_METADATA_ONLY`, `CONTENTFORGE_ALT_TEXT_ENABLED`,
+   `CONTENTFORGE_ANALYSIS_MODEL`. **Not ported:** the architecture-diagram
+   path (`inspectArchitectureSource`, multimodal) — a `type: 'architecture'`
+   document records `inspectError` naming it — and cover-on-inspect (flag
+   only). Next: `forge-article`, `generate-weekly-digest`,
+   `generate-listen-and-learn` on the same router.
 2. `refresh-tool-service-cache` — **demoted**: this repo's frontend has no
    Cloud Tools pages at all (no `getToolComparisonData`, no
    `tool_service_*` reads — the vertical post-dates the 2026-07-22 import),

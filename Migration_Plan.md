@@ -338,7 +338,7 @@ Firebase" claim is weaker than it looks:
 | `forgeArticle` | 300 s / 1 GiB | 300 s | async job; also called in a sequential bulk loop |
 | `fetchRssFeedsManual` | 300 s | 45 s, retried | `202` and reuse the scheduled job |
 | `generateWeeklyDigest` | 300 s | **20 s** (no entry) | async job; the `dryRun` preview needs a fast path |
-| `batchInspect` | 300 s | 45 s, retried | async job — hardcoded `sleep(4000)` × N |
+| `batchInspect` | 300 s | 45 s, retried | **ported 2026-08-21** as the `batch-inspect` job — selects and inspects in one pass, 4 s stagger kept |
 
 Reuse the job pattern that already exists on both sides: a `lab_jobs` document plus a client poll at
 5–10 s (`runToolExpertModeValidation`, `enqueueLabJob`). Fix the client/server timeout mismatch in
@@ -398,7 +398,7 @@ receive; each needs the logic moved into an explicit delete endpoint that the ad
 | `downloadCertBadgeImage` | `certifications` | no | ignored | change feed |
 | `downloadBlogCoverImage` | `blogs` | no | ignored | change feed |
 | `generateBlogCoverImage` | `blogs` | no | ignored | change feed |
-| `inspectAndPopulateContent` | `content` | no | ignored | change feed |
+| `inspectAndPopulateContent` | `content` | no | ignored | change feed; the inspector itself is ported (`functions/src/lib/content/inspect.js`) and runs from the `batch-inspect` job (pull) until the change-feed form lands |
 | `generateAiCoverOnContentTrigger` | `content` | no (rising-edge claim) | ignored | change feed; keep its timeout under the 900 s claim window |
 | `notifyOnWorkflowAlertActivation` | `workflow_alerts` | no | ignored | change feed |
 | `syncToolExpertModeRuns` | `lab_jobs` | no | ignored | change feed |

@@ -147,6 +147,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`batch-inspect` platform job — the article inspector, ported.**
+  `functions/src/lib/content/` carries Site-Main's `scrapeArticle`
+  (`fetch` + cheerio + turndown; strict TLS; reader and headless fallbacks
+  only behind `CONTENTFORGE_SCRAPE_FALLBACK_ENABLED` /
+  `CONTENTFORGE_HEADLESS_FALLBACK_*`), `extractPublishedDate`, the voice /
+  format-rotation block (`pickNextFormat` off `scrapedAt` in Cosmos, fails
+  open), the verbatim analysis system prompt, the critique gate with one
+  automatic revision, and `buildInspectionUpdateData` with its upstream
+  tests. The job (`inspect-jobs.js`) selects up to 25 `ingested` documents —
+  `inspectTrigger: true` first, then unflagged ones that have not failed —
+  inspects each 4 s apart, records `inspectError` on failure and keeps
+  going; results are counts and ids only. `OpsHealthPage` "Batch Inspect"
+  now runs `runJob('batch-inspect', { limit: 10 })`; `batchInspect` left the
+  RPC contract. Not ported: the architecture-diagram (multimodal) path — such
+  documents record an `inspectError` saying so — and cover-on-inspect.
 - **AI router** (`functions/src/lib/ai/router.js`, T-322 §4.4) — ported from
   Site-Main's `ai-model-router.js` with the provider model the owner chose on
   2026-08-21: **a provider is on when its key is present.** Anthropic, OpenAI
