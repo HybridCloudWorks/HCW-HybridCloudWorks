@@ -130,8 +130,18 @@ jobs:
             az functionapp config appsettings delete -n "$APP" -g "$RG" \
               --setting-names AzureWebJobsStorage --output none
           fi
-          az rest --method post --output none \
-            --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"
+          # The appsettings delete above restarts the host; for the next ~30 s the
+          # sync call can answer 400 "InternalServerError from host runtime"
+          # (run 32521270400). Retry before calling it a failure.
+          for attempt in 1 2 3 4; do
+            if az rest --method post --output none 
+                 --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"; then
+              break
+            fi
+            [ "$attempt" -lt 4 ] || { echo "::error::syncfunctiontriggers failed after 4 attempts"; exit 1; }
+            echo "syncfunctiontriggers attempt $attempt failed; retrying in 20 s"
+            sleep 20
+          done
           sleep 15
           count=$(az functionapp function list -n "$APP" -g "$RG" --query "length(@)" -o tsv)
           echo "functions registered after sync: $count"
