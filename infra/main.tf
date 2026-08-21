@@ -984,14 +984,27 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # is ported and reviewed.
     "FEATURE_FLAG_SCHEDULERS" = "false"
 
-    # The only one implemented. Publishes content whose scheduledPublishDate has
-    # come due, through the same pipeline the operator's Publish button uses.
-    "FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT" = "false"
-
-    # Unimplemented TODOs. Do not set to "true".
-    "FEATURE_FLAG_SYNC_RSS_FEEDS"       = "false"
-    "FEATURE_FLAG_CLEANUP_TEMP_STORAGE" = "false"
-    "FEATURE_FLAG_CHECK_AGENT_HEALTH"   = "false"
+    # One flag per timer (functions/src/functions/schedulers.js, Migration_Plan
+    # §4.2). All implemented; each is turned on one at a time at cutover after
+    # being observed firing at the intended local time (§6 step 7).
+    "FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT"    = "false"
+    "FEATURE_FLAG_SYNC_RSS_FEEDS"               = "false"
+    "FEATURE_FLAG_FORGE_SCHEDULED"              = "false"
+    "FEATURE_FLAG_MONITOR_PUBLISHING_PIPELINE"  = "false"
+    "FEATURE_FLAG_GENERATE_REVIEWER_DIGEST"     = "false"
+    "FEATURE_FLAG_CHECK_LIVE_LINKS"             = "false"
+    "FEATURE_FLAG_CLEANUP_REJECTED_CONTENT"     = "false"
+    "FEATURE_FLAG_CLEANUP_SOFT_DELETED_CONTENT" = "false"
+    "FEATURE_FLAG_REVERIFY_CERTIFICATIONS"      = "false"
+    "FEATURE_FLAG_SCRAPE_SKILLS_HUB_RSS"        = "false"
+    "FEATURE_FLAG_REFRESH_PLAUD_TOKEN"          = "false"
+    "FEATURE_FLAG_CHECK_AGENT_HEALTH"           = "false"
+    # The two that delete blobs stay DRY-RUN even when their flag is on, until
+    # the matching *_DELETE setting is "true" (TODO.md T-302).
+    "FEATURE_FLAG_CLEANUP_TEMP_STORAGE"       = "false"
+    "FEATURE_FLAG_CLEANUP_UNUSED_CERT_IMAGES" = "false"
+    "TEMP_STORAGE_CLEANUP_DELETE"             = "false"
+    "CERT_IMAGE_CLEANUP_DELETE"               = "false"
     # platformJobSweeper (jobs-sweeper.js): re-enqueues jobs left `queued` by a
     # failed output binding. Turn on with the first real job traffic (T-322).
     "FEATURE_FLAG_PLATFORM_JOB_SWEEPER" = "false"

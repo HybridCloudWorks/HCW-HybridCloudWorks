@@ -147,6 +147,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Twelve of the sixteen timers (T-323).** `functions/src/lib/timers/`
+  carries `generateReviewerDigest`, `cleanupRejectedContent` (soft),
+  `cleanupSoftDeletedContent` (hard, with linked blogs and `content_versions`
+  rows), `monitorPublishingPipeline`, `checkLiveLinks`,
+  `reVerifyCertifications` (republishes the certifications snapshot),
+  `cleanupUnusedCertImages`, `scrapeSkillsHubRss`, `refreshPlaudToken`,
+  `forgeScheduled`, and the two stubs — `cleanupTempStorage` (prefix + age,
+  not an orphan sweep: T-302) and `checkAgentHealth` (T-401) — each a
+  factory with injected store/fetch/storage, registered in `schedulers.js`
+  through one flag-gated `timer()` helper with the §4.2 NCRONTAB. The two
+  blob-deleting timers are dry-run until `TEMP_STORAGE_CLEANUP_DELETE` /
+  `CERT_IMAGE_CLEANUP_DELETE`. Digest, alert and system-audit records go
+  through `lib/timers/workflow-records.js`. Ten new `FEATURE_FLAG_*` app
+  settings, all `"false"`.
 - **`forge-article` and `generate-weekly-digest` platform jobs; the stale-job
   sweeper.** ContentForge's pipeline is ported whole
   (`functions/src/lib/content/forge*.js`, `drafting.js`): dedupe against the

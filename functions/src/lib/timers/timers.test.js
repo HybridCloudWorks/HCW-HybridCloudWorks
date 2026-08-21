@@ -1,0 +1,562 @@
+import { describe, it, expect, vi } from 'vitest';
+import { mergeDigest, raiseAlert, writeSystemAudit, toMillis } from './workflow-records.js';
+import { createReviewerDigest } from './reviewer-digest.js';
+import { createContentCleanup, getRejectionReferenceDate } from './content-cleanup.js';
+import { createPublishingWatchdog } from './publishing-watchdog.js';
+import { createLinkCheck, collectLiveLinkTargets, probeUrl } from './link-check.js';
+import { createCertReverify, parseExpiryMs, isCredlyUrl } from './cert-reverify.js';
+import {
+  createCertImageCleanup,
+  blobNameFromUrl,
+  collectReferencedBlobNames,
+} from './cert-image-cleanup.js';
+import { createSkillsHubScrape, buildCertEvent, extractExamCodes } from './skills-hub.js';
+import { createPlaudTokenRefresh } from './plaud-token.js';
+import { createAgentHealthCheck, STALE_AFTER_MS } from './agent-health.js';
+import { createTempStorageCleanup, parsePrefixes } from './temp-storage.js';
+import { createForgeScheduled, FORGE_SCHEDULER_ACTOR } from './forge-scheduled.js';
+
+const NOW = new Date('2026-08-21T12:00:00.000Z');
+const now = () => NOW;
+const iso = (ms) => new Date(NOW.getTime() + ms).toISOString();
+const H = 60 * 60 * 1000;
+
+/** A store over an in-memory map of containers; queries are dispatched by a `match` function per test. */
+function memStore(containers = {}, match = () => []) {
+  const data = Object.fromEntries(
+    Object.entries(containers).map(([k, v]) => [k, new Map(v.map((d) => [d.id, d]))])
+  );
+  const get = (c) => (data[c] ||= new Map());
+  return {
+    data,
+    readDoc: vi.fn(async (c, id) => get(c).get(id) || null),
+    upsertDoc: vi.fn(async (c, doc) => {
+      get(c).set(doc.id, doc);
+      return doc;
+    }),
+    patchDoc: vi.fn(async (c, id, u) => {
+      const next = { ...(get(c).get(id) || { id }), ...u };
+      get(c).set(id, next);
+      return next;
+    }),
+    deleteDoc: vi.fn(async (c, id) => {
+      get(c).delete(id);
+    }),
+    queryDocs: vi.fn(async (c, q, p) => match(c, q, p, get(c))),
+    countDocs: vi.fn(async () => 0),
+  };
+}
+
+describe('workflow records', () => {
+  it('merges digests by day, keeps firstSeenAt on alert refresh, writes system audits', async () => {
+    const store = memStore({
+      workflow_digests: [{ id: '2026-08-21', digestDate: '2026-08-21', linkRot: { broken: 1 } }],
+    });
+    await mergeDigest(store, '2026-08-21', { publishingWatchdog: { x: 1 } });
+    expect(store.data.workflow_digests.get('2026-08-21')).toEqual({
+      id: '2026-08-21',
+      digestDate: '2026-08-21',
+      linkRot: { broken: 1 },
+      publishingWatchdog: { x: 1 },
+    });
+    await raiseAlert(store, 'a1', { severity: 'warning' }, () => new Date('2026-08-20T00:00:00Z'));
+    await raiseAlert(store, 'a1', { severity: 'critical' }, now);
+    expect(store.data.workflow_alerts.get('a1')).toMatchObject({
+      active: true,
+      severity: 'critical',
+      firstSeenAt: '2026-08-20T00:00:00.000Z',
+      updatedAt: NOW.toISOString(),
+    });
+    const audit = await writeSystemAudit(
+      store,
+      { action: 'x', source: 'y', details: { n: 1 } },
+      { now, uuid: () => 'u1' }
+    );
+    expect(audit).toMatchObject({
+      id: 'u1',
+      actor: 'system',
+      userId: null,
+      timestamp: NOW.toISOString(),
+      details: { n: 1 },
+    });
+    expect(toMillis('2026-08-21T12:00:00.000Z')).toBe(NOW.getTime());
+    expect(toMillis('nope')).toBe(0);
+  });
+});
+
+describe('reviewer digest', () => {
+  it('counts the review queue (capped at 200), groups recent RSS by provider, writes the day', async () => {
+    const store = memStore({}, (c, q) =>
+      q.includes("c.source = 'rss'")
+        ? [
+            {
+              id: 'r1',
+              Title: 'A',
+              cloudProvider: 'AWS',
+              contentStatus: 'ingested',
+              sourceFeed: 'f',
+              sourceUrl: 'https://a',
+            },
+            { id: 'r2', title: 'B', 'Cloud Provider': 'AWS' },
+            { id: 'r3' },
+          ]
+        : []
+    );
+    store.countDocs.mockImplementation(async (_c, _w, p) => (p[0].value === 'ingested' ? 999 : 3));
+    const r = await createReviewerDigest({ store, now }).run();
+    expect(r).toEqual({
+      success: true,
+      digestDate: '2026-08-21',
+      totalQueued: 209,
+      recentRssCount: 3,
+      queueByStatus: { ingested: 200, inspected: 3, in_review: 3, approved: 3 },
+    });
+    const digest = store.data.workflow_digests.get('2026-08-21');
+    expect(digest.byProvider).toEqual({ AWS: 2, Unknown: 1 });
+    expect(digest.topItems[0]).toEqual({
+      id: 'r1',
+      title: 'A',
+      provider: 'AWS',
+      status: 'ingested',
+      sourceFeed: 'f',
+      sourceUrl: 'https://a',
+    });
+    expect(digest.topItems[2]).toMatchObject({ title: 'Untitled', status: 'ingested' });
+  });
+});
+
+describe('content cleanup', () => {
+  it('soft-deletes aged rejections once, by the rejection reference date, with an audit entry', async () => {
+    const rejected = [
+      { id: 'old', rejectedAt: iso(-48 * H) },
+      { id: 'fresh', rejectedAt: iso(-1 * H) },
+      { id: 'done', reviewedAt: iso(-72 * H), softDeletedAt: iso(-2 * H) },
+      { id: 'viaUpdated', updatedAt: iso(-30 * H) },
+    ];
+    const store = memStore({ content: rejected }, (c) => (c === 'content' ? rejected : []));
+    const r = await createContentCleanup({ store, now, uuid: () => 'a1' }).softDeleteRejected({
+      olderThanHours: 24,
+    });
+    expect(r).toEqual({ deletedCount: 2, softDeletedCount: 2, examinedCount: 4, hasMore: false });
+    expect(store.data.content.get('old')).toMatchObject({
+      softDeletedAt: NOW.toISOString(),
+      softDeletedReason: 'rejected_aged_out',
+    });
+    expect(store.data.content.get('fresh').softDeletedAt).toBeUndefined();
+    expect(store.data.admin_audit_logs.get('a1')).toMatchObject({
+      action: 'cron_soft_deleted_rejected_content',
+      details: { affectedCount: 2, affectedIds: ['old', 'viaUpdated'], olderThanHours: 24 },
+    });
+    expect(getRejectionReferenceDate({ updatedAt: 'x' })).toBeNull();
+  });
+
+  it('hard-deletes soft-deleted content with its blogs and version rows, best-effort on versions', async () => {
+    const store = memStore(
+      {
+        content: [{ id: 'c1', publishedBlogId: 'b1', softDeletedAt: iso(-8 * 24 * H) }],
+        blogs: [{ id: 'b1' }, { id: 'b2', sourceContentId: 'c1' }],
+        content_versions: [{ id: 'v1', contentId: 'c1' }],
+      },
+      (c, q) => {
+        if (c === 'content') return [{ id: 'c1', publishedBlogId: 'b1' }];
+        if (c === 'blogs') return [{ id: 'b2' }];
+        if (c === 'content_versions') return [{ id: 'v1' }];
+        return [];
+      }
+    );
+    const r = await createContentCleanup({ store, now, uuid: () => 'a2' }).hardDeleteSoftDeleted({
+      olderThanHours: 24 * 7,
+    });
+    expect(r).toEqual({
+      deletedContentCount: 1,
+      deletedBlogCount: 2,
+      examinedCount: 1,
+      hasMore: false,
+    });
+    expect(store.deleteDoc.mock.calls).toEqual([
+      ['blogs', 'b1', 'b1'],
+      ['blogs', 'b2', 'b2'],
+      ['content', 'c1', 'c1'],
+      ['content_versions', 'v1', 'c1'],
+    ]);
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([
+      { name: '@cutoff', value: iso(-7 * 24 * H) },
+    ]);
+    expect(store.data.admin_audit_logs.get('a2').details).toMatchObject({
+      deletedContentCount: 1,
+      deletedBlogCount: 2,
+      deletedVersionCount: 1,
+    });
+    const empty = memStore({}, () => []);
+    expect(await createContentCleanup({ store: empty, now }).hardDeleteSoftDeleted()).toEqual({
+      deletedContentCount: 0,
+      deletedBlogCount: 0,
+      examinedCount: 0,
+      hasMore: false,
+    });
+  });
+});
+
+describe('publishing watchdog', () => {
+  it('records counts in the digest and raises a critical alert for overdue schedules', async () => {
+    const store = memStore({}, (c, q) =>
+      q.includes('scheduledPublishDate <= @threshold')
+        ? [{ id: 's1' }]
+        : [
+            { id: 'p1', contentStatus: 'published', publishedAt: iso(-7 * H) },
+            { id: 'p2', contentStatus: 'published', publishedAt: iso(-1 * H) },
+            {
+              id: 'p3',
+              contentStatus: 'published',
+              scheduledPublishDate: iso(1 * H),
+              updatedAt: iso(-20 * H),
+            },
+            { id: 'p4', contentStatus: 'approved', updatedAt: iso(-20 * H) },
+          ]
+    );
+    const r = await createPublishingWatchdog({ store, now }).run();
+    expect(r).toEqual({ overdueScheduledCount: 1, stagedTooLongCount: 1 });
+    expect(store.queryDocs.mock.calls[0][2][0].value).toBe(iso(-45 * 60 * 1000));
+    expect(store.data.workflow_digests.get('2026-08-21').publishingWatchdog).toEqual({
+      lastRunAt: NOW.toISOString(),
+      overdueScheduledCount: 1,
+      stagedTooLongCount: 1,
+    });
+    expect(store.data.workflow_alerts.get('publishing-watchdog-2026-08-21T12')).toMatchObject({
+      alertType: 'publishing_pipeline_stalled_items',
+      severity: 'critical',
+      sampleOverdueIds: ['s1'],
+      sampleStagedIds: ['p1'],
+      active: true,
+    });
+    const healthy = memStore({}, () => []);
+    await createPublishingWatchdog({ store: healthy, now }).run();
+    expect(healthy.data.workflow_alerts).toBeUndefined();
+  });
+});
+
+describe('link check', () => {
+  it('collects page and source targets, confirms HEAD failures with GET, alerts on rot only', async () => {
+    expect(
+      collectLiveLinkTargets({ curatedSubpagePath: 'aws/x', sourceUrl: 'https://s' }, 'd')
+    ).toEqual([
+      { docId: 'd', kind: 'page', url: 'https://hybridcloudworks.com/aws/x' },
+      { docId: 'd', kind: 'source', url: 'https://s' },
+    ]);
+    expect(collectLiveLinkTargets({ url: 'ftp://x' }, 'd')).toEqual([]);
+    const fetch = vi.fn(async (url, { method }) => {
+      if (url === 'https://gone') return { status: 404 };
+      if (url === 'https://headhater') return { status: method === 'HEAD' ? 404 : 200 };
+      if (url === 'https://flaky') return { status: 503 };
+      if (url === 'https://dead') throw new Error('ECONNRESET');
+      return { status: 200 };
+    });
+    expect(await probeUrl('https://headhater', fetch)).toBe(200);
+    expect(await probeUrl('https://dead', fetch)).toBe(0);
+    const store = memStore({}, () => [
+      { id: 'a', slugPageUrl: 'https://ok', sourceUrl: 'https://gone' },
+      { id: 'b', publicUrl: 'https://flaky' },
+      { id: 'c', publishedUrl: 'https://dead' },
+    ]);
+    const r = await createLinkCheck({ store, fetch, now }).run();
+    expect(r).toEqual({ checked: 4, broken: 2 });
+    expect(store.data.workflow_alerts.get('link-rot-2026-08-21')).toMatchObject({
+      alertType: 'link_rot_detected',
+      brokenCount: 2,
+      checkedCount: 4,
+      sampleBroken: [
+        { docId: 'a', kind: 'source', url: 'https://gone', status: 404 },
+        { docId: 'c', kind: 'page', url: 'https://dead', status: 0 },
+      ],
+    });
+  });
+});
+
+describe('certification re-verification', () => {
+  it('retires expired and revoked certs, ignores Credly network errors, republishes once', async () => {
+    expect(parseExpiryMs('2026-01-05')).toBe(Date.parse('2026-01-05T00:00:00Z'));
+    expect(Number.isNaN(parseExpiryMs(''))).toBe(true);
+    expect(isCredlyUrl('https://www.credly.com/badges/x')).toBe(true);
+    expect(isCredlyUrl('http://credly.com/x')).toBe(false);
+    const certs = [
+      { id: 'expired', name: 'E', certState: true, expDate: '2026-01-01' },
+      { id: 'revoked', name: 'R', certState: true, verifyUrl: 'https://credly.com/badges/r' },
+      {
+        id: 'fine',
+        name: 'F',
+        certState: true,
+        expDate: '2099-01-01T00:00:00Z',
+        verifyUrl: 'https://credly.com/badges/f',
+      },
+      { id: 'unreachable', name: 'U', certState: true, verifyUrl: 'https://credly.com/badges/u' },
+    ];
+    const store = memStore({ certifications: certs }, () => certs);
+    const fetch = vi.fn(async (url) => {
+      if (url.endsWith('/u')) throw new Error('timeout');
+      return {
+        text: async () =>
+          url.endsWith('/r') ? '<p>Unable to verify badge</p>' : '<p>Verified</p>',
+      };
+    });
+    const publishSnapshots = vi.fn(async () => ({}));
+    const r = await createCertReverify({ store, fetch, publishSnapshots, now }).run();
+    expect(r).toEqual({ examined: 4, expiredCount: 1, revokedCount: 1 });
+    expect(store.data.certifications.get('expired').certState).toBe(false);
+    expect(store.data.certifications.get('revoked').certState).toBe(false);
+    expect(store.data.certifications.get('fine').certState).toBe(true);
+    expect(store.data.certifications.get('unreachable').certState).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(3); // expired one is not fetched
+    expect(publishSnapshots).toHaveBeenCalledWith(['certifications']);
+  });
+});
+
+describe('cert image cleanup', () => {
+  it('resolves Firebase, GCS and blob URLs to the same blob name', () => {
+    expect(
+      blobNameFromUrl(
+        'https://firebasestorage.googleapis.com/v0/b/x.appspot.com/o/certifications%2Fimages%2Fa%20b.png?alt=media&token=t'
+      )
+    ).toBe('images/a b.png');
+    expect(
+      blobNameFromUrl('https://storage.googleapis.com/x/certifications/images/c.png?x=1')
+    ).toBe('images/c.png');
+    expect(
+      blobNameFromUrl('https://stsiteprodcus01.blob.core.windows.net/certifications/images/d.png')
+    ).toBe('images/d.png');
+    expect(blobNameFromUrl('https://example.com/images/e.png')).toBeNull();
+    expect(
+      [
+        ...collectReferencedBlobNames([
+          {
+            imageUrl: 'https://stsiteprodcus01.blob.core.windows.net/certifications/images/a.png',
+            badge: { ref: 'certifications/images/b.png' },
+            image: [{ url: 'https://storage.googleapis.com/x/certifications/images/c.png' }],
+          },
+        ]),
+      ].sort()
+    ).toEqual(['images/a.png', 'images/b.png', 'images/c.png']);
+  });
+
+  it('dry-runs by default and deletes only old, unreferenced images when enabled', async () => {
+    const certs = [
+      {
+        id: 'c',
+        imageUrl: 'https://stsiteprodcus01.blob.core.windows.net/certifications/images/keep.png',
+      },
+    ];
+    const store = memStore({}, () => certs);
+    const blobs = [
+      { name: 'images/keep.png', lastModified: iso(-30 * 24 * H) },
+      { name: 'images/recent.png', lastModified: iso(-2 * 24 * H) },
+      { name: 'images/orphan.png', lastModified: iso(-30 * 24 * H) },
+    ];
+    const storage = { listBlobs: vi.fn(async () => blobs), deleteBlob: vi.fn(async () => {}) };
+    const dry = await createCertImageCleanup({ store, storage, env: {}, now }).run();
+    expect(dry).toEqual({
+      dryRun: true,
+      examined: 3,
+      referenced: 1,
+      candidates: 1,
+      deleted: 0,
+      skipped: 2,
+    });
+    expect(storage.deleteBlob).not.toHaveBeenCalled();
+    expect(storage.listBlobs).toHaveBeenCalledWith('certifications', 'images/');
+    const real = await createCertImageCleanup({
+      store,
+      storage,
+      env: { CERT_IMAGE_CLEANUP_DELETE: 'true' },
+      now,
+    }).run();
+    expect(real).toMatchObject({ dryRun: false, deleted: 1 });
+    expect(storage.deleteBlob).toHaveBeenCalledWith('certifications', 'images/orphan.png');
+  });
+});
+
+describe('skills hub scrape', () => {
+  it('stores only lifecycle events, once each, with exam codes and mentioned dates', async () => {
+    expect(extractExamCodes('AZ-104 and AZ-104 and AI-9000 and ab-1')).toEqual([
+      'AZ-104',
+      'AI-9000',
+    ]);
+    const items = [
+      {
+        guid: 'g1',
+        title: 'AZ-305 exam retires June 30, 2026',
+        contentSnippet: 'x',
+        pubDate: 'Fri, 01 May 2026 09:00:00 GMT',
+        link: 'https://l',
+      },
+      { guid: 'g2', title: 'Community spotlight', contentSnippet: 'nothing' },
+      { guid: 'g3', title: 'New beta exam SC-100', pubDate: 'garbage' },
+    ];
+    expect(buildCertEvent(items[1], NOW)).toBeNull();
+    expect(buildCertEvent(items[0], NOW)).toMatchObject({
+      type: 'retirement',
+      certCodes: ['AZ-305'],
+      mentionedDates: ['June 30, 2026'],
+      pubDate: '2026-05-01T09:00:00.000Z',
+      source: 'skills-hub-rss',
+      link: 'https://l',
+    });
+    expect(buildCertEvent(items[2], NOW).pubDate).toBe(NOW.toISOString());
+    const first = buildCertEvent(items[0], NOW);
+    const store = memStore({ certEvents: [first] });
+    const parser = { parseURL: vi.fn(async () => ({ items })) };
+    expect(await createSkillsHubScrape({ store, parser, now }).run()).toEqual({
+      written: 1,
+      skipped: 2,
+    });
+    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+    const broken = {
+      parseURL: vi.fn(async () => {
+        throw new Error('503');
+      }),
+    };
+    expect(await createSkillsHubScrape({ store, parser: broken, now }).run()).toMatchObject({
+      written: 0,
+      error: '503',
+    });
+  });
+});
+
+describe('plaud token refresh', () => {
+  it('rotates the pair on success and disconnects on every failure shape', async () => {
+    const store = memStore({
+      mcp_servers: [{ id: 'plaud', oauthRefreshToken: 'r1', status: 'connected' }],
+    });
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({ access_token: 'a2', refresh_token: 'r2', expires_in: 3600 }),
+    }));
+    expect(await createPlaudTokenRefresh({ store, fetch, now }).run()).toEqual({
+      ok: true,
+      expiresInSec: 3600,
+    });
+    expect(store.data.mcp_servers.get('plaud')).toMatchObject({
+      oauthToken: 'a2',
+      oauthRefreshToken: 'r2',
+      oauthExpiresAt: NOW.getTime() + 3600 * 1000,
+      status: 'connected',
+      lastTokenRefreshError: null,
+    });
+    expect(fetch.mock.calls[0][1].body).toBe('refresh_token=r1');
+    fetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'revoked' });
+    expect(await createPlaudTokenRefresh({ store, fetch, now }).run()).toEqual({
+      ok: false,
+      reason: 'http_401',
+    });
+    expect(store.data.mcp_servers.get('plaud')).toMatchObject({
+      status: 'disconnected',
+      lastTokenRefreshError: 'revoked',
+    });
+    expect(await createPlaudTokenRefresh({ store: memStore({}), fetch, now }).run()).toEqual({
+      ok: false,
+      reason: 'missing_doc',
+    });
+    const noToken = memStore({ mcp_servers: [{ id: 'plaud' }] });
+    expect(await createPlaudTokenRefresh({ store: noToken, fetch, now }).run()).toEqual({
+      ok: false,
+      reason: 'missing_refresh_token',
+    });
+  });
+});
+
+describe('agent health + temp storage', () => {
+  it('marks stale agents offline with the partition key, once', async () => {
+    const store = memStore({}, () => [
+      { id: 'agent-1', agentId: 'agent-1', status: 'idle', lastSeenAt: iso(-5 * 60 * 1000) },
+    ]);
+    expect(await createAgentHealthCheck({ store, now }).run()).toEqual({
+      markedOffline: 1,
+      agentIds: ['agent-1'],
+    });
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([
+      { name: '@cutoff', value: iso(-STALE_AFTER_MS) },
+    ]);
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'lab_agents',
+      'agent-1',
+      { status: 'offline', offlineSince: NOW.toISOString() },
+      { partitionKey: 'agent-1' }
+    );
+  });
+
+  it('temp storage: prefix + age only, dry-run by default, never a whole container', async () => {
+    expect(parsePrefixes('content:uploads/, covers:tmp/x:y ,bad,:nope, content:')).toEqual([
+      { container: 'content', prefix: 'uploads/' },
+      { container: 'covers', prefix: 'tmp/x:y' },
+    ]);
+    const storage = {
+      listBlobs: vi.fn(async () => [
+        { name: 'uploads/old.bin', lastModified: iso(-10 * 24 * H) },
+        { name: 'uploads/new.bin', lastModified: iso(-1 * 24 * H) },
+      ]),
+      deleteBlob: vi.fn(async () => {}),
+    };
+    const dry = await createTempStorageCleanup({ storage, env: {}, now }).run();
+    expect(dry).toEqual({
+      dryRun: true,
+      maxAgeDays: 7,
+      examined: 2,
+      candidates: 1,
+      deleted: 0,
+      byPrefix: { 'content:uploads/': { examined: 2, candidates: 1, deleted: 0 } },
+    });
+    expect(storage.deleteBlob).not.toHaveBeenCalled();
+    const real = await createTempStorageCleanup({
+      storage,
+      env: { TEMP_STORAGE_CLEANUP_DELETE: 'true', TEMP_STORAGE_MAX_AGE_DAYS: '3' },
+      now,
+    }).run();
+    expect(real).toMatchObject({ dryRun: false, maxAgeDays: 3, deleted: 1 });
+    expect(storage.deleteBlob).toHaveBeenCalledWith('content', 'uploads/old.bin');
+  });
+});
+
+describe('forge scheduled', () => {
+  it('skips when auto-forge is off, otherwise forges unforged candidates up to the daily limit and tallies outcomes', async () => {
+    const forge = {
+      runForgePipeline: vi.fn(async ({ contentId }) =>
+        contentId === 'dup'
+          ? { ok: false, httpStatus: 409, error: 'dupe' }
+          : contentId === 'bad'
+            ? { ok: false, httpStatus: 502, error: 'gen failed' }
+            : { ok: true, result: { status: contentId === 'ed' ? 'editing' : 'forge_ready' } }
+      ),
+    };
+    const off = {
+      loadForgePrompts: async () => ({ autoForge: { enabled: false, dailyLimit: 3 } }),
+    };
+    expect(
+      (await createForgeScheduled({ store: memStore(), config: off, forge }).run()).skippedRun
+    ).toBe(true);
+    const on = { loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 4 } }) };
+    const store = memStore({}, () => [
+      { id: 'forged', forgeMeta: {} },
+      { id: 'ok' },
+      { id: 'ed' },
+      { id: 'dup' },
+      { id: 'bad' },
+      { id: 'overflow' },
+    ]);
+    const r = await createForgeScheduled({ store, config: on, forge }).run();
+    expect(r).toEqual({
+      skippedRun: false,
+      attempted: 4,
+      staged: 1,
+      editing: 1,
+      skipped: 1,
+      errors: 1,
+      failures: [{ contentId: 'bad', error: 'gen failed' }],
+    });
+    expect(
+      forge.runForgePipeline.mock.calls.every((c) => c[0].actor === FORGE_SCHEDULER_ACTOR)
+    ).toBe(true);
+    expect(forge.runForgePipeline).not.toHaveBeenCalledWith(
+      expect.objectContaining({ contentId: 'overflow' })
+    );
+  });
+});

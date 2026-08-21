@@ -366,20 +366,22 @@ the NCRONTAB column below picks one. Change the hour, not the intent.
 | --- | --- | --- | --- | --- |
 | `publishScheduledContent` | `*/15 * * * *` | Chicago | `0 */15 * * * *` | **implemented**, flag off |
 | `fetchRssFeeds` | `every 2 hours` | — | `0 0 */2 * * *` | **implemented** (`syncRssFeeds`, shares the `fetch-rss-feeds` job's ingest), flag off |
-| `syncSocialCalendarScheduled` | `every 5 minutes` | Chicago | `0 */5 * * * *` | — |
-| `generateReviewerDigest` | `0 7 * * *` | Chicago | `0 0 7 * * *` | — |
-| `cleanupRejectedContent` | `0 4 * * *` | Chicago | `0 0 4 * * *` | — |
-| `cleanupSoftDeletedContent` | `0 */4 * * *` | Chicago | `0 0 */4 * * *` | — |
-| `monitorPublishingPipeline` | `0 */6 * * *` | Chicago | `0 0 */6 * * *` | — |
-| `checkLiveLinks` | `0 6 * * 1` | Chicago | `0 0 6 * * 1` | — |
-| `reVerifyCertifications` | `0 0 * * 0` | Chicago | `0 0 0 * * 0` | — |
-| `refreshToolServiceCacheScheduled` | `every 24 hours` | — | `0 0 3 * * *` | — |
-| `forgeScheduled` | `every 24 hours` | — | `0 30 3 * * *` | — |
-| `cleanupUnusedCertImages` | `every 24 hours` | — | `0 0 5 * * *` | — |
-| `fetchPodcastFeeds` | `every 2 hours` | — | `0 30 */2 * * *` | — |
-| `fetchBlogListings` | `every 6 hours` | — | `0 15 */6 * * *` | — |
-| `refreshPlaudToken` | `every 12 hours` | — | `0 0 */12 * * *` | — |
-| `scrapeSkillsHubRss` | `every friday 09:00` | **UTC** | `0 0 4 * * 5` (04:00 CDT ≈ 09:00 UTC; 03:00 CST in winter) | — |
+| `cleanupTempStorage` (Azure-only) | — | — | `0 0 0 * * *` | **implemented**, flag off; prefix + age, dry-run until `TEMP_STORAGE_CLEANUP_DELETE` |
+| `checkAgentHealth` (Azure-only) | — | — | `0 */5 * * * *` | **implemented**, flag off; marks agents silent > 90 s `offline` |
+| `syncSocialCalendarScheduled` | `every 5 minutes` | Chicago | `0 */5 * * * *` | — (next PR: Publer reconcile) |
+| `generateReviewerDigest` | `0 7 * * *` | Chicago | `0 0 7 * * *` | **implemented**, flag off |
+| `cleanupRejectedContent` | `0 4 * * *` | Chicago | `0 0 4 * * *` | **implemented**, flag off |
+| `cleanupSoftDeletedContent` | `0 */4 * * *` | Chicago | `0 0 */4 * * *` | **implemented**, flag off |
+| `monitorPublishingPipeline` | `0 */6 * * *` | Chicago | `0 0 */6 * * *` | **implemented**, flag off |
+| `checkLiveLinks` | `0 6 * * 1` | Chicago | `0 0 6 * * 1` | **implemented**, flag off |
+| `reVerifyCertifications` | `0 0 * * 0` | Chicago | `0 0 0 * * 0` | **implemented**, flag off |
+| `refreshToolServiceCacheScheduled` | `every 24 hours` | — | `0 0 3 * * *` | demoted with Cloud Tools (T-322) |
+| `forgeScheduled` | `every 24 hours` | — | `0 30 3 * * *` | **implemented**, flag off (and Auto-Forge off in Forge Memory) |
+| `cleanupUnusedCertImages` | `every 24 hours` | — | `0 0 5 * * *` | **implemented**, flag off; dry-run until `CERT_IMAGE_CLEANUP_DELETE` |
+| `fetchPodcastFeeds` | `every 2 hours` | — | `0 30 */2 * * *` | — (next PR) |
+| `fetchBlogListings` | `every 6 hours` | — | `0 15 */6 * * *` | — (next PR: Firecrawl) |
+| `refreshPlaudToken` | `every 12 hours` | — | `0 0 */12 * * *` | **implemented**, flag off |
+| `scrapeSkillsHubRss` | `every friday 09:00` | **UTC** | `0 0 4 * * 5` (04:00 CDT ≈ 09:00 UTC; 03:00 CST in winter) | **implemented**, flag off |
 
 Every timer stays behind its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_SCHEDULERS` master
 switch (`infra/main.tf`), and is turned on one at a time during cutover (§6 step 7) — after being

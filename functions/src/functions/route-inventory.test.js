@@ -278,9 +278,15 @@ describe('non-HTTP triggers', () => {
   it('the scheduler timers stay behind one feature flag', () => {
     // Not an authorization surface, but they are registrations, and one of
     // them deletes blobs with an unimplemented body (TODO.md T-302). The
-    // fifth is platformJobSweeper (jobs-sweeper.js), behind its own flag.
-    expect(timerRegistrations.size).toBe(5);
+    // fourteen are the T-323 timers in schedulers.js; the fifteenth is
+    // platformJobSweeper (jobs-sweeper.js), behind its own flag.
+    expect(timerRegistrations.size).toBe(15);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
+    for (const name of ['cleanupTempStorage', 'cleanupUnusedCertImages']) {
+      // The two that delete blobs: registered, and their handlers are the
+      // dry-run-by-default factories (lib/timers/temp-storage.js, cert-image-cleanup.js).
+      expect(timerRegistrations.has(name)).toBe(true);
+    }
   });
 
   it('the platform job worker is the only queue trigger, on the identity-based host connection', () => {
