@@ -28,19 +28,23 @@ const masterDisabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'false';
 /**
  * @param {string} name - env var suffix, e.g. 'PUBLISH_SCHEDULED'
  */
-const timerEnabled = (name) =>
-  !masterDisabled() && process.env[`FEATURE_FLAG_${name}`] === 'true';
+const timerEnabled = (name) => !masterDisabled() && process.env[`FEATURE_FLAG_${name}`] === 'true';
 
 app.timer('syncRssFeeds', {
-  schedule: '0 0 * * * *', // every hour
+  // Site-Main: `every 2 hours`. Same ingest as the fetch-rss-feeds job
+  // (rss-jobs.js); items[] per rss_cache document is capped at write time
+  // (T-319, MAX_CACHE_ITEMS_PER_FEED).
+  schedule: '0 0 */2 * * *',
   handler: async (myTimer, context) => {
     if (!timerEnabled('SYNC_RSS_FEEDS')) {
       context.log('[syncRssFeeds] disabled — skipping');
       return;
     }
-    context.log('Running RSS feed sync...');
-    // TODO: Fetch feed URLs from Cosmos DB config, parse, upsert content docs.
-    // Cap items[] per document at write time when this lands — see TODO.md T-319.
+    const { runRssIngest } = await import('./rss-jobs.js');
+    const results = await runRssIngest(context);
+    context.log(
+      `[syncRssFeeds] ${results.processed} feeds, ${results.newContent} new, ${results.errors.length} errors`
+    );
   },
 });
 

@@ -20,6 +20,7 @@ import './platform-health-http.js';
 import './public-media.js';
 import './public-reads.js';
 import './publish-http.js';
+import './rss-jobs.js';
 import './public-submissions.js';
 import './schedulers.js';
 

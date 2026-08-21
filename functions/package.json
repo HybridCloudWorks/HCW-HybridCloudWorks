@@ -23,7 +23,8 @@
     "cheerio": "^1.2.0",
     "google-auth-library": "^11.0.2",
     "jsonwebtoken": "^9.0.3",
-    "jwks-rsa": "^4.0.1"
+    "jwks-rsa": "^4.0.1",
+    "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "vitest": "^4.0.18"

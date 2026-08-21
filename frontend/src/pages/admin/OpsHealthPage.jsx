@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { postJSON } from '@/lib/api';
+import { runJob } from '@/lib/jobs';
 import {
   FileText,
   Play,
@@ -152,9 +153,16 @@ const ACTION_CONFIG = {
     buttonLabel: 'Run Now',
     runningLabel: 'Fetching RSS...',
     details: 'Pulls the latest RSS feed entries and creates new content candidates for review.',
+    // A platform job, not an RPC: the fetch takes minutes and Flex Consumption
+    // cuts HTTP responses at 230 s (T-322). runJob enqueues and polls.
     runner: async () => {
-      const result = await postJSON('fetchRssFeedsManual', {});
-      return `RSS fetch complete: ${result.processed || 0} feeds, ${result.newBlogs || 0} new blog entries.`;
+      const job = await runJob('fetch-rss-feeds', {});
+      if (job.status !== 'succeeded') {
+        throw new Error(job.error || `RSS fetch ${job.status}`);
+      }
+      const r = job.result || {};
+      const errors = r.errors?.length ? ` ${r.errors.length} feed(s) failed.` : '';
+      return `RSS fetch complete: ${r.processed || 0} feeds, ${r.newContent || 0} new content drafts, ${r.duplicates || 0} duplicates skipped.${errors}`;
     },
   },
   inspect: {
