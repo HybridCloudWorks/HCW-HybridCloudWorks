@@ -17,6 +17,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **The data-migration workflow can no longer publish production data.** The
+  repository is public, and `migrate-data.yml` uploaded `scripts/reports/` —
+  document ids and 240-character field samples — as a workflow artifact, while
+  the import dry-run printed document samples to the job log. Every migration
+  script now writes a `*.summary.json` (counts, container names, warning
+  tallies) beside its full report; only summaries are uploaded, with 1-day
+  retention; the export lives in `$RUNNER_TEMP` and dies with the runner;
+  `MIGRATION_CI=1` makes `--show-samples` an error; and the upload step refuses
+  any non-summary JSON it finds.
+- **No stored credential on either cloud for the migration.** Firestore and
+  GCS reads authenticate through Workload Identity Federation
+  (`google-github-actions/auth` + `applicationDefault()`); `connectFirestore()`
+  refuses a `service_account` key file in CI, `connectCosmos()` refuses to
+  start if `COSMOS_KEY` is set, and `FIREBASE_SERVICE_ACCOUNT_JSON` is retired
+  before it was ever provisioned. The `azcopy` storage script — whose GCS
+  source accepts only a downloaded key — was replaced by a Node copier on the
+  same federated credentials.
+- **Production Cosmos is locked by RBAC, not by a YAML guard.** The deploy
+  identity's database-scope Data Contributor and blob-write roles on
+  production exist only behind `migration_writer_enabled` (default `false`);
+  the workflow's refusal of `target=production` for write modes is the second
+  lock, not the only one.
 - **Every GitHub Actions reference pinned to a commit SHA** — 35 `uses:`
   lines across all 12 workflows. A tag is a mutable pointer: whoever controls
   the action's repository can move `@v4` to different code at any time, and
@@ -32,6 +54,24 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`migrate-data.yml` carried `COSMOS_KEY` and `COSMOS_DATABASE:
+  hybridcloudworks`.** Key auth is disabled on the account and the database is
+  `hcw`, so every import would have failed — with an error naming neither.
+  Both removed; the workflow also lacked `id-token: write`, so it had no OIDC
+  path to either cloud.
+- **Eleven `moved` blocks removed from `infra/main.tf`.** Verified no-ops:
+  the centralus rebuild recreated every container from the spec while all
+  were empty, and `terraform state list` shows only the `for_each` form. A
+  three-line note records that the partition-key change happened through the
+  rebuild.
+- **Stale counts and comments.** `main.tf`'s partition-key comment (67 on
+  `/id` and five exceptions, not 62 and four); the `cosmos_database_name`
+  comment (the scripts default to `hcw`, not `hybridcloudworks`);
+  `cosmos-client.js` (67 of 72, not 66 of 71); and the storage lifecycle rule
+  for `articles/` is now documented as inert — Azure matches
+  `<container>/<blob>` and no `articles` container exists.
+- **`set-github-variables.ps1` and REVIEW §4.2 omitted `FUNCTION_APP_NAME`**,
+  which is set and consumed by `deploy-functions.yml`.
 - **`Azure/functions-action@v2` does not exist.** Found while resolving tags
   to SHAs: that action's newest tag is `v1.5.7` and its release branch is
   `releases/v1`, so `deploy-functions.yml` carried a reference that resolves
@@ -55,6 +95,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`infra/scratch.tf` — the migration rehearsal estate.** `cosmos-site-sbx-cus`
+  (serverless, keys **off**, the same firewall shape, the same `hcw` database
+  and the same 72 containers from the same generated spec) and
+  `stsitesbxcus01` (the five content containers plus a private
+  `migration-reports`) in their own resource group `rg-db-site-sbx-cus`,
+  created only while `cosmos_scratch_enabled` / `storage_scratch_enabled` are
+  true and destroyed when they are not. Mirrors production's posture on
+  purpose: a key-authenticated rehearsal against an open account passes while
+  proving nothing about the `DefaultAzureCredential` + RBAC path production
+  takes. Outputs via `one()`; `set-github-variables.ps1` wave 2 seeds
+  `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
+  `SCRATCH_RESOURCE_GROUP` from them, and leaves them alone while null.
+- **`scripts/migration-probe.mjs`.** One `SELECT VALUE COUNT(1)` that runs
+  before the export and classifies a Cosmos 403 as `firewall` or `rbac` —
+  two unrelated causes the SDK error does not distinguish, and which would
+  otherwise surface only on the first upsert after a full export.
+- **`scripts/migrate-storage-to-blob.mjs` + `scripts/lib/storage-manifest.mjs`.**
+  Manifest-driven GCS → Blob `--inventory | --copy [--dry-run] [--overwrite] |
+  --verify` on `@google-cloud/storage` + `@azure/storage-blob`, idempotent by
+  `gcsmd5` metadata, carrying `contentType` / `cacheControl`, with a verify
+  that compares counts, bytes, every object's MD5 and a deterministic
+  byte-for-byte sample. `--inventory` exits 2 on an unmanifested prefix,
+  mirroring the Firestore preflight. A vitest suite asserts every target
+  container is one of the five Terraform names. Replaces
+  `migrate-storage-to-blob.sh`.
+- **Wiki pages `Migration-Runbook` and `Phase-4-Data-Migration`.**
+  Referenced from eleven places (README, the plan, `_Sidebar`, the workflow,
+  the manifest header); neither existed. The runbook is the twelve-step
+  operator sequence with the evidence each step produces; the Phase-4 page is
+  the decision log.
+- **`WEBSITE_TIME_ZONE = "America/Chicago"` on the Function App.** Eight of
+  Site-Main's sixteen schedules are declared in that zone; NCRONTAB on Linux
+  evaluates in UTC unless told otherwise.
+- **`storage_resource_group` output**, pairing with `storage_account` the way
+  `web_resource_group` pairs with `functions_storage_account` — what
+  `migrate-data.yml` scopes its per-run firewall window to.
 - **The HCP Terraform → Azure bootstrap, which existed nowhere.**
   `infra/providers.tf` declares the `azurerm` provider with no credential —
   correct, because runs execute under HCP Terraform dynamic provider
@@ -113,6 +189,50 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`migrate-data.yml` rewritten.** Dispatch-only; `id-token: write`;
+  `environment: data-migration`; modes `preflight | inventory-gate |
+  export-dry-run | rehearse | verify | storage-inventory | storage-rehearse`
+  with `target` ∈ `scratch` (default) | `production` and a hard refusal of
+  write modes against production. Step order is a correctness constraint:
+  `npm ci`, the Site-Main checkout and the Cosmos probe all run before
+  `google-github-actions/auth`, because the GitHub OIDC token it exchanges
+  lives five minutes. Per-run storage firewall window with `always()` cleanup,
+  mirroring `deploy-functions.yml`. `COSMOS_DATABASE: hcw`. Inputs reach the
+  shell through `env`, never interpolated into `run:`.
+- **`COSMOS_ENDPOINT` is a repository variable, not a secret.** It is a public
+  URL and a non-sensitive Terraform output; as a secret it was masked in logs
+  and unverifiable in the UI. `set-github-variables.ps1` now seeds it as a
+  variable and deletes the old secret; both consuming workflows read
+  `vars.COSMOS_ENDPOINT`. The script also takes
+  `-GcpWorkloadIdentityProvider` / `-GcpServiceAccount` for the two WIF
+  identifiers, and seeds `STORAGE_ACCOUNT` / `STORAGE_RESOURCE_GROUP`.
+- **Migration scripts share one credential path.** `scripts/lib/cli.mjs` gains
+  `connectFirestore()` (ADC, explicit `projectId`), `connectCosmos()`
+  (`DefaultAzureCredential` only), `connectBlob()`, `classifyCosmosError()`,
+  `writeReport()` (full report + publishable `.summary.json` sibling) and
+  `showSamples()`; the migrator, preflight and verifier use them. The
+  manifest is re-baselined at Site-Main `088f458` with `azure_architectures`
+  and `azure_frameworks` added as `probe` — not provisioned, so the generated
+  container spec is unchanged.
+- **`Migration_Plan.md` rebaselined against Site-Main @ `088f458`.** §0 is now
+  donor/recipient with a pinned baseline instead of "reconcile weekly" (the
+  two repositories finished Phase 1 in incompatible directions); §2 carries
+  real status; §4 carries the measured inventories — the six HTTP handlers
+  over the 230 s Flex cap, the 16 timers with NCRONTAB and zone, the 11
+  triggers with change-feed disposition and the three delete paths the feed
+  cannot deliver, and the Vertex-default finding; §5 is rewritten around the
+  tooling defects, the rehearsal estate, the five dispositions, the storage
+  manifest and the public-repository rule; §6–§9 updated to match. The two
+  links to the wrong GitHub org are gone.
+- **Every image render site routes through `resolveMediaUrl()`** (T-318,
+  sixteen files, commit `09154ad`). Stored site-relative
+  `/api/public/media/...` paths now resolve against the Cloudflare API host,
+  which the origin lock made the only working shape; absolute legacy URLs
+  pass through untouched.
+- **`oidc.tf`'s "deliberately NOT granted" note** now says what is true: the
+  migration *does* use the deploy identity, on the scratch account at
+  database scope, and holds nothing extra on production while
+  `migration_writer_enabled` is off.
 - **Every Terraform output renamed to the 2-word standard** (workload owner
   directive, 2026-08-18: `github_deploy_client_id` was four words). The
   standard now explicitly covers **outputs** — they are operator-facing,

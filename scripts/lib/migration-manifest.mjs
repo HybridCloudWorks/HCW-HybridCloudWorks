@@ -11,7 +11,17 @@
  * Source of the inventory: `platform/firebase/firestore.rules` in
  * HybridCloudWorks/Site-Main (65 top-level `match` blocks) cross-checked
  * against `collection(...)` call sites in that repo's `src/`, `functions/` and
- * `scripts/`. Reviewed at Site-Main commit 07f3123.
+ * `scripts/`. First reviewed at Site-Main commit 07f3123 (2026-08-04).
+ *
+ * Re-baselined against Site-Main 088f458 (2026-08-18, v1.7.0) on 2026-08-20.
+ * Site-Main's own inventory (`npm run inventory:collections` there) lists 68
+ * collections; every one is either here or deliberately not. The two it has
+ * that were missing here — `azure_architectures` and `azure_frameworks`,
+ * written by `scripts/seed_azure_data.js` and matched by no rule — are now
+ * `probe` entries so the preflight counts them instead of failing on them.
+ * Site-Main ships `scripts/inventory-collections.mjs --diff <this file>` as a
+ * cutover gate: it exits 1 on any collection it touches that is not listed
+ * here. Keep that green.
  *
  * ---------------------------------------------------------------------------
  * Dispositions
@@ -464,6 +474,23 @@ export const COLLECTIONS = [
     name: 'rss_cache',
     disposition: 'regenerate',
     note: '~24 docs. Regenerable — let the scheduled fetch refill it.',
+  },
+
+  // --- Seeder-written, no rule, no reader found ----------------------------
+  // Both are written by Site-Main `scripts/seed_azure_data.js` and appear in
+  // neither firestore.rules (so default-deny to clients) nor any read path
+  // found at 088f458. `azure_landing_content`, which the same seeder writes,
+  // IS read and IS provisioned above. These two are probes: the preflight
+  // reports a count, and that count decides drop vs promote before cutover.
+  {
+    name: 'azure_architectures',
+    disposition: 'probe',
+    note: 'Written by Site-Main scripts/seed_azure_data.js; no rules match, no reader found at 088f458. Preflight decides.',
+  },
+  {
+    name: 'azure_frameworks',
+    disposition: 'probe',
+    note: 'Written by Site-Main scripts/seed_azure_data.js; no rules match, no reader found at 088f458. Preflight decides.',
   },
 ];
 

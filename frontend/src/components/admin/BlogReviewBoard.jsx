@@ -39,6 +39,7 @@ import {
 import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { getOrderedContentImages } from '@/lib/contentImages';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 const getStatusLabel = (status, isLive = false) => {
   if (!status) return 'reviewed';
@@ -676,7 +677,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                       >
                         {imageUrl ? (
                           <img
-                            src={imageUrl}
+                            src={resolveMediaUrl(imageUrl)}
                             alt={`${slot.label} thumbnail`}
                             className="h-full w-full object-cover"
                           />

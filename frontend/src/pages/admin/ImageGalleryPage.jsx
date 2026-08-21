@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
 import { normalizeContentProvider } from '@/lib/contentModel';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 const COMMON_PROVIDERS = [
   { value: '', label: 'No provider tag' },
@@ -700,7 +701,11 @@ export default function ImageGalleryPage() {
             <Card key={item.id} className="overflow-hidden">
               <div className="aspect-video bg-muted/40 relative">
                 {imageUrl ? (
-                  <img src={imageUrl} alt={item.title} className="h-full w-full object-cover" />
+                  <img
+                    src={resolveMediaUrl(imageUrl)}
+                    alt={item.title}
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
                     No image URL

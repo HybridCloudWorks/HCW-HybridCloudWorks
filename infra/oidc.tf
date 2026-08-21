@@ -147,9 +147,14 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # Deliberately NOT granted:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
 #     managed identity does that at runtime.
-#   - Cosmos data-plane roles beyond the two-container exception below. The
-#     data migration authenticates with its own credentials rather than
-#     borrowing the deploy identity.
+#   - Cosmos data-plane roles on PRODUCTION beyond the two-container exception
+#     below, until migration_writer_enabled is flipped (see the gated block at
+#     the end of this file). The data migration DOES use this identity —
+#     through the `environment:data-migration` federated credential — but on
+#     the scratch account (scratch.tf) it holds database-scope Data
+#     Contributor, and on production it holds nothing extra while the gate is
+#     off. That is what makes "the workflow cannot write to production" a
+#     property of RBAC rather than of a guard in a YAML file.
 #   - anything at subscription scope.
 
 # ---------------------------------------------------------------------------
@@ -192,6 +197,47 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
   role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
   scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["blogs"].name}"
+}
+
+# ---------------------------------------------------------------------------
+# The production-import gate: migration_writer_enabled
+# ---------------------------------------------------------------------------
+# Both of these are count = 0 until the scratch rehearsal is signed off. While
+# they are absent the migration workflow cannot write to production Cosmos or
+# to the production content storage account no matter what its inputs say —
+# the identity simply does not hold the role. Flipping the variable is the
+# one-line, TFC-reviewed change that opens the production-import phase, and
+# reverting it closes it again without touching the workflow.
+#
+# Database scope rather than account scope: the migration touches every
+# container under `hcw` and nothing else on the account.
+resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_migration" {
+  count = var.migration_writer_enabled ? 1 : 0
+
+  resource_group_name = azurerm_resource_group.app["db"].name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}"
+}
+
+resource "azurerm_role_assignment" "github_deploy_content_blob_migration" {
+  count = var.migration_writer_enabled ? 1 : 0
+
+  scope                = azurerm_storage_account.hcw.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
+}
+
+# Storage Account Contributor on the content account, for the per-run firewall
+# window the storage copy needs — same role, same reasoning, same narrow scope
+# as github_deploy_funcsa_network above.
+resource "azurerm_role_assignment" "github_deploy_content_network_migration" {
+  count = var.migration_writer_enabled ? 1 : 0
+
+  scope                = azurerm_storage_account.hcw.id
+  role_definition_name = "Storage Account Contributor"
+  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
 # ---------------------------------------------------------------------------

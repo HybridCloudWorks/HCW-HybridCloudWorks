@@ -31,14 +31,14 @@ the consolidation of CHECKLIST and Variables into this file.
 | | |
 | --- | --- |
 | Azure infrastructure | **Deployed** — 129 resources, `centralus`, plan clean |
-| Function App code | **Zero functions deployed** — the app is an empty shell |
+| Function App code | **80 functions deployed** (2026-08-20) — `/api/health` 200 through Cloudflare, 403 at the origin |
 | Terraform authentication | **Working** — `id-plat-terraform-prod-cus-01` |
-| HCP Terraform variables | **All 13 set** |
-| GitHub repository variables | **All 7 set and cross-checked against Terraform outputs** |
-| GitHub repository secrets | **1 of 5 set** — see §4.3 |
+| HCP Terraform variables | **All 13 set**, plus `cosmos_scratch_enabled` / `storage_scratch_enabled` = `true` (2026-08-20, runbook step 4); `migration_writer_enabled` stays unset = `false` |
+| GitHub repository variables | **8 of 8 platform variables set**; the 9 migration variables in §4.2 are not — they wait on the WIF binding and the scratch apply |
+| GitHub repository secrets | **1 of 4 set, and that one is moving to variables** — see §4.3 |
 | Key Vault | **19 of 21 secrets seeded** — two runtime-read secrets outstanding, §3.1 |
-| Origin lock | **On** — origin returns 403 to everything that is not Cloudflare |
-| Data migration | **Not started** — 73 containers exist and are empty |
+| Origin lock | **On and proven end to end** — anonymous rate-limited route 200 via Cloudflare, 403 at the origin |
+| Data migration | **Tooling ready, rehearsal not started** — 73 containers empty; sequence in the [Migration-Runbook](.github/wiki/Migration-Runbook.md) |
 
 **The single most useful fact in this document:** the public API base is
 `https://api-azure.hybridcloudworks.com/api`. The `azurewebsites.net` origin is
@@ -353,17 +353,22 @@ worth costing before adding more rules to the current approach.
 
 ## 2.4 Enabling the deployment workflows
 
-`deploy-azure-frontend`, `deploy-functions`, `deploy-infra` and `migrate-data`
-are each guarded by `if: ${{ false }}`. Enabling them is a deliberate act.
-`migrate-data` in particular reads the whole production Firestore database.
+`deploy-functions` and `migrate-data` are dispatch-only and enabled (both
+2026-08-20). `deploy-azure-frontend` and `deploy-infra` are still guarded by
+`if: ${{ false }}`; enabling either is a deliberate act in a reviewed PR.
 
-Two GitHub Environments must exist **with protection rules** before the
-corresponding workflows are enabled — see §4.4. Creating them without reviewers
-would satisfy the linter while removing the gate, which is worse than the
-current state.
+`migrate-data` reads the whole production Firestore database. Its two write
+modes (`rehearse`, `storage-rehearse`) refuse `target=production`, and the
+deploy identity holds no write role on production until
+`migration_writer_enabled` is flipped in Terraform — two independent locks. It
+runs in the `data-migration` environment, which must exist **with a required
+reviewer** before the first dispatch (§4.4). Creating the environment without
+reviewers would satisfy the linter while removing the gate, which is worse than
+the current state.
 
-**Unblocks:** deploying anything. This is the immediate blocker on the
-application layer.
+**Unblocks:** the frontend deploy (needs the SWA token, §4.3) and the gated
+infra workflow (needs `production-infra`, §4.4). The first `migrate-data`
+dispatch needs the environment plus the GCP binding in §4.2.
 
 ---
 
@@ -427,26 +432,41 @@ az keyvault network-rule remove --name $VAULT --resource-group $RG --ip-address 
 Empty `ipRules` is the correct resting state: reachable only by the Function App
 over its subnet.
 
-## 3.2 Four GitHub repository secrets are missing
+## 3.2 Three GitHub repository secrets are missing
 
-Only `COSMOS_ENDPOINT` is set. See §4.3 for the full table and what each blocks.
+`COSMOS_ENDPOINT` is set and is moving to a variable — `set-github-variables.ps1`
+now seeds it there and deletes the secret. `FIREBASE_SERVICE_ACCOUNT_JSON` is
+no longer wanted at all (§4.3). What remains: the SWA token, `TF_API_TOKEN`,
+and a read token for Site-Main. See §4.3 for what each blocks.
 
-## 3.3 Deploy the function code
+## 3.3 Deploy the function code — DONE 2026-08-20
 
-**The Function App holds zero deployed functions.** The rebuild recreated the
-shell and nothing has been deployed to it. Both `/api/health` paths answer 404
-for that reason, not because of routing.
+The first dispatch from `main` deployed 80 functions. It settled all three
+questions it was meant to: the rebuilt identity authenticates (after the
+ID-embedded OIDC subject fix), the smoke test passes through Cloudflare, and
+the origin-secret handshake holds — an anonymous rate-limited route answers 200
+through Cloudflare and the same route answers 403 at the origin, asserted on
+every deploy since.
 
-A single deploy run settles three open questions at once:
+What the deploy did **not** prove: `heal-computed-properties.yml`. Its first
+run failed with a data-plane 403 on a control-plane call; the identity needs an
+ARM role, not a Cosmos one. Engineering item, TODO T-508 — nothing to do here
+until `content` holds data.
 
-1. Whether the rebuilt GitHub deploy identity authenticates (`CLIENT_ID` points
-   at it; its federated credentials were recreated with it, but only a run
-   proves it).
-2. Whether the smoke test passes through the Cloudflare host.
-3. Whether the origin-secret handshake works end to end — the one part of the
-   origin lock still unproven.
+## 3.3b Stand up the migration prerequisites
 
-**This is the natural first move of the application layer.**
+Three things only an operator can do, all ahead of the first `migrate-data`
+dispatch. Each is a numbered step in the
+[Migration-Runbook](.github/wiki/Migration-Runbook.md):
+
+1. **GCP**: a dedicated read-only service account and the Workload Identity
+   Federation binding for this repository → `GCP_WORKLOAD_IDENTITY_PROVIDER`,
+   `GCP_SERVICE_ACCOUNT` (runbook step 2).
+2. **GitHub**: environment `data-migration` with a reviewer; the Site-Main read
+   token (runbook step 3).
+3. **HCP Terraform**: `cosmos_scratch_enabled = true`,
+   `storage_scratch_enabled = true`; apply; re-run
+   `set-github-variables.ps1` (runbook step 4).
 
 ## 3.4 Enable secret scanning and push protection
 
@@ -595,12 +615,25 @@ its own subscription id is a workflow nobody can debug.
 
 ### Two placements to fix
 
-**`COSMOS_ENDPOINT` is a GitHub *secret* and is not sensitive.** It holds
-`https://<account>.documents.azure.com:443/` — a public endpoint, and a
+**`COSMOS_ENDPOINT` was seeded as a GitHub *secret* and is not sensitive.** It
+holds `https://<account>.documents.azure.com:443/` — a public endpoint, and a
 non-sensitive Terraform output. Storing a non-secret as a secret costs three
 things: it is masked in logs so failures are harder to read, it cannot be
 verified in the UI, and it dilutes what "secret" means for the values that are.
-It should be a repository **variable**.
+**Fixed in the tooling 2026-08-20**: `set-github-variables.ps1` seeds it as a
+variable and deletes the secret; both workflows that read it now use
+`vars.COSMOS_ENDPOINT`. The operator's next run of the script completes it.
+
+### The repository is public
+
+Job logs and workflow artifacts on this repository are world-readable. That
+rules out a class of things that would be fine on a private one: uploading a
+migration report that contains document ids or field samples, printing a
+document preview to a log, or leaving an export on an artifact. `migrate-data`
+uploads only `*.summary.json` files (counts, container names, warning tallies)
+with 1-day retention, keeps the export in `$RUNNER_TEMP`, and sets
+`MIGRATION_CI=1` so the scripts refuse `--show-samples`. Any new workflow that
+touches data inherits the same rule.
 
 **The seventeen provider API keys are seeded but nothing consumes them yet.**
 The AI endpoints behind them are unimplemented stubs. That is not wrong — the
@@ -675,18 +708,32 @@ silently ignored and the run fails claiming no credentials were supplied.
 
 ## 4.2 GitHub repository variables
 
-**All seven set 2026-08-20**, each from the matching `terraform output` and
+**All eight set 2026-08-20**, each from the matching `terraform output` and
 cross-checked afterwards.
 
 | Name | Status | Value source | Notes |
 | --- | --- | --- | --- |
 | `FUNCTIONS_URL` | **SET** | output `api_base_url` | **The Cloudflare host, not the origin.** Feeds `VITE_AZURE_FUNCTIONS_URL`. Built from `function_hostname` until 2026-08-20, which the origin lock broke |
 | `APP_HOSTNAME` | **SET** | output `function_hostname` | The origin. Diagnostics only — do not call it |
+| `FUNCTION_APP_NAME` | **SET** | output `function_app_name` | The bare resource name `Azure/functions-action` targets. Was hardcoded in the workflow and went stale across the rename |
 | `CLIENT_ID` | **SET** | output `client_id` | Deploy identity for OIDC login. Distinct from `TFC_AZURE_RUN_CLIENT_ID` |
 | `TENANT_ID` | **SET** | Entra directory | |
 | `SUBSCRIPTION_ID` | **SET** | Application landing zone | |
 | `RESOURCE_GROUP` | **SET** | output `web_resource_group` | For the storage firewall window in `deploy-functions.yml` |
 | `FUNCTIONS_STORAGE_ACCOUNT` | **SET** | output `functions_storage_account` | Paired with `RESOURCE_GROUP` by construction |
+
+Needed by `migrate-data.yml`, all **variables** (every one is an identifier or
+a public URL), none set yet:
+
+| Name | Status | Value source | Notes |
+| --- | --- | --- | --- |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | **SET 2026-08-20** | `projects/556314942797/locations/global/workloadIdentityPools/github-actions/providers/github-actions-hcw` | A sibling of Site-Main's provider in the same pool, pinned to **this** repository id and `refs/heads/main` — Site-Main's trust was not widened. Dispatch from any other ref fails at the GCP step by design |
+| `GCP_SERVICE_ACCOUNT` | **SET 2026-08-20** | `hcw-migration-reader@hybridcloudworks-61e8d.iam.gserviceaccount.com` | Dedicated read-only SA: `roles/datastore.viewer` on the project, `roles/storage.objectViewer` on the one bucket, `workloadIdentityUser` for `attribute.repository/HybridCloudWorks/HCW-HybridCloudWorks`. **Not** Site-Main's deploy SA |
+| `COSMOS_ENDPOINT` | **moving from secrets** | output `cosmos_endpoint` | Production. Read-only use until `migration_writer_enabled` |
+| `STORAGE_ACCOUNT` · `STORAGE_RESOURCE_GROUP` | **MISSING** | outputs `storage_account`, `storage_resource_group` | The **content** account — not the Functions host account the two rows above name |
+| `COSMOS_SCRATCH_ENDPOINT` | **MISSING** | output `cosmos_scratch_endpoint` | Null until `cosmos_scratch_enabled`; the script leaves an absent output's variable unchanged |
+| `STORAGE_SCRATCH_ACCOUNT` · `SCRATCH_RESOURCE_GROUP` | **MISSING** | outputs `storage_scratch_account`, `scratch_resource_group` | Same |
+| `SITE_MAIN_APP_ID` | **MISSING** | GitHub App settings | Only for `mode=inventory-gate`. Absent ⇒ the workflow falls back to `SITE_MAIN_READ_TOKEN` (§4.3) |
 
 Still needed for the frontend build, sourced from the Entra registrations in
 §2.2 rather than Terraform:
@@ -704,28 +751,31 @@ output. It sources from applied state, not a hardcoded copy that drifts.
 
 ## 4.3 GitHub repository secrets
 
-**One of five set.**
+**One of four set, and that one is moving to variables.**
 
 | Name | Status | Blocks | Notes |
 | --- | --- | --- | --- |
-| `COSMOS_ENDPOINT` | **SET — but misplaced** | — | Migration and healing workflows. **Should be a repository *variable*, not a secret**: it holds a public endpoint URL and is a non-sensitive Terraform output. See §4.0, "Two placements to fix" |
+| `COSMOS_ENDPOINT` | **SET — moving** | — | Now a *variable* (§4.2). The script deletes this secret on its next run; until then both exist and the workflows read the variable |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | **MISSING** | Frontend deploy | Terraform output `swa_token`. **Reissued by the rebuild** — any previously recorded value is dead |
 | `TF_API_TOKEN` | **MISSING** | Gated infra workflow | How the *workflow* reaches Terraform. Distinct from §4.1, which is how *Terraform* reaches Azure |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | **MISSING** | Data migration | Whole-JSON credential; scope it read-only. `migrate-data.yml` is `if: false` and must stay so until this exists |
+| `SITE_MAIN_APP_PRIVATE_KEY` (environment `data-migration`) | **MISSING** | `mode=inventory-gate` only | Private key of an org GitHub App with `contents: read` on Site-Main alone. Preferred over a PAT: no human expiry, narrowest scope |
+| `SITE_MAIN_READ_TOKEN` (environment `data-migration`) | **MISSING — fallback** | `mode=inventory-gate` only | Fine-grained PAT, Site-Main `contents: read`, 90-day expiry. **Record the expiry date here** if this path is used |
 | `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | **MISSING** | Runner image build only | Needed only if §3.5 is turned on |
-| `COSMOS_KEY` | **MISSING — correctly** | — | **Do not provision it to silence a linter.** `cosmos_local_auth_disabled = true`, so key auth is off on the account; setting this switches the client to a key path the account rejects. It exists only for the throwaway-account rehearsal |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | **Never provision** | — | Retired 2026-08-20. `migrate-data.yml` authenticates to GCP through Workload Identity Federation and the scripts refuse a `service_account` credential file in CI. A downloaded key is the one artefact this design has no use for |
+| `COSMOS_KEY` | **Never provision** | — | Key auth is off on **both** Cosmos accounts (production and scratch), and `scripts/lib/cli.mjs` throws on startup if this is set. There is no rehearsal shape that needs it |
 
 ## 4.4 GitHub environments
 
-Neither exists. Both referencing jobs are `if: ${{ false }}`, so nothing fails
-today — but an environment is where required reviewers live, and
-`deploy-infra.yml` is the workflow that applies production infrastructure. The
-environment **is** the human-review gate.
+Neither exists. `deploy-infra` is still `if: ${{ false }}`; `migrate-data` is
+enabled and its job names `environment: data-migration`, so a dispatch before
+the environment exists fails at Azure Login (no matching federated subject) —
+loudly, which is the right failure. An environment is where required reviewers
+live; the environment **is** the human-review gate.
 
 | Environment | Purpose | Protection expected | Status |
 | --- | --- | --- | --- |
 | `production-infra` | Review gate for production applies | Required reviewers; restrict to the deploy ref | **MISSING** |
-| `data-migration` | Gate for the one-shot Firestore → Cosmos migration | Required reviewers | **MISSING** |
+| `data-migration` | Gate for every `migrate-data` run — rehearsal and, later, production import | Required reviewers; holds the two Site-Main token secrets (§4.3) | **CREATED 2026-08-20** — required reviewer `saulpatinojr`, no branch policy (the GCP provider already pins `main`) |
 
 > `data-migration` is **load-bearing in two places**. `infra/oidc.tf` pins a
 > federated credential to the subject

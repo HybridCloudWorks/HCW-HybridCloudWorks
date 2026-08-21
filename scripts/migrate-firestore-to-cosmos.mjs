@@ -21,10 +21,13 @@
  * Firestore document id, so re-running converges rather than duplicating.
  *
  * Prerequisites:
- *   GOOGLE_APPLICATION_CREDENTIALS   Firebase service-account key path (export)
- *   COSMOS_ENDPOINT                  target account (import)
- *   COSMOS_DATABASE                  defaults to "hybridcloudworks"
- *   COSMOS_KEY                       optional; omit to use Entra/managed identity
+ *   Firestore (export)   Application Default Credentials with read access to
+ *                        the Site-Main project — Workload Identity Federation
+ *                        in the workflow, `gcloud auth application-default
+ *                        login` at a terminal. Never a downloaded key.
+ *   COSMOS_ENDPOINT      target account (import)
+ *   COSMOS_DATABASE      defaults to "hcw"
+ *   Cosmos auth          DefaultAzureCredential only. COSMOS_KEY is an error.
  *
  * Usage:
  *   # 1. measure the source first
@@ -44,35 +47,52 @@
  *   --export               Read Firestore and write JSONL to --out
  *   --import               Read JSONL from --from and upsert into Cosmos DB
  *   --dry-run              With --import: transform and validate, write nothing
+ *   --show-samples         Print a document preview per container. Off by
+ *                          default and refused under MIGRATION_CI=1 — the
+ *                          repository is public and job logs are readable.
  *   --out <dir>            Export directory (default: export/)
  *   --from <dir>           Import directory (default: export/)
  *   --collections a,b      Restrict to these containers
  *   --concurrency <n>      Parallel Cosmos writes (default: 8)
- *   --report <path>        Reconciliation report path (default: reports/migration-<mode>.json)
+ *   --report <path>        Report path (default: reports/migration-<mode>.json).
+ *                          A redacted <name>.summary.json is written beside it;
+ *                          the summary is the only thing the workflow uploads.
  *
  * Passing neither --export nor --import is an error. There is deliberately no
  * "do everything in one shot against production" default.
  */
 
-import { initializeApp, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, createWriteStream } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, existsSync, readdirSync, mkdirSync, createWriteStream } from 'node:fs';
+import { join } from 'node:path';
 
 import { flattenManifest } from './lib/migration-manifest.mjs';
 import { transformDocument } from './lib/firestore-transform.mjs';
-import { parseArgs, splitList, log, connectCosmos, withRetry, mapWithConcurrency, FIRESTORE_PROJECT_ID } from './lib/cli.mjs';
+import {
+  parseArgs,
+  splitList,
+  log,
+  connectCosmos,
+  connectFirestore,
+  withRetry,
+  mapWithConcurrency,
+  writeReport,
+  tallyByCode,
+  showSamples,
+  FIRESTORE_PROJECT_ID,
+} from './lib/cli.mjs';
 
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
 
 let args;
+let samples;
 try {
   args = parseArgs(process.argv.slice(2), {
-    flags: ['export', 'import', 'dry-run'],
+    flags: ['export', 'import', 'dry-run', 'show-samples'],
     options: ['out', 'from', 'collections', 'concurrency', 'report'],
   });
+  samples = showSamples(args.flags['show-samples']);
 } catch (err) {
   log.error(err.message);
   process.exit(1);
@@ -141,20 +161,11 @@ async function readTarget(firestore, target) {
 }
 
 async function runExport() {
-  const saKeyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!saKeyPath) {
-    log.error('Set GOOGLE_APPLICATION_CREDENTIALS to the Firebase service-account key path');
-    process.exit(1);
-  }
-
-  initializeApp({
-    credential: cert(JSON.parse(readFileSync(saKeyPath, 'utf8'))),
-    projectId: FIRESTORE_PROJECT_ID,
-  });
-  const firestore = getFirestore();
+  const { firestore, credential } = connectFirestore();
 
   log.banner('Export — Firestore → disk', [
     `Source: Firestore project ${FIRESTORE_PROJECT_ID}`,
+    `Credential: ${credential}`,
     `Target: ${exportDir}/`,
     `Collections: ${targets.length}`,
     'Firestore access: READ ONLY',
@@ -296,7 +307,9 @@ async function runImport() {
 
     if (isDryRun) {
       log.info(`  ${target.container.padEnd(32)} ${String(docs.length).padStart(5)} docs would be upserted`);
-      if (docs.length > 0) {
+      // Previews carry field values. They are useful at a terminal and
+      // forbidden in a public repository's job log — see showSamples().
+      if (samples && docs.length > 0) {
         const preview = JSON.stringify(docs[0]).slice(0, 240);
         log.info(`  ${' '.repeat(32)} sample: ${preview}${preview.length === 240 ? '…' : ''}`);
       }
@@ -370,15 +383,48 @@ async function main() {
 
   if (warnings.length) {
     log.section(`Warnings (${warnings.length})`);
-    for (const w of warnings.slice(0, 40)) log.warn(`[${w.container}] ${w.code}: ${w.detail}`);
-    if (warnings.length > 40) log.warn(`… and ${warnings.length - 40} more — see ${reportPath}`);
+    // Warning details name document ids. Print them only where samples are
+    // allowed; otherwise print the tally, which is what the summary carries.
+    if (samples) {
+      for (const w of warnings.slice(0, 40)) log.warn(`[${w.container}] ${w.code}: ${w.detail}`);
+      if (warnings.length > 40) log.warn(`… and ${warnings.length - 40} more — see ${reportPath}`);
+    } else {
+      for (const [code, n] of Object.entries(tallyByCode(warnings))) log.warn(`${code}: ${n}`);
+      log.warn(`Details (with document ids) are in ${reportPath}, which is not uploaded.`);
+    }
   } else {
     log.ok('No warnings');
   }
 
-  mkdirSync(dirname(reportPath), { recursive: true });
-  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-  log.ok(`Report written to ${reportPath}`);
+  // Summary = the publishable subset: per-container counts, warning tallies,
+  // no ids, no values.
+  const publishable = {
+    generatedAt: report.generatedAt,
+    mode: report.mode,
+    containers: report.collectionsSelected.length,
+    export: report.export
+      ? {
+          documents: report.export.summary.reduce((n, s) => n + s.exported, 0),
+          perContainer: Object.fromEntries(report.export.summary.map((s) => [s.container, s.exported])),
+          warnings: tallyByCode(report.export.warnings),
+        }
+      : null,
+    import: report.import
+      ? {
+          read: report.import.summary.reduce((n, s) => n + s.read, 0),
+          imported: report.import.summary.reduce((n, s) => n + s.imported, 0),
+          failed: report.import.summary.reduce((n, s) => n + s.failed, 0),
+          perContainer: Object.fromEntries(
+            report.import.summary.map((s) => [s.container, { read: s.read, imported: s.imported, failed: s.failed }])
+          ),
+          warnings: tallyByCode(report.import.warnings),
+        }
+      : null,
+    failures: failures.length,
+  };
+
+  const { summaryPath } = writeReport(reportPath, report, publishable);
+  log.ok(`Report written to ${reportPath} (summary: ${summaryPath})`);
 
   if (failures.length) {
     log.error(`${failures.length} document(s) collided or failed to import — the migration is NOT complete`);

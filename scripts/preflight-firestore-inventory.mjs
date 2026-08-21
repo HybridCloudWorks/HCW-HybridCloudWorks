@@ -25,21 +25,22 @@
  * Read-only. It never writes to Firestore or to Cosmos.
  *
  * Prerequisites:
- *   GOOGLE_APPLICATION_CREDENTIALS  path to a Firebase service-account key
+ *   Application Default Credentials with read access to the Site-Main project:
+ *   Workload Identity Federation in the workflow, `gcloud auth
+ *   application-default login` at a terminal. Never a downloaded key.
  *
  * Usage:
  *   node scripts/preflight-firestore-inventory.mjs
  *   node scripts/preflight-firestore-inventory.mjs --out reports/preflight.json
  *   node scripts/preflight-firestore-inventory.mjs --sample 10
+ *
+ * Writes the full report to --out and a redacted --out.summary.json beside
+ * it. The full report names problematic document ids; the summary carries
+ * counts only and is what the workflow uploads.
  */
 
-import { initializeApp, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-
 import { COLLECTIONS, knownCollectionIds, findCollection } from './lib/migration-manifest.mjs';
-import { parseArgs, FIRESTORE_PROJECT_ID, log } from './lib/cli.mjs';
+import { parseArgs, connectFirestore, log, writeReport } from './lib/cli.mjs';
 
 let args;
 try {
@@ -56,17 +57,7 @@ const sampleSize = Number(args.options.sample ?? 5);
 // Firestore
 // ---------------------------------------------------------------------------
 
-const saKeyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-if (!saKeyPath) {
-  log.error('Set GOOGLE_APPLICATION_CREDENTIALS to the Firebase service-account key path');
-  process.exit(1);
-}
-
-initializeApp({
-  credential: cert(JSON.parse(readFileSync(saKeyPath, 'utf8'))),
-  projectId: FIRESTORE_PROJECT_ID,
-});
-const firestore = getFirestore();
+const { firestore, credential: firestoreCredential } = connectFirestore();
 
 // ---------------------------------------------------------------------------
 // Field-shape probing
@@ -296,9 +287,34 @@ async function main() {
   log.info(`To migrate (disposition):   ${report.totals.migrated}`);
   log.info(`Skipped (cache/transient):  ${report.totals.skipped}`);
 
-  mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`);
-  log.ok(`Report written to ${outPath}`);
+  // The summary keeps counts and collection names; problematic ids and field
+  // samples stay in the full report, which is never uploaded.
+  const summary = {
+    generatedAt: report.generatedAt,
+    credential: firestoreCredential,
+    totals: report.totals,
+    collections: Object.fromEntries(
+      Object.entries(report.collections).map(([name, v]) => [
+        name,
+        {
+          documentCount: v.documentCount,
+          disposition: v.disposition,
+          manifested: v.manifested,
+          problematicIds: v.problematicIds.length,
+          idFieldConflicts: v.idFieldConflicts,
+          nestedSpecialValues: v.shapes?.nestedSpecialValues ?? 0,
+          conflictingShapeFields: Object.keys(v.shapes?.conflictingShapes ?? {}).length,
+          populatedSubcollections: Object.keys(v.subcollections ?? {}).length,
+        },
+      ])
+    ),
+    configSubcollections: report.configSubcollections,
+    unmanifested,
+    manifestedButAbsent,
+  };
+
+  const { summaryPath } = writeReport(outPath, report, summary);
+  log.ok(`Report written to ${outPath} (summary: ${summaryPath})`);
 
   if (unmanifested.length) {
     log.error('Unmanifested collections found — add them to scripts/lib/migration-manifest.mjs before migrating');

@@ -253,16 +253,16 @@ resource "azurerm_cosmosdb_account" "hcw" {
 resource "azurerm_cosmosdb_sql_database" "hcw" {
   # Deliberately NOT renamed to the CAF convention. This is a data-plane
   # identifier, not an Azure resource name: functions/src/lib/cosmos-client.js,
-  # scripts/lib/cli.mjs and scripts/apply-computed-sortdate.mjs all fall back
-  # to the literal "hybridcloudworks" when COSMOS_DATABASE is unset, and
-  # COSMOS_DATABASE is currently unset everywhere outside the Function App's
-  # own settings. Renaming it would leave those three paths connecting to a
-  # database that does not exist, and the failure would look like a
+  # scripts/lib/cli.mjs and scripts/apply-computed-sortdate.mjs all default to
+  # the literal "hcw" when COSMOS_DATABASE is unset, and the migration workflow
+  # sets it to "hcw" explicitly. Renaming it would leave those paths connecting
+  # to a database that does not exist, and the failure would look like a
   # permissions problem.
   #
   # It is its own variable rather than borrowing project_name so that the
   # coupling is explicit and changing it is a deliberate act coordinated with
-  # those three files.
+  # those files. The scratch account (scratch.tf) uses the same name so a
+  # rehearsal exercises exactly the database id production will.
   name                = var.cosmos_database_name
   resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
@@ -279,10 +279,11 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Do not add containers here by hand — add the collection to the manifest and
 # regenerate, or Terraform, the migrator and the verifier drift apart again.
 #
-# Partition keys come from the manifest: 62 on /id, and four flattened
-# subcollections keyed by their parent (content_versions on /contentId,
-# image_prompts_sets on /pageId, image_prompt_sets_prompts on /setName,
-# listen_and_learn_episodes on /setId).
+# Partition keys come from the manifest: 67 on /id and five exceptions — four
+# flattened subcollections keyed by their parent (content_versions on
+# /contentId, image_prompts_sets on /pageId, image_prompt_sets_prompts on
+# /setName, listen_and_learn_episodes on /setId) and admin_config on a
+# constant /configScope so the ContentForge save stays one TransactionalBatch.
 #
 # /id is right for the rest because the Site-Main query load does not group by
 # anything — one of ~40 content query sites filters on a provider — and the
@@ -291,15 +292,17 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # partition key value cannot be changed in place, and /agentId on lab_agents is
 # identical to /id by construction.
 #
-# The four exceptions are a CORRECTNESS matter, not a tuning one. Each assigns
-# document ids that are unique only within their parent (a set name, a prompt
-# name, an exam-area slug), so flattening them into one container under /id
-# would silently overwrite documents on upsert.
+# The subcollection exceptions are a CORRECTNESS matter, not a tuning one. Each
+# assigns document ids that are unique only within their parent (a set name, a
+# prompt name, an exam-area slug), so flattening them into one container under
+# /id would silently overwrite documents on upsert.
 #
 # Full evidence, with file:line citations, in the manifest header.
 #
 # A partition key path is IMMUTABLE. Changing one on a container that already
-# holds data means destroying the container and re-importing.
+# holds data means destroying the container and re-importing. Every container
+# here is empty as of 2026-08-20 — the partition-key decision window is open
+# now and closes on the first import (Migration_Plan §5).
 # -----------------------------------------------------------------------------
 
 locals {
@@ -356,73 +359,13 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
   }
 }
 
-# -----------------------------------------------------------------------------
-# State moves for the containers that were previously declared individually.
-#
-# These keep Terraform from reading the for_each block as thirteen deletions
-# plus seventy-one creations. Note that `content`, `blogs`, `certifications`,
-# `lab_jobs`, `lab_agents`, `generated_content_images` and `audits` also change
-# partition key, which forces replacement after the move — safe only while the
-# containers are empty. Run this BEFORE importing any data.
-#
-# `dashboard_stats` and `users` are intentionally absent: neither collection
-# exists in Site-Main, so both are destroyed rather than moved.
-# -----------------------------------------------------------------------------
-
-moved {
-  from = azurerm_cosmosdb_sql_container.content
-  to   = azurerm_cosmosdb_sql_container.hcw["content"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.blogs
-  to   = azurerm_cosmosdb_sql_container.hcw["blogs"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.certifications
-  to   = azurerm_cosmosdb_sql_container.hcw["certifications"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.speakerevents
-  to   = azurerm_cosmosdb_sql_container.hcw["speakerevents"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.lab_jobs
-  to   = azurerm_cosmosdb_sql_container.hcw["lab_jobs"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.lab_agents
-  to   = azurerm_cosmosdb_sql_container.hcw["lab_agents"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.config
-  to   = azurerm_cosmosdb_sql_container.hcw["config"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.image_prompts
-  to   = azurerm_cosmosdb_sql_container.hcw["image_prompts"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.generated_content_images
-  to   = azurerm_cosmosdb_sql_container.hcw["generated_content_images"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.workflow_digests
-  to   = azurerm_cosmosdb_sql_container.hcw["workflow_digests"]
-}
-
-moved {
-  from = azurerm_cosmosdb_sql_container.audits
-  to   = azurerm_cosmosdb_sql_container.hcw["audits"]
-}
+# The eleven `moved` blocks that used to follow — carrying the hand-declared
+# containers into the for_each map, seven of them with a partition-key change
+# — were removed on 2026-08-20. The centralus rebuild of 2026-08-19 recreated
+# every container from the spec while all of them were empty, so the moves and
+# the key changes both happened through that rebuild; `terraform state list`
+# shows only the for_each form. The window they guarded is the one described
+# above, and it is still open until the first import.
 
 # =============================================================================
 # Azure Storage Account (replaces Firebase Cloud Storage / GCS)
@@ -530,6 +473,16 @@ resource "azurerm_storage_container" "content" {
 }
 
 # Storage lifecycle management (replaces platform/firebase/storage-lifecycle.json)
+#
+# KNOWN INERT as written. Azure matches `prefix_match` against
+# `<container>/<blob>`, so "articles/" would match a container named
+# `articles` — which does not exist, and is not created on purpose: the
+# storage migration manifest (scripts/lib/storage-manifest.mjs) SKIPS the GCS
+# `articles/` prefix because those are scraped images on a 90-day lifecycle
+# that the RSS and blog-listing jobs regenerate. When the ported scraper
+# starts writing scraped images here, this rule has to name the real path
+# (e.g. "content/articles/") before it does anything. Left in place so that
+# decision is made next to the rule rather than rediscovered as a cost line.
 resource "azurerm_storage_management_policy" "cleanup" {
   storage_account_id = azurerm_storage_account.hcw.id
 
@@ -995,6 +948,14 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # name GITHUB-APP-PRIVATE-KEY.
 
     "NODE_ENV" = "production"
+
+    # Timer clock. NCRONTAB on Linux Flex Consumption evaluates in UTC unless
+    # told otherwise; 7 of Site-Main's 16 schedules are declared in
+    # America/Chicago (the Friday 09:00 digest, the overnight publishers).
+    # Porting the expressions verbatim without this would shift every one of
+    # them by five or six hours depending on DST. Migration_Plan §4 carries the
+    # per-timer table; the ported NCRONTAB expressions assume this setting.
+    "WEBSITE_TIME_ZONE" = "America/Chicago"
 
     # Feature flags.
     #

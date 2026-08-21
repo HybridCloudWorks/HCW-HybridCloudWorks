@@ -3,6 +3,7 @@ import { ScrollTrigger } from '@/components/animations';
 import { useGenerateCuratedImages } from '@/hooks/useGenerateCuratedImages';
 import { normalizePublicImageUrl } from '@/lib/blogUtils';
 import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 // Pulls the WebP variants that match whichever imageUrl resolveImageUrl
 // picked. Returns null when the source doesn't carry variants.
@@ -109,7 +110,7 @@ function ArticleImageSection({ imageUrl, imageVariants, title, category }) {
     <div className="relative overflow-hidden bg-linear-to-br from-slate-700/50 to-slate-900/50 flex items-center justify-center shrink-0 h-48">
       {imageUrl ? (
         <ResponsiveCoverImage
-          src={imageUrl}
+          src={resolveMediaUrl(imageUrl)}
           variants={imageVariants}
           alt={title}
           // Card images max out around half-width on desktop, full-width on

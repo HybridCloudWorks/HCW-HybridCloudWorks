@@ -11,6 +11,7 @@ import { getCoverImageUrl } from '@/lib/blogUtils';
 import { useToast } from '@/components/ui/use-toast';
 import { Calendar, ChevronLeft, ChevronRight, Clock, Share2, X } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 // Helper to format date for calendar display
 const formatDate = (date) => {
@@ -696,7 +697,7 @@ export default function CalendarPage() {
                     <div className="flex items-start gap-4">
                       {getCoverImageUrl(selectedContentForScheduling) && (
                         <img
-                          src={getCoverImageUrl(selectedContentForScheduling)}
+                          src={resolveMediaUrl(getCoverImageUrl(selectedContentForScheduling))}
                           alt=""
                           className="w-24 h-24 object-cover rounded-lg shrink-0"
                         />

@@ -45,6 +45,15 @@ output "storage_account" {
   value       = azurerm_storage_account.hcw.name
 }
 
+# The CONTENT account's group — what migrate-data.yml scopes its per-run
+# firewall window to when target=production (behind migration_writer_enabled).
+# Taken from the account's own attribute for the same pairing guarantee as
+# web_resource_group below.
+output "storage_resource_group" {
+  description = "Resource group holding the content storage account — the STORAGE_RESOURCE_GROUP repository variable migrate-data.yml scopes its firewall window to"
+  value       = azurerm_storage_account.hcw.resource_group_name
+}
+
 output "functions_storage_account" {
   description = "Functions host storage account — the FUNCTIONS_STORAGE_ACCOUNT repository variable whose firewall deploy-functions.yml opens and closes per run (T-503)"
   value       = azurerm_storage_account.functions.name
@@ -162,3 +171,42 @@ output "subnet_id" {
 # CNAME targets) returned values identical to function_hostname / swa_hostname
 # above and were consolidated into them — their Cloudflare-CNAME note now lives
 # on those descriptions. Consume function_hostname / swa_hostname for CNAMEs.
+
+# Which Cloudflare plan this zone is on. Added 2026-08-20 because an
+# architecture argument was being made on an assumption about it, and the plan
+# tier decides what the edge can and cannot do — Origin Rules' Host Header
+# override, Super Bot Fight Mode, and mTLS all gate on it.
+data "cloudflare_zone" "current" {
+  zone_id = var.cloudflare_zone_id
+}
+
+output "cloudflare_plan" {
+  description = "Cloudflare plan for the zone — determines which edge features are reachable at all"
+  value       = data.cloudflare_zone.current.plan
+}
+
+# -----------------------------------------------------------------------------
+# Migration rehearsal estate (scratch.tf) — null while disabled
+# -----------------------------------------------------------------------------
+# Consumed by scripts/set-github-variables.ps1 wave 2 as COSMOS_SCRATCH_ENDPOINT,
+# STORAGE_SCRATCH_ACCOUNT and SCRATCH_RESOURCE_GROUP. `one()` turns the
+# count-gated resource into null rather than an index error when off.
+output "cosmos_scratch_endpoint" {
+  description = "Scratch Cosmos account endpoint for migration rehearsal; null when cosmos_scratch_enabled is false"
+  value       = one(azurerm_cosmosdb_account.scratch[*].endpoint)
+}
+
+output "cosmos_scratch_account_name" {
+  description = "Scratch Cosmos account name; null when disabled"
+  value       = one(azurerm_cosmosdb_account.scratch[*].name)
+}
+
+output "storage_scratch_account" {
+  description = "Scratch storage account for the storage-copy rehearsal; null when storage_scratch_enabled is false"
+  value       = one(azurerm_storage_account.scratch[*].name)
+}
+
+output "scratch_resource_group" {
+  description = "Resource group holding the rehearsal estate; null when disabled"
+  value       = one(azurerm_resource_group.scratch[*].name)
+}

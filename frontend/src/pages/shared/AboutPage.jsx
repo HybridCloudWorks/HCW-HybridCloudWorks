@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { loadPublicDataSnapshot } from '@/lib/publicData';
 import { fetchPublicSnapshotItems } from '@/lib/publicApi';
 import CustomSessionizeWidget from '@/components/widgets/CustomSessionizeWidget';
+import { resolveMediaUrl } from '../../lib/functionsBase';
 
 function normalizeCertification(rawData) {
   // Use the raw data directly for maximum precision with Firestore field names
@@ -180,7 +181,7 @@ const CertificationCard = ({ cert, onImageClick }) => {
               aria-label={`View badge for ${cert.name}`}
             >
               <img
-                src={cert.image_url}
+                src={resolveMediaUrl(cert.image_url)}
                 alt={`${cert.issuer} badge`}
                 loading="lazy"
                 decoding="async"
