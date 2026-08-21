@@ -147,6 +147,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The eleven Firestore triggers as six change-feed functions (T-324).**
+  `functions/src/functions/change-feed.js` registers one `app.cosmosDB`
+  function per watched container on the identity-based binding
+  (`COSMOS_CONNECTION__accountEndpoint` + `__credential = managedidentity`,
+  never a connection string), each with its own `leases` prefix. The
+  before-image substitutes are ported from Site-Main `lib/triggers/`: value
+  markers (image mirrors, Publer push), the rising-edge claim on an
+  etag-conditioned replace (AI cover, slug page), the activation stamp
+  (Telegram alerts) and `content_stats_markers` (dashboard counters,
+  idempotent). Image mirroring keeps the `{docId}/images/…` blob scheme and
+  serves through the media route; the template cover is stored as SVG; the
+  AI cover calls Replicate over REST. The three deletes the feed cannot see:
+  `DELETE /api/cms/content/{id}` and `deleteContentItem` move the counters,
+  `DELETE /api/cms/social-posts/{id}` un-publishes on Publer first, and
+  `DELETE /api/cms/blogs/{id}` is new (publisher, audited). `lib/notify.js`
+  is the Telegram notifier with its per-source cooldown; resolve/reopen
+  clear `activationNotifiedAt`.
 - **The external-ingestion timers (T-323, closed).** `syncSocialCalendarScheduled`
   reconciles `social_posts` with Publer (matched posts take Publer's state,
   vanished ones are marked deleted, unmatched Publer posts become

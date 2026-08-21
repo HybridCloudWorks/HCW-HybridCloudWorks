@@ -5,13 +5,25 @@
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { readDoc, patchDoc, upsertDoc, deleteDoc } from '../lib/cosmos-client.js';
+import {
+  readDoc,
+  patchDoc,
+  upsertDoc,
+  deleteDoc,
+  replaceDocIfMatch,
+} from '../lib/cosmos-client.js';
 import { createContentWorkflowHandlers } from '../lib/content-workflow.js';
+import { createDashboardStatsMaintainer } from '../lib/triggers/dashboard-stats.js';
 
 const handlers = () =>
   createContentWorkflowHandlers({
     guard: getDefaultGuard(),
     store: { readDoc, patchDoc, upsertDoc, deleteDoc },
+    // T-324: the change feed never sees a delete; move the dashboard counters here.
+    onContentDeleted: (contentId) =>
+      createDashboardStatsMaintainer({
+        store: { readDoc, upsertDoc, replaceDocIfMatch, deleteDoc, patchDoc },
+      }).applyTransition({ contentId, afterData: null }),
   });
 
 for (const name of [

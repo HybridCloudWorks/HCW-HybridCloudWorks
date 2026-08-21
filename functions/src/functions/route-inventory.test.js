@@ -298,15 +298,36 @@ describe('non-HTTP triggers', () => {
     expect(worker.connection).toBe('AzureWebJobsStorage');
   });
 
-  it('registers no change-feed trigger', () => {
-    // Both handlers were empty TODOs, and a registered change-feed trigger runs
-    // its processor continuously whether or not the handler does anything —
-    // billing lease-container RU to log a document id. Their only reason to
-    // exist was the reason COSMOS_CONNECTION_STRING, and therefore the account
-    // primary key, sat in app settings (TODO.md T-315).
-    //
-    // Bringing them back means the identity-based binding form, not that
-    // setting. This assertion is the thing that makes reinstating it visible.
-    expect(cosmosRegistrations.size).toBe(0);
+  it('registers the six change-feed functions on the identity-based binding, one lease prefix each', () => {
+    // T-324. A change-feed function runs its processor continuously and bills
+    // lease-container RU, so every registration is a deliberate act; and the
+    // binding is the identity form (COSMOS_CONNECTION__accountEndpoint +
+    // __credential), never COSMOS_CONNECTION_STRING — the account primary key
+    // that used to sit in app settings for two empty TODO handlers (T-315).
+    expect([...cosmosRegistrations.keys()].sort()).toEqual([
+      'mirrorCertificationImages',
+      'mirrorSpeakerEventImages',
+      'notifyWorkflowAlerts',
+      'processBlogChanges',
+      'processContentChanges',
+      'syncSocialPostsToPubler',
+    ]);
+    const prefixes = new Set();
+    for (const [name, options] of cosmosRegistrations) {
+      expect(options.connection).toBe('COSMOS_CONNECTION');
+      expect(options.leaseContainerName).toBe('leases');
+      expect(options.createLeaseContainerIfNotExists).toBe(false);
+      expect(options.leaseContainerPrefix).toBe(`${name}-`);
+      prefixes.add(options.leaseContainerPrefix);
+    }
+    expect(prefixes.size).toBe(6);
+    expect([...cosmosRegistrations.values()].map((o) => o.containerName).sort()).toEqual([
+      'blogs',
+      'certifications',
+      'content',
+      'social_posts',
+      'speakerevents',
+      'workflow_alerts',
+    ]);
   });
 });
