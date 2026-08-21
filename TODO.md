@@ -24,9 +24,9 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 6 |
+| Open items | 7 |
 | Critical | 0 |
-| High | 0 |
+| High | 1 |
 | Medium | 4 |
 | Low | 2 |
 
@@ -40,23 +40,50 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
 
 **Pick up here, in order:**
 
-1. **Every port before cutover is merged** (2026-08-21, PRs #146–#149: 15 of
-   16 timers, the 6 change-feed functions + 3 delete paths, the visitor delta).
-   One `terraform -chdir=infra apply` is pending — **0 added, 1 changed** (the
-   function app: 13 timer flags / `*_DELETE` settings and the two
-   `COSMOS_CONNECTION__*` settings) — then a `deploy-functions` dispatch:
-   expect **93 functions** (84 + 3 timers + 6 change-feed) and six lease
-   documents in `leases`. The frontend deploy picks up T-409.
-2. **Confirm newest-first on the public list** — `PUBLIC_LIST_SQL_ORDER = "1"`
-   is applied; read `https://api-azure.hybridcloudworks.com/api/public/content?limit=8`
-   (baseline before the flag had 2026-06-08 at the top).
-3. **The cutover sequence** (Migration_Plan §6) — owner-gated: Entra SPA
+1. **Apply and deploy are done** (2026-08-21). The `terraform apply` landed
+   **0 added, 1 changed** — only the two `COSMOS_CONNECTION__*` settings were
+   actually outstanding; the 13 timer flags and both `*_DELETE` settings had
+   been applied in an earlier run. `deploy-functions` run 32533019315 then
+   registered **104 functions**: 79 HTTP · 18 timer · 6 change-feed · 1 queue
+   (84 before, plus 13 timers, the 6 change-feed functions and `cmsDeleteBlog`).
+   The **93** this file used to predict was wrong — it counted 3 new timers
+   instead of 13 and omitted the new delete route. `/api/health` 200 through
+   Cloudflare, 403 at the origin.
+
+   Two things that run reads left behind: the keyless `AzureWebJobsStorage`
+   came back with the deploy and broke the timer listeners for ~3 minutes until
+   the workflow's delete-and-resync step ran (`syncfunctiontriggers` needed one
+   retry) — expected, self-healing, and visible in App Insights as
+   `Azure.RequestFailedException` ending at 22:30:34Z. And **T-510** below,
+   which the deploy surfaced rather than caused.
+
+2. **Newest-first is confirmed** — `PUBLIC_LIST_SQL_ORDER = "1"` is live on the
+   app and `/api/public/content?limit=8` returns strictly descending
+   `Published At`, 2026-06-08 first, `total: 24`. The top is unchanged from the
+   pre-flag baseline, which is the correct outcome and not a null result: 24
+   published documents inside a 1,000-row `FETCH_WINDOW` means the SQL `ORDER
+   BY` cannot change what the page shows. The cp_sortDate alias chain in
+   `scripts/apply-computed-sortdate.mjs` matches `resolvePublishedDateValue` in
+   `functions/src/lib/public-reads.js` alias for alias, so the SQL window and
+   the in-memory sort cannot disagree.
+
+3. **The frontend deploy has not happened, and is not a step on its own** — it
+   is Migration_Plan §6 step 1, gated three ways:
+   `deploy-azure-frontend.yml` is still `if: ${{ false }}`,
+   `AZURE_STATIC_WEB_APPS_API_TOKEN` is unset (the repository holds **no**
+   secrets at all), and `VITE_ENTRA_CLIENT_ID` / `VITE_ENTRA_TENANT_ID` /
+   `VITE_ENTRA_API_SCOPE` are unset. T-409 ships with it whenever it runs.
+   The SWA itself is up at `calm-ground-0d0e6a010.7.azurestaticapps.net`, which
+   is the §6 step 2 preview hostname.
+
+4. **The cutover sequence** (Migration_Plan §6) — owner-gated: Entra SPA
    registration + `Admin` app role, SWA token, DNS + `asuid`, Key Vault secrets
    (`ANTHROPIC-API-KEY` first; the inspector, forge, digest, AI cover and
    alerts all no-op cleanly without their keys), the Telegram webhook, then
    the delta import with Site-Main's Publer sync and VPS heartbeat paused and
    `FEATURE_FLAG_SYNC_SOCIAL_CALENDAR` still off, then flags on one timer at a
-   time after observing the Chicago-time fire. Nothing on this list blocks it.
+   time after observing the Chicago-time fire. **T-510 blocks the admin UI
+   part of it**; nothing else on this list does.
 
 **State to keep in mind:**
 
@@ -74,6 +101,53 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
   two Key Vault secrets in T-321.
 - The local `C:\Users\saulp\Workspace\Site-Main` clone is stale; the baseline
   is `088f458`. `git pull` before reading it.
+
+---
+
+## HIGH
+
+### T-510 — Eight CMS functions are disabled by route conflicts
+**Files:** `functions/src/functions/admin-crud-http.js` · `admin-integrations-http.js` · `image-prompts-http.js` · `functions/src/functions/route-inventory.test.js`
+
+The Azure Functions host keys its route table on the **route template alone**,
+not on template + method. Two functions that declare the same `route` with
+different `methods` are a conflict: the host keeps one and marks the other *"is
+in error: The route specified conflicts with the route defined by function
+X"*. Seven routes are shared this way, so eight functions never start.
+Measured live off the deployed route table, 2026-08-21:
+
+| Route | Live | Disabled |
+| --- | --- | --- |
+| `cms/certifications` | POST `cmsCreateCertification` | GET `cmsListCertifications` |
+| `cms/certifications/{id}` | DELETE `cmsDeleteCertification` | PATCH `cmsPatchCertification` |
+| `cms/recordings` | POST `cmsCreateRecording` | GET `cmsListRecordings` |
+| `cms/social-posts` | POST `cmsCreateSocialPost` | GET `cmsListSocialPosts` |
+| `cms/settings` | GET `cmsGetSettings` | PUT `cmsPutSettings` |
+| `cms/config/{collection}/{id}` | DELETE `cmsDeleteConfig` | PUT `cmsPutConfig`, PATCH `cmsPatchConfig` |
+| `cms/keyword-config/{collection}/{id}` | DELETE `cmsDeleteKeywordDoc` | PUT `cmsPutKeywordDoc` |
+
+Confirmed from outside: `POST /api/cms/certifications` returns **401** (alive,
+guard reached), `GET /api/cms/certifications` returns **404** (not registered).
+So the admin UI cannot list certifications, recordings or social posts, cannot
+edit a certification, cannot save settings, and cannot write config or keyword
+documents.
+
+**Not caused by the T-323/T-324 deploy** — App Insights first records these at
+21:39:15Z on 2026-08-21, with the 84-function deploy. It is a live defect that
+has simply had no caller yet, because the admin surface is not deployed.
+
+**Why the tests did not catch it.** `route-inventory.test.js` mocks
+`@azure/functions` with `http: (name, options) => httpRegistrations.set(name,
+options)` — a Map keyed by **function name**. Two functions sharing a route are
+two distinct keys, so both look registered and both pass every assertion. The
+test proves each route is guarded; it cannot prove the host will serve it.
+
+**Fix:** merge each conflicting pair into one registration that declares all its
+methods and dispatches on `request.method` — the shape `cmsGetSettings` /
+`cmsPutSettings` should have had from the start. Then add an assertion to
+`route-inventory.test.js` that no two registrations share a route template,
+which is the check that keeps this from returning. The smoke test should also
+fail on a host route conflict rather than only checking `/api/health`.
 
 ---
 

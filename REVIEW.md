@@ -31,7 +31,7 @@ the consolidation of CHECKLIST and Variables into this file.
 | | |
 | --- | --- |
 | Azure infrastructure | **Deployed** — 129 resources, `centralus`, plan clean |
-| Function App code | **84 functions deployed** (2026-08-21, run 32521270400) — `/api/health` 200 through Cloudflare, 403 at the origin; **93 after the next deploy** (PRs #146–#149 merged: 3 timers + 6 change-feed functions), which needs one `terraform apply` first (15 app settings) |
+| Function App code | **104 functions deployed** (2026-08-21, run 32533019315) — `/api/health` 200 through Cloudflare, 403 at the origin. 79 HTTP · 18 timer · 6 change-feed · 1 queue, counted live. The preceding deploy (run 32521270400, commit `12ebecb`) was 84; PRs #146–#149 added 20: 13 timers, the 6 change-feed functions and `cmsDeleteBlog`. **8 of the 79 HTTP functions are disabled by route conflicts — T-510.** |
 | Terraform authentication | **Working** — `id-plat-terraform-prod-cus-01` |
 | HCP Terraform variables | **All 13 set**, plus `cosmos_scratch_enabled` / `storage_scratch_enabled` = `true` (2026-08-20, runbook step 4); `migration_writer_enabled` stays unset = `false` |
 | GitHub repository variables | **8 of 8 platform variables set**; the 9 migration variables in §4.2 are not — they wait on the WIF binding and the scratch apply |
