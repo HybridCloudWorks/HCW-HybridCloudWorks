@@ -1,6 +1,6 @@
 # Migration Plan — Personal-Site_HCW → HCW-HybridCloudWorks (Azure)
 
-**Audience:** engineers executing the migration. **Status:** Phase 2 done; Phases 3–4 in progress
+**Audience:** engineers executing the migration. **Status:** Phases 2–4 done; every port before cutover merged 2026-08-21; next is the cutover sequence (§6)
 against **Site-Main @ `088f458`** (2026-08-18, v1.7.0); see the note below.
 **Written** 2026-07-30; deployment note added 2026-08-19; rebaselined against Site-Main and the
 migration tooling 2026-08-20.
@@ -150,8 +150,8 @@ deployed to Azure.
 | ----- | ---------------------------------------- | ------------- | --------------------------------------------------------------- |
 | 0     | Reconcile the two repositories           | Both          | **Retired** — replaced by the pinned baseline in §0             |
 | 1     | Decouple from Firebase behind interfaces | Both          | **DONE on both sides** — here: zero `firebase/*` imports; Site-Main: v1.7.0 `lib/data/` + `lib/auth/` encapsulation |
-| 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **80 functions deployed 2026-08-20** |
-| 3     | Port the API and workers                 | This repo     | **In progress** — 65 of 89 HTTP registered, 4 of 16 timers (3 stubs), 0 of 11 triggers; see §4 |
+| 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **84 functions deployed 2026-08-21** (93 after the T-323/T-324 deploy) |
+| 3     | Port the API and workers                 | This repo     | **DONE 2026-08-21** — the HTTP surface per `.azure/api-surface.json`, the six long handlers as platform jobs, 15 of 16 timers, the 11 triggers as 6 change-feed functions + 3 delete paths; what is not ported is a deliberate demotion (Cloud Tools T-410, Listen & Learn T-411, the D3 admin cluster); see §4 |
 | 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **DONE on production 2026-08-21** — 8,023 documents / 62 containers / 0 failed, reconciled; 1,438 blobs / 3.17 GiB verified. Re-runnable for the delta before cutover (upsert, `gcsmd5`) |
 | 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |
 | 6     | Decommission and archive                 | Both          | GCP down, Site-Main archived                                    |
@@ -298,11 +298,11 @@ load-bearing and must be ported.
 > origin-secret handshake works — three unknowns that otherwise surface in the middle of debugging
 > business logic.
 
-**Where Phase 3 stands (2026-08-20, measured at Site-Main `088f458`):** 80 functions are deployed
-here — 65 of Site-Main's 89 HTTP endpoints have a counterpart, plus Azure-only routes (health,
-public media). Of the 16 timers, 4 are registered and 1 is implemented (`publishScheduledContent`);
-the other 3 are stubs behind flags that are `"false"`. None of the 11 triggers is ported. The three
-tables below are the remaining inventory; each row was read from the source, not estimated.
+**Where Phase 3 stands (2026-08-21, measured at Site-Main `088f458`):** done. 84 functions are
+deployed and 93 register on the next deploy: the HTTP surface per `.azure/api-surface.json`, the
+six >230 s handlers as platform jobs (§4.1), 15 of the 16 timers behind their flags (§4.2), and the
+11 triggers as six change-feed functions plus the three delete endpoints (§4.3). The tables below
+are now the record of what each upstream export became; every row was read from the source.
 
 Do not port the endpoints one by one in isolation. Group them:
 

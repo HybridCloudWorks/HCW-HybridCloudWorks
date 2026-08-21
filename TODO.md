@@ -24,11 +24,11 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 11 |
+| Open items | 6 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 8 |
-| Low | 3 |
+| Medium | 4 |
+| Low | 2 |
 
 ## Where we left off — 2026-08-21
 
@@ -40,23 +40,23 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
 
 **Pick up here, in order:**
 
-1. **`terraform -chdir=infra apply`** — 1 change, `PUBLIC_LIST_SQL_ORDER = "1"`
-   (#138 merged, `--inspect` precondition: **clean**, run 32448514462 — 1,142 + 242 documents, every date alias ISO-sortable). Then read
-   `https://api-azure.hybridcloudworks.com/api/public/content?limit=8` and
-   confirm newest-first; baseline before the flag had 2026-06-08 at the top.
-2. **T-322 is closed** (2026-08-21). Four of the six run as jobs
-   (`fetch-rss-feeds`, `batch-inspect`, `forge-article`,
-   `generate-weekly-digest`) and the stale-queued sweeper is in;
-   `refresh-tool-service-cache` is demoted to the Cloud Tools port and
-   `generate-listen-and-learn` is deferred to **T-411** (three Google services
-   and no frontend here). Next: **T-323**.
-3. **T-323, T-324 and T-409 are closed** (2026-08-21): 15 of 16 timers behind
-   their flags, the 11 triggers as six change-feed functions plus the three
-   delete paths, and the visitor-facing upstream delta. **Nothing engineering
-   remains before the cutover sequence (Migration_Plan §6)** — the open items
-   are the owner gates in REVIEW §2–§4 and the optional scoped projects
-   (T-410 Cloud Tools, T-411 Listen & Learn, the D3 admin cluster).
-4. **T-409** — the visitor-facing upstream delta.
+1. **Every port before cutover is merged** (2026-08-21, PRs #146–#149: 15 of
+   16 timers, the 6 change-feed functions + 3 delete paths, the visitor delta).
+   One `terraform -chdir=infra apply` is pending — **0 added, 1 changed** (the
+   function app: 13 timer flags / `*_DELETE` settings and the two
+   `COSMOS_CONNECTION__*` settings) — then a `deploy-functions` dispatch:
+   expect **93 functions** (84 + 3 timers + 6 change-feed) and six lease
+   documents in `leases`. The frontend deploy picks up T-409.
+2. **Confirm newest-first on the public list** — `PUBLIC_LIST_SQL_ORDER = "1"`
+   is applied; read `https://api-azure.hybridcloudworks.com/api/public/content?limit=8`
+   (baseline before the flag had 2026-06-08 at the top).
+3. **The cutover sequence** (Migration_Plan §6) — owner-gated: Entra SPA
+   registration + `Admin` app role, SWA token, DNS + `asuid`, Key Vault secrets
+   (`ANTHROPIC-API-KEY` first; the inspector, forge, digest, AI cover and
+   alerts all no-op cleanly without their keys), the Telegram webhook, then
+   the delta import with Site-Main's Publer sync and VPS heartbeat paused and
+   `FEATURE_FLAG_SYNC_SOCIAL_CALENDAR` still off, then flags on one timer at a
+   time after observing the Chicago-time fire. Nothing on this list blocks it.
 
 **State to keep in mind:**
 
@@ -99,105 +99,6 @@ and REVIEW.md Part 1. What remains:
   refuse a service-account key in CI. It is only the ported runtime code paths
   that still read it.
 
-### T-322 — Six HTTP handlers exceed the Flex Consumption 230 s cap
-**Files:** `functions/src/functions/*` (the six below) · `frontend/src/lib/api.js` · `functions/host.json`
-
-Flex Consumption hard-caps an HTTP response at **230 s** at the load balancer;
-the setting in `host.json` cannot raise it. Non-HTTP triggers are unbounded
-(30 min default). Six of Site-Main's HTTP handlers declare longer server
-timeouts, none of them enqueue, and all of them make the browser wait — and on
-five of them the client's own abort already disagrees with the server:
-
-| Handler | Server | Client abort today | Port as |
-| --- | --- | --- | --- |
-| `generateListenAndLearn` | 540 s / 1 GiB | **20 s** (no entry) | async — episodes already save incrementally |
-| `refreshToolServiceCache` | 300 s / **4 GiB** | 120 s | async; the memory is likely already solved by the Price List Query API move recorded in `main.tf` |
-| `forgeArticle` | 300 s / 1 GiB | 300 s | async; also called in a sequential bulk loop |
-| `fetchRssFeedsManual` | 300 s | 45 s, retried | 202 + reuse the scheduled job |
-| `generateWeeklyDigest` | 300 s | **20 s** (no entry) | async; the `dryRun` preview needs a fast path |
-| `batchInspect` | 300 s | 45 s, retried | async — hardcoded `sleep(4000)` × N |
-
-**Scaffold landed 2026-08-21 (PR "Platform jobs").** `functions/src/lib/jobs.js`
-is the pattern every one of the six sits on: `POST /api/enqueueJob {type,
-payload}` → 202 + jobId → Storage Queue `platform-jobs` → `jobs-worker.js`
-runs the registered worker under its own timeout (non-HTTP budget, 30 min on
-Flex) → `GET|POST /api/getJob`. Client: `frontend/src/lib/jobs.js`
-`runJob(type, payload)` enqueues and polls with the Labs backoff. The claim is
-an etag-conditioned replace, so at-least-once delivery never runs a job
-twice; a job-level failure is recorded, never rethrown. Built-in type `noop`
-proves the path on a deployed app (`runJob('noop', { delayMs: 3000 })`).
-
-**First worker ported 2026-08-21: `fetch-rss-feeds`** (`functions/src/lib/rss/`,
-`rss-jobs.js`). The admin "RSS Fetch" button enqueues it through `runJob()`;
-the `syncRssFeeds` timer runs the same ingest every two hours behind
-`FEATURE_FLAG_SYNC_RSS_FEEDS`. It fills `rss_cache` (the public `/feed`
-endpoint) and `homepage_feeds/latest`, and drafts new `content` through the
-four-stage dedup. Not ported with it: the Telegram alert on feed errors (no
-notifier here yet) — errors land in the job result instead.
-
-Each remaining port is: port the worker, `registerJobType('<kebab-name>',
-{ worker, timeoutMs, maxPayloadBytes })`, switch the page to `runJob()`.
-Order by value and entanglement:
-
-1. **The AI router is in** (`functions/src/lib/ai/router.js`, 2026-08-21):
-   providers by key presence, Anthropic → OpenAI → Gemini, `AI_NOT_CONFIGURED`
-   when none. **`batch-inspect` is in** (2026-08-21, `functions/src/lib/content/`):
-   one job that selects `ingested` documents (flagged first) and runs the
-   ported inspector on each — scrape (`fetch` + cheerio + turndown, strict
-   TLS, reader/headless fallbacks behind `CONTENTFORGE_SCRAPE_FALLBACK_ENABLED`
-   / `CONTENTFORGE_HEADLESS_FALLBACK_*`), publish-date extraction, format
-   rotation off `scrapedAt`, the verbatim analysis prompt + voice block,
-   critique with one automatic revision (`needs_rework` if still generic),
-   `buildInspectionUpdateData` with its upstream tests. Optional switches,
-   all default off: `CONTENTFORGE_METADATA_ONLY`, `CONTENTFORGE_ALT_TEXT_ENABLED`,
-   `CONTENTFORGE_ANALYSIS_MODEL`. **Not ported:** the architecture-diagram
-   path (`inspectArchitectureSource`, multimodal) — a `type: 'architecture'`
-   document records `inspectError` naming it — and cover-on-inspect (flag
-   only).
-   **`forge-article` and `generate-weekly-digest` are in** (2026-08-21,
-   `functions/src/lib/content/{forge,forge-config,forge-pipeline,forge-grader,drafting,digest}.js`,
-   `forge-jobs.js`). The forge pipeline is the upstream one: dedupe against
-   the published corpus (fails open) → `admin_config/forge_profile` +
-   `forge_prompts` (defaults when missing, 5-min cache) → format rotation →
-   master prompt + voice block + forge module instruction + word soup →
-   draft → dash scrub, banned-phrase scan, module validation with mechanical
-   repair → grade (keyword prescreen, then one model call, best-fit weighted
-   overall) → `forge_ready` above the publish threshold and clean, else
-   `editing` → content patch + `content_versions` + `admin_audit_logs` +
-   `forge_stats` counters (three writes, not one transaction — stated in the
-   file header). `forge-article` takes `sourceContentId` or
-   `sourceContentIds` (≤ 10, the upstream bulk loop). `generate-weekly-digest`
-   takes `{ days, dryRun }`; the Mailing List page has the two buttons
-   (preview / draft) upstream had. **No ContentForge page exists here** (it
-   post-dates the import) — the job is reachable through `POST /api/enqueueJob`
-   and the page is part of the T-409/D3 admin port, together with
-   `gradeContentItem`, `assignForgeImages` and the config endpoints.
-   `forgeScheduled` (daily auto-forge) is a T-323 timer.
-   **`generate-listen-and-learn` is deferred → T-411**: it needs Google
-   Text-to-Speech through ADC, a YouTube Data API key and GCS audio uploads,
-   and neither the admin page nor the certification-page player exists in
-   this frontend; porting the worker alone would produce episodes nothing
-   can play.
-2. `refresh-tool-service-cache` — **demoted**: this repo's frontend has no
-   Cloud Tools pages at all (no `getToolComparisonData`, no
-   `tool_service_*` reads — the vertical post-dates the 2026-07-22 import),
-   so the cache would feed nothing. It belongs to a Cloud Tools port as a
-   whole (T-410-class scoped project: pricing worker ~1,000 lines incl. AWS
-   SigV4 + bulk offer documents and a GCP column that needs a credential the
-   app cannot hold, plus the read handler and pages).
-
-Known gap, closed 2026-08-21: the job document is written before the output
-binding sends the message, so a binding failure left a job `queued` forever.
-`platformJobSweeper` (`jobs-sweeper.js`, every 15 min, behind
-`FEATURE_FLAG_PLATFORM_JOB_SWEEPER` under the schedulers master switch)
-re-enqueues jobs `queued` for more than 10 minutes and stamps
-`requeuedAt` / `requeueCount`; the worker's etag-conditioned claim makes a
-duplicate delivery harmless. Turn the flag on with the first real job
-traffic. The
-client/server timeout mismatch disappears with `runJob()`: there is no
-per-call timeout left to mismatch. `generateAiCoverOnContentTrigger`'s 540 s
-must still stay under the 900 s rising-edge claim window (T-324).
-
 ### T-411 — Port Listen & Learn (study podcasts) as a scoped project
 **Files:** Site-Main `functions/listen-and-learn/*` (2,800 lines incl. tests) · `src/pages/admin/ListenAndLearnPage.jsx` · certification detail pages
 
@@ -213,136 +114,6 @@ episodes in this frontend — the admin page and the certification-page player
 both post-date the import — so the worker, the two containers' read API, the
 player and the admin page land together or not at all. Run it on the job
 scaffold (`generate-listen-and-learn`, area-by-area saves as upstream).
-
-### T-323 — Port the 16 timers (NCRONTAB + `America/Chicago`)
-**Files:** `functions/src/functions/schedulers.js` · `functions/src/lib/timers/*` · `infra/main.tf` (flags)
-
-**Fifteen of sixteen are in (2026-08-21, PRs "timers: content ops" and "timers: ingestion"); T-323 is closed.** Each is a
-factory in `lib/timers/` with injected store/fetch/storage, registered in
-`schedulers.js` through one `timer(name, FLAG, ncrontab, run)` helper, behind
-its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_SCHEDULERS` master
-switch (all `"false"` in `main.tf`): `publishScheduledContent`,
-`syncRssFeeds`, `forgeScheduled`, `monitorPublishingPipeline`,
-`generateReviewerDigest`, `checkLiveLinks`, `cleanupRejectedContent`,
-`cleanupSoftDeletedContent`, `cleanupTempStorage`, `cleanupUnusedCertImages`,
-`reVerifyCertifications`, `scrapeSkillsHubRss`, `refreshPlaudToken`,
-`checkAgentHealth`, `syncSocialCalendarScheduled` (Publer reconcile),
-`fetchBlogListings` (Firecrawl v1 REST, not the SDK), `fetchPodcastFeeds`
-(PodBean). `workflow_digests` / `workflow_alerts` / system audit
-entries are written through `lib/timers/workflow-records.js`. The one UTC
-schedule (`scrapeSkillsHubRss`) is expressed in Chicago time and drifts an
-hour across DST — a weekly scrape does not care. Alerts that upstream relayed
-to Telegram (`notifyOnWorkflowAlertActivation`) sit in `workflow_alerts` until
-T-324.
-
-**The sixteenth**, `refreshToolServiceCacheScheduled`, stays demoted with
-Cloud Tools (T-322 note). The three external-ingestion timers skip
-themselves while their keys are Key Vault stubs (`PUBLER_API_KEY` +
-`PUBLER_WORKSPACE_ID`, `FIRECRAWL_API_KEY`; REVIEW §3.1). **D12:**
-`syncSocialCalendarScheduled` is the live writer of `social_posts` — its flag
-stays off until the cutover delta import is done. Cutover: turn each flag on one at
-a time after observing the fire time in App Insights (§6 step 7); the
-`regenerate` / `reseed` collections (`homepage_feeds`, `rss_cache`) fill on
-the first `syncRssFeeds` run.
-
-### T-324 — Port the 11 Firestore triggers as change-feed functions, plus the three delete paths
-**Files:** `functions/src/functions/change-feed.js` · `functions/src/lib/triggers/*` · `infra/main.tf` (`COSMOS_CONNECTION__*`)
-
-**Closed 2026-08-21 (PR "change-feed triggers").** Six `app.cosmosDB`
-functions — one per watched container, each with its own `leases` prefix —
-on the identity-based binding (`COSMOS_CONNECTION__accountEndpoint` +
-`__credential = managedidentity`; the app identity's account-scope Data
-Contributor covers `leases`): `mirrorSpeakerEventImages`,
-`mirrorCertificationImages`, `processBlogChanges` (cover mirror, template SVG
-cover, claimed slug page), `processContentChanges` (inspect on
-`inspectTrigger`, AI cover on `altCoverImageTrigger` via a rising-edge claim,
-dashboard counters via `content_stats_markers`), `notifyWorkflowAlerts`
-(Telegram, stamped after the send), `syncSocialPostsToPubler`. The three
-deletes the feed cannot see: `DELETE /api/cms/content/{id}` and
-`deleteContentItem` move the dashboard counters; `DELETE /api/cms/social-posts/{id}`
-un-publishes on Publer first; `DELETE /api/cms/blogs/{id}` is new — the slug
-page was always fields on the blog document, so deleting the document is the
-removal. Not registered: `syncToolExpertModeRuns` (`lab_jobs` → Cloud Tools
-artifact; nothing here writes `artifactRef`; demoted with Cloud Tools).
-
-**Differences from upstream, stated in the file headers:** the template cover
-is stored as SVG (no sharp), the AI cover has no WebP variants, no mascot
-path and no OpenAI fallback; `speakerevents` stays a private container so its
-mirror keeps `downloadURL` on the source URL (disclosure decision, §5.4).
-Secrets the handlers need are Key Vault stubs until REVIEW §3.1 is done
-(`REPLICATE_API_KEY`, `TELEGRAM_*`, `PUBLER_*`); each handler skips or records
-a clear error without them. The `batch-inspect` job stays as the backfill
-path. **Cutover check:** the feed starts from "now" (`startFromBeginning:
-false`), so documents imported before the deploy are not replayed — run
-`batch-inspect` for flagged imports and `recalculateDashboardStats` is the
-counters' baseline (T-409 ships no page for it; `getAdminDashboardSnapshot`
-seeds from a scan when the stats doc is missing).
-
-### T-409 — Port the visitor-facing upstream delta (Site-Main @ `088f458`)
-**Files:** `frontend/src/components/{shared,architecture}/` · `frontend/src/data/{ansible,vmware}/education.js`
-
-**Closed 2026-08-21 (PR "visitor delta").** Ported verbatim with their
-tests: `RichTextBody` (HTML-or-markdown overview body, now used by the
-architecture and framework detail templates — markdown bodies no longer
-render as literal `## Heading` text), `CoderCornerSnippet` + `CodeBlock`
-(the `codeSnippet` / `language` / `repoUrl` fields the coder_corner publish
-contract requires finally render; fenced blocks get syntax highlighting and
-a copy button), `WafAssessment` + `config/wellArchitectedPillars.js` (the
-Well-Architected tab on an architecture detail when the document carries
-`waf`; vendor pillar sets, VMware deliberately absent), `FeaturedArchitecture`
-+ `lib/colorClasses.js` (the AWS and Azure galleries' featured panel is now
-the first blueprint instead of one hardcoded design), and the Ansible and
-VMware education data (rendered through a small `EducationTracks` component
-with the level filter, learning paths and resources — the 712-line
-`EducationTemplate` stays unported, D2). `FrameworkRadar` gained a `max`
-prop for the 0–100 scale.
-
-Of the 140 files Site-Main added since the 2026-07-22 import, these are the
-ones a visitor would notice — Firebase-free and small (~590 lines + two data
-files). Everything else is a refactor the visitor cannot see (D2), a scoped
-project (T-410), or Firebase plumbing that must never come across.
-
-| File | Lines | Visitor gets | Cost |
-| --- | --- | --- | --- |
-| `components/shared/RichTextBody.jsx` | 47 | richer article bodies | needs `CodeBlock`, recover from the deletions |
-| `components/shared/CoderCornerSnippet.jsx` | 78 | code snippets in blogs | same dependency |
-| `components/architecture/WafAssessment.jsx` + `config/wellArchitectedPillars.js` | 114 + 178 | WAF radar and pillar scores | none |
-| `components/architecture/FeaturedArchitecture.jsx` + `lib/colorClasses.js` | 124 + 47 | featured-architecture hero | none |
-| `data/ansible/education.js`, `data/vmware/education.js` | 206 + 199 | **genuinely new content** (95-line stubs here) | copy the data only |
-
-Each wires into a template both sides rewrote (`ArchitectureDetailTemplate`,
-`BlogDetailTemplate`, `FrameworkDetailTemplate`, `pages/{aws,azure}/ArchitecturePage`)
-— hand-wire, do not merge. Five tests ride along. **Never re-sync `frontend/`
-from Site-Main**: it encapsulated Firebase behind `lib/data/` (364 call sites);
-we eliminated it (0 imports). The two are incompatible by construction.
-
-### T-302 — Blob GC (flag split done; prefix-and-age cleanup in, dry-run)
-**File:** `functions/src/lib/timers/temp-storage.js` · `cert-image-cleanup.js`
-
-**Resolved 2026-08-21 by not writing the orphan sweep.** `cleanupTempStorage`
-deletes by PREFIX and AGE only (`TEMP_STORAGE_PREFIXES`, default
-`content:uploads/`; `TEMP_STORAGE_MAX_AGE_DAYS`, default 7) — nothing a
-document references lives under a temp prefix by construction, so there is no
-enumeration to get wrong. `cleanupUnusedCertImages` (the one real
-reference-based sweep, upstream's) compares by blob path against every
-certification document. Both are DRY-RUN until `TEMP_STORAGE_CLEANUP_DELETE`
-/ `CERT_IMAGE_CLEANUP_DELETE` are `"true"` in TFC; run them dry for a week and
-read the counts before flipping either. The history below stands.
-
-**The flag half is resolved.** Each timer has its own `FEATURE_FLAG_<NAME>` and
-`FEATURE_FLAG_SCHEDULERS` is a master kill switch, so enabling the publisher no
-longer arms anything else. Terraform sets all four individual flags to `"false"`.
-
-**What remains is `cleanupTempStorage` itself**, still an unimplemented TODO.
-The hazard is real and unchanged: an orphan query has to enumerate every blob
-and every referencing document, and anything it fails to enumerate it
-classifies as an orphan and deletes. Only `delete_retention_policy { days = 7 }`
-makes that recoverable.
-
-The finding's stated blocker does **not** apply — `queryDocs` does not truncate
-(corrected; see CHANGELOG). The real constraint is that `fetchAll` materialises
-the whole result set, so the enumeration needs a cursor rather than a bigger
-window. **Make the first version dry-run regardless.**
 
 ### T-319 — Bound `items[]` within an `rss_cache` document
 **Files:** `functions/src/lib/public-reads.js` (getFeed) · `functions/src/functions/schedulers.js` (syncRssFeeds)
@@ -468,7 +239,7 @@ remains unwritten:
 | Unit | `api.js` with `VITE_BACKEND_PROVIDER=azure` | resolves to `VITE_AZURE_FUNCTIONS_URL` | API base resolution |
 | Unit | `cms-content.list` limit `abc` / `0` / `-5` / `99999` | clamped to [1,500] | Input bounds |
 | Unit | `putConfig` omitting `oauthToken` | stored token preserved | Partial-update safety |
-| Integration | the six T-322 handlers as jobs | 202 within 1 s; job document reaches a terminal state | T-322 |
+| Live | `runJob('noop', { delayMs: 3000 })` on the deployed app | 202 within 1 s; the job document reaches `succeeded` | the platform-jobs path end to end — blocked on the Entra admin sign-in (REVIEW §2.2) |
 
 The origin-lock assertion — an anonymous request through Cloudflare succeeds
 while the same request to the `azurewebsites.net` origin returns 403 — now
