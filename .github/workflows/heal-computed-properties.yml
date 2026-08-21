@@ -73,5 +73,8 @@ jobs:
       # just established. --apply is a no-op when the property is intact.
       - name: Re-apply cp_sortDate if missing
         env:
-          COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
+          # A VARIABLE since 2026-08-20 (it is a public URL; set-github-variables.ps1
+          # moved it and deleted the secret). This read `secrets.` until 2026-08-21 and
+          # failed with "COSMOS_ENDPOINT is not set" on the first run after the move.
+          COSMOS_ENDPOINT: ${{ vars.COSMOS_ENDPOINT }}
         run: node apply-computed-sortdate.mjs --apply

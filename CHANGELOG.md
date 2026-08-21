@@ -54,6 +54,11 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`heal-computed-properties.yml` still read `secrets.COSMOS_ENDPOINT`** after
+  the value moved to a repository variable and the secret was deleted
+  (2026-08-20); its next run failed with "COSMOS_ENDPOINT is not set". Now
+  `vars.COSMOS_ENDPOINT`. The #128 changelog entry said both consuming
+  workflows had been switched; only `migrate-data.yml` had.
 - **`preflight-firestore-inventory.mjs` referenced `FIRESTORE_PROJECT_ID` without
   importing it.** Introduced when the Firestore connection moved into
   `connectFirestore()`; `node --check` and the 65 tests all passed because an
