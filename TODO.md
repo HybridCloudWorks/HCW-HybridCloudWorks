@@ -24,19 +24,48 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 9 |
+| Open items | 11 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 6 |
+| Medium | 8 |
 | Low | 3 |
 
-**The next move is the data-migration rehearsal.** The function deploy this
-paragraph used to point at happened on 2026-08-20: 80 functions live, the
-rebuilt identity authenticates, the smoke test passes through Cloudflare, and
-the origin-secret handshake is proven by an anonymous rate-limited route
-answering 200 through Cloudflare and 403 at the origin. The
-[Migration-Runbook](.github/wiki/Migration-Runbook.md) carries the sequence
-from here; nothing below is a prerequisite for its first steps.
+## Where we left off — 2026-08-21
+
+**Phase 4 (data) is done on production.** `cosmos-site-prod-cus` holds 8,023
+documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
+1,438 blobs / 3.17 GiB (idempotent on re-run). `cp_sortDate` is live on
+`content` and `blogs`. Full evidence: the
+[Phase-4 page](.github/wiki/Phase-4-Data-Migration.md) (rows P1–P5, D11, D12).
+
+**Pick up here, in order:**
+
+1. **`terraform -chdir=infra apply`** — 1 change, `PUBLIC_LIST_SQL_ORDER = "1"`
+   (#138 merged, `--inspect` precondition: **clean**, run 32448514462 — 1,142 + 242 documents, every date alias ISO-sortable). Then read
+   `https://api-azure.hybridcloudworks.com/api/public/content?limit=8` and
+   confirm newest-first; baseline before the flag had 2026-06-08 at the top.
+2. **T-322** below — the six HTTP handlers over the 230 s cap. First real
+   Phase 3 work; none is mechanical.
+3. **T-323 / T-324** below — the 16 timers and the 11 triggers, tables in
+   Migration_Plan §4.2 / §4.3.
+4. **T-409** — the visitor-facing upstream delta.
+
+**State to keep in mind:**
+
+- Locks: `migration_writer_enabled = true` stays on in TFC for the cutover
+  delta run; `PRODUCTION_IMPORT_ENABLED` is unset (workflow-side lock closed).
+  The scratch estate (`rg-db-site-sbx-cus`) is kept through the production
+  dress rehearsal — flip `cosmos_scratch_enabled` / `storage_scratch_enabled`
+  off afterwards.
+- The cutover delta import must follow **pausing Site-Main's Publer sync timer
+  and the VPS agent** — both rewrite `social_posts` / `lab_agents` every few
+  minutes (D12). Everything else already reconciles.
+- Owner-gated items live in REVIEW, not here: Entra SPA registration (admin
+  sign-in), the SWA deploy token (frontend deploy), the Site-Main read token
+  (`inventory-gate` in CI; the local two-clone form already passed), and the
+  two Key Vault secrets in T-321.
+- The local `C:\Users\saulp\Workspace\Site-Main` clone is stale; the baseline
+  is `088f458`. `git pull` before reading it.
 
 ---
 
@@ -87,6 +116,35 @@ streaming anywhere, so the cap bites only these six. For the background
 handlers set `functionTimeout` ≥ 10 min in `host.json`;
 `generateAiCoverOnContentTrigger`'s 540 s must stay under the 900 s rising-edge
 claim window.
+
+### T-323 — Port the 16 timers (NCRONTAB + `America/Chicago`)
+**Files:** `functions/src/functions/schedulers.js` · `functions/host.json` · `infra/main.tf` (flags)
+
+Four are registered here, one implemented (`publishScheduledContent`). The
+other fifteen are in the table in Migration_Plan §4.2 with their NCRONTAB
+expressions already translated — `every 24 hours` and friends picked an
+explicit hour; the one UTC schedule (`scrapeSkillsHubRss`) is re-expressed in
+Chicago time and will drift an hour across DST unless the handler pins it.
+`WEBSITE_TIME_ZONE = America/Chicago` is set on the app. Each timer stays
+behind its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_SCHEDULERS`
+master switch and is turned on one at a time at cutover, after being observed
+firing at the intended **local** time. `regenerate` / `reseed` collections
+(`homepage_feeds`, `tool_service_cache`, `rss_cache`, `azure_landing_content`,
+`tool_service_catalog`) are empty on Azure until their jobs run — port those
+jobs first.
+
+### T-324 — Port the 11 Firestore triggers as change-feed functions, plus the three delete paths
+**Files:** `functions/src/functions/*` (`app.cosmosDB`) · the `leases` container
+
+Table in Migration_Plan §4.3. Eight port as change-feed functions with no
+redesign. Three depend on deletes the change feed never delivers and need the
+logic moved into explicit endpoints the admin UI calls: `createSlugPageOnTrigger`
+→ `DELETE /blogs/{id}` removes the slug page; `maintainDashboardStats` →
+recompute-on-change plus `DELETE /content/{id}` triggering the recompute (the
+stats doc is `system/dashboard_stats_v1`); `syncSocialPostToPubler` → upserts
+via the feed, the `!after` un-publish branch into `DELETE /social-posts/{id}`.
+`generateAiCoverOnContentTrigger`'s timeout must stay under the 900 s
+rising-edge claim window.
 
 ### T-409 — Port the visitor-facing upstream delta (Site-Main @ `088f458`)
 **Files:** `frontend/src/components/{shared,architecture}/` · `frontend/src/data/{ansible,vmware}/education.js`
