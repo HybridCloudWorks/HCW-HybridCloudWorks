@@ -50,9 +50,10 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    `refresh-tool-service-cache` is demoted to the Cloud Tools port and
    `generate-listen-and-learn` is deferred to **T-411** (three Google services
    and no frontend here). Next: **T-323**.
-3. **T-323 is closed** (2026-08-21): 15 of 16 timers registered behind their
-   flags, all off. Next: **T-324** — the 11 triggers as change-feed functions
-   plus the three delete paths (Migration_Plan §4.3).
+3. **T-323 and T-324 are closed** (2026-08-21): 15 of 16 timers behind their
+   flags, and the 11 triggers as six change-feed functions on the
+   identity-based binding plus the three delete paths. Next: **T-409**, then
+   the cutover sequence (Migration_Plan §6).
 4. **T-409** — the visitor-facing upstream delta.
 
 **State to keep in mind:**
@@ -243,17 +244,37 @@ a time after observing the fire time in App Insights (§6 step 7); the
 the first `syncRssFeeds` run.
 
 ### T-324 — Port the 11 Firestore triggers as change-feed functions, plus the three delete paths
-**Files:** `functions/src/functions/*` (`app.cosmosDB`) · the `leases` container
+**Files:** `functions/src/functions/change-feed.js` · `functions/src/lib/triggers/*` · `infra/main.tf` (`COSMOS_CONNECTION__*`)
 
-Table in Migration_Plan §4.3. Eight port as change-feed functions with no
-redesign. Three depend on deletes the change feed never delivers and need the
-logic moved into explicit endpoints the admin UI calls: `createSlugPageOnTrigger`
-→ `DELETE /blogs/{id}` removes the slug page; `maintainDashboardStats` →
-recompute-on-change plus `DELETE /content/{id}` triggering the recompute (the
-stats doc is `system/dashboard_stats_v1`); `syncSocialPostToPubler` → upserts
-via the feed, the `!after` un-publish branch into `DELETE /social-posts/{id}`.
-`generateAiCoverOnContentTrigger`'s timeout must stay under the 900 s
-rising-edge claim window.
+**Closed 2026-08-21 (PR "change-feed triggers").** Six `app.cosmosDB`
+functions — one per watched container, each with its own `leases` prefix —
+on the identity-based binding (`COSMOS_CONNECTION__accountEndpoint` +
+`__credential = managedidentity`; the app identity's account-scope Data
+Contributor covers `leases`): `mirrorSpeakerEventImages`,
+`mirrorCertificationImages`, `processBlogChanges` (cover mirror, template SVG
+cover, claimed slug page), `processContentChanges` (inspect on
+`inspectTrigger`, AI cover on `altCoverImageTrigger` via a rising-edge claim,
+dashboard counters via `content_stats_markers`), `notifyWorkflowAlerts`
+(Telegram, stamped after the send), `syncSocialPostsToPubler`. The three
+deletes the feed cannot see: `DELETE /api/cms/content/{id}` and
+`deleteContentItem` move the dashboard counters; `DELETE /api/cms/social-posts/{id}`
+un-publishes on Publer first; `DELETE /api/cms/blogs/{id}` is new — the slug
+page was always fields on the blog document, so deleting the document is the
+removal. Not registered: `syncToolExpertModeRuns` (`lab_jobs` → Cloud Tools
+artifact; nothing here writes `artifactRef`; demoted with Cloud Tools).
+
+**Differences from upstream, stated in the file headers:** the template cover
+is stored as SVG (no sharp), the AI cover has no WebP variants, no mascot
+path and no OpenAI fallback; `speakerevents` stays a private container so its
+mirror keeps `downloadURL` on the source URL (disclosure decision, §5.4).
+Secrets the handlers need are Key Vault stubs until REVIEW §3.1 is done
+(`REPLICATE_API_KEY`, `TELEGRAM_*`, `PUBLER_*`); each handler skips or records
+a clear error without them. The `batch-inspect` job stays as the backfill
+path. **Cutover check:** the feed starts from "now" (`startFromBeginning:
+false`), so documents imported before the deploy are not replayed — run
+`batch-inspect` for flagged imports and `recalculateDashboardStats` is the
+counters' baseline (T-409 ships no page for it; `getAdminDashboardSnapshot`
+seeds from a scan when the stats doc is missing).
 
 ### T-409 — Port the visitor-facing upstream delta (Site-Main @ `088f458`)
 **Files:** `frontend/src/components/{shared,architecture}/` · `frontend/src/data/{ansible,vmware}/education.js`

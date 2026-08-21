@@ -53,8 +53,55 @@ const LIST_WINDOW = 1000;
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
-export function createAdminCrudHandlers({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createAdminCrudHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+  unpublishSocialPost = null,
+}) {
   return {
+    // ── blogs ──────────────────────────────────────────────────────────────
+
+    /**
+     * DELETE /api/cms/blogs/{id} — publisher. Site-Main's createSlugPageOnTrigger
+     * wrote the curated slug-page fields ONTO the blog document, so removing
+     * the slug page is removing the document (T-324, the first of the three
+     * deletes the change feed cannot see). Audited.
+     */
+    async deleteBlog(request, context) {
+      const auth = await guard.requireRole(request, 'publisher');
+      if (auth.error) return auth.error;
+      try {
+        const id = String(request.params.id || '').trim();
+        if (!id) return json(400, { error: 'id required' });
+        const existing = await store.readDoc('blogs', id, id);
+        if (!existing) return json(404, { error: `Blog ${id} not found` });
+        await store.deleteDoc('blogs', id, id);
+        const { user } = auth;
+        await store.upsertDoc('admin_audit_logs', {
+          id: uuid(),
+          action: 'blog_deleted',
+          userId: user?.oid || user?.sub || null,
+          userEmail: user?.email || null,
+          timestamp: now().toISOString(),
+          details: {
+            blogId: id,
+            slug: existing.slug || existing.Slug || null,
+            curatedSubpagePath: existing.curatedSubpagePath || null,
+          },
+          userAgent: request.headers?.get?.('user-agent') || null,
+          contentId: existing.sourceContentId || null,
+          contentTitle: existing.Title || existing.title || '',
+          compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+        });
+        return json(200, { success: true, blogId: id });
+      } catch (error) {
+        context.error('deleteBlog failed:', error);
+        return json(500, { error: 'Failed to delete blog' });
+      }
+    },
+
     // ── certifications ─────────────────────────────────────────────────────
 
     /** GET /api/cms/certifications — all docs; the page sorts client-side. */
@@ -152,7 +199,10 @@ export function createAdminCrudHandlers({ guard, store, now = () => new Date(), 
       try {
         const statusParam = String(request.query.get('status') || '').trim();
         const statuses = statusParam
-          ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
+          ? statusParam
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
           : SOCIAL_DEFAULT_STATUSES;
         const limit = Math.min(Math.max(Number(request.query.get('limit')) || 50, 1), 100);
 
@@ -164,9 +214,7 @@ export function createAdminCrudHandlers({ guard, store, now = () => new Date(), 
             : `SELECT TOP ${LIST_WINDOW} * FROM c WHERE ARRAY_CONTAINS(@statuses, c.status)`,
           unfiltered ? [] : [{ name: '@statuses', value: statuses }]
         );
-        const sorted = items
-          .sort((a, b) => createdAtValue(b) - createdAtValue(a))
-          .slice(0, limit);
+        const sorted = items.sort((a, b) => createdAtValue(b) - createdAtValue(a)).slice(0, limit);
         return json(200, { success: true, items: sorted, total: sorted.length });
       } catch (error) {
         context.error('listSocialPosts failed:', error);
@@ -202,8 +250,16 @@ export function createAdminCrudHandlers({ guard, store, now = () => new Date(), 
       try {
         const id = String(request.params.id || '').trim();
         if (!id) return json(400, { error: 'id required' });
+        // The `!after` branch of Site-Main's syncSocialPostToPubler: the change
+        // feed never delivers a delete, so the Publer un-publish happens here
+        // (T-324). Best-effort, before the document goes.
+        let publer = { attempted: 0, removed: 0 };
+        if (unpublishSocialPost) {
+          const existing = await store.readDoc('social_posts', id, id);
+          if (existing) publer = await unpublishSocialPost(existing);
+        }
         await store.deleteDoc('social_posts', id);
-        return json(200, { success: true });
+        return json(200, { success: true, publer });
       } catch (error) {
         context.error('deleteSocialPost failed:', error);
         return json(500, { error: 'Failed to delete social post' });

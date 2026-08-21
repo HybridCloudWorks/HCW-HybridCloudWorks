@@ -847,20 +847,15 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
     "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
-    # COSMOS_CONNECTION_STRING is deliberately absent (TODO.md T-315).
-    #
-    # It carried the account PRIMARY KEY — readable by anyone with Contributor on
-    # the resource group, and present in Terraform state — and existed solely for
-    # the Cosmos change-feed trigger binding, whose two handlers were empty TODOs
-    # that nonetheless ran continuously and billed lease-container RU. The
-    # handlers and their registrations are gone, so the setting has nothing left
-    # to serve.
-    #
-    # When change-feed triggers return, use the identity-based binding form
-    # rather than reinstating this:
-    #   COSMOS_CONNECTION__accountEndpoint = azurerm_cosmosdb_account.hcw.endpoint
-    #   COSMOS_CONNECTION__credential      = "managedidentity"
+    # COSMOS_CONNECTION_STRING is deliberately absent (TODO.md T-315): it carried
+    # the account PRIMARY KEY for two empty change-feed handlers. The six
+    # change-feed functions that replaced Site-Main's Firestore triggers (T-324,
+    # functions/src/functions/change-feed.js) use the IDENTITY-BASED binding —
+    # the app's managed identity already holds Cosmos Data Contributor at account
+    # scope (func_cosmos), which covers the `leases` container too.
     # See https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
+    "COSMOS_CONNECTION__accountEndpoint" = azurerm_cosmosdb_account.hcw.endpoint
+    "COSMOS_CONNECTION__credential"      = "managedidentity"
 
     "STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.hcw.name
     "STORAGE_BLOB_ENDPOINT"  = azurerm_storage_account.hcw.primary_blob_endpoint
@@ -1261,11 +1256,9 @@ resource "azurerm_consumption_budget_subscription" "hcw" {
 # Change feed lease container — explicit so it has a controlled partition key
 # and is tracked in state (not auto-created by the SDK at runtime).
 #
-# Currently unused: the change-feed triggers were removed with their connection
-# string (TODO.md T-315), so nothing leases anything. Kept rather than destroyed
-# because removing a container is a destructive Terraform change that does not
-# belong in a code cleanup, and because it costs only storage on a serverless
-# account with no processor polling it.
+# The lease store for the six change-feed functions (T-324), each under its own
+# prefix (`<functionName>-`). `createLeaseContainerIfNotExists = false` in the
+# bindings: the container is Terraform's, never the SDK's.
 resource "azurerm_cosmosdb_sql_container" "leases" {
   name                = "leases"
   resource_group_name = azurerm_resource_group.app["db"].name

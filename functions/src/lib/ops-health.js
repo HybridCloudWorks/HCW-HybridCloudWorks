@@ -48,7 +48,13 @@ export function getWorkflowAlertStatus(alert = {}) {
 }
 
 /** Per-action update payload for a workflow_alert doc (source :5907). */
-export function buildWorkflowAlertUpdates({ action, nowIso, actor, normalizedResolutionNote, alertData }) {
+export function buildWorkflowAlertUpdates({
+  action,
+  nowIso,
+  actor,
+  normalizedResolutionNote,
+  alertData,
+}) {
   const updates = { updatedAt: nowIso, updatedBy: actor };
   if (action === 'acknowledge') {
     updates.acknowledgedAt = nowIso;
@@ -60,6 +66,9 @@ export function buildWorkflowAlertUpdates({ action, nowIso, actor, normalizedRes
     updates.resolvedBy = actor;
     updates.status = 'resolved';
     updates.resolutionNote = normalizedResolutionNote;
+    // Cleared on resolve so the alert's next activation announces again
+    // (lib/triggers/activation-notice.js).
+    updates.activationNotifiedAt = null;
     if (!alertData?.acknowledgedAt) {
       updates.acknowledgedAt = nowIso;
       updates.acknowledgedBy = actor;
@@ -70,6 +79,8 @@ export function buildWorkflowAlertUpdates({ action, nowIso, actor, normalizedRes
     updates.resolvedAt = null;
     updates.resolvedBy = null;
     updates.resolutionNote = null;
+    // Reopen must announce: cleared in the same write that sets active.
+    updates.activationNotifiedAt = null;
   }
   return updates;
 }
@@ -83,9 +94,18 @@ const IMAGES_PROBE_BOUND = 2000;
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
-export function createOpsHealthHandlers({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createOpsHealthHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+}) {
   const count = async (where, params = []) => {
-    const rows = await store.queryDocs('content', `SELECT VALUE COUNT(1) FROM c WHERE ${where}`, params);
+    const rows = await store.queryDocs(
+      'content',
+      `SELECT VALUE COUNT(1) FROM c WHERE ${where}`,
+      params
+    );
     return Number(rows[0]) || 0;
   };
 

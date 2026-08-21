@@ -7,11 +7,16 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createAdminCrudHandlers } from '../lib/admin-crud.js';
+import { createPublerClient } from '../lib/timers/publer-sync.js';
+import { unpublishFromPubler } from '../lib/triggers/handlers.js';
 
 const handlers = () =>
   createAdminCrudHandlers({
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
+    // T-324: the change feed never sees a delete, so the Publer un-publish
+    // that syncSocialPostToPubler's `!after` branch did happens on the route.
+    unpublishSocialPost: (doc) => unpublishFromPubler(createPublerClient(), doc),
   });
 
 httpRoute('cmsListCertifications', {
@@ -61,4 +66,11 @@ httpRoute('cmsDeleteSocialPost', {
   authLevel: 'anonymous',
   route: 'cms/social-posts/{id}',
   handler: (request, context) => handlers().deleteSocialPost(request, context),
+});
+
+httpRoute('cmsDeleteBlog', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'cms/blogs/{id}',
+  handler: (request, context) => handlers().deleteBlog(request, context),
 });

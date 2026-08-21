@@ -164,6 +164,7 @@ export function validateSaveEditorDraftBody(body) {
 export function createContentWorkflowHandlers({
   guard,
   store,
+  onContentDeleted = null,
   now = () => new Date(),
   uuid = randomUUID,
 }) {
@@ -412,6 +413,15 @@ export function createContentWorkflowHandlers({
         } catch (err) {
           // Firestore .delete() on a missing doc is a no-op; keep that.
           if (err?.code !== 404) throw err;
+        }
+        // The change feed never delivers a delete (T-324): move the dashboard
+        // counters here, best-effort.
+        if (onContentDeleted) {
+          await onContentDeleted(contentId).catch((err) =>
+            context.warn?.(
+              `deleteContentItem: counters not updated for ${contentId}: ${err?.message}`
+            )
+          );
         }
         return json(200, { success: true, contentId });
       } catch (error) {

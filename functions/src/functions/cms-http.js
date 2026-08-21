@@ -19,8 +19,16 @@
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { queryDocs, readDoc, upsertDoc, deleteDoc, patchDoc } from '../lib/cosmos-client.js';
+import {
+  queryDocs,
+  readDoc,
+  upsertDoc,
+  deleteDoc,
+  patchDoc,
+  replaceDocIfMatch,
+} from '../lib/cosmos-client.js';
 import { createCmsContentHandlers } from '../lib/cms-content.js';
+import { createDashboardStatsMaintainer } from '../lib/triggers/dashboard-stats.js';
 import { createContentCreateHandler } from '../lib/cms/content-create.js';
 import {
   createContentUpdateHandler,
@@ -31,6 +39,11 @@ const handlers = () =>
   createCmsContentHandlers({
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, deleteDoc },
+    // T-324: the change feed never sees a delete; move the dashboard counters here.
+    onContentDeleted: (contentId) =>
+      createDashboardStatsMaintainer({
+        store: { readDoc, upsertDoc, replaceDocIfMatch, deleteDoc, patchDoc },
+      }).applyTransition({ contentId, afterData: null }),
   });
 
 // critiqueDraft is not injected: the default null critique is the specified

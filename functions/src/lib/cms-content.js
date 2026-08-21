@@ -24,27 +24,73 @@
  * shows "Not provided" for data that exists.
  */
 export const ADMIN_CONTENT_SNAPSHOT_FIELDS = [
-  'Title', 'title', 'Summary', 'summary',
-  'sourceUrl', 'sourceUrls', 'sourceFeed', 'CD Url',
-  'type', 'contentType', 'publishTarget', 'targetLandingZone',
-  'Cloud Provider', 'cloudProvider',
-  'contentStatus', 'Live',
-  'fetchedAt', 'createdAt', 'Created At', 'updatedAt', 'reviewedAt',
-  'publishedAt', 'Published At', 'publishedDate', 'datePublished', 'pubDate',
-  'keyTopics', 'Tags', 'aiTags',
-  'forgeGrade', 'forgeMeta',
-  'slug', 'Slug', 'category', 'wordCount', 'readTime', 'source',
-  'altCoverImage', 'coverImage', 'Cover Image', 'heroImageUrl',
-  'contentImageUrl', 'secondaryImageUrls', 'aiImageUrls',
-  'slugPageUrl', 'publishedUrl', 'publicUrl', 'curatedSubpagePath',
+  'Title',
+  'title',
+  'Summary',
+  'summary',
+  'sourceUrl',
+  'sourceUrls',
+  'sourceFeed',
+  'CD Url',
+  'type',
+  'contentType',
+  'publishTarget',
+  'targetLandingZone',
+  'Cloud Provider',
+  'cloudProvider',
+  'contentStatus',
+  'Live',
+  'fetchedAt',
+  'createdAt',
+  'Created At',
+  'updatedAt',
+  'reviewedAt',
+  'publishedAt',
+  'Published At',
+  'publishedDate',
+  'datePublished',
+  'pubDate',
+  'keyTopics',
+  'Tags',
+  'aiTags',
+  'forgeGrade',
+  'forgeMeta',
+  'slug',
+  'Slug',
+  'category',
+  'wordCount',
+  'readTime',
+  'source',
+  'altCoverImage',
+  'coverImage',
+  'Cover Image',
+  'heroImageUrl',
+  'contentImageUrl',
+  'secondaryImageUrls',
+  'aiImageUrls',
+  'slugPageUrl',
+  'publishedUrl',
+  'publicUrl',
+  'curatedSubpagePath',
   'format',
   // Workflow-page fields (EditorList/LivePages/Calendar/Published read these
   // from list rows; they came for free when the pages fetched whole docs):
-  'Status', 'scheduledPublishDate', 'softDeletedAt', 'softDeleteExpiresAt',
-  'archivedAt', 'blogEditedAt', 'blogPublishedAt', 'blogUrl',
-  'publishedContentId', 'sourceContentId', 'provider',
-  'critiqueVerdict', 'critiqueGenericityScore', 'critiqueSpecificityScore',
-  'critiqueIssues', 'draftRevised',
+  'Status',
+  'scheduledPublishDate',
+  'softDeletedAt',
+  'softDeleteExpiresAt',
+  'archivedAt',
+  'blogEditedAt',
+  'blogPublishedAt',
+  'blogUrl',
+  'publishedContentId',
+  'sourceContentId',
+  'provider',
+  'critiqueVerdict',
+  'critiqueGenericityScore',
+  'critiqueSpecificityScore',
+  'critiqueIssues',
+  'draftRevised',
 ];
 
 export const LIST_DEFAULT_LIMIT = 25;
@@ -67,7 +113,7 @@ const json = (status, body) => ({
  * @param {{ requireRole: Function }} deps.guard role guard (default-guard.js in prod)
  * @param {{ queryDocs: Function, readDoc: Function, deleteDoc: Function }} deps.store
  */
-export function createCmsContentHandlers({ guard, store }) {
+export function createCmsContentHandlers({ guard, store, onContentDeleted = null }) {
   return {
     /**
      * GET /api/cms/content — source: listContentItems.
@@ -82,10 +128,15 @@ export function createCmsContentHandlers({ guard, store }) {
       try {
         const statusParam = String(request.query.get('status') || '').trim();
         const statuses = statusParam
-          ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
+          ? statusParam
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
           : [];
         const liveOnly = request.query.get('live') === 'true';
-        const type = String(request.query.get('type') || '').trim().toLowerCase();
+        const type = String(request.query.get('type') || '')
+          .trim()
+          .toLowerCase();
         // `?limit=abc` produced `TOP NaN` (a 500 carrying raw Cosmos error
         // text) and `?limit=0` produced `TOP 0` (a silently empty list). Same
         // clamp the four sibling handlers use (TODO.md T-310).
@@ -160,6 +211,13 @@ export function createCmsContentHandlers({ guard, store }) {
         const id = request.params.id;
         if (!id) return json(400, { error: 'id required' });
         await store.deleteDoc('content', id);
+        // The change feed never delivers a delete (T-324): the dashboard
+        // counters are moved here, best-effort.
+        if (onContentDeleted) {
+          await onContentDeleted(id).catch((err) =>
+            context.warn?.(`cmsDeleteContent: counters not updated for ${id}: ${err?.message}`)
+          );
+        }
         return json(200, { success: true });
       } catch (error) {
         context.error('cmsDeleteContent failed:', error);

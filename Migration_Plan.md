@@ -396,17 +396,17 @@ receive; each needs the logic moved into an explicit delete endpoint that the ad
 
 | Trigger | Watches | Before-image? | On delete today | Port as |
 | --- | --- | --- | --- | --- |
-| `downloadSpeakerEventImage` | `speakerevents` | no (value marker) | ignored (`!after?.exists` returns) | change feed |
-| `downloadCertBadgeImage` | `certifications` | no | ignored | change feed |
-| `downloadBlogCoverImage` | `blogs` | no | ignored | change feed |
-| `generateBlogCoverImage` | `blogs` | no | ignored | change feed |
-| `inspectAndPopulateContent` | `content` | no | ignored | change feed; the inspector itself is ported (`functions/src/lib/content/inspect.js`) and runs from the `batch-inspect` job (pull) until the change-feed form lands |
-| `generateAiCoverOnContentTrigger` | `content` | no (rising-edge claim) | ignored | change feed; keep its timeout under the 900 s claim window |
-| `notifyOnWorkflowAlertActivation` | `workflow_alerts` | no | ignored | change feed |
-| `syncToolExpertModeRuns` | `lab_jobs` | no | ignored | change feed |
-| `createSlugPageOnTrigger` | `blogs` | no | slug page should go | change feed **+ `DELETE /blogs/{id}` removes the slug page** |
-| `maintainDashboardStats` | `content` | **yes** (`beforeData` / `afterData`) | decrements counters | recompute-on-change from a query (idempotent) **+ `DELETE /content/{id}` triggers the recompute** |
-| `syncSocialPostToPubler` | `social_posts` | **yes** (`before?.publerPostIds`) | `!after` → un-publish on Publer | change feed for upserts; **the `!after` branch moves into `DELETE /social-posts/{id}`** |
+| `downloadSpeakerEventImage` | `speakerevents` | no (value marker) | ignored (`!after?.exists` returns) | **`mirrorSpeakerEventImages`** (2026-08-21) |
+| `downloadCertBadgeImage` | `certifications` | no | ignored | **`mirrorCertificationImages`** |
+| `downloadBlogCoverImage` | `blogs` | no | ignored | **`processBlogChanges`** |
+| `generateBlogCoverImage` | `blogs` | no | ignored | **`processBlogChanges`** (SVG, no sharp) |
+| `inspectAndPopulateContent` | `content` | no | ignored | **`processContentChanges`**; `batch-inspect` remains the backfill |
+| `generateAiCoverOnContentTrigger` | `content` | no (rising-edge claim) | ignored | **`processContentChanges`** (Replicate REST; no WebP variants / mascot) |
+| `notifyOnWorkflowAlertActivation` | `workflow_alerts` | no | ignored | **`notifyWorkflowAlerts`** |
+| `syncToolExpertModeRuns` | `lab_jobs` | no | ignored | demoted with Cloud Tools (nothing writes `artifactRef` here) |
+| `createSlugPageOnTrigger` | `blogs` | no | slug page should go | **`processBlogChanges` + `DELETE /api/cms/blogs/{id}`** (the slug page is fields on the document) |
+| `maintainDashboardStats` | `content` | **yes** (`beforeData` / `afterData`) | decrements counters | **`processContentChanges`** via `content_stats_markers` (idempotent) **+ `DELETE /api/cms/content/{id}` and `deleteContentItem` move the counters** |
+| `syncSocialPostToPubler` | `social_posts` | **yes** (`before?.publerPostIds`) | `!after` → un-publish on Publer | **`syncSocialPostsToPubler`** for upserts; **`DELETE /api/cms/social-posts/{id}` un-publishes first** |
 
 `lab_jobs` is a `transient` collection in the manifest — it is not migrated, but its container
 exists, and the change feed on it is how `syncToolExpertModeRuns` works, so the container stays.
