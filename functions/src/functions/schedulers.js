@@ -1,98 +1,176 @@
+/**
+ * schedulers.js — the timer triggers replacing Firebase Cloud Scheduler
+ * (Migration_Plan §4.2, TODO T-323).
+ *
+ * **Each timer has its own flag.** A timer runs when the master switch
+ * `FEATURE_FLAG_SCHEDULERS` is not explicitly "false" AND its own
+ * `FEATURE_FLAG_<NAME>` is "true". Timers fire on schedule regardless — the
+ * flags make them safe no-ops — and every flag is "false" in `infra/main.tf`
+ * until that timer has been observed firing at the intended local time
+ * (§6 step 7).
+ *
+ * The clock is `WEBSITE_TIME_ZONE = America/Chicago` (app-wide); the NCRONTAB
+ * expressions below are the §4.2 translations. Three timers from the
+ * upstream sixteen are not here: `syncSocialCalendarScheduled`,
+ * `fetchBlogListings` and `fetchPodcastFeeds` (external ingestion, the second
+ * T-323 PR) and `refreshToolServiceCacheScheduled` (demoted with Cloud
+ * Tools). Two delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages`
+ * — and both are dry-run until their own `*_DELETE=true` setting (T-302).
+ *
+ * Every handler builds its dependencies per invocation, not at module load:
+ * this file is imported by index.js on every cold start, including for
+ * anonymous GETs that never run a timer.
+ */
 import { app } from '@azure/functions';
 import * as store from '../lib/cosmos-client.js';
+import * as blobStorage from '../lib/blob-storage.js';
 import { createPublishHandlers } from '../lib/cms/publish.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { createScheduledPublisher } from '../lib/scheduled-publish.js';
-
-/**
- * schedulers.js
- *
- * Timer triggers replacing Firebase Cloud Scheduler / scheduled functions.
- *
- * **Each timer has its own flag.** They shared `FEATURE_FLAG_SCHEDULERS`, which
- * meant enabling any one of them enabled all four — including
- * `cleanupTempStorage`, which is an unimplemented TODO that deletes blobs.
- * Turning on the scheduled publisher would have armed a blob-deletion job at
- * the same time, and only `delete_retention_policy { days = 7 }` would have
- * made that recoverable (TODO.md T-302).
- *
- * `FEATURE_FLAG_SCHEDULERS` is still honoured as the master switch, so an
- * existing "false" keeps everything off, but "true" no longer enables anything
- * on its own: a timer runs when the master switch is not explicitly false AND
- * its own flag is "true". Timers fire on schedule regardless — the flags make
- * them safe no-ops.
- */
+import { createSnapshotPublishHandlers } from '../lib/snapshots-publish.js';
+import { createReviewerDigest } from '../lib/timers/reviewer-digest.js';
+import { createContentCleanup } from '../lib/timers/content-cleanup.js';
+import { createPublishingWatchdog } from '../lib/timers/publishing-watchdog.js';
+import { createLinkCheck } from '../lib/timers/link-check.js';
+import { createCertReverify } from '../lib/timers/cert-reverify.js';
+import { createCertImageCleanup } from '../lib/timers/cert-image-cleanup.js';
+import { createSkillsHubScrape } from '../lib/timers/skills-hub.js';
+import { createPlaudTokenRefresh } from '../lib/timers/plaud-token.js';
+import { createAgentHealthCheck } from '../lib/timers/agent-health.js';
+import { createTempStorageCleanup } from '../lib/timers/temp-storage.js';
+import { createForgeScheduled } from '../lib/timers/forge-scheduled.js';
 
 const masterDisabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'false';
 
-/**
- * @param {string} name - env var suffix, e.g. 'PUBLISH_SCHEDULED'
- */
+/** @param {string} name - env var suffix, e.g. 'PUBLISH_SCHEDULED_CONTENT' */
 const timerEnabled = (name) => !masterDisabled() && process.env[`FEATURE_FLAG_${name}`] === 'true';
 
-app.timer('syncRssFeeds', {
-  // Site-Main: `every 2 hours`. Same ingest as the fetch-rss-feeds job
-  // (rss-jobs.js); items[] per rss_cache document is capped at write time
-  // (T-319, MAX_CACHE_ITEMS_PER_FEED).
-  schedule: '0 0 */2 * * *',
-  handler: async (myTimer, context) => {
-    if (!timerEnabled('SYNC_RSS_FEEDS')) {
-      context.log('[syncRssFeeds] disabled — skipping');
-      return;
-    }
-    const { runRssIngest } = await import('./rss-jobs.js');
-    const results = await runRssIngest(context);
-    context.log(
-      `[syncRssFeeds] ${results.processed} feeds, ${results.newContent} new, ${results.errors.length} errors`
-    );
-  },
+/**
+ * Register a flag-gated timer. `run(context)` returns a small summary that is
+ * logged; a thrown error is logged and rethrown so the host records the
+ * failure.
+ */
+function timer(name, flag, schedule, run) {
+  app.timer(name, {
+    schedule,
+    handler: async (_timer, context) => {
+      if (!timerEnabled(flag)) {
+        context.log(`[${name}] disabled — skipping`);
+        return;
+      }
+      const result = await run(context);
+      if (result !== undefined) context.log(`[${name}] ${JSON.stringify(result)}`);
+    },
+  });
+}
+
+const storage = () => ({ listBlobs: blobStorage.listBlobs, deleteBlob: blobStorage.deleteBlob });
+
+// ── Ingestion and drafting ───────────────────────────────────────────────────
+
+timer('syncRssFeeds', 'SYNC_RSS_FEEDS', '0 0 */2 * * *', async (context) => {
+  // Site-Main: `every 2 hours`. Same ingest as the fetch-rss-feeds job.
+  const { runRssIngest } = await import('./rss-jobs.js');
+  const results = await runRssIngest(context);
+  return {
+    processed: results.processed,
+    newContent: results.newContent,
+    errors: results.errors.length,
+  };
 });
 
-app.timer('publishScheduledContent', {
-  schedule: '0 */15 * * * *', // every 15 minutes
-  handler: async (myTimer, context) => {
-    if (!timerEnabled('PUBLISH_SCHEDULED_CONTENT')) {
-      context.log('[publishScheduledContent] disabled — skipping');
-      return;
-    }
-    // Built per invocation rather than at module load: the publish factory
-    // reaches for a Cosmos client, and this file is imported by index.js on
-    // every cold start, including for anonymous GETs that never publish
-    // anything.
-    const publish = createPublishHandlers({ guard: getDefaultGuard(), store });
-    const publisher = createScheduledPublisher({ store, publish });
-    await publisher.runScheduledPublish(context);
-  },
+timer('forgeScheduled', 'FORGE_SCHEDULED', '0 30 3 * * *', async (context) => {
+  // Site-Main: `every 24 hours`. Off twice over: this flag and the Auto-Forge
+  // toggle in Forge Memory (admin_config/forge_prompts.autoForge).
+  const [{ createForgeConfigLoader }, { createDrafter }, { createGrader }, { createForge }, ai] =
+    await Promise.all([
+      import('../lib/content/forge-config.js'),
+      import('../lib/content/drafting.js'),
+      import('../lib/content/forge-grader.js'),
+      import('../lib/content/forge.js'),
+      import('../lib/ai/router.js'),
+    ]);
+  const config = createForgeConfigLoader({ store });
+  const forge = createForge({
+    store,
+    config,
+    drafter: createDrafter({ store, ai }),
+    grader: createGrader({ ai }),
+    log: context,
+  });
+  return createForgeScheduled({ store, config, forge, log: context }).run();
 });
 
-app.timer('cleanupTempStorage', {
-  schedule: '0 0 0 * * *', // daily at midnight UTC
-  handler: async (myTimer, context) => {
-    if (!timerEnabled('CLEANUP_TEMP_STORAGE')) {
-      context.log('[cleanupTempStorage] disabled — skipping');
-      return;
-    }
-    context.log('Running storage cleanup...');
-    // TODO: identify and delete orphaned blobs using blob-storage.js.
-    //
-    // NOT implemented, and the flag exists so that enabling the publisher does
-    // not enable this. Whoever writes it: make the first version dry-run, and
-    // read TODO.md T-302 first — the orphan query has to enumerate every blob
-    // and every referencing document, and anything it fails to enumerate it
-    // classifies as an orphan and deletes.
-  },
+// ── Publishing ───────────────────────────────────────────────────────────────
+
+timer('publishScheduledContent', 'PUBLISH_SCHEDULED_CONTENT', '0 */15 * * * *', async (context) => {
+  const publish = createPublishHandlers({ guard: getDefaultGuard(), store });
+  await createScheduledPublisher({ store, publish }).runScheduledPublish(context);
 });
 
-app.timer('checkAgentHealth', {
-  schedule: '0 */5 * * * *', // every 5 minutes
-  handler: async (myTimer, context) => {
-    if (!timerEnabled('CHECK_AGENT_HEALTH')) {
-      context.log('[checkAgentHealth] disabled — skipping');
-      return;
-    }
-    context.log('Running agent health check...');
-    // TODO: query lab_agents and mark stale ones offline. Note the field is
-    // `lastSeenAt`, written server-side by the agent heartbeat route — not
-    // `lastPing`, which never existed on the read side (TODO.md T-401).
-  },
+timer('monitorPublishingPipeline', 'MONITOR_PUBLISHING_PIPELINE', '0 0 */6 * * *', (context) =>
+  createPublishingWatchdog({ store, log: context }).run()
+);
+
+timer('generateReviewerDigest', 'GENERATE_REVIEWER_DIGEST', '0 0 7 * * *', (context) =>
+  createReviewerDigest({ store, log: context }).run()
+);
+
+timer('checkLiveLinks', 'CHECK_LIVE_LINKS', '0 0 6 * * 1', (context) =>
+  createLinkCheck({ store, log: context }).run()
+);
+
+// ── Retirement ───────────────────────────────────────────────────────────────
+
+timer('cleanupRejectedContent', 'CLEANUP_REJECTED_CONTENT', '0 0 4 * * *', (context) =>
+  createContentCleanup({ store, log: context }).softDeleteRejected({
+    olderThanHours: 24,
+    limit: 500,
+  })
+);
+
+timer('cleanupSoftDeletedContent', 'CLEANUP_SOFT_DELETED_CONTENT', '0 0 */4 * * *', (context) =>
+  // 7-day grace window from softDeletedAt; with the 24 h above, an accidental
+  // rejection is recoverable for ~8 days.
+  createContentCleanup({ store, log: context }).hardDeleteSoftDeleted({
+    olderThanHours: 24 * 7,
+    limit: 200,
+  })
+);
+
+timer('cleanupTempStorage', 'CLEANUP_TEMP_STORAGE', '0 0 0 * * *', (context) =>
+  // T-302: prefix + age, dry-run until TEMP_STORAGE_CLEANUP_DELETE=true.
+  createTempStorageCleanup({ storage: storage(), log: context }).run()
+);
+
+timer('cleanupUnusedCertImages', 'CLEANUP_UNUSED_CERT_IMAGES', '0 0 5 * * *', (context) =>
+  // Dry-run until CERT_IMAGE_CLEANUP_DELETE=true.
+  createCertImageCleanup({ store, storage: storage(), log: context }).run()
+);
+
+// ── Certifications ───────────────────────────────────────────────────────────
+
+timer('reVerifyCertifications', 'REVERIFY_CERTIFICATIONS', '0 0 0 * * 0', (context) => {
+  const snapshots = createSnapshotPublishHandlers({ guard: getDefaultGuard(), store });
+  return createCertReverify({
+    store,
+    publishSnapshots: snapshots.publishSnapshots,
+    log: context,
+  }).run();
 });
+
+timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 4 * * 5', async (context) => {
+  // Site-Main: `every friday 09:00` UTC; 04:00 CDT (03:00 CST) here.
+  const { createRssParser } = await import('../lib/rss/ingest.js');
+  return createSkillsHubScrape({ store, parser: await createRssParser(), log: context }).run();
+});
+
+// ── Platform ─────────────────────────────────────────────────────────────────
+
+timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
+  createPlaudTokenRefresh({ store, log: context }).run()
+);
+
+timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
+  createAgentHealthCheck({ store, log: context }).run()
+);

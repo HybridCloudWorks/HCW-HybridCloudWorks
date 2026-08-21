@@ -211,20 +211,32 @@ player and the admin page land together or not at all. Run it on the job
 scaffold (`generate-listen-and-learn`, area-by-area saves as upstream).
 
 ### T-323 — Port the 16 timers (NCRONTAB + `America/Chicago`)
-**Files:** `functions/src/functions/schedulers.js` · `functions/host.json` · `infra/main.tf` (flags)
+**Files:** `functions/src/functions/schedulers.js` · `functions/src/lib/timers/*` · `infra/main.tf` (flags)
 
-Four are registered here, one implemented (`publishScheduledContent`). The
-other fifteen are in the table in Migration_Plan §4.2 with their NCRONTAB
-expressions already translated — `every 24 hours` and friends picked an
-explicit hour; the one UTC schedule (`scrapeSkillsHubRss`) is re-expressed in
-Chicago time and will drift an hour across DST unless the handler pins it.
-`WEBSITE_TIME_ZONE = America/Chicago` is set on the app. Each timer stays
-behind its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_SCHEDULERS`
-master switch and is turned on one at a time at cutover, after being observed
-firing at the intended **local** time. `regenerate` / `reseed` collections
-(`homepage_feeds`, `tool_service_cache`, `rss_cache`, `azure_landing_content`,
-`tool_service_catalog`) are empty on Azure until their jobs run — port those
-jobs first.
+**Twelve of sixteen are in (2026-08-21, PR "timers: content ops").** Each is a
+factory in `lib/timers/` with injected store/fetch/storage, registered in
+`schedulers.js` through one `timer(name, FLAG, ncrontab, run)` helper, behind
+its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_SCHEDULERS` master
+switch (all `"false"` in `main.tf`): `publishScheduledContent`,
+`syncRssFeeds`, `forgeScheduled`, `monitorPublishingPipeline`,
+`generateReviewerDigest`, `checkLiveLinks`, `cleanupRejectedContent`,
+`cleanupSoftDeletedContent`, `cleanupTempStorage`, `cleanupUnusedCertImages`,
+`reVerifyCertifications`, `scrapeSkillsHubRss`, `refreshPlaudToken`,
+`checkAgentHealth`. `workflow_digests` / `workflow_alerts` / system audit
+entries are written through `lib/timers/workflow-records.js`. The one UTC
+schedule (`scrapeSkillsHubRss`) is expressed in Chicago time and drifts an
+hour across DST — a weekly scrape does not care. Alerts that upstream relayed
+to Telegram (`notifyOnWorkflowAlertActivation`) sit in `workflow_alerts` until
+T-324.
+
+**Remaining — the external-ingestion three, next PR:** `syncSocialCalendarScheduled`
+(Publer reconcile, `cms/social.js`; the live writer D12 pauses at cutover),
+`fetchBlogListings` (Firecrawl listing scrape → `content`, REST not SDK),
+`fetchPodcastFeeds` (PodBean → `podcasts`). `refreshToolServiceCacheScheduled`
+stays demoted with Cloud Tools (T-322 note). Cutover: turn each flag on one at
+a time after observing the fire time in App Insights (§6 step 7); the
+`regenerate` / `reseed` collections (`homepage_feeds`, `rss_cache`) fill on
+the first `syncRssFeeds` run.
 
 ### T-324 — Port the 11 Firestore triggers as change-feed functions, plus the three delete paths
 **Files:** `functions/src/functions/*` (`app.cosmosDB`) · the `leases` container
@@ -261,8 +273,18 @@ Each wires into a template both sides rewrote (`ArchitectureDetailTemplate`,
 from Site-Main**: it encapsulated Firebase behind `lib/data/` (364 call sites);
 we eliminated it (0 imports). The two are incompatible by construction.
 
-### T-302 — Blob GC is still unwritten (flag split done)
-**File:** `functions/src/functions/schedulers.js`
+### T-302 — Blob GC (flag split done; prefix-and-age cleanup in, dry-run)
+**File:** `functions/src/lib/timers/temp-storage.js` · `cert-image-cleanup.js`
+
+**Resolved 2026-08-21 by not writing the orphan sweep.** `cleanupTempStorage`
+deletes by PREFIX and AGE only (`TEMP_STORAGE_PREFIXES`, default
+`content:uploads/`; `TEMP_STORAGE_MAX_AGE_DAYS`, default 7) — nothing a
+document references lives under a temp prefix by construction, so there is no
+enumeration to get wrong. `cleanupUnusedCertImages` (the one real
+reference-based sweep, upstream's) compares by blob path against every
+certification document. Both are DRY-RUN until `TEMP_STORAGE_CLEANUP_DELETE`
+/ `CERT_IMAGE_CLEANUP_DELETE` are `"true"` in TFC; run them dry for a week and
+read the counts before flipping either. The history below stands.
 
 **The flag half is resolved.** Each timer has its own `FEATURE_FLAG_<NAME>` and
 `FEATURE_FLAG_SCHEDULERS` is a master kill switch, so enabling the publisher no
