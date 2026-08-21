@@ -133,6 +133,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Platform jobs — the pattern for every handler over Flex Consumption's
+  230 s HTTP cap** (T-322 scaffold). `functions/src/lib/jobs.js`: a job-type
+  registry, `POST /api/enqueueJob` (editor; type allowlist, per-type payload
+  cap; 202 + jobId; message to Storage Queue `platform-jobs` through an output
+  binding on the identity-based host connection), `GET|POST /api/getJob`
+  (viewer), and a queue-triggered worker that claims with an etag-conditioned
+  replace — at-least-once delivery never runs a job twice — and records
+  `succeeded` / `failed` / `timeout` without rethrowing into the queue. New
+  `jobs` container (30-day TTL, indexed like `lab_jobs`). Client:
+  `frontend/src/lib/jobs.js` `runJob()` enqueues and polls with the Labs
+  backoff. Built-in type `noop`. 14 new functions tests, 5 frontend tests; the
+  route inventory now asserts the worker is the only queue trigger.
 - **`infra/scratch.tf` — the migration rehearsal estate.** `cosmos-site-sbx-cus`
   (serverless, keys **off**, the same firewall shape, the same `hcw` database
   and the same 72 containers from the same generated spec) and

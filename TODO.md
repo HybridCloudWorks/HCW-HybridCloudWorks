@@ -109,13 +109,42 @@ five of them the client's own abort already disagrees with the server:
 | `generateWeeklyDigest` | 300 s | **20 s** (no entry) | async; the `dryRun` preview needs a fast path |
 | `batchInspect` | 300 s | 45 s, retried | async — hardcoded `sleep(4000)` × N |
 
-Reuse the existing job pattern — a `lab_jobs` document plus a client poll at
-5–10 s (`runToolExpertModeValidation`, `enqueueLabJob` already do this). Fix
-the client/server timeout mismatch in the same change. There is no SSE or
-streaming anywhere, so the cap bites only these six. For the background
-handlers set `functionTimeout` ≥ 10 min in `host.json`;
-`generateAiCoverOnContentTrigger`'s 540 s must stay under the 900 s rising-edge
-claim window.
+**Scaffold landed 2026-08-21 (PR "Platform jobs").** `functions/src/lib/jobs.js`
+is the pattern every one of the six sits on: `POST /api/enqueueJob {type,
+payload}` → 202 + jobId → Storage Queue `platform-jobs` → `jobs-worker.js`
+runs the registered worker under its own timeout (non-HTTP budget, 30 min on
+Flex) → `GET|POST /api/getJob`. Client: `frontend/src/lib/jobs.js`
+`runJob(type, payload)` enqueues and polls with the Labs backoff. The claim is
+an etag-conditioned replace, so at-least-once delivery never runs a job
+twice; a job-level failure is recorded, never rethrown. Built-in type `noop`
+proves the path on a deployed app (`runJob('noop', { delayMs: 3000 })`).
+
+**None of the six is ported yet** — not one exists here in any form; the
+frontend already calls `fetchRssFeedsManual` and `batchInspect`
+(`OpsHealthPage.jsx`) and gets 404. Each port is now: port the worker
+function, `registerJobType('<kebab-name>', { worker, timeoutMs,
+maxPayloadBytes })`, switch the page to `runJob()`. Order by value and
+entanglement:
+
+1. `refresh-tool-service-cache` — no AI; `tool_service_cache` is **empty on
+   Azure** until it runs, so the Cloud Tools pages show nothing. Needs the
+   pricing worker (`ensureServiceCache`, `SERVICE_CATALOG`, AWS Price List +
+   Azure Retail Prices clients — ~700 lines of Site-Main `cloud-tools.js`;
+   `@aws-sdk/client-pricing` is already a dependency). Its scheduled twin is
+   T-323's first timer.
+2. `fetch-rss-feeds` — shares its worker with the `syncRssFeeds` timer stub;
+   fills `rss_cache` (also empty).
+3. `batch-inspect`, `forge-article`, `generate-weekly-digest`,
+   `generate-listen-and-learn` — all AI; blocked on the provider-routing
+   decision in Migration_Plan §4.4 (Vertex default → direct provider keyed
+   from Key Vault).
+
+Known gap to close with the first real worker: the document is written before
+the output binding sends the message, so a binding failure leaves a job
+`queued` forever — add a sweeper that re-enqueues stale `queued` jobs. The
+client/server timeout mismatch disappears with `runJob()`: there is no
+per-call timeout left to mismatch. `generateAiCoverOnContentTrigger`'s 540 s
+must still stay under the 900 s rising-edge claim window (T-324).
 
 ### T-323 — Port the 16 timers (NCRONTAB + `America/Chicago`)
 **Files:** `functions/src/functions/schedulers.js` · `functions/host.json` · `infra/main.tf` (flags)

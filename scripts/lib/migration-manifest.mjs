@@ -179,6 +179,7 @@ export const CONTAINER_TTL_SECONDS = Object.freeze({
   rss_cache: 604800,
   // Transient job records. Long enough to debug a failure after the weekend.
   lab_jobs: 2592000, // 30 days
+  jobs: 2592000,
 });
 
 /**
@@ -474,6 +475,7 @@ export const COLLECTIONS = [
   // --- Labs ----------------------------------------------------------------
   { name: 'lab_jobs', disposition: 'transient', note: '~11 in-flight job records. Worthless after cutover.' },
   { name: 'submission_quota', disposition: 'transient', note: 'Anonymous public-submission rate-limit counters, keyed by hashed client identity. Azure-only: no Firestore source, created by public-submissions.js.' },
+  { name: 'jobs', disposition: 'transient', note: 'Azure-only: in-platform asynchronous jobs (functions/src/lib/jobs.js, T-322) — the six handlers over the 230 s HTTP cap run here. No Firestore source.' },
   { name: 'lab_public_quota', disposition: 'transient', note: 'Per-uid rate-limit counters.' },
   { name: 'lab_agents', disposition: 'migrate', note: 'Agent registrations — coordinate with vps-agent before cutover.' },
 

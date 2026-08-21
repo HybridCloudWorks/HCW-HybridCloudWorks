@@ -279,7 +279,7 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Do not add containers here by hand — add the collection to the manifest and
 # regenerate, or Terraform, the migrator and the verifier drift apart again.
 #
-# Partition keys come from the manifest: 67 on /id and five exceptions — four
+# Partition keys come from the manifest: 68 on /id and five exceptions — four
 # flattened subcollections keyed by their parent (content_versions on
 # /contentId, image_prompts_sets on /pageId, image_prompt_sets_prompts on
 # /setName, listen_and_learn_episodes on /setId) and admin_config on a

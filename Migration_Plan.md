@@ -345,6 +345,11 @@ Reuse the job pattern that already exists on both sides: a `lab_jobs` document p
 the same change. There is no SSE or streaming anywhere, so the cap bites only these six. Tracked as
 TODO T-322.
 
+> **2026-08-21:** the job scaffold exists — `functions/src/lib/jobs.js` (enqueue → Storage Queue →
+> queue-triggered worker → `getJob`), `frontend/src/lib/jobs.js` `runJob()`, container `jobs`. Each
+> of the six is now "port the worker, `registerJobType()`, switch the page to `runJob()`"; the order
+> and blockers are in TODO T-322.
+
 ### 4.2 The 16 timers — NCRONTAB, and the clock
 
 Two things change, not one. Cloud Scheduler accepts five-field cron *and* natural language

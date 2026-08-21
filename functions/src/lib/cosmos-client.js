@@ -18,7 +18,7 @@ let database = null;
  * Containers whose partition key is NOT `/id`.
  *
  * `readDoc`, `patchDoc` and `deleteDoc` default the partition key to the
- * document id, which is correct for 67 of the 72 containers and silently wrong
+ * document id, which is correct for 68 of the 73 containers and silently wrong
  * for these five. Wrong in the worst way: a point read against the wrong
  * logical partition does not error, it returns nothing — and `readDoc` maps
  * that to `null`. The first person to write a `content_versions` reader would
