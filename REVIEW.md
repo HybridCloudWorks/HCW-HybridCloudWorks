@@ -33,7 +33,7 @@ the consolidation of CHECKLIST and Variables into this file.
 | Azure infrastructure | **Deployed** — 129 resources, `centralus`, plan clean |
 | Function App code | **80 functions deployed** (2026-08-20) — `/api/health` 200 through Cloudflare, 403 at the origin |
 | Terraform authentication | **Working** — `id-plat-terraform-prod-cus-01` |
-| HCP Terraform variables | **All 13 set**; three new migration switches default `false` and need nothing |
+| HCP Terraform variables | **All 13 set**, plus `cosmos_scratch_enabled` / `storage_scratch_enabled` = `true` (2026-08-20, runbook step 4); `migration_writer_enabled` stays unset = `false` |
 | GitHub repository variables | **8 of 8 platform variables set**; the 9 migration variables in §4.2 are not — they wait on the WIF binding and the scratch apply |
 | GitHub repository secrets | **1 of 4 set, and that one is moving to variables** — see §4.3 |
 | Key Vault | **19 of 21 secrets seeded** — two runtime-read secrets outstanding, §3.1 |
@@ -727,8 +727,8 @@ a public URL), none set yet:
 
 | Name | Status | Value source | Notes |
 | --- | --- | --- | --- |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | **MISSING** | GCP — `projects/<n>/locations/global/workloadIdentityPools/<pool>/providers/<provider>` | Runbook step 2. Pass to the script as `-GcpWorkloadIdentityProvider` |
-| `GCP_SERVICE_ACCOUNT` | **MISSING** | GCP — the read-only SA email | `-GcpServiceAccount`. **Not** Site-Main's deploy SA |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | **SET 2026-08-20** | `projects/556314942797/locations/global/workloadIdentityPools/github-actions/providers/github-actions-hcw` | A sibling of Site-Main's provider in the same pool, pinned to **this** repository id and `refs/heads/main` — Site-Main's trust was not widened. Dispatch from any other ref fails at the GCP step by design |
+| `GCP_SERVICE_ACCOUNT` | **SET 2026-08-20** | `hcw-migration-reader@hybridcloudworks-61e8d.iam.gserviceaccount.com` | Dedicated read-only SA: `roles/datastore.viewer` on the project, `roles/storage.objectViewer` on the one bucket, `workloadIdentityUser` for `attribute.repository/HybridCloudWorks/HCW-HybridCloudWorks`. **Not** Site-Main's deploy SA |
 | `COSMOS_ENDPOINT` | **moving from secrets** | output `cosmos_endpoint` | Production. Read-only use until `migration_writer_enabled` |
 | `STORAGE_ACCOUNT` · `STORAGE_RESOURCE_GROUP` | **MISSING** | outputs `storage_account`, `storage_resource_group` | The **content** account — not the Functions host account the two rows above name |
 | `COSMOS_SCRATCH_ENDPOINT` | **MISSING** | output `cosmos_scratch_endpoint` | Null until `cosmos_scratch_enabled`; the script leaves an absent output's variable unchanged |
@@ -775,7 +775,7 @@ live; the environment **is** the human-review gate.
 | Environment | Purpose | Protection expected | Status |
 | --- | --- | --- | --- |
 | `production-infra` | Review gate for production applies | Required reviewers; restrict to the deploy ref | **MISSING** |
-| `data-migration` | Gate for every `migrate-data` run — rehearsal and, later, production import | Required reviewers; holds the two Site-Main token secrets (§4.3) | **MISSING** |
+| `data-migration` | Gate for every `migrate-data` run — rehearsal and, later, production import | Required reviewers; holds the two Site-Main token secrets (§4.3) | **CREATED 2026-08-20** — required reviewer `saulpatinojr`, no branch policy (the GCP provider already pins `main`) |
 
 > `data-migration` is **load-bearing in two places**. `infra/oidc.tf` pins a
 > federated credential to the subject

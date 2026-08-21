@@ -139,4 +139,7 @@ the proof that the production lock holds.
 
 | Date | Step | Artifact / link | Result |
 | --- | --- | --- | --- |
-| 2026-08-20 | 1 | PR: tooling + scratch.tf + workflow | — |
+| 2026-08-20 | 1 | [PR #128](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/pull/128) — tooling, scratch.tf, workflow, docs | CI green |
+| 2026-08-20 | 2 | SA `hcw-migration-reader`; provider `github-actions/providers/github-actions-hcw` (repo id 1268997852, `main` only); repo variables `GCP_*` | done |
+| 2026-08-20 | 3 | Environment `data-migration`, reviewer `saulpatinojr`. Site-Main read token: **not yet** (needs the GitHub UI — App or PAT) | partial |
+| 2026-08-20 | 4 | TFC `cosmos_scratch_enabled` / `storage_scratch_enabled` = true; plan = **86 add, 1 change, 0 destroy** | apply pending |
