@@ -731,6 +731,7 @@ a public URL), none set yet:
 | `GCP_SERVICE_ACCOUNT` | **SET 2026-08-20** | `hcw-migration-reader@hybridcloudworks-61e8d.iam.gserviceaccount.com` | Dedicated read-only SA: `roles/datastore.viewer` on the project, `roles/storage.objectViewer` on the one bucket, `workloadIdentityUser` for `attribute.repository/HybridCloudWorks/HCW-HybridCloudWorks`. **Not** Site-Main's deploy SA |
 | `COSMOS_ENDPOINT` | **moving from secrets** | output `cosmos_endpoint` | Production. Read-only use until `migration_writer_enabled` |
 | `STORAGE_ACCOUNT` · `STORAGE_RESOURCE_GROUP` | **MISSING** | outputs `storage_account`, `storage_resource_group` | The **content** account — not the Functions host account the two rows above name |
+| `COSMOS_RESOURCE_GROUP` | **MISSING** | output `cosmos_resource_group` | For the healer's ARM write (T-508). Seeded by the next `set-github-variables.ps1` run |
 | `COSMOS_SCRATCH_ENDPOINT` | **MISSING** | output `cosmos_scratch_endpoint` | Null until `cosmos_scratch_enabled`; the script leaves an absent output's variable unchanged |
 | `STORAGE_SCRATCH_ACCOUNT` · `SCRATCH_RESOURCE_GROUP` | **MISSING** | outputs `storage_scratch_account`, `scratch_resource_group` | Same |
 | `SITE_MAIN_APP_ID` | **MISSING** | GitHub App settings | Only for `mode=inventory-gate`. Absent ⇒ the workflow falls back to `SITE_MAIN_READ_TOKEN` (§4.3) |

@@ -54,6 +54,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The healer can now actually heal.** `heal-computed-properties.yml` had never
+  succeeded on this estate: `cp_sortDate` was absent from both `content` and
+  `blogs` on 2026-08-21 with 1,142 documents in `content`. Setting
+  `computedProperties` is a control-plane operation, and the SDK's
+  `container.replace()` sends it to the data plane, which Cosmos refuses with
+  an AAD token regardless of roles. `--apply` now does an ARM PUT on the
+  container resource (polling the async operation and re-reading to confirm),
+  authorized by a new custom role — SQL container read + write on the one
+  account, nothing else; not "Cosmos DB Operator", which is
+  `databaseAccounts/*` minus keys. `buildArmBody()` strips the read-only keys
+  and is unit-tested. New output `cosmos_resource_group` → variable
+  `COSMOS_RESOURCE_GROUP` (T-508).
+- **`deploy-functions.yml`'s storage window now survives a same-region
+  runner** (T-509): the same default-action Allow/Deny bracket
+  `migrate-data.yml` gained in #134, with the Deny restored first and verified.
 - **`heal-computed-properties.yml` still read `secrets.COSMOS_ENDPOINT`** after
   the value moved to a repository variable and the secret was deleted
   (2026-08-20); its next run failed with "COSMOS_ENDPOINT is not set". Now

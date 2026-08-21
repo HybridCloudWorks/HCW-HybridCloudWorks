@@ -363,6 +363,10 @@ if ($outputs) {
     # The old secret of the same name is removed below so the workflows'
     # `vars.COSMOS_ENDPOINT` reference cannot silently shadow it.
     @{ output = 'cosmos_endpoint'; kind = 'variable'; name = 'COSMOS_ENDPOINT'; transform = { param($v) $v } }
+    # The Cosmos account's group, for the healer's ARM write (cp_sortDate is a
+    # control-plane attribute; infra/oidc.tf). Pairs with COSMOS_ENDPOINT the
+    # way STORAGE_RESOURCE_GROUP pairs with STORAGE_ACCOUNT.
+    @{ output = 'cosmos_resource_group'; kind = 'variable'; name = 'COSMOS_RESOURCE_GROUP'; transform = { param($v) $v } }
     # The CONTENT storage account and its group — what migrate-data.yml's
     # storage modes target when target=production (behind the Terraform gate).
     # Distinct from FUNCTIONS_STORAGE_ACCOUNT / RESOURCE_GROUP, which name the

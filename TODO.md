@@ -24,10 +24,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 11 |
+| Open items | 9 |
 | Critical | 0 |
 | High | 0 |
-| Medium | 8 |
+| Medium | 6 |
 | Low | 3 |
 
 **The next move is the data-migration rehearsal.** The function deploy this
@@ -192,44 +192,6 @@ Already conforming, no action: `environment`, `instance`, `domain`, `tags`,
 Sequence it as one PR that renames in code, with the workspace keys renamed in
 the same maintenance window, and a plan run immediately after to prove nothing
 became unset. **Not urgent** — the current names are verbose, not wrong.
-
-### T-509 — `deploy-functions.yml`'s storage firewall window is inert from a same-region runner
-**Files:** `.github/workflows/deploy-functions.yml`
-
-The per-run `network-rule add` on the Functions host storage account has the
-same flaw `migrate-data.yml` hit on 2026-08-21 (run 32444649912): Azure's
-storage firewall ignores IP rules for requests that originate in the storage
-account's own region, and GitHub-hosted runners are Azure VMs. Every deploy
-so far drew a runner outside `centralus`; the first one that does not will
-fail the package upload with a 403 that reads like an auth problem.
-
-`migrate-data.yml` now also sets `--default-action Allow` for the window and
-restores `Deny` in the `always()` step (data-plane access still needs an
-Entra token — `allowBlobPublicAccess` is false). Apply the same two lines to
-the deploy workflow, or move the deploy onto the in-VNet runner
-(`ci_runner_enabled`) and drop the window entirely. Not urgent until it
-bites; cheap to do before it does.
-
-### T-508 — `heal-computed-properties` needs an ARM role, not a data-plane one
-**Files:** `.github/workflows/heal-computed-properties.yml` · `scripts/heal-computed-properties.mjs` · `infra/oidc.tf`
-
-Run 32420399977 (2026-08-20) failed with `403 … cannot be authorized by AAD
-token in data plane` on `PUT /dbs/hcw/colls/content`. The healer calls
-`container.replace()` to set `computedProperties`, and that is a
-**control-plane** operation: the deploy identity's container-scoped Cosmos
-Built-in Data Contributor can never satisfy it, no matter the scope.
-
-Two fixes, pick one: grant the identity **Cosmos DB Operator** on the account
-(ARM role, `azurerm_role_assignment`, not `azurerm_cosmosdb_sql_role_assignment`)
-and keep the SDK call; or rewrite the step as
-`az cosmosdb sql container update --idx-policy/--computed-properties` after
-`azure/login`, which uses the ARM token the login already minted. The second
-keeps the identity's data-plane footprint at zero for a job that does not read
-data.
-
-Not urgent: `cp_sortDate` only matters once `content` and `blogs` hold
-documents, which is the production-import phase. The workflow should stay
-dispatch-only until then.
 
 ---
 

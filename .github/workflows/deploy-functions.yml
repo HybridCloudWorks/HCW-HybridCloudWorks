@@ -66,6 +66,14 @@ jobs:
       # Account Contributor grant scoped to exactly this account (infra/
       # oidc.tf github_deploy_funcsa_network). The rule add is eventually
       # consistent — the short wait lets it propagate before the upload.
+      #
+      # An IP rule alone is not enough (T-509): GitHub-hosted runners are Azure
+      # VMs, and the storage firewall ignores IP rules for requests from the
+      # account's own region. migrate-data.yml hit this on 2026-08-21 (run
+      # 32444649912). So the default action is opened to Allow for the minutes
+      # of the upload too — data-plane access still needs an Entra token with
+      # a blob role, allowBlobPublicAccess is false — and the always() step
+      # restores Deny first.
       - name: Open storage firewall window for this runner
         id: fw
         run: |
@@ -77,6 +85,10 @@ jobs:
             --account-name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
             --ip-address "${RUNNER_IP}" \
             --output none
+          az storage account update \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
+            --default-action Allow --output none
           sleep 30
 
       # A repository VARIABLE, seeded from the `function_app_name` Terraform
@@ -98,11 +110,20 @@ jobs:
       - name: Close storage firewall window
         if: ${{ always() && steps.fw.outputs.runner_ip != '' }}
         run: |
+          # Deny first — this is the part that matters if anything below fails.
+          az storage account update \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
+            --default-action Deny --output none
           az storage account network-rule remove \
             --resource-group "${{ vars.RESOURCE_GROUP }}" \
             --account-name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
             --ip-address "${{ steps.fw.outputs.runner_ip }}" \
             --output none
+          az storage account show --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
+            --query "networkRuleSet.defaultAction" -o tsv | grep -qx Deny \
+            || { echo "::error::default action is not Deny after the window closed"; exit 1; }
 
       # Probe the ORIGIN through a temporary firewall window, not Cloudflare.
       #

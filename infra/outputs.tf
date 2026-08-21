@@ -34,6 +34,15 @@ output "cosmos_database" {
   value       = azurerm_cosmosdb_sql_database.hcw.name
 }
 
+# The account's resource group — what heal-computed-properties.yml needs to
+# address the container through ARM (the cp_sortDate write is control-plane;
+# see oidc.tf). Same pairing guarantee as web_resource_group: read from the
+# account resource itself.
+output "cosmos_resource_group" {
+  description = "Resource group holding the Cosmos account — the COSMOS_RESOURCE_GROUP repository variable the healer addresses ARM with"
+  value       = azurerm_cosmosdb_account.hcw.resource_group_name
+}
+
 # cosmos_db_primary_key intentionally removed — use managed identity
 # cosmos_db_connection_string intentionally removed — use managed identity
 

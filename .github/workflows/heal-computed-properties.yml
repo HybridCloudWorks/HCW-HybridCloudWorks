@@ -77,4 +77,10 @@ jobs:
           # moved it and deleted the secret). This read `secrets.` until 2026-08-21 and
           # failed with "COSMOS_ENDPOINT is not set" on the first run after the move.
           COSMOS_ENDPOINT: ${{ vars.COSMOS_ENDPOINT }}
+          # The write is an ARM PUT (control plane), so the script needs to address
+          # the account as a resource: subscription + resource group + the account
+          # name it derives from the endpoint. Authorized by the custom role in
+          # infra/oidc.tf, not by the data-plane grants.
+          SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+          COSMOS_RESOURCE_GROUP: ${{ vars.COSMOS_RESOURCE_GROUP }}
         run: node apply-computed-sortdate.mjs --apply
