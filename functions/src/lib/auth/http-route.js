@@ -56,9 +56,32 @@ export function parseExtraOrigins(env = process.env) {
 
 let defaultCors = null;
 
+/**
+ * The CORS allowlist is built ONCE per worker process and then never
+ * mentioned again — which is how a wrong allowlist becomes an afternoon.
+ *
+ * On 2026-08-22 `CORS_ALLOWED_ORIGINS` was set correctly in ARM, verified
+ * byte-for-byte, and the app still refused the origin. Ruling that out took a
+ * restart, a stop/start, two deploys and about twenty probes, because from
+ * outside there is no difference between "the setting did not arrive", "the
+ * setting arrived and was parsed wrong", and "the code never read it". One log
+ * line at construction distinguishes all three.
+ *
+ * It is written once per process, at INFO, and names only origins — the same
+ * information any browser preflight already reveals. It discloses nothing that
+ * `Access-Control-Allow-Origin` does not, so it is safe in a way that logging
+ * app settings generally is not.
+ */
 function getDefaultCors() {
   if (!defaultCors) {
-    defaultCors = createCors({ extraOrigins: parseExtraOrigins() });
+    const raw = process.env.CORS_ALLOWED_ORIGINS;
+    const extraOrigins = parseExtraOrigins();
+    defaultCors = createCors({ extraOrigins });
+    console.log(
+      `[cors] allowlist built: ${extraOrigins.length} extra origin(s) ` +
+        `${JSON.stringify(extraOrigins)}; CORS_ALLOWED_ORIGINS is ` +
+        `${raw === undefined ? 'UNSET in this process' : `${JSON.stringify(raw)} (${raw.length} chars)`}`
+    );
   }
   return defaultCors;
 }
