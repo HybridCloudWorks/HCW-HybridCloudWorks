@@ -6,7 +6,13 @@
  * but a control applied at one call site out of fifty-eight (TODO.md T-102).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { httpRoute, withPreflight, mergeCorsHeaders, parseExtraOrigins } from './http-route.js';
+import {
+  httpRoute,
+  withPreflight,
+  mergeCorsHeaders,
+  parseExtraOrigins,
+  resetHttpRouteCors,
+} from './http-route.js';
 import { createCors } from './cors.js';
 
 const context = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
@@ -185,5 +191,104 @@ describe('httpRoute', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers['Access-Control-Allow-Origin']).toBe('https://preview.test');
+  });
+});
+
+/**
+ * The allowlist diagnostic (T-513).
+ *
+ * The previous version used `console.log` and produced nothing across two
+ * deploys, which cost hours and produced a wrong conclusion — that no worker
+ * telemetry reached Application Insights at all. In the Node v4 model only
+ * `context.log` is forwarded by the host, arriving under
+ * `Function.<name>.User`. These tests hold the line at the three properties
+ * that actually failed: it is called with the real context, exactly once per
+ * process, and the once-guard is resettable so a test cannot silently consume
+ * the single emission for every test after it.
+ */
+describe('[cors] allowlist diagnostic', () => {
+  /** The default evaluator is only used when no `cors` seam is injected. */
+  const registerReal = () => {
+    resetHttpRouteCors();
+    const { routes, register } = recorder();
+    httpRoute('r', { methods: ['GET'], route: 'x', handler: async () => ({ status: 200 }) }, { register });
+    return routes.get('r');
+  };
+
+  it('reaches context.log — not console.log, which the host does not forward', async () => {
+    const route = registerReal();
+    const log = vi.fn();
+    await route.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log });
+
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toContain('[cors] allowlist built');
+  });
+
+  it('is emitted once per process, not once per request', async () => {
+    const route = registerReal();
+    const log = vi.fn();
+    const req = () => route.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log });
+    await req();
+    await req();
+    await req();
+
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+
+  it('resetHttpRouteCors clears the once-guard, or every later test inherits a used one', async () => {
+    const first = registerReal();
+    const logA = vi.fn();
+    await first.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: logA });
+    expect(logA).toHaveBeenCalledTimes(1);
+
+    const second = registerReal(); // calls resetHttpRouteCors
+    const logB = vi.fn();
+    await second.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: logB });
+    expect(logB).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports UNSET distinctly from an empty string — the two the query must tell apart', async () => {
+    const previous = process.env.CORS_ALLOWED_ORIGINS;
+
+    delete process.env.CORS_ALLOWED_ORIGINS;
+    const unsetRoute = registerReal();
+    const unsetLog = vi.fn();
+    await unsetRoute.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: unsetLog });
+    expect(unsetLog.mock.calls[0][0]).toContain('UNSET in this process');
+
+    process.env.CORS_ALLOWED_ORIGINS = '';
+    const emptyRoute = registerReal();
+    const emptyLog = vi.fn();
+    await emptyRoute.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: emptyLog });
+    expect(emptyLog.mock.calls[0][0]).toContain('(0 chars)');
+    expect(emptyLog.mock.calls[0][0]).not.toContain('UNSET');
+
+    process.env.CORS_ALLOWED_ORIGINS = 'https://a.example,https://b.example';
+    const setRoute = registerReal();
+    const setLog = vi.fn();
+    await setRoute.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: setLog });
+    expect(setLog.mock.calls[0][0]).toContain('2 extra origin(s)');
+    expect(setLog.mock.calls[0][0]).toContain('https://a.example');
+
+    if (previous === undefined) delete process.env.CORS_ALLOWED_ORIGINS;
+    else process.env.CORS_ALLOWED_ORIGINS = previous;
+    resetHttpRouteCors();
+  });
+
+  it('does not fire when a cors seam is injected — a test double has nothing to report', async () => {
+    resetHttpRouteCors();
+    const { routes, register } = recorder();
+    httpRoute('r', { methods: ['GET'], route: 'x', handler: async () => ({ status: 200 }) }, { cors: cors(), register });
+    const log = vi.fn();
+    await routes.get('r').handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log });
+
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('survives a context without a log function rather than throwing mid-request', async () => {
+    const route = registerReal();
+    await expect(
+      route.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), {})
+    ).resolves.toBeDefined();
   });
 });
