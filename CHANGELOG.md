@@ -54,6 +54,57 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Eight CMS functions never started — seven route templates were each
+  declared two or three times (T-510).** The Azure Functions host keys its
+  route table on the route template *alone*, not template + method, so two
+  functions declaring the same `route` with different `methods` conflict: the
+  host starts one and refuses the other with *"is in error: The route specified
+  conflicts with the route defined by function X"*. The losing verb answers
+  404. `GET`/`PATCH`/`PUT` were lost across `cms/certifications`,
+  `cms/certifications/{id}`, `cms/recordings`, `cms/social-posts`,
+  `cms/settings`, `cms/config/{collection}/{id}` and
+  `cms/keyword-config/{collection}/{id}` — list, edit and save for most of the
+  admin UI, all of which the frontend calls. Confirmed live before the fix:
+  `POST /api/cms/certifications` 401, `GET /api/cms/certifications` 404.
+
+  Present since the 84-function deploy (App Insights, 21:39:15Z 2026-08-21) and
+  invisible because the admin surface is not deployed yet, so nothing had ever
+  called them. Each pair is now one registration via the new
+  `httpRouteByMethod`, which declares every method on one template and fans out
+  on `request.method`; each verb keeps the guard it already had. 79 HTTP
+  registrations become 71 and the deploy total 104 → **96, all serving**.
+
+  `route-inventory.test.js` could not have caught it: its mock is
+  `http: (name, options) => httpRegistrations.set(name, options)`, a Map keyed
+  by function *name*, so both halves of a conflict register and pass properties
+  1–3 — every one of them was individually correct. New **property 4** asserts
+  no two registrations share a route template (parameter names collapsed, case
+  folded, matching how a router compares them) and that every method a merged
+  registration declares has a handler behind it. Verified by injecting a
+  conflict and watching it fail.
+
+- **The keyless `AzureWebJobsStorage` is written by Terraform, not by the
+  deploy** — the attribution in `infra/main.tf` and `deploy-functions.yml` was
+  wrong, and the Azure activity log is the only place the two are
+  distinguishable: the 20:02Z deploy *deleted* the setting, Terraform's 20:31Z
+  apply was the only `sites/config` write after it, and the setting was back.
+  `azurerm_function_app_flex_consumption` re-injects it on every apply whatever
+  `storage_authentication_type` says, without surfacing it in plan
+  ([azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
+  open on the pinned 5.1.0). Nothing in this repository can stop the write, so
+  the apply path now has the same removal the deploy path had: new
+  `repair-host-storage.yml`, `mode=repair` to delete and re-sync or
+  `mode=check` to fail read-only if it is present.
+
+  It runs on a **30-minute schedule**, not as a post-apply step, because
+  applies are owner-run from a CLI workspace with no CI hook and a step someone
+  has to remember is not a fix for a fault this silent. The tick is one read and
+  a clean exit when the setting is absent, and raises a `::warning::` when it
+  actually repairs something so the frequency stays visible. It shares the
+  `function-app-host` concurrency group with `deploy-functions.yml` so a tick
+  cannot re-sync a half-written host. Both comments corrected; T-511 tracks the
+  upstream fix.
+
 - **The public content list failed the moment `PUBLIC_LIST_SQL_ORDER` went
   live** — Cosmos: "The index path corresponding to the specified order-by
   item is excluded". Computed properties are not covered by the `/*`

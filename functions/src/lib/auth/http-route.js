@@ -127,3 +127,73 @@ export function httpRoute(name, options, { cors, register = app } = {}) {
     },
   });
 }
+
+/**
+ * Register ONE function that serves several methods on ONE route template.
+ *
+ * The Azure Functions host keys its route table on the **route template
+ * alone** — not on template + method. Two functions that declare the same
+ * `route` with different `methods` are a conflict: the host keeps one and
+ * refuses to start the other with *"is in error: The route specified conflicts
+ * with the route defined by function X"*. The losing verb then answers 404,
+ * which reads as a missing endpoint rather than a registration defect.
+ *
+ * That is not a hypothetical. It shipped: seven `cms/*` templates were each
+ * declared two or three times, eight functions never started, and the admin UI
+ * lost list, patch and put across certifications, recordings, social posts,
+ * settings, config and keyword-config (TODO.md T-510). Nothing caught it,
+ * because every one of those registrations was individually correct.
+ *
+ * So: one template, one registration, and the method fan-out happens here.
+ *
+ *   httpRouteByMethod('cmsCertifications', {
+ *     authLevel: 'anonymous',
+ *     route: 'cms/certifications',
+ *     handlers: {
+ *       GET: (request, context) => handlers().listCertifications(request, context),
+ *       POST: (request, context) => handlers().createCertification(request, context),
+ *     },
+ *   });
+ *
+ * Each verb keeps its own guard, exactly as it did when it was its own
+ * function — this changes registration, not authorization. `OPTIONS` never
+ * reaches the dispatcher: `httpRoute` adds it to the method list and the CORS
+ * evaluator answers the preflight first.
+ *
+ * @param {string} name - Function name
+ * @param {object} options - `httpRoute` options, but `handlers` replaces `handler`/`methods`
+ * @param {Record<string, Function>} options.handlers - method (upper-case) → handler
+ * @param {object} [deps] - test seam, forwarded to `httpRoute`
+ */
+export function httpRouteByMethod(name, { handlers, ...options }, deps) {
+  const table = new Map(
+    Object.entries(handlers || {}).map(([method, fn]) => [method.toUpperCase(), fn])
+  );
+  if (table.size === 0) throw new Error(`httpRouteByMethod('${name}') needs at least one handler`);
+
+  const methods = [...table.keys()];
+
+  return httpRoute(
+    name,
+    {
+      ...options,
+      methods,
+      handler: (request, context) => {
+        const fn = table.get(String(request.method || '').toUpperCase());
+        // Unreachable through the host, which only routes the methods declared
+        // above — but a direct call in a test, or a future edit that adds a
+        // method to `methods` without adding a handler, lands here rather than
+        // on `undefined is not a function`.
+        if (!fn) {
+          return {
+            status: 405,
+            headers: { 'Content-Type': 'application/json', Allow: methods.join(', ') },
+            body: JSON.stringify({ error: 'Method not allowed' }),
+          };
+        }
+        return fn(request, context);
+      },
+    },
+    deps
+  );
+}

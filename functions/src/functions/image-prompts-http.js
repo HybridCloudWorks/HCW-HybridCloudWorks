@@ -4,7 +4,7 @@
  * endpoints replacing useImagePrompts.js's direct Firestore access.
  * Registration only; semantics in lib/cms/image-prompts.js.
  */
-import { httpRoute } from '../lib/auth/http-route.js';
+import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createImagePromptHandlers } from '../lib/cms/image-prompts.js';
@@ -36,16 +36,11 @@ httpRoute('cmsGetKeywordConfig', {
   handler: (request, context) => handlers().getKeywordConfig(request, context),
 });
 
-httpRoute('cmsPutKeywordDoc', {
-  methods: ['PUT'],
+httpRouteByMethod('cmsKeywordDoc', {
   authLevel: 'anonymous',
   route: 'cms/keyword-config/{collection}/{id}',
-  handler: (request, context) => handlers().putKeywordDoc(request, context),
-});
-
-httpRoute('cmsDeleteKeywordDoc', {
-  methods: ['DELETE'],
-  authLevel: 'anonymous',
-  route: 'cms/keyword-config/{collection}/{id}',
-  handler: (request, context) => handlers().deleteKeywordDoc(request, context),
+  handlers: {
+    PUT: (request, context) => handlers().putKeywordDoc(request, context),
+    DELETE: (request, context) => handlers().deleteKeywordDoc(request, context),
+  },
 });

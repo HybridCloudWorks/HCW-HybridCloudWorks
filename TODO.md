@@ -24,11 +24,11 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 6 |
+| Open items | 7 |
 | Critical | 0 |
 | High | 0 |
 | Medium | 4 |
-| Low | 2 |
+| Low | 3 |
 
 ## Where we left off — 2026-08-21
 
@@ -40,17 +40,52 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
 
 **Pick up here, in order:**
 
-1. **Every port before cutover is merged** (2026-08-21, PRs #146–#149: 15 of
-   16 timers, the 6 change-feed functions + 3 delete paths, the visitor delta).
-   One `terraform -chdir=infra apply` is pending — **0 added, 1 changed** (the
-   function app: 13 timer flags / `*_DELETE` settings and the two
-   `COSMOS_CONNECTION__*` settings) — then a `deploy-functions` dispatch:
-   expect **93 functions** (84 + 3 timers + 6 change-feed) and six lease
-   documents in `leases`. The frontend deploy picks up T-409.
-2. **Confirm newest-first on the public list** — `PUBLIC_LIST_SQL_ORDER = "1"`
-   is applied; read `https://api-azure.hybridcloudworks.com/api/public/content?limit=8`
-   (baseline before the flag had 2026-06-08 at the top).
-3. **The cutover sequence** (Migration_Plan §6) — owner-gated: Entra SPA
+1. **Apply and deploy are done** (2026-08-21). The `terraform apply` landed
+   **0 added, 1 changed** — only the two `COSMOS_CONNECTION__*` settings were
+   actually outstanding; the 13 timer flags and both `*_DELETE` settings had
+   been applied in an earlier run. `deploy-functions` run 32533019315 then
+   registered **104 functions**: 79 HTTP · 18 timer · 6 change-feed · 1 queue
+   (84 before, plus 13 timers, the 6 change-feed functions and `cmsDeleteBlog`).
+   The **93** this file used to predict was wrong — it counted 3 new timers
+   instead of 13 and omitted the new delete route. `/api/health` 200 through
+   Cloudflare, 403 at the origin.
+
+   Two things that run reads left behind. The keyless `AzureWebJobsStorage`
+   was back and broke the timer listeners for ~3 minutes until the workflow's
+   delete-and-resync step ran (`syncfunctiontriggers` needed one retry) —
+   visible in App Insights as `Azure.RequestFailedException` ending at
+   22:30:34Z. The activity log then showed **Terraform**, not the deploy, is
+   what writes it: T-511, with `repair-host-storage.yml` as the apply-path fix.
+
+   And the host log showed eight CMS functions refusing to start on route
+   conflicts. **Fixed in this change** — seven `cms/*` templates were each
+   declared two or three times, and the Functions host keys its route table on
+   the template alone. They are now one registration per template via
+   `httpRouteByMethod`, so **the next deploy registers 96 functions, all of
+   them serving**, against 104 registered today of which 8 are dead. Fewer
+   functions, more working endpoints. `route-inventory.test.js` property 4
+   fails the build if a shared template ever comes back.
+
+2. **Newest-first is confirmed** — `PUBLIC_LIST_SQL_ORDER = "1"` is live on the
+   app and `/api/public/content?limit=8` returns strictly descending
+   `Published At`, 2026-06-08 first, `total: 24`. The top is unchanged from the
+   pre-flag baseline, which is the correct outcome and not a null result: 24
+   published documents inside a 1,000-row `FETCH_WINDOW` means the SQL `ORDER
+   BY` cannot change what the page shows. The cp_sortDate alias chain in
+   `scripts/apply-computed-sortdate.mjs` matches `resolvePublishedDateValue` in
+   `functions/src/lib/public-reads.js` alias for alias, so the SQL window and
+   the in-memory sort cannot disagree.
+
+3. **The frontend deploy has not happened, and is not a step on its own** — it
+   is Migration_Plan §6 step 1, gated three ways:
+   `deploy-azure-frontend.yml` is still `if: ${{ false }}`,
+   `AZURE_STATIC_WEB_APPS_API_TOKEN` is unset (the repository holds **no**
+   secrets at all), and `VITE_ENTRA_CLIENT_ID` / `VITE_ENTRA_TENANT_ID` /
+   `VITE_ENTRA_API_SCOPE` are unset. T-409 ships with it whenever it runs.
+   The SWA itself is up at `calm-ground-0d0e6a010.7.azurestaticapps.net`, which
+   is the §6 step 2 preview hostname.
+
+4. **The cutover sequence** (Migration_Plan §6) — owner-gated: Entra SPA
    registration + `Admin` app role, SWA token, DNS + `asuid`, Key Vault secrets
    (`ANTHROPIC-API-KEY` first; the inspector, forge, digest, AI cover and
    alerts all no-op cleanly without their keys), the Telegram webhook, then
@@ -210,6 +245,55 @@ inline; the visitor sees nothing change. And never: `lib/data/*` (37) and
 Each new frontend test file has to be added by hand or CI silently does not run
 it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
+
+### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
+**Files:** `infra/main.tf` · `.github/workflows/repair-host-storage.yml` · `.github/workflows/deploy-functions.yml`
+**Category:** Dependency maintenance · **Label:** Deferred (upstream)
+
+`azurerm_function_app_flex_consumption` writes an `AzureWebJobsStorage`
+connection string with an **empty AccountKey** on every apply, whatever
+`storage_authentication_type` says, and never shows it in plan —
+[hashicorp/terraform-provider-azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
+open, reproducing on the 5.1.0 in `.terraform.lock.hcl`. The host prefers it
+over the identity-based `AzureWebJobsStorage__accountName`, tries shared-key
+auth with no key, and fails every storage call on the signature.
+
+It does not fail as "storage". It fails as SyncTriggers not registering new
+functions (a build or routing problem, to look at) and as
+`The listener for function 'Functions.X' was unable to start` on every timer
+and queue trigger (nothing at all, to look at). Three incidents so far:
+2026-08-20 every route 404; 2026-08-21 83 deployed / 80 registered; 2026-08-21
+the 104-function deploy, timer listeners down for ~3 minutes.
+
+**Attribution was wrong until 2026-08-21** — `main.tf` and `deploy-functions.yml`
+both said the deploy wrote it. The Azure activity log settles it: the 20:02Z
+deploy *deleted* the setting, Terraform's 20:31Z apply was the only
+`sites/config` write after it, and the setting was back. Both comments are now
+corrected.
+
+**Nothing in this repository can prevent the write**, so both paths are covered
+by removal after the fact. `deploy-functions.yml` deletes and re-syncs after
+every deploy. The apply path has no CI hook — applies are owner-run from a CLI
+workspace — so `repair-host-storage.yml` runs **on a 30-minute schedule**
+rather than as a step someone has to remember: a fault this silent, fixed by a
+step this forgettable, is not fixed. The scheduled run is a single read and a
+clean exit when the setting is absent, and annotates with a `::warning::` when
+it actually repairs something, so the frequency stays visible instead of being
+silently absorbed. Dispatch it by hand after an apply for an immediate repair
+(~1 min, against ~4 min for a redeploy); `mode=check` is read-only and fails if
+the setting is present. Both workflows share the `function-app-host`
+concurrency group so a tick cannot land mid-deploy.
+
+**If the 30-minute worst case is ever too slow** (it is half an hour of dead
+timers after an apply), the zero-latency version is an HCP Terraform run
+notification on `completed` → `repository_dispatch` → this workflow. That needs
+a webhook configured in the workspace, which is owner-gated; the schedule needs
+nothing and cannot be forgotten.
+
+**Revisit** when #29149 closes: drop the two removal paths and the schedule,
+keep a `mode=check` run as the regression guard. The `::warning::` annotations
+are the evidence — when they stop appearing after an apply, the upstream fix
+has landed.
 
 ### D-001 — ESLint 10 upgrade blocked upstream
 **Category:** Dependency maintenance · **Label:** Deferred
