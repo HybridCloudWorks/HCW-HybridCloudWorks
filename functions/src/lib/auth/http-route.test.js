@@ -74,7 +74,7 @@ describe('parseExtraOrigins', () => {
   });
 
   it('splits, trims, and drops blanks', () => {
-    expect(parseExtraOrigins({ CORS_ALLOWED_ORIGINS: 'https://a.test, ,https://b.test ' })).toEqual(
+    expect(parseExtraOrigins({ EXTRA_ALLOWED_ORIGINS: 'https://a.test, ,https://b.test ' })).toEqual(
       ['https://a.test', 'https://b.test']
     );
   });
@@ -174,7 +174,7 @@ describe('httpRoute', () => {
     expect(res.headers['Access-Control-Allow-Origin']).toBeUndefined();
   });
 
-  it('admits an origin added through CORS_ALLOWED_ORIGINS', async () => {
+  it('admits an origin added through EXTRA_ALLOWED_ORIGINS', async () => {
     const { routes, register } = recorder();
     const handler = vi.fn(async () => ({ status: 200 }));
     httpRoute(
@@ -250,30 +250,30 @@ describe('[cors] allowlist diagnostic', () => {
   });
 
   it('reports UNSET distinctly from an empty string — the two the query must tell apart', async () => {
-    const previous = process.env.CORS_ALLOWED_ORIGINS;
+    const previous = process.env.EXTRA_ALLOWED_ORIGINS;
 
-    delete process.env.CORS_ALLOWED_ORIGINS;
+    delete process.env.EXTRA_ALLOWED_ORIGINS;
     const unsetRoute = registerReal();
     const unsetLog = vi.fn();
     await unsetRoute.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: unsetLog });
     expect(unsetLog.mock.calls[0][0]).toContain('UNSET in this process');
 
-    process.env.CORS_ALLOWED_ORIGINS = '';
+    process.env.EXTRA_ALLOWED_ORIGINS = '';
     const emptyRoute = registerReal();
     const emptyLog = vi.fn();
     await emptyRoute.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: emptyLog });
     expect(emptyLog.mock.calls[0][0]).toContain('(0 chars)');
     expect(emptyLog.mock.calls[0][0]).not.toContain('UNSET');
 
-    process.env.CORS_ALLOWED_ORIGINS = 'https://a.example,https://b.example';
+    process.env.EXTRA_ALLOWED_ORIGINS = 'https://a.example,https://b.example';
     const setRoute = registerReal();
     const setLog = vi.fn();
     await setRoute.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log: setLog });
     expect(setLog.mock.calls[0][0]).toContain('2 extra origin(s)');
     expect(setLog.mock.calls[0][0]).toContain('https://a.example');
 
-    if (previous === undefined) delete process.env.CORS_ALLOWED_ORIGINS;
-    else process.env.CORS_ALLOWED_ORIGINS = previous;
+    if (previous === undefined) delete process.env.EXTRA_ALLOWED_ORIGINS;
+    else process.env.EXTRA_ALLOWED_ORIGINS = previous;
     resetHttpRouteCors();
   });
 
@@ -330,10 +330,10 @@ describe('readConfigStamp', () => {
     // against the value it produced — so they belong on the same row.
     const prevG = process.env.RUNTIME_CONFIG_GENERATION;
     const prevW = process.env.RUNTIME_CONFIG_WRITER;
-    const prevC = process.env.CORS_ALLOWED_ORIGINS;
+    const prevC = process.env.EXTRA_ALLOWED_ORIGINS;
     process.env.RUNTIME_CONFIG_GENERATION = 'gh-99-deadbee';
     process.env.RUNTIME_CONFIG_WRITER = 'azapi-strip';
-    process.env.CORS_ALLOWED_ORIGINS = 'https://x.example';
+    process.env.EXTRA_ALLOWED_ORIGINS = 'https://x.example';
 
     resetHttpRouteCors();
     const { routes, register } = recorder();
@@ -350,7 +350,7 @@ describe('readConfigStamp', () => {
     for (const [k, v] of [
       ['RUNTIME_CONFIG_GENERATION', prevG],
       ['RUNTIME_CONFIG_WRITER', prevW],
-      ['CORS_ALLOWED_ORIGINS', prevC],
+      ['EXTRA_ALLOWED_ORIGINS', prevC],
     ]) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -359,11 +359,11 @@ describe('readConfigStamp', () => {
   });
 
   it('reproduces the observed fault signature — writer arrived, this key did not', async () => {
-    // writer=azapi-strip with CORS_ALLOWED_ORIGINS=[] is the case that would
+    // writer=azapi-strip with EXTRA_ALLOWED_ORIGINS=[] is the case that would
     // rule out "the worker simply missed the final write", so the diagnostic
     // has to render it unambiguously rather than collapsing it into "empty".
-    const prev = process.env.CORS_ALLOWED_ORIGINS;
-    process.env.CORS_ALLOWED_ORIGINS = '[]';
+    const prev = process.env.EXTRA_ALLOWED_ORIGINS;
+    process.env.EXTRA_ALLOWED_ORIGINS = '[]';
     process.env.RUNTIME_CONFIG_WRITER = 'azapi-strip';
 
     resetHttpRouteCors();
@@ -377,8 +377,8 @@ describe('readConfigStamp', () => {
     expect(line).toContain('"[]" (2 chars)');
     expect(line).not.toContain('UNSET');
 
-    if (prev === undefined) delete process.env.CORS_ALLOWED_ORIGINS;
-    else process.env.CORS_ALLOWED_ORIGINS = prev;
+    if (prev === undefined) delete process.env.EXTRA_ALLOWED_ORIGINS;
+    else process.env.EXTRA_ALLOWED_ORIGINS = prev;
     delete process.env.RUNTIME_CONFIG_WRITER;
     resetHttpRouteCors();
   });

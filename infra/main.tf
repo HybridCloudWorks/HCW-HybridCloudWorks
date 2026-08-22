@@ -1062,7 +1062,11 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Static Web App's own *.azurestaticapps.net hostname before DNS moves, and
     # that origin is not in the compiled list — so without this every API call
     # from the parallel-running site fails CORS, which looks like a broken API.
-    "CORS_ALLOWED_ORIGINS" = join(",", var.cors_extra_origins)
+    # NOT "CORS_ALLOWED_ORIGINS" — that name collides with the read-only CORS
+    # environment variables App Service injects from siteConfig.cors, so the
+    # worker receives an empty array's serialisation (`[]`) no matter what is
+    # written here. Proven on 2026-08-22 by three independent writers, T-513.
+    "EXTRA_ALLOWED_ORIGINS" = join(",", var.cors_extra_origins)
 
     # T-513 sentinel — which writer's configuration generation is this worker
     # actually running? ARM answers "the last one written". Only the worker can

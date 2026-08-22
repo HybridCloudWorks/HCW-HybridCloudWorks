@@ -24,10 +24,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 9 |
+| Open items | 8 |
 | Critical | 0 |
 | High | 1 |
-| Medium | 5 |
+| Medium | 4 |
 | Low | 3 |
 
 ## Where we left off — 2026-08-21
@@ -245,68 +245,6 @@ inline; the visitor sees nothing change. And never: `lib/data/*` (37) and
 Each new frontend test file has to be added by hand or CI silently does not run
 it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
-
-### T-513 — the worker holds `[]` for `CORS_ALLOWED_ORIGINS` while ARM holds the real value
-**Files:** `functions/src/lib/auth/http-route.js` (`parseExtraOrigins`) · `infra/main.tf` (the azapi strip)
-
-**The diagnostic answered it, 2026-08-22T09:31Z.** Two fresh workers, different
-`HostInstanceId`, ProcessId 44 and 45, both reported:
-
-```
-[cors] allowlist built: 1 extra origin(s) ["[]"]; CORS_ALLOWED_ORIGINS is "[]" (2 chars)
-```
-
-So it is **not** `UNSET in this process` and **not** an empty string. The
-worker's `process.env.CORS_ALLOWED_ORIGINS` is the literal two-character string
-`[]`. `parseExtraOrigins` splits it on comma and yields one "origin" called
-`[]`, which cannot match anything — which is exactly the observed behaviour.
-
-**ARM has never held that value.** All 58 app settings were checked: not one is
-`[]`, `{}`, empty or null. `siteConfig.appSettings` is null, so there is no
-second copy on the site resource. The current ARM value is
-`https://calm-ground-…,https://probe.invalid`.
-
-**Nothing in the repository can produce `[]` either.** `infra/main.tf:1065` is
-`join(",", var.cors_extra_origins)` and has been since it was introduced in
-#154 — `join(",", [])` is `""`, never `"[]"`. The Terraform plan for the 05:55Z
-apply printed the correct value:
-`+ "CORS_ALLOWED_ORIGINS" = "https://calm-ground-…"`.
-
-**So a fresh worker's environment diverges from ARM for this one key**, while
-`TELEGRAM_BOT_TOKEN` in the same worker reads fine — proven independently,
-because `/api/telegram/webhook` answers 401 rather than 404 and that path
-requires the token to be readable from `process.env`.
-
-`[]` is the string form of an empty list, and the only empty list in this
-system is `var.cors_extra_origins`'s own `default = []`. Something is rendering
-that default rather than the workspace value, and delivering it to the worker
-in preference to what ARM holds.
-
-**Prime suspect: the azapi app-settings rewrite added for T-511.** It is the
-newest thing that rewrites the *entire* settings collection on every apply
-(`azapi_update_resource.function_app_settings_without_webjobs_storage`), it
-round-trips every value through azapi's dynamic decoding, and **both T-513 and
-T-514 first appeared after it started running.** That is circumstantial, not
-proof, and it should not be assumed.
-
-**Next step needs a decision, because every remaining test is a write.** The
-read-only surface is exhausted — ARM, the site resource, the workspace, the
-plan and the repository have all been checked. Options, cheapest first:
-
-1. Set `CORS_ALLOWED_ORIGINS` directly with `az` to a distinctive value, deploy,
-   and read the diagnostic. Separates "the worker ignores ARM" from "Terraform
-   or azapi writes something ARM does not show".
-2. Comment out the azapi pair for one apply and re-read. Tests the prime
-   suspect directly, at the cost of one apply where the keyless
-   `AzureWebJobsStorage` returns (T-511) — the deploy assertion will catch it.
-3. Add the presence-not-value sentinel (`RUNTIME_CONFIG_GENERATION`) so every
-   deployment stamps a generation the worker echoes back. This is the general
-   fix for the class and makes gate 2 of the cutover runbook real rather than
-   aspirational.
-
-**Not blocking anything.** The preview origin is compiled into `PREVIEW_ORIGINS`
-and behaves correctly: the SPA origin answers 200, `evil.example.com` and a
-lookalike `*.azurestaticapps.net` answer 403.
 
 ### T-514 — Telemetry died at the ingestion cap, and requests were never on
 **Files:** `functions/host.json` · workspace `log-plat-prod-cus-01`
