@@ -222,6 +222,18 @@ export function createOpsHealthHandlers({
   }
 
   return {
+    /**
+     * The snapshot itself, unguarded.
+     *
+     * `getOpsHealthSnapshot` is the HTTP face of this and checks a role first.
+     * The Telegram bot (lib/telegram/bot.js) is not a user and carries no
+     * token — it is authorized by the webhook secret and the chat id before it
+     * ever gets here — so it needs the data without the role check. Exposing
+     * the builder is the honest way to say that; the alternative is a fake
+     * request object carrying a fake identity through requireRole.
+     */
+    buildSnapshot,
+
     /** POST /api/getOpsHealthSnapshot */
     async getOpsHealthSnapshot(request, context) {
       const auth = await guard.requireRole(request, 'viewer');

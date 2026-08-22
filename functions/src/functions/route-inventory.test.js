@@ -100,6 +100,12 @@ vi.mock('../lib/auth/default-agent-guard.js', () => ({
  * does not implement it.
  */
 const PUBLIC_ROUTES = new Set([
+  // Telegram cannot send a bearer token, so `requireRole` has nothing to check.
+  // Guarded instead by the X-Telegram-Bot-Api-Secret-Token header — which
+  // Telegram echoes back from `setWebhook` — compared in constant time against
+  // sha256(TELEGRAM_BOT_TOKEN), plus a second check that the sending chat id
+  // matches TELEGRAM_CHAT_ID. See functions/telegram-http.js (T-512).
+  'telegram/webhook',
   'health', // liveness probe; returns no data
   'public/content', // published documents only — lib/public-reads.js
   'public/content/{slugOrId}',

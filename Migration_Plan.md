@@ -651,14 +651,15 @@ three have to be true before step 1.
 5. Move DNS at Cloudflare: the apex and `www` CNAMEs from the Firebase origin to the SWA hostname.
    **Keep TTL low for at least 48 hours beforehand.** The API host `api-azure.` does not move — it
    has been on Azure since Phase 2.
-6. Re-point external webhooks. **Telegram is not a re-point — corrected 2026-08-22.** This step
-   used to say to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`. There is nothing to
-   re-point to: no Telegram webhook receiver was ported. `functions/src/lib/notify.js` only *sends*
-   messages, and no HTTP route accepts a Telegram update (checked against the deployed route table,
-   not just the source). The inbound bot is absent and is not recorded anywhere as a deliberate
-   demotion, so it is a decision — retire it with `deleteWebhook`, or port the receiver as a scoped
-   project. **T-512.** Outbound alerts are unaffected either way: `TELEGRAM-BOT-TOKEN` and
-   `TELEGRAM-CHAT-ID` are in Key Vault and `notify.js` reads them directly.
+6. Re-point external webhooks — **Telegram is the one that will be forgotten, and it is two
+   changes, not one.** The receiver was missing until 2026-08-22 (this step assumed one existed);
+   it is now `POST /api/telegram/webhook` (T-512, ported with the owner's decision to keep the
+   bot). Deploying it changes nothing on its own: the URL and secret token are registered with
+   **Telegram**, not in code, so `setWebhook` has to be re-run or the bot keeps POSTing at the
+   Cloud Functions URL until GCP is decommissioned — at which point it goes quiet with no error
+   anywhere in Azure. `scripts/cutover/04-telegram-webhook.ps1` does both halves and preflights
+   the receiver first, because a webhook pointed at a 404 makes Telegram back off. The secret
+   derives from `sha256(TELEGRAM_BOT_TOKEN)`, which is already in Key Vault.
 7. Turn the timers on: `FEATURE_FLAG_SCHEDULERS` then the per-timer flags, one at a time, each
    observed firing once (§7).
 8. Watch for 24–48 hours before touching GCP.
@@ -728,7 +729,7 @@ Add for the migration:
 | Six HTTP handlers exceed the 230 s Flex Consumption cap | Medium | §4 / T-322. Convert to jobs; fix the client/server timeout mismatch in the same change |
 | Change-feed semantics lose delete-driven behaviour | Medium   | §3.5 done upstream; §4 trigger table names the two delete endpoints to write |
 | Cron syntax differences silently disable a job, or time zone shifts it | Medium | §4 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7 scheduled-job proof at the right local time |
-| Telegram inbound bot was never ported              | Medium   | §6 step 6 / T-512 — decide: `deleteWebhook` and retire it, or port the receiver. Outbound alerts are unaffected |
+| Telegram/webhook re-registration forgotten         | Medium   | §6 step 6 — the receiver exists (T-512); `setWebhook` still has to be re-run. `scripts/cutover/04-telegram-webhook.ps1` |
 | `speakerevents/` storage rule is open in Firebase  | Medium   | Do not carry it forward: `speakerevents` is a private container here, served through the API like every other |
 | Labs runner contract drift                         | Medium   | Coordinate `vps-agent` with Phase 3 labs group                      |
 | Repo divergence during the overlap                 | Closed   | §0 — resolved by pinning the baseline and porting by hand; was "reconcile weekly" |
