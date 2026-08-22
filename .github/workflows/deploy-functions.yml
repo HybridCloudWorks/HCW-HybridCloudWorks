@@ -24,6 +24,13 @@ permissions:
   contents: read
   id-token: write
 
+# Shared with repair-host-storage.yml, whose scheduled tick also deletes app
+# settings and calls SyncTriggers. Queue rather than overlap; never cancel a
+# deploy that is mid-flight.
+concurrency:
+  group: function-app-host
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to Azure Functions

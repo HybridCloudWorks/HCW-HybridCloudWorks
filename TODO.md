@@ -271,15 +271,29 @@ deploy *deleted* the setting, Terraform's 20:31Z apply was the only
 `sites/config` write after it, and the setting was back. Both comments are now
 corrected.
 
-**Nothing in this repository can prevent the write.** Both paths are covered by
-removal after the fact instead: `deploy-functions.yml` deletes and re-syncs
-after every deploy, and `repair-host-storage.yml` (dispatch, `mode=repair`)
-does the same after an apply. **Run it after every `terraform apply` that
-touches the function app** — it is far cheaper than a redeploy. `mode=check` is
-read-only and fails if the setting is present.
+**Nothing in this repository can prevent the write**, so both paths are covered
+by removal after the fact. `deploy-functions.yml` deletes and re-syncs after
+every deploy. The apply path has no CI hook — applies are owner-run from a CLI
+workspace — so `repair-host-storage.yml` runs **on a 30-minute schedule**
+rather than as a step someone has to remember: a fault this silent, fixed by a
+step this forgettable, is not fixed. The scheduled run is a single read and a
+clean exit when the setting is absent, and annotates with a `::warning::` when
+it actually repairs something, so the frequency stays visible instead of being
+silently absorbed. Dispatch it by hand after an apply for an immediate repair
+(~1 min, against ~4 min for a redeploy); `mode=check` is read-only and fails if
+the setting is present. Both workflows share the `function-app-host`
+concurrency group so a tick cannot land mid-deploy.
 
-**Revisit** when #29149 closes: drop the two removal paths, keep a `mode=check`
-run as the regression guard.
+**If the 30-minute worst case is ever too slow** (it is half an hour of dead
+timers after an apply), the zero-latency version is an HCP Terraform run
+notification on `completed` → `repository_dispatch` → this workflow. That needs
+a webhook configured in the workspace, which is owner-gated; the schedule needs
+nothing and cannot be forgotten.
+
+**Revisit** when #29149 closes: drop the two removal paths and the schedule,
+keep a `mode=check` run as the regression guard. The `::warning::` annotations
+are the evidence — when they stop appearing after an apply, the upstream fix
+has landed.
 
 ### D-001 — ESLint 10 upgrade blocked upstream
 **Category:** Dependency maintenance · **Label:** Deferred

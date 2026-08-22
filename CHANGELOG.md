@@ -93,9 +93,17 @@ This project has not cut a tagged release; entries are grouped under
   ([azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
   open on the pinned 5.1.0). Nothing in this repository can stop the write, so
   the apply path now has the same removal the deploy path had: new
-  `repair-host-storage.yml`, dispatch-only, `mode=repair` to delete and re-sync
-  or `mode=check` to fail read-only if it is present. Both comments corrected;
-  T-511 tracks the upstream fix.
+  `repair-host-storage.yml`, `mode=repair` to delete and re-sync or
+  `mode=check` to fail read-only if it is present.
+
+  It runs on a **30-minute schedule**, not as a post-apply step, because
+  applies are owner-run from a CLI workspace with no CI hook and a step someone
+  has to remember is not a fix for a fault this silent. The tick is one read and
+  a clean exit when the setting is absent, and raises a `::warning::` when it
+  actually repairs something so the frequency stays visible. It shares the
+  `function-app-host` concurrency group with `deploy-functions.yml` so a tick
+  cannot re-sync a half-written host. Both comments corrected; T-511 tracks the
+  upstream fix.
 
 - **The public content list failed the moment `PUBLIC_LIST_SQL_ORDER` went
   live** — Cosmos: "The index path corresponding to the specified order-by

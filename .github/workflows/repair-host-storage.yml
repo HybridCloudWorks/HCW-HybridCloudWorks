@@ -26,13 +26,29 @@
 # that — the 20:02 deploy deleted the setting, Terraform's 20:31 apply was the
 # only config write after it, and the setting was back.
 #
-# So: run this after every `terraform apply` that touches the function app. It
-# is much cheaper than a redeploy and does the same repair.
+# THIS RUNS ON A SCHEDULE, deliberately, and that is the whole point.
 #
-#   mode=repair (default) — delete the setting if present, re-sync triggers,
-#                           report the registered function count.
+# The obvious design was "dispatch this after every apply". That is a step a
+# human has to remember, forever, for a failure that is silent and does not
+# look like storage — which is the same as no fix at all. Every 30 minutes the
+# job asks one question and, on the overwhelming majority of runs, answers it
+# and exits without writing anything: if the setting is absent it is a single
+# read and a clean exit. Worst case after an apply is half an hour of dead
+# timers instead of however long it takes someone to notice.
+#
+# Dispatch it by hand right after an apply if you want the repair immediately
+# rather than at the next tick. It is ~1 minute against a ~4 minute redeploy,
+# and it is idempotent — running it when there is nothing to fix is free.
+#
+#   mode=repair (default, and what the schedule uses) — delete the setting if
+#                           present, re-sync triggers, report the registered
+#                           function count. No-op when it is already absent.
 #   mode=check            — read-only; FAILS if the setting is present. Use it
 #                           as a monitor, or to confirm an apply was clean.
+#
+# GitHub disables scheduled workflows on a repository with no activity for 60
+# days. If this stops ticking, that is why, and `mode=check` is how you find
+# out what it missed.
 #
 # Read-only in `check` mode. In `repair` mode it writes exactly one app setting
 # deletion and issues a SyncTriggers call; it never touches code or data.
@@ -40,6 +56,10 @@
 name: Repair Function Host Storage
 
 on:
+  # Every 30 minutes. See the header: the apply path has no CI hook, so a
+  # scheduled no-op is the only version of this fix that cannot be forgotten.
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -54,6 +74,14 @@ on:
 permissions:
   contents: read
   id-token: write
+
+# Shared with deploy-functions.yml. Both delete app settings and call
+# SyncTriggers; a scheduled tick landing in the middle of a deploy would re-sync
+# a half-written host. Queue instead of overlapping, and never cancel — an
+# interrupted repair leaves the setting in place.
+concurrency:
+  group: function-app-host
+  cancel-in-progress: false
 
 jobs:
   repair:
@@ -125,3 +153,9 @@ jobs:
             echo "- Functions registered after sync: **${count}**"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           [ "$count" -gt 0 ] || { echo "::error::no functions registered after SyncTriggers"; exit 1; }
+
+          # A green run that silently repaired something is how a recurring
+          # fault becomes invisible. Annotate, so the frequency stays legible
+          # and so closing azurerm#29149 (T-511) has an observable trigger.
+          echo "::warning::Repaired a re-injected AzureWebJobsStorage. If this fires outside an apply window, azurerm#29149 has changed behaviour — see TODO.md T-511."
+
