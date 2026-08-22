@@ -54,6 +54,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The inbound Telegram bot is ported (T-512), not retired.** Migration_Plan §6
+  step 6 said to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`;
+  there was nothing to point a webhook at, because no receiver had been ported
+  — `notify.js` only *sends*, and no route accepted a Telegram update (checked
+  against the deployed route table, not just the source). Unlike Cloud Tools
+  (T-410) or Listen & Learn (T-411) it was never recorded as a deliberate
+  demotion, so nobody had decided it. The owner chose to keep the bot.
+
+  `POST /api/telegram/webhook` now serves the eleven commands and the free-form
+  Q&A from Site-Main's `telegram-bot.js` + `telegramWebhook`. Two things
+  changed in the port, both forced by the platform:
+
+  - **Long commands enqueue instead of running inline.** Upstream answered
+    Telegram with 200 immediately and kept working afterwards, which Cloud
+    Functions tolerates and Azure does not — an invocation ends at the
+    response, so `/forge` and `/inspect` would have been dropped silently
+    about as often as they ran. Those two and `/rss` now enqueue the platform
+    job that already exists for each (`forge-article`, `batch-inspect`,
+    `fetch-rss-feeds`, T-322) and reply with the job id.
+  - **The route is anonymous, and that is the only option.** Telegram cannot
+    send a bearer token, so `requireRole` has nothing to check. It is guarded
+    by two independent checks instead: the
+    `X-Telegram-Bot-Api-Secret-Token` header compared in **constant time**
+    against `sha256(TELEGRAM_BOT_TOKEN)` — the secret is derived, not stored,
+    so there is only one thing to rotate — and the sending chat id against
+    `TELEGRAM_CHAT_ID`. The first proves Telegram sent it; the second proves
+    the owner did, because anyone who finds a bot can message it. An
+    unauthorized chat gets **no reply at all**, so the bot cannot be used to
+    confirm it exists. `telegram/webhook` is in `PUBLIC_ROUTES` with that
+    reasoning recorded next to it.
+
+  It always answers 200 once the secret validates: Telegram retries non-2xx,
+  so a 500 on a bad command turns one broken message into a retry storm that
+  re-runs the command every few seconds. 32 tests, weighted on the two
+  authorization checks, since a mistake in either makes this an
+  unauthenticated remote control for the platform. `scripts/cutover/04-telegram-webhook.ps1`
+  re-registers the webhook and preflights the receiver first — a webhook aimed
+  at a 404 makes Telegram back off, so the bot stays broken after the real fix.
+
 - **Eight CMS functions never started — seven route templates were each
   declared two or three times (T-510).** The Azure Functions host keys its
   route table on the route template *alone*, not template + method, so two

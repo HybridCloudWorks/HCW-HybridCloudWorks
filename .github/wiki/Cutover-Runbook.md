@@ -149,23 +149,33 @@ has been on Azure since Phase 2.
 anything in GCP until Azure has run a full week including every scheduled job —
 the daily and weekly timers are exactly what a short soak misses.
 
-### 3d. Telegram — read this before doing anything
+### 3d. Telegram — re-run setWebhook
 
-Migration_Plan §6 step 6 says to rewrite `getTelegramWebhookUrl()` and re-run
-`setWebhook`. **That step cannot be executed as written.** There is no Telegram
-webhook receiver in this repository — `functions/src/lib/notify.js` only *sends*
-messages, and no HTTP route accepts a Telegram update. The inbound bot was never
-ported, and it is not recorded anywhere as a deliberate demotion.
+The receiver was missing until 2026-08-22; §6 step 6 assumed one existed. It is
+now `POST /api/telegram/webhook` (T-512), ported rather than retired.
 
-So this is a decision, not a task:
+**Deploying it changes nothing on its own.** The URL and its secret token are
+registered with **Telegram**, not in code, so the bot keeps POSTing at the Cloud
+Functions URL until `setWebhook` is re-run — and nothing breaks until GCP is
+decommissioned, at which point it goes quiet with no error anywhere in Azure.
 
-- **Retire the inbound bot** — call `deleteWebhook` so Telegram stops POSTing at
-  a Cloud Function that is about to be decommissioned. Outbound alerts keep
-  working; bot commands are gone.
-- **Port the receiver** — a scoped project, not a cutover step.
+**You run, after the functions deploy:**
 
-Either way, outbound notifications are unaffected: `TELEGRAM-BOT-TOKEN` and
-`TELEGRAM-CHAT-ID` are already in Key Vault and `notify.js` uses them directly.
+```powershell
+./scripts/cutover/04-telegram-webhook.ps1 -Mode Show   # what is registered now
+./scripts/cutover/04-telegram-webhook.ps1              # point it at Azure
+```
+
+It derives the secret the same way the running code does (`sha256` of the bot
+token — one secret, nothing to keep in sync), and preflights the receiver first:
+an unauthenticated POST must return **401**, which proves both that the route is
+deployed and that the secret gate is running. A webhook pointed at a 404 makes
+Telegram back off, so the bot stays broken for a while after you fix it.
+
+**Verified when:** `/help` in the chat comes back with the command list. If it
+does not, an unauthorized chat id is ignored *silently* by design — check
+`TELEGRAM_CHAT_ID`, then App Insights traces for `[telegram]`, then
+`-Mode Show` for Telegram's own `last_error_message`.
 
 ---
 
