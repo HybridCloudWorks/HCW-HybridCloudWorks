@@ -243,7 +243,7 @@ point is that the earlier ones can pass while the later ones fail.
 | 1 | **Deployment** | ARM holds the setting | `az functionapp config appsettings list ... --query "[?name=='FEATURE_FLAG_X']"` |
 | 2 | **Runtime** | the *active worker* sees it | the startup log line — presence, never the value |
 | 3 | **Behaviour** | the feature reads it | exercise whatever depends on the setting |
-| 4 | **Invocation** | the timer actually fired | `AppRequests` **and** the timer's own durable side effect |
+| 4 | **Invocation** | the timer actually fired | `Function.<name>` traces **and** the timer's own durable side effect |
 
 The evidence chain, in order, with nothing skipped:
 
@@ -315,9 +315,32 @@ Confirm the plane itself is alive, once, at the start of the session:
 # ingestion is not capped
 az monitor log-analytics workspace show -g rg-mgmt-plat-prod-cus -n log-plat-prod-cus-01   --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e   --query "workspaceCapping.dataIngestionStatus" -o tsv     # expect: RespectQuota
 
-# a fresh HTTP call appears in BOTH tables
-az monitor log-analytics query -w cf80dc24-2499-49a0-8c66-9522bcc294ed --analytics-query   "union AppRequests, AppTraces | where TimeGenerated > ago(10m) | summarize count() by Type"
+# WORKER logs are arriving, not just host ones
+az monitor log-analytics query -w cf80dc24-2499-49a0-8c66-9522bcc294ed --analytics-query   "AppTraces | where TimeGenerated > ago(15m) | extend cat=tostring(Properties.Category)    | where cat startswith 'Function' | summarize count() by cat"
 ```
+
+**Send traffic first, and keep sending it.** `always_ready = 0`, so the app
+scales to zero and a worker torn down between flush intervals takes its
+buffered telemetry with it. On 2026-08-22 a handful of probes produced nothing
+for twenty minutes, while three sustained minutes produced rows within four.
+**An empty result from a cold app is not evidence of anything.**
+
+**`AppRequests` is empty and is not the oracle.** Zero rows for this app's
+entire history. `Host.Results` was `Error` until 2026-08-22, which explains the
+history, but the table stayed empty after that was corrected and redeployed —
+unexplained, tracked in T-514. Use the `Function.<name>` traces, which are
+strictly better here because they carry the schedule:
+
+```
+Function.syncSocialCalendarScheduled       Executed 'Functions.…' (Succeeded, Id=…, Duration=…)
+Function.syncSocialCalendarScheduled       Trigger Details: ScheduleStatus: {"Last":"…03:40:00-05:00","Next":"…03:45:00-05:00"}
+Function.syncSocialCalendarScheduled.User  [syncSocialCalendarScheduled] disabled — skipping
+```
+
+`Last` and `Next` are already in **Chicago local time**, which is the
+comparison §7 actually asks for — `AppRequests` would not have given that. The
+`.User` row is the handler's own `context.log`, and it is how you tell "the
+timer fired and the flag gate skipped it" from "the timer never fired".
 
 **Query the workspace, never `az monitor app-insights query --app <appId>`.**
 The component is workspace-based with the workspace in another subscription, and
