@@ -10,6 +10,16 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 5.0"
     }
+    # azapi exists for exactly one thing: stripping the `AzureWebJobsStorage`
+    # connection string that azurerm re-injects on every apply (T-511,
+    # hashicorp/terraform-provider-azurerm#29149). See the read-then-strip pair
+    # at the end of the function app block in main.tf. It is a thin ARM
+    # passthrough — it writes the body it is given and nothing else, which is
+    # the property azurerm lacks here.
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
     # Cloudflare remains for DNS management
     cloudflare = {
       source  = "cloudflare/cloudflare"
@@ -96,6 +106,16 @@ provider "azurerm" {
 #
 # Add it, and its variable, in the same change that adds the first Identity
 # resource. That is a five-line addition, not a refactor.
+
+# Same dynamic credentials as azurerm above — azapi reads ARM_CLIENT_ID,
+# ARM_OIDC_TOKEN and ARM_USE_OIDC from the run environment with no HCL. The
+# subscription is pinned in HCL for the same reason it is on every azurerm
+# block: an explicit value cannot be got wrong by a missing environment
+# variable, and this provider only ever touches the function app, which is in
+# the application subscription.
+provider "azapi" {
+  subscription_id = var.subscription_app
+}
 
 provider "cloudflare" {
   api_token = var.cloudflare_api_token

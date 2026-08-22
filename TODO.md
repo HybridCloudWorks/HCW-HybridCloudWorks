@@ -55,7 +55,7 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    delete-and-resync step ran (`syncfunctiontriggers` needed one retry) —
    visible in App Insights as `Azure.RequestFailedException` ending at
    22:30:34Z. The activity log then showed **Terraform**, not the deploy, is
-   what writes it: T-511, with `repair-host-storage.yml` as the apply-path fix.
+   what writes it, and T-511 now strips it inside the apply itself.
 
    And the host log showed eight CMS functions refusing to start on route
    conflicts. **Fixed in this change** — seven `cms/*` templates were each
@@ -247,53 +247,54 @@ it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
 
 ### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
-**Files:** `infra/main.tf` · `.github/workflows/repair-host-storage.yml` · `.github/workflows/deploy-functions.yml`
-**Category:** Dependency maintenance · **Label:** Deferred (upstream)
+**Files:** `infra/main.tf` (azapi pair) · `infra/providers.tf` · `.github/workflows/deploy-functions.yml`
+**Category:** Dependency maintenance · **Label:** Deferred (upstream) — **worked around in-apply, not outstanding**
 
 `azurerm_function_app_flex_consumption` writes an `AzureWebJobsStorage`
 connection string with an **empty AccountKey** on every apply, whatever
 `storage_authentication_type` says, and never shows it in plan —
 [hashicorp/terraform-provider-azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
-open, reproducing on the 5.1.0 in `.terraform.lock.hcl`. The host prefers it
-over the identity-based `AzureWebJobsStorage__accountName`, tries shared-key
-auth with no key, and fails every storage call on the signature.
+open since March 2025, still open on the 5.1.0 in `.terraform.lock.hcl`. The
+host prefers it over the identity-based `AzureWebJobsStorage__accountName`,
+tries shared-key auth with no key, and fails every storage call on the
+signature.
 
 It does not fail as "storage". It fails as SyncTriggers not registering new
 functions (a build or routing problem, to look at) and as
 `The listener for function 'Functions.X' was unable to start` on every timer
-and queue trigger (nothing at all, to look at). Three incidents so far:
-2026-08-20 every route 404; 2026-08-21 83 deployed / 80 registered; 2026-08-21
-the 104-function deploy, timer listeners down for ~3 minutes.
+and queue trigger (nothing at all, to look at). Three incidents: 2026-08-20
+every route 404; 2026-08-21 83 deployed / 80 registered; 2026-08-21 the
+104-function deploy, timer listeners down for ~3 minutes.
 
-**Attribution was wrong until 2026-08-21** — `main.tf` and `deploy-functions.yml`
-both said the deploy wrote it. The Azure activity log settles it: the 20:02Z
-deploy *deleted* the setting, Terraform's 20:31Z apply was the only
-`sites/config` write after it, and the setting was back. Both comments are now
-corrected.
+**Attribution was wrong until 2026-08-21.** `main.tf` and `deploy-functions.yml`
+both blamed the deploy. The Azure activity log settles it: the 20:02Z deploy
+*deleted* the setting, Terraform's 20:31Z apply was the only `sites/config`
+write after it, and the setting was back.
 
-**Nothing in this repository can prevent the write**, so both paths are covered
-by removal after the fact. `deploy-functions.yml` deletes and re-syncs after
-every deploy. The apply path has no CI hook — applies are owner-run from a CLI
-workspace — so `repair-host-storage.yml` runs **on a 30-minute schedule**
-rather than as a step someone has to remember: a fault this silent, fixed by a
-step this forgettable, is not fixed. The scheduled run is a single read and a
-clean exit when the setting is absent, and annotates with a `::warning::` when
-it actually repairs something, so the frequency stays visible instead of being
-silently absorbed. Dispatch it by hand after an apply for an immediate repair
-(~1 min, against ~4 min for a redeploy); `mode=check` is read-only and fails if
-the setting is present. Both workflows share the `function-app-host`
-concurrency group so a tick cannot land mid-deploy.
+**Fixed in-apply, not patched afterwards.** `azapi_resource_action.function_app_settings`
+reads the settings azurerm has just written and
+`azapi_update_resource.function_app_settings_without_webjobs_storage` writes
+them back without that key, both triggered by the function app resource. The
+setting never survives the apply that creates it, so there is no post-apply
+step, no scheduled job and nothing to remember. `deploy-functions.yml`
+**asserts it is absent and fails the deploy if it is not** — a repair there
+would hide a regression in the strip, which is exactly how this stayed a
+recurring incident instead of becoming a bug: every occurrence was quietly
+cleaned up by the next deploy.
 
-**If the 30-minute worst case is ever too slow** (it is half an hour of dead
-timers after an apply), the zero-latency version is an HCP Terraform run
-notification on `completed` → `repository_dispatch` → this workflow. That needs
-a webhook configured in the workspace, which is owner-gated; the schedule needs
-nothing and cannot be forgotten.
+Two things deliberately **not** used:
 
-**Revisit** when #29149 closes: drop the two removal paths and the schedule,
-keep a `mode=check` run as the regression guard. The `::warning::` annotations
-are the evidence — when they stop appearing after an apply, the upstream fix
-has landed.
+- `"AzureWebJobsStorage" = ""` in `app_settings`, the workaround the issue is
+  best known for. It worked until early May 2026 and then stopped, confirmed by
+  three separate reporters. An empty value is also indistinguishable from a
+  misconfiguration to anyone reading the file later.
+- Managing the whole function app as `azapi_resource`. It avoids the provider
+  bug entirely but trades a well-understood resource for a hand-written ARM
+  body, which is a much larger surface to get wrong for one bad key.
+
+**Revisit** when #29149 closes: delete both azapi resources, the azapi provider
+from `providers.tf` and `.terraform.lock.hcl`, and this item — then keep the
+`deploy-functions.yml` assertion, which is the regression guard either way.
 
 ### D-001 — ESLint 10 upgrade blocked upstream
 **Category:** Dependency maintenance · **Label:** Deferred
