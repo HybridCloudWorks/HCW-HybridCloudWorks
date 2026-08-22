@@ -75,14 +75,38 @@ jobs:
           # NOTE: VITE_COSMOS_* vars are intentionally absent.
           # The frontend never accesses Cosmos directly — all data goes through the API.
 
+      # The build output must be complete and must be the ONLY thing uploaded.
+      # The first run of this workflow failed with "The size of the app content
+      # was too large. The limit for this Static Web App is 524288000 bytes":
+      # with `skip_app_build: true` the action uploads `app_location` itself, so
+      # pointing it at `frontend` sent 1.4 GB — 927 MB of which was
+      # node_modules. `dist` is 112 MB.
+      - name: Verify the upload payload
+        run: |
+          set -euo pipefail
+          test -f dist/staticwebapp.config.json || {
+            echo "::error::dist/staticwebapp.config.json is missing. Without it the site loads, the home page works, and every deep link 404s — see frontend/scripts/stage-swa-config.mjs."
+            exit 1
+          }
+          test -f dist/index.html || { echo "::error::dist/index.html is missing; the build did not produce a site."; exit 1; }
+          bytes=$(du -sb dist | cut -f1)
+          echo "dist: $(du -sh dist | cut -f1) ($bytes bytes), limit 524288000"
+          [ "$bytes" -lt 524288000 ] || {
+            echo "::error::dist is over the Static Web Apps 500 MB limit at $bytes bytes."
+            exit 1
+          }
+
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          app_location: frontend
-          output_location: dist
+          # The BUILT OUTPUT, not the app source. `output_location` is an Oryx
+          # build-output path and is ignored when the build is skipped, so it
+          # cannot narrow what gets uploaded — `app_location` has to be the
+          # content root itself.
+          app_location: frontend/dist
           skip_app_build: true
           # No skip_api_build here: it is not an input at the pinned action SHA,
           # and with no api_location set there is no API build to skip anyway.
