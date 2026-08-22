@@ -27,7 +27,7 @@
  * same-origin behind a Static Web App, or a separate API hostname — changes
  * configuration here, not code. Same-origin requests either carry no `Origin`
  * (allowed) or carry the site's own, which is already in the production
- * allowlist; a different SPA hostname is added through `CORS_ALLOWED_ORIGINS`.
+ * allowlist; a different SPA hostname is added through `EXTRA_ALLOWED_ORIGINS`.
  *
  * CORS IS NOT AN AUTHORIZATION CONTROL — it stops browsers, not curl. This
  * helper does not authorize anything, and no handler may treat having passed
@@ -44,11 +44,25 @@ import { createCors } from './cors.js';
  * The escape hatch for a preview slot, a staging hostname, or a cross-origin
  * SPA host chosen by §0.1. Empty in the default deployment.
  *
- * @param {Record<string, string|undefined>} [env]
- * @returns {string[]}
+ * THE NAME MATTERS, and it is not the obvious one. This read
+ * `CORS_ALLOWED_ORIGINS` until 2026-08-22, and that setting **can never reach
+ * the worker**: App Service injects read-only CORS environment variables
+ * derived from `siteConfig.cors.allowedOrigins`, which is a `string[]`, and
+ * ours is unset — so the worker received the serialisation of an empty array,
+ * the literal two characters `[]`, in place of whatever was written.
+ *
+ * Three independent writers proved it. Terraform via azurerm, Terraform via
+ * the azapi strip, and a plain `az functionapp config appsettings set` all put
+ * the right value in ARM; all three times the worker reported `[]`. The final
+ * experiment settled it: ONE CLI write carried three keys —
+ * `RUNTIME_CONFIG_GENERATION`, `RUNTIME_CONFIG_WRITER` and the origins — and
+ * the worker reported the first two verbatim while the third arrived as `[]`.
+ * Same write, same instant, same process. Only the name differed.
+ *
+ * So do not name anything here `CORS_*` or `WEBSITE_*`. TODO.md T-513.
  */
 export function parseExtraOrigins(env = process.env) {
-  return String(env.CORS_ALLOWED_ORIGINS || '')
+  return String(env.EXTRA_ALLOWED_ORIGINS || '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
@@ -134,7 +148,7 @@ let allowlistLogged = false;
 function logAllowlistOnce(context) {
   if (allowlistLogged) return;
   allowlistLogged = true;
-  const raw = process.env.CORS_ALLOWED_ORIGINS;
+  const raw = process.env.EXTRA_ALLOWED_ORIGINS;
   const extraOrigins = parseExtraOrigins();
   const { generation, writer } = readConfigStamp();
   // One record, not several. Correlating separate lines by HostInstanceId is
@@ -145,7 +159,7 @@ function logAllowlistOnce(context) {
   context?.log?.(
     `[cors] generation=${generation} writer=${writer}; ` +
       `allowlist built: ${extraOrigins.length} extra origin(s) ${JSON.stringify(extraOrigins)}; ` +
-      `CORS_ALLOWED_ORIGINS is ` +
+      `EXTRA_ALLOWED_ORIGINS is ` +
       `${raw === undefined ? 'UNSET in this process' : `${JSON.stringify(raw)} (${raw.length} chars)`}`
   );
 }

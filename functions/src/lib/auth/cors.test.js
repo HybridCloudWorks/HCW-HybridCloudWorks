@@ -146,7 +146,7 @@ describe('anonymous caller identity', () => {
 describe('the Static Web App preview origin — TEMPORARY, remove when DNS moves', () => {
   // Migration_Plan §6 step 2 serves the site from the SWA's own hostname
   // before DNS moves. Compiled in rather than supplied through
-  // CORS_ALLOWED_ORIGINS, which did not take effect on the deployed app
+  // EXTRA_ALLOWED_ORIGINS, which did not take effect on the deployed app
   // (TODO.md T-513). These tests are the reason a security control belongs in
   // code: an app setting has none.
   it('is allowed by default, with no environment configuration at all', () => {

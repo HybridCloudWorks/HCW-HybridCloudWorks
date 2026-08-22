@@ -47,7 +47,7 @@ const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridc
  * anyone. It is a real origin that can reach the API, so leaving it behind is
  * leaving a door open for no reason.
  *
- * It is compiled in rather than supplied through `CORS_ALLOWED_ORIGINS`, which
+ * It is compiled in rather than supplied through `EXTRA_ALLOWED_ORIGINS`, which
  * is what §6 step 2 was originally going to use. On 2026-08-22 that setting was
  * applied correctly — verified in ARM byte-for-byte, 51 characters, single key
  * — and the running app still refused the origin, through a restart, a

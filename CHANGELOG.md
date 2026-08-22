@@ -54,6 +54,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`CORS_ALLOWED_ORIGINS` could never have worked — the name collides with a
+  platform-injected variable** (T-513). App Service injects read-only CORS
+  environment variables derived from `siteConfig.cors.allowedOrigins`, which is
+  a `string[]`. Ours is unset, so the worker received the serialisation of an
+  empty array — the literal two characters `[]` — in place of whatever was
+  written to the app setting. `parseExtraOrigins` split that on comma and
+  produced one "origin" called `[]`, which matches nothing.
+
+  Renamed to `EXTRA_ALLOWED_ORIGINS`. Nothing here may be called `CORS_*` or
+  `WEBSITE_*` again.
+
+  **Three independent writers proved it, and the last one was conclusive.**
+  Terraform via azurerm, Terraform via the azapi strip, and a plain
+  `az functionapp config appsettings set` each put the correct value in ARM; all
+  three times the worker reported `[]`. The final experiment carried **three
+  keys in one CLI write** — `RUNTIME_CONFIG_GENERATION`,
+  `RUNTIME_CONFIG_WRITER` and the origins. The worker reported the first two
+  verbatim and the third as `[]`. Same write, same instant, same process, two
+  distinct `HostInstanceId`s. Only the name differed.
+
+  That sequence also **exonerated Terraform and the azapi rewrite**, which had
+  been the prime suspect on the reasonable grounds that they were the newest
+  thing rewriting the whole settings collection. They were innocent, and the
+  generation/writer sentinel is what showed it: the workers reported
+  `writer=azapi-strip` and later `writer=cli` with the *current* generation
+  every time, so they were never stale and never missed a write. Without the
+  writer dimension the conclusion would have been "stale worker" and the search
+  would have continued in the wrong place.
+
 - **Telemetry had been dead since 01:33Z and request telemetry had never worked
   at all** (T-514). Two faults wearing one coat, both in `host.json`.
 
