@@ -776,3 +776,27 @@ variable "cors_extra_origins" {
   type        = list(string)
   default     = []
 }
+
+variable "config_generation" {
+  description = <<-EOT
+    An immutable identifier for the configuration generation this apply writes,
+    reported back by the running worker as RUNTIME_CONFIG_GENERATION (T-513).
+
+    ARM can only answer "what was written last". This is how a worker answers
+    "what did I actually consume" — the two disagreed on 2026-08-22, when a
+    fresh worker held the literal string `[]` for CORS_ALLOWED_ORIGINS while
+    ARM held the real value.
+
+    Set it to something that identifies the deployment and cannot repeat, e.g.
+    `gh-<run-id>-<short-sha>` or `t513-cli-1` for a hand-run experiment.
+
+    DO NOT wire this to timestamp(). A value that changes on every plan proposes
+    a diff forever and restarts the host on every apply, which is both noise and
+    a small outage each time.
+
+    The default is deliberately a fixed string rather than anything derived: an
+    unset generation must be visibly unset, not quietly plausible.
+  EOT
+  type        = string
+  default     = "unset"
+}
