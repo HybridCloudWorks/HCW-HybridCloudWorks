@@ -212,6 +212,13 @@ running.
 
 ## Step 5 — Arm the timers, one at a time
 
+> **The acceptance criterion changed on 2026-08-22.** It used to be "the
+> setting is applied". It is now "the invocation was observed". That is not
+> pedantry — `CORS_ALLOWED_ORIGINS` was applied correctly, confirmed in ARM
+> byte-for-byte, and the running app never honoured it (T-513). ARM is
+> **desired** state. It is not evidence of **effective runtime** state, and the
+> gap between the two is silent.
+
 **Turning a timer on is a workspace variable edit, not a code change.** Add its
 flag suffix to `enabled_timers` in HCP Terraform and apply:
 
@@ -226,7 +233,61 @@ here is indistinguishable from a timer that does not fire.
 `"false"`. It holds every timer off regardless of `enabled_timers`, so arming
 the first timer means setting **both**.
 
-**After each one:**
+### The four gates
+
+Do not advance if any of them fails. Each proves a different link, and the whole
+point is that the earlier ones can pass while the later ones fail.
+
+| # | Gate | Proves | How |
+| --- | --- | --- | --- |
+| 1 | **Deployment** | ARM holds the setting | `az functionapp config appsettings list ... --query "[?name=='FEATURE_FLAG_X']"` |
+| 2 | **Runtime** | the *active worker* sees it | the startup log line — presence, never the value |
+| 3 | **Behaviour** | the feature reads it | exercise whatever depends on the setting |
+| 4 | **Invocation** | the timer actually fired | `Function.<name>` traces **and** the timer's own durable side effect |
+
+The evidence chain, in order, with nothing skipped:
+
+```
+enabled_timers configured
+  -> new worker/revision active
+  -> timer registration visible at startup
+  -> scheduled invocation occurs
+  -> handler enters
+  -> expected downstream action or log occurs
+```
+
+### Gate 4 needs two independent witnesses
+
+Telemetry alone is not an oracle here, and 2026-08-22 is why: **there are three
+planes that can fail independently**, and a silent timer looks identical in all
+three.
+
+```
+configuration plane   enabled_timers  -> did the worker receive it?
+execution plane       timer scheduled -> did it actually invoke?
+telemetry plane       log written     -> did it survive filters and the cap?
+```
+
+`AppRequests` was empty for the entire life of this app because `host.json` set
+`Host.Results` to `Error`, and every trace after 01:33Z on 2026-08-22 was
+discarded because the workspace was over its ingestion cap. Either fault alone
+turns "the timer did not fire" and "the timer fired and nobody heard it" into
+the same observation.
+
+So pair the telemetry with a **durable side effect the timer necessarily
+creates** — a document write, a queue message, a blob, a timestamp:
+
+| Timer | Durable witness |
+| --- | --- |
+| `checkAgentHealth` | `lab_agents` documents get a fresh health field |
+| `syncRssFeeds` | new `rss_cache` / `content` documents, or an updated marker |
+| `publishScheduledContent` | a `content` document moves to `published` |
+| `cleanupTempStorage` | a dry-run summary in the logs; blobs unchanged until `TEMP_STORAGE_CLEANUP_DELETE` |
+
+Read the witness directly from Cosmos or Storage. If telemetry and the witness
+disagree, believe the witness.
+
+### Then, per timer
 
 ```powershell
 ./scripts/cutover/05-verify-timer.ps1 -Name syncRssFeeds
@@ -237,16 +298,54 @@ local time". A timer firing five hours early passes a naive "fired once" check
 and fails the real one; the script prints both zones so the comparison is
 against the local column.
 
-**Order matters for two of them:**
+### Order matters for two of them
 
 - `SYNC_SOCIAL_CALENDAR` — not until after step 4, or Azure becomes a third
   writer to `social_posts` mid-import.
 - `CLEANUP_TEMP_STORAGE` and `CLEANUP_UNUSED_CERT_IMAGES` stay **dry-run** even
   when armed, until `TEMP_STORAGE_CLEANUP_DELETE` / `CERT_IMAGE_CLEANUP_DELETE`
-  are set. Arming the timer and arming the deletion are two decisions; conflating
-  them is how a dry run becomes data loss (T-302).
+  are set. Arming the timer and arming the deletion are two decisions;
+  conflating them is how a dry run becomes data loss (T-302).
 
----
+### Before trusting telemetry as evidence at all
+
+Confirm the plane itself is alive, once, at the start of the session:
+
+```bash
+# ingestion is not capped
+az monitor log-analytics workspace show -g rg-mgmt-plat-prod-cus -n log-plat-prod-cus-01   --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e   --query "workspaceCapping.dataIngestionStatus" -o tsv     # expect: RespectQuota
+
+# WORKER logs are arriving, not just host ones
+az monitor log-analytics query -w cf80dc24-2499-49a0-8c66-9522bcc294ed --analytics-query   "AppTraces | where TimeGenerated > ago(15m) | extend cat=tostring(Properties.Category)    | where cat startswith 'Function' | summarize count() by cat"
+```
+
+**Send traffic first, and keep sending it.** `always_ready = 0`, so the app
+scales to zero and a worker torn down between flush intervals takes its
+buffered telemetry with it. On 2026-08-22 a handful of probes produced nothing
+for twenty minutes, while three sustained minutes produced rows within four.
+**An empty result from a cold app is not evidence of anything.**
+
+**`AppRequests` is empty and is not the oracle.** Zero rows for this app's
+entire history. `Host.Results` was `Error` until 2026-08-22, which explains the
+history, but the table stayed empty after that was corrected and redeployed —
+unexplained, tracked in T-514. Use the `Function.<name>` traces, which are
+strictly better here because they carry the schedule:
+
+```
+Function.syncSocialCalendarScheduled       Executed 'Functions.…' (Succeeded, Id=…, Duration=…)
+Function.syncSocialCalendarScheduled       Trigger Details: ScheduleStatus: {"Last":"…03:40:00-05:00","Next":"…03:45:00-05:00"}
+Function.syncSocialCalendarScheduled.User  [syncSocialCalendarScheduled] disabled — skipping
+```
+
+`Last` and `Next` are already in **Chicago local time**, which is the
+comparison §7 actually asks for — `AppRequests` would not have given that. The
+`.User` row is the handler's own `context.log`, and it is how you tell "the
+timer fired and the flag gate skipped it" from "the timer never fired".
+
+**Query the workspace, never `az monitor app-insights query --app <appId>`.**
+The component is workspace-based with the workspace in another subscription, and
+that proxy returns **zero rows for every query** rather than erroring — it
+produced two wrong conclusions on 2026-08-22 (T-514).
 
 ## Then watch
 
