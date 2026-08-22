@@ -279,10 +279,26 @@ reach the worker, `enabled_timers` has the same exposure** — arming a timer
 would appear to do nothing. Verify that explicitly at §6 step 7 rather than
 assuming, by watching for the invocation and not just the applied setting.
 
-**Next step, now unblocked.** T-514 turned out to be an ingestion cap, not a
-logging failure: the `[cors]` line from PR #156 *was* written and was discarded
-because the workspace was OverQuota from 01:33Z. Once ingestion resumes, hit
-any route and read it:
+**CONFIRMED from outside, 2026-08-22.** The setting was left holding two
+origins — `https://calm-ground-…,https://probe.invalid` — of which only the
+first is compiled into `PREVIEW_ORIGINS`:
+
+```
+probe.invalid   -> 403   (present ONLY in the app setting)
+calm-ground-…   -> 200   (compiled into cors.js)
+evil.example    -> 403
+```
+
+So the app setting is definitively not reaching the allowlist, while
+`TELEGRAM_BOT_TOKEN` in the same worker reads fine. That is the whole finding:
+it is not a parsing quirk of one value, it is that this setting does not arrive.
+
+**The diagnostic was also broken**, which is why this took so long. The `[cors]`
+line added in PR #156 used `console.log`, and in the Node v4 model only
+`context.log` reaches Application Insights — it surfaces under
+`Function.<name>.User`, forwarded by the host over the invocation channel.
+`console.log` outside an invocation has no route. Now written from the handler
+with a context in hand. Hit any route on a warm worker and read:
 
 ```
 AppTraces | where Message has '[cors]' | order by TimeGenerated desc | take 1
@@ -337,11 +353,39 @@ and the proxy silently returns empty rather than erroring. **Query
 the `AppTraces` / `AppRequests` / `AppExceptions` tables directly.** Trusting
 the proxy cost hours and produced two wrong conclusions.
 
-**Still to verify after the 08:00Z reset:** that traces resume, that
-`AppRequests` populates, and that 24h volume now sits far below the cap. If it
-does not, revisit the restart loop — `Found the following functions` appeared
-337 times in 24 hours, which is the T-511 unhealthy-host loop and should have
-stopped now that the keyless `AzureWebJobsStorage` is stripped in-apply.
+**Verified after the 08:00Z reset.**
+
+- **Traces resumed.** `Function.<name>` and `Function.<name>.User` rows are
+  arriving again, including handlers' own `context.log`. The earlier "no worker
+  telemetry reaches App Insights" conclusion was a cap artifact and is
+  withdrawn — worker logging works.
+- **The restart loop is gone.** 20 `/health` samples over 8.5 minutes returned
+  a single `startedAt`; the old cadence was roughly one restart every four
+  minutes. T-511's in-apply strip holds.
+- **`AppRequests` is STILL EMPTY** — zero rows for the app's entire history,
+  and still zero after `Host.Results` was corrected to `Information` and
+  deployed. `Host.Results: Error` explains the history but not the present.
+  **This is the open remainder of this item.**
+
+  It is not blocking: the `Function.<name>` traces are a better invocation
+  oracle anyway, because they carry `Trigger Details: ScheduleStatus` with
+  `Last`/`Next` already in Chicago local time — which is exactly the comparison
+  Migration_Plan §7 asks for, and what `AppRequests` would not have given.
+
+**And a trap worth knowing before reading any of this.** `always_ready = 0`, so
+the app scales to zero and a worker torn down between flush intervals takes its
+buffered telemetry with it. A handful of probes produced nothing for twenty
+minutes; three sustained minutes of traffic produced rows within four. **An
+empty result from a cold app is not evidence.** Send traffic, keep sending it,
+then query.
+
+**The cap is tighter than the function app alone.** 24h ingestion was ~262 MB
+against a 250 MB cap: `AppTraces` 207 MB (the `Azure.Core` flood, now fixed),
+but also `CDBDataPlaneRequests` 17.8 MB, `AppExceptions` 15.6 MB, `AppMetrics`
+and `AppPerformanceCounters` 13.9 MB, and Cosmos partition/query stats 7.7 MB.
+**Cosmos diagnostics share this workspace** and cannot be fixed in `host.json`.
+Once the post-fix baseline is visible, decide whether 250 MB is the right
+number or whether the Cosmos diagnostic settings should be trimmed.
 
 ### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
 **Files:** `infra/main.tf` (azapi pair) · `infra/providers.tf` · `.github/workflows/deploy-functions.yml`
