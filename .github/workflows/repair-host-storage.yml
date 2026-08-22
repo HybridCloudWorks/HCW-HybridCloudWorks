@@ -1,0 +1,161 @@
+# Remove the keyless `AzureWebJobsStorage` the azurerm provider re-injects, and
+# re-sync the function triggers.
+#
+# WHY THIS EXISTS, and why it is not part of the deploy.
+#
+# `azurerm_function_app_flex_consumption` writes an `AzureWebJobsStorage`
+# connection string with an EMPTY AccountKey on every apply, whatever
+# `storage_authentication_type` says, and it does not appear in the plan —
+# hashicorp/terraform-provider-azurerm#29149, open, still reproducing on the
+# 5.1.0 this repository pins. The host then prefers that string over the
+# identity-based `AzureWebJobsStorage__accountName` Terraform owns, attempts
+# shared-key auth with no key, and every storage call fails the signature
+# check. What that looks like from outside is NOT "storage is broken":
+#
+#   - SyncTriggers fails, so newly deployed functions are never registered.
+#     The package runs and existing HTTP routes answer, so it reads as a build
+#     or routing problem. 2026-08-20 (every route 404) and 2026-08-21 (83
+#     deployed, 80 registered) were both this.
+#   - Timer and queue listeners fail to start: "The listener for function
+#     'Functions.X' was unable to start." No schedule fires, and nothing on the
+#     HTTP surface looks wrong.
+#
+# `deploy-functions.yml` already does this after every deploy, so the deploy
+# path is covered. The gap is the APPLY path: a `terraform apply` re-injects the
+# setting and nothing follows it. On 2026-08-21 the activity log showed exactly
+# that — the 20:02 deploy deleted the setting, Terraform's 20:31 apply was the
+# only config write after it, and the setting was back.
+#
+# THIS RUNS ON A SCHEDULE, deliberately, and that is the whole point.
+#
+# The obvious design was "dispatch this after every apply". That is a step a
+# human has to remember, forever, for a failure that is silent and does not
+# look like storage — which is the same as no fix at all. Every 30 minutes the
+# job asks one question and, on the overwhelming majority of runs, answers it
+# and exits without writing anything: if the setting is absent it is a single
+# read and a clean exit. Worst case after an apply is half an hour of dead
+# timers instead of however long it takes someone to notice.
+#
+# Dispatch it by hand right after an apply if you want the repair immediately
+# rather than at the next tick. It is ~1 minute against a ~4 minute redeploy,
+# and it is idempotent — running it when there is nothing to fix is free.
+#
+#   mode=repair (default, and what the schedule uses) — delete the setting if
+#                           present, re-sync triggers, report the registered
+#                           function count. No-op when it is already absent.
+#   mode=check            — read-only; FAILS if the setting is present. Use it
+#                           as a monitor, or to confirm an apply was clean.
+#
+# GitHub disables scheduled workflows on a repository with no activity for 60
+# days. If this stops ticking, that is why, and `mode=check` is how you find
+# out what it missed.
+#
+# Read-only in `check` mode. In `repair` mode it writes exactly one app setting
+# deletion and issues a SyncTriggers call; it never touches code or data.
+
+name: Repair Function Host Storage
+
+on:
+  # Every 30 minutes. See the header: the apply path has no CI hook, so a
+  # scheduled no-op is the only version of this fix that cannot be forgotten.
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'repair (delete + re-sync) or check (read-only, fails if present)'
+        required: false
+        default: 'repair'
+        type: choice
+        options:
+          - repair
+          - check
+
+permissions:
+  contents: read
+  id-token: write
+
+# Shared with deploy-functions.yml. Both delete app settings and call
+# SyncTriggers; a scheduled tick landing in the middle of a deploy would re-sync
+# a half-written host. Queue instead of overlapping, and never cancel — an
+# interrupted repair leaves the setting in place.
+concurrency:
+  group: function-app-host
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: AzureWebJobsStorage
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    steps:
+      - name: Azure Login
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Detect, repair, verify
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          SUB: ${{ vars.SUBSCRIPTION_ID }}
+          MODE: ${{ github.event.inputs.mode || 'repair' }}
+        run: |
+          set -euo pipefail
+
+          present=$(az functionapp config appsettings list -n "$APP" -g "$RG" \
+                      --query "[?name=='AzureWebJobsStorage'] | length(@)" -o tsv)
+
+          {
+            echo "## AzureWebJobsStorage — mode \`${MODE}\`"
+            echo "- App: \`${APP}\`"
+            echo "- Present before: **${present}**"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          if [ "$MODE" = "check" ]; then
+            if [ "$present" != "0" ]; then
+              echo "- Result: **FAIL** — the keyless setting is present; run this workflow with mode=repair" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "::error::AzureWebJobsStorage is present. Timers and SyncTriggers are degraded (azurerm#29149)."
+              exit 1
+            fi
+            echo "- Result: **clean**" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$present" = "0" ]; then
+            echo "- Result: **nothing to repair**" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "removing keyless AzureWebJobsStorage"
+          az functionapp config appsettings delete -n "$APP" -g "$RG" \
+            --setting-names AzureWebJobsStorage --output none
+
+          # The delete restarts the host; for the next ~30 s SyncTriggers can
+          # answer 400 "InternalServerError from host runtime". Retry before
+          # calling it a failure — same loop as deploy-functions.yml.
+          for attempt in 1 2 3 4; do
+            if az rest --method post --output none \
+                 --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"; then
+              break
+            fi
+            [ "$attempt" -lt 4 ] || { echo "::error::syncfunctiontriggers failed after 4 attempts"; exit 1; }
+            echo "syncfunctiontriggers attempt $attempt failed; retrying in 20 s"
+            sleep 20
+          done
+
+          sleep 15
+          count=$(az functionapp function list -n "$APP" -g "$RG" --query "length(@)" -o tsv)
+          {
+            echo "- Removed, triggers re-synced"
+            echo "- Functions registered after sync: **${count}**"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$count" -gt 0 ] || { echo "::error::no functions registered after SyncTriggers"; exit 1; }
+
+          # A green run that silently repaired something is how a recurring
+          # fault becomes invisible. Annotate, so the frequency stays legible
+          # and so closing azurerm#29149 (T-511) has an observable trigger.
+          echo "::warning::Repaired a re-injected AzureWebJobsStorage. If this fires outside an apply window, azurerm#29149 has changed behaviour — see TODO.md T-511."
+

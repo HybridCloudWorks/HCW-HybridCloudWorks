@@ -832,11 +832,20 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # queue and table endpoints from the account name and authenticates with its
     # own managed identity, which already holds Storage Blob Data Owner here.
     #
-    # Declaring it here does NOT stop the deploy from re-adding the keyless
-    # `AzureWebJobsStorage` string: that key is not in this map and the
-    # provider does not report it in plan, so it came back on 2026-08-21 and
-    # broke SyncTriggers again (83 functions deployed, 80 registered).
-    # deploy-functions.yml now deletes it after every deploy and re-syncs.
+    # Declaring it here does NOT stop the keyless `AzureWebJobsStorage` string
+    # from coming back, and the culprit is THIS PROVIDER, not the deploy —
+    # corrected 2026-08-21 from the activity log, which is the only place the
+    # two are distinguishable. `azurerm_function_app_flex_consumption` re-injects
+    # it on every apply whatever `storage_authentication_type` says, and it does
+    # not surface in plan: hashicorp/terraform-provider-azurerm#29149, open,
+    # reproducing on the 5.1.0 pinned in .terraform.lock.hcl. Evidence: the
+    # 20:02Z deploy deleted the setting, Terraform's 20:31Z apply was the only
+    # `sites/config` write after it, and the setting was present again.
+    #
+    # There is no configuration here that prevents it. Both write paths are
+    # therefore covered by removal after the fact: deploy-functions.yml deletes
+    # it and re-syncs after every deploy, and repair-host-storage.yml does the
+    # same on demand after an apply. TODO.md T-511 tracks the upstream fix.
     #
     # The failure mode is worth remembering: a keyless connection string does
     # not fail at deploy, and does not fail as "storage". It fails as a 404 on

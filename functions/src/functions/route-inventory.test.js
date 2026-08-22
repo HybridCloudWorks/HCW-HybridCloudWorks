@@ -331,3 +331,80 @@ describe('non-HTTP triggers', () => {
     ]);
   });
 });
+
+/**
+ * Property 4 — the one the host enforces and the other three cannot see.
+ *
+ * Properties 1–3 ask whether each registration is *correct*. This asks whether
+ * the set of them is *servable*, which is a different question and the one that
+ * shipped broken: the Azure Functions host keys its route table on the route
+ * template ALONE, not on template + method. Two functions declaring the same
+ * `route` with different `methods` are a conflict — the host starts one and
+ * refuses the other with "is in error: The route specified conflicts with the
+ * route defined by function X". The losing verb answers 404.
+ *
+ * Seven `cms/*` templates were declared two or three times each and eight
+ * functions never started: list, patch and put across certifications,
+ * recordings, social posts, settings, config and keyword-config, which is most
+ * of what the admin UI does (TODO.md T-510). Every one of those registrations
+ * passed properties 1, 2 and 3 — individually they were all fine.
+ *
+ * `httpRegistrations` is keyed by function NAME, which is exactly why the
+ * mock could not see it: two functions sharing a route are two distinct keys.
+ * The fix is `httpRouteByMethod` — one template, one registration, the method
+ * fan-out inside it — and this test is what keeps a second one from appearing.
+ *
+ * Templates are compared with parameter names collapsed (`{id}` and `{docId}`
+ * are the same template to a router) and case-folded, because ASP.NET routing
+ * matches on shape, not on spelling.
+ */
+describe('property 4 — no two registrations share a route template', () => {
+  const normalise = (route) =>
+    String(route ?? '')
+      .toLowerCase()
+      .replace(/\{[^}]*\}/g, '{}');
+
+  it('because the host would refuse to start all but one of them', () => {
+    const byTemplate = new Map();
+    for (const [name, options] of httpRegistrations) {
+      const template = normalise(options.route);
+      if (!byTemplate.has(template)) byTemplate.set(template, []);
+      byTemplate.get(template).push(name);
+    }
+
+    const conflicts = [...byTemplate.entries()]
+      .filter(([, names]) => names.length > 1)
+      .map(([template, names]) => `${template} <- ${names.join(', ')}`);
+
+    // A failure here means the host will 404 a verb that the code, the tests
+    // and the API surface all say exists. Merge the registrations with
+    // httpRouteByMethod rather than renaming the route.
+    expect(conflicts).toEqual([]);
+  });
+
+  it('and every method a merged registration declares has a handler behind it', async () => {
+    // httpRouteByMethod fans out on request.method. A method listed in
+    // `methods` with nothing in `handlers` would 405 at runtime — reachable
+    // only by editing one and not the other, which is precisely the kind of
+    // drift the merge is supposed to end.
+    const merged = [...httpRegistrations.entries()].filter(
+      ([, options]) => options.methods.filter((m) => m !== 'OPTIONS').length > 1
+    );
+    expect(merged.length).toBeGreaterThan(0);
+
+    for (const [name, options] of merged) {
+      for (const method of options.methods) {
+        if (method === 'OPTIONS') continue;
+        const response = await invoke(options, makeRequest({ method, origin: ALLOWED_ORIGIN }));
+        // `invoke` returns null when the handler threw, which every guarded
+        // route does on an unauthenticated probe — that is a reached handler,
+        // not a missing one. Only an actual 405 means the dispatcher found no
+        // entry for the method it declared.
+        expect(
+          response?.status,
+          `${name} ${method} fell through to the 405 branch — no handler registered`
+        ).not.toBe(405);
+      }
+    }
+  });
+});

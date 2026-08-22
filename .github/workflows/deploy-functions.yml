@@ -24,6 +24,13 @@ permissions:
   contents: read
   id-token: write
 
+# Shared with repair-host-storage.yml, whose scheduled tick also deletes app
+# settings and calls SyncTriggers. Queue rather than overlap; never cancel a
+# deploy that is mid-flight.
+concurrency:
+  group: function-app-host
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to Azure Functions
@@ -107,9 +114,12 @@ jobs:
           package: functions/
           respect-funcignore: true
 
-      # The deploy leaves an `AzureWebJobsStorage` connection string with an EMPTY
-      # AccountKey on the app (nothing in infra/ writes it, and the azurerm
-      # provider does not surface it in plan). The host then tries shared-key
+      # An `AzureWebJobsStorage` connection string with an EMPTY AccountKey sits
+      # on the app. The azurerm provider writes it on every `terraform apply`
+      # (hashicorp/terraform-provider-azurerm#29149) without surfacing it in
+      # plan; this step runs here because a deploy is the other moment the app
+      # is expected to come back healthy, not because the deploy wrote it —
+      # see repair-host-storage.yml for the apply path. The host tries shared-key
       # auth with no key for its secret repository, SyncTriggers fails with
       # "Server failed to authenticate the request", and the new functions are
       # not registered — the package runs, HTTP routes that already existed

@@ -150,7 +150,7 @@ deployed to Azure.
 | ----- | ---------------------------------------- | ------------- | --------------------------------------------------------------- |
 | 0     | Reconcile the two repositories           | Both          | **Retired** — replaced by the pinned baseline in §0             |
 | 1     | Decouple from Firebase behind interfaces | Both          | **DONE on both sides** — here: zero `firebase/*` imports; Site-Main: v1.7.0 `lib/data/` + `lib/auth/` encapsulation |
-| 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **104 functions deployed 2026-08-21** (84 before the T-323/T-324 deploy) |
+| 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **104 functions deployed 2026-08-21** (84 before the T-323/T-324 deploy; 96 after the route-conflict merge, which retires 8 dead registrations) |
 | 3     | Port the API and workers                 | This repo     | **DONE 2026-08-21** — the HTTP surface per `.azure/api-surface.json`, the six long handlers as platform jobs, 15 of 16 timers, the 11 triggers as 6 change-feed functions + 3 delete paths; what is not ported is a deliberate demotion (Cloud Tools T-410, Listen & Learn T-411, the D3 admin cluster); see §4 |
 | 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **DONE on production 2026-08-21** — 8,023 documents / 62 containers / 0 failed, reconciled; 1,438 blobs / 3.17 GiB verified. Re-runnable for the delta before cutover (upsert, `gcsmd5`) |
 | 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |

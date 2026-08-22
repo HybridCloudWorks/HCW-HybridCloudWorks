@@ -7,7 +7,7 @@
  * The {collection} segment on the config routes is allowlisted in the lib
  * (ai-providers, mcp-servers) — anything else 404s before touching Cosmos.
  */
-import { httpRoute } from '../lib/auth/http-route.js';
+import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createAdminIntegrationHandlers } from '../lib/admin-integrations.js';
@@ -18,18 +18,13 @@ const handlers = () =>
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
   });
 
-httpRoute('cmsListRecordings', {
-  methods: ['GET'],
+httpRouteByMethod('cmsRecordings', {
   authLevel: 'anonymous',
   route: 'cms/recordings',
-  handler: (request, context) => handlers().listRecordings(request, context),
-});
-
-httpRoute('cmsCreateRecording', {
-  methods: ['POST'],
-  authLevel: 'anonymous',
-  route: 'cms/recordings',
-  handler: (request, context) => handlers().createRecording(request, context),
+  handlers: {
+    GET: (request, context) => handlers().listRecordings(request, context),
+    POST: (request, context) => handlers().createRecording(request, context),
+  },
 });
 
 httpRoute('cmsPatchRecording', {
@@ -46,18 +41,13 @@ httpRoute('cmsListSpeakerEvents', {
   handler: (request, context) => handlers().listSpeakerEvents(request, context),
 });
 
-httpRoute('cmsGetSettings', {
-  methods: ['GET'],
+httpRouteByMethod('cmsSettings', {
   authLevel: 'anonymous',
   route: 'cms/settings',
-  handler: (request, context) => handlers().getSettings(request, context),
-});
-
-httpRoute('cmsPutSettings', {
-  methods: ['PUT'],
-  authLevel: 'anonymous',
-  route: 'cms/settings',
-  handler: (request, context) => handlers().putSettings(request, context),
+  handlers: {
+    GET: (request, context) => handlers().getSettings(request, context),
+    PUT: (request, context) => handlers().putSettings(request, context),
+  },
 });
 
 httpRoute('cmsGetCuratedImage', {
@@ -81,25 +71,14 @@ httpRoute('cmsListConfig', {
   handler: (request, context) => handlers().listConfig(request, context),
 });
 
-httpRoute('cmsPutConfig', {
-  methods: ['PUT'],
+httpRouteByMethod('cmsConfigDoc', {
   authLevel: 'anonymous',
   route: 'cms/config/{collection}/{id}',
-  handler: (request, context) => handlers().putConfig(request, context),
-});
-
-httpRoute('cmsPatchConfig', {
-  methods: ['PATCH'],
-  authLevel: 'anonymous',
-  route: 'cms/config/{collection}/{id}',
-  handler: (request, context) => handlers().patchConfig(request, context),
-});
-
-httpRoute('cmsDeleteConfig', {
-  methods: ['DELETE'],
-  authLevel: 'anonymous',
-  route: 'cms/config/{collection}/{id}',
-  handler: (request, context) => handlers().deleteConfig(request, context),
+  handlers: {
+    PUT: (request, context) => handlers().putConfig(request, context),
+    PATCH: (request, context) => handlers().patchConfig(request, context),
+    DELETE: (request, context) => handlers().deleteConfig(request, context),
+  },
 });
 
 httpRoute('cmsListAiUsage', {
