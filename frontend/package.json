@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node scripts/stage-swa-config.mjs",
     "build:data": "node scripts/generate-public-data.cjs",
     "data:update:applied-skills": "node scripts/update-applied-skills.mjs",
     "data:update:credentials": "node scripts/update-applied-skills.mjs",
