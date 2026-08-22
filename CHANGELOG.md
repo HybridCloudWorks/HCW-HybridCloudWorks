@@ -92,18 +92,20 @@ This project has not cut a tagged release; entries are grouped under
   `storage_authentication_type` says, without surfacing it in plan
   ([azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
   open on the pinned 5.1.0). Nothing in this repository can stop the write, so
-  the apply path now has the same removal the deploy path had: new
-  `repair-host-storage.yml`, `mode=repair` to delete and re-sync or
-  `mode=check` to fail read-only if it is present.
+  it is now **stripped inside the same apply that creates it**: an
+  `azapi_resource_action` reads the settings azurerm has just written and an
+  `azapi_update_resource` writes them back without that key. The setting never
+  survives the run, so there is no post-apply step, no scheduled job and
+  nothing to remember. `deploy-functions.yml` **asserts it is absent and fails**
+  rather than deleting it — a repair there would hide a regression in the
+  strip, which is how this stayed a recurring incident instead of becoming a
+  bug: every occurrence was quietly cleaned up by the next deploy.
 
-  It runs on a **30-minute schedule**, not as a post-apply step, because
-  applies are owner-run from a CLI workspace with no CI hook and a step someone
-  has to remember is not a fix for a fault this silent. The tick is one read and
-  a clean exit when the setting is absent, and raises a `::warning::` when it
-  actually repairs something so the frequency stays visible. It shares the
-  `function-app-host` concurrency group with `deploy-functions.yml` so a tick
-  cannot re-sync a half-written host. Both comments corrected; T-511 tracks the
-  upstream fix.
+  Not used: `"AzureWebJobsStorage" = ""`, the workaround the issue is best
+  known for — it stopped working in early May 2026, per three reporters — nor
+  rewriting the function app as a raw `azapi_resource`, which trades a
+  well-understood resource for a hand-written ARM body to dodge one bad key.
+  Both misattributing comments corrected; T-511 tracks the upstream close.
 
 - **The public content list failed the moment `PUBLIC_LIST_SQL_ORDER` went
   live** — Cosmos: "The index path corresponding to the specified order-by

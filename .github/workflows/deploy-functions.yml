@@ -24,9 +24,9 @@ permissions:
   contents: read
   id-token: write
 
-# Shared with repair-host-storage.yml, whose scheduled tick also deletes app
-# settings and calls SyncTriggers. Queue rather than overlap; never cancel a
-# deploy that is mid-flight.
+# One deploy at a time. Two overlapping runs would swap packages under each
+# other and race on SyncTriggers; never cancel one that is mid-flight, because
+# a half-deployed package is worse than a queued run.
 concurrency:
   group: function-app-host
   cancel-in-progress: false
@@ -114,35 +114,44 @@ jobs:
           package: functions/
           respect-funcignore: true
 
-      # An `AzureWebJobsStorage` connection string with an EMPTY AccountKey sits
-      # on the app. The azurerm provider writes it on every `terraform apply`
-      # (hashicorp/terraform-provider-azurerm#29149) without surfacing it in
-      # plan; this step runs here because a deploy is the other moment the app
-      # is expected to come back healthy, not because the deploy wrote it —
-      # see repair-host-storage.yml for the apply path. The host tries shared-key
-      # auth with no key for its secret repository, SyncTriggers fails with
-      # "Server failed to authenticate the request", and the new functions are
-      # not registered — the package runs, HTTP routes that already existed
-      # answer, and anything new (a queue trigger, a new route) silently does
-      # not exist. 2026-08-20 (every route 404) and 2026-08-21 (83 functions
-      # deployed, 80 registered) were both this. Identity-based
-      # `AzureWebJobsStorage__accountName` is the setting Terraform owns.
-      - name: Drop the keyless AzureWebJobsStorage the deploy leaves behind, then sync triggers
+      # `AzureWebJobsStorage` must NOT be on this app. A connection string with
+      # an empty AccountKey makes the host attempt shared-key auth with no key
+      # against its own secret repository, and the failure does not present as
+      # storage: SyncTriggers stops registering new functions (which reads as a
+      # build or routing problem) and every timer and queue listener refuses to
+      # start (which reads as nothing at all). Three incidents, all of them
+      # diagnosed as something else first.
+      #
+      # This step used to DELETE the setting on every deploy. That was a
+      # bandaid over the actual cause — `azurerm_function_app_flex_consumption`
+      # re-injecting it on every apply, azurerm#29149 — which is now stripped
+      # inside the apply itself by the azapi pair in infra/main.tf (T-511).
+      #
+      # So this checks and FAILS rather than repairing. A repair here would
+      # hide a regression in the Terraform fix, which is precisely how this
+      # became a recurring incident instead of a bug: every occurrence was
+      # quietly cleaned up by the next deploy. If this fires, the azapi
+      # resources did not run or did not work — re-apply and look at why,
+      # rather than deleting the setting by hand.
+      - name: Assert AzureWebJobsStorage is absent, then sync triggers
         env:
           APP: ${{ vars.FUNCTION_APP_NAME }}
           RG: ${{ vars.RESOURCE_GROUP }}
           SUB: ${{ vars.SUBSCRIPTION_ID }}
         run: |
           set -euo pipefail
-          if az functionapp config appsettings list -n "$APP" -g "$RG" \
-               --query "[?name=='AzureWebJobsStorage'].name" -o tsv | grep -q .; then
-            echo "removing keyless AzureWebJobsStorage"
-            az functionapp config appsettings delete -n "$APP" -g "$RG" \
-              --setting-names AzureWebJobsStorage --output none
+
+          present=$(az functionapp config appsettings list -n "$APP" -g "$RG"                       --query "[?name=='AzureWebJobsStorage'] | length(@)" -o tsv)
+          if [ "$present" != "0" ]; then
+            echo "::error::AzureWebJobsStorage is present on $APP. The apply-time strip           (azapi_update_resource.function_app_settings_without_webjobs_storage, TODO.md T-511)           did not take effect. Timers and SyncTriggers are degraded. Re-apply infra/ and           investigate; do not delete the setting by hand — that hides the regression."
+            exit 1
           fi
-          # The appsettings delete above restarts the host; for the next ~30 s the
-          # sync call can answer 400 "InternalServerError from host runtime"
-          # (run 32521270400). Retry before calling it a failure.
+          echo "AzureWebJobsStorage absent — as the apply-time strip guarantees"
+
+          # SyncTriggers is still worth doing explicitly: the Flex deploy does
+          # not always register newly added triggers on its own, and the host
+          # can answer 400 "InternalServerError from host runtime" for ~30 s
+          # while it restarts after a package swap (run 32521270400).
           for attempt in 1 2 3 4; do
             if az rest --method post --output none --url "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/syncfunctiontriggers?api-version=2023-12-01"; then
               break

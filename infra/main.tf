@@ -842,10 +842,11 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # 20:02Z deploy deleted the setting, Terraform's 20:31Z apply was the only
     # `sites/config` write after it, and the setting was present again.
     #
-    # There is no configuration here that prevents it. Both write paths are
-    # therefore covered by removal after the fact: deploy-functions.yml deletes
-    # it and re-syncs after every deploy, and repair-host-storage.yml does the
-    # same on demand after an apply. TODO.md T-511 tracks the upstream fix.
+    # It is stripped inside this same apply by the azapi read-then-update pair
+    # below the resource — so the setting never survives the run that creates
+    # it, and nothing downstream has to remember to clean up. deploy-functions.yml
+    # asserts it is absent and FAILS if it is not, rather than deleting it:
+    # a repair there would hide a regression in the strip. TODO.md T-511.
     #
     # The failure mode is worth remembering: a keyless connection string does
     # not fail at deploy, and does not fail as "storage". It fails as a 404 on
@@ -1023,6 +1024,72 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
   }
 
   tags = var.tags
+}
+
+# ---------------------------------------------------------------------------
+# Strip the `AzureWebJobsStorage` azurerm re-injects — T-511.
+# ---------------------------------------------------------------------------
+#
+# `azurerm_function_app_flex_consumption` writes an `AzureWebJobsStorage`
+# connection string with an EMPTY AccountKey on every apply, whatever
+# `storage_authentication_type` says, and never shows it in plan
+# (hashicorp/terraform-provider-azurerm#29149, open since March 2025). The host
+# prefers that string over the identity-based `AzureWebJobsStorage__accountName`
+# below, attempts shared-key auth with no key, and fails every storage call on
+# the signature — which does NOT present as storage. It presents as SyncTriggers
+# not registering new functions, and as "The listener for function 'Functions.X'
+# was unable to start" on every timer and queue trigger. Three incidents:
+# 2026-08-20 (every route 404), 2026-08-21 (83 deployed / 80 registered), and
+# 2026-08-21 again (timer listeners down through the 104-function deploy).
+#
+# The widely-cited `"AzureWebJobsStorage" = ""` workaround is NOT used here: it
+# worked until early May 2026 and then stopped, confirmed by three separate
+# reporters on the issue. An empty value is also indistinguishable from a
+# misconfiguration to anyone reading this file later.
+#
+# So the setting is removed inside the same apply that creates it. `list` reads
+# the settings azurerm has just written; `update` writes them back without that
+# one key. `replace_triggered_by` on the whole function app is deliberate rather
+# than on `.app_settings` alone — the provider decides when it re-injects, this
+# configuration does not, and a narrower trigger is a guess about behaviour that
+# is already known to change without notice. If the function app did not change,
+# azurerm wrote no config and there is nothing to strip.
+#
+# This is why azapi is a dependency (providers.tf). It is a thin ARM passthrough:
+# it writes the body it is given and nothing else, which is exactly the property
+# azurerm lacks here.
+#
+# WHEN #29149 CLOSES, delete both resources, the azapi provider, and T-511 — and
+# confirm with the post-apply check in deploy-functions.yml, which is what fails
+# if this stops working.
+
+resource "azapi_resource_action" "function_app_settings" {
+  type        = "Microsoft.Web/sites@2024-04-01"
+  resource_id = azurerm_function_app_flex_consumption.hcw.id
+  action      = "config/appsettings/list"
+  method      = "POST"
+
+  response_export_values = ["properties"]
+
+  lifecycle {
+    replace_triggered_by = [azurerm_function_app_flex_consumption.hcw]
+  }
+}
+
+resource "azapi_update_resource" "function_app_settings_without_webjobs_storage" {
+  type        = "Microsoft.Web/sites/config@2024-04-01"
+  resource_id = "${azurerm_function_app_flex_consumption.hcw.id}/config/appsettings"
+
+  body = {
+    properties = {
+      for key, value in azapi_resource_action.function_app_settings.output.properties :
+      key => value if key != "AzureWebJobsStorage"
+    }
+  }
+
+  lifecycle {
+    replace_triggered_by = [azapi_resource_action.function_app_settings]
+  }
 }
 
 # NOTE: there is deliberately NO `moved` block from
