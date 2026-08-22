@@ -26,9 +26,9 @@ work** — that is a valid state, not a missing document.
 | --- | --- |
 | Open items | 7 |
 | Critical | 0 |
-| High | 1 |
+| High | 0 |
 | Medium | 4 |
-| Low | 2 |
+| Low | 3 |
 
 ## Where we left off — 2026-08-21
 
@@ -50,12 +50,21 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    instead of 13 and omitted the new delete route. `/api/health` 200 through
    Cloudflare, 403 at the origin.
 
-   Two things that run reads left behind: the keyless `AzureWebJobsStorage`
-   came back with the deploy and broke the timer listeners for ~3 minutes until
-   the workflow's delete-and-resync step ran (`syncfunctiontriggers` needed one
-   retry) — expected, self-healing, and visible in App Insights as
-   `Azure.RequestFailedException` ending at 22:30:34Z. And **T-510** below,
-   which the deploy surfaced rather than caused.
+   Two things that run reads left behind. The keyless `AzureWebJobsStorage`
+   was back and broke the timer listeners for ~3 minutes until the workflow's
+   delete-and-resync step ran (`syncfunctiontriggers` needed one retry) —
+   visible in App Insights as `Azure.RequestFailedException` ending at
+   22:30:34Z. The activity log then showed **Terraform**, not the deploy, is
+   what writes it: T-511, with `repair-host-storage.yml` as the apply-path fix.
+
+   And the host log showed eight CMS functions refusing to start on route
+   conflicts. **Fixed in this change** — seven `cms/*` templates were each
+   declared two or three times, and the Functions host keys its route table on
+   the template alone. They are now one registration per template via
+   `httpRouteByMethod`, so **the next deploy registers 96 functions, all of
+   them serving**, against 104 registered today of which 8 are dead. Fewer
+   functions, more working endpoints. `route-inventory.test.js` property 4
+   fails the build if a shared template ever comes back.
 
 2. **Newest-first is confirmed** — `PUBLIC_LIST_SQL_ORDER = "1"` is live on the
    app and `/api/public/content?limit=8` returns strictly descending
@@ -82,8 +91,7 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    alerts all no-op cleanly without their keys), the Telegram webhook, then
    the delta import with Site-Main's Publer sync and VPS heartbeat paused and
    `FEATURE_FLAG_SYNC_SOCIAL_CALENDAR` still off, then flags on one timer at a
-   time after observing the Chicago-time fire. **T-510 blocks the admin UI
-   part of it**; nothing else on this list does.
+   time after observing the Chicago-time fire. Nothing on this list blocks it.
 
 **State to keep in mind:**
 
@@ -101,53 +109,6 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
   two Key Vault secrets in T-321.
 - The local `C:\Users\saulp\Workspace\Site-Main` clone is stale; the baseline
   is `088f458`. `git pull` before reading it.
-
----
-
-## HIGH
-
-### T-510 — Eight CMS functions are disabled by route conflicts
-**Files:** `functions/src/functions/admin-crud-http.js` · `admin-integrations-http.js` · `image-prompts-http.js` · `functions/src/functions/route-inventory.test.js`
-
-The Azure Functions host keys its route table on the **route template alone**,
-not on template + method. Two functions that declare the same `route` with
-different `methods` are a conflict: the host keeps one and marks the other *"is
-in error: The route specified conflicts with the route defined by function
-X"*. Seven routes are shared this way, so eight functions never start.
-Measured live off the deployed route table, 2026-08-21:
-
-| Route | Live | Disabled |
-| --- | --- | --- |
-| `cms/certifications` | POST `cmsCreateCertification` | GET `cmsListCertifications` |
-| `cms/certifications/{id}` | DELETE `cmsDeleteCertification` | PATCH `cmsPatchCertification` |
-| `cms/recordings` | POST `cmsCreateRecording` | GET `cmsListRecordings` |
-| `cms/social-posts` | POST `cmsCreateSocialPost` | GET `cmsListSocialPosts` |
-| `cms/settings` | GET `cmsGetSettings` | PUT `cmsPutSettings` |
-| `cms/config/{collection}/{id}` | DELETE `cmsDeleteConfig` | PUT `cmsPutConfig`, PATCH `cmsPatchConfig` |
-| `cms/keyword-config/{collection}/{id}` | DELETE `cmsDeleteKeywordDoc` | PUT `cmsPutKeywordDoc` |
-
-Confirmed from outside: `POST /api/cms/certifications` returns **401** (alive,
-guard reached), `GET /api/cms/certifications` returns **404** (not registered).
-So the admin UI cannot list certifications, recordings or social posts, cannot
-edit a certification, cannot save settings, and cannot write config or keyword
-documents.
-
-**Not caused by the T-323/T-324 deploy** — App Insights first records these at
-21:39:15Z on 2026-08-21, with the 84-function deploy. It is a live defect that
-has simply had no caller yet, because the admin surface is not deployed.
-
-**Why the tests did not catch it.** `route-inventory.test.js` mocks
-`@azure/functions` with `http: (name, options) => httpRegistrations.set(name,
-options)` — a Map keyed by **function name**. Two functions sharing a route are
-two distinct keys, so both look registered and both pass every assertion. The
-test proves each route is guarded; it cannot prove the host will serve it.
-
-**Fix:** merge each conflicting pair into one registration that declares all its
-methods and dispatches on `request.method` — the shape `cmsGetSettings` /
-`cmsPutSettings` should have had from the start. Then add an assertion to
-`route-inventory.test.js` that no two registrations share a route template,
-which is the check that keeps this from returning. The smoke test should also
-fail on a host route conflict rather than only checking `/api/health`.
 
 ---
 
@@ -284,6 +245,41 @@ inline; the visitor sees nothing change. And never: `lib/data/*` (37) and
 Each new frontend test file has to be added by hand or CI silently does not run
 it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
+
+### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
+**Files:** `infra/main.tf` · `.github/workflows/repair-host-storage.yml` · `.github/workflows/deploy-functions.yml`
+**Category:** Dependency maintenance · **Label:** Deferred (upstream)
+
+`azurerm_function_app_flex_consumption` writes an `AzureWebJobsStorage`
+connection string with an **empty AccountKey** on every apply, whatever
+`storage_authentication_type` says, and never shows it in plan —
+[hashicorp/terraform-provider-azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
+open, reproducing on the 5.1.0 in `.terraform.lock.hcl`. The host prefers it
+over the identity-based `AzureWebJobsStorage__accountName`, tries shared-key
+auth with no key, and fails every storage call on the signature.
+
+It does not fail as "storage". It fails as SyncTriggers not registering new
+functions (a build or routing problem, to look at) and as
+`The listener for function 'Functions.X' was unable to start` on every timer
+and queue trigger (nothing at all, to look at). Three incidents so far:
+2026-08-20 every route 404; 2026-08-21 83 deployed / 80 registered; 2026-08-21
+the 104-function deploy, timer listeners down for ~3 minutes.
+
+**Attribution was wrong until 2026-08-21** — `main.tf` and `deploy-functions.yml`
+both said the deploy wrote it. The Azure activity log settles it: the 20:02Z
+deploy *deleted* the setting, Terraform's 20:31Z apply was the only
+`sites/config` write after it, and the setting was back. Both comments are now
+corrected.
+
+**Nothing in this repository can prevent the write.** Both paths are covered by
+removal after the fact instead: `deploy-functions.yml` deletes and re-syncs
+after every deploy, and `repair-host-storage.yml` (dispatch, `mode=repair`)
+does the same after an apply. **Run it after every `terraform apply` that
+touches the function app** — it is far cheaper than a redeploy. `mode=check` is
+read-only and fails if the setting is present.
+
+**Revisit** when #29149 closes: drop the two removal paths, keep a `mode=check`
+run as the regression guard.
 
 ### D-001 — ESLint 10 upgrade blocked upstream
 **Category:** Dependency maintenance · **Label:** Deferred
