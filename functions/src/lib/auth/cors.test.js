@@ -142,3 +142,25 @@ describe('anonymous caller identity', () => {
     expect(key).toMatch(/^[a-f0-9]{64}$/);
   });
 });
+
+describe('the Static Web App preview origin — TEMPORARY, remove when DNS moves', () => {
+  // Migration_Plan §6 step 2 serves the site from the SWA's own hostname
+  // before DNS moves. Compiled in rather than supplied through
+  // CORS_ALLOWED_ORIGINS, which did not take effect on the deployed app
+  // (TODO.md T-513). These tests are the reason a security control belongs in
+  // code: an app setting has none.
+  it('is allowed by default, with no environment configuration at all', () => {
+    const cors = createCors({});
+    expect(cors.isAllowed('https://calm-ground-0d0e6a010.7.azurestaticapps.net')).toBe(true);
+  });
+
+  it('does not open azurestaticapps.net generally', () => {
+    const cors = createCors({});
+    expect(cors.isAllowed('https://someone-elses-app.azurestaticapps.net')).toBe(false);
+    expect(cors.isAllowed('https://calm-ground-0d0e6a010.7.azurestaticapps.net.evil.com')).toBe(false);
+  });
+
+  it('still refuses an unrelated origin', () => {
+    expect(createCors({}).isAllowed('https://evil.example.com')).toBe(false);
+  });
+});
