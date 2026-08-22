@@ -1,4 +1,4 @@
-import { httpRoute } from '../lib/auth/http-route.js';
+import { httpRoute, readConfigStamp } from '../lib/auth/http-route.js';
 
 // Import all triggers so they are registered with the Azure Functions framework
 import './admin-crud-http.js';
@@ -56,6 +56,20 @@ httpRoute('healthCheck', {
         status: 'ok',
         service: 'hcw-functions',
         startedAt: BUILD_TIME,
+        // T-513's second observation channel. Application Insights went blind
+        // for six hours on 2026-08-22 (T-514) while this endpoint kept
+        // answering, so the configuration generation a worker is running must
+        // be readable without it.
+        //
+        // This is a deliberate, narrow exception to T-402, which stripped
+        // `node`, the site name and a feature flag from this response. Those
+        // disclosed the runtime version and deployment topology to anyone
+        // enumerating the host. These two disclose neither: `generation` is a
+        // CI run id and a commit SHA from a public repository, and `writer` is
+        // one of `azurerm`, `azapi-strip`, `cli` or `unset`. Neither is a
+        // secret, a version, or a name — and both are useless to an attacker
+        // and load-bearing for an operator.
+        ...readConfigStamp(),
       }),
     };
   },

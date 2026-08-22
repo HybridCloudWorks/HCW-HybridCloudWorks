@@ -54,6 +54,35 @@ export function parseExtraOrigins(env = process.env) {
     .filter(Boolean);
 }
 
+/**
+ * The configuration stamp this worker process is actually running (T-513).
+ *
+ * Two dimensions, because one is not enough here. A single generation cannot
+ * distinguish the two writes that happen in a single `terraform apply`:
+ * `azurerm` writes the whole `app_settings` map, then the azapi pair added for
+ * T-511 reads the resulting collection back and writes it again minus
+ * `AzureWebJobsStorage`. Both carry the same generation. Only the writer marker
+ * says which of the two this process actually consumed:
+ *
+ *   writer=azapi-strip, current generation  the final rewrite arrived
+ *   writer=azurerm,     current generation  the first write arrived, the second did not
+ *   an older generation                     stale propagation
+ *   different writers across instances      rolling or out-of-order propagation
+ *   writer=azapi-strip AND CORS_ALLOWED_ORIGINS=[]  the final generation arrived
+ *                                           and this key alone is wrong — which
+ *                                           would rule out "the worker simply
+ *                                           missed the last write"
+ *
+ * `unset` means the stamp itself never reached the process, which is the same
+ * class of failure being investigated and must not be reported as a generation.
+ */
+export function readConfigStamp(env = process.env) {
+  return {
+    generation: env.RUNTIME_CONFIG_GENERATION || 'unset',
+    writer: env.RUNTIME_CONFIG_WRITER || 'unset',
+  };
+}
+
 let defaultCors = null;
 
 /**
@@ -107,12 +136,20 @@ function logAllowlistOnce(context) {
   allowlistLogged = true;
   const raw = process.env.CORS_ALLOWED_ORIGINS;
   const extraOrigins = parseExtraOrigins();
+  const { generation, writer } = readConfigStamp();
+  // One record, not several. Correlating separate lines by HostInstanceId is
+  // possible but tedious, and the whole question is which writer's generation
+  // THIS process is running — so generation, writer and the value they are
+  // being judged against belong on the same row. HostInstanceId and ProcessId
+  // arrive for free in the trace's Properties; there is no need to log them.
   context?.log?.(
-    `[cors] allowlist built: ${extraOrigins.length} extra origin(s) ` +
-      `${JSON.stringify(extraOrigins)}; CORS_ALLOWED_ORIGINS is ` +
+    `[cors] generation=${generation} writer=${writer}; ` +
+      `allowlist built: ${extraOrigins.length} extra origin(s) ${JSON.stringify(extraOrigins)}; ` +
+      `CORS_ALLOWED_ORIGINS is ` +
       `${raw === undefined ? 'UNSET in this process' : `${JSON.stringify(raw)} (${raw.length} chars)`}`
   );
 }
+
 
 
 /** Test seam: drop the memoised CORS evaluator so env changes take effect. */

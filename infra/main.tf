@@ -1063,6 +1063,25 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # that origin is not in the compiled list — so without this every API call
     # from the parallel-running site fails CORS, which looks like a broken API.
     "CORS_ALLOWED_ORIGINS" = join(",", var.cors_extra_origins)
+
+    # T-513 sentinel — which writer's configuration generation is this worker
+    # actually running? ARM answers "the last one written". Only the worker can
+    # answer "the one I consumed", and on 2026-08-22 those disagreed: a fresh
+    # worker held the literal string `[]` for CORS_ALLOWED_ORIGINS while ARM
+    # held the real value.
+    #
+    # Two dimensions, because one cannot separate the two writes that happen in
+    # a single apply — azurerm writes this whole map, then the azapi pair below
+    # reads the result back and writes it again minus AzureWebJobsStorage. Both
+    # carry the same generation. The WRITER marker is the only thing that says
+    # which of the two a process consumed, and the azapi write deliberately
+    # overrides it to `azapi-strip`.
+    #
+    # NOT timestamp(): that would change on every plan, propose a diff forever
+    # and restart the host each apply. The generation must be an immutable
+    # identifier supplied by whatever performed the deployment.
+    "RUNTIME_CONFIG_GENERATION" = var.config_generation
+    "RUNTIME_CONFIG_WRITER"     = "azurerm"
   })
 
   identity {
@@ -1127,10 +1146,24 @@ resource "azapi_update_resource" "function_app_settings_without_webjobs_storage"
   resource_id = "${azurerm_function_app_flex_consumption.hcw.id}/config/appsettings"
 
   body = {
-    properties = {
-      for key, value in azapi_resource_action.function_app_settings.output.properties :
-      key => value if key != "AzureWebJobsStorage"
-    }
+    # The WRITER marker is overridden here and the generation deliberately is
+    # not. Both writes belong to the same apply and therefore the same
+    # generation; what differs is which of them a worker actually consumed
+    # (T-513). A worker reporting `azurerm` has the first write and missed this
+    # one; `azapi-strip` has this one. Without the marker the two are
+    # indistinguishable, because ARM shows only the final state either way.
+    #
+    # Values pass through exactly as azapi returned them, unchanged. Wrapping
+    # them in tostring() would be reasonable hardening — app-settings values are
+    # strings — but doing it now could silently remove the very fault under
+    # investigation and destroy the evidence. Harden after T-513 closes.
+    properties = merge(
+      {
+        for key, value in azapi_resource_action.function_app_settings.output.properties :
+        key => value if key != "AzureWebJobsStorage"
+      },
+      { "RUNTIME_CONFIG_WRITER" = "azapi-strip" }
+    )
   }
 
   lifecycle {

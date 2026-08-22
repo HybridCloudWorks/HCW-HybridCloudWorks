@@ -12,6 +12,7 @@ import {
   mergeCorsHeaders,
   parseExtraOrigins,
   resetHttpRouteCors,
+  readConfigStamp,
 } from './http-route.js';
 import { createCors } from './cors.js';
 
@@ -221,7 +222,8 @@ describe('[cors] allowlist diagnostic', () => {
     await route.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log });
 
     expect(log).toHaveBeenCalledTimes(1);
-    expect(log.mock.calls[0][0]).toContain('[cors] allowlist built');
+    expect(log.mock.calls[0][0]).toContain('[cors] generation=');
+    expect(log.mock.calls[0][0]).toContain('allowlist built');
   });
 
   it('is emitted once per process, not once per request', async () => {
@@ -290,5 +292,94 @@ describe('[cors] allowlist diagnostic', () => {
     await expect(
       route.handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), {})
     ).resolves.toBeDefined();
+  });
+});
+
+/**
+ * The configuration stamp (T-513).
+ *
+ * One generation cannot separate the two writes a single `terraform apply`
+ * performs — azurerm writes the whole map, then the azapi pair from T-511
+ * reads it back and writes it again. Both carry the same generation. The
+ * writer marker is the only thing that says which one this process consumed,
+ * so these tests hold the two dimensions apart.
+ */
+describe('readConfigStamp', () => {
+  it('reports both dimensions from the environment', () => {
+    expect(readConfigStamp({ RUNTIME_CONFIG_GENERATION: 'gh-42-abc123', RUNTIME_CONFIG_WRITER: 'azapi-strip' }))
+      .toEqual({ generation: 'gh-42-abc123', writer: 'azapi-strip' });
+  });
+
+  it('reports `unset` rather than undefined, because a missing stamp is itself the finding', () => {
+    // The stamp not arriving is the same class of failure being investigated.
+    // It must read as a distinct value, never as an absent field that a
+    // consumer might render as blank and mistake for "no problem".
+    expect(readConfigStamp({})).toEqual({ generation: 'unset', writer: 'unset' });
+  });
+
+  it('distinguishes the two writers of a single apply', () => {
+    expect(readConfigStamp({ RUNTIME_CONFIG_GENERATION: 'g1', RUNTIME_CONFIG_WRITER: 'azurerm' }).writer)
+      .toBe('azurerm');
+    expect(readConfigStamp({ RUNTIME_CONFIG_GENERATION: 'g1', RUNTIME_CONFIG_WRITER: 'azapi-strip' }).writer)
+      .toBe('azapi-strip');
+  });
+
+  it('puts generation, writer and the CORS value on ONE record', async () => {
+    // Correlating separate lines by HostInstanceId is possible and tedious.
+    // The question is which writer's generation this process runs, judged
+    // against the value it produced — so they belong on the same row.
+    const prevG = process.env.RUNTIME_CONFIG_GENERATION;
+    const prevW = process.env.RUNTIME_CONFIG_WRITER;
+    const prevC = process.env.CORS_ALLOWED_ORIGINS;
+    process.env.RUNTIME_CONFIG_GENERATION = 'gh-99-deadbee';
+    process.env.RUNTIME_CONFIG_WRITER = 'azapi-strip';
+    process.env.CORS_ALLOWED_ORIGINS = 'https://x.example';
+
+    resetHttpRouteCors();
+    const { routes, register } = recorder();
+    httpRoute('r', { methods: ['GET'], route: 'x', handler: async () => ({ status: 200 }) }, { register });
+    const log = vi.fn();
+    await routes.get('r').handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log });
+
+    const line = log.mock.calls[0][0];
+    expect(line).toContain('generation=gh-99-deadbee');
+    expect(line).toContain('writer=azapi-strip');
+    expect(line).toContain('https://x.example');
+    expect(line).toContain('1 extra origin(s)');
+
+    for (const [k, v] of [
+      ['RUNTIME_CONFIG_GENERATION', prevG],
+      ['RUNTIME_CONFIG_WRITER', prevW],
+      ['CORS_ALLOWED_ORIGINS', prevC],
+    ]) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    resetHttpRouteCors();
+  });
+
+  it('reproduces the observed fault signature — writer arrived, this key did not', async () => {
+    // writer=azapi-strip with CORS_ALLOWED_ORIGINS=[] is the case that would
+    // rule out "the worker simply missed the final write", so the diagnostic
+    // has to render it unambiguously rather than collapsing it into "empty".
+    const prev = process.env.CORS_ALLOWED_ORIGINS;
+    process.env.CORS_ALLOWED_ORIGINS = '[]';
+    process.env.RUNTIME_CONFIG_WRITER = 'azapi-strip';
+
+    resetHttpRouteCors();
+    const { routes, register } = recorder();
+    httpRoute('r', { methods: ['GET'], route: 'x', handler: async () => ({ status: 200 }) }, { register });
+    const log = vi.fn();
+    await routes.get('r').handler(makeRequest({ origin: 'https://hybridcloudworks.com' }), { log });
+
+    const line = log.mock.calls[0][0];
+    expect(line).toContain('writer=azapi-strip');
+    expect(line).toContain('"[]" (2 chars)');
+    expect(line).not.toContain('UNSET');
+
+    if (prev === undefined) delete process.env.CORS_ALLOWED_ORIGINS;
+    else process.env.CORS_ALLOWED_ORIGINS = prev;
+    delete process.env.RUNTIME_CONFIG_WRITER;
+    resetHttpRouteCors();
   });
 });
