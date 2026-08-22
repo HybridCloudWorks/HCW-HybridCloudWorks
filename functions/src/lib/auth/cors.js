@@ -41,6 +41,33 @@
 const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridcloudworks.com'];
 
 /**
+ * The Static Web App's own hostname — TEMPORARY, for Migration_Plan §6 step 2.
+ *
+ * REMOVE IT when DNS moves (§6 step 5) and the preview host stops serving
+ * anyone. It is a real origin that can reach the API, so leaving it behind is
+ * leaving a door open for no reason.
+ *
+ * It is compiled in rather than supplied through `CORS_ALLOWED_ORIGINS`, which
+ * is what §6 step 2 was originally going to use. On 2026-08-22 that setting was
+ * applied correctly — verified in ARM byte-for-byte, 51 characters, single key
+ * — and the running app still refused the origin, through a restart, a
+ * stop/start, three deploys and about twenty probes. `parseExtraOrigins()` and
+ * `createCors()` return `true` for that exact value locally, so the code is not
+ * the problem, and `TELEGRAM_BOT_TOKEN` reaching the same worker proves app
+ * settings do arrive. It is unexplained, and it is TODO.md T-513.
+ *
+ * Two reasons this is the better home regardless of how T-513 resolves:
+ *
+ *   1. An allowlist is a security control. In code it is reviewed, diffed and
+ *      covered by the tests below. As an app setting it can be changed by
+ *      anyone with Contributor, silently, with no test and no reviewer.
+ *   2. Deploys are the one propagation path that is demonstrably reliable here
+ *      — the function count moved 84 → 96 → 97 across three of them, while the
+ *      same app ignored a setting written four different ways.
+ */
+const PREVIEW_ORIGINS = ['https://calm-ground-0d0e6a010.7.azurestaticapps.net'];
+
+/**
  * Methods advertised in a preflight response.
  *
  * This was `GET, POST, OPTIONS`, written before the migration added the REST
@@ -59,7 +86,7 @@ const LOCALHOST_PATTERN = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
  */
 export function createCors({ environment = process.env.NODE_ENV, extraOrigins = [] } = {}) {
   const isProduction = environment === 'production';
-  const allowlist = new Set([...PRODUCTION_ORIGINS, ...extraOrigins]);
+  const allowlist = new Set([...PRODUCTION_ORIGINS, ...PREVIEW_ORIGINS, ...extraOrigins]);
 
   const isAllowed = (origin) => {
     if (allowlist.has(origin)) return true;

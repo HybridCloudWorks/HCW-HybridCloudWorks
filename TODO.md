@@ -24,10 +24,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 9 |
 | Critical | 0 |
-| High | 0 |
-| Medium | 4 |
+| High | 1 |
+| Medium | 5 |
 | Low | 3 |
 
 ## Where we left off — 2026-08-21
@@ -245,6 +245,73 @@ inline; the visitor sees nothing change. And never: `lib/data/*` (37) and
 Each new frontend test file has to be added by hand or CI silently does not run
 it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
+
+### T-513 — `CORS_ALLOWED_ORIGINS` is set correctly and the app ignores it
+**Files:** `functions/src/lib/auth/http-route.js` (`parseExtraOrigins`) · `functions/src/lib/auth/cors.js`
+
+On 2026-08-22 `cors_extra_origins` was applied, ARM held
+`CORS_ALLOWED_ORIGINS = "https://calm-ground-0d0e6a010.7.azurestaticapps.net"`,
+and the running app refused that origin on every route.
+
+**Ruled out, each with evidence:**
+
+| Candidate | Evidence against |
+| --- | --- |
+| The code | `parseExtraOrigins()` + `createCors()` return `true` for that exact value locally |
+| The stored value | 51 characters, hexdumped, no whitespace or BOM, one key, exact match |
+| Cloudflare caching | `cf-cache-status: DYNAMIC`; the *same* URL returns 200 for one origin and 403 for another |
+| A stale worker | `/api/health` `startedAt` moved to 06:19:17 after the write; still refused |
+| Route-specific behaviour | `health`, `public/content`, `public/podcasts` all refuse it identically |
+| A different app behind the DNS | `telegram/webhook` — deployed minutes earlier — answers through the same hostname |
+| App settings not reaching the worker at all | `telegram/webhook` returns **401 not 404**, which requires `TELEGRAM_BOT_TOKEN` to be readable from `process.env` in that worker |
+
+That last row is what makes this strange: app settings *do* reach the worker,
+but this one apparently does not. Written four ways — Terraform via azurerm,
+Terraform via the azapi strip, and twice with
+`az functionapp config appsettings set` — with a restart, a stop/start and
+three deploys between attempts.
+
+**Unblocked, not fixed.** The preview origin is now compiled into
+`PREVIEW_ORIGINS` in `cors.js`, which works and is the better home for a
+security control anyway. This item is the unexplained platform behaviour, and
+it matters beyond CORS: **if a newly added app setting can silently fail to
+reach the worker, `enabled_timers` has the same exposure** — arming a timer
+would appear to do nothing. Verify that explicitly at §6 step 7 rather than
+assuming, by watching for the invocation and not just the applied setting.
+
+**Next step** is blocked on T-514: the one-line allowlist log added for exactly
+this (PR #156) cannot be read, because no worker telemetry reaches App Insights.
+
+### T-514 — No worker telemetry reaches Application Insights
+**Files:** `functions/host.json` · `appi-site-prod-cus-01`
+
+Found 2026-08-22 while investigating T-513. **No `context.log`, `context.warn`
+or `console.log` from any function handler appears in App Insights**, and no
+`requests` telemetry either. Host-side .NET telemetry did arrive earlier the
+same day — route-conflict errors, MSAL token acquisitions, blob lock renewals
+— so the component and its connection string work.
+
+Confirmed with a control: `POST /api/telegram/webhook` with an invalid secret
+logs `[telegram] rejected an update with an invalid secret token.` and returns
+401. The 401 was observed; the trace never appeared.
+
+By 06:35 a `traces | where timestamp > ago(3h)` returned **nothing at all**,
+though the same query at 06:04 returned over ten thousand rows — so ingestion
+appears to have stopped, not merely to be missing worker rows. Between those
+two points the app was restarted, stopped and started, and deployed three
+times.
+
+**This is the more serious of the two.** Every handler's diagnostics are
+invisible: the platform-jobs path, the change-feed handlers, the Telegram bot
+and every timer at §6 step 7 all report through `context.log`. Arming a timer
+and watching for it to fire — the §7 scheduled-job gate — is not currently
+possible.
+
+Start with `samplingSettings.isEnabled: true` in `host.json` (only `Request` is
+excluded, so a single line per process is a plausible casualty, though not one
+that explains ten thousand rows going to zero), then whether
+`APPLICATIONINSIGHTS_CONNECTION_STRING` survives the azapi app-settings
+rewrite in T-511, then the component's own ingestion and daily cap.
 
 ### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
 **Files:** `infra/main.tf` (azapi pair) · `infra/providers.tf` · `.github/workflows/deploy-functions.yml`
