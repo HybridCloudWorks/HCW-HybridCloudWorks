@@ -279,39 +279,69 @@ reach the worker, `enabled_timers` has the same exposure** — arming a timer
 would appear to do nothing. Verify that explicitly at §6 step 7 rather than
 assuming, by watching for the invocation and not just the applied setting.
 
-**Next step** is blocked on T-514: the one-line allowlist log added for exactly
-this (PR #156) cannot be read, because no worker telemetry reaches App Insights.
+**Next step, now unblocked.** T-514 turned out to be an ingestion cap, not a
+logging failure: the `[cors]` line from PR #156 *was* written and was discarded
+because the workspace was OverQuota from 01:33Z. Once ingestion resumes, hit
+any route and read it:
 
-### T-514 — No worker telemetry reaches Application Insights
-**Files:** `functions/host.json` · `appi-site-prod-cus-01`
+```
+AppTraces | where Message has '[cors]' | order by TimeGenerated desc | take 1
+```
 
-Found 2026-08-22 while investigating T-513. **No `context.log`, `context.warn`
-or `console.log` from any function handler appears in App Insights**, and no
-`requests` telemetry either. Host-side .NET telemetry did arrive earlier the
-same day — route-conflict errors, MSAL token acquisitions, blob lock renewals
-— so the component and its connection string work.
+It reports whether `CORS_ALLOWED_ORIGINS` was `UNSET in this process` or
+present-and-parsed, which separates every remaining hypothesis in one query.
+Query the **workspace** directly, not `az monitor app-insights query` — see the
+tooling note in T-514.
 
-Confirmed with a control: `POST /api/telegram/webhook` with an invalid secret
-logs `[telegram] rejected an update with an invalid secret token.` and returns
-401. The 401 was observed; the trace never appeared.
+### T-514 — Telemetry died at the ingestion cap, and requests were never on
+**Files:** `functions/host.json` · workspace `log-plat-prod-cus-01`
 
-By 06:35 a `traces | where timestamp > ago(3h)` returned **nothing at all**,
-though the same query at 06:04 returned over ten thousand rows — so ingestion
-appears to have stopped, not merely to be missing worker rows. Between those
-two points the app was restarted, stopped and started, and deployed three
-times.
+**Root cause found 2026-08-22, and it was two separate faults wearing one coat.**
 
-**This is the more serious of the two.** Every handler's diagnostics are
-invisible: the platform-jobs path, the change-feed handlers, the Telegram bot
-and every timer at §6 step 7 all report through `context.log`. Arming a timer
-and watching for it to fire — the §7 scheduled-job gate — is not currently
-possible.
+**1. The workspace was over its daily cap.** `log-plat-prod-cus-01` has
+`dailyQuotaGb: 0.25`; `dataIngestionStatus` read **OverQuota** with
+`quotaNextReset: 08:00Z`. Ingestion stopped at **01:33Z** and every trace after
+that was discarded at the door — including the `[cors]` allowlist line added
+specifically to diagnose T-513, and the `[telegram]` warning used as the
+control that "proved" worker logs never arrive. **That control was a false
+negative.** Worker logging works; the evidence was being thrown away.
 
-Start with `samplingSettings.isEnabled: true` in `host.json` (only `Request` is
-excluded, so a single line per process is a plausible casualty, though not one
-that explains ten thousand rows going to zero), then whether
-`APPLICATIONINSIGHTS_CONNECTION_STRING` survives the azapi app-settings
-rewrite in T-511, then the component's own ingestion and daily cap.
+What filled a 250 MB budget:
+
+| Category | 24h volume | Messages |
+| --- | --- | --- |
+| `Azure.Core` | **39.3 MB** | 76,125 |
+| `Azure.Identity` | 4.4 MB | 21,469 |
+| `Host.Startup` | 2.5 MB | 16,269 |
+| everything else | ~4 MB | — |
+
+`Azure.Core` logs every SDK HTTP request and response at Information, and the
+host polls blob leases continuously. The platform's own chatter ate the budget;
+application logs were collateral. Both are now `Warning` in `host.json`.
+Raising the cap would have paid for the noise instead of removing it.
+
+**2. `Host.Results` was set to `Error`, so `AppRequests` was always empty.**
+Request telemetry is emitted at Information; that category at Error empties the
+table. Not a symptom of the cap — `AppRequests` had **zero rows, ever**. It is
+also the table that answers *"did the timer fire"*, so Migration_Plan §7's
+scheduled-job gate was unobservable by construction. Restored to `Information`.
+`Host.Aggregator` was on `Trace`, the most verbose level available, for a
+diagnosis nobody recorded; now `Warning`.
+
+**A tooling trap worth remembering.** `az monitor app-insights query --app
+<appId>` returned **zero rows for every query**, including with no time filter,
+while the workspace held 138,220 traces. The component is workspace-based
+(`ingestionMode: LogAnalytics`) with the workspace in a different subscription,
+and the proxy silently returns empty rather than erroring. **Query
+`az monitor log-analytics query -w cf80dc24-2499-49a0-8c66-9522bcc294ed` and
+the `AppTraces` / `AppRequests` / `AppExceptions` tables directly.** Trusting
+the proxy cost hours and produced two wrong conclusions.
+
+**Still to verify after the 08:00Z reset:** that traces resume, that
+`AppRequests` populates, and that 24h volume now sits far below the cap. If it
+does not, revisit the restart loop — `Found the following functions` appeared
+337 times in 24 hours, which is the T-511 unhealthy-host loop and should have
+stopped now that the keyless `AzureWebJobsStorage` is stripped in-apply.
 
 ### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
 **Files:** `infra/main.tf` (azapi pair) · `infra/providers.tf` · `.github/workflows/deploy-functions.yml`

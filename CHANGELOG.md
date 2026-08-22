@@ -54,6 +54,36 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Telemetry had been dead since 01:33Z and request telemetry had never worked
+  at all** (T-514). Two faults wearing one coat, both in `host.json`.
+
+  `log-plat-prod-cus-01` caps ingestion at **0.25 GB/day** and read
+  `OverQuota`. What filled it was not the application: `Azure.Core` logged
+  **39.3 MB across 76,125 messages** in 24 hours — every SDK HTTP request and
+  response at Information, driven by the host's continuous blob-lease polling —
+  with `Azure.Identity` adding 4.4 MB. Application logs were collateral. Both
+  categories are now `Warning`; fixing the noise beats paying for it.
+
+  Separately, `Host.Results` was set to `Error`. Request telemetry is emitted at
+  Information, so that one line emptied the `AppRequests` table permanently —
+  it had **zero rows, ever**. That is the table that answers *"did the timer
+  fire"*, so Migration_Plan §7's scheduled-job gate was unobservable by
+  construction. Restored to `Information`. `Host.Aggregator` was left on
+  `Trace`, the most verbose level available, for a diagnosis nobody recorded;
+  now `Warning`.
+
+  **Two conclusions this reverses.** The `[cors]` diagnostic from the previous
+  entry was written correctly and discarded at ingestion, and the `[telegram]`
+  control that appeared to prove "no worker logs reach App Insights" was a
+  false negative — worker logging works.
+
+  **And a tooling trap.** `az monitor app-insights query --app <appId>`
+  returned zero rows for every query, including with no time filter, while the
+  workspace held 138,220 traces. The component is workspace-based with the
+  workspace in another subscription, and the proxy returns empty rather than
+  erroring. Query the workspace and the `AppTraces` / `AppRequests` tables
+  directly.
+
 - **The inbound Telegram bot is ported (T-512), not retired.** Migration_Plan §6
   step 6 said to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`;
   there was nothing to point a webhook at, because no receiver had been ported

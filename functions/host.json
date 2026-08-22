@@ -9,9 +9,17 @@
     },
     "logLevel": {
       "default": "Information",
-      "Host.Results": "Error",
       "Function": "Information",
-      "Host.Aggregator": "Trace"
+
+      "//": "Host.Results carries REQUEST telemetry and it is emitted at Information. Setting it to Error, as this file did until 2026-08-22, does not merely quieten it — it empties the AppRequests table completely. Nothing had ever appeared there. That is the table you need to answer 'did the timer fire' at Migration_Plan §6 step 7, so the scheduled-job gate was unobservable by construction.",
+      "Host.Results": "Information",
+
+      "//1": "Host.Aggregator was 'Trace'. The aggregator emits per-invocation rollups and Trace is the most verbose level there is; it was set for a diagnosis nobody recorded and then left on.",
+      "Host.Aggregator": "Warning",
+
+      "//2": "THE QUOTA KILLER. Azure.Core logs every SDK HTTP request and response at Information, and the host polls blob leases continuously — 76,125 messages and 39.3 MB in 24 hours, with Azure.Identity adding 4.4 MB. The workspace cap is 0.25 GB/day, so the platform's own chatter consumed most of it and ingestion went OverQuota at 01:33Z on 2026-08-22, silently discarding EVERY trace after that. Two investigations were blind for hours because a log line that was written correctly was thrown away at the door. Raising the cap would have paid for the noise instead of removing it.",
+      "Azure.Core": "Warning",
+      "Azure.Identity": "Warning"
     }
   },
   "extensions": {
