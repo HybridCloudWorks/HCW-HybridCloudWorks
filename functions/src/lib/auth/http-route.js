@@ -74,21 +74,51 @@ let defaultCors = null;
  */
 function getDefaultCors() {
   if (!defaultCors) {
-    const raw = process.env.CORS_ALLOWED_ORIGINS;
-    const extraOrigins = parseExtraOrigins();
-    defaultCors = createCors({ extraOrigins });
-    console.log(
-      `[cors] allowlist built: ${extraOrigins.length} extra origin(s) ` +
-        `${JSON.stringify(extraOrigins)}; CORS_ALLOWED_ORIGINS is ` +
-        `${raw === undefined ? 'UNSET in this process' : `${JSON.stringify(raw)} (${raw.length} chars)`}`
-    );
+    defaultCors = createCors({ extraOrigins: parseExtraOrigins() });
   }
   return defaultCors;
 }
 
+let allowlistLogged = false;
+
+/**
+ * Report the allowlist the worker actually built, once per process.
+ *
+ * This used `console.log`, from inside `getDefaultCors`, and produced nothing
+ * — through two deploys and a lot of confusion. In the Node v4 model only
+ * `context.log` reaches Application Insights: it arrives under the
+ * `Function.<name>.User` category, forwarded by the host over the invocation
+ * channel. Plain `console.log`, especially outside an invocation, has no such
+ * route. So the line must be written from inside a request with the context in
+ * hand, which is why it lives here rather than where the allowlist is built.
+ *
+ * It exists because T-513 is open: `CORS_ALLOWED_ORIGINS` is set on the app and
+ * the app does not honour it, while `TELEGRAM_BOT_TOKEN` in the same worker
+ * reads fine. Confirmed from outside on 2026-08-22 — the setting carries two
+ * origins and only the one compiled into `PREVIEW_ORIGINS` answers 200. This
+ * line separates the two remaining explanations: the value never reaches
+ * `process.env`, or it reaches it and parses to empty.
+ *
+ * Origins only. `Access-Control-Allow-Origin` already returns the same
+ * information to any browser that asks.
+ */
+function logAllowlistOnce(context) {
+  if (allowlistLogged) return;
+  allowlistLogged = true;
+  const raw = process.env.CORS_ALLOWED_ORIGINS;
+  const extraOrigins = parseExtraOrigins();
+  context?.log?.(
+    `[cors] allowlist built: ${extraOrigins.length} extra origin(s) ` +
+      `${JSON.stringify(extraOrigins)}; CORS_ALLOWED_ORIGINS is ` +
+      `${raw === undefined ? 'UNSET in this process' : `${JSON.stringify(raw)} (${raw.length} chars)`}`
+  );
+}
+
+
 /** Test seam: drop the memoised CORS evaluator so env changes take effect. */
 export function resetHttpRouteCors() {
   defaultCors = null;
+  allowlistLogged = false;
 }
 
 /**
@@ -138,6 +168,8 @@ export function httpRoute(name, options, { cors, register = app } = {}) {
     methods: withPreflight(methods),
     handler: async (request, context) => {
       const evaluator = cors || getDefaultCors();
+      // Only for the real, memoised evaluator — a test seam has nothing to say.
+      if (!cors) logAllowlistOnce(context);
       const evaluation = evaluator.evaluate(request);
 
       // Disallowed origin (403) or preflight (204). Neither reaches the
