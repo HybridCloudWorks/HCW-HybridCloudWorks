@@ -1,10 +1,24 @@
-name: DISABLED - Prototype Frontend Deployment
+name: Deploy Frontend
 
+# ENABLED 2026-08-22 for Migration_Plan §6 step 1. Dispatch-only, for the same
+# reason deploy-functions.yml is: enabling a workflow and enabling
+# auto-deploy-on-merge are two separate decisions, and only the first has been
+# made. Restore the push trigger once a dispatch run has succeeded end to end
+# and someone has looked at the site — not before, because a red auto-deploy on
+# main is discovered by whoever next visits it.
+#
+# THE FIRST RUN DOES NOT TOUCH VISITORS. It publishes to the Static Web App's
+# own calm-ground-0d0e6a010.7.azurestaticapps.net hostname, which is the §6
+# step 2 preview host. DNS still points at Firebase and does not move until §6
+# step 5, so this is safe to run while Firebase is live — and running the two
+# in parallel on that hostname is the point of step 2.
+#
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - 'frontend/**'
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
   workflow_dispatch:
 
 permissions:
@@ -12,7 +26,6 @@ permissions:
 
 jobs:
   build-and-deploy:
-    if: ${{ false }}
     name: Build and Deploy to Azure Static Web Apps
     runs-on: ubuntu-latest
     defaults:
