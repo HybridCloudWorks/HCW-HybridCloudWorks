@@ -24,9 +24,9 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 8 |
+| Open items | 9 |
 | Critical | 0 |
-| High | 1 |
+| High | 2 |
 | Medium | 4 |
 | Low | 3 |
 
@@ -113,6 +113,75 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
 ---
 
 ## MEDIUM
+
+### T-515 — Pre-rendering was never ported; the site ships as a bare SPA shell
+**Files:** `frontend/vite.config.js` · `frontend/package.json` · Site-Main `vike.config.*`, `scripts/finalize-dynamic-shell.mjs`
+
+Found 2026-08-22 on the first parallel-run comparison, which is exactly what §6
+step 2 exists to catch.
+
+**Site-Main builds with Vike. This repository builds with plain Vite.**
+
+```
+Site-Main   "build": "vike build && node scripts/finalize-dynamic-shell.mjs"
+here        "build": "vite build"
+```
+
+Vike is an SSR/SSG framework; `vite build` is a single-entry SPA bundle. Nothing
+in `vite.config.js` pre-renders — its only plugin is `react()`, and there is one
+HTML entry point. The port dropped the rendering strategy and nobody noticed,
+because a SPA build succeeds, every unit test passes, and the site works when
+you click through it.
+
+**Measured, same path, both sites:**
+
+| | live Firebase | Azure preview |
+| --- | --- | --- |
+| `/about` | 24,902 bytes | 2,808 bytes |
+| `<title>` | `About Saul Patino \| Hybrid Cloud Works` | `Hybrid Cloud Works` |
+| visible text in HTML | 2,717 chars | 967 chars |
+| HTML documents in `dist` | — | **3** (`index.html` + two static copies from `public/`) |
+
+**Migration_Plan §7 states a gate this build cannot pass.** It lists
+`npm run build  # 90 HTML documents pre-rendered` under *"this repository's
+baseline"*. It is 3, and it has presumably always been 3 — that line describes
+Site-Main's build, attributed to this one. §7 also warns *"this repo has broken
+pre-rendered output three times with every unit test passing"*, which is the
+same confusion: that history belongs upstream.
+
+**Why it matters more than it looks.** This is a content platform whose purpose
+is being found. Every article, framework and architecture page currently serves
+a generic title and an empty shell to anything that does not execute JavaScript
+— which includes most link unfurlers, several crawlers, and every social preview
+card. The pages render correctly in a browser, so nothing about clicking through
+the site reveals it.
+
+**Also different, and cheaper to settle:** the live site redirects `/about` to
+`/about/`; `staticwebapp.config.json` sets `"trailingSlash": "never"`. Every
+existing inbound link and every indexed URL uses the trailing form. Decide
+deliberately rather than by omission.
+
+**Not a regression, but worth recording while here:** unknown URLs return **200**
+on both sites. §3.4 changed `responseOverrides.404.statusCode` to `404` and that
+change is live and correct — but `navigationFallback` matches unmatched routes
+first, so the override never fires. The one-line fix §3.4 prescribes does not
+achieve what §3.4 wanted, and a hard 404 needs the router to know which routes
+are real, which is a pre-rendering question. Same root.
+
+**Options, and this is a decision, not a task:**
+
+1. **Port Vike.** Restores parity, closes §7's gate, fixes the 404 as a side
+   effect. It is a build-system change, not a copy — and Vike's routing model
+   would have to be reconciled with this repo's `react-router` setup.
+2. **A pre-render step over the existing SPA.** Cheaper, no framework change,
+   produces real HTML per route. Wants a route manifest, which
+   `scripts/validate-routes.js` may already imply.
+3. **Ship the SPA and accept it.** Defensible only if search traffic does not
+   matter, which for this site it plainly does.
+
+**Cutover impact:** does not block the parallel run or the delta import. It does
+mean **DNS should not move until this is decided** — moving it swaps a
+pre-rendered site for a shell at every indexed URL simultaneously.
 
 ### T-321 — Finish the post-rebuild re-pointing
 **Files:** Key Vault `kv-site-prod-cus-01`

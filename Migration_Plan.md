@@ -680,7 +680,7 @@ Reuse what exists. This repository's baseline is:
 cd functions && npx vitest run   # 822 pass / 50 files
 cd frontend  && npx vitest run src/   # 105 pass / 14 files
 cd frontend  && npx eslint src        # 0 errors
-npm run build                         # 90 HTML documents pre-rendered
+npm run build                         # 3 HTML documents — NOT 90; see T-515
 ```
 
 Infrastructure has its own gates, all currently green: `terraform fmt -check`,
