@@ -246,68 +246,67 @@ Each new frontend test file has to be added by hand or CI silently does not run
 it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
 
-### T-513 — `CORS_ALLOWED_ORIGINS` is set correctly and the app ignores it
-**Files:** `functions/src/lib/auth/http-route.js` (`parseExtraOrigins`) · `functions/src/lib/auth/cors.js`
+### T-513 — the worker holds `[]` for `CORS_ALLOWED_ORIGINS` while ARM holds the real value
+**Files:** `functions/src/lib/auth/http-route.js` (`parseExtraOrigins`) · `infra/main.tf` (the azapi strip)
 
-On 2026-08-22 `cors_extra_origins` was applied, ARM held
-`CORS_ALLOWED_ORIGINS = "https://calm-ground-0d0e6a010.7.azurestaticapps.net"`,
-and the running app refused that origin on every route.
-
-**Ruled out, each with evidence:**
-
-| Candidate | Evidence against |
-| --- | --- |
-| The code | `parseExtraOrigins()` + `createCors()` return `true` for that exact value locally |
-| The stored value | 51 characters, hexdumped, no whitespace or BOM, one key, exact match |
-| Cloudflare caching | `cf-cache-status: DYNAMIC`; the *same* URL returns 200 for one origin and 403 for another |
-| A stale worker | `/api/health` `startedAt` moved to 06:19:17 after the write; still refused |
-| Route-specific behaviour | `health`, `public/content`, `public/podcasts` all refuse it identically |
-| A different app behind the DNS | `telegram/webhook` — deployed minutes earlier — answers through the same hostname |
-| App settings not reaching the worker at all | `telegram/webhook` returns **401 not 404**, which requires `TELEGRAM_BOT_TOKEN` to be readable from `process.env` in that worker |
-
-That last row is what makes this strange: app settings *do* reach the worker,
-but this one apparently does not. Written four ways — Terraform via azurerm,
-Terraform via the azapi strip, and twice with
-`az functionapp config appsettings set` — with a restart, a stop/start and
-three deploys between attempts.
-
-**Unblocked, not fixed.** The preview origin is now compiled into
-`PREVIEW_ORIGINS` in `cors.js`, which works and is the better home for a
-security control anyway. This item is the unexplained platform behaviour, and
-it matters beyond CORS: **if a newly added app setting can silently fail to
-reach the worker, `enabled_timers` has the same exposure** — arming a timer
-would appear to do nothing. Verify that explicitly at §6 step 7 rather than
-assuming, by watching for the invocation and not just the applied setting.
-
-**CONFIRMED from outside, 2026-08-22.** The setting was left holding two
-origins — `https://calm-ground-…,https://probe.invalid` — of which only the
-first is compiled into `PREVIEW_ORIGINS`:
+**The diagnostic answered it, 2026-08-22T09:31Z.** Two fresh workers, different
+`HostInstanceId`, ProcessId 44 and 45, both reported:
 
 ```
-probe.invalid   -> 403   (present ONLY in the app setting)
-calm-ground-…   -> 200   (compiled into cors.js)
-evil.example    -> 403
+[cors] allowlist built: 1 extra origin(s) ["[]"]; CORS_ALLOWED_ORIGINS is "[]" (2 chars)
 ```
 
-So the app setting is definitively not reaching the allowlist, while
-`TELEGRAM_BOT_TOKEN` in the same worker reads fine. That is the whole finding:
-it is not a parsing quirk of one value, it is that this setting does not arrive.
+So it is **not** `UNSET in this process` and **not** an empty string. The
+worker's `process.env.CORS_ALLOWED_ORIGINS` is the literal two-character string
+`[]`. `parseExtraOrigins` splits it on comma and yields one "origin" called
+`[]`, which cannot match anything — which is exactly the observed behaviour.
 
-**The diagnostic was also broken**, which is why this took so long. The `[cors]`
-line added in PR #156 used `console.log`, and in the Node v4 model only
-`context.log` reaches Application Insights — it surfaces under
-`Function.<name>.User`, forwarded by the host over the invocation channel.
-`console.log` outside an invocation has no route. Now written from the handler
-with a context in hand. Hit any route on a warm worker and read:
+**ARM has never held that value.** All 58 app settings were checked: not one is
+`[]`, `{}`, empty or null. `siteConfig.appSettings` is null, so there is no
+second copy on the site resource. The current ARM value is
+`https://calm-ground-…,https://probe.invalid`.
 
-```
-AppTraces | where Message has '[cors]' | order by TimeGenerated desc | take 1
-```
+**Nothing in the repository can produce `[]` either.** `infra/main.tf:1065` is
+`join(",", var.cors_extra_origins)` and has been since it was introduced in
+#154 — `join(",", [])` is `""`, never `"[]"`. The Terraform plan for the 05:55Z
+apply printed the correct value:
+`+ "CORS_ALLOWED_ORIGINS" = "https://calm-ground-…"`.
 
-It reports whether `CORS_ALLOWED_ORIGINS` was `UNSET in this process` or
-present-and-parsed, which separates every remaining hypothesis in one query.
-Query the **workspace** directly, not `az monitor app-insights query` — see the
-tooling note in T-514.
+**So a fresh worker's environment diverges from ARM for this one key**, while
+`TELEGRAM_BOT_TOKEN` in the same worker reads fine — proven independently,
+because `/api/telegram/webhook` answers 401 rather than 404 and that path
+requires the token to be readable from `process.env`.
+
+`[]` is the string form of an empty list, and the only empty list in this
+system is `var.cors_extra_origins`'s own `default = []`. Something is rendering
+that default rather than the workspace value, and delivering it to the worker
+in preference to what ARM holds.
+
+**Prime suspect: the azapi app-settings rewrite added for T-511.** It is the
+newest thing that rewrites the *entire* settings collection on every apply
+(`azapi_update_resource.function_app_settings_without_webjobs_storage`), it
+round-trips every value through azapi's dynamic decoding, and **both T-513 and
+T-514 first appeared after it started running.** That is circumstantial, not
+proof, and it should not be assumed.
+
+**Next step needs a decision, because every remaining test is a write.** The
+read-only surface is exhausted — ARM, the site resource, the workspace, the
+plan and the repository have all been checked. Options, cheapest first:
+
+1. Set `CORS_ALLOWED_ORIGINS` directly with `az` to a distinctive value, deploy,
+   and read the diagnostic. Separates "the worker ignores ARM" from "Terraform
+   or azapi writes something ARM does not show".
+2. Comment out the azapi pair for one apply and re-read. Tests the prime
+   suspect directly, at the cost of one apply where the keyless
+   `AzureWebJobsStorage` returns (T-511) — the deploy assertion will catch it.
+3. Add the presence-not-value sentinel (`RUNTIME_CONFIG_GENERATION`) so every
+   deployment stamps a generation the worker echoes back. This is the general
+   fix for the class and makes gate 2 of the cutover runbook real rather than
+   aspirational.
+
+**Not blocking anything.** The preview origin is compiled into `PREVIEW_ORIGINS`
+and behaves correctly: the SPA origin answers 200, `evil.example.com` and a
+lookalike `*.azurestaticapps.net` answer 403.
 
 ### T-514 — Telemetry died at the ingestion cap, and requests were never on
 **Files:** `functions/host.json` · workspace `log-plat-prod-cus-01`
