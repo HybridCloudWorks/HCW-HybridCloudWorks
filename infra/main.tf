@@ -667,6 +667,50 @@ resource "azurerm_storage_container" "function_releases" {
 #   - FUNCTIONS_WORKER_RUNTIME                    (replaced by runtime_name)
 #   - the platform `cors` block                   (see DECISION 7 below)
 # =============================================================================
+# ---------------------------------------------------------------------------
+# Timer feature flags — generated, so cutover flips a variable, not this file.
+# ---------------------------------------------------------------------------
+#
+# The catalogue is the authority on which timers exist. It must match the
+# `timer(name, FLAG, ...)` registrations in
+# functions/src/functions/schedulers.js plus platformJobSweeper in
+# jobs-sweeper.js — route-inventory.test.js asserts the timer set, so a timer
+# added there without a flag here ships disarmed and one removed there leaves a
+# dead setting behind.
+locals {
+  # Flag suffix => the function it arms. The comment is the whole point of the
+  # map: `SYNC_SOCIAL_CALENDAR` tells an operator nothing about what turning it
+  # on will start writing.
+  timer_catalogue = {
+    PUBLISH_SCHEDULED_CONTENT    = "publishScheduledContent — publishes content whose scheduledPublishDate is due"
+    SYNC_RSS_FEEDS               = "syncRssFeeds — RSS ingest, every 2 hours"
+    FORGE_SCHEDULED              = "forgeScheduled — nightly content forge run"
+    MONITOR_PUBLISHING_PIPELINE  = "monitorPublishingPipeline — publishing watchdog, every 6 hours"
+    GENERATE_REVIEWER_DIGEST     = "generateReviewerDigest — daily 07:00 reviewer digest e-mail"
+    CHECK_LIVE_LINKS             = "checkLiveLinks — weekly Monday link check"
+    CLEANUP_REJECTED_CONTENT     = "cleanupRejectedContent — daily 04:00, deletes rejected documents"
+    CLEANUP_SOFT_DELETED_CONTENT = "cleanupSoftDeletedContent — every 4 hours, purges soft-deleted documents"
+    REVERIFY_CERTIFICATIONS      = "reVerifyCertifications — weekly Sunday certification re-verify"
+    SCRAPE_SKILLS_HUB_RSS        = "scrapeSkillsHubRss — weekly Friday Skills Hub scrape"
+    REFRESH_PLAUD_TOKEN          = "refreshPlaudToken — Plaud OAuth token refresh, every 12 hours"
+    CHECK_AGENT_HEALTH           = "checkAgentHealth — VPS agent heartbeat check, every 5 minutes"
+    FETCH_PODCAST_FEEDS          = "fetchPodcastFeeds — podcast ingest, every 2 hours"
+    FETCH_BLOG_LISTINGS          = "fetchBlogListings — Firecrawl blog listings, every 6 hours"
+    # D12: the live writer of social_posts. Turning this on before the cutover
+    # delta import means importing over rows this timer is actively rewriting.
+    SYNC_SOCIAL_CALENDAR = "syncSocialCalendarScheduled — Publer calendar sync, every 5 minutes. NOT before the delta import"
+    # T-302: both stay dry-run until their matching *_DELETE setting is true.
+    CLEANUP_TEMP_STORAGE       = "cleanupTempStorage — daily, deletes temp blobs (dry-run unless TEMP_STORAGE_CLEANUP_DELETE)"
+    CLEANUP_UNUSED_CERT_IMAGES = "cleanupUnusedCertImages — daily 05:00, deletes unused cert images (dry-run unless CERT_IMAGE_CLEANUP_DELETE)"
+    PLATFORM_JOB_SWEEPER       = "platformJobSweeper — re-enqueues jobs left queued by a failed output binding (T-322)"
+  }
+
+  timer_flags = {
+    for suffix, _description in local.timer_catalogue :
+    "FEATURE_FLAG_${suffix}" => contains(var.enabled_timers, suffix) ? "true" : "false"
+  }
+}
+
 resource "azurerm_function_app_flex_consumption" "hcw" {
   name                = var.function_app_name
   location            = azurerm_resource_group.app["web"].location
@@ -803,7 +847,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
   # even while it stays publicly reachable.
   webdeploy_publish_basic_authentication_enabled = false
 
-  app_settings = {
+  app_settings = merge({
     # ---------------------------------------------------------------------------
     # The Functions HOST's own storage — timers, singleton locks, SyncTriggers.
     #
@@ -990,34 +1034,36 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "FEATURE_FLAG_SCHEDULERS" = "false"
 
     # One flag per timer (functions/src/functions/schedulers.js, Migration_Plan
-    # §4.2). All implemented; each is turned on one at a time at cutover after
+    # §4.2). All implemented; each is turned on ONE AT A TIME at cutover after
     # being observed firing at the intended local time (§6 step 7).
-    "FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT"    = "false"
-    "FEATURE_FLAG_SYNC_RSS_FEEDS"               = "false"
-    "FEATURE_FLAG_FORGE_SCHEDULED"              = "false"
-    "FEATURE_FLAG_MONITOR_PUBLISHING_PIPELINE"  = "false"
-    "FEATURE_FLAG_GENERATE_REVIEWER_DIGEST"     = "false"
-    "FEATURE_FLAG_CHECK_LIVE_LINKS"             = "false"
-    "FEATURE_FLAG_CLEANUP_REJECTED_CONTENT"     = "false"
-    "FEATURE_FLAG_CLEANUP_SOFT_DELETED_CONTENT" = "false"
-    "FEATURE_FLAG_REVERIFY_CERTIFICATIONS"      = "false"
-    "FEATURE_FLAG_SCRAPE_SKILLS_HUB_RSS"        = "false"
-    "FEATURE_FLAG_REFRESH_PLAUD_TOKEN"          = "false"
-    "FEATURE_FLAG_CHECK_AGENT_HEALTH"           = "false"
-    "FEATURE_FLAG_FETCH_PODCAST_FEEDS"          = "false"
-    "FEATURE_FLAG_FETCH_BLOG_LISTINGS"          = "false"
-    # D12: the live writer of social_posts. Off until the cutover delta import.
-    "FEATURE_FLAG_SYNC_SOCIAL_CALENDAR" = "false"
+    #
+    # These are generated from `local.timer_flags` rather than written out here,
+    # so turning a timer on is a WORKSPACE VARIABLE edit — add its name to
+    # `enabled_timers` — and not a code change. Eighteen timers turned on one at
+    # a time would otherwise be eighteen pull requests during a cutover window,
+    # which is how a "one at a time, watch each one" procedure quietly becomes
+    # "turn them all on and see what breaks".
+    #
+    # The name in `enabled_timers` is the flag suffix, e.g. SYNC_RSS_FEEDS. An
+    # unrecognised name fails the plan (see the validation on the variable)
+    # rather than silently arming nothing, because a typo here is indisting-
+    # uishable from a timer that does not fire.
+    }, local.timer_flags, {
     # The two that delete blobs stay DRY-RUN even when their flag is on, until
-    # the matching *_DELETE setting is "true" (TODO.md T-302).
-    "FEATURE_FLAG_CLEANUP_TEMP_STORAGE"       = "false"
-    "FEATURE_FLAG_CLEANUP_UNUSED_CERT_IMAGES" = "false"
-    "TEMP_STORAGE_CLEANUP_DELETE"             = "false"
-    "CERT_IMAGE_CLEANUP_DELETE"               = "false"
-    # platformJobSweeper (jobs-sweeper.js): re-enqueues jobs left `queued` by a
-    # failed output binding. Turn on with the first real job traffic (T-322).
-    "FEATURE_FLAG_PLATFORM_JOB_SWEEPER" = "false"
-  }
+    # the matching *_DELETE setting is "true" (TODO.md T-302). Deliberately NOT
+    # part of enabled_timers: arming the timer and arming the deletion are two
+    # decisions, and conflating them is how a dry run becomes a data loss.
+    "TEMP_STORAGE_CLEANUP_DELETE" = "false"
+    "CERT_IMAGE_CLEANUP_DELETE"   = "false"
+
+    # Extra browser origins allowed to call the API, comma-separated, on top of
+    # the production allowlist compiled into lib/auth/cors.js
+    # (hybridcloudworks.com and www). Needed for §6 step 2: the site runs on the
+    # Static Web App's own *.azurestaticapps.net hostname before DNS moves, and
+    # that origin is not in the compiled list — so without this every API call
+    # from the parallel-running site fails CORS, which looks like a broken API.
+    "CORS_ALLOWED_ORIGINS" = join(",", var.cors_extra_origins)
+  })
 
   identity {
     type = "SystemAssigned"

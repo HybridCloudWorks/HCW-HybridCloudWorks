@@ -717,3 +717,62 @@ variable "tags" {
     dataClassification = "internal"
   }
 }
+
+# -----------------------------------------------------------------------------
+# Cutover switches
+# -----------------------------------------------------------------------------
+
+variable "enabled_timers" {
+  description = <<-EOT
+    Timers to arm, by flag suffix — e.g. ["SYNC_RSS_FEEDS"] sets
+    FEATURE_FLAG_SYNC_RSS_FEEDS = "true". Everything in
+    local.timer_catalogue that is not listed here is set to "false"
+    explicitly, so a timer is never merely absent.
+
+    Migration_Plan §6 step 7 turns these on ONE AT A TIME, each observed firing
+    once at the intended Chicago local time before the next is added. Set this
+    in the HCP Terraform workspace so a cutover flip is a variable edit and an
+    apply, not a pull request.
+
+    FEATURE_FLAG_SCHEDULERS is a separate master kill switch and is still
+    "false": it holds every timer off regardless of what is listed here, so
+    arming the first timer means setting BOTH.
+  EOT
+  type        = set(string)
+  default     = []
+
+  validation {
+    # A typo here is indistinguishable from a timer that does not fire, which
+    # is the single most expensive way to be wrong during a cutover window.
+    condition = alltrue([
+      for name in var.enabled_timers : contains([
+        "PUBLISH_SCHEDULED_CONTENT", "SYNC_RSS_FEEDS", "FORGE_SCHEDULED",
+        "MONITOR_PUBLISHING_PIPELINE", "GENERATE_REVIEWER_DIGEST", "CHECK_LIVE_LINKS",
+        "CLEANUP_REJECTED_CONTENT", "CLEANUP_SOFT_DELETED_CONTENT",
+        "REVERIFY_CERTIFICATIONS", "SCRAPE_SKILLS_HUB_RSS", "REFRESH_PLAUD_TOKEN",
+        "CHECK_AGENT_HEALTH", "FETCH_PODCAST_FEEDS", "FETCH_BLOG_LISTINGS",
+        "SYNC_SOCIAL_CALENDAR", "CLEANUP_TEMP_STORAGE", "CLEANUP_UNUSED_CERT_IMAGES",
+        "PLATFORM_JOB_SWEEPER",
+      ], name)
+    ])
+    error_message = "enabled_timers accepts only flag suffixes from local.timer_catalogue in main.tf, e.g. SYNC_RSS_FEEDS — not the function name, and not the full FEATURE_FLAG_ prefix."
+  }
+}
+
+variable "cors_extra_origins" {
+  description = <<-EOT
+    Browser origins allowed to call the API on top of the production allowlist
+    compiled into functions/src/lib/auth/cors.js (hybridcloudworks.com and www).
+
+    Needed for Migration_Plan §6 step 2, where the site runs on the Static Web
+    App's own *.azurestaticapps.net hostname before DNS moves. That origin is
+    not in the compiled list, so without it every API call from the
+    parallel-running site fails CORS — which presents as a broken API, not as a
+    missing allowlist entry.
+
+    Empty it again once DNS has moved and the preview hostname is no longer
+    serving anyone.
+  EOT
+  type        = list(string)
+  default     = []
+}

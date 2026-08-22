@@ -7,6 +7,7 @@
 - [ADR register](Architecture-Decision-Records)
 - [Migration inventory](Migration-Inventory)
 - [Migration runbook](Migration-Runbook)
+- [Cutover runbook](Cutover-Runbook)
 - [Deployment runbook](Deployment-Runbook)
 - [IaC repository standard](IaC-Repository-Standard)
 - [Naming convention](Naming-Convention)
