@@ -24,11 +24,11 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 7 |
+| Open items | 8 |
 | Critical | 0 |
 | High | 0 |
 | Medium | 4 |
-| Low | 3 |
+| Low | 4 |
 
 ## Where we left off — 2026-08-21
 
@@ -245,6 +245,32 @@ inline; the visitor sees nothing change. And never: `lib/data/*` (37) and
 Each new frontend test file has to be added by hand or CI silently does not run
 it — the failure mode where a test exists, passes locally, and gates nothing.
 Everything else that was under this item is complete and recorded in CHANGELOG.
+
+### T-512 — The Telegram inbound bot was never ported, and §6 assumed it was
+**Files:** `functions/src/lib/notify.js` (outbound only) · Site-Main `functions/telegram/*`
+
+Found 2026-08-22 while writing the cutover runbook. Migration_Plan §6 step 6
+said to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`. **There is
+nothing to point the webhook at.** `notify.js` only *sends* messages; no HTTP
+route accepts a Telegram update — checked against the deployed route table, not
+just the source. The inbound bot is simply absent, and unlike Cloud Tools
+(T-410) or Listen & Learn (T-411) it is not recorded anywhere as a deliberate
+demotion, so nobody decided this.
+
+It matters at GCP decommission, not before: Telegram is still POSTing updates to
+a Cloud Function that is about to stop existing. Nothing breaks until it does,
+which is exactly why this will be missed.
+
+**Decide, then do one of:**
+
+- **Retire it** — `deleteWebhook` against the bot, and say so in the plan.
+  Outbound alerts keep working; `/`-commands stop. Five minutes.
+- **Port the receiver** — a scoped project: the update handler, the
+  `sha256(TELEGRAM_BOT_TOKEN)` secret-token check, and whatever commands are
+  worth keeping. Not a cutover step.
+
+Outbound notification is unaffected either way — `TELEGRAM-BOT-TOKEN` and
+`TELEGRAM-CHAT-ID` are already in Key Vault and `notify.js` reads them directly.
 
 ### T-511 — `azurerm` re-injects the keyless `AzureWebJobsStorage` on every apply
 **Files:** `infra/main.tf` (azapi pair) · `infra/providers.tf` · `.github/workflows/deploy-functions.yml`

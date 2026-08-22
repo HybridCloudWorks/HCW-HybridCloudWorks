@@ -1,0 +1,247 @@
+# Cutover runbook — Migration_Plan §6
+
+Ordered. Each step says **who** runs it and **how you know it worked**. Nothing
+here is reversible by itself except step 3c (DNS), which is the rollback.
+
+Read [Migration_Plan.md §6](../../Migration_Plan.md) for the reasoning; this
+file is the mechanics.
+
+> **State when this was written (2026-08-22).** 96 functions deployed and
+> serving, production data imported (8,023 documents / 62 containers, 1,438
+> blobs), API live at `api-azure.hybridcloudworks.com` behind Cloudflare with
+> the origin locked. The Static Web App exists and serves Azure's placeholder.
+> Firebase is still live and still serving visitors.
+
+---
+
+## Step 1 — Entra sign-in
+
+**Already done, verified against the live tenant:** the `HCWSite API`
+registration (`ac696e96-e203-47be-ade8-c35ece8a6c4a`) exposes `access_as_admin`
+and carries the `Admin` and `LabAgent` app roles. The three build variables are
+set in the repository:
+
+| Variable | Value |
+| --- | --- |
+| `VITE_ENTRA_CLIENT_ID` | `ac696e96-e203-47be-ade8-c35ece8a6c4a` |
+| `VITE_ENTRA_TENANT_ID` | `1a2fce27-b5f6-43c7-a86e-cf0bb74d4672` |
+| `VITE_ENTRA_API_SCOPE` | `api://ac696e96-e203-47be-ade8-c35ece8a6c4a/access_as_admin` |
+
+**You run:**
+
+```powershell
+./scripts/cutover/01-entra-spa.ps1 -WhatIf     # look first
+./scripts/cutover/01-entra-spa.ps1
+```
+
+Adds the SPA redirect URIs and assigns the `Admin` app role. It uses a SPA
+platform on the existing registration rather than a second one, so the SPA
+requests a scope on its own app — that consents automatically and removes the
+client-id/audience mismatch REVIEW §2.2 calls the highest-risk in the system.
+
+**Then, gate 2.** The role is only half the guard. `admins/{oid}` must also hold
+a row. Set `CMS_BOOTSTRAP_ALLOWED_EMAILS` on the Function App, sign in, and call
+`POST /api/bootstrapCurrentUserAdmin` once. A token with the `Admin` role and no
+registry row is still a 403.
+
+**Verified when:** `az ad app show --id ac696e96-... --query spa.redirectUris`
+lists four URIs, and an admin sign-in reaches the UI without a 401 on every call.
+
+---
+
+## Step 2 — Frontend deploy (this is §6 step 1, not a separate thing)
+
+**You run:**
+
+```powershell
+./scripts/cutover/02-swa-token.ps1
+```
+
+Reads the SWA deploy token and stores it as `AZURE_STATIC_WEB_APPS_API_TOKEN`.
+The repository currently holds **no secrets at all**, and any token recorded
+before the centralus rebuild is dead — the rebuild reissued it.
+
+**Then enable the workflow.** `deploy-azure-frontend.yml` is gated with
+`if: ${{ false }}`. Enabling it is a deliberate, reviewed change — REVIEW §2.4.
+Two edits:
+
+```diff
+-name: DISABLED - Prototype Frontend Deployment
++name: Deploy Frontend
+
+   build-and-deploy:
+-    if: ${{ false }}
+     name: Build and Deploy to Azure Static Web Apps
+```
+
+Then `gh workflow run "Deploy Frontend" --ref main`.
+
+**This is safe while Firebase is live.** The first run publishes to
+`calm-ground-0d0e6a010.7.azurestaticapps.net` — the §6 step 2 preview host. DNS
+does not move until step 3c.
+
+**One thing that must land first:** that origin is not in the CORS allowlist
+compiled into `functions/src/lib/auth/cors.js`, which only knows
+`hybridcloudworks.com` and `www`. Without it every API call from the
+parallel-running site fails CORS, and it presents as a broken API. Set the
+`cors_extra_origins` workspace variable and apply **before** the first frontend
+deploy:
+
+```
+cors_extra_origins = ["https://calm-ground-0d0e6a010.7.azurestaticapps.net"]
+```
+
+Empty it again after DNS moves.
+
+**Verified when:** the preview hostname serves the real site and the browser
+console shows no CORS failures.
+
+---
+
+## Step 3 — Secrets, domains, DNS
+
+### 3a. Key Vault (TODO.md T-321)
+
+**You run:**
+
+```powershell
+./scripts/cutover/03-keyvault-secrets.ps1 `
+    -GcpServiceAccountJsonPath .\gcp-sa.json `
+    -GitHubAppPrivateKeyPath   .\github-app.pem
+```
+
+Nineteen of twenty-one secrets are seeded; these two are not. Both are
+multi-line and both are read by `getSecret()` at runtime rather than through an
+app-setting reference, which is why the diff that checked the other nineteen
+missed them.
+
+The script seeds with `--file` (never `--value`, which folds newlines and stores
+something that parses as neither JSON nor PEM), opens a Key Vault firewall
+window for your IP, and always closes it — including on Ctrl-C. It reads both
+secrets back and re-parses them, because a mangled secret that stored
+successfully looks done and fails much later.
+
+`ANTHROPIC-API-KEY` is already set. The inspector, forge, digest, AI cover and
+alerts all no-op cleanly without their keys, so nothing here blocks the rest.
+
+### 3b. Custom domains on the Static Web App
+
+```powershell
+az staticwebapp hostname set -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus `
+    --hostname hybridcloudworks.com
+az staticwebapp hostname set -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus `
+    --hostname www.hybridcloudworks.com
+```
+
+Binding does **not** wait on DNS moving: Terraform already manages the `asuid`
+TXT record (`cloudflare_record.azure_swa_txt_validation`), which is the
+ownership proof.
+
+### 3c. Move DNS — the visitor-facing moment
+
+At Cloudflare, repoint the apex and `www` CNAMEs from the Firebase origin to
+`calm-ground-0d0e6a010.7.azurestaticapps.net`.
+
+**Lower the TTL at least 48 hours beforehand.** `api-azure.` does not move — it
+has been on Azure since Phase 2.
+
+**Rollback is DNS**, for as long as Firebase stays deployed. Do not decommission
+anything in GCP until Azure has run a full week including every scheduled job —
+the daily and weekly timers are exactly what a short soak misses.
+
+### 3d. Telegram — read this before doing anything
+
+Migration_Plan §6 step 6 says to rewrite `getTelegramWebhookUrl()` and re-run
+`setWebhook`. **That step cannot be executed as written.** There is no Telegram
+webhook receiver in this repository — `functions/src/lib/notify.js` only *sends*
+messages, and no HTTP route accepts a Telegram update. The inbound bot was never
+ported, and it is not recorded anywhere as a deliberate demotion.
+
+So this is a decision, not a task:
+
+- **Retire the inbound bot** — call `deleteWebhook` so Telegram stops POSTing at
+  a Cloud Function that is about to be decommissioned. Outbound alerts keep
+  working; bot commands are gone.
+- **Port the receiver** — a scoped project, not a cutover step.
+
+Either way, outbound notifications are unaffected: `TELEGRAM-BOT-TOKEN` and
+`TELEGRAM-CHAT-ID` are already in Key Vault and `notify.js` uses them directly.
+
+---
+
+## Step 4 — The delta import
+
+**Pause the live writers first.** Two things rewrite migrated containers every
+few minutes, and importing over them produces field mismatches that look like
+corruption (D12):
+
+1. Site-Main's `syncSocialCalendarScheduled` Publer sync — rewrites `social_posts`
+2. The VPS agent heartbeat (`labs/vps-agent/index.js`) — re-`set()`s `lab_agents`
+
+Keep `SYNC_SOCIAL_CALENDAR` **out of** `enabled_timers` until the import is done,
+or Azure becomes the third writer.
+
+**Gate, then import:**
+
+```bash
+gh workflow run migrate-data.yml -f mode=inventory-gate
+gh workflow run migrate-data.yml -f mode=rehearse -f target=production
+```
+
+The inventory gate must pass immediately before the import — a collection added
+upstream in between is exactly what it catches.
+
+**Verified when:** `reconciliation.summary.json` shows `failed: 0` on every
+container. `social_posts` and `lab_agents` mismatches mean a writer is still
+running.
+
+`migration_writer_enabled = true` is already on for this run. Flip it, plus
+`cosmos_scratch_enabled` and `storage_scratch_enabled`, off afterwards.
+
+---
+
+## Step 5 — Arm the timers, one at a time
+
+**Turning a timer on is a workspace variable edit, not a code change.** Add its
+flag suffix to `enabled_timers` in HCP Terraform and apply:
+
+```
+enabled_timers = ["SYNC_RSS_FEEDS"]
+```
+
+An unrecognised name fails the plan rather than silently arming nothing — a typo
+here is indistinguishable from a timer that does not fire.
+
+**`FEATURE_FLAG_SCHEDULERS` is a separate master kill switch** and is still
+`"false"`. It holds every timer off regardless of `enabled_timers`, so arming
+the first timer means setting **both**.
+
+**After each one:**
+
+```powershell
+./scripts/cutover/05-verify-timer.ps1 -Name syncRssFeeds
+```
+
+The gate is not "did it run". It is "did it run at the intended **Chicago**
+local time". A timer firing five hours early passes a naive "fired once" check
+and fails the real one; the script prints both zones so the comparison is
+against the local column.
+
+**Order matters for two of them:**
+
+- `SYNC_SOCIAL_CALENDAR` — not until after step 4, or Azure becomes a third
+  writer to `social_posts` mid-import.
+- `CLEANUP_TEMP_STORAGE` and `CLEANUP_UNUSED_CERT_IMAGES` stay **dry-run** even
+  when armed, until `TEMP_STORAGE_CLEANUP_DELETE` / `CERT_IMAGE_CLEANUP_DELETE`
+  are set. Arming the timer and arming the deletion are two decisions; conflating
+  them is how a dry run becomes data loss (T-302).
+
+---
+
+## Then watch
+
+24–48 hours before touching GCP, and a **full week including every scheduled
+job** before decommissioning anything. Firebase Storage stays warm the whole
+time: migrated documents still carry their original `imageUrl` / `storagePath`
+values until the re-pointing step in §5.7 runs, deliberately, so a rollback
+needs nothing rewritten.
