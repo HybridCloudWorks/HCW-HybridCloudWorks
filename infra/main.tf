@@ -1084,6 +1084,24 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # NOT timestamp(): that would change on every plan, propose a diff forever
     # and restart the host each apply. The generation must be an immutable
     # identifier supplied by whatever performed the deployment.
+    # Guard gate 2 — the admins/{oid} registry (REVIEW §2.2, lib/admin-identity.js).
+    # Gate 1 is the Entra `Admin` App Role; a token carrying it and no registry
+    # record is still a 403, which is the point: directory membership alone does
+    # not grant access to this application.
+    #
+    # This allowlist is consulted ONLY when the registry holds zero active
+    # admins — bootstrapCurrentUserAdmin checks that first and requires
+    # super_admin for every later call. So it is a first-admin escape hatch, not
+    # a standing grant, and FINDING-06 forbids an allow-any form of it.
+    #
+    # BOTH forms are set deliberately. The owner is a B2B guest whose UPN
+    # (spatino_hybridcloudworks.com#EXT#@...onmicrosoft.com) is not their mail
+    # address, and which of the two an Entra token carries in `email` /
+    # `preferred_username` is not worth guessing — the object id is unambiguous
+    # and the email costs nothing as a second chance.
+    "CMS_BOOTSTRAP_ALLOWED_UIDS"   = join(",", var.bootstrap_admin_oids)
+    "CMS_BOOTSTRAP_ALLOWED_EMAILS" = join(",", var.bootstrap_admin_emails)
+
     "RUNTIME_CONFIG_GENERATION" = var.config_generation
     "RUNTIME_CONFIG_WRITER"     = "azurerm"
   })

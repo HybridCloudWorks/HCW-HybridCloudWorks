@@ -800,3 +800,32 @@ variable "config_generation" {
   type        = string
   default     = "unset"
 }
+
+variable "bootstrap_admin_oids" {
+  description = <<-EOT
+    Entra object ids permitted to bootstrap the FIRST admin record
+    (CMS_BOOTSTRAP_ALLOWED_UIDS). Consulted only while the `admins` container
+    holds no active admin; every later role change requires super_admin.
+
+    Prefer object ids over e-mail addresses. A B2B guest's UPN is not their mail
+    address, and which of the two a token carries in `email` or
+    `preferred_username` varies — an object id does not.
+
+    It is an escape hatch that closes itself the moment a first admin exists.
+    Empty it once the registry is seeded if you would rather it not be there.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "bootstrap_admin_emails" {
+  description = <<-EOT
+    E-mail addresses permitted to bootstrap the first admin record
+    (CMS_BOOTSTRAP_ALLOWED_EMAILS). Matched case-insensitively against the
+    token's `email` or `preferred_username`.
+
+    A second chance alongside bootstrap_admin_oids, not a replacement for it.
+  EOT
+  type        = list(string)
+  default     = []
+}
