@@ -163,6 +163,26 @@ async function main() {
   const { render, routes } = await import(entryUrl);
 
   const template = readFileSync(join(dist, 'index.html'), 'utf8');
+
+  // The SPA fallback needs a shell of its own, and this is not optional.
+  //
+  // `staticwebapp.config.json` rewrites any request with no matching file to a
+  // single HTML document, which is how article pages work: /azure/blog/{slug}
+  // is not pre-rendered — the slugs are not known at build time — so it falls
+  // back and the SPA renders it.
+  //
+  // That fallback used to be dist/index.html, an empty shell. Pre-rendering
+  // turns dist/index.html into the fully rendered HOME PAGE, so every unknown
+  // URL would serve complete home-page content at HTTP 200 — the whole site's
+  // front page duplicated across unlimited addresses, which is worse for search
+  // than the shell it replaced. Measured on the preview host before this fix:
+  // /definitely-not-real returned 200 with the home page's title and body.
+  //
+  // So the pristine template is kept as its own file and the fallback points at
+  // it. Known routes get their pre-rendered document; anything else gets a shell
+  // that boots the SPA, exactly as before.
+  writeFileSync(join(dist, 'app-shell.html'), template);
+
   const targets = routes();
   const failures = [];
   const skipped = [];

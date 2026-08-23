@@ -1,6 +1,6 @@
 {
   "navigationFallback": {
-    "rewrite": "/index.html",
+    "rewrite": "/app-shell.html",
     "exclude": [
       "/assets/*.{js,css,map}",
       "/images/*.{png,jpg,jpeg,gif,svg,webp,ico}",
@@ -46,7 +46,7 @@
   ],
   "responseOverrides": {
     "404": {
-      "rewrite": "/index.html",
+      "rewrite": "/app-shell.html",
       "statusCode": 404
     }
   },

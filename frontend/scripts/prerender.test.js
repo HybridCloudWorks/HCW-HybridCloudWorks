@@ -9,7 +9,12 @@
  * would paper over the mistake.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { splitHead, injectIntoTemplate } from './prerender.mjs';
+// Imported rather than read from a path: under Vitest `import.meta.url` is a
+// Vite module id, not a file: URL, so fileURLToPath on it throws.
+import swaConfig from '../staticwebapp.config.json';
 
 const TEMPLATE = [
   '<!DOCTYPE html>',
@@ -110,5 +115,34 @@ describe('injectIntoTemplate', () => {
     expect(() =>
       injectIntoTemplate('<html><body></body></html>', { head: '', body: '<p>x</p>' })
     ).toThrow(/no <div id="root">/);
+  });
+});
+
+describe('the SPA fallback must not be a pre-rendered page', () => {
+  const config = swaConfig;
+
+  it('rewrites unmatched requests to the shell, not to index.html', () => {
+    // index.html is the pre-rendered HOME PAGE. Pointing the fallback at it
+    // serves the site's front page, in full, at HTTP 200, for every URL that
+    // does not match a file — every mistyped link and every unpublished slug.
+    // That is unbounded duplicate content, and it is worse than the empty shell
+    // it replaced. Measured on the preview host on 2026-08-23, before the fix:
+    // /definitely-not-real returned 200 with the home page's title and body.
+    expect(config.navigationFallback.rewrite).toBe('/app-shell.html');
+    expect(config.navigationFallback.rewrite).not.toBe('/index.html');
+  });
+
+  it('sends the 404 override to the shell too', () => {
+    expect(config.responseOverrides['404'].rewrite).toBe('/app-shell.html');
+    expect(config.responseOverrides['404'].statusCode).toBe(404);
+  });
+
+  it('names a file the pre-render step actually writes', () => {
+    // A rewrite target that does not exist is a 404 for every article page,
+    // which is the one thing the fallback exists to serve.
+    const target = config.navigationFallback.rewrite.replace(/^\//, '');
+    // vitest runs with the frontend package as cwd.
+    const source = readFileSync(join(process.cwd(), 'scripts', 'prerender.mjs'), 'utf8');
+    expect(source).toContain(`'${target}'`);
   });
 });
