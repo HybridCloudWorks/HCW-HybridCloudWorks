@@ -6,11 +6,27 @@ here is reversible by itself except step 3c (DNS), which is the rollback.
 Read [Migration_Plan.md §6](../../Migration_Plan.md) for the reasoning; this
 file is the mechanics.
 
-> **State when this was written (2026-08-22).** 96 functions deployed and
-> serving, production data imported (8,023 documents / 62 containers, 1,438
-> blobs), API live at `api-azure.hybridcloudworks.com` behind Cloudflare with
-> the origin locked. The Static Web App exists and serves Azure's placeholder.
-> Firebase is still live and still serving visitors.
+> **State — updated 2026-08-23.** Production data imported (8,023 documents /
+> 62 containers, 1,438 blobs); API live at `api-azure.hybridcloudworks.com`
+> behind Cloudflare with the origin locked. Firebase is still live and still
+> serving visitors, and DNS has not moved.
+>
+> The Static Web App **no longer serves Azure's placeholder** — the frontend
+> deployed to the preview host on 2026-08-23 (§6 step 1 done). It is reachable
+> at `calm-ground-0d0e6a010.7.azurestaticapps.net`.
+>
+> **Three deploys are pending, and all three must land before DNS moves:**
+>
+> | What | Why | Last deployed |
+> | --- | --- | --- |
+> | `terraform apply` | Adds `GEMINI_API_KEY`. Expect **2 add / 1 change / 2 destroy** — the two azapi resources are the T-511 strip pair and are replaced on every settings change. | — |
+> | `deploy-functions` | Adds the `cms/ai-features` route (T-516). Expect **98 functions**, verified by counting registrations on `main`. | 2026-08-22 17:00, commit `a93029d` — predates T-516 |
+> | `deploy-azure-frontend` | The deployed site is still the **bare SPA shell**; pre-rendering (T-515) landed after it. Expect the payload check to report **82 HTML documents**. | 2026-08-23 02:17, commit `ca596dc` — predates T-515 |
+>
+> Until the frontend is redeployed, the preview host serves a shell: generic
+> `<title>`, no content for crawlers. Moving DNS in that state would swap a
+> pre-rendered Firebase site for a shell at every indexed URL at once, which is
+> exactly what T-515 warned about.
 
 ---
 
