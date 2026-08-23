@@ -74,9 +74,32 @@ function clearAuthFragment() {
  * than sniffing a user-agent string, so it does not rot as browsers change
  * their UA.
  */
+/**
+ * Redirect is the default. Popup is opt-in and, right now, nothing opts in.
+ *
+ * This used to return true only for `pointer: coarse`, on the theory that
+ * popups fail on phones and work on desktops. The second half is not true here.
+ *
+ * Observed on Edge/Windows against www.hybridcloudworks.com on 2026-08-23:
+ * `loginPopup()` opened a TOP-LEVEL WINDOW rather than a child popup. Entra
+ * authenticated, the code came back to the redirect URI, and the opener sat
+ * waiting on a window handle it no longer had. After #196 taught the root page
+ * to consume the fragment, the token was written to localStorage — where the
+ * opener could have read it — and the opener still waited, because nothing
+ * tells `loginPopup()` that its promise has been settled elsewhere.
+ *
+ * That is not a bug to work around with cross-window messaging. The popup flow
+ * has one failure mode that no amount of care on our side removes: the browser
+ * decides what `window.open` produces, and if it produces a top-level window
+ * the handshake is gone.
+ *
+ * Redirect has no handshake. One window navigates to Entra, comes back with the
+ * code, `handleRedirectPromise()` consumes it, and MSAL returns the user to the
+ * page they started from. The cost is losing in-page state across the
+ * navigation, which for a sign-in on an admin route is nothing.
+ */
 function prefersRedirect() {
-  if (typeof window === 'undefined') return false;
-  return window.matchMedia?.('(pointer: coarse)')?.matches === true;
+  return true;
 }
 
 /**
@@ -185,7 +208,12 @@ export function onAuthStateChanged(callback) {
   };
 }
 
-/** Popup first; redirect when the popup is blocked or fails to open. */
+/**
+ * Redirect flow. The popup branch below is retained but unreachable while
+ * `prefersRedirect()` returns true — see the reasoning there. It is kept rather
+ * than deleted because the choice is a deployment observation, not a law, and
+ * the fallback chain it contains is the thing that would have to be rebuilt.
+ */
 export async function signIn() {
   await initializeAuth();
   const msal = getMsalInstance();

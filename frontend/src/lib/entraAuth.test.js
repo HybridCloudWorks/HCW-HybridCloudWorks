@@ -185,7 +185,7 @@ describe('initializeAuth — a failure must not be memoised', () => {
   });
 });
 
-describe('signIn — popup is the wrong default on a phone', () => {
+describe('signIn — redirect is the only flow that cannot lose its handshake', () => {
   it('goes straight to redirect on a touch device', async () => {
     // loginPopup on mobile opens a new TAB, and a new tab does not share the
     // request state the response is matched against. The response then lands
@@ -200,24 +200,34 @@ describe('signIn — popup is the wrong default on a phone', () => {
     expect(mocks.loginPopup).not.toHaveBeenCalled();
   });
 
-  it('still prefers popup with a mouse, where it works and is less disruptive', async () => {
+  it('uses redirect with a mouse too — popup is not reliable here either', async () => {
+    // This asserted the opposite until 2026-08-23, on the theory that popups
+    // fail on phones and work on desktops. Edge on Windows opened a TOP-LEVEL
+    // window for loginPopup() against www.hybridcloudworks.com: Entra
+    // authenticated, the code returned, and the opener waited forever on a
+    // handle it no longer had. The browser decides what window.open produces,
+    // and when it produces a top-level window there is no handshake left to
+    // rescue. Redirect has no handshake to lose.
     setPointer('fine');
     const { signIn } = await freshModule();
 
-    const user = await signIn();
+    await signIn();
 
-    expect(mocks.loginPopup).toHaveBeenCalledTimes(1);
-    expect(mocks.loginRedirect).not.toHaveBeenCalled();
-    expect(user).toMatchObject({ uid: 'oid-1' });
+    expect(mocks.loginRedirect).toHaveBeenCalledTimes(1);
+    expect(mocks.loginPopup).not.toHaveBeenCalled();
   });
 
-  it('falls back to redirect when a popup is blocked', async () => {
+  it('reaches redirect regardless of what the popup would have done', async () => {
+    // The popup fallback chain is retained in signIn but unreachable. Kept
+    // rather than deleted: the choice is a deployment observation, not a law,
+    // and the fallback is the part that would have to be rebuilt.
     setPointer('fine');
     mocks.loginPopup.mockRejectedValue({ errorCode: 'popup_window_error' });
     const { signIn } = await freshModule();
 
     await signIn();
     expect(mocks.loginRedirect).toHaveBeenCalledTimes(1);
+    expect(mocks.loginPopup).not.toHaveBeenCalled();
   });
 });
 
