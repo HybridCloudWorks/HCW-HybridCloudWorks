@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useBlogData } from '@/hooks/useBlogData';
 import { Skeleton } from '@/components/performance/Skeleton';
 import { resolveMediaUrl } from '../../lib/functionsBase';

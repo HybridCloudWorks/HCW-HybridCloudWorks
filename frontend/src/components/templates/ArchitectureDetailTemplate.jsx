@@ -4,7 +4,7 @@ import RichTextBody from '@/components/shared/RichTextBody';
 // Lazy: WafAssessment pulls chart.js (vendor-charts) via FrameworkRadar.
 const WafAssessment = React.lazy(() => import('@/components/architecture/WafAssessment'));
 import { Helmet } from 'react-helmet-async';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentItem } from '@/lib/publicApi';
 import { Button } from '@/components/ui/button';

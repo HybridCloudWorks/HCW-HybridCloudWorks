@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ExternalLink, Search, Trash2 } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { usePublicData } from '@/hooks/usePublicData';

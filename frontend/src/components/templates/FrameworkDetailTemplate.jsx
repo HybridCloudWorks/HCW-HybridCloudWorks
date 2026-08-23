@@ -2,7 +2,7 @@
 import React, { lazy, Suspense } from 'react';
 import RichTextBody from '@/components/shared/RichTextBody';
 import { Helmet } from 'react-helmet-async';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentItem } from '@/lib/publicApi';
 import { Button } from '@/components/ui/button';

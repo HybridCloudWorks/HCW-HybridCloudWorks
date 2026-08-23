@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { getPublishTargetForItem } from '@/lib/contentModel';
 import { usePublicData } from '@/hooks/usePublicData';
 import { getJSON } from '@/lib/api';

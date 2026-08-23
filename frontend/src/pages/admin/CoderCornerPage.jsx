@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';

@@ -2,7 +2,7 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { StaggerList } from '@/components/animations';
 import { AccessibleButton } from '@/components/accessibility';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import FeaturedArchitecture from '@/components/architecture/FeaturedArchitecture';

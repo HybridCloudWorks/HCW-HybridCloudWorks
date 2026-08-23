@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';

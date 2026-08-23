@@ -6,7 +6,7 @@ import {
   Navigate,
   useLocation,
   useParams,
-} from 'react-router-dom';
+} from 'react-router';
 import ScrollToTop from '@/components/shared/ScrollToTop';
 import Header from '@/components/shared/Header';
 import Footer from '@/components/shared/Footer';
