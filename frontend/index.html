@@ -27,7 +27,14 @@
     -->
     <script src="/theme-init.js"></script>
 
-    <link rel="canonical" href="https://hybridcloudworks.com" />
+    <!--
+      NO CANONICAL HERE. It used to be hardcoded to the home page, and every
+      pre-rendered route inherited it — each page telling crawlers it was a
+      duplicate of "/". scripts/prerender.mjs now injects a route-specific
+      canonical per page. This file is also the SPA fallback shell served for
+      routes that are not pre-rendered, and a shell must not claim to be the
+      home page either.
+    -->
 
     <!-- Resource hints: establish connections to critical origins before they are needed -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
