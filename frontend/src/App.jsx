@@ -12,6 +12,7 @@ import Header from '@/components/shared/Header';
 import Footer from '@/components/shared/Footer';
 import { VALID_PROVIDERS, ProviderLayout } from '@/context/ProviderContext';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { useAuthRedirectLanding } from '@/hooks/useAuthRedirectLanding';
 
 const lazyPage = (loader) => lazy(loader);
 
@@ -217,6 +218,9 @@ class RouteErrorBoundary extends React.Component {
 
 function App() {
   const location = useLocation();
+  // A sign-in that lands on `/` has to be finishable from `/`. The redirect URI
+  // is the origin, and nothing at the origin used to touch MSAL — see the hook.
+  useAuthRedirectLanding();
   const [, firstSegment] = location.pathname.split('/');
   const provider = VALID_PROVIDERS.includes(firstSegment) ? firstSegment : null;
   const isAdminRoute = firstSegment === 'admin';
