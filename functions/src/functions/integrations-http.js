@@ -40,11 +40,28 @@ const KLAVIYO = createIntegration({
   }),
 });
 
+// Base URL and allowlist taken from Site-Main's working proxy
+// (functions/cms/proxies.js), not inferred. The first version of this file
+// guessed `https://api.linkie.bio` from the env-var name and was wrong: the API
+// is served from the app host under a version prefix. Overridable because
+// Site-Main found the published docs Cloudflare-gated from non-browser clients,
+// so the endpoint may have to be corrected without a code change.
+//
+// Linkie is the one integration here with an allowlist. Its admin page calls a
+// small known set, and the key's scopes (profiles read+write, analytics read,
+// posts read+write) are broader than any single screen needs — so naming the
+// endpoints is worth more than trusting the caller.
 const LINKIE = createIntegration({
   name: 'Linkie',
-  baseUrl: 'https://api.linkie.bio',
+  baseUrl: process.env.LINKIE_API_BASE_URL || 'https://app.linkie.bio/api/v1',
   keyEnv: 'LINKIE_API_KEY',
   headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+  allowedPaths: {
+    paths: ['/profiles', '/analytics/traffic-stats'],
+    // Posts are profile-scoped: Linkie has no top-level /links or /analytics
+    // endpoint, which is the detail an inferred base URL would have missed too.
+    patterns: [/^\/profiles\/[^/]+\/posts$/, /^\/profiles\/[^/]+\/posts\/[^/]+$/],
+  },
 });
 
 for (const [name, integration] of [

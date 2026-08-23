@@ -80,8 +80,30 @@ export function assertSafePath(path) {
  * than repeated — `lib/timers/publer-sync.js` has been calling this API since
  * the port and is the one place that already knows the answer.
  */
-export function createIntegration({ name, baseUrl, keyEnv, headers, extraEnv = [] }) {
-  return { name, baseUrl, keyEnv, headers, extraEnv };
+export function createIntegration({ name, baseUrl, keyEnv, headers, extraEnv = [], allowedPaths = null }) {
+  return { name, baseUrl, keyEnv, headers, extraEnv, allowedPaths };
+}
+
+/**
+ * Optional per-integration ALLOWLIST, on top of assertSafePath.
+ *
+ * assertSafePath is a denylist: it rejects shapes that could redirect the
+ * credential somewhere else. An allowlist is strictly stronger — it names the
+ * handful of endpoints the admin UI actually calls and refuses everything
+ * else, so a caller cannot reach an unrelated part of the upstream API with a
+ * key that has broader scope than the page needs.
+ *
+ * Applied where the set of endpoints is small and known. Site-Main did exactly
+ * this for Linkie and not for Publer or Klaviyo, whose admin pages construct
+ * paths freely; narrowing those would break screens without an enumeration of
+ * every path they can build.
+ *
+ * @param {{paths?: string[], patterns?: RegExp[]}} allowed
+ */
+export function isAllowedPath(allowed, pathOnly) {
+  if (!allowed) return true;
+  if (allowed.paths?.includes(pathOnly)) return true;
+  return Boolean(allowed.patterns?.some((re) => re.test(pathOnly)));
 }
 
 /**
@@ -136,6 +158,19 @@ export function createRestProxy({ guard, env = process.env, fetch: fetchImpl = g
           path: String(body?.path ?? '').slice(0, 200),
         });
         return json(400, { ok: false, error: error.message });
+      }
+
+      // The allowlist is checked against the path WITHOUT its query string, so a
+      // query cannot be used to disguise an endpoint as an allowed one.
+      const pathOnly = path.split('?')[0];
+      if (!isAllowedPath(integration.allowedPaths, pathOnly)) {
+        context.error?.(`${integration.name}Proxy blocked a path outside the allowlist`, {
+          path: pathOnly.slice(0, 200),
+        });
+        return json(400, {
+          ok: false,
+          error: `${pathOnly} is not an allowed ${integration.name} endpoint`,
+        });
       }
 
       const options = {
