@@ -198,11 +198,19 @@ export function injectIntoTemplate(template, { head, body }, route = '/') {
   // either a wrong canonical or two competing ones — and Google's guidance for
   // JavaScript sites is explicit that the canonical in the served HTML must not
   // contradict the rendered one.
-  html = html.replace(/\s*<link[^>]*rel="canonical"[^>]*>/i, '');
+  html = html.replace(/\s*<link[^>]*rel="canonical"[^>]*>/gi, '');
 
   const title = /<title\b[^>]*>([^<]*)<\/title>/i.exec(head)?.[1] || '';
   const generated = socialTags(head, route, title);
-  const combined = [head, generated].filter(Boolean).join('\n    ');
+
+  // Detail templates set their own canonical via Helmet, so it arrives in
+  // `head` — correct in spirit, but the route decides the origin and the
+  // trailing-slash form and this step already knows both. Dropping it here and
+  // letting socialTags emit one keeps exactly one per document. Leaving it
+  // produced TWO on all 24 article pages, which is not a tie a crawler
+  // resolves the way anyone hopes.
+  const headWithoutCanonical = head.replace(/\s*<link[^>]*rel="canonical"[^>]*>/gi, '');
+  const combined = [headWithoutCanonical, generated].filter(Boolean).join('\n    ');
 
   if (combined) {
     html = html.replace(/<\/head>/i, `    ${combined}\n  </head>`);
@@ -227,9 +235,70 @@ export function injectIntoTemplate(template, { head, body }, route = '/') {
 }
 
 /** `/azure/blog` -> `dist/azure/blog/index.html`; `/` -> `dist/index.html`. */
+/**
+ * The data a route needs, keyed as `usePublicData` keys it.
+ *
+ * Only the entry for THIS route is handed over, not the whole manifest: a page
+ * that reads a key it was not given should fall through to its normal fetch,
+ * and passing everything would hide that.
+ */
+function seedFor(manifest, route) {
+  if (!manifest?.data) return null;
+  const slug = /\/blog\/([^/]+)$/.exec(route)?.[1];
+  if (!slug) return null;
+  const key = `article:${slug}`;
+  return Object.prototype.hasOwnProperty.call(manifest.data, key)
+    ? { [key]: manifest.data[key] }
+    : null;
+}
+
 function outputPathFor(dist, route) {
   const clean = route.replace(/^\/+|\/+$/g, '');
   return clean ? join(dist, clean, 'index.html') : join(dist, 'index.html');
+}
+
+/**
+ * Minimal browser globals for libraries that need a document at import time.
+ *
+ * Installing a window is not free. Before this, `typeof window === 'undefined'`
+ * was true and every SSR guard in the tree took its server path. Afterwards the
+ * guards pass and the code runs — so a HALF-built DOM is worse than none, and
+ * the first narrow version proved it: /azure/education had pre-rendered fine for
+ * days and immediately failed with "window.matchMedia is not a function".
+ *
+ * So the shim fills jsdom's own documented gaps rather than only DOMPurify's
+ * needs. `matchMedia` is absent from jsdom entirely, which is why a guard of the
+ * form `window.matchMedia && window.matchMedia(...)` behaves differently here
+ * than in any real browser.
+ */
+async function installDom() {
+  if (globalThis.window?.document) return;
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM('<!doctype html><html><body></body></html>');
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Node = dom.window.Node;
+  globalThis.Element = dom.window.Element;
+  globalThis.DocumentFragment = dom.window.DocumentFragment;
+  globalThis.HTMLTemplateElement = dom.window.HTMLTemplateElement;
+  globalThis.NodeFilter = dom.window.NodeFilter;
+  globalThis.trustedTypes = dom.window.trustedTypes;
+
+  // jsdom does not implement matchMedia. Reduced motion and dark mode both
+  // report false, which is the right default for a static file: it is served to
+  // everyone, so it must not bake in one visitor's preference.
+  if (!dom.window.matchMedia) {
+    dom.window.matchMedia = (query) => ({
+      matches: false,
+      media: String(query),
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    });
+  }
 }
 
 function buildSsrBundle(frontend) {
@@ -262,8 +331,37 @@ async function main() {
 
   buildSsrBundle(frontend);
 
+  // A DOM has to exist BEFORE the bundle is imported.
+  //
+  // Article pages sanitise their body with DOMPurify and feed the result to
+  // `dangerouslySetInnerHTML`. DOMPurify binds to a window at import time and
+  // exposes no `sanitize` without one, so under plain Node every detail route
+  // died with "I.sanitize is not a function" — which the pre-render step
+  // correctly refused to write, rather than shipping the error page.
+  //
+  // Skipping sanitisation here was never an option: the output is a static file
+  // served to every visitor, so unsanitised markup would be baked in permanently
+  // rather than merely rendered once.
+  //
+  // jsdom is already a devDependency — vitest uses it as the test environment —
+  // so this adds no package, and nothing here reaches the browser bundle.
+  await installDom();
+
   const entryUrl = pathToFileURL(join(ssrDist, 'prerender-entry.js')).href;
   const { render, routes } = await import(entryUrl);
+
+  // Build input, not site content — see build-content-manifest.mjs. Absent is
+  // fine and simply means no detail routes this build.
+  const manifestPath = join(frontend, 'data', 'content-manifest.json');
+  let manifest = null;
+  if (existsSync(manifestPath)) {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    console.log(
+      `[prerender] manifest: ${manifest.routes?.length || 0} article routes, generated ${manifest.generatedAt || 'unknown'}`
+    );
+  } else {
+    console.log('[prerender] no content manifest — article detail pages will not be pre-rendered');
+  }
 
   const template = readFileSync(join(dist, 'index.html'), 'utf8');
 
@@ -286,7 +384,7 @@ async function main() {
   // that boots the SPA, exactly as before.
   writeFileSync(join(dist, 'app-shell.html'), template);
 
-  const targets = routes();
+  const targets = routes(manifest);
   const failures = [];
   const skipped = [];
   const publishedRoutes = [];
@@ -296,7 +394,9 @@ async function main() {
   for (const route of targets) {
     let rendered;
     try {
-      rendered = await render(route);
+      // Only detail routes carry a seed; everything else renders from nothing,
+      // exactly as it did before the manifest existed.
+      rendered = await render(route, seedFor(manifest, route));
     } catch (error) {
       failures.push(`${route}: threw — ${error?.message || error}`);
       continue;

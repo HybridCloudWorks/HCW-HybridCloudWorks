@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usePrerenderedData } from './prerenderData';
 
 /**
  * Tiny data hook for the anonymous public API (lib/publicApi.js) — the
@@ -20,10 +21,20 @@ import { useEffect, useRef, useState } from 'react';
  */
 export function usePublicData(fetcher, key) {
   const normalizedKey = key || '';
+
+  // Pre-render only. Effects do not run during server rendering, so without a
+  // synchronous seed a pre-rendered detail page emits its skeleton and stops.
+  // In the browser no provider is mounted, this is always undefined, and every
+  // line below behaves exactly as it did before. See hooks/prerenderData.js.
+  const seeded = usePrerenderedData(normalizedKey);
+  const hasSeed = seeded !== undefined;
+
   const [state, setState] = useState({
     key: normalizedKey,
-    data: null,
-    loading: Boolean(normalizedKey),
+    data: hasSeed ? seeded : null,
+    // Seeded means resolved: rendering a spinner over data we already hold
+    // would put the skeleton into the pre-rendered HTML, which is the bug.
+    loading: hasSeed ? false : Boolean(normalizedKey),
     error: null,
   });
 
@@ -43,8 +54,19 @@ export function usePublicData(fetcher, key) {
     fetcherRef.current = fetcher;
   });
 
+  // Which key arrived pre-seeded, if any. A ref rather than a dependency: the
+  // first version of this put `state.data` in the dependency array below, so
+  // resolving a fetch re-ran the effect and fetched again — a double request on
+  // every public page, and exactly the re-fetch loop the `key` pattern above
+  // was designed to avoid.
+  const seededKeyRef = useRef(hasSeed ? normalizedKey : null);
+
   useEffect(() => {
     if (!normalizedKey) return undefined;
+    // Seeded for this exact key: the data is already on screen, so fetching it
+    // again on hydration would be a redundant request. Navigating to another
+    // key leaves the ref behind and the fetch runs normally.
+    if (seededKeyRef.current === normalizedKey) return undefined;
     let cancelled = false;
 
     fetcherRef

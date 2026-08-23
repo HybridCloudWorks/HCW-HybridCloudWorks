@@ -111,6 +111,14 @@ jobs:
           # was applied by the pre-render step — neither of which a React
           # component test looks at. Every page shipped a canonical pointing at
           # the home page, telling crawlers the whole site was one document.
+          # Every page, not a sample: the two-canonical bug appeared only on
+          # article detail routes, because those templates render one of their
+          # own — a sample of three landing pages would have missed all 24.
+          dupes=$(for f in $(find dist -name index.html); do
+            n=$(grep -c 'rel="canonical"' "$f" || true); [ "$n" -eq 1 ] || echo "$f:$n";
+          done)
+          [ -z "$dupes" ] || { echo "::error::pages without exactly one canonical:"; echo "$dupes"; exit 1; }
+
           for page in about azure/education contact; do
             f="dist/$page/index.html"
             n=$(grep -c 'rel="canonical"' "$f" || true)
