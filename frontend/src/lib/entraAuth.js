@@ -54,11 +54,7 @@ function clearAuthFragment() {
   if (typeof window === 'undefined' || !window.location?.hash) return;
   if (!/[#&](code|error|state|id_token|access_token)=/.test(window.location.hash)) return;
   try {
-    window.history.replaceState(
-      null,
-      '',
-      window.location.pathname + window.location.search
-    );
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
   } catch {
     // A browser that refuses replaceState is not worth failing sign-in over.
   }
