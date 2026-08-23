@@ -67,12 +67,32 @@ function apiBase() {
 async function fetchSnapshot(base, id) {
   const url = `${base}/public/snapshots/${encodeURIComponent(id)}`;
   const response = await fetch(url, {
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      // Named rather than left as the runtime default. Edge bot rules treat an
+      // absent or generic agent as suspicious, and a build that is refused by
+      // the edge should at least be identifiable in the logs that refused it.
+      'User-Agent': 'hcw-build-generate-public-data',
+    },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
   if (!response.ok) {
-    throw new Error(`GET ${url} -> HTTP ${response.status}`);
+    // The status alone is not enough to act on. A 403 from the application
+    // says "Origin not allowed" as JSON; a 403 from the edge is an HTML
+    // challenge page; a 403 from the origin lock is different again. Whoever
+    // reads this failure needs to know which, without redeploying to find out.
+    const body = await response.text().catch(() => '');
+    const server = response.headers.get('server') || 'unknown';
+    const ray = response.headers.get('cf-ray');
+    const snippet = body.replace(/\s+/g, ' ').trim().slice(0, 300);
+    throw new Error(
+      `GET ${url} -> HTTP ${response.status}
+` +
+        `  server: ${server}${ray ? `  cf-ray: ${ray}` : ''}
+` +
+        `  body:   ${snippet || '(empty)'}`
+    );
   }
 
   const body = await response.json();
