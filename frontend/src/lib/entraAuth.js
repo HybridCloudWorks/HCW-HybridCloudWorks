@@ -31,7 +31,17 @@ export function getMsalInstance() {
   return instance;
 }
 
-/** Idempotent: first caller initializes and drains any redirect response. */
+/**
+ * Idempotent: first caller initializes and drains any redirect response.
+ *
+ * A REJECTION IS NOT CACHED. `initPromise` memoises the in-flight
+ * initialisation so concurrent callers share one MSAL init — but memoising a
+ * *failure* means one bad redirect response poisons every later call for the
+ * life of the page, and the only way out is a manual reload. `handleRedirectPromise`
+ * rejects on things that genuinely recur on mobile: an interrupted redirect, a
+ * consent error in the hash, `interaction_in_progress` from a double-tap. So a
+ * failed attempt clears the memo and lets the next caller try again.
+ */
 export function initializeAuth() {
   if (!initPromise) {
     const msal = getMsalInstance();
@@ -44,6 +54,10 @@ export function initializeAuth() {
         } else if (!msal.getActiveAccount() && msal.getAllAccounts().length > 0) {
           msal.setActiveAccount(msal.getAllAccounts()[0]);
         }
+      })
+      .catch((error) => {
+        initPromise = null;
+        throw error;
       });
   }
   return initPromise;
@@ -73,9 +87,25 @@ export function onAuthStateChanged(callback) {
   const msal = getMsalInstance();
   let cancelled = false;
 
-  initializeAuth().then(() => {
-    if (!cancelled) callback(toUser(msal.getActiveAccount()));
-  });
+  // THE CALLBACK MUST FIRE EXACTLY ONCE, INCLUDING ON FAILURE.
+  //
+  // Consumers treat the first call as "auth has resolved" — useAdminAuth sets
+  // authReady there, and AdminAuthGuard renders a spinner until it does. A
+  // rejected initialisation with no catch means the callback never fires,
+  // authReady stays false, and the admin page spins forever showing no error
+  // and offering no sign-in button. That is what /admin did on 2026-08-23.
+  //
+  // On failure the user is reported as null, which is honest — MSAL could not
+  // establish a session — and renders the sign-in card, which is the one thing
+  // that can actually recover the situation.
+  initializeAuth()
+    .then(() => {
+      if (!cancelled) callback(toUser(msal.getActiveAccount()));
+    })
+    .catch((error) => {
+      console.error('[auth] MSAL initialisation failed; treating as signed out.', error);
+      if (!cancelled) callback(null);
+    });
 
   const callbackId = msal.addEventCallback((event) => {
     if (
