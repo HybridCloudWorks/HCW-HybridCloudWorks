@@ -50,6 +50,11 @@ export default function Header() {
   const sharedLinks = [
     { label: 'About', path: staticRoutes.about },
     { label: 'Contact', path: staticRoutes.contact },
+    // The admin portal has had no link into it from the site — reachable only
+    // by typing /admin. It is behind Entra sign-in and a two-gate role check,
+    // so linking it exposes nothing; it just makes the portal reachable, and
+    // testable, the same way every other page is.
+    { label: 'Admin', path: '/admin' },
   ];
 
   // Define navigation groups
@@ -267,7 +272,9 @@ export default function Header() {
           {/* Divider - always in same position */}
           <div className="h-6 w-px bg-slate-300 dark:bg-slate-800 shrink-0"></div>
           {/* About/Contact - always in same position */}
-          <nav aria-label="Secondary" className="hidden xl:flex items-center gap-1 w-42.5">
+          {/* Fixed width so the primary nav does not shift when this renders.
+              Widened from w-42.5 when Admin became a third link. */}
+          <nav aria-label="Secondary" className="hidden xl:flex items-center gap-1 w-64">
             {sharedLinks.map((item) => (
               <Link
                 key={item.path}
