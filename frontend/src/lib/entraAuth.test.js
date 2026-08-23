@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   setActiveAccount: vi.fn(),
   addEventCallback: vi.fn(),
   removeEventCallback: vi.fn(),
+  loginPopup: vi.fn(),
+  loginRedirect: vi.fn(),
 }));
 
 vi.mock('@azure/msal-browser', () => ({
@@ -41,6 +43,8 @@ vi.mock('@azure/msal-browser', () => ({
     setActiveAccount = mocks.setActiveAccount;
     addEventCallback = mocks.addEventCallback;
     removeEventCallback = mocks.removeEventCallback;
+    loginPopup = mocks.loginPopup;
+    loginRedirect = mocks.loginRedirect;
   },
   InteractionRequiredAuthError: class extends Error {},
   EventType: {
@@ -65,7 +69,25 @@ beforeEach(() => {
   mocks.getActiveAccount.mockReturnValue(ACCOUNT);
   mocks.getAllAccounts.mockReturnValue([ACCOUNT]);
   mocks.addEventCallback.mockReturnValue('cb-id');
+  mocks.loginPopup.mockResolvedValue({ account: ACCOUNT });
+  mocks.loginRedirect.mockResolvedValue(undefined);
+  setPointer('fine');
+  setHash('');
 });
+
+/** Drive the touch-vs-mouse decision without sniffing a user agent. */
+function setPointer(kind) {
+  window.matchMedia = vi.fn((query) => ({
+    matches: query.includes('coarse') ? kind === 'coarse' : kind === 'fine',
+    media: query,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+}
+
+function setHash(hash) {
+  window.history.replaceState(null, '', window.location.pathname + hash);
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -160,5 +182,98 @@ describe('initializeAuth — a failure must not be memoised', () => {
 
     await initializeAuth();
     expect(mocks.setActiveAccount).toHaveBeenCalledWith(redirected);
+  });
+});
+
+describe('signIn — popup is the wrong default on a phone', () => {
+  it('goes straight to redirect on a touch device', async () => {
+    // loginPopup on mobile opens a new TAB, and a new tab does not share the
+    // request state the response is matched against. The response then lands
+    // back in the original tab as no_token_request_cache_error, with a stale
+    // fragment that reproduces on every reload.
+    setPointer('coarse');
+    const { signIn } = await freshModule();
+
+    await signIn();
+
+    expect(mocks.loginRedirect).toHaveBeenCalledTimes(1);
+    expect(mocks.loginPopup).not.toHaveBeenCalled();
+  });
+
+  it('still prefers popup with a mouse, where it works and is less disruptive', async () => {
+    setPointer('fine');
+    const { signIn } = await freshModule();
+
+    const user = await signIn();
+
+    expect(mocks.loginPopup).toHaveBeenCalledTimes(1);
+    expect(mocks.loginRedirect).not.toHaveBeenCalled();
+    expect(user).toMatchObject({ uid: 'oid-1' });
+  });
+
+  it('falls back to redirect when a popup is blocked', async () => {
+    setPointer('fine');
+    mocks.loginPopup.mockRejectedValue({ errorCode: 'popup_window_error' });
+    const { signIn } = await freshModule();
+
+    await signIn();
+    expect(mocks.loginRedirect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('recoverable initialisation errors', () => {
+  it('no_token_request_cache_error resolves instead of failing the page', async () => {
+    // The error the owner actually hit. It means "this response has no matching
+    // request here" — there is no session, but authentication is not broken,
+    // and the sign-in button must still work.
+    mocks.handleRedirectPromise.mockRejectedValue({
+      errorCode: 'no_token_request_cache_error',
+    });
+    const { initializeAuth } = await freshModule();
+
+    await expect(initializeAuth()).resolves.toBeUndefined();
+  });
+
+  it('clears the stale auth fragment, so a reload does not reproduce it', async () => {
+    // Left in the address bar the fragment is re-processed on every reload and
+    // the same error appears — which is what made this feel permanent.
+    setHash('#code=abc&state=xyz');
+    mocks.handleRedirectPromise.mockRejectedValue({
+      errorCode: 'no_token_request_cache_error',
+    });
+    const { initializeAuth } = await freshModule();
+
+    await initializeAuth();
+    expect(window.location.hash).toBe('');
+  });
+
+  it('leaves a non-auth fragment alone', async () => {
+    setHash('#section-two');
+    mocks.handleRedirectPromise.mockRejectedValue({
+      errorCode: 'no_token_request_cache_error',
+    });
+    const { initializeAuth } = await freshModule();
+
+    await initializeAuth();
+    expect(window.location.hash).toBe('#section-two');
+  });
+
+  it('interaction_in_progress is recoverable too — it is a double tap', async () => {
+    mocks.handleRedirectPromise.mockRejectedValue({ errorCode: 'interaction_in_progress' });
+    const { initializeAuth } = await freshModule();
+
+    await expect(initializeAuth()).resolves.toBeUndefined();
+  });
+
+  it('an UNKNOWN error still rejects — recovery is a allowlist, not a catch-all', async () => {
+    mocks.handleRedirectPromise.mockRejectedValue({
+      errorCode: 'something_genuinely_broken',
+      message: 'boom',
+    });
+    const { initializeAuth } = await freshModule();
+
+    await expect(initializeAuth()).rejects.toMatchObject({
+      errorCode: 'something_genuinely_broken',
+    });
   });
 });
