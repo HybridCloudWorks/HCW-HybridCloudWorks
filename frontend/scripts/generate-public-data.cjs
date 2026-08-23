@@ -1,213 +1,124 @@
 #!/usr/bin/env node
 /**
- * Generate static JSON snapshots of low-churn Firestore collections served
- * directly from public/data/ at runtime. Eliminates per-visitor Firestore
- * reads on the /about page (certifications) and the speaker widget
- * (speakerevents). See F4 in documentation/Firebase-GCP-Cost-Inventory.md.
+ * Build-time cache of the public snapshot endpoints.
  *
- * Auth: uses Application Default Credentials.
- *   - Local: `gcloud auth application-default login`
- *   - CI: GOOGLE_APPLICATION_CREDENTIALS pointed at the GCP_SA_KEY JSON
+ * The /about page and the speaker widget need certifications and speaker
+ * events. Both already have a runtime path — `fetchPublicSnapshotItems` calls
+ * `GET /api/public/snapshots/{id}` — and both prefer a static file when one
+ * exists, because a static file costs a CDN hit instead of a function
+ * invocation and a Cosmos read per visitor.
  *
- * Exit codes:
- *   0   wrote both files
- *   0   skipped — no credentials available (build still proceeds)
- *   1   credentials present but a Firestore read failed (build should fail)
+ * So this writes the static file, and it writes EXACTLY what the runtime
+ * fallback would have fetched. Same endpoint, same payload, same consumers,
+ * same normalisers. There is no second copy of the shaping logic here to drift
+ * out of step with the API — verified 2026-08-23 against both sources: 109
+ * certifications, identical field sets, zero differences.
  *
- * Output: data is written as { generatedAt, items: [...displaySafeDocs] }.
- * Consumers keep their existing client-side normalizers; only the read path
- * changes.
+ * WHY THIS REPLACED A FIRESTORE DUMP. It used to read Firestore directly with
+ * `firebase-admin` and Application Default Credentials, and to `return 0`
+ * — succeed — when no GCP credentials were present. The deploy workflow has no
+ * GCP credentials, so on the first real frontend deploy it skipped, exited
+ * green, and shipped a site with no /data files at all. Nothing failed. The
+ * runtime fallback quietly absorbed it, and the only visible symptom was two
+ * 404s that nobody was looking for.
+ *
+ * It now reads the platform's own API, which means the frontend build no longer
+ * depends on GCP at all.
+ *
+ * IT FAILS LOUDLY. A build that cannot produce these files is a build whose
+ * output is worse than the last one, and shipping that silently is precisely
+ * what went wrong before. The runtime fallback is a safety net for visitors,
+ * not a licence for the build to be quietly wrong.
+ *
+ * Env:
+ *   AZURE_FUNCTIONS_URL   API base including /api. The deploy workflow already
+ *                         sets it for this step from the FUNCTIONS_URL variable.
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
 
-const COLLECTIONS = [
-  {
-    name: 'certifications',
-    outFile: 'certifications.json',
-    sanitize: sanitizeCertification,
-  },
-  {
-    name: 'speakerevents',
-    outFile: 'speakerevents.json',
-    sanitize: sanitizeSpeakerEvent,
-  },
+/** Snapshot id -> output file. Ids are allowlisted server-side; see public-reads.js. */
+const SNAPSHOTS = [
+  { id: 'certifications', outFile: 'certifications.json' },
+  { id: 'speakerevents', outFile: 'speakerevents.json' },
 ];
 
-const PROJECT_ID =
-  process.env.GCLOUD_PROJECT ||
-  process.env.GOOGLE_CLOUD_PROJECT ||
-  process.env.VITE_FIREBASE_PROJECT_ID ||
-  'hybridcloudworks-61e8d';
-
 const OUT_DIR = path.join(__dirname, '..', 'public', 'data');
+const TIMEOUT_MS = 30_000;
 
-function hasCredentials() {
-  // ADC resolves from these in order. The library doesn't expose a "can I
-  // auth" probe, so we sniff the env. Local: GOOGLE_APPLICATION_CREDENTIALS
-  // or a gcloud login. CI: GOOGLE_APPLICATION_CREDENTIALS via a key file
-  // written by the deploy workflow.
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
-  // gcloud ADC well-known location (best-effort sniff)
-  const home = process.env.HOME || process.env.USERPROFILE;
-  if (home) {
-    const adcPath = path.join(
-      home,
-      process.platform === 'win32' ? 'AppData/Roaming' : '.config',
-      'gcloud',
-      'application_default_credentials.json'
+function apiBase() {
+  const raw = process.env.AZURE_FUNCTIONS_URL || process.env.VITE_AZURE_FUNCTIONS_URL || '';
+  const base = raw.trim().replace(/\/+$/, '');
+  if (!base) {
+    throw new Error(
+      'AZURE_FUNCTIONS_URL is not set. It must be the API base INCLUDING the /api prefix, ' +
+        'e.g. https://api-azure.hybridcloudworks.com/api'
     );
-    if (fs.existsSync(adcPath)) return true;
   }
-  return false;
+  if (!/\/api$/.test(base)) {
+    // The same trap functionsBase.js guards against: routes are registered
+    // relative to /api, so a base without it 404s uniformly and the failure
+    // looks like a missing endpoint rather than a missing path segment.
+    throw new Error(`AZURE_FUNCTIONS_URL must end in /api — got "${base}"`);
+  }
+  return base;
 }
 
-function serializeValue(value) {
-  if (value === null || value === undefined) return value;
-  // Firestore Timestamp → ISO string
-  if (typeof value === 'object' && typeof value.toDate === 'function') {
-    return value.toDate().toISOString();
-  }
-  // GeoPoint → { lat, lng }
-  if (typeof value === 'object' && value.latitude !== undefined && value.longitude !== undefined) {
-    return { latitude: value.latitude, longitude: value.longitude };
-  }
-  if (Array.isArray(value)) return value.map(serializeValue);
-  if (typeof value === 'object') {
-    const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = serializeValue(v);
-    return out;
-  }
-  return value;
-}
-
-function getFirst(data, keys) {
-  for (const key of keys) {
-    if (data[key] !== undefined && data[key] !== null) return data[key];
-  }
-  return undefined;
-}
-
-function isVisible(data) {
-  const display = getFirst(data, ['display', 'Display']);
-  return display === true;
-}
-
-function compactObject(obj) {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, value]) => value !== undefined && value !== null)
-  );
-}
-
-function sanitizeImageValue(value) {
-  if (!value) return value;
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(sanitizeImageValue).filter(Boolean);
-  if (typeof value === 'object') {
-    return compactObject({
-      downloadURL: getFirst(value, ['downloadURL', 'downloadUrl']),
-      url: value.url,
-      src: value.src,
-      link: value.link,
-    });
-  }
-  return undefined;
-}
-
-function sanitizeCertification(doc) {
-  if (!isVisible(doc)) return null;
-
-  return compactObject({
-    id: doc.id,
-    name: getFirst(doc, ['name', 'Name']),
-    Name: doc.Name,
-    issuer: getFirst(doc, ['issuer', 'Issuer']),
-    Issuer: doc.Issuer,
-    issueDate: getFirst(doc, ['issueDate', 'issue_date', 'IssueDate']),
-    expDate: getFirst(doc, ['expDate', 'exp_date', 'ExpDate']),
-    certState: getFirst(doc, ['certState', 'isValid', 'is_valid', 'cert_state']),
-    code: getFirst(doc, ['code', 'Code']),
-    verifyUrl: getFirst(doc, ['verifyUrl', 'verify_url', 'VerifyUrl']),
-    image: sanitizeImageValue(getFirst(doc, ['image', 'Image', 'badge', 'Badge'])),
-    credentialImage: sanitizeImageValue(
-      getFirst(doc, ['credentialImage', 'CredentialImage', 'imageUrl', 'ImageUrl', 'image_url'])
-    ),
-    displayOrder: getFirst(doc, ['displayOrder', 'display_order', 'DisplayOrder']),
-    tags: getFirst(doc, ['tags', 'Tags']),
-    display: true,
+async function fetchSnapshot(base, id) {
+  const url = `${base}/public/snapshots/${encodeURIComponent(id)}`;
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-}
 
-function sanitizeSpeakerEvent(doc) {
-  if (!isVisible(doc)) return null;
+  if (!response.ok) {
+    throw new Error(`GET ${url} -> HTTP ${response.status}`);
+  }
 
-  return compactObject({
-    id: doc.id,
-    eventId: getFirst(doc, ['eventId', 'sessionizeId', 'SessionizeId', 'sessionize_id']),
-    sessionizeId: getFirst(doc, ['sessionizeId', 'SessionizeId', 'sessionize_id']),
-    eventName: getFirst(doc, ['eventName', 'name', 'Name']),
-    name: doc.name,
-    description: getFirst(doc, ['description', 'Description']),
-    date: getFirst(doc, ['date', 'Date']),
-    location: getFirst(doc, ['location', 'locationLabel']),
-    locationLabel: doc.locationLabel,
-    locationCoords: getFirst(doc, ['locationCoords', 'coords', 'coordinates']),
-    eventUrl: doc.eventUrl,
-    presentationUrl: doc.presentationUrl,
-    images: sanitizeImageValue(getFirst(doc, ['images', 'Images'])),
-    eventImageUrl: getFirst(doc, ['eventImageUrl', 'imageUrl', 'eventImageURL']),
-    display: true,
-  });
-}
+  const body = await response.json();
+  const items = body?.snapshot?.items;
+  if (!Array.isArray(items)) {
+    throw new Error(`GET ${url} returned no snapshot.items array`);
+  }
+  if (items.length === 0) {
+    // An empty snapshot is almost always a publish that has not happened or a
+    // wrong id, not a genuinely empty collection. Writing it would replace a
+    // good file with a useless one and look like success.
+    throw new Error(`GET ${url} returned zero items — refusing to write an empty snapshot`);
+  }
 
-async function dumpCollection(db, { name, outFile, sanitize }) {
-  const snap = await db.collection(name).get();
-  const items = snap.docs
-    .map((doc) => sanitize({ id: doc.id, ...serializeValue(doc.data()) }))
-    .filter(Boolean);
-  const payload = {
-    generatedAt: new Date().toISOString(),
-    count: items.length,
-    items,
-  };
-  const outPath = path.join(OUT_DIR, outFile);
-  fs.mkdirSync(OUT_DIR, { recursive: true });
-  fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
-  return { name, outFile, count: items.length, bytes: fs.statSync(outPath).size };
+  return { items, generatedAt: body.snapshot.generatedAt || null };
 }
 
 async function main() {
-  if (!hasCredentials()) {
+  const base = apiBase();
+  console.log(`[generate-public-data] source: ${base}`);
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+
+  for (const { id, outFile } of SNAPSHOTS) {
+    const { items, generatedAt } = await fetchSnapshot(base, id);
+
+    // Shape kept identical to the previous Firestore dump: consumers read
+    // `items`, and loadPublicDataSnapshot returns [] unless it finds that key.
+    const payload = {
+      generatedAt: generatedAt || new Date().toISOString(),
+      count: items.length,
+      items,
+    };
+
+    const outPath = path.join(OUT_DIR, outFile);
+    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
     console.log(
-      '[generate-public-data] No GCP credentials available — skipping data dump.\n' +
-        '  Local: run `gcloud auth application-default login` to enable.\n' +
-        '  Existing public/data/*.json files (if any) will be used as-is.'
+      `[generate-public-data] ${outFile}: ${items.length} items, ${fs.statSync(outPath).size} bytes`
     );
-    return 0;
   }
-
-  initializeApp({ projectId: PROJECT_ID });
-  const db = getFirestore();
-
-  const results = [];
-  for (const col of COLLECTIONS) {
-    try {
-      const r = await dumpCollection(db, col);
-      results.push(r);
-      console.log(`[generate-public-data] ${r.outFile}: ${r.count} docs, ${r.bytes} bytes`);
-    } catch (err) {
-      console.error(`[generate-public-data] FAILED ${col.name}:`, err.message);
-      throw err;
-    }
-  }
-  return 0;
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    console.error('[generate-public-data] fatal:', err);
-    process.exit(1);
-  });
+main().catch((error) => {
+  console.error(`[generate-public-data] FAILED: ${error.message}`);
+  console.error(
+    '  This build would ship without /data/*.json, falling back to a per-visitor API call.\n' +
+      '  That is a silent regression, so the build stops here instead.'
+  );
+  process.exit(1);
+});
