@@ -24,10 +24,10 @@ work** — that is a valid state, not a missing document.
 
 | | |
 | --- | --- |
-| Open items | 9 |
+| Open items | 7 |
 | Critical | 0 |
 | High | 2 |
-| Medium | 4 |
+| Medium | 2 |
 | Low | 3 |
 
 ## Where we left off — 2026-08-21
@@ -114,74 +114,63 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
 
 ## MEDIUM
 
-### T-515 — Pre-rendering was never ported; the site ships as a bare SPA shell
-**Files:** `frontend/vite.config.js` · `frontend/package.json` · Site-Main `vike.config.*`, `scripts/finalize-dynamic-shell.mjs`
+### T-515 — Pre-rendering was never ported — CLOSED 2026-08-23 (#182)
+**Files:** `frontend/scripts/prerender.mjs` · `frontend/scripts/prerender-entry.jsx` · `frontend/package.json`
 
-Found 2026-08-22 on the first parallel-run comparison, which is exactly what §6
-step 2 exists to catch.
+The site shipped as a bare SPA shell for the whole migration: `/about` was 2,808
+bytes with 967 characters of text and the generic title, against 24,902 / 2,717
+and the right title on the Firebase site it replaces. Three HTML documents in
+`dist`, against a §7 gate of 90 that was describing Site-Main's build.
 
-**Site-Main builds with Vike. This repository builds with plain Vite.**
+`npm run build` now runs `scripts/prerender.mjs` after `vite build`. It renders
+every route in its manifest through the real application and writes static HTML
+beside the SPA, which is untouched and still hydrates. **80 documents**; /about
+is 19,668 bytes with 3,565 characters of text, more than the site it replaces.
 
-```
-Site-Main   "build": "vike build && node scripts/finalize-dynamic-shell.mjs"
-here        "build": "vite build"
-```
+Three bugs had to be fixed first, and one was not an SSR problem at all: twelve
+components passed an ARRAY to `<title>` (`<title>{x} | HCW</title>` is two
+children, which React 19 refuses), so those routes had no title client-side
+either — and they were shared templates, so they took a large share of the site
+with them.
 
-Vike is an SSR/SSG framework; `vite build` is a single-entry SPA bundle. Nothing
-in `vite.config.js` pre-renders — its only plugin is `react()`, and there is one
-HTML entry point. The port dropped the rendering strategy and nobody noticed,
-because a SPA build succeeds, every unit test passes, and the site works when
-you click through it.
+The step **fails the build** on a route that throws, renders its error boundary,
+or comes back shell-sized, and the deploy workflow asserts the document count
+separately. Both exist because the original failure was invisible: a shell
+builds, tests, deploys and browses exactly like a real site.
 
-**Measured, same path, both sites:**
+**Deliberately not pre-rendered.** Article detail pages need the article list at
+build time and CI cannot reach the API (issue #175); wiring pre-rendering to that
+would make every deploy depend on a permanent bot-protection exception. Listing
+pages carry the links. Admin routes are behind sign-in and have no search value.
 
-| | live Firebase | Azure preview |
-| --- | --- | --- |
-| `/about` | 24,902 bytes | 2,808 bytes |
-| `<title>` | `About Saul Patino \| Hybrid Cloud Works` | `Hybrid Cloud Works` |
-| visible text in HTML | 2,717 chars | 967 chars |
-| HTML documents in `dist` | — | **3** (`index.html` + two static copies from `public/`) |
+**Still open, split out:** 8 routes serve another provider's content
+(`/vmware/news` is titled "Azure Platform News") — issue #183. `trailingSlash` is
+still `"never"` while every indexed URL uses the trailing form; a canonical-URL
+decision, not a bug. Framework mode was NOT adopted: the hard part (rendering
+under Node) is identical either way, and the restructure buys nothing more once
+`ssr: false` is settled. Now a smaller step if it is wanted.
 
-**Migration_Plan §7 states a gate this build cannot pass.** It lists
-`npm run build  # 90 HTML documents pre-rendered` under *"this repository's
-baseline"*. It is 3, and it has presumably always been 3 — that line describes
-Site-Main's build, attributed to this one. §7 also warns *"this repo has broken
-pre-rendered output three times with every unit test passing"*, which is the
-same confusion: that history belongs upstream.
+**DNS is no longer blocked on this.**
 
-**Why it matters more than it looks.** This is a content platform whose purpose
-is being found. Every article, framework and architecture page currently serves
-a generic title and an empty shell to anything that does not execute JavaScript
-— which includes most link unfurlers, several crawlers, and every social preview
-card. The pages render correctly in a browser, so nothing about clicking through
-the site reveals it.
+### T-516 — Admin AI settings governed nothing — CLOSED 2026-08-23 (#181)
+**Files:** `functions/src/lib/ai/ai-config.js` · `functions/src/lib/ai/router.js` · `frontend/src/lib/aiEngine.js`
 
-**Also different, and cheaper to settle:** the live site redirects `/about` to
-`/about/`; `staticwebapp.config.json` sets `"trailingSlash": "never"`. Every
-existing inbound link and every indexed URL uses the trailing form. Decide
-deliberately rather than by omission.
+The AI Engine page wrote provider toggles and an order field into `ai_providers`
+and the router never opened that container — it read environment variables only.
+Every switch was decorative. The page was also inverted: Vertex listed as enabled
+(removed at the port; it needs GCP ADC a Function App cannot hold), OpenAI listed
+as deprecated and deleted on every page load (the router calls it), plus three
+providers nothing routes text to.
 
-**Not a regression, but worth recording while here:** unknown URLs return **200**
-on both sites. §3.4 changed `responseOverrides.404.statusCode` to `404` and that
-change is live and correct — but `navigationFallback` matches unmatched routes
-first, so the override never fires. The one-line fix §3.4 prescribes does not
-achieve what §3.4 wanted, and a hard 404 needs the router to know which routes
-are real, which is a pre-rendering question. Same root.
+Now: configuration can disable and reorder providers but never enable one without
+a key; an unreadable configuration changes nothing, so a Cosmos blip cannot switch
+the site's AI off; absent means on. Six feature switches, one per real call site,
+gated in the router and guarded by a source scan that fails if a call site carries
+no feature or a catalogue entry has none.
 
-**Options, and this is a decision, not a task:**
-
-1. **Port Vike.** Restores parity, closes §7's gate, fixes the 404 as a side
-   effect. It is a build-system change, not a copy — and Vike's routing model
-   would have to be reconciled with this repo's `react-router` setup.
-2. **A pre-render step over the existing SPA.** Cheaper, no framework change,
-   produces real HTML per route. Wants a route manifest, which
-   `scripts/validate-routes.js` may already imply.
-3. **Ship the SPA and accept it.** Defensible only if search traffic does not
-   matter, which for this site it plainly does.
-
-**Cutover impact:** does not block the parallel run or the delta import. It does
-mean **DNS should not move until this is decided** — moving it swaps a
-pre-rendered site for a shell at every indexed URL simultaneously.
+Order is Gemini → OpenAI → Anthropic. **`GEMINI-API-KEY` is not seeded**, so
+Gemini is first in preference and unreachable until it is; the router falls
+through to OpenAI meanwhile.
 
 ### T-321 — Finish the post-rebuild re-pointing
 **Files:** Key Vault `kv-site-prod-cus-01`

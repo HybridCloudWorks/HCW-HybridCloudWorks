@@ -119,6 +119,23 @@ resource "azurerm_static_web_app" "hcw" {
   sku_tier            = "Standard"
   sku_size            = "Standard"
   tags                = var.tags
+
+  lifecycle {
+    # These two are written by the deploy, not by Terraform.
+    #
+    # `Azure/static-web-apps-deploy` stamps the repository it published from
+    # onto the resource. Terraform has never set them, so it reads them as
+    # drift and plans to null them — which would win until the next frontend
+    # deploy stamped them back, and then plan again. An apply that always
+    # shows a change and a deploy that always undoes it is a loop, not a
+    # convergence, and it makes "0 changed" stop meaning anything.
+    #
+    # They are metadata: the deployment uses a token, and nothing about
+    # serving the site reads these. The right answer is that the pipeline owns
+    # the field, so Terraform stops claiming it. First seen 2026-08-23, on the
+    # first plan after the §6 step 1 frontend deploy.
+    ignore_changes = [repository_url, repository_branch]
+  }
 }
 
 # =============================================================================
