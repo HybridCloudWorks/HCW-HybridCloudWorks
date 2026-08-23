@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/prerender.mjs",
     "postbuild": "node scripts/stage-swa-config.mjs",
     "build:data": "node scripts/generate-public-data.cjs",
     "data:update:applied-skills": "node scripts/update-applied-skills.mjs",

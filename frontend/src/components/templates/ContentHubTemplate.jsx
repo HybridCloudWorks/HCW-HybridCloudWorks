@@ -15,7 +15,7 @@ export function ContentHubTemplate({ title, description, children, showSearch = 
   return (
     <div className="container mx-auto px-4 py-8">
       <Helmet>
-        <title>{title} | HCW</title>
+        <title>{`${title} | HCW`}</title>
         <meta name="description" content={description} />
       </Helmet>
 

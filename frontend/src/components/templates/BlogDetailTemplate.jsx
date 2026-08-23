@@ -212,7 +212,7 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
   return (
     <div className="pt-28 pb-20 px-4 md:px-8 max-w-[1200px] mx-auto w-full">
       <Helmet>
-        <title>{post.title} | HCW</title>
+        <title>{`${post.title} | HCW`}</title>
         <meta name="description" content={post.summary} />
         <link
           rel="canonical"

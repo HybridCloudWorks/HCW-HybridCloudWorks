@@ -68,7 +68,7 @@ export default function ArchitectureDetailTemplate({ provider = 'aws' }) {
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       <Helmet>
-        <title>{architecture.title} | HCW</title>
+        <title>{`${architecture.title} | HCW`}</title>
         <meta name="description" content={architecture.description} />
         <link
           rel="canonical"

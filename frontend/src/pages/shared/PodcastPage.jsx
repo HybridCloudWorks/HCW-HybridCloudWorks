@@ -201,7 +201,7 @@ export default function SharedPodcastPage() {
   return (
     <>
       <Helmet>
-        <title>{meta.name} Podcast | HCW</title>
+        <title>{`${meta.name} Podcast | HCW`}</title>
         <meta
           name="description"
           content={`Expert audio episodes on ${meta.name} architecture, patterns, and enterprise solutions.`}

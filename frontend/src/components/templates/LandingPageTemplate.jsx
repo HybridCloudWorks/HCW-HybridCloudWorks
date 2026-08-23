@@ -37,7 +37,7 @@ export function LandingPageTemplate({
   return (
     <div className="max-w-[1600px] mx-auto px-4 md:px-8 py-12">
       <Helmet>
-        <title>{heroTitle} | HCW</title>
+        <title>{`${heroTitle} | HCW`}</title>
         <meta name="description" content={heroDescription} />
       </Helmet>
 

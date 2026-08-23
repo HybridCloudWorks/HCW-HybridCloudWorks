@@ -588,9 +588,25 @@ function ProviderRssDispatcher() {
   return <NewsPage provider={provider} />;
 }
 
+/**
+ * Everything the application needs that is NOT the router.
+ *
+ * Split out so the browser entry and the pre-render step share one list. They
+ * mount different routers — `BrowserRouter` here, `StaticRouter` under Node —
+ * and before this existed the only way to render the tree on a server was to
+ * rebuild the provider stack alongside it, which is a copy that silently stops
+ * matching the moment anyone adds a provider.
+ */
+export function AppProviders({ children }) {
+  return <ThemeProvider>{children}</ThemeProvider>;
+}
+
+/** The routed application, without a router. The pre-render entry supplies its own. */
+export { App };
+
 function AppWrapper() {
   return (
-    <ThemeProvider>
+    <AppProviders>
       <Router
         future={{
           v7_startTransition: true,
@@ -599,7 +615,7 @@ function AppWrapper() {
       >
         <App />
       </Router>
-    </ThemeProvider>
+    </AppProviders>
   );
 }
 

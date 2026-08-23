@@ -89,7 +89,7 @@ export default function FrameworksPage({ provider = 'aws' }) {
   return (
     <>
       <Helmet>
-        <title>{providerLabel} Frameworks | Hybrid Cloud Works</title>
+        <title>{`${providerLabel} Frameworks | Hybrid Cloud Works`}</title>
         <meta
           name="description"
           content={`${providerLabel} framework explorer with dynamic concepts and architecture recommendations from ContentForge.`}

@@ -186,7 +186,7 @@ export function ContentListingTemplate({
   return (
     <main className="flex-grow pt-28 pb-20 px-4 md:px-8 max-w-[1600px] mx-auto w-full">
       <Helmet>
-        <title>{title} | HCW</title>
+        <title>{`${title} | HCW`}</title>
         <meta name="description" content={description} />
       </Helmet>
 

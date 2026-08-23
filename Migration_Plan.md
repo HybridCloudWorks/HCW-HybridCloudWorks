@@ -708,8 +708,16 @@ Add for the migration:
 - **Authorisation parity.** `firestore.rules` has emulator-backed tests today; its replacement must
   be tested to at least that coverage. Architecture_Plan §5.1 — this is the most dangerous silent
   loss in the migration.
-- **Pre-render parity.** 90 documents, and grep the built HTML for each page's distinctive content.
-  This repo has broken pre-rendered output three times with every unit test passing.
+- **Pre-render parity.** ~80 documents, and grep the built HTML for each page's distinctive content.
+  The "three times with every unit test passing" history belongs to Site-Main, not here; the same
+  confusion put a 90-document baseline on this repository when its build produced three. Closed
+  2026-08-23 by `frontend/scripts/prerender.mjs` (T-515), which renders every route in its manifest
+  through the real application and **fails the build** on a route that throws, renders its error
+  boundary, or comes back small enough to be a shell. `npm run build` runs it; the deploy workflow
+  asserts the document count independently, because a shell deploys perfectly well and is only
+  visible to a crawler. 11 provider/section combinations have no content and are skipped by design
+  — they are listed on every run. Article detail pages are NOT pre-rendered: they need the API at
+  build time, which CI cannot reach (issue #175).
 - **Scheduled-job proof.** Each of the 16 timers observed firing at least once in Azure — **at the
   right local time**. `WEBSITE_TIME_ZONE = America/Chicago` is set on the app; a timer that fires
   five hours early passed the "fired once" test and failed the real one.

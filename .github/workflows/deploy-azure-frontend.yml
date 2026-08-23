@@ -89,6 +89,22 @@ jobs:
             exit 1
           }
           test -f dist/index.html || { echo "::error::dist/index.html is missing; the build did not produce a site."; exit 1; }
+
+          # The site shipped as a bare SPA shell for the whole migration and
+          # nothing noticed: a shell builds cleanly, passes every test, and
+          # looks correct in a browser. Only a crawler sees the difference, so
+          # the count is asserted here rather than left to be discovered.
+          # `npm run build` runs scripts/prerender.mjs, which writes ~80.
+          html=$(find dist -name '*.html' | wc -l)
+          echo "dist contains $html HTML documents"
+          [ "$html" -ge 60 ] || {
+            echo "::error::only $html HTML documents in dist — pre-rendering did not run or mostly failed. See frontend/scripts/prerender.mjs (T-515)."
+            exit 1
+          }
+          grep -q '<div id="root"><[^/]' dist/about/index.html || {
+            echo "::error::dist/about/index.html has an empty mount point — it is a shell, not a pre-rendered page."
+            exit 1
+          }
           bytes=$(du -sb dist | cut -f1)
           echo "dist: $(du -sh dist | cut -f1) ($bytes bytes), limit 524288000"
           [ "$bytes" -lt 524288000 ] || {
