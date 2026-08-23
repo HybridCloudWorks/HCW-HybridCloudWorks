@@ -32,6 +32,58 @@ export function getMsalInstance() {
 }
 
 /**
+ * Initialisation failures that mean "there is no usable session here", not
+ * "authentication is broken".
+ *
+ * `no_token_request_cache_error` is the one seen in the wild: MSAL found a
+ * redirect response but no matching request in its cache. On a phone that
+ * happens routinely — `loginPopup` opens a new tab rather than a popup, the
+ * sign-in completes there, and the response arrives in a context whose cache
+ * never held the original request. `interaction_in_progress` is the double-tap
+ * equivalent. Neither warrants failing the page; both warrant clearing the
+ * fragment and letting the user try again.
+ */
+const RECOVERABLE_INIT_ERRORS = new Set([
+  'no_token_request_cache_error',
+  'interaction_in_progress',
+  'hash_does_not_contain_known_properties',
+]);
+
+/** Strip an auth response fragment without adding a history entry. */
+function clearAuthFragment() {
+  if (typeof window === 'undefined' || !window.location?.hash) return;
+  if (!/[#&](code|error|state|id_token|access_token)=/.test(window.location.hash)) return;
+  try {
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + window.location.search
+    );
+  } catch {
+    // A browser that refuses replaceState is not worth failing sign-in over.
+  }
+}
+
+/**
+ * Redirect rather than popup on touch devices.
+ *
+ * MSAL's popup flow assumes a real popup window. Mobile browsers and in-app
+ * webviews either block it or open a new TAB, and a new tab does not share the
+ * request state the response is matched against — which surfaces as
+ * no_token_request_cache_error back in the original tab, with a stale fragment
+ * that reproduces on every reload. Redirect has none of that: one context, one
+ * cache, one response.
+ *
+ * `pointer: coarse` is the signal because it describes the input device rather
+ * than sniffing a user-agent string, so it does not rot as browsers change
+ * their UA.
+ */
+function prefersRedirect() {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia?.('(pointer: coarse)')?.matches === true;
+}
+
+/**
  * Idempotent: first caller initializes and drains any redirect response.
  *
  * A REJECTION IS NOT CACHED. `initPromise` memoises the in-flight
@@ -57,6 +109,15 @@ export function initializeAuth() {
       })
       .catch((error) => {
         initPromise = null;
+        if (RECOVERABLE_INIT_ERRORS.has(error?.errorCode)) {
+          // A stale or foreign auth fragment. Left in the address bar it
+          // reproduces this error on every reload, which is what made the
+          // failure feel permanent rather than transient — the user reloads,
+          // the same hash is re-processed, the same error appears. Drop it and
+          // resolve with no session so the sign-in button works on the retry.
+          clearAuthFragment();
+          return;
+        }
         throw error;
       });
   }
@@ -132,6 +193,12 @@ export function onAuthStateChanged(callback) {
 export async function signIn() {
   await initializeAuth();
   const msal = getMsalInstance();
+
+  if (prefersRedirect()) {
+    await msal.loginRedirect(loginRequest);
+    return null; // page navigates away
+  }
+
   try {
     const result = await msal.loginPopup(loginRequest);
     if (result?.account) msal.setActiveAccount(result.account);
