@@ -139,7 +139,19 @@ console shows no CORS failures.
 > work in this step, then **empty it and apply again** — the same window
 > discipline as `admin_ip_rules`, and for the same reason.
 
-### 3a. Key Vault (TODO.md T-321)
+### 3a. Key Vault (TODO.md T-321) — OPTIONAL, not a cutover blocker
+
+Traced 2026-08-23, because this step sent someone looking for two files they
+did not have:
+
+| Secret | Read by | Missing means |
+| --- | --- | --- |
+| `GCP-SERVICE-ACCOUNT-JSON` | `lib/cloud-tools/pricing/gcp.js`, nothing else | GCP prices absent from the pricing comparison. AWS and Azure still render — each provider is isolated in its own try/catch, which that module calls "the single most important behaviour" it carries |
+| `GITHUB-APP-PRIVATE-KEY` | **nothing in the ported code** | nothing |
+
+Neither is on any path a visitor or the admin portal touches. **Skip this step
+at cutover** and seed them later if the GCP column in the pricing tool is
+wanted; that is a GCP console export, not cutover work.
 
 **You run:**
 
@@ -165,16 +177,69 @@ alerts all no-op cleanly without their keys, so nothing here blocks the rest.
 
 ### 3b. Custom domains on the Static Web App
 
-```powershell
-az staticwebapp hostname set -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus `
-    --hostname hybridcloudworks.com
-az staticwebapp hostname set -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus `
-    --hostname www.hybridcloudworks.com
+**Done 2026-08-23.** Both are bound; `www` is serving. Kept here because the
+procedure is not obvious and the previous version of this section was wrong.
+
+The two hostnames validate by **different mechanisms**, and the earlier claim
+that binding "does not wait on DNS moving" was false for both. `www` needed a
+real CNAME; the apex needed a token Azure generates.
+
+Neither binding moves visitor traffic. Traffic moves in 3c, and only there.
+
+#### www — CNAME validation
+
+`www` did not exist in DNS at all (NXDOMAIN), so there was no live traffic and
+nothing to lower a TTL on. Create the record first, then bind:
+
+1. Cloudflare: `CNAME` · name `www` · target the SWA default hostname ·
+   **DNS only (grey cloud)** · TTL 60.
+2. Then:
+
+```bash
+az staticwebapp hostname set -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus --hostname www.hybridcloudworks.com --no-wait
 ```
 
-Binding does **not** wait on DNS moving: Terraform already manages the `asuid`
-TXT record (`cloudflare_record.azure_swa_txt_validation`), which is the
-ownership proof.
+Validation is quick; the managed TLS certificate then takes 15–20 minutes.
+`Adding` → `Ready`. It does not serve until `Ready`, and HTTPS fails with a
+connection error until then — that is the certificate, not a fault.
+
+#### apex — TXT token validation
+
+A root domain cannot be a CNAME, so Azure mints a token instead:
+
+```bash
+az staticwebapp hostname set -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus --hostname hybridcloudworks.com --validation-method dns-txt-token --no-wait
+az staticwebapp hostname show -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus --hostname hybridcloudworks.com --query validationToken -o tsv
+```
+
+Add the token as `TXT` · name `@` in Cloudflare. Azure re-checks on its own —
+**nothing to re-run**. The apex already carries several TXT records (Google
+verification, `MS=`, SPF, Firebase); TXT records coexist.
+
+#### Use `--no-wait`
+
+Without it the CLI blocks on the long-running operation. For the apex that
+**never completes**, because it is waiting for a TXT record you cannot add while
+the command is holding the terminal. It is not stuck; it is deadlocked on you.
+
+#### There is no `asuid` record
+
+This section used to say Terraform managed an `asuid` TXT record that served as
+the ownership proof. It did not. `cloudflare_record.azure_swa_txt_validation`
+published the SWA *hostname* as a TXT value, which validates nothing, and has
+been removed — see the comment where it used to be in `infra/main.tf`. The
+`asuid.` convention is App Service and Front Door; Static Web Apps does not use
+it.
+
+#### Verified when
+
+```bash
+az staticwebapp hostname list -n stapp-site-prod-cus-01 -g rg-web-site-prod-cus -o table
+```
+
+Both `Ready`. On 2026-08-23 `https://www.hybridcloudworks.com/` returned 200
+with 65,577 bytes and the pre-rendered title, which is the whole stack proven:
+Static Web App, managed certificate, pre-rendered HTML, own domain.
 
 ### 3c. Move DNS — the visitor-facing moment
 
