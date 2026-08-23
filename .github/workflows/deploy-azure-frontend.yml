@@ -105,6 +105,32 @@ jobs:
             echo "::error::dist/about/index.html has an empty mount point — it is a shell, not a pre-rendered page."
             exit 1
           }
+
+          # Assert on the BUILT HTML, not the components. The canonical bug got
+          # past every unit test precisely because it lived in index.html and
+          # was applied by the pre-render step — neither of which a React
+          # component test looks at. Every page shipped a canonical pointing at
+          # the home page, telling crawlers the whole site was one document.
+          for page in about azure/education contact; do
+            f="dist/$page/index.html"
+            n=$(grep -c 'rel="canonical"' "$f" || true)
+            [ "$n" -eq 1 ] || { echo "::error::$f has $n canonical links, expected exactly 1."; exit 1; }
+            grep -q "rel=\"canonical\" href=\"https://hybridcloudworks.com/$page/\"" "$f" || {
+              echo "::error::$f canonical is not https://hybridcloudworks.com/$page/ — $(grep -o 'rel="canonical"[^>]*' "$f")"
+              exit 1
+            }
+            grep -q 'property="og:url"' "$f" || { echo "::error::$f has no og:url."; exit 1; }
+          done
+
+          # The sitemap is generated from the routes that were written, so a
+          # stale hand-maintained file reappearing is a real regression.
+          locs=$(grep -c '<loc>' dist/sitemap.xml || echo 0)
+          [ "$locs" -ge 60 ] || { echo "::error::sitemap.xml has only $locs URLs — it was not generated from the pre-render route list."; exit 1; }
+          grep -q '<loc>https://hybridcloudworks.com/about/</loc>' dist/sitemap.xml || {
+            echo "::error::sitemap.xml does not use the canonical trailing-slash form."
+            exit 1
+          }
+          echo "metadata contract: canonical, og:url and sitemap verified on built HTML"
           bytes=$(du -sb dist | cut -f1)
           echo "dist: $(du -sh dist | cut -f1) ($bytes bytes), limit 524288000"
           [ "$bytes" -lt 524288000 ] || {

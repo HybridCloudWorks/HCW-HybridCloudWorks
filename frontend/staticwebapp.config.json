@@ -50,5 +50,5 @@
       "statusCode": 404
     }
   },
-  "trailingSlash": "never"
+  "trailingSlash": "always"
 }

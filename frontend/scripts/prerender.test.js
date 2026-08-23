@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { splitHead, injectIntoTemplate } from './prerender.mjs';
+import { splitHead, injectIntoTemplate, canonicalFor, socialTags } from './prerender.mjs';
 // Imported rather than read from a path: under Vitest `import.meta.url` is a
 // Vite module id, not a file: URL, so fileURLToPath on it throws.
 import swaConfig from '../staticwebapp.config.json';
@@ -144,5 +144,73 @@ describe('the SPA fallback must not be a pre-rendered page', () => {
     // vitest runs with the frontend package as cwd.
     const source = readFileSync(join(process.cwd(), 'scripts', 'prerender.mjs'), 'utf8');
     expect(source).toContain(`'${target}'`);
+  });
+});
+
+describe('metadata contract', () => {
+  it('canonical is route-specific, apex, and trailing-slashed', () => {
+    expect(canonicalFor('/')).toBe('https://hybridcloudworks.com/');
+    expect(canonicalFor('/about')).toBe('https://hybridcloudworks.com/about/');
+    expect(canonicalFor('/azure/blog')).toBe('https://hybridcloudworks.com/azure/blog/');
+  });
+
+  it('normalises whatever slash form the route list uses', () => {
+    // The canonical must not depend on how a route happened to be written.
+    expect(canonicalFor('/about/')).toBe(canonicalFor('/about'));
+  });
+
+  it('never emits a bare-origin canonical for a sub-route', () => {
+    // The original bug in one line: every page claimed to be the home page.
+    for (const route of ['/about', '/azure', '/azure/education']) {
+      expect(canonicalFor(route)).not.toBe('https://hybridcloudworks.com/');
+    }
+  });
+
+  it('fills the tags a page did not supply', () => {
+    const tags = socialTags('', '/about', 'About | HCW');
+    expect(tags).toContain('rel="canonical" href="https://hybridcloudworks.com/about/"');
+    expect(tags).toContain('property="og:url" content="https://hybridcloudworks.com/about/"');
+    expect(tags).toContain('property="og:title" content="About | HCW"');
+    expect(tags).toContain('name="twitter:card"');
+  });
+
+  it('does NOT overwrite what a page said about itself', () => {
+    // /azure/news sets its own og:title via NewsPage. Clobbering it with the
+    // document title would make this feature a downgrade for the pages that
+    // already had metadata.
+    const head = '<meta property="og:title" content="Azure Platform News" />';
+    const tags = socialTags(head, '/azure/news', 'Azure Platform News | Hybrid Cloud Works');
+    expect(tags).not.toContain('property="og:title"');
+    expect(tags).toContain('rel="canonical"');
+  });
+
+  it('og:url always agrees with the canonical', () => {
+    // Two contradictory signals are worse than one, and they are written by
+    // different lines, so nothing else would catch them diverging.
+    const tags = socialTags('', '/azure/blog', 'T');
+    const canonical = /rel="canonical" href="([^"]+)"/.exec(tags)[1];
+    const ogUrl = /property="og:url" content="([^"]+)"/.exec(tags)[1];
+    expect(ogUrl).toBe(canonical);
+  });
+
+  it('escapes quotes so a title cannot break out of the attribute', () => {
+    const tags = socialTags('', '/x', 'A "quoted" title');
+    expect(tags).toContain('&quot;quoted&quot;');
+    expect(tags).not.toMatch(/content="A "quoted"/);
+  });
+
+  it('omits a description rather than inventing one', () => {
+    const tags = socialTags('', '/about', 'About');
+    expect(tags).not.toContain('og:description');
+  });
+
+  it('strips the template canonical even when the route supplies none', () => {
+    // The template's is hardcoded to the home page. Leaving it means either a
+    // wrong canonical or two competing ones.
+    const template =
+      '<html><head><link rel="canonical" href="https://hybridcloudworks.com" /><title>T</title></head><body><div id="root"></div></body></html>';
+    const html = injectIntoTemplate(template, { head: '', body: '<p>x</p>' }, '/about');
+    expect(html.match(/rel="canonical"/g)).toHaveLength(1);
+    expect(html).toContain('href="https://hybridcloudworks.com/about/"');
   });
 });

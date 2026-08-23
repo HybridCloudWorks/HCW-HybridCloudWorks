@@ -70,6 +70,87 @@ const MIN_TEXT_CHARS = 420;
 const HEAD_TAG = /^\s*<(link|meta|title|style|script|base)\b[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/i;
 
 /**
+ * The canonical origin and URL shape. Decided 2026-08-23 from evidence, not
+ * preference, because canonical and trailing slash cannot be chosen separately:
+ * a canonical pointing at a URL that redirects is worse than no canonical.
+ *
+ *   - The live Firebase site 301s `/about` to `/about/`, so the form Google
+ *     actually resolved and indexed is the TRAILING one.
+ *   - Its sitemap advertises `/about`, the non-trailing form. The two have
+ *     disagreed the whole time; the sitemap is the half that is wrong.
+ *   - Azure was configured `trailingSlash: "never"`, the opposite of live.
+ *
+ * Trailing wins: it preserves the indexed form. `staticwebapp.config.json` is
+ * set to `always` to match, and the sitemap is now generated from the same
+ * route list as the pages, so the three cannot drift apart again.
+ *
+ * Apex, not www: every indexed URL and the sitemap use the apex.
+ */
+export const SITE_ORIGIN = 'https://hybridcloudworks.com';
+const DEFAULT_SOCIAL_IMAGE = `${SITE_ORIGIN}/icons/hcw-logo.png`;
+
+/** `/azure/blog` -> `https://hybridcloudworks.com/azure/blog/` */
+export function canonicalFor(route) {
+  const clean = String(route).replace(/^\/+|\/+$/g, '');
+  return clean ? `${SITE_ORIGIN}/${clean}/` : `${SITE_ORIGIN}/`;
+}
+
+/** The value of a `<meta>` already present in the rendered head, if any. */
+function metaContent(head, attr, name) {
+  const match = new RegExp(`<meta[^>]*${attr}="${name}"[^>]*content="([^"]*)"`, 'i').exec(head);
+  return match?.[1] || null;
+}
+
+/**
+ * The head tags a route did not supply itself.
+ *
+ * WHY THIS IS NOT OPTIONAL. Pre-rendering made these pages legible to crawlers
+ * for the first time, and what they read was `index.html`'s hardcoded
+ * `<link rel="canonical" href="https://hybridcloudworks.com">` — every page
+ * declaring itself a duplicate of the home page. Titles were correct and the
+ * canonical said to consolidate all of them onto one URL anyway.
+ *
+ * Coverage was also uneven rather than absent: `/azure/news` already emitted
+ * og:title and og:description from NewsPage, `/about` emitted neither, and the
+ * routes with the best metadata of all — the article and architecture detail
+ * templates, which set canonical, og:image and more — are the ones not
+ * pre-rendered at all. So this fills gaps and never overwrites: a page that
+ * says something about itself keeps saying it.
+ */
+export function socialTags(head, route, title) {
+  const canonical = canonicalFor(route);
+  const description = metaContent(head, 'name', 'description');
+  const ogTitle = metaContent(head, 'property', 'og:title') || title;
+  const ogDescription = metaContent(head, 'property', 'og:description') || description;
+  const ogImage = metaContent(head, 'property', 'og:image') || DEFAULT_SOCIAL_IMAGE;
+
+  const tags = [`<link rel="canonical" href="${canonical}" />`];
+  const add = (attr, name, content) => {
+    if (!content) return;
+    if (metaContent(head, attr, name)) return; // the page said it; leave it alone
+    tags.push(`<meta ${attr}="${name}" content="${escapeAttr(content)}" />`);
+  };
+
+  // og:url must agree with the canonical or the two signals contradict.
+  add('property', 'og:url', canonical);
+  add('property', 'og:type', 'website');
+  add('property', 'og:site_name', 'Hybrid Cloud Works');
+  add('property', 'og:title', ogTitle);
+  add('property', 'og:description', ogDescription);
+  add('property', 'og:image', ogImage);
+  add('name', 'twitter:card', 'summary_large_image');
+  add('name', 'twitter:title', ogTitle);
+  add('name', 'twitter:description', ogDescription);
+  add('name', 'twitter:image', ogImage);
+
+  return tags.join('\n    ');
+}
+
+function escapeAttr(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+/**
  * Split React's output into head tags and body markup.
  *
  * React 19 hoists `<title>`, `<meta>` and `<link>` rendered anywhere in the tree
@@ -95,14 +176,26 @@ export function splitHead(rendered) {
  * in one document is not a tie a crawler resolves the way you would hope, and
  * the template's is the generic one.
  */
-export function injectIntoTemplate(template, { head, body }) {
+export function injectIntoTemplate(template, { head, body }, route = '/') {
   let html = template;
 
   if (/<title\b/i.test(head)) {
     html = html.replace(/\s*<title\b[^>]*>[\s\S]*?<\/title>/i, '');
   }
-  if (head) {
-    html = html.replace(/<\/head>/i, `    ${head}\n  </head>`);
+
+  // The template's canonical is ALWAYS removed, whether or not the route
+  // supplies its own. It is hardcoded to the home page, so leaving it means
+  // either a wrong canonical or two competing ones — and Google's guidance for
+  // JavaScript sites is explicit that the canonical in the served HTML must not
+  // contradict the rendered one.
+  html = html.replace(/\s*<link[^>]*rel="canonical"[^>]*>/i, '');
+
+  const title = /<title\b[^>]*>([^<]*)<\/title>/i.exec(head)?.[1] || '';
+  const generated = socialTags(head, route, title);
+  const combined = [head, generated].filter(Boolean).join('\n    ');
+
+  if (combined) {
+    html = html.replace(/<\/head>/i, `    ${combined}\n  </head>`);
   }
 
   // The mount point keeps its id: the client bundle still hydrates into it.
@@ -186,6 +279,7 @@ async function main() {
   const targets = routes();
   const failures = [];
   const skipped = [];
+  const publishedRoutes = [];
   let written = 0;
   let bytes = 0;
 
@@ -228,13 +322,38 @@ async function main() {
       continue;
     }
 
-    const html = injectIntoTemplate(template, splitHead(rendered.html));
+    const html = injectIntoTemplate(template, splitHead(rendered.html), route);
     const outPath = outputPathFor(dist, route);
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, html);
     written += 1;
     bytes += Buffer.byteLength(html);
+    publishedRoutes.push(route);
   }
+
+  // The sitemap is GENERATED from the routes that were actually written, not
+  // hand-maintained. public/sitemap.xml held 51 URLs in the non-trailing form
+  // while the live site redirected every one of them to the trailing form — the
+  // two had disagreed the whole time, and a static list drifts from the
+  // pre-render set the moment either changes. Generating it from
+  // `publishedRoutes` means sitemap, canonical and the files on disk cannot
+  // disagree: they have one source.
+  //
+  // Skipped routes are excluded by construction. Advertising a URL that renders
+  // the 404 page is worse than omitting it.
+  const urls = publishedRoutes
+    .map((route) => ['  <url>', `    <loc>${canonicalFor(route)}</loc>`, '  </url>'].join('\n'))
+    .join('\n');
+  writeFileSync(
+    join(dist, 'sitemap.xml'),
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      urls,
+      '</urlset>',
+      '',
+    ].join('\n')
+  );
 
   // The SSR bundle is a build artefact, not site content. Left in place it would
   // be uploaded with the site — and `dist-ssr` contains a copy of every page's
