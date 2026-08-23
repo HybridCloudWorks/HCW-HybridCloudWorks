@@ -5,6 +5,7 @@ import './admin-crud-http.js';
 import './admin-identity-http.js';
 import './admin-integrations-http.js';
 import './ai-proxy-http.js';
+import './integrations-http.js';
 import './admin-uploads-http.js';
 import './admin-snapshots-http.js';
 import './cms-http.js';
