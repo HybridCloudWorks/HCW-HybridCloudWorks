@@ -1533,8 +1533,13 @@ resource "azurerm_cosmosdb_sql_container" "leases" {
 # start the validation, read the token with `az staticwebapp hostname show`, add
 # it as a TXT record, and Azure completes on its own.
 #
-# The `asuid.` convention some Azure docs describe is App Service and Front Door.
-# Static Web Apps does not use it, and no asuid record has ever existed here.
+# The `asuid.` convention some Azure docs describe belongs to App Service and
+# Front Door, NOT to Static Web Apps. This estate does use it — correctly — for
+# the Function App: `cloudflare_record.azure_functions_domain_verification`
+# publishes `asuid.api-azure` holding `custom_domain_verification_id`, which is
+# exactly how App Service proves domain ownership. Carrying that pattern across
+# to the Static Web App is the mistake this comment exists to prevent; SWA
+# validates a root domain with a generated token instead.
 
 # Azure Functions subdomain (for API calls during migration)
 resource "cloudflare_record" "azure_functions" {

@@ -222,14 +222,20 @@ Without it the CLI blocks on the long-running operation. For the apex that
 **never completes**, because it is waiting for a TXT record you cannot add while
 the command is holding the terminal. It is not stuck; it is deadlocked on you.
 
-#### There is no `asuid` record
+#### There is no `asuid` record *for the Static Web App*
 
 This section used to say Terraform managed an `asuid` TXT record that served as
-the ownership proof. It did not. `cloudflare_record.azure_swa_txt_validation`
+the SWA ownership proof. It did not. `cloudflare_record.azure_swa_txt_validation`
 published the SWA *hostname* as a TXT value, which validates nothing, and has
-been removed — see the comment where it used to be in `infra/main.tf`. The
-`asuid.` convention is App Service and Front Door; Static Web Apps does not use
-it.
+been removed — see the comment where it used to be in `infra/main.tf`.
+
+An `asuid` record **does** exist in this estate, and it is correct: Terraform's
+`cloudflare_record.azure_functions_domain_verification` publishes
+`asuid.api-azure` holding the Function App's `custom_domain_verification_id`.
+That is the App Service convention, used properly, for the Function App.
+
+The error was carrying that pattern across to Static Web Apps, which does not
+use it — SWA validates a root domain with a generated token instead.
 
 #### Verified when
 
