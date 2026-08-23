@@ -450,3 +450,127 @@ describe('stored configuration, applied end to end', () => {
     expect(fetchImpl.host()).toBe('generativelanguage.googleapis.com');
   });
 });
+
+describe('failover — "order of preference" has to mean preference', () => {
+  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
+  const HOSTS = {
+    gemini: 'generativelanguage.googleapis.com',
+    openai: 'api.openai.com',
+    anthropic: 'api.anthropic.com',
+  };
+
+  /** Fails the named providers with `status`, answers for everything else. */
+  function fetchFailing(failing, status, message = 'boom') {
+    const calls = [];
+    const impl = vi.fn(async (url) => {
+      const host = new URL(url).host;
+      const provider = Object.keys(HOSTS).find((p) => HOSTS[p] === host);
+      calls.push(provider);
+      if (failing.includes(provider)) {
+        return {
+          ok: false,
+          status,
+          headers: { get: () => null },
+          text: async () => JSON.stringify({ error: { message } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () =>
+          JSON.stringify({
+            content: [{ type: 'text', text: '{}' }],
+            choices: [{ message: { content: '{}' } }],
+            candidates: [{ content: { parts: [{ text: '{}' }] } }],
+          }),
+      };
+    });
+    impl.providers = () => calls;
+    return impl;
+  }
+
+  const router = (fetchImpl, extraEnv = {}) =>
+    createAiRouter({ env: { ...keys, ...extraEnv }, fetch: fetchImpl, sleep: noSleep, log: quiet });
+
+  it('falls through to OpenAI when Gemini rejects the model as unknown', async () => {
+    // The exact risk that prompted this: the Gemini model ids were ported from
+    // upstream's VERTEX table, and Gemini became the first-choice provider on
+    // 2026-08-23. If one of those ids is not a valid public model, every AI
+    // feature that worked through Anthropic the day before returns 404.
+    const fetchImpl = fetchFailing(['gemini'], 404, 'models/gemini-3.6-flash is not found');
+    await expect(router(fetchImpl).generateJsonResponse({ prompt: 'x' })).resolves.toEqual({});
+    expect(fetchImpl.providers()).toEqual(['gemini', 'openai']);
+  });
+
+  it('falls through on a rejected key', async () => {
+    const fetchImpl = fetchFailing(['gemini'], 401, 'API key not valid');
+    await router(fetchImpl).generateTextResponse({ prompt: 'x' });
+    expect(fetchImpl.providers()).toEqual(['gemini', 'openai']);
+  });
+
+  it('walks the whole chain and reaches the last provider', async () => {
+    const fetchImpl = fetchFailing(['gemini', 'openai'], 403, 'forbidden');
+    await router(fetchImpl).generateTextResponse({ prompt: 'x' });
+    expect(fetchImpl.providers()).toEqual(['gemini', 'openai', 'anthropic']);
+  });
+
+  it('does NOT fall through on a bad request — that fails identically everywhere', async () => {
+    // Walking the chain to prove a malformed prompt is still malformed spends
+    // money and time on the same failure three times over.
+    const fetchImpl = fetchFailing(['gemini', 'openai', 'anthropic'], 400, 'invalid request');
+    await expect(router(fetchImpl).generateTextResponse({ prompt: 'x' })).rejects.toThrow(/400/);
+    expect(fetchImpl.providers()).toEqual(['gemini']);
+  });
+
+  it('throws the last error when every provider is unusable', async () => {
+    const fetchImpl = fetchFailing(['gemini', 'openai', 'anthropic'], 401, 'nope');
+    await expect(router(fetchImpl).generateTextResponse({ prompt: 'x' })).rejects.toThrow(/401/);
+    expect(fetchImpl.providers()).toEqual(['gemini', 'openai', 'anthropic']);
+  });
+
+  it('an explicit pin selects one provider and does not fall through', async () => {
+    // A pin is an instruction, not a preference. Quietly spending on another
+    // provider would defeat the reason someone set it.
+    const fetchImpl = fetchFailing(['anthropic'], 404, 'unknown model');
+    await expect(
+      router(fetchImpl, { CONTENTFORGE_AI_PROVIDER: 'anthropic' }).generateTextResponse({
+        prompt: 'x',
+      })
+    ).rejects.toThrow(/404/);
+    expect(fetchImpl.providers()).toEqual(['anthropic']);
+  });
+
+  it('records the provider that actually served, not the one first tried', async () => {
+    // usageOut is what drafting.js and inspect.js persist and the portal shows.
+    const fetchImpl = fetchFailing(['gemini'], 404, 'unknown model');
+    const usage = [];
+    await router(fetchImpl).generateTextResponse({ prompt: 'x', usageOut: usage });
+    expect(usage.at(-1).provider).toBe('openai');
+  });
+
+  it('skips a disabled provider entirely rather than failing over from it', async () => {
+    const fetchImpl = fetchFailing([], 500);
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: {
+        queryDocs: async () => [{ id: 'gemini', enabled: false }],
+        readDoc: async () => null,
+      },
+    });
+    await r.generateTextResponse({ prompt: 'x' });
+    expect(fetchImpl.providers()).toEqual(['openai']);
+  });
+
+  it('warns when it falls through, so a broken provider is not silently paid around', async () => {
+    const log = { warn: vi.fn() };
+    const fetchImpl = fetchFailing(['gemini'], 404, 'unknown model');
+    await createAiRouter({ env: keys, fetch: fetchImpl, sleep: noSleep, log }).generateTextResponse({
+      prompt: 'x',
+    });
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/gemini could not serve/i));
+  });
+});
