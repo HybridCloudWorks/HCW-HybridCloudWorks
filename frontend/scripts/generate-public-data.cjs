@@ -27,10 +27,11 @@
  *
  * IT WARNS LOUDLY AND CONTINUES, which is not the silent skip it replaced —
  * and the difference is the whole point. The old version printed a friendly
- * note and exited 0, indistinguishable from success. This emits a ::warning::
- * that surfaces on the run summary and the pull request, names the status and
- * the response body, and says which layer refused it. You cannot miss it; it
- * simply does not stop a deploy over a performance optimisation.
+ * note and exited 0, indistinguishable from success. This emits a short
+ * ::warning:: that surfaces on the run summary and the pull request, while the
+ * complete HTTP status, Cloudflare metadata, and response snippet remain in the
+ * step logs. The annotation stays single-line so GitHub Actions cannot truncate
+ * or misparse it. The deploy still does not stop over a performance optimisation.
  *
  * It DID fail the build, for about an hour on 2026-08-23, and that was wrong.
  * Cloudflare answers a GitHub runner with a managed challenge — datacenter IP,
@@ -162,10 +163,13 @@ main().catch((error) => {
     process.exit(1);
   }
 
-  // ::warning:: is picked up by GitHub and shown on the run summary and on the
-  // pull request, so this cannot pass unnoticed the way the old silent skip
-  // did. That visibility is the whole difference between the two.
-  console.log(`::warning::generate-public-data could not reach the API — ${error.message}`);
+  // GitHub Actions workflow-command annotations must remain single-line.
+  // Keep the annotation concise and leave the full multiline diagnostic in the
+  // ordinary step logs immediately below, where status, server, cf-ray, and the
+  // response-body snippet remain available for troubleshooting.
+  console.log(
+    '::warning::Public-data cache generation skipped; API was unreachable. See step logs.'
+  );
   console.error(`[generate-public-data] SKIPPED: ${error.message}`);
   console.error(
     '  The site falls back to fetchPublicSnapshotItems at runtime, which is the\n' +
