@@ -1,14 +1,23 @@
 /**
  * router.js — one door to the text models, for every AI handler (T-322 §4.4).
  *
- * Ported from Site-Main `lib/ai-model-router.js` (088f458) with the provider
- * model changed, by owner decision on 2026-08-21: **a provider is on when its
- * key is present, and nothing else.** Seed `ANTHROPIC_API_KEY`,
- * `OPENAI_API_KEY` or `GEMINI_API_KEY` and that provider becomes available;
- * seed none and every AI handler fails with `AI_NOT_CONFIGURED` — a plain
- * sentence, not a stack trace. `CONTENTFORGE_AI_PROVIDER` still pins a choice
- * when more than one key exists; the default order is Anthropic, OpenAI,
- * Gemini.
+ * Ported from Site-Main `lib/ai-model-router.js` (088f458). A key makes a
+ * provider POSSIBLE: seed `GEMINI_API_KEY`, `OPENAI_API_KEY` or
+ * `ANTHROPIC_API_KEY` and that provider becomes available; seed none and every
+ * AI handler fails with `AI_NOT_CONFIGURED` — a plain sentence, not a stack
+ * trace.
+ *
+ * Since 2026-08-23 a key is necessary but no longer sufficient. The admin
+ * portal's AI Engine page decides which of the available providers are actually
+ * used, in what order, and which parts of the site may call one at all. That
+ * configuration is read by `ai-config.js`, which also carries the rules for
+ * what happens when it disagrees with reality — read its header before changing
+ * anything here. In short: configuration can disable and reorder, never enable;
+ * an unreadable configuration changes nothing.
+ *
+ * Default order is Gemini, OpenAI, Anthropic. `CONTENTFORGE_AI_PROVIDER` still
+ * pins one outright, and now warns differently depending on whether the pin
+ * missed for want of a key or because someone switched that provider off.
  *
  * What is gone from upstream and why:
  *   - Vertex. It authenticates with Application Default Credentials — a GCP
@@ -25,7 +34,26 @@
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
  */
 
-export const PROVIDERS = Object.freeze(['anthropic', 'openai', 'gemini']);
+import {
+  DEFAULT_PROVIDER_ORDER,
+  createAiConfigLoader,
+  configuredModelFor,
+  isFeatureEnabled,
+  resolveProviderOrder,
+} from './ai-config.js';
+
+/**
+ * The providers this platform implements, in default preference order.
+ *
+ * Set and order are deliberately the same list: there is no implemented
+ * provider without a place in the order, and no place in the order for a
+ * provider that is not implemented. Keeping them as one constant is what stops
+ * the two drifting — `ai-config.test.js` asserts the members match.
+ *
+ * The order changed on 2026-08-23 (owner decision) from Anthropic-first to
+ * Gemini-first; the reasoning is on DEFAULT_PROVIDER_ORDER.
+ */
+export const PROVIDERS = DEFAULT_PROVIDER_ORDER;
 
 const KEY_ENV = Object.freeze({
   anthropic: 'ANTHROPIC_API_KEY',
@@ -131,6 +159,21 @@ export class AiNotConfiguredError extends Error {
     super(message);
     this.name = 'AiNotConfiguredError';
     this.code = 'AI_NOT_CONFIGURED';
+  }
+}
+
+/**
+ * An administrator switched this feature off in the portal. Distinct from
+ * AiNotConfiguredError because it is a decision, not a fault: callers that
+ * degrade gracefully (skip alt text, publish an ungraded draft) should catch
+ * this and carry on, and nothing should page anyone about it.
+ */
+export class AiFeatureDisabledError extends Error {
+  constructor(feature) {
+    super(`The '${feature}' AI feature is turned off in the admin portal.`);
+    this.name = 'AiFeatureDisabledError';
+    this.code = 'AI_FEATURE_DISABLED';
+    this.feature = feature;
   }
 }
 
@@ -290,15 +333,34 @@ export function createAiRouter({
   fetch: fetchImpl = globalThis.fetch,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   log = console,
+  store = null,
+  configTtlMs = 60_000,
 } = {}) {
+  // With no store the loader reports "no configuration", and every path below
+  // falls back to exactly the environment-only behaviour this router had before
+  // the portal's settings were wired up. That is what keeps unit tests — and
+  // any caller that does not hand over a Cosmos client — working unchanged.
+  const config = createAiConfigLoader({ store, ttlMs: configTtlMs, log });
+
   const availableProviders = () => PROVIDERS.filter((p) => readKey(env, KEY_ENV[p]));
 
-  /** The provider in use, or null when no key is present. */
-  function getActiveAiProvider() {
-    const available = availableProviders();
-    const pinned = String(env.CONTENTFORGE_AI_PROVIDER || '')
+  const pinnedProvider = () =>
+    String(env.CONTENTFORGE_AI_PROVIDER || '')
       .toLowerCase()
       .trim();
+
+  /**
+   * The provider chosen from KEYS ALONE, ignoring anything stored in the portal.
+   *
+   * Kept synchronous and kept env-only on purpose: callers use it to label and
+   * to log, and an await there would ripple through four modules for no gain.
+   * It is NOT the provider a call will use once an administrator has reordered
+   * or disabled something — for that, read `usageOut` after the call, which
+   * records what actually ran. `resolveProvider` is the real selection.
+   */
+  function getActiveAiProvider() {
+    const available = availableProviders();
+    const pinned = pinnedProvider();
     if (pinned) {
       if (available.includes(pinned)) return pinned;
       log.warn?.(
@@ -308,14 +370,53 @@ export function createAiRouter({
     return available[0] || null;
   }
 
-  function requireProvider() {
-    const provider = getActiveAiProvider();
+  /**
+   * The real selection: stored configuration applied over key presence, plus
+   * the feature gate.
+   *
+   * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
+   * @returns {Promise<{provider: string, model: string|null}>} `model` is the
+   *          administrator's pinned model for that provider, if they set one.
+   */
+  async function resolveProvider(feature = null) {
+    const { providers: docs, features } = await config.load();
+
+    if (feature && !isFeatureEnabled(features, feature)) {
+      throw new AiFeatureDisabledError(feature);
+    }
+
+    const available = availableProviders();
+    const { order, disabled } = resolveProviderOrder(docs, available);
+
+    const pinned = pinnedProvider();
+    let provider = order[0] || null;
+    if (pinned) {
+      if (order.includes(pinned)) {
+        provider = pinned;
+      } else {
+        // Two different reasons the pin missed, and they need different fixes:
+        // seed a key, or re-enable the provider in the portal.
+        const why = disabled.includes(pinned)
+          ? 'it is disabled in the admin portal'
+          : 'its key is not present';
+        log.warn?.(
+          `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${provider || 'none'}`
+        );
+      }
+    }
+
     if (!provider) {
+      // "Every provider is switched off" is a legitimate instruction and reads
+      // very differently from "no keys are seeded". Saying which one it is here
+      // saves an hour of looking in the wrong place.
       throw new AiNotConfiguredError(
-        'No AI provider is configured. Seed ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY in Key Vault (REVIEW §4.6) and the matching provider turns on.'
+        disabled.length > 0
+          ? `Every configured AI provider is disabled in the admin portal (${disabled.join(', ')}). Re-enable one under AI Engine → AI Services.`
+          : 'No AI provider is configured. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY in Key Vault (REVIEW §4.6) and the matching provider turns on.'
       );
     }
-    return provider;
+
+    return { provider, model: configuredModelFor(docs, provider) };
   }
 
   function defaultModelFor(provider, purpose = 'general') {
@@ -452,13 +553,16 @@ export function createAiRouter({
     purpose = 'general',
     systemPrompt = '',
     usageOut = null,
+    feature = null,
   } = {}) {
-    const provider = requireProvider();
+    const { provider, model: configuredModel } = await resolveProvider(feature);
     return withRetry(() =>
       callWith(provider, {
         prompt,
         parts,
-        model,
+        // An explicit model from the call site wins; then the administrator's
+        // choice in the portal; then the purpose table.
+        model: model || configuredModel,
         purpose,
         expectJson: false,
         systemPrompt,
@@ -474,13 +578,14 @@ export function createAiRouter({
     purpose = 'general',
     systemPrompt = '',
     usageOut = null,
+    feature = null,
   } = {}) {
-    const provider = requireProvider();
+    const { provider, model: configuredModel } = await resolveProvider(feature);
     const text = await withRetry(() =>
       callWith(provider, {
         prompt,
         parts,
-        model,
+        model: model || configuredModel,
         purpose,
         expectJson: true,
         systemPrompt,
@@ -498,6 +603,9 @@ export function createAiRouter({
         systemPrompt:
           'You repair malformed JSON. Return only strict RFC 8259 JSON. Do not add commentary.',
         usageOut,
+        // The repair belongs to the call that is already permitted; re-checking
+        // under the same cached settings keeps the two halves consistent.
+        feature,
       });
       try {
         return parseJsonWithFallbacks(repaired);
@@ -538,21 +646,39 @@ export function createAiRouter({
   return {
     availableProviders,
     getActiveAiProvider,
+    resolveProvider,
     defaultModelFor,
     generateTextResponse,
     generateJsonResponse,
     callProvider,
     getCostEstimate,
+    invalidateConfig: config.invalidate,
   };
 }
 
-// Process-wide instance on the real environment, for production call sites.
-const defaultRouter = createAiRouter();
+/**
+ * Process-wide instance for production call sites.
+ *
+ * The Cosmos client is imported lazily, and for two reasons. It keeps the cost
+ * off the cold-start path of every function that merely imports `readKey` from
+ * here (six modules do, and none of them touch a model). And it keeps this
+ * module importable in tests and in tooling without a Cosmos connection string
+ * — the store is only constructed when an AI call is actually made.
+ */
+const defaultRouter = createAiRouter({
+  store: {
+    queryDocs: async (...args) => (await import('../cosmos-client.js')).queryDocs(...args),
+    readDoc: async (...args) => (await import('../cosmos-client.js')).readDoc(...args),
+  },
+});
+
 export const {
   availableProviders,
   getActiveAiProvider,
+  resolveProvider,
   defaultModelFor,
   generateTextResponse,
   generateJsonResponse,
   callProvider,
+  invalidateConfig,
 } = defaultRouter;

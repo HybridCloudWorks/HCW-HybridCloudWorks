@@ -320,3 +320,89 @@ describe('usage records', () => {
     expect((await h.listUsage(makeRequest({ query: { since: 'junk' } }), context)).status).toBe(400);
   });
 });
+
+describe('AI feature switches', () => {
+  const handlers = (store) =>
+    createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+
+  it('GET resolves absent-means-on, so the portal shows real state not an empty object', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => null) });
+    const response = await handlers(store).getAiFeatures(makeRequest(), context);
+    const body = JSON.parse(response.body);
+
+    expect(response.status).toBe(200);
+    expect(Object.values(body.features).every((v) => v === true)).toBe(true);
+    expect(Object.keys(body.features)).toContain('inspector');
+  });
+
+  it('GET returns the catalogue, so the UI does not keep a second copy of the list', async () => {
+    // A second copy is precisely how the AI Engine page came to advertise
+    // Vertex as enabled while the router had removed it.
+    const store = makeStore();
+    const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
+    expect(body.catalogue.inspector.label).toBeTruthy();
+    expect(Object.keys(body.catalogue).sort()).toEqual(Object.keys(body.features).sort());
+  });
+
+  it('GET reports a stored false as false', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ features: { critique: false } })) });
+    const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
+    expect(body.features.critique).toBe(false);
+    expect(body.features.inspector).toBe(true);
+  });
+
+  it('PUT merges rather than replaces, so one toggle does not clear the rest', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ features: { critique: false } })) });
+    const response = await handlers(store).putAiFeatures(
+      makeRequest({ body: { features: { telegram: false } } }),
+      context
+    );
+    expect(response.status).toBe(200);
+    expect(store.patchDoc).toHaveBeenCalledWith('admin_settings', 'ai-features', {
+      features: { critique: false, telegram: false },
+      updatedAt: '2026-08-06T12:00:00.000Z',
+    });
+  });
+
+  it('PUT stores strict booleans — a stray 0 must not read as OFF later', async () => {
+    // The router disables on an explicit false only, so a 0 stored here would
+    // silently mean ON. Coercing at the door means the document cannot hold
+    // that ambiguity at all.
+    const store = makeStore();
+    await handlers(store).putAiFeatures(
+      makeRequest({ body: { features: { inspector: 0, altText: false } } }),
+      context
+    );
+    expect(store.upsertDoc.mock.calls[0][1].features).toEqual({
+      inspector: true,
+      altText: false,
+    });
+  });
+
+  it('PUT 400s an unknown feature name instead of storing a switch that governs nothing', async () => {
+    const store = makeStore();
+    const response = await handlers(store).putAiFeatures(
+      makeRequest({ body: { features: { inspectr: false } } }),
+      context
+    );
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body).error).toMatch(/inspectr/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('PUT 400s a body that is not { features: {...} }', async () => {
+    const store = makeStore();
+    for (const body of [{}, { features: [] }, { features: null }]) {
+      expect((await handlers(store).putAiFeatures(makeRequest({ body }), context)).status).toBe(400);
+    }
+  });
+
+  it('both verbs require a role', async () => {
+    const store = makeStore();
+    const denied = createAdminIntegrationHandlers({ guard: denyGuard, store, ...fixed });
+    expect((await denied.getAiFeatures(makeRequest(), context)).status).toBe(403);
+    expect(
+      (await denied.putAiFeatures(makeRequest({ body: { features: {} } }), context)).status
+    ).toBe(403);
+  });
+});

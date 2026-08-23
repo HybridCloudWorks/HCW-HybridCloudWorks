@@ -163,6 +163,7 @@ export function createGrader({ ai }) {
     const response = await ai.generateJsonResponse({
       prompt: buildRubricPrompt(article, profile, sections),
       purpose: 'analysis',
+      feature: 'forgeGrading',
       systemPrompt:
         'You are a strict, consistent content relevance grader. Respond with valid JSON only.',
       usageOut,

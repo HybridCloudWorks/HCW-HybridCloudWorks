@@ -37,22 +37,24 @@ describe('provider resolution — by key presence', () => {
     });
   });
 
-  it('orders Anthropic, OpenAI, Gemini; a pin wins only if its key exists', () => {
-    const env = { OPENAI_API_KEY: 'o', GEMINI_API_KEY: 'g' };
+  it('orders Gemini, OpenAI, Anthropic; a pin wins only if its key exists', () => {
+    // Owner decision 2026-08-23, reversing the ported Anthropic-first order.
+    // Cost, not quality: see DEFAULT_PROVIDER_ORDER in ai-config.js.
+    const env = { OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
     expect(createAiRouter({ env, log: quiet }).getActiveAiProvider()).toBe('openai');
     expect(
-      createAiRouter({ env: { ...env, ANTHROPIC_API_KEY: 'a' }, log: quiet }).getActiveAiProvider()
-    ).toBe('anthropic');
-    expect(
-      createAiRouter({
-        env: { ...env, CONTENTFORGE_AI_PROVIDER: 'gemini' },
-        log: quiet,
-      }).getActiveAiProvider()
+      createAiRouter({ env: { ...env, GEMINI_API_KEY: 'g' }, log: quiet }).getActiveAiProvider()
     ).toBe('gemini');
-    const log = { warn: vi.fn() };
     expect(
       createAiRouter({
         env: { ...env, CONTENTFORGE_AI_PROVIDER: 'anthropic' },
+        log: quiet,
+      }).getActiveAiProvider()
+    ).toBe('anthropic');
+    const log = { warn: vi.fn() };
+    expect(
+      createAiRouter({
+        env: { ...env, CONTENTFORGE_AI_PROVIDER: 'gemini' },
         log,
       }).getActiveAiProvider()
     ).toBe('openai');
@@ -289,6 +291,162 @@ describe('cost table (ported from upstream ai-model-router.cost.test.js)', () =>
         ).toBeDefined();
       }
     }
-    expect(PROVIDERS).toEqual(['anthropic', 'openai', 'gemini']);
+    expect(PROVIDERS).toEqual(['gemini', 'openai', 'anthropic']);
+  });
+});
+
+describe('stored configuration, applied end to end', () => {
+  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
+
+  /** A store whose ai_providers rows and ai-features doc are given inline. */
+  const storeOf = (providers, features = null) => ({
+    queryDocs: vi.fn(async () => providers),
+    readDoc: vi.fn(async () => features),
+  });
+
+  /** Captures which provider actually got called by looking at the URL. */
+  function spyFetch() {
+    const fetchImpl = vi.fn(async (url) => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () =>
+        JSON.stringify({
+          content: [{ type: 'text', text: '{}' }],
+          choices: [{ message: { content: '{}' } }],
+          candidates: [{ content: { parts: [{ text: '{}' }] } }],
+        }),
+    }));
+    fetchImpl.host = () => new URL(fetchImpl.mock.calls.at(-1)[0]).host;
+    return fetchImpl;
+  }
+
+  it('routes to Gemini by default when every key is present', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({ env: keys, fetch: fetchImpl, sleep: noSleep, log: quiet });
+    await r.generateJsonResponse({ prompt: 'x' });
+    expect(fetchImpl.host()).toBe('generativelanguage.googleapis.com');
+  });
+
+  it('a disabled provider is skipped even though its key is present', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([{ id: 'gemini', enabled: false }]),
+    });
+    await r.generateJsonResponse({ prompt: 'x' });
+    expect(fetchImpl.host()).toBe('api.openai.com');
+  });
+
+  it('honours the configured order over the default one', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([
+        { id: 'anthropic', enabled: true, order: 1 },
+        { id: 'gemini', enabled: true, order: 2 },
+      ]),
+    });
+    await r.generateJsonResponse({ prompt: 'x' });
+    expect(fetchImpl.host()).toBe('api.anthropic.com');
+  });
+
+  it('uses the model an administrator pinned for that provider', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([{ id: 'gemini', enabled: true, defaultModel: 'gemini-2.5-pro' }]),
+    });
+    await r.generateJsonResponse({ prompt: 'x' });
+    expect(fetchImpl.mock.calls.at(-1)[0]).toContain('gemini-2.5-pro');
+  });
+
+  it('an explicit model from the call site still wins over the pin', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([{ id: 'gemini', enabled: true, defaultModel: 'gemini-2.5-pro' }]),
+    });
+    await r.generateJsonResponse({ prompt: 'x', model: 'gemini-3.6-flash' });
+    expect(fetchImpl.mock.calls.at(-1)[0]).toContain('gemini-3.6-flash');
+  });
+
+  it('a disabled feature throws AI_FEATURE_DISABLED without calling anything', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([], { features: { critique: false } }),
+    });
+    await expect(r.generateJsonResponse({ prompt: 'x', feature: 'critique' })).rejects.toMatchObject(
+      { code: 'AI_FEATURE_DISABLED', feature: 'critique' }
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('leaves every other feature running when one is switched off', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([], { features: { critique: false } }),
+    });
+    await expect(r.generateJsonResponse({ prompt: 'x', feature: 'inspector' })).resolves.toEqual({});
+  });
+
+  it('says "disabled in the portal", not "not configured", when all providers are off', async () => {
+    // The two need different fixes and the message is the only thing pointing
+    // at which one.
+    const r = createAiRouter({
+      env: keys,
+      fetch: spyFetch(),
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf([
+        { id: 'gemini', enabled: false },
+        { id: 'openai', enabled: false },
+        { id: 'anthropic', enabled: false },
+      ]),
+    });
+    await expect(r.generateJsonResponse({ prompt: 'x' })).rejects.toThrow(/disabled in the admin/i);
+  });
+
+  it('a configuration read failure changes nothing — AI keeps working', async () => {
+    // The failure mode this guards is the worst one available: a Cosmos blip
+    // that reads as "everything disabled" would take the site's AI down with
+    // no error anyone would connect to it.
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: {
+        queryDocs: vi.fn(async () => {
+          throw new Error('cosmos down');
+        }),
+        readDoc: vi.fn(async () => {
+          throw new Error('cosmos down');
+        }),
+      },
+    });
+    await r.generateJsonResponse({ prompt: 'x', feature: 'inspector' });
+    expect(fetchImpl.host()).toBe('generativelanguage.googleapis.com');
   });
 });

@@ -192,8 +192,11 @@ export function createInspector({
 
   async function analyzeArticle(url, markdownContent, cloudProvider, format, revisionIssues) {
     const only = metadataOnly();
-    const aiProvider = ai.getActiveAiProvider();
     const modelOverride = env.CONTENTFORGE_ANALYSIS_MODEL || null;
+    // Recorded on the article and shown in the portal, so it has to be the
+    // provider that actually served the call. Now that the portal can reorder
+    // providers, a guess taken before the call can name a different one.
+    const usage = [];
     const revisionClause =
       Array.isArray(revisionIssues) && revisionIssues.length > 0
         ? `\n\nThis is a revision of a draft an editorial critique pass rejected. Fix every issue below — do not just paraphrase around them:\n${revisionIssues.map((issue) => `- ${issue}`).join('\n')}`
@@ -203,7 +206,7 @@ export function createInspector({
       : `${ANALYSIS_SYSTEM_PROMPT}\n\n${buildVoiceAndFormatBlock(cloudProvider, format)}${revisionClause}`;
     const prompt = buildAnalysisPrompt(url, markdownContent, only);
 
-    log.log?.(`[ai-model] article analysis via ${aiProvider}`, {
+    log.log?.('[ai-model] article analysis starting', {
       metadataOnly: only,
       format: format?.key,
     });
@@ -212,7 +215,11 @@ export function createInspector({
       systemPrompt,
       model: modelOverride,
       purpose: 'analysis',
+      usageOut: usage,
+      feature: 'inspector',
     });
+    const aiProvider = usage.at(-1)?.provider || ai.getActiveAiProvider();
+    log.log?.(`[ai-model] article analysis via ${aiProvider}`);
     // Fingerprint only — never the payload.
     log.log?.('[ai-model] analysis complete', {
       title: metadata?.title,
@@ -253,6 +260,7 @@ export function createInspector({
             { inlineData: { mimeType, data: buffer.toString('base64') } },
           ],
           purpose: 'multimodal',
+          feature: 'altText',
         });
         if (altText && altText.trim()) results[url] = altText.trim().slice(0, 125);
       } catch (error) {

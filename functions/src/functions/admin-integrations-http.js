@@ -81,6 +81,15 @@ httpRouteByMethod('cmsConfigDoc', {
   },
 });
 
+httpRouteByMethod('cmsAiFeatures', {
+  authLevel: 'anonymous',
+  route: 'cms/ai-features',
+  handlers: {
+    GET: (request, context) => handlers().getAiFeatures(request, context),
+    PUT: (request, context) => handlers().putAiFeatures(request, context),
+  },
+});
+
 httpRoute('cmsListAiUsage', {
   methods: ['GET'],
   authLevel: 'anonymous',
