@@ -116,6 +116,29 @@ console shows no CORS failures.
 
 ## Step 3 — Secrets, domains, DNS
 
+> **Before any script in this step: you need a data-plane role on the vault.**
+>
+> The vault is RBAC-authorised (`enable_rbac_authorization = true`) with zero
+> access policies. Terraform grants the Function App *Key Vault Secrets User*
+> and the HCP Terraform service principal *Key Vault Secrets Officer* — and no
+> human anything. **Being subscription Owner does not help**: Owner is
+> control-plane, secret values are data-plane.
+>
+> Without it, every script here opens its firewall window exactly as designed
+> and is then refused with `ForbiddenByRbac`, which reads as a broken script.
+> That cost an hour on 2026-08-23.
+>
+> Grant it through Terraform, so it is reviewed and revoked deliberately rather
+> than clicked in the portal and forgotten. In HCP Terraform:
+>
+> ```
+> admin_object_ids = ["<your Entra object id>"]
+> ```
+>
+> Your object id: `az ad signed-in-user show --query id -o tsv`. Apply, do the
+> work in this step, then **empty it and apply again** — the same window
+> discipline as `admin_ip_rules`, and for the same reason.
+
 ### 3a. Key Vault (TODO.md T-321)
 
 **You run:**
