@@ -25,10 +25,21 @@
  * It now reads the platform's own API, which means the frontend build no longer
  * depends on GCP at all.
  *
- * IT FAILS LOUDLY. A build that cannot produce these files is a build whose
- * output is worse than the last one, and shipping that silently is precisely
- * what went wrong before. The runtime fallback is a safety net for visitors,
- * not a licence for the build to be quietly wrong.
+ * IT WARNS LOUDLY AND CONTINUES, which is not the silent skip it replaced —
+ * and the difference is the whole point. The old version printed a friendly
+ * note and exited 0, indistinguishable from success. This emits a ::warning::
+ * that surfaces on the run summary and the pull request, names the status and
+ * the response body, and says which layer refused it. You cannot miss it; it
+ * simply does not stop a deploy over a performance optimisation.
+ *
+ * It DID fail the build, for about an hour on 2026-08-23, and that was wrong.
+ * Cloudflare answers a GitHub runner with a managed challenge — datacenter IP,
+ * not user agent — so the only way to make it succeed was a permanent
+ * bot-protection exception on the API host. Poor trade against one extra API
+ * call per visitor on two pages. Issue #175 carries the decision.
+ *
+ * A CONFIGURATION MISTAKE STILL FAILS: a missing AZURE_FUNCTIONS_URL or a base
+ * without the /api suffix is a broken build, not an unreachable dependency.
  *
  * Env:
  *   AZURE_FUNCTIONS_URL   API base including /api. The deploy workflow already
@@ -44,13 +55,21 @@ const SNAPSHOTS = [
 ];
 
 const OUT_DIR = path.join(__dirname, '..', 'public', 'data');
+
+/**
+ * A mistake in how the build is configured, as distinct from a dependency being
+ * unreachable. Typed rather than matched on message text, because which of the
+ * two it is decides whether the build stops.
+ */
+class ConfigError extends Error {}
+
 const TIMEOUT_MS = 30_000;
 
 function apiBase() {
   const raw = process.env.AZURE_FUNCTIONS_URL || process.env.VITE_AZURE_FUNCTIONS_URL || '';
   const base = raw.trim().replace(/\/+$/, '');
   if (!base) {
-    throw new Error(
+    throw new ConfigError(
       'AZURE_FUNCTIONS_URL is not set. It must be the API base INCLUDING the /api prefix, ' +
         'e.g. https://api-azure.hybridcloudworks.com/api'
     );
@@ -59,7 +78,7 @@ function apiBase() {
     // The same trap functionsBase.js guards against: routes are registered
     // relative to /api, so a base without it 404s uniformly and the failure
     // looks like a missing endpoint rather than a missing path segment.
-    throw new Error(`AZURE_FUNCTIONS_URL must end in /api — got "${base}"`);
+    throw new ConfigError(`AZURE_FUNCTIONS_URL must end in /api — got "${base}"`);
   }
   return base;
 }
@@ -87,11 +106,11 @@ async function fetchSnapshot(base, id) {
     const ray = response.headers.get('cf-ray');
     const snippet = body.replace(/\s+/g, ' ').trim().slice(0, 300);
     throw new Error(
-      `GET ${url} -> HTTP ${response.status}
-` +
-        `  server: ${server}${ray ? `  cf-ray: ${ray}` : ''}
-` +
-        `  body:   ${snippet || '(empty)'}`
+      [
+        `GET ${url} -> HTTP ${response.status}`,
+        `  server: ${server}${ray ? `  cf-ray: ${ray}` : ''}`,
+        `  body:   ${snippet || '(empty)'}`,
+      ].join('\n')
     );
   }
 
@@ -135,10 +154,23 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`[generate-public-data] FAILED: ${error.message}`);
+  // A configuration mistake is the build's own fault and fails it. An
+  // unreachable or refusing API is not, and the site has a designed fallback
+  // for exactly that.
+  if (error instanceof ConfigError) {
+    console.error(`[generate-public-data] FAILED: ${error.message}`);
+    process.exit(1);
+  }
+
+  // ::warning:: is picked up by GitHub and shown on the run summary and on the
+  // pull request, so this cannot pass unnoticed the way the old silent skip
+  // did. That visibility is the whole difference between the two.
+  console.log(`::warning::generate-public-data could not reach the API — ${error.message}`);
+  console.error(`[generate-public-data] SKIPPED: ${error.message}`);
   console.error(
-    '  This build would ship without /data/*.json, falling back to a per-visitor API call.\n' +
-      '  That is a silent regression, so the build stops here instead.'
+    '  The site falls back to fetchPublicSnapshotItems at runtime, which is the\n' +
+      '  path these components already had. Visitors get correct data; it costs\n' +
+      '  one extra API call on /about and the speaker widget. See issue #175.'
   );
-  process.exit(1);
+  process.exit(0);
 });
