@@ -644,10 +644,12 @@ three have to be true before step 1.
    `*.azurestaticapps.net` host is that hostname; nothing needs creating.
 3. Run the production import (the phase after the rehearsal — §5.7), with a write-freeze on
    Site-Main's admin from export to verification. Re-run the verification gates (§7) against Azure.
-4. Bind the custom domains. `hybridcloudworks.com` and `www` become SWA custom domains — the `asuid`
-   TXT record Terraform already manages (`cloudflare_record.azure_swa_txt_validation`) is the
-   ownership proof, so the binding does not wait on DNS moving. `admin.hybridcloudworks.com` binds
-   the same way if the admin UI keeps its own host.
+4. Bind the custom domains. `hybridcloudworks.com` and `www` become SWA custom domains, and the two
+   validate by **different** mechanisms — neither of which is an `asuid` record, and neither of
+   which Terraform can pre-satisfy. `www` needs a real CNAME in place first; the apex needs
+   `--validation-method dns-txt-token` and the token Azure mints, added as a TXT record at `@`.
+   Binding does not move traffic, but it does wait on DNS. Done 2026-08-23; the mechanics, including
+   why `--no-wait` matters, are in the Cutover runbook step 3b.
 5. Move DNS at Cloudflare: the apex and `www` CNAMEs from the Firebase origin to the SWA hostname.
    **Keep TTL low for at least 48 hours beforehand.** The API host `api-azure.` does not move — it
    has been on Azure since Phase 2.

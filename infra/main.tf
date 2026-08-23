@@ -1513,14 +1513,33 @@ resource "azurerm_cosmosdb_sql_container" "leases" {
 # =============================================================================
 
 # Azure SWA custom domain validation TXT record
-resource "cloudflare_record" "azure_swa_txt_validation" {
-  zone_id = var.cloudflare_zone_id
-  name    = "@"
-  content = azurerm_static_web_app.hcw.default_host_name
-  type    = "TXT"
-  ttl     = 300
-  comment = "Azure Static Web App domain validation"
-}
+# REMOVED 2026-08-23: cloudflare_record.azure_swa_txt_validation
+#
+# It published the Static Web App's default hostname as a TXT value at the apex
+# and was described, here and in the runbook, as the domain-ownership proof. It
+# was neither. Azure validates a root domain against a TOKEN it generates when
+# the validation starts — a value like `_6sod2vwest3f9qq3jascfmqk4g5c9jt` — and
+# it never looks at a hostname in a TXT record. The record was inert from the
+# day it was written.
+#
+# It cost real time on 2026-08-23: the runbook said binding "does not wait on
+# DNS moving" because this record existed, so `az staticwebapp hostname set` was
+# run for both hostnames and both failed. www needed an actual CNAME; the apex
+# needed `--validation-method dns-txt-token` and the generated token.
+#
+# It is not replaced by a managed record. The token is minted per validation and
+# is not knowable at plan time, so pinning one in Terraform would be state that
+# drifts the moment Azure reissues it. The procedure is in the runbook, step 3b:
+# start the validation, read the token with `az staticwebapp hostname show`, add
+# it as a TXT record, and Azure completes on its own.
+#
+# The `asuid.` convention some Azure docs describe belongs to App Service and
+# Front Door, NOT to Static Web Apps. This estate does use it — correctly — for
+# the Function App: `cloudflare_record.azure_functions_domain_verification`
+# publishes `asuid.api-azure` holding `custom_domain_verification_id`, which is
+# exactly how App Service proves domain ownership. Carrying that pattern across
+# to the Static Web App is the mistake this comment exists to prevent; SWA
+# validates a root domain with a generated token instead.
 
 # Azure Functions subdomain (for API calls during migration)
 resource "cloudflare_record" "azure_functions" {

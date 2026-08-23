@@ -86,7 +86,7 @@ documents in 62 containers (0 failed, reconciled); `stsiteprodcus01` holds
    is the §6 step 2 preview hostname.
 
 4. **The cutover sequence** (Migration_Plan §6) — owner-gated: Entra SPA
-   registration + `Admin` app role, SWA token, DNS + `asuid`, Key Vault secrets
+   registration + `Admin` app role, SWA token, DNS + SWA domain validation, Key Vault secrets
    (`ANTHROPIC-API-KEY` first; the inspector, forge, digest, AI cover and
    alerts all no-op cleanly without their keys), the Telegram webhook, then
    the delta import with Site-Main's Publer sync and VPS heartbeat paused and
