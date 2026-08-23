@@ -148,10 +148,13 @@ describe('the SPA fallback must not be a pre-rendered page', () => {
 });
 
 describe('metadata contract', () => {
-  it('canonical is route-specific, apex, and trailing-slashed', () => {
+  it('canonical is route-specific, apex, and NOT trailing-slashed', () => {
+    // Non-trailing because `trailingSlash: "always"` in Static Web Apps
+    // redirects every path including files: /assets/*.js, /icons/*.png and
+    // /sitemap.xml all 301'd, costing a round trip per asset per page load.
     expect(canonicalFor('/')).toBe('https://hybridcloudworks.com/');
-    expect(canonicalFor('/about')).toBe('https://hybridcloudworks.com/about/');
-    expect(canonicalFor('/azure/blog')).toBe('https://hybridcloudworks.com/azure/blog/');
+    expect(canonicalFor('/about')).toBe('https://hybridcloudworks.com/about');
+    expect(canonicalFor('/azure/blog')).toBe('https://hybridcloudworks.com/azure/blog');
   });
 
   it('normalises whatever slash form the route list uses', () => {
@@ -168,8 +171,8 @@ describe('metadata contract', () => {
 
   it('fills the tags a page did not supply', () => {
     const tags = socialTags('', '/about', 'About | HCW');
-    expect(tags).toContain('rel="canonical" href="https://hybridcloudworks.com/about/"');
-    expect(tags).toContain('property="og:url" content="https://hybridcloudworks.com/about/"');
+    expect(tags).toContain('rel="canonical" href="https://hybridcloudworks.com/about"');
+    expect(tags).toContain('property="og:url" content="https://hybridcloudworks.com/about"');
     expect(tags).toContain('property="og:title" content="About | HCW"');
     expect(tags).toContain('name="twitter:card"');
   });
@@ -211,6 +214,24 @@ describe('metadata contract', () => {
       '<html><head><link rel="canonical" href="https://hybridcloudworks.com" /><title>T</title></head><body><div id="root"></div></body></html>';
     const html = injectIntoTemplate(template, { head: '', body: '<p>x</p>' }, '/about');
     expect(html.match(/rel="canonical"/g)).toHaveLength(1);
-    expect(html).toContain('href="https://hybridcloudworks.com/about/"');
+    expect(html).toContain('href="https://hybridcloudworks.com/about"');
+  });
+});
+
+describe('the canonical form must match how the platform serves', () => {
+  it('agrees with staticwebapp.config.json trailingSlash', () => {
+    // These two were set independently and disagreed for one deploy: canonical
+    // said /about/ while the config said "never". A canonical pointing at a URL
+    // that redirects is worse than no canonical, and nothing else compares them.
+    const trailing = swaConfig.trailingSlash;
+    const canonical = canonicalFor('/about');
+    if (trailing === 'always') expect(canonical.endsWith('/')).toBe(true);
+    if (trailing === 'never') expect(canonical.endsWith('/')).toBe(false);
+  });
+
+  it('never lets a file path inherit a trailing-slash rule', () => {
+    // Why "never" and not "always": Static Web Apps applies trailingSlash to
+    // every path, files included.
+    expect(swaConfig.trailingSlash).toBe('never');
   });
 });

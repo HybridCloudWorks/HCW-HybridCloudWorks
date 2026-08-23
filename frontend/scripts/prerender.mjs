@@ -80,19 +80,29 @@ const HEAD_TAG = /^\s*<(link|meta|title|style|script|base)\b[^>]*?(?:\/>|>[\s\S]
  *     disagreed the whole time; the sitemap is the half that is wrong.
  *   - Azure was configured `trailingSlash: "never"`, the opposite of live.
  *
- * Trailing wins: it preserves the indexed form. `staticwebapp.config.json` is
- * set to `always` to match, and the sitemap is now generated from the same
- * route list as the pages, so the three cannot drift apart again.
+ * Trailing looked right — it preserves the indexed form — and was shipped that
+ * way for one deploy. It is wrong on this platform.
+ *
+ * `trailingSlash: "always"` in Static Web Apps applies to EVERY path, files
+ * included. Measured live: `/assets/index-*.js`, `/assets/vendor-*.css`,
+ * `/icons/hcw-logo.png` and `/sitemap.xml` all returned 301 to a slashed URL.
+ * They resolve at the redirect with the correct content type, so nothing broke
+ * — it simply cost an extra round trip on every asset on every page load,
+ * permanently, to preserve a URL form that a 301 already handles.
+ *
+ * So: NON-trailing, matching `trailingSlash: "never"`. Existing trailing-form
+ * inbound links redirect once and pass their equity on, which is the same
+ * mechanism that made the trailing form look preferable in the first place.
  *
  * Apex, not www: every indexed URL and the sitemap use the apex.
  */
 export const SITE_ORIGIN = 'https://hybridcloudworks.com';
 const DEFAULT_SOCIAL_IMAGE = `${SITE_ORIGIN}/icons/hcw-logo.png`;
 
-/** `/azure/blog` -> `https://hybridcloudworks.com/azure/blog/` */
+/** `/azure/blog` -> `https://hybridcloudworks.com/azure/blog` (root keeps its slash) */
 export function canonicalFor(route) {
   const clean = String(route).replace(/^\/+|\/+$/g, '');
-  return clean ? `${SITE_ORIGIN}/${clean}/` : `${SITE_ORIGIN}/`;
+  return clean ? `${SITE_ORIGIN}/${clean}` : `${SITE_ORIGIN}/`;
 }
 
 /** The value of a `<meta>` already present in the rendered head, if any. */

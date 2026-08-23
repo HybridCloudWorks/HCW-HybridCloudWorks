@@ -115,7 +115,7 @@ jobs:
             f="dist/$page/index.html"
             n=$(grep -c 'rel="canonical"' "$f" || true)
             [ "$n" -eq 1 ] || { echo "::error::$f has $n canonical links, expected exactly 1."; exit 1; }
-            grep -q "rel=\"canonical\" href=\"https://hybridcloudworks.com/$page/\"" "$f" || {
+            grep -q "rel=\"canonical\" href=\"https://hybridcloudworks.com/$page\"" "$f" || {
               echo "::error::$f canonical is not https://hybridcloudworks.com/$page/ — $(grep -o 'rel="canonical"[^>]*' "$f")"
               exit 1
             }
@@ -126,10 +126,11 @@ jobs:
           # stale hand-maintained file reappearing is a real regression.
           locs=$(grep -c '<loc>' dist/sitemap.xml || echo 0)
           [ "$locs" -ge 60 ] || { echo "::error::sitemap.xml has only $locs URLs — it was not generated from the pre-render route list."; exit 1; }
-          grep -q '<loc>https://hybridcloudworks.com/about/</loc>' dist/sitemap.xml || {
-            echo "::error::sitemap.xml does not use the canonical trailing-slash form."
+          grep -q '<loc>https://hybridcloudworks.com/about</loc>' dist/sitemap.xml || {
+            echo "::error::sitemap.xml does not use the canonical (non-trailing) form."
             exit 1
           }
+          test -f dist/robots.txt || { echo "::error::dist/robots.txt is missing; navigationFallback excludes it, so crawlers get a 404."; exit 1; }
           echo "metadata contract: canonical, og:url and sitemap verified on built HTML"
           bytes=$(du -sb dist | cut -f1)
           echo "dist: $(du -sh dist | cut -f1) ($bytes bytes), limit 524288000"
