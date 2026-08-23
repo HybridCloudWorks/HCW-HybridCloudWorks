@@ -59,6 +59,34 @@ const NEWS_META = {
     glowColor: 'rgba(var(--primary-rgb,30,164,130),0.3)',
     bgGlow: 'bg-emerald-500/10',
   },
+  vmware: {
+    title: 'VMware News',
+    subtitle:
+      'VMware by Broadcom updates — vSphere, Cloud Foundation, and private cloud operations.',
+    gradientFrom: 'from-vmware-primary',
+    gradientTo: 'to-vmware-primary',
+    glowColor: 'rgba(var(--primary-rgb,96,124,143),0.3)',
+    bgGlow: 'bg-slate-500/10',
+  },
+  ansible: {
+    title: 'Ansible News',
+    subtitle:
+      'Red Hat Ansible updates — automation platform releases, collections, and playbook practice.',
+    gradientFrom: 'from-ansible-primary',
+    gradientTo: 'to-ansible-primary',
+    glowColor: 'rgba(var(--primary-rgb,238,0,0),0.3)',
+    bgGlow: 'bg-red-500/10',
+  },
+};
+
+/** Deliberately generic. See the comment at the call site. */
+const FALLBACK_META = {
+  title: 'Platform News',
+  subtitle: 'Cloud platform updates, announcements and architecture insights.',
+  gradientFrom: 'from-slate-700 dark:from-slate-300',
+  gradientTo: 'to-slate-700 dark:to-slate-100',
+  glowColor: 'rgba(var(--primary-rgb,110,118,129),0.3)',
+  bgGlow: 'bg-slate-400/10',
 };
 
 export default function NewsPage({ provider: providerProp } = {}) {
@@ -70,7 +98,13 @@ export default function NewsPage({ provider: providerProp } = {}) {
     includeInsights: showInsights,
   });
 
-  const meta = NEWS_META[provider] || NEWS_META.azure;
+  // Falling back to NEWS_META.azure gave VMware and Ansible AZURE'S IDENTITY:
+  // /vmware/news served the title "Azure Platform News" and Azure's copy, at
+  // HTTP 200, on an indexable URL (#183). A neutral fallback is wrong in a way
+  // a reader can see; another provider's identity is wrong in a way that looks
+  // deliberate. `newsPage.providers.test.js` fails if a VALID_PROVIDERS entry
+  // has no row here, so the fallback should now be unreachable.
+  const meta = NEWS_META[provider] || FALLBACK_META;
 
   const articleCount = articles.length;
   const feedItemCount = rssItems.length;
