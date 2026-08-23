@@ -1391,10 +1391,35 @@ resource "azurerm_role_assignment" "func_kv_secrets" {
 }
 
 # Key Vault Secrets Officer — Terraform executor (write during CI/CD secret seeding)
+#
+# NOTE: on a CLI-driven HCP Terraform workspace this resolves to the WORKSPACE's
+# service principal, not to whoever typed `terraform apply`. That is correct, and
+# it is also why a human operator gets nothing from it — see admin_object_ids.
 resource "azurerm_role_assignment" "terraform_kv_secrets" {
   scope                = azurerm_key_vault.hcw.id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# Key Vault Secrets Officer — named human operators, for the seeding windows the
+# cutover scripts need.
+#
+# Every script in scripts/cutover that touches a secret assumed this existed.
+# It did not: the vault is RBAC-authorised with no access policies, so the only
+# principals with data-plane access were the Function App and the Terraform
+# service principal above. `04-telegram-webhook.ps1` opened the firewall exactly
+# as designed on 2026-08-23 and was refused by RBAC, which looks like a broken
+# script and is actually a missing role assignment.
+#
+# Empty by default and emptied again after the window, for the same reason
+# admin_ip_rules is: standing human access to production secrets is not a steady
+# state worth having.
+resource "azurerm_role_assignment" "admin_kv_secrets" {
+  for_each = toset(var.admin_object_ids)
+
+  scope                = azurerm_key_vault.hcw.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = each.value
 }
 
 # =============================================================================

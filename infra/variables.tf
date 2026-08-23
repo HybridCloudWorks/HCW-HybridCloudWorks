@@ -564,12 +564,19 @@ variable "github_deploy_ref" {
 variable "admin_ip_rules" {
   description = <<-EOT
     Public IPv4 addresses or CIDRs permitted to reach Key Vault, for seeding
-    secrets by hand as Azure Owner. Empty is the correct steady state: the vault
-    is then reachable only by the Function App over its subnet.
+    secrets by hand. Empty is the correct steady state: the vault is then
+    reachable only by the Function App over its subnet.
 
     Populate for the seeding window, apply, run the `az keyvault secret set`
     commands, then empty it and apply again. Secret values are never managed by
     Terraform, so they do not enter state or Terraform Cloud.
+
+    THIS OPENS THE NETWORK, NOT THE DOOR. This used to say "as Azure Owner",
+    which is wrong in a way that cost an hour on 2026-08-23: the vault sets
+    `enable_rbac_authorization = true`, and Owner is a CONTROL-plane role that
+    conveys no data-plane access to secret values. An operator with this IP
+    allowed and no data-plane role gets `ForbiddenByRbac` from a vault whose
+    firewall just let them in. Grant the role with `admin_object_ids` below.
   EOT
   type        = list(string)
   default     = []
@@ -577,6 +584,41 @@ variable "admin_ip_rules" {
   validation {
     condition     = alltrue([for ip in var.admin_ip_rules : can(cidrnetmask("${ip}/32")) || can(cidrnetmask(ip))])
     error_message = "admin_ip_rules entries must be IPv4 addresses or CIDR ranges."
+  }
+}
+
+variable "admin_object_ids" {
+  description = <<-EOT
+    Entra object ids granted **Key Vault Secrets Officer** on the vault, for
+    reading and seeding secret values by hand.
+
+    WHY THIS HAS TO EXIST. The vault is RBAC-authorised with zero access
+    policies, and the only principals Terraform grants are the Function App
+    (Secrets User) and Terraform's own service principal (Secrets Officer). No
+    human was granted anything — while every cutover script in scripts/cutover
+    assumes the operator can read secrets. `04-telegram-webhook.ps1` opened the
+    firewall exactly as designed and was then refused by RBAC, which reads as a
+    broken script rather than a missing role assignment.
+
+    Being Owner of the subscription does NOT help: that is control-plane, and
+    secret values are data-plane.
+
+    Same lifecycle as admin_ip_rules — populate for the window, apply, do the
+    work, empty it, apply again. Standing human access to production secrets is
+    not the steady state, which is why the default is empty and why this is a
+    reviewed variable rather than a portal click nobody records.
+
+    Object ids, not e-mail addresses: `az ad signed-in-user show --query id -o tsv`.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for id in var.admin_object_ids :
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", id))
+    ])
+    error_message = "admin_object_ids entries must be Entra object id GUIDs, not e-mail addresses or display names."
   }
 }
 
