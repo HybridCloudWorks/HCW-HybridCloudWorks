@@ -16,6 +16,7 @@ import { StaticRouter } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
 import { App, AppProviders } from '@/App';
 import { VALID_PROVIDERS } from '@/context/ProviderContext';
+import { PrerenderDataContext } from '@/hooks/prerenderData';
 
 /**
  * Sections that exist under every provider, as declared by App.jsx's
@@ -42,17 +43,19 @@ const PROVIDER_SECTIONS = [
  * adds its pages automatically — a hand-maintained list is how a route quietly
  * stops being pre-rendered.
  *
- * DELIBERATELY NO DETAIL PAGES. `/:provider/blog/:slug` and friends would need
- * the article list, which means calling the API during the build, and the build
- * runs on a GitHub runner that Cloudflare answers with a managed challenge
- * (issue #175). Wiring pre-rendering to that would make every deploy depend on
- * a bot-protection exception. Listing pages carry the links, so crawlers still
- * reach the articles; the articles themselves are client-rendered for now.
+ * DETAIL PAGES COME FROM THE MANIFEST, not from the API. `/:provider/blog/:slug`
+ * needs its article at render time and the build cannot fetch one — Cloudflare
+ * answers a GitHub runner with a managed challenge (#175), and making every
+ * deploy depend on a bot-protection exception is the trade that issue rejected.
+ * So `frontend/data/content-manifest.json`, written by an Azure-authenticated
+ * workflow reading Cosmos directly, supplies both the routes and their content.
+ * When the file is absent — a fresh clone, a branch that predates it — detail
+ * routes are simply skipped and everything else pre-renders as before.
  *
  * Admin routes are excluded on purpose: they are behind Entra sign-in, have no
  * search value, and pre-rendering them would publish the shell of a private UI.
  */
-export function routes() {
+export function routes(manifest = null) {
   return [
     '/',
     '/about',
@@ -61,6 +64,7 @@ export function routes() {
       `/${provider}`,
       ...PROVIDER_SECTIONS.map((section) => `/${provider}/${section}`),
     ]),
+    ...(manifest?.routes || []),
   ];
 }
 
@@ -68,7 +72,7 @@ export function routes() {
  * @param {string} url Route path to render, e.g. '/about'.
  * @returns {Promise<{html: string, head: string}>}
  */
-export async function render(url) {
+export async function render(url, seededData = null) {
   const helmetContext = {};
 
   // `prerenderToNodeStream`, not `renderToString`. Every route in this app is a
@@ -88,11 +92,18 @@ export async function render(url) {
 
   const { prelude } = await prerenderToNodeStream(
     <HelmetProvider context={helmetContext}>
-      <AppProviders>
-        <StaticRouter location={url}>
-          <App />
-        </StaticRouter>
-      </AppProviders>
+      {/*
+        The seed is how a detail page renders its article at all: usePublicData
+        fetches in an effect, and effects do not run here. Null on every route
+        that needs no data, which is the browser's behaviour too.
+      */}
+      <PrerenderDataContext.Provider value={seededData}>
+        <AppProviders>
+          <StaticRouter location={url}>
+            <App />
+          </StaticRouter>
+        </AppProviders>
+      </PrerenderDataContext.Provider>
     </HelmetProvider>,
     {
       onError(error, info) {

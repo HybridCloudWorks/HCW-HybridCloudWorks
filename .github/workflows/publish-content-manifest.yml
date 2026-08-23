@@ -1,0 +1,86 @@
+name: Publish Content Manifest
+
+# Produces frontend/data/content-manifest.json — the published articles that
+# scripts/prerender.mjs turns into static HTML.
+#
+# WHY A SEPARATE WORKFLOW. The frontend build cannot fetch this itself. It runs
+# on a GitHub runner, the public API is behind Cloudflare, and Cloudflare answers
+# a datacenter IP with a managed challenge (#175). The alternative was a
+# permanent bot-protection exception on the API host, which that issue rejected.
+#
+# So the data comes from the other side: this workflow holds Azure federated
+# credentials, reads Cosmos directly with data-plane RBAC, and commits a plain
+# JSON file. deploy-azure-frontend.yml keeps `contents: read` and a Static Web
+# Apps token — no Azure identity at all — and reads a file from the checkout.
+# That separation is the point, not an implementation detail: the build that
+# runs on every push should not hold database credentials.
+#
+# Committed rather than passed as an artifact so a build is reproducible from a
+# checkout alone, and so a diff shows what changed about the published set.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:15 UTC daily, after the nightly content timers have run. Articles are
+    # published by humans and by the forge, and neither tells this workflow.
+    - cron: '15 6 * * *'
+
+permissions:
+  contents: write # commits the manifest
+  id-token: write # federated credential exchange for azure/login
+
+concurrency:
+  group: content-manifest
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Read Cosmos and commit the manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Azure login
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Install script dependencies
+        working-directory: scripts
+        run: npm ci
+
+      # DefaultAzureCredential resolves through the CLI session azure/login
+      # leaves behind. COSMOS_ENDPOINT is a repository variable, not a secret —
+      # the endpoint is public and access is RBAC, not a connection string.
+      - name: Build the manifest
+        working-directory: scripts
+        env:
+          COSMOS_ENDPOINT: ${{ vars.COSMOS_ENDPOINT }}
+        run: node build-content-manifest.mjs
+
+      - name: Commit if the published set changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- frontend/data/content-manifest.json; then
+            echo "No change to the published set."
+            exit 0
+          fi
+          # The script already suppresses timestamp-only rewrites, so reaching
+          # here means the article set or its content actually moved.
+          routes=$(node -e "console.log(require('./frontend/data/content-manifest.json').routes.length)")
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add frontend/data/content-manifest.json
+          git commit -m "chore: refresh content manifest ($routes article routes)"
+          git push
+          echo "::notice::Manifest updated to $routes article routes. Deploy the frontend to publish them."

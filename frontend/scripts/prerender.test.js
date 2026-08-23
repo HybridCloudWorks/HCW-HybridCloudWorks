@@ -235,3 +235,25 @@ describe('the canonical form must match how the platform serves', () => {
     expect(swaConfig.trailingSlash).toBe('never');
   });
 });
+
+describe('article detail routes', () => {
+  it('replaces a canonical the page rendered rather than adding a second', () => {
+    // BlogDetailTemplate sets its own canonical via Helmet. Emitting one
+    // regardless put TWO on all 24 article pages the first time detail routes
+    // were pre-rendered. The route-derived one wins because it is what knows
+    // the origin and the trailing-slash policy.
+    const template = '<html><head><title>T</title></head><body><div id="root"></div></body></html>';
+    const head = '<link rel="canonical" href="https://example.com/wrong/" /><title>A | HCW</title>';
+    const html = injectIntoTemplate(template, { head, body: '<p>x</p>' }, '/aws/blog/my-post');
+
+    expect(html.match(/rel="canonical"/g)).toHaveLength(1);
+    expect(html).toContain('href="https://hybridcloudworks.com/aws/blog/my-post"');
+    expect(html).not.toContain('example.com/wrong');
+  });
+
+  it('keeps a page-supplied og:image, which only detail pages have', () => {
+    const head = '<meta property="og:image" content="https://cdn.example/hero.png" />';
+    const tags = socialTags(head, '/aws/blog/my-post', 'A | HCW');
+    expect(tags).not.toContain('og:image');
+  });
+});
