@@ -9,7 +9,7 @@
  * session.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createRestProxy, createIntegration, assertSafePath } from './rest-proxy.js';
+import { createRestProxy, createIntegration, assertSafePath, isAllowedPath } from './rest-proxy.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 const allowGuard = { requireRole: vi.fn(async () => ({ role: 'editor', error: null })) };
@@ -161,5 +161,64 @@ describe('the proxy handler', () => {
     const response = await handler(makeRequest({ path: '/x' }), context);
     expect(response.status).toBe(403);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('per-integration path allowlist', () => {
+  const LINKIE_ALLOWED = {
+    paths: ['/profiles', '/analytics/traffic-stats'],
+    patterns: [/^\/profiles\/[^/]+\/posts$/, /^\/profiles\/[^/]+\/posts\/[^/]+$/],
+  };
+
+  const withAllowlist = createIntegration({
+    name: 'Linkie',
+    baseUrl: 'https://app.linkie.bio/api/v1',
+    keyEnv: 'TEST_API_KEY',
+    headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+    allowedPaths: LINKIE_ALLOWED,
+  });
+
+  const handlerFor = (fetchImpl) =>
+    createRestProxy({
+      guard: allowGuard,
+      env: { TEST_API_KEY: 'secret' },
+      fetch: fetchImpl,
+      readKey,
+    })(withAllowlist);
+
+  it('allows exactly the endpoints the admin page calls', () => {
+    for (const path of ['/profiles', '/analytics/traffic-stats', '/profiles/abc/posts', '/profiles/abc/posts/xyz']) {
+      expect(isAllowedPath(LINKIE_ALLOWED, path), path).toBe(true);
+    }
+  });
+
+  it('blocks the rest of the upstream API', () => {
+    // The key's scopes are broader than any one screen needs, so an allowlist
+    // is worth more than trusting whatever path the caller sends.
+    for (const path of ['/billing', '/profiles/abc', '/analytics', '/profiles/abc/posts/xyz/extra']) {
+      expect(isAllowedPath(LINKIE_ALLOWED, path), path).toBe(false);
+    }
+  });
+
+  it('checks the path without its query string, so a query cannot disguise one', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' }));
+    await handlerFor(fetchImpl)(makeRequest({ path: '/profiles?limit=10' }), context);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://app.linkie.bio/api/v1/profiles?limit=10',
+      expect.anything()
+    );
+  });
+
+  it('never calls fetch for a path outside the allowlist', async () => {
+    const fetchImpl = vi.fn();
+    const response = await handlerFor(fetchImpl)(makeRequest({ path: '/billing' }), context);
+    expect(response.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('integrations without an allowlist are unrestricted beyond assertSafePath', () => {
+    // Publer and Klaviyo build paths freely in the admin UI; narrowing them
+    // would break screens without an enumeration of every path they construct.
+    expect(isAllowedPath(null, '/anything/at/all')).toBe(true);
   });
 });
