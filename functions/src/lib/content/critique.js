@@ -39,8 +39,13 @@ export function createCritic({ ai }) {
         const judged = await ai.generateJsonResponse({
           prompt: `Title: ${title || 'Untitled'}\n\nContent:\n${String(postContent || '').slice(0, 12000)}`,
           systemPrompt: CRITIQUE_SYSTEM_PROMPT,
-          model: ai.defaultModelFor(ai.getActiveAiProvider(), 'draft'),
+          // No explicit model. This used to resolve one for whichever provider
+          // key order picked, which was harmless only while the two could not
+          // disagree; with portal ordering in play it could hand a Claude model
+          // id to Gemini. `purpose` lets the router pick the model for the
+          // provider it actually selects.
           purpose: 'draft',
+          feature: 'critique',
         });
         const genericityScore = normalizeScore(judged?.genericityScore, 0);
         const specificityScore = normalizeScore(judged?.specificityScore, 10);

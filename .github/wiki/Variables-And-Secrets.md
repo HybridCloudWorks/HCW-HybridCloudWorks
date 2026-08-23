@@ -312,7 +312,8 @@ Seeded by hand; referenced from `infra/main.tf` app settings as
 | `CF-ORIGIN-SECRET` | §3 | Runtime shared secret proving a request came via Cloudflare; the anonymous submission path depends on it |
 | `CLIENT-IP-SALT` | §3 | Runtime salt for quota keys; rotating it resets live counters, so rotation must not need a Terraform run |
 | `AWS-ACCESS-KEY-ID`, `AWS-SECRET-ACCESS-KEY` | not inventoried | Third-party static credentials — AWS offers the Function App no federation here. Scope the IAM policy to `pricing:GetProducts` only |
-| `ANTHROPIC-API-KEY`, `OPENAI-API-KEY`, `PERPLEXITY-API-KEY`, `REPLICATE-API-KEY` | §4, partially | Third-party SaaS keys. Distinct from Azure OpenAI, which is keyless |
+| `GEMINI-API-KEY` | §4 | Public Generative Language API, NOT Vertex — Vertex needs GCP ADC the Function App cannot hold. First in provider preference order since 2026-08-23. Unseeded resolves to the literal `@Microsoft.KeyVault(...)`, which the router reads as no key, so it falls through to OpenAI |
+| `ANTHROPIC-API-KEY`, `OPENAI-API-KEY`, `PERPLEXITY-API-KEY`, `REPLICATE-API-KEY` | §4, partially | Third-party SaaS keys. Distinct from Azure OpenAI, which is keyless. `PERPLEXITY` and `REPLICATE` are referenced as app settings but no longer reachable through the AI router — it implements Gemini, OpenAI and Anthropic only |
 | `FIRECRAWL-API-KEY`, `LINKIE-API-KEY`, `YOUTUBE-API-KEY` | not inventoried | Third-party SaaS keys |
 | `PUBLER-API-KEY`, `PUBLER-WORKSPACE-ID`, `KLAVIYO-PRIVATE-KEY`, `KLAVIYO-LIST-ID` | not inventoried | The two `*-ID` values are identifiers rather than credentials, but they travel with their key and splitting them across stores buys nothing |
 | `TELEGRAM-BOT-TOKEN`, `TELEGRAM-CHAT-ID` | not inventoried | As above |

@@ -45,6 +45,9 @@ import {
   Layers,
   CheckSquare,
   Square,
+  ArrowUp,
+  ArrowDown,
+  ToggleLeft,
 } from 'lucide-react';
 import {
   aiEngine,
@@ -261,8 +264,122 @@ function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
   );
 }
 
+/**
+ * Which parts of the site may call a model.
+ *
+ * The list of switches comes from the API, not from a constant here. A copy of
+ * that list kept in the browser is exactly how this page came to advertise
+ * providers the server had removed, and a switch that governs nothing is worse
+ * than no switch at all — it reads as working.
+ */
+function FeatureSwitches() {
+  const { toast } = useToast();
+  const [features, setFeatures] = useState(null);
+  const [catalogue, setCatalogue] = useState({});
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    aiEngine
+      .getAiFeatures()
+      .then(({ features: f, catalogue: c }) => {
+        if (cancelled) return;
+        setFeatures(f);
+        setCatalogue(c);
+      })
+      .catch((err) => !cancelled && setError(err?.message || 'Could not load AI feature settings'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleToggle = async (name, next) => {
+    setBusy(name);
+    // Optimistic, then reconciled with what the server stored. A switch that
+    // springs back is the honest outcome of a failed write.
+    setFeatures((prev) => ({ ...prev, [name]: next }));
+    try {
+      const saved = await aiEngine.setAiFeature(name, next);
+      setFeatures((prev) => ({ ...prev, ...saved }));
+    } catch (err) {
+      setFeatures((prev) => ({ ...prev, [name]: !next }));
+      toast({
+        title: 'Could not save',
+        description: err?.message || 'The switch has been put back.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-4 text-sm text-red-600 dark:text-red-400">{error}</CardContent>
+      </Card>
+    );
+  }
+
+  const names = Object.keys(catalogue);
+  const offCount = features ? names.filter((n) => features[n] === false).length : 0;
+
+  let summary;
+  if (features === null) {
+    summary = 'Loading…';
+  } else if (offCount === 0) {
+    summary =
+      'Every AI feature is on. Switching one off stops those calls immediately — the rest of the feature keeps working.';
+  } else {
+    summary = `${offCount} of ${names.length} switched off.`;
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <ToggleLeft className="h-4 w-4" />
+          Where AI is used
+        </CardTitle>
+        <CardDescription>{summary}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-1">
+        {features === null ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" /> Reading settings…
+          </div>
+        ) : (
+          names.map((name) => (
+            <div
+              key={name}
+              className="flex items-start justify-between gap-4 py-2.5 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+            >
+              <div className="min-w-0">
+                <div className="font-medium text-sm">{catalogue[name]?.label || name}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{catalogue[name]?.description}</div>
+                {/* The question someone actually has in front of a toggle. */}
+                <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  {catalogue[name]?.route}
+                </div>
+              </div>
+              <Switch
+                checked={features[name] !== false}
+                disabled={busy === name}
+                onCheckedChange={(next) => handleToggle(name, next)}
+                aria-label={catalogue[name]?.label || name}
+              />
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ServicesTab({ providers }) {
   const { toast } = useToast();
+  const [reordering, setReordering] = useState(false);
 
   const handleToggle = async (id, enabled) => {
     await aiEngine.setEnabled('ai_providers', id, enabled);
@@ -281,8 +398,34 @@ function ServicesTab({ providers }) {
     }
   };
 
-  const enabledCount = providers.filter((p) => p.enabled && p.status !== 'unavailable').length;
-  const connectedCount = providers.filter((p) => p.status === 'connected').length;
+  // The API tries providers in this order and uses the first one that is both
+  // enabled and holds a key, so the sort here is the real running order.
+  const ordered = [...providers].sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+
+  const move = async (index, delta) => {
+    const next = [...ordered];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setReordering(true);
+    try {
+      await aiEngine.setProviderOrder(next.map((p) => p.id));
+    } catch (err) {
+      toast({
+        title: 'Could not save the new order',
+        description: err?.message || 'Nothing was changed.',
+        variant: 'destructive',
+      });
+    } finally {
+      setReordering(false);
+    }
+  };
+
+  const enabledCount = ordered.filter((p) => p.enabled && p.status !== 'unavailable').length;
+  const connectedCount = ordered.filter((p) => p.status === 'connected').length;
+  // Which provider a request lands on right now. A key is required as well as
+  // the switch, so an enabled provider with no key is not the answer.
+  const active = ordered.find((p) => p.enabled && p.status !== 'unavailable');
 
   return (
     <div className="space-y-4">
@@ -296,8 +439,59 @@ function ServicesTab({ providers }) {
         </div>
       </div>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Order of preference</CardTitle>
+          <CardDescription>
+            {active ? (
+              <>
+                Requests go to <span className="font-medium">{active.name}</span> first. If it has
+                no API key or is switched off, the next one down is used instead.
+              </>
+            ) : (
+              'No provider is both enabled and holding an API key, so AI calls will fail.'
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1">
+          {ordered.map((p, index) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-3 py-2 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+            >
+              <span className="w-5 text-sm text-slate-400 tabular-nums">{index + 1}</span>
+              <span className="text-lg leading-none">{p.icon}</span>
+              <span className="flex-1 text-sm font-medium truncate">{p.name}</span>
+              {!p.enabled && <span className="text-xs text-slate-400">off</span>}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                disabled={index === 0 || reordering}
+                onClick={() => move(index, -1)}
+                aria-label={`Move ${p.name} up`}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                disabled={index === ordered.length - 1 || reordering}
+                onClick={() => move(index, 1)}
+                aria-label={`Move ${p.name} down`}
+              >
+                <ArrowDown className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <FeatureSwitches />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {providers.map((p) => (
+        {ordered.map((p) => (
           <ProviderCard
             key={p.id}
             provider={p}

@@ -120,14 +120,21 @@ export function createDrafter({ store, ai, env = process.env }) {
     });
 
     const modelOverride = env.CONTENTFORGE_DRAFT_MODEL || null;
-    const aiProvider = ai.getActiveAiProvider();
+    // Persisted on the draft, so it must name the provider that actually ran
+    // rather than the one key order would have picked — the portal can reorder
+    // them. A local array is used when the caller passed none, and entries are
+    // appended to the caller's when it did.
+    const usage = Array.isArray(usageOut) ? usageOut : [];
+    const usageStart = usage.length;
     const parsed = await ai.generateJsonResponse({
       prompt: parts[0].text,
       parts,
       model: modelOverride,
       purpose: 'draft',
-      usageOut,
+      usageOut: usage,
+      feature: 'forgeDrafting',
     });
+    const aiProvider = usage.slice(usageStart).at(-1)?.provider || ai.getActiveAiProvider();
 
     // Code snippets stay inline; automatic Gist publishing is disabled.
     return {

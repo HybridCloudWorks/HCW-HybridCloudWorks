@@ -966,6 +966,19 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # own APIs. Re-adding an Azure OpenAI account would be a second, unused
     # route to the same capability — and in this region it could not be used
     # regardless, since the subscription holds zero model quota.
+    #
+    # GEMINI_API_KEY reaches Gemini through the PUBLIC Generative Language API,
+    # not Vertex. Vertex authenticates with Application Default Credentials — a
+    # GCP identity this Function App cannot hold — so it was dropped from the
+    # router at the port. The model ids are the same either way.
+    #
+    # It is listed first because it is first in preference order as of
+    # 2026-08-23 (owner decision; see DEFAULT_PROVIDER_ORDER in
+    # functions/src/lib/ai/ai-config.js). An unseeded secret resolves to the
+    # literal @Microsoft.KeyVault(...) string, which readKey() treats as no key
+    # at all — so until GEMINI-API-KEY is seeded the router simply moves on to
+    # OpenAI. Adding this reference does not switch anything on by itself.
+    "GEMINI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GEMINI-API-KEY)"
     "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
     "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
     "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"

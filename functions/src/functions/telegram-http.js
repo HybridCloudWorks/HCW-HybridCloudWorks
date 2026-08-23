@@ -78,7 +78,9 @@ httpRoute('telegramWebhook', {
       enqueueJob: makeEnqueue(context),
       generateText: async (args) => {
         const { generateTextResponse } = await import('../lib/ai/router.js');
-        return generateTextResponse(args);
+        // The bot keeps answering its commands when this is switched off in
+        // the portal; only the free-form model replies stop.
+        return generateTextResponse({ ...args, feature: 'telegram' });
       },
       send: createSender({ log: context }),
       log: context,

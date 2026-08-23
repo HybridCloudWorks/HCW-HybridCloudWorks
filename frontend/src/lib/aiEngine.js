@@ -24,85 +24,88 @@ import { postJSON, getJSON, sendJSON } from '@/lib/api';
 // Written through the config API on first admin page load if empty.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Bumped when the seed takes ownership of a field back from whatever is stored.
+ * Version 2 (2026-08-23) reclaims `enabled`, `order` and `apiKeyEnvVar`, which
+ * were written by a UI the API never read. See seedAiEngineIfEmpty.
+ */
+export const PROVIDER_SCHEMA_VERSION = 2;
+
+/**
+ * The text providers the API actually implements, in default preference order.
+ *
+ * THIS LIST USED TO BE FICTION. It was carried over from Site-Main unchanged and
+ * described a platform that no longer existed: Vertex was listed `enabled: true`
+ * though the router dropped it at the port (Vertex authenticates with GCP
+ * Application Default Credentials, which a Function App cannot hold); OpenAI was
+ * in DEPRECATED_PROVIDERS and deleted on sight though the router calls it; and
+ * Perplexity, Bedrock and Replicate were offered though nothing routes text to
+ * them. Reading this page told you the opposite of what the API would do.
+ *
+ * It is now the same three providers as `functions/src/lib/ai/router.js`, in the
+ * same order, and `aiEngine.test.js` fails if the two lists diverge.
+ *
+ * Order is cost, not quality — see DEFAULT_PROVIDER_ORDER in ai-config.js. These
+ * are seed values only: `order` and `enabled` are the administrator's to change
+ * from this page, and the API honours both on every call.
+ *
+ * Replicate has NOT gone away — it generates article cover images, reached
+ * directly through REPLICATE_API_KEY. It was never a text provider, and listing
+ * it as one is what made this page confusing.
+ */
 export const DEFAULT_PROVIDERS = [
+  {
+    id: 'gemini',
+    name: 'Gemini (Google AI)',
+    description: 'Gemini 3.6 Flash, 3.5 Flash-Lite, 2.5 Pro — lowest cost per token',
+    icon: '🔵',
+    enabled: true,
+    defaultModel: 'gemini-3.5-flash-lite',
+    models: [
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+    ],
+    apiKeyEnvVar: 'GEMINI_API_KEY',
+    docsUrl: 'https://ai.google.dev/gemini-api/docs',
+    status: 'untested',
+    order: 1,
+    schemaVersion: PROVIDER_SCHEMA_VERSION,
+    notes:
+      'Public Generative Language API, not Vertex. Seed GEMINI-API-KEY in Key Vault; until then the API falls through to the next provider.',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    description: 'GPT-5 mini and nano',
+    icon: '🟢',
+    enabled: true,
+    defaultModel: 'gpt-5-mini',
+    models: ['gpt-5-mini', 'gpt-5-nano', 'gpt-4o', 'gpt-4o-mini'],
+    apiKeyEnvVar: 'OPENAI_API_KEY',
+    docsUrl: 'https://platform.openai.com/docs',
+    status: 'untested',
+    order: 2,
+    schemaVersion: PROVIDER_SCHEMA_VERSION,
+    notes:
+      'Seed OPENAI-API-KEY in Key Vault. gpt-5 rates are not in the cost table yet, so usage totals fall back to gpt-4o pricing.',
+  },
   {
     id: 'anthropic',
     name: 'Claude (Anthropic)',
-    description: 'claude-opus-4, claude-sonnet-4, claude-haiku-4',
+    description: 'Claude Opus 4.6, Sonnet 4.6, Haiku 4.5',
     icon: '🟣',
-    enabled: false,
+    enabled: true,
     defaultModel: 'claude-sonnet-4-6',
-    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     apiKeyEnvVar: 'ANTHROPIC_API_KEY',
     docsUrl: 'https://docs.anthropic.com',
     status: 'untested',
-    order: 1,
-    notes: 'Set ANTHROPIC_API_KEY in functions/.env',
-  },
-
-  {
-    id: 'vertex',
-    name: 'Gemini (Google Vertex AI)',
-    description: 'Gemini 2.5 Flash, Flash-Lite, Pro',
-    icon: '🔵',
-    enabled: true,
-    defaultModel: 'gemini-2.5-flash',
-    models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'],
-    apiKeyEnvVar: null,
-    docsUrl: 'https://cloud.google.com/vertex-ai/docs',
-    status: 'untested',
     order: 3,
-    notes:
-      'Uses Application Default Credentials — no API key needed in Cloud Functions. Set GCLOUD_PROJECT env var.',
-  },
-  {
-    id: 'perplexity',
-    name: 'Perplexity (Sonar)',
-    description: 'Search-augmented AI with live web access',
-    icon: '🔍',
-    enabled: false,
-    defaultModel: 'sonar-pro',
-    models: ['sonar-pro', 'sonar'],
-    apiKeyEnvVar: 'PERPLEXITY_API_KEY',
-    docsUrl: 'https://docs.perplexity.ai',
-    status: 'untested',
-    order: 4,
-    notes: 'Set PERPLEXITY_API_KEY in functions/.env',
-  },
-  {
-    id: 'bedrock',
-    name: 'AWS Bedrock (Nova)',
-    description: 'Amazon Nova Lite/Pro — very affordable inference',
-    icon: '🟠',
-    enabled: false,
-    defaultModel: 'amazon.nova-lite-v1:0',
-    models: ['amazon.nova-micro-v1:0', 'amazon.nova-lite-v1:0', 'amazon.nova-pro-v1:0'],
-    apiKeyEnvVar: 'AWS_ACCESS_KEY_ID',
-    docsUrl: 'https://docs.aws.amazon.com/bedrock',
-    status: 'untested',
-    order: 5,
-    notes:
-      'Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION (default: us-east-1) in functions/.env. Nova Lite is near-free.',
-  },
-  {
-    id: 'replicate',
-    name: 'Replicate',
-    description: 'Run and fine-tune open-source models — Llama, SDXL, Flux, Imagen-4',
-    icon: '🎨',
-    enabled: false,
-    defaultModel: 'meta/llama-3.1-405b-instruct',
-    models: [
-      'meta/llama-3.1-405b-instruct',
-      'meta/llama-3.1-70b-instruct',
-      'meta/llama-3.1-8b-instruct',
-      'mistralai/mistral-7b-instruct-v0.2',
-    ],
-    apiKeyEnvVar: 'REPLICATE_API_KEY',
-    docsUrl: 'https://replicate.com/docs',
-    status: 'untested',
-    order: 6,
-    notes:
-      'Set REPLICATE_API_KEY in Firebase secrets (already used for image generation). Text models use the predictions endpoint. Llama 405B is near-GPT-4 quality.',
+    schemaVersion: PROVIDER_SCHEMA_VERSION,
+    notes: 'Seed ANTHROPIC-API-KEY in Key Vault. Highest cost per token of the three.',
   },
 ];
 
@@ -307,7 +310,18 @@ export function subscribeMcpServers(callback) {
  */
 export async function seedAiEngineIfEmpty() {
   // Providers and servers that have been permanently removed from defaults.
-  const DEPRECATED_PROVIDERS = ['openai'];
+  //
+  // `openai` used to be on this list and was deleted from the container on every
+  // admin page load, while the API called it happily. The four ids here are the
+  // real removals: none is reachable through the AI router, so their documents
+  // govern nothing — verified against the backend, which reads `ai_providers` in
+  // exactly one place (lib/ai/ai-config.js) and looks up only providers the
+  // router implements.
+  //
+  // `vertex` in particular cannot be made to work from a Function App at all: it
+  // authenticates with GCP Application Default Credentials. Gemini is reached
+  // through the public API instead, as the `gemini` provider above.
+  const DEPRECATED_PROVIDERS = ['vertex', 'perplexity', 'bedrock', 'replicate'];
   const DEPRECATED_MCP_SERVERS = ['anthropic-mcp', 'openai-mcp', 'perplexity-mcp'];
 
   // URL migrations for servers that changed endpoints.
@@ -341,6 +355,35 @@ export async function seedAiEngineIfEmpty() {
       writes.push(putConfig('ai-providers', p.id, p));
     }
   });
+
+  // ONE-TIME RESET OF enabled/order ON PROVIDERS THAT ALREADY EXIST.
+  //
+  // Documents written before PROVIDER_SCHEMA_VERSION 2 hold values that never
+  // meant anything: until 2026-08-23 the API read providers from environment
+  // variables alone and never opened this container, so every switch and every
+  // order field on this page was decorative. The stored `anthropic` document,
+  // for instance, says `enabled: false` while Claude was in fact serving every
+  // request as the first-choice provider.
+  //
+  // There is therefore no administrator intent to preserve in those fields, and
+  // carrying them forward would land the new, working UI with Claude switched
+  // off and a stale order — which reads as a broken feature rather than a
+  // migrated one. The version marker is what keeps this a migration rather than
+  // a reset: once stamped, real choices made through the UI are never touched
+  // again. Fields the seed does not own (defaultModel, status, notes) are left
+  // alone even on the first pass.
+  for (const existing of providers) {
+    const seed = DEFAULT_PROVIDERS.find((p) => p.id === existing.id);
+    if (!seed || existing.schemaVersion >= PROVIDER_SCHEMA_VERSION) continue;
+    writes.push(
+      patchConfig('ai-providers', existing.id, {
+        enabled: seed.enabled,
+        order: seed.order,
+        apiKeyEnvVar: seed.apiKeyEnvVar,
+        schemaVersion: PROVIDER_SCHEMA_VERSION,
+      })
+    );
+  }
 
   // ─ MCP Servers ───────────────────────────────────────────────
   const serverIds = new Set(servers.map((srv) => srv.id));
@@ -491,6 +534,46 @@ export function aggregateByProvider(records) {
   return agg;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Preference order and feature switches
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Persist a new preference order.
+ *
+ * Rewrites `order` on every provider from its position in `orderedIds`, rather
+ * than patching the two that moved. Contiguous 1..n values mean the API never
+ * has to break a tie, and a tie is the one case where the active provider could
+ * look non-deterministic between Function App instances.
+ */
+export async function setProviderOrder(orderedIds) {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      sendJSON(`cms/config/ai-providers/${id}`, 'PATCH', { order: index + 1 })
+    )
+  );
+  await notifyConfigSubscribers('ai-providers');
+}
+
+/**
+ * Which parts of the site may call a model.
+ *
+ * Returns `{ features, catalogue }`. The catalogue is the API's own list — the
+ * page renders its toggles from it rather than from a copy kept here, because a
+ * second copy of a list like this is exactly how DEFAULT_PROVIDERS came to
+ * describe a platform that no longer existed.
+ */
+export async function getAiFeatures() {
+  const res = await getJSON('cms/ai-features');
+  return { features: res.features || {}, catalogue: res.catalogue || {} };
+}
+
+/** Turn one feature on or off. Merges server-side; other features are untouched. */
+export async function setAiFeature(name, enabled) {
+  const res = await sendJSON('cms/ai-features', 'PUT', { features: { [name]: enabled } });
+  return res.features || {};
+}
+
 // Named export bundle for convenience
 export const aiEngine = {
   chat,
@@ -502,6 +585,9 @@ export const aiEngine = {
   subscribeMcpServers,
   setEnabled,
   setProviderModel,
+  setProviderOrder,
+  getAiFeatures,
+  setAiFeature,
   setMcpOAuthToken,
   addMcpServer,
   removeMcpServer,
