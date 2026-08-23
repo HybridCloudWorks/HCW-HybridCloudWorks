@@ -446,7 +446,8 @@ function ServicesTab({ providers }) {
             {active ? (
               <>
                 Requests go to <span className="font-medium">{active.name}</span> first. If it has
-                no API key or is switched off, the next one down is used instead.
+                no API key, is switched off, or cannot serve the call, the next one down is used
+                instead.
               </>
             ) : (
               'No provider is both enabled and holding an API key, so AI calls will fail.'

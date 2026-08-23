@@ -15,9 +15,13 @@
  * anything here. In short: configuration can disable and reorder, never enable;
  * an unreadable configuration changes nothing.
  *
- * Default order is Gemini, OpenAI, Anthropic. `CONTENTFORGE_AI_PROVIDER` still
- * pins one outright, and now warns differently depending on whether the pin
- * missed for want of a key or because someone switched that provider off.
+ * Default order is Gemini, OpenAI, Anthropic, and the order now FAILS OVER: a
+ * provider that cannot serve a call (rejected key, unknown model, dead endpoint)
+ * hands on to the next one rather than failing the call. A bad request does not
+ * fail over, because it would fail identically everywhere. `callWithFailover`
+ * carries the reasoning. `CONTENTFORGE_AI_PROVIDER` still pins one outright —
+ * and a pin does NOT fall through, because it is an instruction rather than a
+ * preference.
  *
  * What is gone from upstream and why:
  *   - Vertex. It authenticates with Application Default Credentials — a GCP
@@ -371,14 +375,15 @@ export function createAiRouter({
   }
 
   /**
-   * The real selection: stored configuration applied over key presence, plus
-   * the feature gate.
+   * The ordered list of providers a call may use, best first.
+   *
+   * Returns every eligible provider rather than only the winner, because
+   * "order of preference" has to mean preference — see `callWithFailover`.
    *
    * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
-   * @returns {Promise<{provider: string, model: string|null}>} `model` is the
-   *          administrator's pinned model for that provider, if they set one.
+   * @returns {Promise<Array<{provider: string, model: string|null}>>}
    */
-  async function resolveProvider(feature = null) {
+  async function resolveProviderChain(feature = null) {
     const { providers: docs, features } = await config.load();
 
     if (feature && !isFeatureEnabled(features, feature)) {
@@ -389,26 +394,23 @@ export function createAiRouter({
     const { order, disabled } = resolveProviderOrder(docs, available);
 
     const pinned = pinnedProvider();
-    let provider = order[0] || null;
+    let chain = order;
     if (pinned) {
       if (order.includes(pinned)) {
-        provider = pinned;
+        // An explicit pin is an instruction, not a preference: it selects one
+        // provider and does NOT fall through to the others.
+        chain = [pinned];
       } else {
-        // Two different reasons the pin missed, and they need different fixes:
-        // seed a key, or re-enable the provider in the portal.
         const why = disabled.includes(pinned)
           ? 'it is disabled in the admin portal'
           : 'its key is not present';
         log.warn?.(
-          `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${provider || 'none'}`
+          `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${order[0] || 'none'}`
         );
       }
     }
 
-    if (!provider) {
-      // "Every provider is switched off" is a legitimate instruction and reads
-      // very differently from "no keys are seeded". Saying which one it is here
-      // saves an hour of looking in the wrong place.
+    if (chain.length === 0) {
       throw new AiNotConfiguredError(
         disabled.length > 0
           ? `Every configured AI provider is disabled in the admin portal (${disabled.join(', ')}). Re-enable one under AI Engine → AI Services.`
@@ -416,7 +418,81 @@ export function createAiRouter({
       );
     }
 
-    return { provider, model: configuredModelFor(docs, provider) };
+    return chain.map((provider) => ({ provider, model: configuredModelFor(docs, provider) }));
+  }
+
+  /**
+   * Does this error mean the PROVIDER is unusable, or that the REQUEST is bad?
+   *
+   * The distinction decides whether trying the next provider is worth anything.
+   * A rejected key, a missing model or a dead endpoint is specific to one
+   * provider and the next one will very likely work. A malformed request will
+   * be malformed for all three, and walking the whole chain to prove it just
+   * spends money and time on the same failure.
+   */
+  function isProviderUnusable(error) {
+    const status = Number(error?.status);
+    // 401/403 rejected key, 404 unknown model or endpoint.
+    if ([401, 403, 404].includes(status)) return true;
+    // Anything retryable that survived its retries: the provider is not coming
+    // back within this call.
+    if (isRetryableError(error)) return true;
+    return /model|not found|unsupported|deprecated|quota|billing|credit/i.test(
+      String(error?.message || '')
+    );
+  }
+
+  /**
+   * Try each provider in order until one answers.
+   *
+   * WHY THIS EXISTS. The portal calls its list an "order of preference" and the
+   * page says the next provider down is used if the first cannot serve. Until
+   * this, that was only true of key presence and the enabled switch — an actual
+   * FAILURE from the first provider failed the whole call. That gap became
+   * dangerous the moment the default order changed to Gemini first (2026-08-23):
+   * the Gemini model ids were ported from upstream's Vertex table, and if one of
+   * them is not a valid public Generative Language API model, every AI feature
+   * that worked through Anthropic the day before would return 404 and stop.
+   *
+   * A provider that fails is logged at warn with the reason, because silently
+   * spending Anthropic money to paper over a broken Gemini configuration is its
+   * own kind of failure. `usageOut` records the provider that actually served.
+   */
+  async function callWithFailover({ chain, explicitModel, ...args }) {
+    const attempts = [];
+
+    for (const { provider, model: configuredModel } of chain) {
+      try {
+        return await withRetry(() =>
+          callWith(provider, {
+            ...args,
+            // An explicit model from the call site wins; then the
+            // administrator's choice in the portal; then the purpose table.
+            model: explicitModel || configuredModel,
+          })
+        );
+      } catch (error) {
+        attempts.push({ provider, error });
+        const last = chain[chain.length - 1].provider === provider;
+        if (last || !isProviderUnusable(error)) throw error;
+        log.warn?.(
+          `[ai-router] ${provider} could not serve this call (${error?.message || error}); trying the next provider`
+        );
+      }
+    }
+
+    // Unreachable: the loop either returns or throws on its last iteration.
+    throw attempts.at(-1)?.error || new AiNotConfiguredError('No AI provider was tried');
+  }
+
+  /**
+   * The single best provider, for callers that only need to name one.
+   *
+   * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
+   * @returns {Promise<{provider: string, model: string|null}>}
+   */
+  async function resolveProvider(feature = null) {
+    return (await resolveProviderChain(feature))[0];
   }
 
   function defaultModelFor(provider, purpose = 'general') {
@@ -555,20 +631,17 @@ export function createAiRouter({
     usageOut = null,
     feature = null,
   } = {}) {
-    const { provider, model: configuredModel } = await resolveProvider(feature);
-    return withRetry(() =>
-      callWith(provider, {
-        prompt,
-        parts,
-        // An explicit model from the call site wins; then the administrator's
-        // choice in the portal; then the purpose table.
-        model: model || configuredModel,
-        purpose,
-        expectJson: false,
-        systemPrompt,
-        usageOut,
-      })
-    );
+    const chain = await resolveProviderChain(feature);
+    return callWithFailover({
+      chain,
+      explicitModel: model,
+      prompt,
+      parts,
+      purpose,
+      expectJson: false,
+      systemPrompt,
+      usageOut,
+    });
   }
 
   async function generateJsonResponse({
@@ -580,18 +653,17 @@ export function createAiRouter({
     usageOut = null,
     feature = null,
   } = {}) {
-    const { provider, model: configuredModel } = await resolveProvider(feature);
-    const text = await withRetry(() =>
-      callWith(provider, {
-        prompt,
-        parts,
-        model: model || configuredModel,
-        purpose,
-        expectJson: true,
-        systemPrompt,
-        usageOut,
-      })
-    );
+    const chain = await resolveProviderChain(feature);
+    const text = await callWithFailover({
+      chain,
+      explicitModel: model,
+      prompt,
+      parts,
+      purpose,
+      expectJson: true,
+      systemPrompt,
+      usageOut,
+    });
     try {
       return parseJsonWithFallbacks(text);
     } catch (parseError) {
@@ -647,6 +719,7 @@ export function createAiRouter({
     availableProviders,
     getActiveAiProvider,
     resolveProvider,
+    resolveProviderChain,
     defaultModelFor,
     generateTextResponse,
     generateJsonResponse,
