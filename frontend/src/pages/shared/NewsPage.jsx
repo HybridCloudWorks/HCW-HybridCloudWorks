@@ -85,7 +85,7 @@ export default function NewsPage({ provider: providerProp } = {}) {
   return (
     <>
       <Helmet>
-        <title>{meta.title} | Hybrid Cloud Works</title>
+        <title>{`${meta.title} | Hybrid Cloud Works`}</title>
         <meta name="description" content={meta.subtitle} />
         <meta property="og:title" content={meta.title} />
         <meta property="og:description" content={meta.subtitle} />

@@ -1,0 +1,279 @@
+/**
+ * Pre-render the built SPA to real HTML, one file per route (TODO.md T-515).
+ *
+ * WHAT WAS WRONG. This repository built with `vite build` and shipped a single
+ * `index.html` containing an empty `<div id="root">` and the title "Hybrid Cloud
+ * Works". Site-Main, the site being migrated from, built with Vike and shipped
+ * pre-rendered HTML. Measured on the same path during the §6 parallel run:
+ * `/about` was 24,902 bytes on Firebase and 2,808 bytes on Azure, with 2,717
+ * characters of visible text against 967, and the correct `<title>` against a
+ * generic one. Migration_Plan §7 states a gate of "90 HTML documents
+ * pre-rendered"; this build produced three.
+ *
+ * That matters here more than it usually would. This is a content platform
+ * whose purpose is being found, and every article, framework and architecture
+ * page served a generic title and an empty shell to anything that does not run
+ * JavaScript — most link unfurlers, several crawlers, every social preview card.
+ * The pages render correctly in a browser, so clicking through the site reveals
+ * nothing at all.
+ *
+ * HOW. `vite build` still produces the SPA exactly as before; this runs after it
+ * and adds static HTML beside it. Each route is rendered through the real
+ * application — same components, same providers, same 42 pages that set their
+ * own title — and written to `dist/<route>/index.html`. The client bundle is
+ * untouched and still hydrates, so this is additive: if a file here were wrong,
+ * the SPA underneath it still works.
+ *
+ * WHY NOT `renderToString`. Every route is a `React.lazy` import behind one
+ * `<Suspense>`, and `renderToString` does not wait for those — it emits the
+ * loading fallback and returns, producing ~380 characters of identical markup
+ * for every URL. `prerenderToNodeStream` (React 19's static API) resolves every
+ * boundary first.
+ *
+ * WHY NO ARTICLE PAGES. See `routes()` in prerender-entry.jsx: they would need
+ * the API at build time, and CI cannot reach it (issue #175).
+ *
+ * THIS STEP FAILS THE BUILD. A route that throws, renders its error boundary, or
+ * comes back suspiciously small is a broken page — and a broken page written to
+ * disk looks exactly like a working one from the outside. Shipping a shell is
+ * the failure this whole file exists to prevent, so it is not something to warn
+ * about and continue past.
+ */
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const ENTRY = 'scripts/prerender-entry.jsx';
+
+/**
+ * Resolved on demand, not at module scope.
+ *
+ * `splitHead` and `injectIntoTemplate` are pure and are imported by
+ * prerender.test.js, where `import.meta.url` is a Vite module id rather than a
+ * `file:` URL — computing these eagerly made the whole test file fail to import
+ * with "The URL must be of scheme file", before a single assertion ran.
+ */
+function paths() {
+  const frontend = fileURLToPath(new URL('..', import.meta.url));
+  return { frontend, dist: join(frontend, 'dist'), ssrDist: join(frontend, 'dist-ssr') };
+}
+
+/**
+ * Below this many characters of visible text, a page is a shell rather than a
+ * page. The smallest legitimate route is a Coming Soon page at ~470; the shell
+ * this replaces measured 389 on every URL. 420 sits between them.
+ */
+const MIN_TEXT_CHARS = 420;
+
+/** Tags React hoists to the document head, emitted ahead of the body markup. */
+const HEAD_TAG = /^\s*<(link|meta|title|style|script|base)\b[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/i;
+
+/**
+ * Split React's output into head tags and body markup.
+ *
+ * React 19 hoists `<title>`, `<meta>` and `<link>` rendered anywhere in the tree
+ * to the front of the stream, ahead of the first real element. This consumes
+ * that run; whatever is left is the body.
+ */
+export function splitHead(rendered) {
+  let rest = rendered;
+  const head = [];
+  for (;;) {
+    const match = HEAD_TAG.exec(rest);
+    if (!match) break;
+    head.push(match[0].trim());
+    rest = rest.slice(match[0].length);
+  }
+  return { head: head.join('\n    '), body: rest };
+}
+
+/**
+ * Put the rendered markup and head tags into the built index.html.
+ *
+ * The template's own `<title>` is REPLACED, not appended to. Two title elements
+ * in one document is not a tie a crawler resolves the way you would hope, and
+ * the template's is the generic one.
+ */
+export function injectIntoTemplate(template, { head, body }) {
+  let html = template;
+
+  if (/<title\b/i.test(head)) {
+    html = html.replace(/\s*<title\b[^>]*>[\s\S]*?<\/title>/i, '');
+  }
+  if (head) {
+    html = html.replace(/<\/head>/i, `    ${head}\n  </head>`);
+  }
+
+  // The mount point keeps its id: the client bundle still hydrates into it.
+  const rootDiv = /<div id="root"><\/div>/;
+  if (!rootDiv.test(html)) {
+    // `/` is written back to dist/index.html, which is also the template. Run
+    // this twice without an intervening `vite build` and the second run reads
+    // its own output — an empty mount point is the thing that distinguishes
+    // them, so say which case this is rather than "no root div".
+    if (/<div id="root">\s*\S/.test(html)) {
+      throw new Error(
+        'dist/index.html has already been pre-rendered. This step needs the ' +
+          'template `vite build` produces — run `npm run build`, which does both in order.'
+      );
+    }
+    throw new Error('dist/index.html has no <div id="root"></div> to render into');
+  }
+  return html.replace(rootDiv, `<div id="root">${body}</div>`);
+}
+
+/** `/azure/blog` -> `dist/azure/blog/index.html`; `/` -> `dist/index.html`. */
+function outputPathFor(dist, route) {
+  const clean = route.replace(/^\/+|\/+$/g, '');
+  return clean ? join(dist, clean, 'index.html') : join(dist, 'index.html');
+}
+
+function buildSsrBundle(frontend) {
+  // Built here rather than as a separate npm script so `npm run build` cannot
+  // pre-render a stale tree against fresh client assets.
+  //
+  // Vite's JS entry is run through this same Node binary rather than the `vite`
+  // shim or npx: the shims are `.cmd` files on Windows, which spawnSync cannot
+  // execute without `shell: true` — and that both failed to resolve in the shell
+  // this first ran in and drags in shell quoting for no benefit.
+  const vite = join(frontend, 'node_modules', 'vite', 'bin', 'vite.js');
+  const result = spawnSync(
+    process.execPath,
+    [vite, 'build', '--ssr', ENTRY, '--outDir', 'dist-ssr', '--logLevel', 'warn'],
+    { cwd: frontend, stdio: 'inherit' }
+  );
+  if (result.error) {
+    throw new Error(`could not run ${vite}: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`SSR bundle build failed with exit code ${result.status}`);
+  }
+}
+
+async function main() {
+  const { frontend, dist, ssrDist } = paths();
+  if (!existsSync(join(dist, 'index.html'))) {
+    throw new Error('dist/index.html is missing — run `vite build` before this step');
+  }
+
+  buildSsrBundle(frontend);
+
+  const entryUrl = pathToFileURL(join(ssrDist, 'prerender-entry.js')).href;
+  const { render, routes } = await import(entryUrl);
+
+  const template = readFileSync(join(dist, 'index.html'), 'utf8');
+  const targets = routes();
+  const failures = [];
+  const skipped = [];
+  let written = 0;
+  let bytes = 0;
+
+  for (const route of targets) {
+    let rendered;
+    try {
+      rendered = await render(route);
+    } catch (error) {
+      failures.push(`${route}: threw — ${error?.message || error}`);
+      continue;
+    }
+
+    if (rendered.errors.length > 0) {
+      // An error boundary produces perfectly valid-looking HTML. Without this
+      // check the error state would be written out and published as the page.
+      failures.push(`${route}: rendered an error — ${rendered.errors[0].message}`);
+      continue;
+    }
+
+    if (rendered.html.includes('data-page="not-found"')) {
+      // Not an error. `/:provider/<section>` is declared for every provider,
+      // and the dispatcher behind it renders the 404 page for the combinations
+      // that have no content — /azure/code and /github/frameworks among them.
+      // The route list is a candidate grid, so this is the expected answer for
+      // a real part of it.
+      //
+      // It must still be SKIPPED rather than written: the page says "this page
+      // does not exist" and would be served at HTTP 200 for a crawler to index
+      // as content. Reported so the count is visible and a sudden jump is not.
+      skipped.push(route);
+      continue;
+    }
+
+    const text = rendered.html
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length < MIN_TEXT_CHARS) {
+      failures.push(`${route}: only ${text.length} characters of text — a shell, not a page`);
+      continue;
+    }
+
+    const html = injectIntoTemplate(template, splitHead(rendered.html));
+    const outPath = outputPathFor(dist, route);
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, html);
+    written += 1;
+    bytes += Buffer.byteLength(html);
+  }
+
+  // The SSR bundle is a build artefact, not site content. Left in place it would
+  // be uploaded with the site — and `dist-ssr` contains a copy of every page's
+  // source-mapped server build.
+  rmSync(ssrDist, { recursive: true, force: true });
+
+  // The three routes that must always exist. Everything else is content that
+  // can legitimately come and go; these are the site itself, and if one of them
+  // starts rendering the 404 page something is broken badly enough that a
+  // deploy should stop.
+  const CORE = ['/', '/about', '/contact'];
+  for (const route of CORE) {
+    if (skipped.includes(route)) {
+      failures.push(`${route}: rendered the 404 page — this route must always exist`);
+    }
+  }
+
+  // A floor, not an exact count: sections appear and disappear with content, but
+  // a collapse from ~80 to a handful means the render broke rather than that
+  // someone unpublished a page.
+  const MINIMUM_DOCUMENTS = 60;
+  if (written < MINIMUM_DOCUMENTS && failures.length === 0) {
+    failures.push(
+      `only ${written} documents written, expected at least ${MINIMUM_DOCUMENTS} — ` +
+        `${skipped.length} routes rendered the 404 page`
+    );
+  }
+
+  if (skipped.length > 0) {
+    const list = skipped.map((route) => `  ${route}`).join('\n');
+    console.log(
+      `[prerender] ${skipped.length} route(s) have no content for that provider ` +
+        `and were skipped:\n${list}`
+    );
+  }
+
+  if (failures.length > 0) {
+    console.error(`\n[prerender] ${failures.length} route(s) failed:`);
+    for (const failure of failures) console.error(`  ${failure}`);
+    console.error(
+      '\nA pre-rendered shell is indistinguishable from a working page once it is\n' +
+        'deployed, which is the failure this step exists to prevent. Fix the route\n' +
+        'or remove it from routes() in scripts/prerender-entry.jsx.'
+    );
+    process.exit(1);
+  }
+
+  const average = Math.round(bytes / Math.max(written, 1) / 1024);
+  console.log(`[prerender] ${written} HTML documents written, ${average} kB average`);
+}
+
+// Only when run as a script. `splitHead` and `injectIntoTemplate` are imported
+// by prerender.test.js, and an unguarded main() would kick off a full SSR build
+// the moment the test file loaded.
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(`[prerender] FAILED: ${error?.message || error}`);
+    process.exit(1);
+  });
+}

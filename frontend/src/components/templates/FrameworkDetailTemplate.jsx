@@ -85,7 +85,7 @@ export default function FrameworkDetailTemplate({ provider = 'aws' }) {
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       <Helmet>
-        <title>{framework.title} | HCW</title>
+        <title>{`${framework.title} | HCW`}</title>
         <meta name="description" content={framework.summary || framework.description} />
       </Helmet>
 

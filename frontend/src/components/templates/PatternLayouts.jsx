@@ -29,7 +29,7 @@ export function ProviderLanding({
   return (
     <div className={`theme-${provider.toLowerCase()} min-h-screen pt-20 pb-20`}>
       <Helmet>
-        <title>{helmetTitle} | HCW</title>
+        <title>{`${helmetTitle} | HCW`}</title>
       </Helmet>
 
       {/* Hero Section */}

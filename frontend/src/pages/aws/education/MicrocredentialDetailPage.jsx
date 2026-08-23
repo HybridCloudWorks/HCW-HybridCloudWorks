@@ -191,7 +191,7 @@ export default function MicrocredentialDetailPage() {
   return (
     <>
       <Helmet>
-        <title>{mc.title} | AWS Microcredentials | HCW</title>
+        <title>{`${mc.title} | AWS Microcredentials | HCW`}</title>
         <meta name="description" content={mc.description} />
         <meta property="og:title" content={mc.title} />
         <meta property="og:description" content={mc.longDescription} />
