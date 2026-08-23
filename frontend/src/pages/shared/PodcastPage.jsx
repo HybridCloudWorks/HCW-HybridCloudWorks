@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useLocation } from 'react-router';
 import usePodcastData from '@/hooks/usePodcastData';
-import { useProviderConfig } from '@/context/ProviderContext';
+import { useProvider, useProviderConfig } from '@/context/ProviderContext';
 
 const PLATFORM_LOGOS = {
   spotify: '/icons/logos/spotify.png',
@@ -73,13 +73,83 @@ const PROVIDER_META = {
     placeholderIcon: 'text-emerald-400/60',
     sectionIcon: 'text-emerald-400',
   },
+  vmware: {
+    name: 'VMware',
+    gradient:
+      'from-sky-700 via-sky-900 to-sky-700 dark:from-sky-400 dark:via-white dark:to-sky-300',
+    accent: 'text-sky-400',
+    border: 'border-sky-500/30',
+    badge: 'bg-sky-500/20 border-sky-500/30 text-sky-400',
+    glow: 'bg-sky-500/5',
+    selectedBg: 'bg-sky-500/10 border-sky-500/40',
+    hoverBorder: 'hover:border-sky-500/20',
+    playBtn: 'from-sky-500 to-sky-700 hover:from-sky-400 hover:to-sky-800 shadow-sky-500/25',
+    subscribeBg: 'from-sky-500/20 to-sky-900/20',
+    subscribeBorder: 'border-sky-500/30',
+    subscribeIcon: 'text-sky-400',
+    subscribeHover: 'hover:bg-sky-500/20 hover:border-sky-500/40',
+    progressBar: 'from-sky-400 to-sky-300',
+    placeholder: 'from-sky-600/30 to-sky-900/40 border-sky-500/20',
+    placeholderIcon: 'text-sky-400/60',
+    sectionIcon: 'text-sky-400',
+  },
+  ansible: {
+    name: 'Red Hat Ansible',
+    gradient:
+      'from-red-700 via-red-900 to-red-700 dark:from-red-400 dark:via-white dark:to-red-300',
+    accent: 'text-red-400',
+    border: 'border-red-500/30',
+    badge: 'bg-red-500/20 border-red-500/30 text-red-400',
+    glow: 'bg-red-500/5',
+    selectedBg: 'bg-red-500/10 border-red-500/40',
+    hoverBorder: 'hover:border-red-500/20',
+    playBtn: 'from-red-500 to-red-700 hover:from-red-400 hover:to-red-800 shadow-red-500/25',
+    subscribeBg: 'from-red-500/20 to-red-900/20',
+    subscribeBorder: 'border-red-500/30',
+    subscribeIcon: 'text-red-400',
+    subscribeHover: 'hover:bg-red-500/20 hover:border-red-500/40',
+    progressBar: 'from-red-400 to-red-300',
+    placeholder: 'from-red-600/30 to-red-900/40 border-red-500/20',
+    placeholderIcon: 'text-red-400/60',
+    sectionIcon: 'text-red-400',
+  },
 };
 
+/** Deliberately generic. See where it is used. */
+const FALLBACK_META = {
+  name: 'Podcast',
+  gradient:
+    'from-slate-700 via-slate-900 to-slate-700 dark:from-slate-400 dark:via-white dark:to-slate-300',
+  accent: 'text-slate-400',
+  border: 'border-slate-500/30',
+  badge: 'bg-slate-500/20 border-slate-500/30 text-slate-400',
+  glow: 'bg-slate-500/5',
+  selectedBg: 'bg-slate-500/10 border-slate-500/40',
+  hoverBorder: 'hover:border-slate-500/20',
+  playBtn:
+    'from-slate-500 to-slate-700 hover:from-slate-400 hover:to-slate-800 shadow-slate-500/25',
+  subscribeBg: 'from-slate-500/20 to-slate-900/20',
+  subscribeBorder: 'border-slate-500/30',
+  subscribeIcon: 'text-slate-400',
+  subscribeHover: 'hover:bg-slate-500/20 hover:border-slate-500/40',
+  progressBar: 'from-slate-400 to-slate-300',
+  placeholder: 'from-slate-600/30 to-slate-900/40 border-slate-500/20',
+  placeholderIcon: 'text-slate-400/60',
+  sectionIcon: 'text-slate-400',
+};
+
+/**
+ * Last resort only. Prefer the prop or the router context.
+ *
+ * This used to be the ONLY source, with an incomplete list and `github` as the
+ * default, so /vmware/audio and /ansible/audio served pages titled "GitHub
+ * Podcast" at HTTP 200 on indexable URLs (#183). Sniffing the path re-derives
+ * what the router already knows, and it failed by silently adopting another
+ * provider's identity rather than by being visibly unset.
+ */
 function detectProvider(pathname) {
-  if (pathname.includes('/github')) return 'github';
-  if (pathname.includes('/terraform')) return 'terraform';
-  if (pathname.includes('/finops')) return 'finops';
-  return 'github';
+  const match = /^\/([a-z-]+)(?:\/|$)/.exec(pathname || '');
+  return match ? match[1] : null;
 }
 
 function formatDuration(raw) {
@@ -128,10 +198,15 @@ function EpisodeImage({ image, title, size = 'md', meta }) {
   );
 }
 
-export default function SharedPodcastPage() {
+export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const { pathname } = useLocation();
-  const provider = detectProvider(pathname);
-  const meta = PROVIDER_META[provider];
+  const ctxProvider = useProvider();
+  // Prop, then router context, then the path. The first two know the answer;
+  // the third is a guess, reached only when both are absent.
+  const provider = providerProp || ctxProvider || detectProvider(pathname);
+  // A generic podcast page is wrong in a way a reader can see. Another
+  // provider's name and colours is wrong in a way that looks deliberate.
+  const meta = PROVIDER_META[provider] || FALLBACK_META;
   const podcastConfig = useProviderConfig();
   const { episodes = [], loading } = usePodcastData(provider);
 
