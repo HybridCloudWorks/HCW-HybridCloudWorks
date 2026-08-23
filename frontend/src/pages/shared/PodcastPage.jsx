@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import usePodcastData from '@/hooks/usePodcastData';
 import { useProviderConfig } from '@/context/ProviderContext';
 

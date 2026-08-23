@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { EditorProvider, useEditor } from '@/features/editor/context/EditorContext';
 import { EditorLayout } from '@/features/editor/components/EditorLayout';
 import PipelineStepper from '@/components/admin/PipelineStepper';

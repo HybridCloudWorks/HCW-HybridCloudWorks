@@ -1,5 +1,5 @@
 import React, { createContext, lazy, useContext } from 'react';
-import { useParams, Outlet } from 'react-router-dom';
+import { useParams, Outlet } from 'react-router';
 
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 

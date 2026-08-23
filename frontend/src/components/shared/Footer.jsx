@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import NewsletterSignup from '@/components/shared/NewsletterSignup';
 
 // Hoisted to module scope so jsx-ast-utils can statically resolve `href`

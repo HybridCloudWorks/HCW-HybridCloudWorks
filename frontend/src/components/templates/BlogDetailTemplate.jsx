@@ -1,7 +1,7 @@
 /* eslint-disable complexity, no-nested-ternary */
 import React, { useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import CoderCornerSnippet from '@/components/shared/CoderCornerSnippet';
 import { markdownCodeComponents } from '@/components/shared/CodeBlock';

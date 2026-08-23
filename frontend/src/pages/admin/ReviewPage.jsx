@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';

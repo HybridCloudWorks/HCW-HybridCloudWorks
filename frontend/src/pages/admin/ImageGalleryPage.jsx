@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { postJSON } from '@/lib/api';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
