@@ -11,6 +11,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@azure/identity": "^4.8.0"
+    "@azure/identity": "^4.13.2"
   }
 }
