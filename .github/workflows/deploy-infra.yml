@@ -40,7 +40,7 @@ jobs:
   terraform-run:
     if: ${{ false }}
     name: Start HCP Terraform run
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     environment: production-infra
     defaults:
       run:

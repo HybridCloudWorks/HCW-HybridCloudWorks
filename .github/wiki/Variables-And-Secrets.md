@@ -80,26 +80,10 @@ by a test asserting the module cannot read them again, which is what
 "deliberately absent" looks like when you want it to survive contact with a
 future contributor.
 
-### The fifth store, named so it is not confused with the four
+### There is no fifth store
 
-`azurerm_container_app_job.ci_runner` declares its own secrets
-(`gh-app-private-key`, `dockerhub-token`), seeded out-of-band with
-`az containerapp job secret set` and protected by `ignore_changes`. This is a
-store, but it is not a *choice* — it is the only place a Container Apps job can
-read a secret from when it has no managed identity. Container Apps secrets can
-be Key Vault references, but that requires a managed identity on the job holding
-`Key Vault Secrets User`, and `ci-runner.tf` deliberately gives the job no
-identity at all (CI legs need zero Azure access, and granting the deploy
-identity would give every CI step ambient rights to the estate). The vault's IP
-rules could not admit it either: Container Apps consumption egress addresses are
-shared and dynamic.
-
-So the runner's GitHub App private key belongs in the job's own secrets, and
-**not** in GitHub Actions secrets — where it would be a static credential
-carrying `Administration: Read & write` on the repository, readable by any
-workflow. The trigger that would move it into Key Vault (store 1) is the job
-gaining a managed identity and a network path, which is the same change
-`ci_runner_enabled = true` would have to justify anyway.
+All workflows use GitHub-hosted runners. The repository has no Container Apps
+runner job, runner image, Docker Hub dependency, or runner-specific secrets.
 
 ---
 
@@ -253,8 +237,8 @@ already exists and is already wired.
 
 What that implies for store 4: it may only hold credentials to systems that are
 **not Azure** and offer **no federation from GitHub**. Today that is HCP
-Terraform, Docker Hub, and Firebase — three external systems, each with a named
-reason. `AZURE_STATIC_WEB_APPS_API_TOKEN` fails this test on its first word.
+Terraform and Firebase — two external systems, each with a named reason.
+`AZURE_STATIC_WEB_APPS_API_TOKEN` fails this test on its first word.
 
 ### Secrets that must never transit Terraform state, and why Key Vault is seeded out-of-band
 
@@ -357,7 +341,6 @@ entry at all.
 
 | Value | CHECKLIST | Why store 3 |
 | --- | --- | --- |
-| `CI_RUNNER` | §7 | Runner selection. **Deliberately absent** ⇒ `ubuntu-latest`. The editor's "Context access might be invalid" warning on all 8 references is expected and must not be "fixed" by setting it |
 | `CLIENT_ID` | §7 | Identifier under WIF; grants nothing without a matching federated subject |
 | `TENANT_ID` | §7 | Identifier |
 | `SUBSCRIPTION_ID` | §7 | Identifier |
@@ -377,12 +360,10 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | — | GitHub | Injected per-run by GitHub, scoped by `permissions:`, expires with the job. Not stored by us at all | Correct, and contractual |
 | `TF_API_TOKEN` | §7 | HCP Terraform | Authenticates GitHub → *Terraform*, the reverse direction from §8. The HCP Terraform CLI credential has no inbound GitHub OIDC path. Use a **team** token, not a user token, so it survives the user leaving | Justified |
-| `DOCKERHUB_TOKEN` | §7 | Docker Hub | Registry push credential. A scoped access token, never an account password | Justified only while Docker Hub is a publish target — see below |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned. Must be scoped read-only, and deleted the day the migration completes | Justified, with an expiry |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None available — see below | **Wrong store** |
 | `AZURE_FUNCTIONS_URL` | §7 | — | A public API base URL | **Resolved 2026-08-18** — now `vars.FUNCTIONS_URL`, store 3 |
 | `COSMOS_ENDPOINT` (GitHub-side) | §7 | — | A public hostname; with `local_auth_disabled = true` it grants nothing | **Wrong store** |
-| `DOCKERHUB_USERNAME` | §7 | — | An account name, published as part of every image tag | **Wrong store** |
 | `COSMOS_KEY` | §7 | — | Must stay unset | Correctly absent |
 
 ### Not in any store
@@ -398,7 +379,6 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | `AZURE_OPENAI_KEY` | §4 | Deliberately absent — see below |
 | `LABS_AGENT_CERT_PATH` | §2b | Generated in place on the VPS |
 | `LABS_AGENT_*` (the rest), the `LabAgent` app role, `lab_agents/{agentId}` | §2b | Host-local configuration and Entra/Cosmos objects, outside all four stores. The agent holds no database credential by design |
-| `gh-app-private-key`, `dockerhub-token` (runner) | §7 | Container Apps job secrets, seeded out-of-band |
 | `production-infra`, `data-migration` | §7b | GitHub Environments — protection gates, not values. `data-migration` is additionally the OIDC subject in `infra/oidc.tf` and cannot be renamed without breaking login with AADSTS70021 |
 
 ---
@@ -436,16 +416,9 @@ Correct placement is **derived** — `heal-computed-properties.yml` and
 `az cosmosdb show --query documentEndpoint` removes the entry entirely. Store 3
 is the acceptable fallback if a lookup is judged too slow.
 
-**4. `DOCKERHUB_USERNAME` is in store 4.** It is an account name, and
-`build-runner-image.yml` interpolates it directly into the image tags it pushes
-to a public registry. Masking it means the pushed tag prints as `***` in the
-build summary — the one line you want to read. Correct store: **3**. The larger
-question is whether the entry should exist at all: the same workflow already
-logs in to GHCR with `GITHUB_TOKEN`, so publishing the runner image only to GHCR
-would eliminate `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` together and take
-store 4 down to three entries. The trigger not to is the authenticated-pull-limit
-reason in `ci-runner.tf`, which applies to *pulls* from the Container Apps job,
-not to *pushes* from CI.
+**4. Docker Hub runner credentials are not used.** The runner-image workflow and
+the Container Apps runner job were removed; no Docker Hub secrets belong in this
+repository.
 
 **5. `AZURE_OPENAI_KEY` is inventoried in CHECKLIST §4 as `Required: Yes`,
 source Key Vault.** `infra/main.tf` decided the opposite under T-506: Azure
@@ -575,7 +548,7 @@ Every name sorts into exactly one:
 
 | Bucket | Meaning | Currently |
 | --- | --- | --- |
-| **Safe now** | Unset everywhere, or read only by code changed in the same PR | `AZURE_STATIC_WEB_APPS_API_TOKEN`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `DOCKERHUB_USERNAME` — all `Missing`. (`AZURE_FUNCTIONS_URL` → `FUNCTIONS_URL` already exercised this path, 2026-08-18) |
+| **Safe now** | Unset everywhere, or read only by code changed in the same PR | `AZURE_STATIC_WEB_APPS_API_TOKEN`, `FIREBASE_SERVICE_ACCOUNT_JSON` — both `Missing`. (`AZURE_FUNCTIONS_URL` → `FUNCTIONS_URL` already exercised this path, 2026-08-18) |
 | **Coordinated** | Already set in HCP Terraform or GitHub, or already read by shipped code. Report it; never rename silently | `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `APP_HOSTNAME`, `RESOURCE_GROUP`, `VITE_AZURE_FUNCTIONS_URL` |
 | **Contractual** | Never touched | The table above |
 

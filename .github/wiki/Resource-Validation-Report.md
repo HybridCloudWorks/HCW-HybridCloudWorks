@@ -78,7 +78,6 @@ findings:
 
 ### Implemented but never planned
 
-Container Apps self-hosted CI runner (new trust surface, no budget line),
 71 Cosmos containers (the plan explicitly gated container design), two
 hardcoded OpenAI model deployments (incl. DALL·E 3, unplanned), the HCP
 Terraform backend, all RBAC assignments, and a naming scheme where **zero

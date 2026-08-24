@@ -26,14 +26,9 @@ concurrency:
 jobs:
   verify:
     name: ${{ matrix.name }}
-    # Runner selection is a repository variable so CI can fail over to the
-    # self-hosted Azure runners (infra/ci-runner.tf) during a GitHub-hosted
-    # runner outage without a code change:
-    #   unset / 'ubuntu-latest'  -> GitHub-hosted (normal operation)
-    #   '["self-hosted","aca"]'  -> Azure Container Apps runners (fallback)
-    # GitHub has no automatic runs-on failover; flipping CI_RUNNER applies to
-    # all runs created after the change. See Review.md §4.4 for the runbook.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    # All CI runs use GitHub-hosted runners. No alternate runner infrastructure
+    # is provisioned or selected.
+    runs-on: ubuntu-latest
     strategy:
       # One package failing should not mask the state of the others.
       fail-fast: false

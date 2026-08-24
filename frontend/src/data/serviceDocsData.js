@@ -1082,7 +1082,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Paste the token in HCW',
-            body: 'Go to /admin/recordings → Connect tab → paste the token → Save & Test. The token is stored server-side in Firestore and used by the mcpProxy Cloud Function. It never returns to the browser after saving.',
+            body: 'Go to /admin/recordings → Connect tab → paste the token → Save & Test. The token is stored server-side in Cosmos DB and used by the Azure mcpProxy Function. It never returns to the browser after saving.',
             codes: [],
           },
         ],
@@ -1092,7 +1092,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Available MCP tools',
-            body: 'These tools are called by HCW via the mcpProxy Cloud Function at https://mcp.plaud.ai/mcp.',
+            body: 'These tools are called by HCW via the Azure mcpProxy Function at https://mcp.plaud.ai/mcp.',
             codes: [
               {
                 lang: 'text',
@@ -1151,7 +1151,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Remove OAuth token from HCW',
-            body: 'In /admin/ai-engine → MCP Servers → Plaud → toggle Off. To delete the stored token, clear the oauthToken field from the mcp_servers/plaud document in Firestore.',
+            body: 'In /admin/ai-engine → MCP Servers → Plaud → toggle Off. To delete the stored token, clear the oauthToken field from the mcp_servers/plaud document in Cosmos DB.',
             codes: [],
           },
           {
@@ -1285,13 +1285,13 @@ export const SERVICE_DOCS = {
         title: 'Install & Configure',
         steps: [
           {
-            heading: 'Already installed in functions/',
-            body: 'The @mendable/firecrawl-js SDK is already in functions/package.json and in active use. The FIRECRAWL_API_KEY is already defined as a Firebase Secret.',
+            heading: 'Configure the Azure MCP proxy',
+            body: 'The MCP proxy reads FIRECRAWL_API_KEY from the Azure Function App settings. In production, store it as an App Setting backed by Key Vault; do not put it in functions/.env or source control.',
             codes: [
               {
-                lang: 'bash',
-                label: 'functions/package.json (already present)',
-                content: '"@mendable/firecrawl-js": "^4.20.0"',
+                lang: 'text',
+                label: 'Azure Function App setting',
+                content: 'FIRECRAWL_API_KEY=fc-...',
               },
             ],
           },
@@ -1309,8 +1309,8 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'If you need a new API key',
-            body: 'Get a key at firecrawl.dev → Dashboard → API Keys. Add it to functions/.env.',
-            codes: [{ lang: 'bash', label: 'functions/.env', content: 'FIRECRAWL_API_KEY=fc-...' }],
+            body: 'Get a key at firecrawl.dev → Dashboard → API Keys. Add it to the Azure Function App settings, preferably as a Key Vault reference.',
+            codes: [{ lang: 'text', label: 'Azure Function App setting', content: 'FIRECRAWL_API_KEY=fc-...' }],
           },
         ],
       },
@@ -1371,7 +1371,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Remove the API key',
-            body: 'Remove FIRECRAWL_API_KEY from functions/.env and revoke the key in your Firecrawl dashboard.',
+            body: 'Remove FIRECRAWL_API_KEY from the Azure Function App settings / Key Vault and revoke the key in your Firecrawl dashboard.',
             codes: [],
           },
         ],
@@ -1464,9 +1464,9 @@ export const SERVICE_DOCS = {
             codes: [],
           },
           {
-            heading: '3. Add the key to functions/.env',
-            body: 'The mcpProxy Cloud Function reads this key when calling the Brave Search MCP server.',
-            codes: [{ lang: 'bash', label: 'functions/.env', content: 'BRAVE_API_KEY=BSA...' }],
+            heading: '3. Add the key to Azure Function App settings',
+            body: 'The Azure mcpProxy Function reads this key when calling the Brave Search MCP server. Prefer a Key Vault reference for production.',
+            codes: [{ lang: 'text', label: 'Azure Function App setting', content: 'BRAVE_API_KEY=BSA...' }],
           },
           {
             heading: '4. Enable in AI Engine',
@@ -1501,7 +1501,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Disable and remove key',
-            body: 'Toggle off in AI Engine → MCP Servers → Brave Search. Remove BRAVE_API_KEY from functions/.env and revoke the application in the Brave Search API Dashboard.',
+            body: 'Toggle off in AI Engine → MCP Servers → Brave Search. Remove BRAVE_API_KEY from the Azure Function App settings / Key Vault and revoke the application in the Brave Search API Dashboard.',
             codes: [],
           },
         ],

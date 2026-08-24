@@ -83,7 +83,7 @@ they are operator-facing — someone reads them off the state backend's
 Outputs tab and pastes the value somewhere.
 
 Sweeps cover **every** file that declares a name, not a curated list:
-`output` blocks live in feature files (`ci-runner.tf`, `oidc.tf`), not only
+`output` blocks live in feature files (`oidc.tf`), not only
 `outputs.tf`. Each name sorts into exactly one bucket — **safe now**
 (outputs; unset variables), **coordinated** (variables already set in the
 state backend or GitHub — report, never rename silently), or

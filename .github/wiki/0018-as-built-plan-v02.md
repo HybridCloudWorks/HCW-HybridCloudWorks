@@ -33,7 +33,6 @@ which describes the implemented environment. Deviations are dispositioned exactl
 | --- | --- |
 | One Function App instead of the API/worker/labs split | [ADR 0019](0019-single-function-app) (supersedes ADR 0004) |
 | Flat native `azurerm` root module instead of AVM composition | [ADR 0020](0020-native-terraform-root-module) (supersedes ADR 0005's module clause) |
-| Container Apps self-hosted CI runner (unplanned) | [ADR 0021](0021-container-apps-ci-runner) |
 | LRS instead of ZRS on both storage accounts | This ADR (amends ADR 0014); revisit trigger below |
 | No compute zone redundancy | This ADR (amends ADR 0011's compute posture); recovery is redeploy-from-code |
 | As-built resource names retained; CAF `-9x7k` scheme abandoned | This ADR; renaming live resources is destroy/create for zero risk reduction |
@@ -80,5 +79,5 @@ which describes the implemented environment. Deviations are dispositioned exactl
 ## Related decisions and references
 
 - Supersedes plan v0.1; amends [ADR 0011](0011-single-region-recovery), [ADR 0013](0013-ai-provider-strategy), [ADR 0014](0014-storage-and-media)
-- [ADR 0019](0019-single-function-app) · [ADR 0020](0020-native-terraform-root-module) · [ADR 0021](0021-container-apps-ci-runner)
+- [ADR 0019](0019-single-function-app) · [ADR 0020](0020-native-terraform-root-module)
 - [Resource-Validation-Report](Resource-Validation-Report) · REVIEW.md §8.2 · [Deployment Runbook](Deployment-Runbook)

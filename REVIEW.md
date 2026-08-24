@@ -304,11 +304,10 @@ no stable egress IPs. Denying SCM breaks every deploy. Closing it properly needs
 one of:
 
 - a per-run SCM firewall window, exactly as the host storage account already
-  gets in `deploy-functions.yml`; or
-- the self-hosted runner in `infra/ci-runner.tf`, which has a stable address.
+  gets in `deploy-functions.yml`.
 
-The first is a small change to a workflow that already does this once. The
-second is §3.5 and costs money.
+That is the only supported path because all workflows use GitHub-hosted
+runners, whose egress IPs are dynamic.
 
 **FTP basic auth is still enabled** (`ftpsState: FtpsOnly`). The
 `azurerm_function_app_flex_consumption` resource exposes no argument for it —
@@ -474,63 +473,11 @@ dispatch. Each is a numbered step in the
 protection**. The repository is public, so both are free. Push protection turns
 "a credential was committed, now rotate it" into "the push was refused."
 
-## 3.5 Self-hosted CI runner — deferred, not deleted
+## 3.5 CI runners — GitHub-hosted only
 
-`infra/ci-runner.tf` defines an Azure Container Apps event-driven Job running
-ephemeral GitHub runners (KEDA `github-runner` scaler, scale-to-zero — idle days
-cost $0, active days ≈ $10/mo). It is a **fallback** for GitHub-hosted runner
-outages, selected per-run by the `CI_RUNNER` repository variable.
-
-`ci_runner_enabled = false`, so none of it is deployed. The setup below applies
-only if you turn it on.
-
-<details>
-<summary>One-time setup, in order</summary>
-
-1. **GitHub App** (org settings → Developer settings → GitHub Apps → New): no
-   webhook, repository permission **Administration: Read & write** only. Install
-   on `HCW-HybridCloudWorks` only. Record App ID, Installation ID, and a
-   generated private key. A GitHub App rather than a PAT, so tokens are
-   short-lived and not person-bound.
-2. **Docker Hub**: create repository `hcw-runner` and a read/write token scoped
-   to it. Add `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` as repository secrets,
-   then run `Build runner image` once via `workflow_dispatch`.
-3. **Terraform**: set `ci_runner_enabled = true` and apply.
-4. **Seed the job's secrets and config** — the values Terraform deliberately
-   does not manage; `lifecycle.ignore_changes` protects everything set here:
-
-   ```bash
-   RG=rg-mgmt-plat-prod-cus JOB=caj-plat-ci-prod-cus-01
-   az containerapp job secret set -g $RG --name $JOB \
-     --secrets gh-app-private-key="$(cat app-key.pem)" dockerhub-token='<token>'
-   az containerapp job registry set -g $RG --name $JOB \
-     --server docker.io --username '<dockerhub-user>' --password-secret-ref dockerhub-token
-   az containerapp job update -g $RG --name $JOB \
-     --set-env-vars GH_APP_ID=<app-id> GH_APP_INSTALLATION_ID=<installation-id> \
-       GH_REPO_OWNER=HybridCloudWorks GH_REPO_NAME=HCW-HybridCloudWorks
-   ```
-
-5. **Smoke test**: `gh variable set CI_RUNNER --body '["self-hosted","aca"]'`,
-   start a run, watch a job execution appear, then flip back.
-
-**Failover during an outage:**
-
-```bash
-gh variable set CI_RUNNER --body '["self-hosted","aca"]'   # fail over
-gh variable delete CI_RUNNER                                # restore
-```
-
-Applies to runs created after the change. Caveat from the 2026-08-06 outage: its
-second phase stalled workflow-run *creation*, and no runner helps when the
-control plane is down. This covers hosted-runner-capacity outages only.
-
-**Deliberate security posture** — do not "improve" these without reading
-`infra/ci-runner.tf`'s header: no managed identity on the runner job, no VNet,
-JIT ephemeral runners via `generate-jitconfig`, secrets out-of-band of Terraform
-state, runner image rebuilt weekly on GitHub-hosted runners so a broken image
-cannot brick its own rebuild.
-
-</details>
+Every workflow uses GitHub-hosted `ubuntu-latest` runners. The repository does
+not provision self-hosted runner infrastructure, maintain a runner image, or
+support a `CI_RUNNER` override.
 
 ---
 
@@ -700,7 +647,6 @@ silently ignored and the run fails claiming no credentials were supplied.
 | `cosmos_local_auth_disabled` | `true` | Key auth off; AAD only |
 | `budget_amount_usd` | `150` | |
 | `purge_protection_enabled` | `false` | Set `true` before production secrets matter |
-| `ci_runner_enabled` | `false` | §3.5 |
 | `vnet_address_space` / `functions_subnet_prefix` | `10.40.0.0/16` · `/24` | |
 | `domain` | `hybridcloudworks.com` | |
 | `admin_ip_rules` / `cosmos_admin_ip_rules` / `functions_storage_admin_ip_rules` | `[]` | Empty is the correct resting state. Populate → apply → work → empty → apply |
@@ -746,7 +692,6 @@ Still needed for the frontend build, sourced from the Entra registrations in
 | `VITE_ENTRA_TENANT_ID` | **MISSING** | A variable, not a secret |
 | `VITE_ENTRA_API_SCOPE` | **MISSING** | Must correspond to `entra_api_audience` — see the warning in §2.2 |
 | `VITE_SOCIAL_X_URL` · `VITE_SOCIAL_LINKEDIN_URL` · `VITE_SOCIAL_GITHUB_URL` | **MISSING** | Cosmetic; absence renders an empty link target |
-| `CI_RUNNER` | **Deliberately absent** | Absence ⇒ `ubuntu-latest`, which is normal operation. This is why the Actions extension reports "Context access might be invalid" on its references — expected, and must not be "fixed" by setting the variable |
 
 Re-run `scripts/set-github-variables.ps1` after any apply that changes an
 output. It sources from applied state, not a hardcoded copy that drifts.
@@ -762,7 +707,6 @@ output. It sources from applied state, not a hardcoded copy that drifts.
 | `TF_API_TOKEN` | **MISSING** | Gated infra workflow | How the *workflow* reaches Terraform. Distinct from §4.1, which is how *Terraform* reaches Azure |
 | `SITE_MAIN_APP_PRIVATE_KEY` (environment `data-migration`) | **MISSING** | `mode=inventory-gate` only | Private key of an org GitHub App with `contents: read` on Site-Main alone. Preferred over a PAT: no human expiry, narrowest scope |
 | `SITE_MAIN_READ_TOKEN` (environment `data-migration`) | **MISSING — fallback** | `mode=inventory-gate` only | Fine-grained PAT, Site-Main `contents: read`, 90-day expiry. **Record the expiry date here** if this path is used |
-| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | **MISSING** | Runner image build only | Needed only if §3.5 is turned on |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | **Never provision** | — | Retired 2026-08-20. `migrate-data.yml` authenticates to GCP through Workload Identity Federation and the scripts refuse a `service_account` credential file in CI. A downloaded key is the one artefact this design has no use for |
 | `COSMOS_KEY` | **Never provision** | — | Key auth is off on **both** Cosmos accounts (production and scratch), and `scripts/lib/cli.mjs` throws on startup if this is set. There is no rehearsal shape that needs it |
 

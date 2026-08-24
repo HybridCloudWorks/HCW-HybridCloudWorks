@@ -41,8 +41,8 @@
     VITE_ENTRA_* - Entra app-registration values, produced by the manual
              registration step, not derivable from any state this script can
              reach.
-    DOCKERHUB_* and the GitHub App - CI-runner prerequisites for a runner
-             that is deliberately disabled (ci_runner_enabled = false).
+     DOCKERHUB_* and the GitHub App - not used; all workflows run on
+             GitHub-hosted runners.
     TF_API_TOKEN - opt-in via -SetTfApiToken, because it copies the token
              this script authenticates with into a repository secret. The
              wiki calls for a TEAM token there, so the switch is only correct
@@ -438,7 +438,7 @@ Write-Info 'FIREBASE_SERVICE_ACCOUNT_JSON - never. migrate-data.yml authenticate
 Write-Info '                through Workload Identity Federation; in CI the scripts'
 Write-Info '                refuse a service-account key file outright.'
 Write-Info 'VITE_ENTRA_*  - from the manual Entra app registrations.'
-Write-Info 'DOCKERHUB_*   - CI-runner prerequisites; the runner is disabled.'
+Write-Info 'DOCKERHUB_*   - not used; all workflows run on GitHub-hosted runners.'
 
 if ($WhatIfPreference) {
   Write-Host "`n  Dry run — nothing was written.`n" -ForegroundColor Green

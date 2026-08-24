@@ -882,8 +882,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # ("Will use Kudu https://<scmsite>/api/publish to deploy since Flex
     # consumption plan is detected"), and GitHub-hosted runners have no stable
     # egress IPs, so denying SCM breaks every deploy. Closing it properly needs
-    # either a per-run SCM firewall window like the storage account already
-    # gets, or the self-hosted runner in ci-runner.tf.
+    # a per-run SCM firewall window like the storage account already gets.
     #
     # What IS closed below is basic authentication on that endpoint, which is
     # the credential half of the exposure and costs nothing here: this app

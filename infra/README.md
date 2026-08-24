@@ -35,12 +35,10 @@ before any plan or apply.
 | `variables.tf` | All inputs; names must match TFC workspace variable keys exactly |
 | `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, observability, budget, DNS |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |
-| `ci-runner.tf` | Container Apps job for self-hosted CI runner failover |
 | `outputs.tf` | Root outputs |
 | `cosmos-containers.json` | Generated container manifest (one container per Firestore collection) — regenerate with `scripts/generate-cosmos-container-spec.mjs`, do not hand-edit |
 | `terraform.tfvars.example` | Placeholder-only example; real values live in TFC workspace variables |
 | `.tflint.hcl` | Lint ruleset used by CI |
-| `runner-image/` | Dockerfile for the self-hosted runner image |
 
 The module is deliberately flat. Three irreversible decisions are load-bearing
 on each other (serverless Cosmos, container-per-collection, per-container

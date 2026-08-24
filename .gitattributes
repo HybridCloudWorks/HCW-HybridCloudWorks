@@ -11,8 +11,7 @@
 #     suites while `node --check` on the same files passed.
 #   * `npm run format:check` reported 244 frontend files, every one of them
 #     line-endings-only — .prettierrc pins endOfLine: lf.
-#   * infra/runner-image/entrypoint.sh is COPY'd into the CI runner image. A
-#     CRLF shebang there makes the container fail to exec.
+#   * shell entrypoints must retain LF shebangs when they are executed in CI.
 #
 # `eol=lf` rather than a bare `text=auto` is the operative part: text=auto
 # normalizes what git stores, eol=lf also dictates what git checks out. It is

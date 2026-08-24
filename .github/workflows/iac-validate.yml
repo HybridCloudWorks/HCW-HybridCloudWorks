@@ -31,8 +31,7 @@ concurrency:
 jobs:
   terraform:
     name: fmt, validate, tflint
-    # Same failover switch as ci.yml — see REVIEW.md §4.4.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: infra
@@ -65,7 +64,7 @@ jobs:
 
   trivy:
     name: Trivy IaC misconfiguration scan
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     env:
       # v0.69.3 is the latest release named safe by Aqua's 2026-03-19 security
       # advisory (github.com/aquasecurity/trivy/discussions/10425): the
