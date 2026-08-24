@@ -1204,8 +1204,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     #
     # The drift is structural: two writers manage one settings map, and telling
     # them apart requires them to disagree. It cannot be removed without
-    # removing the signal. It goes away on its own when azurerm#29149 closes
-    # and both azapi resources are deleted — see the T-511 block below.
+    # removing the signal. It goes away on its own when
+    # hashicorp/terraform-provider-azurerm#29149 closes and both azapi
+    # resources are deleted — see the T-511 block below.
     "RUNTIME_CONFIG_WRITER" = "azurerm"
   })
 
