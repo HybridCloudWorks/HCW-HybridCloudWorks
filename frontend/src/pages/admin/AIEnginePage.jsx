@@ -788,8 +788,8 @@ function McpTab({ servers }) {
           <strong>Transport:</strong> MCP requests go through the{' '}
           <strong>Azure Functions API</strong>. Each server uses its configured transport
           (Streamable HTTP or SSE). API keys come from Azure Function App settings / Key Vault
-          references, and OAuth tokens are stored in Cosmos DB — never exposed to the browser.
-          Click <em>Sync Tools</em> to fetch the tool list server-side.
+          references, and OAuth tokens are stored in Cosmos DB — never exposed to the browser. Click{' '}
+          <em>Sync Tools</em> to fetch the tool list server-side.
         </div>
       </div>
 

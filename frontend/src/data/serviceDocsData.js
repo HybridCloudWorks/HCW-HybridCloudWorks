@@ -1310,7 +1310,13 @@ export const SERVICE_DOCS = {
           {
             heading: 'If you need a new API key',
             body: 'Get a key at firecrawl.dev → Dashboard → API Keys. Add it to the Azure Function App settings, preferably as a Key Vault reference.',
-            codes: [{ lang: 'text', label: 'Azure Function App setting', content: 'FIRECRAWL_API_KEY=fc-...' }],
+            codes: [
+              {
+                lang: 'text',
+                label: 'Azure Function App setting',
+                content: 'FIRECRAWL_API_KEY=fc-...',
+              },
+            ],
           },
         ],
       },
@@ -1466,7 +1472,13 @@ export const SERVICE_DOCS = {
           {
             heading: '3. Add the key to Azure Function App settings',
             body: 'The Azure mcpProxy Function reads this key when calling the Brave Search MCP server. Prefer a Key Vault reference for production.',
-            codes: [{ lang: 'text', label: 'Azure Function App setting', content: 'BRAVE_API_KEY=BSA...' }],
+            codes: [
+              {
+                lang: 'text',
+                label: 'Azure Function App setting',
+                content: 'BRAVE_API_KEY=BSA...',
+              },
+            ],
           },
           {
             heading: '4. Enable in AI Engine',
