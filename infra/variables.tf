@@ -299,38 +299,36 @@ variable "cosmos_local_auth_disabled" {
 }
 
 variable "cosmos_allow_azure_datacenter_ips" {
-  description = "Include the '0.0.0.0' sentinel in the Cosmos firewall, allowing Azure datacenter IPs. Required while heal-computed-properties AND migrate-data run on GitHub-hosted runners (which are Azure-hosted). Drop when those jobs move in-VNet."
+  description = "Include the '0.0.0.0' sentinel in the Cosmos firewall, allowing Azure datacenter IPs. Required while heal-computed-properties runs on GitHub-hosted runners; remove after an approved in-VNet operations design is verified."
   type        = bool
   default     = true
 }
 
 # -----------------------------------------------------------------------------
-# Data-migration rehearsal (scratch.tf)
+# Legacy import rehearsal controls (scratch.tf)
 #
-# Three switches, all off by default, so the rehearsal estate costs nothing
-# and does not exist until someone turns it on for a reason.
+# These switches are all off by default. The declarations remain only until an
+# owner confirms the state and approves their removal; no current workflow
+# enables them.
 # -----------------------------------------------------------------------------
 
-# The scratch Cosmos account the Firestore import is rehearsed against before
-# it ever touches production. Created with the SAME posture as production —
-# serverless, keys off, the same 72 containers from the same generated spec —
-# because the point of the rehearsal is to exercise the production path, not
-# a convenient one. A rehearsal against a key-authenticated account with an
-# open firewall passes while proving nothing.
+# The legacy scratch Cosmos account was intended for import rehearsal before
+# production. It is off by default and is retained pending the owner-only
+# state check recorded in REVIEW.md.
 #
 # Holds a full copy of production data while on. Turn it off — which
 # destroys the account and the copy — when the rehearsal is signed off, and
 # write the intended lifetime down in the Phase-4 wiki page.
 variable "cosmos_scratch_enabled" {
-  description = "Create the scratch Cosmos account (cosmos-site-sbx-cus) for migration rehearsal. Off = zero resources"
+  description = "Legacy: create the scratch Cosmos account for rehearsal. Off = zero resources; remove after owner-approved state review."
   type        = bool
   default     = false
 }
 
-# The scratch storage account the Firebase Storage copy is rehearsed against.
-# Implies cosmos_scratch_enabled (same resource group).
+# Legacy scratch storage account for a content-copy rehearsal. Implies
+# cosmos_scratch_enabled (same resource group).
 variable "storage_scratch_enabled" {
-  description = "Create the scratch storage account (stsitesbxcus01) for the storage-copy rehearsal. Requires cosmos_scratch_enabled"
+  description = "Legacy: create the scratch storage account for rehearsal. Requires cosmos_scratch_enabled."
   type        = bool
   default     = false
 
@@ -340,14 +338,10 @@ variable "storage_scratch_enabled" {
   }
 }
 
-# The production-import gate. While false, the deploy identity holds NO
-# database-scope Cosmos role and NO blob-write role on the production content
-# account, so the migration workflow physically cannot write to production
-# even if its own guard were removed. Flipping this is the one-variable change
-# the production-import phase makes, reviewed in HCP Terraform, after the
-# scratch rehearsal is signed off.
+# Legacy production-import role gate. It remains false and is retained only
+# until an owner approves removing its state-backed declarations in oidc.tf.
 variable "migration_writer_enabled" {
-  description = "Grant the deploy identity database-scope Cosmos Data Contributor and blob write on PRODUCTION. The production-import gate — leave false until the rehearsal is signed off"
+  description = "Legacy: grant the deploy identity import roles on production. Leave false; remove with the owner-approved Terraform cleanup."
   type        = bool
   default     = false
 }

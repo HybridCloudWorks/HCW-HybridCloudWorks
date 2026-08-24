@@ -1,12 +1,19 @@
 # Migration Plan — Personal-Site_HCW → HCW-HybridCloudWorks (Azure)
 
-**Audience:** engineers executing the migration. **Status:** Phases 2–4 done; every port before cutover merged 2026-08-21; next is the cutover sequence (§6)
-against **Site-Main @ `088f458`** (2026-08-18, v1.7.0); see the note below.
+> **ARCHIVED 2026-08-24.** This is the historical migration record, retained
+> for decisions, evidence, and traceability. It is not an active migration
+> checklist. Current website work is in [README.md](README.md), [TODO.md](TODO.md),
+> and [REVIEW.md](REVIEW.md); current completion entries are in
+> [CHANGELOG.md](CHANGELOG.md). The migration workflow and one-shot import
+> tooling described below have been retired.
+
+**Audience:** engineers reviewing the completed migration. **Status:** archived;
+the phase table below is the historical completion summary.
 **Written** 2026-07-30; deployment note added 2026-08-19; rebaselined against Site-Main and the
 migration tooling 2026-08-20.
 **Companion:** [Architecture_Plan.md](Architecture_Plan.md) — the target and why.
 
-> ## ⚠️ PLEASE NOTE — what is *actually* deployed, as of 2026-08-20
+> ## Historical deployment snapshot — 2026-08-20
 >
 > **Everything below this box is the plan as written on 2026-07-30. It describes what was designed
 > to be deployed. It is not a description of the running estate.**
@@ -148,13 +155,13 @@ deployed to Azure.
 
 | Phase | Goal                                     | Runs in       | Status / exit criterion                                         |
 | ----- | ---------------------------------------- | ------------- | --------------------------------------------------------------- |
-| 0     | Reconcile the two repositories           | Both          | **Retired** — replaced by the pinned baseline in §0             |
-| 1     | Decouple from Firebase behind interfaces | Both          | **DONE on both sides** — here: zero `firebase/*` imports; Site-Main: v1.7.0 `lib/data/` + `lib/auth/` encapsulation |
-| 2     | Stand up Azure infrastructure            | This repo     | **DONE 2026-08-19** — 129 resources, plan clean; **104 functions deployed 2026-08-21** (84 before the T-323/T-324 deploy; 96 after the route-conflict merge, which retires 8 dead registrations) |
-| 3     | Port the API and workers                 | This repo     | **DONE 2026-08-21** — the HTTP surface per `.azure/api-surface.json`, the six long handlers as platform jobs, 15 of 16 timers, the 11 triggers as 6 change-feed functions + 3 delete paths; what is not ported is a deliberate demotion (Cloud Tools T-410, Listen & Learn T-411, the D3 admin cluster); see §4 |
-| 4     | Migrate data                             | `scripts/` + `migrate-data.yml` | **DONE on production 2026-08-21** — 8,023 documents / 62 containers / 0 failed, reconciled; 1,438 blobs / 3.17 GiB verified. Re-runnable for the delta before cutover (upsert, `gcsmd5`) |
-| 5     | Cutover                                  | DNS           | Live on Azure, Firebase warm                                    |
-| 6     | Decommission and archive                 | Both          | GCP down, Site-Main archived                                    |
+| ~~0~~ | ~~Reconcile the two repositories~~ | Both | **~~Retired~~** — replaced by the pinned baseline in §0 |
+| ~~1~~ | ~~Decouple from Firebase behind interfaces~~ | Both | **~~DONE on both sides~~** — current Azure code is the retained implementation |
+| ~~2~~ | ~~Stand up Azure infrastructure~~ | This repo | **~~DONE 2026-08-19~~** — historical apply and validation evidence is retained below |
+| ~~3~~ | ~~Port the API and workers~~ | This repo | **~~DONE 2026-08-21~~** — current handlers and workers live under `functions/` |
+| ~~4~~ | ~~Migrate data~~ | Historical tooling | **~~DONE on production 2026-08-21~~** — the one-shot workflow and import tooling are retired |
+| ~~5~~ | ~~Cutover~~                              | ~~DNS~~       | **~~Completed in the historical record~~** — owner-only live checks remain in `REVIEW.md` |
+| ~~6~~ | ~~Decommission and archive~~             | ~~Both~~      | **~~Archived~~** — remaining resource retirement requires owner approval in `REVIEW.md` |
 
 Phases 3 and 4 are independent and should run in parallel: the rehearsal needs none of Phase 3's
 handlers, and Phase 3 needs no data to register routes.
@@ -177,7 +184,7 @@ handlers, and Phase 3 needs no data to register routes.
 These are the "leverage" items. **Each improves this codebase whether or not the migration ever
 happens**, which is what makes them safe to do now.
 
-### 3.1 Put every Firestore read behind a data-access layer — _the big one_ — DONE, both sides
+### ~~3.1 Put every Firestore read behind a data-access layer — the big one — DONE, both sides~~
 
 > Here: `frontend/src` has zero `firebase/*` imports; every read goes through `lib/api.js` against
 > the Azure API. Site-Main: v1.7.0 put all 364 call sites behind `lib/data/`. The two
@@ -201,7 +208,7 @@ By the end, the frontend has no database SDK at all, and the Azure port becomes 
 Start with the **71 `useFirestoreCollection` / `useFirestoreQuery` / `useFirestoreDocument` call
 sites** — they are already funnelled through hooks, which is the natural seam.
 
-### 3.2 Isolate auth behind a provider interface — DONE
+### ~~3.2 Isolate auth behind a provider interface — DONE~~
 
 > Here: MSAL behind `frontend/src/lib/auth/`; the Entra SPA registration (REVIEW §2.2) is the
 > remaining owner gate before admin sign-in works. Site-Main: `lib/auth/` (4 files).
@@ -210,7 +217,7 @@ sites** — they are already funnelled through hooks, which is the natural seam.
 sign-out, token acquisition and claim reads in one module. Entra/MSAL then swaps in at one place
 instead of five.
 
-### 3.3 Isolate storage — DONE
+### ~~3.3 Isolate storage — DONE~~
 
 5 files import `firebase/storage`. Same treatment; Blob Storage swaps in behind it.
 
@@ -218,7 +225,7 @@ instead of five.
 > `resolveMediaUrl()` (commit `09154ad`, 2026-08-20) so stored site-relative paths resolve against
 > the Cloudflare API host in the cross-origin topology.
 
-### 3.4 Fix `staticwebapp.config.json` — the soft 404 is already there and already broken — DONE
+### ~~3.4 Fix `staticwebapp.config.json` — the soft 404 is already there and already broken — DONE~~
 
 **`frontend/staticwebapp.config.json` exists** — the claim in an earlier draft that "No such file
 exists anywhere in the target repository yet" was wrong.
@@ -254,7 +261,7 @@ status code on the explicit 404 override needs to change.
 
 This is a one-line change, do it now.
 
-### 3.5 Audit the 11 Firestore triggers for change-feed compatibility — DONE upstream
+### ~~3.5 Audit the 11 Firestore triggers for change-feed compatibility — DONE upstream~~
 
 Cosmos's change feed delivers current state and **does not surface deletes**. Any trigger relying on
 the before-image or on deletion needs redesign (Architecture_Plan §5.3). Do the audit now — it is
@@ -264,7 +271,10 @@ reading, not writing, and it de-risks the Phase 3 estimate.
 > change-feed disposition — which port as-is, which retire, which need an explicit delete endpoint
 > because the feed cannot see a delete — is the trigger table in §4.
 
-### 3.6 Decide `blogs`
+### ~~3.6 Decide `blogs`~~
+
+> **Historical decision:** retain the `blogs` collection for the current website
+> compatibility surface. Its retirement is not an open engineering task.
 
 242 legacy documents, reached only through a fallback path in `BlogDetailTemplate` and
 `ArchitectureDetailTemplate`. Its six composite indexes were retired on 2026-07-30 as orphaned. If

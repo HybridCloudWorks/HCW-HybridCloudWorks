@@ -622,9 +622,8 @@ function SetupTab({ agents, now }) {
 
       <p className="text-xs text-muted-foreground">
         Current agent source and environment template: <code>vps-agent/index.js</code> and{' '}
-        <code>vps-agent/.env.example</code> in the repo. The legacy{' '}
-        <code>frontend/labs/vps-agent</code> package uses Firebase Admin/Firestore and must not be
-        deployed.
+        <code>vps-agent/.env.example</code> in the repo. The agent reaches this API through its
+        scoped Entra credential; it does not access Cosmos directly.
       </p>
     </div>
   );

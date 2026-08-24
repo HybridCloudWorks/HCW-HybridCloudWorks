@@ -1,11 +1,10 @@
 # =============================================================================
-# scratch.tf — the migration rehearsal estate
+# scratch.tf — legacy rehearsal estate
 #
 # A second Cosmos account and a second storage account, in their own resource
-# group, that exist only while cosmos_scratch_enabled / storage_scratch_enabled
-# are true. Migration_Plan §5 asks for the Firestore import to be "run many
-# times against a scratch Cosmos account before the real one"; this is that
-# account.
+# group, that exist only while the legacy switches are true. No current
+# workflow enables them. Keep these declarations until REVIEW.md records the
+# owner-approved state cleanup.
 #
 # Everything here mirrors production's posture on purpose:
 #   - serverless, centralus, Session consistency, the same database name, the

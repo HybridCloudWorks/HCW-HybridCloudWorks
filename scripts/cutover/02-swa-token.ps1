@@ -3,7 +3,7 @@
     Cutover step 2 — put the Static Web App deploy token into GitHub.
 
 .DESCRIPTION
-    Migration_Plan §6 step 1 / REVIEW.md §4.3. `deploy-azure-frontend.yml` needs
+    The frontend release workflow / REVIEW.md. `deploy-azure-frontend.yml` needs
     the repository secret AZURE_STATIC_WEB_APPS_API_TOKEN. The repository
     currently holds NO secrets at all, so this is genuinely missing rather than
     stale — and any value recorded before the centralus rebuild is dead,
@@ -78,6 +78,6 @@ gh secret list --repo $Repo | ForEach-Object { Write-Host $_ }
 Write-Host ''
 Write-Host 'Next, and it is a separate decision:' -ForegroundColor Yellow
 Write-Host '  deploy-azure-frontend.yml is still gated with `if: ${{ false }}`.'
-Write-Host '  Enabling it is a reviewed change — see .github/wiki/Cutover-Runbook.md step 2.'
+Write-Host '  Enabling it is a reviewed change — see wiki/Cutover-Runbook.md step 2.'
 Write-Host '  The first run publishes to the *.azurestaticapps.net preview host;'
-Write-Host '  DNS does not move until step 3, so it is safe while Firebase is live.'
+Write-Host '  DNS does not move until the reviewed DNS step.'

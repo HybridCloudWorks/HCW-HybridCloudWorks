@@ -3,18 +3,18 @@
 #
 # Manages:
 #   - Resource Group
-#   - Azure Static Web App (frontend hosting, replaces Firebase Hosting)
-#   - Cosmos DB Serverless (database, replaces Cloud Firestore)
-#   - Azure Storage Account + containers (replaces Firebase Cloud Storage)
-#   - Azure Function App on Consumption plan (replaces Cloud Functions)
-#   - Azure Key Vault (replaces GCP Secret Manager)
+#   - Azure Static Web App (frontend hosting)
+#   - Cosmos DB Serverless (website data)
+#   - Azure Storage Account + containers (content and media)
+#   - Azure Function App on Consumption plan (API and workers)
+#   - Azure Key Vault (runtime secrets)
 #   - Application Insights + Log Analytics (observability)
 #   - Budget alerts (replaces GCP billing export + budget)
 #   - Cloudflare DNS records for Azure services
 #
-# NOTE: Authentication (Firebase Auth) is retained as-is per the migration
-# plan Option A. If migrating to Azure AD B2C in the future, add the
-# azuread provider and B2C tenant resource here.
+# NOTE: User authentication is implemented by Microsoft Entra ID in the
+# application. This module manages Azure resources and does not provision the
+# Entra app registrations or app roles.
 # =============================================================================
 
 data "azurerm_client_config" "current" {}
@@ -85,7 +85,7 @@ resource "azurerm_log_analytics_workspace" "hcw" {
 }
 
 # =============================================================================
-# Application Insights (replaces Cloud Logging + Firebase Performance)
+# Application Insights and Log Analytics observability
 # =============================================================================
 resource "azurerm_application_insights" "hcw" {
   name                = "appi-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
@@ -97,7 +97,7 @@ resource "azurerm_application_insights" "hcw" {
 }
 
 # =============================================================================
-# Azure Static Web App (replaces Firebase Hosting)
+# Azure Static Web App (frontend hosting)
 #
 # Standard tier provides:
 #   - Custom domain with free managed SSL
@@ -175,8 +175,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
   # capacity mode, one container per Firestore collection, and the per-container
   # partition keys. On serverless, empty and idle containers cost nothing, so
   # 66 containers is genuinely free today and keeps the per-container indexing
-  # policies and the 1:1 verification story that scripts/verify-migration.mjs
-  # is built on.
+  # policies and the container/query contract used by the current website.
   #
   # Trigger condition: if multi-region, autoscale, or provisioned throughput is
   # ever required, container consolidation happens in the SAME project, before
@@ -234,7 +233,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
   ))
 
   # T-504: keys off. The app is managed-identity-only (AAD data plane), the
-  # migration tooling uses DefaultAzureCredential, and REVIEW §0.2's worry is
+  # operational tooling uses DefaultAzureCredential, and REVIEW.md's concern is
   # a key that may once have existed — disabling local auth is the durable
   # answer to it. Set the variable false only if plan review surfaces a key
   # consumer nobody remembered.
@@ -251,13 +250,13 @@ resource "azurerm_cosmosdb_account" "hcw" {
     tier = "Continuous7Days"
   }
 
-  # This account holds all migrated production data. A plan that wants to
+  # This account holds production website data. A plan that wants to
   # replace it must fail until a human removes this guard in a reviewed PR.
   #
   # Lifted once, for the centralus rebuild on 2026-08-19, and restored the same
   # day once the rebuild applied. That window was safe only because
-  # Migration_Plan §4 had not run and every container was empty. It will not be
-  # safe again: from the first migrated document onward this guard is the
+  # The original rebuild window occurred before production data was populated.
+  # It will not be safe again: this guard is the
   # difference between a typo and a data-loss incident.
   lifecycle {
     prevent_destroy = true
@@ -271,8 +270,8 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
   # Deliberately NOT renamed to the CAF convention. This is a data-plane
   # identifier, not an Azure resource name: functions/src/lib/cosmos-client.js,
   # scripts/lib/cli.mjs and scripts/apply-computed-sortdate.mjs all default to
-  # the literal "hcw" when COSMOS_DATABASE is unset, and the migration workflow
-  # sets it to "hcw" explicitly. Renaming it would leave those paths connecting
+  # the literal "hcw" when COSMOS_DATABASE is unset; all current clients share
+  # that value. Renaming it would leave those paths connecting to a database
   # to a database that does not exist, and the failure would look like a
   # permissions problem.
   #
@@ -289,12 +288,12 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Cosmos DB Containers
 #
 # The container list is GENERATED from scripts/lib/migration-manifest.mjs, the
-# same manifest the migration and verification scripts read. Regenerate with:
+# collection contract used by Terraform and operational tooling. Regenerate with:
 #
 #     node scripts/generate-cosmos-container-spec.mjs
 #
 # Do not add containers here by hand — add the collection to the manifest and
-# regenerate, or Terraform, the migrator and the verifier drift apart again.
+# regenerate, or Terraform and the application contract drift apart.
 #
 # Partition keys come from the manifest: 68 on /id and five exceptions — four
 # flattened subcollections keyed by their parent (content_versions on
@@ -381,11 +380,12 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
 # — were removed on 2026-08-20. The centralus rebuild of 2026-08-19 recreated
 # every container from the spec while all of them were empty, so the moves and
 # the key changes both happened through that rebuild; `terraform state list`
-# shows only the for_each form. The window they guarded is the one described
-# above, and it is still open until the first import.
+# shows only the for_each form. The rebuild and state transition are complete;
+# future address or partition-key changes still require an explicit reviewed
+# plan.
 
 # =============================================================================
-# Azure Storage Account (replaces Firebase Cloud Storage / GCS)
+# Azure Storage Account (content and media)
 #
 # Hot tier for frequently accessed blog covers, cert badges, AI images.
 # LRS (locally redundant) — sufficient for a single-region deployment.
@@ -438,7 +438,7 @@ resource "azurerm_storage_account" "hcw" {
     virtual_network_subnet_ids = [azurerm_subnet.functions_integration.id]
   }
 
-  # Holds all migrated production media. Same guard rationale as the Cosmos
+  # Holds production website media. Same guard rationale as the Cosmos
   # account: replacement must be an explicit, reviewed decision.
   #
   # Lifted for the centralus rebuild on 2026-08-19 and restored the same day.
@@ -489,17 +489,15 @@ resource "azurerm_storage_container" "content" {
   container_access_type = "private" # private: raw content assets, not public
 }
 
-# Storage lifecycle management (replaces platform/firebase/storage-lifecycle.json)
+# Storage lifecycle management for generated and uploaded website media.
 #
 # KNOWN INERT as written. Azure matches `prefix_match` against
 # `<container>/<blob>`, so "articles/" would match a container named
-# `articles` — which does not exist, and is not created on purpose: the
-# storage migration manifest (scripts/lib/storage-manifest.mjs) SKIPS the GCS
-# `articles/` prefix because those are scraped images on a 90-day lifecycle
-# that the RSS and blog-listing jobs regenerate. When the ported scraper
-# starts writing scraped images here, this rule has to name the real path
-# (e.g. "content/articles/") before it does anything. Left in place so that
-# decision is made next to the rule rather than rediscovered as a cost line.
+# `articles` — which does not exist, and is not created on purpose.
+# `articles/` prefix is reserved for generated images on a 90-day lifecycle
+# that RSS and blog-listing jobs may regenerate. When a scraper writes images
+# here, this rule must name the real path (for example, "content/articles/")
+# before it does anything. The decision stays next to the rule.
 resource "azurerm_storage_management_policy" "cleanup" {
   storage_account_id = azurerm_storage_account.hcw.id
 
@@ -568,8 +566,8 @@ resource "azurerm_subnet" "functions_integration" {
   #
   # azurerm 5.0 removed the service_endpoints list in favour of repeated
   # service_endpoint blocks. Generated from a variable rather than written out
-  # three times: the set is a deployment input — a private-endpoint migration
-  # empties it, and a new VNet-ruled service appends to it — so it belongs
+  # three times: the set is a deployment input — private endpoints would change
+  # this posture, and a new VNet-ruled service appends to it — so it belongs
   # somewhere a tfvars file can reach.
   dynamic "service_endpoint" {
     for_each = toset(var.functions_subnet_service_endpoints)
@@ -953,8 +951,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
     # COSMOS_CONNECTION_STRING is deliberately absent (TODO.md T-315): it carried
     # the account PRIMARY KEY for two empty change-feed handlers. The six
-    # change-feed functions that replaced Site-Main's Firestore triggers (T-324,
-    # functions/src/functions/change-feed.js) use the IDENTITY-BASED binding —
+    # current change-feed functions use the IDENTITY-BASED binding —
     # the app's managed identity already holds Cosmos Data Contributor at account
     # scope (func_cosmos), which covers the `leases` container too.
     # See https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2
@@ -990,7 +987,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "CLIENT_IP_SALT"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CLIENT-IP-SALT)"
 
     # -------------------------------------------------------------------------
-    # Ported Firebase defineSecret bindings.
+    # Runtime Key Vault bindings.
     #
     # Site-Main's functions/ declares 18 defineSecret bindings; before this block
     # exactly two of them (the AWS pair above) existed here. The other sixteen
@@ -1002,9 +999,8 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # underscored name so `process.env.X` reads port unchanged, and the Key Vault
     # secret uses hyphens because Key Vault names cannot contain underscores.
     #
-    # These resolve to empty until the vault is seeded (Review.md §4.2). That is
-    # safe today because the handlers are still stubs; it must be done before
-    # FEATURE_FLAG_SCHEDULERS goes true or any CMS handler is ported.
+    # These resolve to empty until the vault is seeded (REVIEW.md). Optional
+    # integrations remain disabled until their owner-approved credentials exist.
     # -------------------------------------------------------------------------
 
     # AI generation — content drafting, scoring and image pipelines.
@@ -1050,18 +1046,6 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Telegram notifications.
     "TELEGRAM_BOT_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-BOT-TOKEN)"
     "TELEGRAM_CHAT_ID"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-CHAT-ID)"
-
-    # Site rebuild trigger (GitHub App) and VPS control (Hostinger).
-    "GITHUB_APP_INSTALLATION_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GITHUB-APP-INSTALLATION-ID)"
-    "HOSTINGER_API_TOKEN"        = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/HOSTINGER-API-TOKEN)"
-
-    # GITHUB_APP_PRIVATE_KEY is deliberately NOT here, for the same reason as the
-    # GCP service-account JSON above: it is a multi-line RSA PEM, and app
-    # settings are visible in the portal and in
-    # `az webapp config appsettings list`. It is signed into a JWT
-    # (Site-Main cms-functions.js:3880 → getGithubAppInstallationToken), so it
-    # must be read from Key Vault at runtime via src/lib/key-vault.js under the
-    # name GITHUB-APP-PRIVATE-KEY.
 
     "NODE_ENV" = "production"
 
@@ -1387,7 +1371,7 @@ resource "azurerm_key_vault" "hcw" {
   # vault is unreachable by anyone except the app, which is the correct steady
   # state — populate it only for the seeding window. Secret VALUES are
   # deliberately not managed by Terraform, so they never enter state or TFC.
-  # See Review.md §4.2 for the runbook.
+  # See REVIEW.md for the runbook.
   network_acls {
     default_action             = "Deny"
     bypass                     = "AzureServices"
@@ -1541,8 +1525,7 @@ resource "azurerm_cosmosdb_sql_container" "leases" {
 # Cloudflare DNS — Azure Static Web App custom domain
 #
 # The existing root Terraform manages VPS subdomains (api, auth, argocd, etc.).
-# This module adds the Azure-specific records. During migration, both Firebase
-# and Azure records coexist; the cutover flips the root A/CNAME record.
+# This module adds the Azure-specific records used by the website and API.
 # =============================================================================
 
 # Azure SWA custom domain validation TXT record
@@ -1574,7 +1557,7 @@ resource "azurerm_cosmosdb_sql_container" "leases" {
 # to the Static Web App is the mistake this comment exists to prevent; SWA
 # validates a root domain with a generated token instead.
 
-# Azure Functions subdomain (for API calls during migration)
+# Azure Functions subdomain for the API origin.
 resource "cloudflare_record" "azure_functions" {
   zone_id = var.cloudflare_zone_id
   name    = "api-azure"
@@ -1582,7 +1565,7 @@ resource "cloudflare_record" "azure_functions" {
   type    = "CNAME"
   proxied = true
   ttl     = 1
-  comment = "Azure Functions API endpoint (migration)"
+  comment = "Azure Functions API endpoint"
 }
 
 # =============================================================================

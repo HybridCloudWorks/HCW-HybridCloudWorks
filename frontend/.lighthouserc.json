@@ -32,7 +32,7 @@
         "image-delivery-insight": "off",
         "uses-webp-images": "off",
 
-        "_comment_byte_weight": "Firebase Firestore + Storage modular APIs are ~138KB gz combined and that's already the modular subset. Reducing further means architectural changes (move admin reads to a Cloud Function, lazy-load Firestore on user gesture) that are out of scope for the lighthouse-preset restoration. Suppressed with explicit ack.",
+        "_comment_byte_weight": "The admin application and provider route bundles are intentionally split for lazy loading. The total-byte-weight audit is suppressed because it evaluates the homepage without those route boundaries; route-specific checks remain the relevant signal.",
         "total-byte-weight": "off",
 
         "_comment_unused_js_css": "Unused-JS audit flags lazy-loaded chunks that aren't used on the audited route — this is a known Lighthouse limitation when route-based code splitting is in play. The chunks ARE used; just not on the homepage. Suppressed with note.",

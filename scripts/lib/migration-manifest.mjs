@@ -1,17 +1,16 @@
 /**
  * migration-manifest.mjs
  *
- * The single source of truth for the Firestore → Cosmos DB data migration.
+ * The collection contract used to generate the website's Cosmos containers.
  *
- * Every other piece of migration tooling — the preflight inventory, the
- * migrator, the verifier, and the Terraform container list — is derived from
- * this file. If a collection is not described here, it does not get migrated,
- * and the preflight will flag it loudly rather than let it disappear quietly.
+ * The one-shot import tooling that created this file has been retired. The
+ * manifest remains because Terraform and the container-spec generator still
+ * need one source of truth for provisioned containers, partition keys, TTLs,
+ * and historical data-disposition notes.
  *
- * Source of the inventory: `platform/firebase/firestore.rules` in
- * HybridCloudWorks/Site-Main (65 top-level `match` blocks) cross-checked
- * against `collection(...)` call sites in that repo's `src/`, `functions/` and
- * `scripts/`. First reviewed at Site-Main commit 07f3123 (2026-08-04).
+ * The inventory was originally derived from the former Firebase rules and
+ * application call sites in HybridCloudWorks/Site-Main. Those source files
+ * are historical inputs and are no longer part of this repository.
  *
  * Re-baselined against Site-Main 088f458 (2026-08-18, v1.7.0) on 2026-08-20.
  * Site-Main's own inventory (`npm run inventory:collections` there) lists 68
@@ -19,19 +18,18 @@
  * that were missing here — `azure_architectures` and `azure_frameworks`,
  * written by `scripts/seed_azure_data.js` and matched by no rule — are now
  * `probe` entries so the preflight counts them instead of failing on them.
- * Site-Main ships `scripts/inventory-collections.mjs --diff <this file>` as a
- * cutover gate: it exits 1 on any collection it touches that is not listed
- * here. Keep that green.
+ * The current application contract is validated by the API and Terraform
+ * checks in this repository. Keep this list aligned with those consumers.
  *
  * ---------------------------------------------------------------------------
  * Dispositions
  * ---------------------------------------------------------------------------
- *   migrate   — copy the documents across. The default.
+ *   migrate   — historical source-data disposition. The default.
  *   reseed    — seed data; re-created on the far side by a seeding script, so
  *               migrating it only imports drift. Container still provisioned.
  *   regenerate— cache; a scheduled job refills it. Do not migrate.
  *   transient — in-flight job/quota records with no value after cutover.
- *   probe     — declared in firestore.rules but with no code that writes it.
+ *   probe     — historical declaration with no known application writer.
  *               Also: exists in Firestore with neither a rules match nor a
  *               writer at the baseline (legacy residue the 2026-08-21 preflight
  *               surfaced). Not provisioned; the owner decides from the counts.

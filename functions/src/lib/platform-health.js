@@ -1,6 +1,6 @@
 /**
  * Cloud provider status aggregation, ported from
- * `frontend/functions/index.js:113-249` (TODO.md T-316).
+ * The old Firebase implementation was replaced by this Azure Functions module.
  *
  * The four indicators on the landing page are the only consumer. Before this
  * route existed they sat at `CHECKING` and then rendered "Health check

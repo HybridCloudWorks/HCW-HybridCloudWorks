@@ -3,13 +3,12 @@
 /**
  * generate-cosmos-container-spec.mjs
  *
- * Renders `infra/cosmos-containers.json` from the migration manifest.
+ * Renders `infra/cosmos-containers.json` from the collection manifest.
  *
  * Terraform reads that file with `jsondecode(file(...))`, so the manifest is
  * the only place a container list is maintained. Before this existed the list
- * was written out three times — in `infra/main.tf`, in the migrator's
- * COLLECTION_MAP and in the verifier's hardcoded array — and all three had
- * drifted from each other and from the source repository.
+ * was written out in multiple migration-era tools and had drifted from the
+ * application contract.
  *
  * Usage:
  *   node scripts/generate-cosmos-container-spec.mjs
@@ -79,9 +78,9 @@ const INDEXING_OVERRIDES = {
 
 /**
  * Composite indexes, transcribed 1:1 from Site-Main's
- * `platform/firebase/firestore.indexes.json` (18 composites, read at commit
- * 07f3123). That file is a specification of exactly which multi-property sorts
- * the application performs, so it is the right source for these.
+ * the historical Firestore index specification (18 composites, read at
+ * commit 07f3123). It records the multi-property sorts the application
+ * performs, so it remains the source for these Cosmos indexes.
  *
  * This is not an optimisation. Cosmos requires a composite index for an
  * ORDER BY over two or more properties — without one the query does not run
@@ -225,7 +224,7 @@ const COMPUTED_PROPERTIES_DOC = {
   ],
 };
 
-/** Why a container exists when no documents are migrated into it. */
+/** Why a container exists when no source documents were copied into it. */
 const DISPOSITION_NOTE = {
   reseed: 'seed data — re-seeded on the far side, not migrated',
   regenerate: 'cache — refilled by a scheduled job, not migrated',

@@ -1,40 +1,24 @@
 <#
 .SYNOPSIS
-    Cutover step 3a — seed the two missing Key Vault secrets (TODO.md T-321).
+    Seed the runtime GCP credential used by the optional GCP pricing tool.
 
 .DESCRIPTION
-    REVIEW.md §3.1. Nineteen of twenty-one secrets are seeded. Two are not:
-
-        GCP-SERVICE-ACCOUNT-JSON     multi-line JSON
-        GITHUB-APP-PRIVATE-KEY       multi-line PEM
-
-    Both are read by getSecret() at execution time rather than through an
-    @Microsoft.KeyVault(...) app-setting reference, which is exactly why the
-    diff that verified the other nineteen did not catch them — it compared
-    against app settings, and these have none.
+    The GCP pricing tool reads one multi-line JSON credential at runtime.
 
     SEED WITH --file, NEVER --value. `az keyvault secret set --value` mangles
     multi-line content: PowerShell folds the newlines and the stored secret is
     a single line that parses as neither JSON nor PEM. The failure appears much
     later, inside whichever handler reads it.
 
-    The data migration does NOT need GCP-SERVICE-ACCOUNT-JSON: migrate-data.yml
-    authenticates to GCP through Workload Identity Federation, and the scripts
-    refuse a service-account key in CI. Only the ported runtime code paths read
-    it.
 
 .PARAMETER GcpServiceAccountJsonPath
     Path to the GCP service-account JSON file.
-
-.PARAMETER GitHubAppPrivateKeyPath
-    Path to the GitHub App private key (.pem).
 
 .PARAMETER MyIp
     Public IP to allow while seeding. Defaults to whatever api.ipify.org says.
 
 .EXAMPLE
-    ./03-keyvault-secrets.ps1 -GcpServiceAccountJsonPath .\gcp-sa.json `
-                              -GitHubAppPrivateKeyPath .\github-app.pem
+    ./03-keyvault-secrets.ps1 -GcpServiceAccountJsonPath .\gcp-sa.json
 
 .NOTES
     THE FIREWALL IS THE AWKWARD PART. kv-site-prod-cus-01 is default-Deny with
@@ -54,7 +38,6 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)][string] $GcpServiceAccountJsonPath,
-    [Parameter(Mandatory)][string] $GitHubAppPrivateKeyPath,
     [string] $VaultName = 'kv-site-prod-cus-01',
     [string] $MyIp
 )
@@ -63,7 +46,7 @@ $ErrorActionPreference = 'Stop'
 function Write-Step { param($Text) Write-Host "`n=== $Text ===" -ForegroundColor Cyan }
 
 Write-Step 'Preflight'
-foreach ($p in @($GcpServiceAccountJsonPath, $GitHubAppPrivateKeyPath)) {
+foreach ($p in @($GcpServiceAccountJsonPath)) {
     if (-not (Test-Path $p)) { throw "File not found: $p" }
 }
 
@@ -75,12 +58,6 @@ if (-not $parsed.private_key -or $parsed.type -ne 'service_account') {
     throw "$GcpServiceAccountJsonPath does not look like a GCP service-account key (need type=service_account and private_key)."
 }
 Write-Host "gcp json  : valid, client_email = $($parsed.client_email)"
-
-$pem = Get-Content $GitHubAppPrivateKeyPath -Raw
-if ($pem -notmatch '-----BEGIN [A-Z ]*PRIVATE KEY-----') {
-    throw "$GitHubAppPrivateKeyPath does not contain a PEM private key header."
-}
-Write-Host "github pem: valid, $((($pem -split "`n").Count)) lines"
 
 if (-not $MyIp) {
     $MyIp = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 15).ip
@@ -104,12 +81,6 @@ try {
             --file $GcpServiceAccountJsonPath --output none
         Write-Host 'GCP-SERVICE-ACCOUNT-JSON  set' -ForegroundColor Green
     }
-    if ($PSCmdlet.ShouldProcess($VaultName, 'set GITHUB-APP-PRIVATE-KEY')) {
-        az keyvault secret set --vault-name $VaultName --name 'GITHUB-APP-PRIVATE-KEY' `
-            --file $GitHubAppPrivateKeyPath --output none
-        Write-Host 'GITHUB-APP-PRIVATE-KEY    set' -ForegroundColor Green
-    }
-
     Write-Step 'Verify round-trip'
     # Read back and re-parse. A secret that stored but folded its newlines
     # passes a "does it exist" check and fails at runtime.
@@ -117,13 +88,6 @@ try {
         --query 'value' -o tsv
     try { $null = $back | ConvertFrom-Json; Write-Host 'GCP-SERVICE-ACCOUNT-JSON  round-trips as JSON' -ForegroundColor Green }
     catch { throw 'GCP-SERVICE-ACCOUNT-JSON did not round-trip as JSON — it was probably stored with --value. Re-seed with --file.' }
-
-    $backPem = az keyvault secret show --vault-name $VaultName --name 'GITHUB-APP-PRIVATE-KEY' `
-        --query 'value' -o tsv
-    if ($backPem -match '-----BEGIN [A-Z ]*PRIVATE KEY-----') {
-        Write-Host 'GITHUB-APP-PRIVATE-KEY    round-trips with its PEM header' -ForegroundColor Green
-    }
-    else { throw 'GITHUB-APP-PRIVATE-KEY did not round-trip. Re-seed with --file.' }
 
     Write-Step 'Inventory'
     az keyvault secret list --vault-name $VaultName --query '[].name' -o tsv | Sort-Object |

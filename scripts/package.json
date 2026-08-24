@@ -1,21 +1,11 @@
 {
-  "name": "hybridcloudworks-migration-scripts",
-  "description": "Firestore → Cosmos DB and Firebase Storage → Blob data migration tooling for the Site-Main migration",
+  "name": "hybridcloudworks-ops-scripts",
+  "description": "Operational validation and content tooling for the HybridCloudWorks website",
   "version": "1.1.0",
   "type": "module",
   "private": true,
   "scripts": {
-    "preflight": "node preflight-firestore-inventory.mjs",
-    "probe": "node migration-probe.mjs",
-    "export": "node migrate-firestore-to-cosmos.mjs --export",
-    "import:dry": "node migrate-firestore-to-cosmos.mjs --import --dry-run",
-    "import": "node migrate-firestore-to-cosmos.mjs --import",
-    "verify": "node verify-migration.mjs",
-    "storage:inventory": "node migrate-storage-to-blob.mjs --inventory",
-    "storage:copy:dry": "node migrate-storage-to-blob.mjs --copy --dry-run",
-    "storage:copy": "node migrate-storage-to-blob.mjs --copy",
-    "storage:verify": "node migrate-storage-to-blob.mjs --verify",
-    "spec:check": "node generate-cosmos-container-spec.mjs --check",
+    "container-spec:check": "node generate-cosmos-container-spec.mjs --check",
     "test": "vitest run",
     "smoke:deployed": "node smoke-deployed.mjs",
     "lint": "eslint ."
@@ -25,10 +15,7 @@
   },
   "dependencies": {
     "@azure/cosmos": "^4.3.0",
-    "@azure/identity": "^4.8.0",
-    "@azure/storage-blob": "^12.27.0",
-    "@google-cloud/storage": "^7.21.0",
-    "firebase-admin": "^14.2.0"
+    "@azure/identity": "^4.8.0"
   },
   "devDependencies": {
     "eslint": "^9.39.5",

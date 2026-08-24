@@ -14,10 +14,9 @@
  *   completeLabJob   — write a terminal result, only for a job this agent
  *                      currently holds
  *
- * Ported from the source agent's own logic (`frontend/labs/vps-agent/index.js`
- * lines 82-134), which ran client-side against Firestore. Moving it here is
- * what makes the constraints enforceable: the agent used to decide for itself
- * which jobs matched its capabilities and what status to write.
+ * The API owns the job claim and completion rules. The standalone `vps-agent/`
+ * process only polls these handlers with its scoped Entra credential; it never
+ * receives a Cosmos or database credential.
  */
 
 const json = (status, body) => ({

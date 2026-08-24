@@ -601,12 +601,9 @@ foreach ($variable in $variables) {
 # ===========================================================================
 # 4. What is still missing
 # ===========================================================================
-# Two values this script deliberately does not set, because neither belongs in
-# a Terraform workspace.
+# This script deliberately does not seed runtime secrets into a Terraform
+# workspace.
 Write-Step 'Not set by this script'
-Write-Info 'TF_API_TOKEN  - a GitHub secret, not a workspace variable. It is how'
-Write-Info '                deploy-infra.yml authenticates TO HCP Terraform, so'
-Write-Info '                storing it here would be circular.'
 Write-Info 'Key Vault     - the five runtime application secrets are seeded'
 Write-Info '                out-of-band and must never transit Terraform state.'
 Write-Info '                See Variables-And-Secrets in the wiki.'

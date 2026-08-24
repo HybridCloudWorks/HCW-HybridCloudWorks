@@ -1,14 +1,11 @@
 name: Deploy Functions
 
-# ENABLED 2026-08-20, manual-dispatch only.
+# Manual release workflow, dispatch-only.
 #
 # The push trigger is deliberately commented out rather than deleted. Enabling
-# this workflow and enabling auto-deploy-on-merge are two separate decisions,
-# and only the first has been made: the Function App has never held code, so
-# the first deploys are the ones most likely to need watching. Restore the push
-# trigger once a dispatch run has succeeded end to end and the smoke test is
-# trusted — not before, because a red auto-deploy on main is discovered by
-# whoever next visits the site.
+# Enabling this workflow and enabling auto-deploy-on-merge are separate
+# decisions. Keep releases observable until the deployment and smoke checks
+# have an approved automatic-release policy.
 #
 # on:
 #   push:
@@ -74,10 +71,9 @@ jobs:
       # oidc.tf github_deploy_funcsa_network). The rule add is eventually
       # consistent — the short wait lets it propagate before the upload.
       #
-      # An IP rule alone is not enough (T-509): GitHub-hosted runners are Azure
-      # VMs, and the storage firewall ignores IP rules for requests from the
-      # account's own region. migrate-data.yml hit this on 2026-08-21 (run
-      # 32444649912). So the default action is opened to Allow for the minutes
+      # An IP rule alone is not enough: GitHub-hosted runners are Azure VMs, and
+      # the storage firewall ignores IP rules for requests from the account's
+      # own region. The default action is opened to Allow for the minutes
       # of the upload too — data-plane access still needs an Entra token with
       # a blob role, allowBlobPublicAccess is false — and the always() step
       # restores Deny first.
