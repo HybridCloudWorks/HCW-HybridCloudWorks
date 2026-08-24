@@ -30,8 +30,37 @@ export const UPLOAD_CONTAINERS = new Set([
  * content assets, and `speakerevents` is declared private in Terraform with the
  * comment "event assets served via API" — serving either anonymously would
  * quietly undo that. Adding a container here is a disclosure decision.
+ *
+ * Every entry must also appear in UPLOAD_CONTAINERS or in
+ * GENERATED_MEDIA_CONTAINERS below, so that each publicly readable container
+ * has exactly one declared writer. `listenandlearn` is the generated one.
  */
-export const PUBLIC_MEDIA_CONTAINERS = new Set(['blogs', 'covers', 'certifications']);
+export const PUBLIC_MEDIA_CONTAINERS = new Set([
+  'blogs',
+  'covers',
+  'certifications',
+  'listenandlearn',
+]);
+
+/**
+ * Containers written by a server-side job rather than by a person.
+ *
+ * `listenandlearn` holds Listen & Learn episode audio, written by the
+ * `generate-listen-and-learn` job through `uploadBlob` with a path it derives
+ * itself (`{provider}/{examCode}/{areaSlug}.mp3`). Nothing else writes there.
+ *
+ * This set exists so the separation is checkable rather than incidental. It is
+ * deliberately DISJOINT from UPLOAD_CONTAINERS, and blob-paths.test.js asserts
+ * that: a container that is both publicly readable and reachable from the
+ * admin upload route lets any editor put an arbitrary file behind an anonymous
+ * URL, which is exactly what a generated-media container must not allow.
+ *
+ * Until this existed, `PUBLIC_MEDIA_CONTAINERS ⊂ UPLOAD_CONTAINERS` held by
+ * accident — every public container happened to be one people upload to. That
+ * was a description of the world, not a control, and satisfying it here would
+ * have meant opening the episode container to the upload route.
+ */
+export const GENERATED_MEDIA_CONTAINERS = new Set(['listenandlearn']);
 
 /**
  * The blob path is caller-chosen, to preserve the existing naming scheme

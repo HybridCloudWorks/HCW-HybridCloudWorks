@@ -525,12 +525,34 @@ export async function getUsageRecords(limitN = 100, startAfterDate = null) {
 
 /** Aggregate usage by provider. Returns { provider: { tokens, costUsd, calls } } */
 export function aggregateByProvider(records) {
+  return aggregateBy(records, (r) => r.provider);
+}
+
+/**
+ * The same totals grouped by what SPENT the money rather than who was paid.
+ *
+ * `provider` answers "which vendor" — useful when several are enabled, useless
+ * when one vendor serves several features. `source` is what the usage writer
+ * stamps (ai/usage.js USAGE_SOURCES): admin playground calls, Listen & Learn
+ * scripts, Listen & Learn audio. Audio is priced on an output rate an order of
+ * magnitude above text, so a run's cost is dominated by one of these and
+ * grouping by provider alone hides which.
+ */
+export function aggregateBySource(records) {
+  return aggregateBy(records, (r) => r.source || 'admin');
+}
+
+function aggregateBy(records, keyOf) {
   const agg = {};
   for (const r of records) {
-    if (!agg[r.provider]) agg[r.provider] = { tokens: 0, costUsd: 0, calls: 0 };
-    agg[r.provider].tokens += r.totalTokens || 0;
-    agg[r.provider].costUsd += r.estimatedCostUsd || 0;
-    agg[r.provider].calls += 1;
+    const key = keyOf(r);
+    if (!agg[key]) agg[key] = { tokens: 0, costUsd: 0, calls: 0, estimated: 0 };
+    agg[key].tokens += r.totalTokens || 0;
+    agg[key].costUsd += r.estimatedCostUsd || 0;
+    agg[key].calls += 1;
+    // Rows whose token counts were derived rather than reported by the API.
+    // Surfaced so a derived figure is never shown as a billed one.
+    if (r.estimatedTokens) agg[key].estimated += 1;
   }
   return agg;
 }
@@ -594,6 +616,7 @@ export const aiEngine = {
   removeMcpServer,
   getUsageRecords,
   aggregateByProvider,
+  aggregateBySource,
 };
 
 export default aiEngine;

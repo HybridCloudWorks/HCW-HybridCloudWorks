@@ -134,3 +134,26 @@ export async function fetchPublicCuratedImage(articleId) {
   const body = await publicGet(`public/curated-image/${encodeURIComponent(articleId)}`);
   return body?.imageUrl || null;
 }
+
+/**
+ * GET public/listen-and-learn — the approved episodes of one certification.
+ *
+ * The server filters to `status === 'published'`, which is the whole review
+ * gate: episodes are AI-written summaries of a paid exam's objectives,
+ * generated as drafts and approved one at a time in the admin portal. There is
+ * deliberately no way to ask this endpoint for anything else.
+ *
+ * Returns `null` for a certification that has never been generated, which the
+ * page renders differently from a generated set with nothing approved yet —
+ * that comes back with an empty `episodes` array.
+ *
+ * @param {{platform: string, examCode: string}} params
+ * @returns {Promise<{set: object, episodes: object[]}|null>}
+ */
+export async function fetchPublicListenAndLearn({ platform, examCode } = {}) {
+  if (!platform || !examCode) return null;
+  const params = new URLSearchParams({ platform, examCode });
+  const body = await publicGet(`public/listen-and-learn?${params}`);
+  if (!body) return null;
+  return { set: body.set || null, episodes: body.episodes || [] };
+}

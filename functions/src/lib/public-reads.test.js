@@ -1032,3 +1032,99 @@ describe('public list limits are clamped, whatever the query string says', () =>
     expect(await listed('5000')).toHaveLength(MAX_LIMIT);
   });
 });
+
+describe('getListenAndLearn — approval is the only gate', () => {
+  const store = (set, episodes) => ({
+    readDoc: vi.fn(async () => set),
+    queryDocs: vi.fn(async () => episodes),
+  });
+
+  const get = async (deps, query = { platform: 'azure', examCode: 'AZ-104' }) => {
+    const h = createPublicReadHandlers({ store: deps });
+    return h.getListenAndLearn(makeRequest({ query }), context);
+  };
+
+  it('filters to published in SQL, on an equality test', async () => {
+    // These are AI-written summaries of a paid exam's objectives. Every
+    // episode is generated as a draft and approved one at a time, so this
+    // filter IS the review gate — not a display preference. An equality test
+    // means an unrecognised status stays hidden, which is the safe direction;
+    // a `!== 'draft'` would leak anything a future writer misspells.
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps);
+
+    const [container, query, params] = deps.queryDocs.mock.calls[0];
+    expect(container).toBe('listen_and_learn_episodes');
+    expect(query).toContain('c.status = @status');
+    expect(query).not.toContain('!=');
+    expect(params).toContainEqual({ name: '@status', value: 'published' });
+    expect(params).toContainEqual({ name: '@setId', value: 'azure_az-104' });
+  });
+
+  it('returns episodes in study-guide order, not query order', async () => {
+    const deps = store({ id: 'azure_az-104' }, [
+      { id: 'c', order: 2 },
+      { id: 'a', order: 0 },
+      { id: 'b', order: 1 },
+    ]);
+    const body = JSON.parse((await get(deps)).body);
+    expect(body.episodes.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('drops a soft-deleted episode the status filter would have admitted', async () => {
+    const deps = store({ id: 'azure_az-104' }, [
+      { id: 'a', order: 0 },
+      { id: 'gone', order: 1, softDeletedAt: '2026-02-01' },
+    ]);
+    const body = JSON.parse((await get(deps)).body);
+    expect(body.episodes.map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('strips Cosmos system properties from the set and the episodes', async () => {
+    const deps = store({ id: 'azure_az-104', _etag: 'x' }, [{ id: 'a', order: 0, _ts: 1 }]);
+    const res = await get(deps);
+    expect(res.body).not.toContain('_etag');
+    expect(res.body).not.toContain('_ts');
+  });
+
+  it('serves a generated set with nothing approved as an empty list, not a 404', async () => {
+    // "Generated but not yet approved" and "never generated" are different
+    // states, and the page renders a different thing for each.
+    const res = await get(store({ id: 'azure_az-104', examCode: 'AZ-104' }, []));
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).episodes).toEqual([]);
+  });
+
+  it('404s a certification that was never generated', async () => {
+    expect((await get(store(null, []))).status).toBe(404);
+  });
+
+  it('lowercases the platform and exam code into the set id', async () => {
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps, { platform: 'AZURE', examCode: 'AZ-104' });
+    expect(deps.readDoc).toHaveBeenCalledWith('listen_and_learn', 'azure_az-104', 'azure_az-104');
+  });
+
+  it('requires both parameters', async () => {
+    expect((await get(store(null, []), { platform: 'azure' })).status).toBe(400);
+    expect((await get(store(null, []), { examCode: 'AZ-104' })).status).toBe(400);
+  });
+
+  it('bounds the episode query', async () => {
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps);
+    expect(deps.queryDocs.mock.calls[0][1]).toMatch(/SELECT TOP \d+/);
+  });
+
+  it('names the same containers the writer does', async () => {
+    // public-reads.js has no imports on purpose, so the container names are a
+    // second copy. This is what stops the copies drifting into a read that
+    // silently returns nothing.
+    const { SET_CONTAINER, EPISODE_CONTAINER } = await import('./listen-and-learn/publish.js');
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps);
+
+    expect(deps.readDoc.mock.calls[0][0]).toBe(SET_CONTAINER);
+    expect(deps.queryDocs.mock.calls[0][0]).toBe(EPISODE_CONTAINER);
+  });
+});

@@ -166,6 +166,7 @@ const AdminLinkiePage = lazyPage(() => import('@/pages/admin/LinkiePage'));
 const AdminMailingListPage = lazyPage(() => import('@/pages/admin/MailingListPage'));
 const AdminConnectionsPage = lazyPage(() => import('@/pages/admin/ConnectionsPage'));
 const AdminLabsPage = lazyPage(() => import('@/pages/admin/LabsPage'));
+const AdminListenAndLearnPage = lazyPage(() => import('@/pages/admin/ListenAndLearnPage'));
 
 // Placeholder loader
 const PageLoader = () => (
@@ -367,6 +368,7 @@ function App() {
                 <Route path="mailing-list" element={<AdminMailingListPage />} />
                 <Route path="connections" element={<AdminConnectionsPage />} />
                 <Route path="labs" element={<AdminLabsPage />} />
+                <Route path="listen-and-learn" element={<AdminListenAndLearnPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
               {/* Catch-All */}

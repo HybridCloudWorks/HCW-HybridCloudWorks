@@ -26,6 +26,7 @@ import {
   Mail,
   Plug,
   FlaskConical,
+  Headphones,
 } from 'lucide-react';
 import { signOutUser } from '@/lib/entraAuth';
 
@@ -75,6 +76,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/admin/speaking-events', icon: Mic, label: 'Speaking Events' },
       { to: '/admin/certifications', icon: Award, label: 'Certifications' },
+      { to: '/admin/listen-and-learn', icon: Headphones, label: 'Listen & Learn' },
     ],
   },
   {

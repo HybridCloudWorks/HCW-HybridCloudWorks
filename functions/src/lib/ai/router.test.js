@@ -266,7 +266,18 @@ describe('cost table (ported from upstream ai-model-router.cost.test.js)', () =>
     expect(COST_TABLE.gemini['gemini-3.6-flash']).not.toEqual(
       COST_TABLE.gemini['gemini-2.5-flash']
     );
-    expect(COST_TABLE.vertex).toEqual(COST_TABLE.gemini); // history recorded as vertex prices identically
+    // `vertex` is retired and its rows exist only to price history recorded
+    // against it, so it must price every TEXT model exactly as gemini does.
+    // It is no longer identical: gemini gained the TTS models, and no historical
+    // vertex row can be a TTS call because the feature did not exist then.
+    // Copying them across would be pricing a combination that cannot occur.
+    const textModels = Object.keys(COST_TABLE.vertex);
+    for (const model of textModels) {
+      expect(COST_TABLE.gemini[model], `${model} must price the same on both`).toEqual(
+        COST_TABLE.vertex[model]
+      );
+    }
+    expect(textModels.some((m) => m.includes('tts'))).toBe(false);
   });
 
   it('keeps the 2.5 rows, which price usage already recorded against them', () => {

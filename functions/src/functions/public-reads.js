@@ -46,6 +46,13 @@ httpRoute('publicGetFeed', {
   handler: (request, context) => handlers().getFeed(request, context),
 });
 
+httpRoute('publicGetListenAndLearn', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/listen-and-learn',
+  handler: (request, context) => handlers().getListenAndLearn(request, context),
+});
+
 httpRoute('publicGetCuratedImage', {
   methods: ['GET'],
   authLevel: 'anonymous',

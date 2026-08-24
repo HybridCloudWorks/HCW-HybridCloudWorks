@@ -24,6 +24,8 @@
  * that quietly succeeds against Gemini answers the wrong question.
  */
 
+import { recordAiUsage } from './usage.js';
+
 const json = (status, body) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
@@ -31,7 +33,6 @@ const json = (status, body) => ({
 });
 
 const PROVIDERS_CONTAINER = 'ai_providers';
-const USAGE_CONTAINER = 'ai_usage';
 
 /** A short, cheap prompt. The answer does not matter; reaching the model does. */
 const TEST_PROMPT = 'Reply with the single word: ok';
@@ -56,32 +57,17 @@ export function createAiProxyHandlers({
   /**
    * Record what a call cost.
    *
-   * `ai_usage` has been read by the portal's Usage tab since the port and
-   * written by nothing, so the figures shown are imported Firebase history that
-   * stops at the migration. Field names match what the reader expects —
-   * provider, totalTokens, estimatedCostUsd, timestamp — because that page does
-   * the arithmetic client-side and silently totals zero for anything else.
+   * The row shape lives in ai/usage.js, shared with the Listen & Learn run
+   * since that became the second thing here that spends money on a model. The
+   * portal's Usage tab does its arithmetic client-side over whatever rows it
+   * finds — totalling `totalTokens` and `estimatedCostUsd`, grouping by
+   * `provider` — so a second writer with a slightly different shape would not
+   * error, it would silently total zero.
    *
-   * A failure here must not fail the call: the model has already answered and
+   * A failure there must not fail the call: the model has already answered and
    * been paid for, and losing the record is better than losing the answer.
    */
-  async function recordUsage({ provider, model, promptTokens, completionTokens, source }) {
-    try {
-      await store.upsertDoc(USAGE_CONTAINER, {
-        id: uuid(),
-        provider,
-        model,
-        promptTokens,
-        completionTokens,
-        totalTokens: promptTokens + completionTokens,
-        estimatedCostUsd: ai.getCostEstimate(provider, model, promptTokens, completionTokens),
-        source: source || 'admin',
-        timestamp: now().toISOString(),
-      });
-    } catch {
-      // Intentionally swallowed — see above.
-    }
-  }
+  const recordUsage = (record) => recordAiUsage({ store, ai, uuid, now }, record);
 
   return {
     /** POST /api/aiProxy — one call to one named provider. */

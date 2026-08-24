@@ -2,6 +2,7 @@ import React from 'react';
 import { useParams, Link } from 'react-router';
 import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
+import ListenAndLearn from '@/components/education/ListenAndLearn';
 
 // ── Shared data (mirrors EducationPage) ─────────────────────────────────────
 
@@ -807,6 +808,13 @@ export default function CertDetailPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8">
           <div className="space-y-8">
+            {/* Listen & Learn — renders nothing until an episode is approved. */}
+            <ListenAndLearn
+              platform="azure"
+              examCode={cert.code}
+              studyGuideUrl={cert.studyGuideUrl}
+            />
+
             {/* Topics */}
             <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
               <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">

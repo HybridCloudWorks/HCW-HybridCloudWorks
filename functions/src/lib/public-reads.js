@@ -392,6 +392,21 @@ const FEED_INSIGHTS_MAX_DOCS = 200;
 const FEED_CACHE_MAX_ITEMS_PER_DOC = 20;
 
 /**
+ * Listen & Learn containers and the per-set episode ceiling.
+ *
+ * Named here rather than imported from listen-and-learn/publish.js because
+ * this module deliberately has no imports (see the getFeed ceiling note): the
+ * anonymous read path must not be breakable by a change on the generation
+ * side. public-reads.test.js asserts the names agree.
+ *
+ * Eight areas is the largest real study guide, so fifty is a runaway guard
+ * rather than a page size.
+ */
+const LISTEN_AND_LEARN_SET_CONTAINER = 'listen_and_learn';
+const LISTEN_AND_LEARN_EPISODE_CONTAINER = 'listen_and_learn_episodes';
+const LISTEN_AND_LEARN_MAX_EPISODES = 50;
+
+/**
  * Newest-first by `pubDate`, with undated items last in their stored order.
  *
  * Undated items sort to the tail rather than to "now": an item with no date is
@@ -787,6 +802,69 @@ export function createPublicReadHandlers({ store }) {
       } catch (error) {
         context.error('publicGetFeed failed:', error);
         return json(500, { error: 'Failed to get feed' });
+      }
+    },
+
+    /**
+     * GET /api/public/listen-and-learn?platform=&examCode= — the approved
+     * episodes for one certification (components/education/ListenAndLearn.jsx).
+     *
+     * `status === 'published'` is the ONLY thing standing between a draft and a
+     * visitor. These are AI-written summaries of a paid exam's objectives,
+     * generated as drafts and approved one at a time in the admin portal, so
+     * this filter is the whole review gate rather than a display preference —
+     * which is why it is an equality test on an explicit value and not a
+     * `!== 'draft'`. An episode whose status a future writer misspells stays
+     * hidden, which is the safe direction.
+     *
+     * A set with no approved episodes returns `episodes: []` and a 200 rather
+     * than a 404: the certification exists and the page renders its own
+     * "nothing published yet" state, which is a different thing from a
+     * certification that has never been generated.
+     */
+    async getListenAndLearn(request, context) {
+      try {
+        const platform = String(request.query.get('platform') || '')
+          .trim()
+          .toLowerCase();
+        const examCode = String(request.query.get('examCode') || '').trim();
+        if (!platform || !examCode) {
+          return json(400, { error: 'platform and examCode are required' });
+        }
+
+        const id = `${platform}_${examCode.toLowerCase()}`;
+        const [set, episodes] = await Promise.all([
+          store.readDoc(LISTEN_AND_LEARN_SET_CONTAINER, id, id),
+          store.queryDocs(
+            LISTEN_AND_LEARN_EPISODE_CONTAINER,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_EPISODES} * FROM c WHERE c.setId = @setId AND c.status = @status`,
+            [
+              { name: '@setId', value: id },
+              { name: '@status', value: 'published' },
+            ]
+          ),
+        ]);
+
+        if (!set) return json(404, { error: 'Not found' });
+
+        return json(
+          200,
+          {
+            success: true,
+            set: stripInternalFields(set),
+            // Study-guide order. Episodes are meant to be heard in the order
+            // the exam presents the areas, which is neither the order a query
+            // returns nor the order exam weighting would give.
+            episodes: episodes
+              .filter((doc) => !isSoftDeleted(doc))
+              .map(stripInternalFields)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+          },
+          300
+        );
+      } catch (error) {
+        context.error('publicGetListenAndLearn failed:', error);
+        return json(500, { error: 'Failed to get Listen & Learn episodes' });
       }
     },
   };
