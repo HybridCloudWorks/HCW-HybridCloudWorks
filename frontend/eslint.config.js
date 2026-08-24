@@ -16,8 +16,6 @@ export default [
       'build/**',
       'dist/**',
       'node_modules/**',
-      'functions/node_modules/**',
-      '.firebase/**',
       'coverage/**',
       'documentation/archive/**',
     ],
@@ -140,21 +138,6 @@ export default [
     files: ['scripts/**/*.js'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
-      'no-console': 'off',
-    },
-  },
-  // Firebase Cloud Functions: CommonJS runtime, allows require(), and the
-  // standalone setup/test scripts under functions/scripts and
-  // functions/test-* legitimately use console for CLI output.
-  {
-    files: ['functions/**/*.js'],
-    rules: {
-      '@typescript-eslint/no-require-imports': 'off',
-    },
-  },
-  {
-    files: ['functions/scripts/**/*.js', 'functions/test-*.js'],
-    rules: {
       'no-console': 'off',
     },
   },

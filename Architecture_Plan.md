@@ -1,5 +1,10 @@
 # Architecture Plan — HCW on Azure
 
+> **ARCHIVED 2026-08-24.** This document records the architecture decisions
+> and cost reasoning that shaped the current website platform. It is retained
+> for traceability, not as an implementation checklist. Use [README.md](README.md)
+> for the current website and [TODO.md](TODO.md) for pending engineering work.
+
 **Audience:** engineers implementing the Azure platform in
 [HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks). **Status:**
 recommendation, **now largely built** — see the box below. Written 2026-07-30 against the approved
@@ -41,9 +46,9 @@ choosing which properties to keep.
 >   three apply-time failures — Cosmos has no subscription region access there and Static Web Apps
 >   is not offered there. Region availability is now checked before an apply, not during one.
 >
-> **What is NOT built:** the application. The Function App holds zero deployed functions, all 73
+> ~~**What is NOT built:** the application. The Function App holds zero deployed functions, all 73
 > Cosmos containers are empty, and no data has been migrated. §5's three hard problems are all
-> still ahead.
+> still ahead.~~ **Historical snapshot only.** The current application and Azure backend are implemented in this repository; live deployment and owner-only configuration checks are tracked in `REVIEW.md`.
 
 ---
 
@@ -118,7 +123,7 @@ monthly.
 
 Each is stated as a change, its reason, and what it costs you.
 
-### 3.1 Replace the three Elastic Premium plans with **Flex Consumption**
+### ~~3.1 Replace the three Elastic Premium plans with Flex Consumption~~
 
 Flex Consumption supports VNet integration and scales to zero. At 1,395 documents and a
 single-operator admin surface, the workload is idle nearly all the time — which is precisely the
@@ -128,7 +133,7 @@ shape Flex Consumption prices well and Premium prices badly.
 count on the API app only if measurement shows it matters. **Do not** pre-emptively buy always-ready
 capacity on the worker or labs apps.
 
-### 3.2 Collapse three Functions apps to **two**
+### ~~3.2 Collapse three Functions apps to two~~
 
 `api` (public + admin HTTP) and `worker` (scheduled + change-feed + labs dispatch). Three apps was a
 reasonable isolation boundary under per-app-plan billing assumptions; under consumption billing the
@@ -139,7 +144,7 @@ Keep them separate **only** if the labs runner genuinely needs a different netwo
 longer timeout ceiling than the rest. That is a real possibility given the self-hosted agent; decide
 it on that basis, not on cost.
 
-### 3.3 Defer Private Endpoints — **ACCEPTED DECISION (ADR-001, 2026-07-30)**
+### ~~3.3 Defer Private Endpoints — ACCEPTED DECISION (ADR-001, 2026-07-30)~~
 
 **Decision:** Service firewalls + managed identity is the permanent network security model for this workload. Private Endpoints will not be provisioned unless the threat model changes materially (second operator joining, regulated data arriving, or a corporate network peering requirement).
 
@@ -162,7 +167,7 @@ The plan's own tradeoff note already conceded origin-bypass risk is "documented 
 
 **Revisit if:** a second operator joins and corporate VPN/peering is required, any regulated data (PII, PCI, HIPAA) arrives in the system, or the workload's budget grows to the point where the cost is immaterial.
 
-### 3.4 Cosmos DB in **serverless** mode, single region, session consistency
+### ~~3.4 Cosmos DB in serverless mode, single region, session consistency~~
 
 1,395 documents. Serverless bills per request-unit consumed with no hourly floor. Provisioned
 throughput — even the 400 RU/s minimum — is a permanent charge for capacity this workload will never
@@ -177,13 +182,13 @@ For a single-operator content site on serverless, the cost is not justified.
 this workload. Re-evaluate only if a collection passes roughly 50 GB or sustained heavy traffic
 appears.
 
-### 3.5 Reduce four storage accounts to **two**
+### ~~3.5 Reduce four storage accounts to two~~
 
 `content` (public media, the only account needing anonymous or CDN read) and `platform` (function
 state, queues, artefacts). Per-app storage accounts are a scaling-and-blast-radius pattern; at this
 size they mostly multiply configuration and private-endpoint cost.
 
-### 3.6 Keep Static Web Apps, and keep the current frontend architecture exactly
+### ~~3.6 Keep Static Web Apps, and keep the current frontend architecture exactly~~
 
 The plan already specifies `publicContent: "Vike-prerendered static output"` and
 `adminShell: "Publicly downloadable SPA…"`. **That is what this repository already produces.** See
@@ -293,12 +298,10 @@ reasoning is what makes the next similar decision cheaper.
    keyed from Key Vault. The decision was forced by quota rather than chosen: zero gpt-4o TPM in
    every SKU, no DALL-E in region. The provider-abstracted model router is what kept the cost of
    being wrong low, which is the transferable lesson.
-5. **Cosmos partition-key strategy per collection** — **still open, and now urgent.** All 73
-   containers exist and are empty, so this is the last moment it is free. `content` (947 docs) is
-   the only collection where it materially matters. After the first import it is a migration.
-6. **What happens to `blogs`** — **still open.** 242 documents, legacy, read only through a
-   fallback path. Migrating it carries the legacy forward. Cutover is the natural moment to retire
-   it instead.
+5. ~~**Cosmos partition-key strategy per collection**~~ — **DECIDED and implemented** in the
+   generated container contract consumed by Terraform and the current API.
+6. ~~**What happens to `blogs`**~~ — **DECIDED: retain it** for the current website compatibility
+   surface; retirement is not an open engineering task.
 
 ---
 

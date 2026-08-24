@@ -1,6 +1,6 @@
 {
   "name": "hybridcloudworks-functions-azure",
-  "description": "Azure Functions for HybridCloudWorks (migrated from Firebase Cloud Functions)",
+  "description": "Azure Functions API and workers for the HybridCloudWorks website",
   "version": "1.0.0",
   "type": "module",
   "main": "src/functions/index.js",

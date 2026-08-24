@@ -1,88 +1,108 @@
-# HCW HybridCloudWorks
+# HybridCloudWorks Website
 
-HybridCloudWorks is migrating from Firebase/GCP to a cost-conscious Azure platform. This repository
-is the application, infrastructure, migration, and delivery source of truth. The approved architecture
-is a baseline for implementation; it does not authorize an Azure deployment, DNS cutover, external
-mutation, GCP decommission, or archival of the old repository.
+HybridCloudWorks is a cloud engineering website and operations portal covering
+Azure, AWS, Google Cloud, GitHub, Terraform, FinOps, VMware, and Ansible. It
+publishes technical articles, architecture guidance, frameworks, certification
+content, provider tools, RSS/news views, speaking events, and submission forms.
 
-## Current status
+The repository is the current website, Azure backend, infrastructure, and
+delivery source of truth. The earlier Firebase-to-Azure migration is complete
+and retained only in the archived plans and historical Wiki pages.
 
-- Architecture plan: approved
-- Environment model: one production workload state
-- Monthly design ceiling: USD 150
-- Administrator identity: Microsoft Entra ID
-- Infrastructure implementation: not started from the approved plan
-- Production deployment: not authorized
-- Dependency audit: across seven npm package boundaries, 10 of 12 findings remediated; zero moderate
-  findings remain. The two residual highs are the react-router RSC-mode advisory
-  (GHSA-qwww-vcr4-c8h2), assessed as not applicable to this Vite SPA and with no fixed version above
-  the current one
-- Dependency automation: root Dependabot coverage for GitHub Actions and for the six npm packages
-  that declare dependencies. The seventh, `frontend/scripts`, is excluded deliberately: its
-  package.json declares none and exists only to mark that directory as CommonJS
-- Repository history: re-rooted after credential rotation; replace clones made before 2026-07-22
+## Features
 
-## Engineering Wiki
+- Provider landing pages with blog/news, architecture, frameworks, education,
+  code, tools, and audio content where available.
+- Pre-rendered public pages for search-friendly delivery, with client-side
+  hydration for interactive views.
+- Entra ID/MSAL-protected administration with role-aware content workflows,
+  publishing, calendars, image management, AI Engine configuration, MCP server
+  configuration, social integrations, operations health, and Labs controls.
+- Azure Functions APIs for public reads, CMS actions, background jobs, media,
+  integrations, and the pull-based VPS Labs agent.
+- Accessibility, route, provider-content, API-contract, and deployment smoke
+  checks in the repository and CI.
 
-All human-facing documentation is maintained in the
-[GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki).
+## Platform breakdown
 
-- [Implementation TODO](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Implementation-TODO)
-- [Approved architecture](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Architecture)
-- [Architecture decisions](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Architecture-Decision-Records)
-- [Well-Architected assessment](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Well-Architected-Assessment)
-- [Migration runbook](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Migration-Runbook)
-- [Phase 4 data migration](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Phase-4-Data-Migration)
-- [Cost analysis](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Cost-Analysis)
-
-The root README must be updated whenever repository structure, documentation authority, architecture
-status, or delivery status changes. Markdown consumed by GitHub or development tooling may remain next
-to that tooling; general documentation belongs only in the Wiki.
-
-## Review and delivery state
-
-Four working documents at the repository root hold review state, per the Code
-Review SOP (`CODE_REVIEW_PROMPT.md` v1.0). They are the handoff surface between
-engineering sessions and are deliberately distinct from the Wiki's narrative
-documentation — the Wiki explains the system, these record its current state.
-
-| Document | Holds | Read it when |
-| --- | --- | --- |
-| [TODO.md](TODO.md) | Actionable engineering work | Deciding what to pick up next. An empty list means no known outstanding work |
-| [REVIEW.md](REVIEW.md) | **Start here.** What is already done, blockers only a human can resolve, and every required input — variables, secrets, keys, certificates. Never actual values | Something is stalled, or you are preparing a deployment |
-| [CHANGELOG.md](CHANGELOG.md) | Completed and released work | Establishing what has already shipped |
-
-`scripts/validate-repository-structure.ps1` enforces that all three exist and are
-spelled exactly as above; CI fails if one is missing or its casing drifts.
-
-`CHECKLIST.md` and `Variables.md` were merged into REVIEW.md on 2026-08-20 and
-deleted. Three documents were describing one thing — the input inventory, the
-variable catalogue, and the blockers depending on both — and disagreeing with
-each other about it. REVIEW.md Part 4 is the single inventory now.
+| Area | Implementation |
+| --- | --- |
+| Public web | React 19, Vite, TypeScript/JavaScript, Tailwind CSS, React Router |
+| Rendering and hosting | Vite build plus route pre-rendering on Azure Static Web Apps |
+| Authentication | Microsoft Entra ID with `@azure/msal-browser`; API tokens are validated by Azure Functions |
+| API and jobs | Azure Functions Flex Consumption, managed identity, Storage Queue, and change-feed/timer handlers |
+| Data | Azure Cosmos DB with Entra data-plane access |
+| Media and secrets | Azure Blob Storage and Azure Key Vault |
+| Edge and telemetry | Cloudflare DNS/proxy and Azure Application Insights/Log Analytics |
+| Delivery | GitHub-hosted Actions runners for CI and approved manual releases |
 
 ## Repository layout
 
-| Path | Purpose | Current posture |
-| --- | --- | --- |
-| `.azure/` | Machine-readable architecture plan and discovery output | Approved plan; not deployment code |
-| `.github/` | Repository-level GitHub Actions workflows, contribution standards (`CONTRIBUTING.md`, `SECURITY.md`, `CODEOWNERS`, PR/issue templates) | Prototype delivery jobs are disabled pending baseline hardening; credential-free validation gates (CI, CodeQL, repository policy, IaC validation) run on every PR |
-| `frontend/` | Imported React application and source-system compatibility code | Requires reconciliation with the old repository |
-| `functions/` | Azure Functions application scaffold | Prototype; must be aligned to approved boundaries |
-| `infra/` | Terraform Azure infrastructure — see [`infra/README.md`](infra/README.md) for working rules, guardrails, and the ALZ-absorption posture | Deployed environment smoke-verified by the operator (TODO.md, 2026-08-14); applies remain gated and human-approved in HCP Terraform Cloud. Stateful resources carry `prevent_destroy` |
-| `scripts/` | Data and media migration tooling | Firestore data migration prepared against Site-Main and not yet executed; read-only preflight, dry-run and reconciliation implemented. Media migration still incomplete |
-| `vps-agent/` | Azure-oriented labs agent scaffold | Incomplete; source agent contract still requires migration |
+| Path | Purpose |
+| --- | --- |
+| `frontend/` | Public React website and Entra-protected admin portal |
+| `functions/` | Azure Functions API, workers, timers, triggers, and tests |
+| `vps-agent/` | API-authenticated pull-based Labs job executor |
+| `infra/` | Terraform root module for Azure and Cloudflare resources |
+| `scripts/` | Container-spec generation, content-manifest tooling, smoke checks, and operator utilities |
+| `.github/workflows/` | CI, validation, Wiki sync, scheduled maintenance, and manual release workflows |
+| `wiki/` | Wiki-as-code source for reviewed runbooks and engineering records |
+| `Architecture_Plan.md` | Archived architecture planning record |
+| `Migration_Plan.md` | Archived migration planning record |
+| `TODO.md` | Current engineering work that does not require owner-only access |
+| `REVIEW.md` | Human-only decisions, approvals, credentials, and external access |
+| `CHANGELOG.md` | Verified completed work |
 
-Temporary duplicate implementation paths under `frontend/` are retained until Phase 1 reconciliation
-proves which source is authoritative. Their presence is tracked in the Wiki TODO and is not an
-endorsement of the final layout.
+## Local development
 
-## Delivery guardrails
+Requirements: Node.js 22+, npm 10+, Git, and the relevant Azure Functions or
+Terraform CLI when working on those components.
 
-- Use GitHub OIDC and managed identities; do not commit static cloud credentials.
-- Keep the Terraform implementation a flat native-provider root module with pinned provider
-  versions and stable resource addresses — any rename requires `moved` blocks and plan evidence
-  showing zero destroy/create pairs (ADR-0020; supersedes the earlier Azure Verified Modules
-  guardrail).
-- Keep Terraform state, saved plans, local settings, generated output, and secrets out of Git.
-- Require explicit approval for production applies, destructive changes, DNS cutover, credential
-  revocation, Firebase/GCP decommissioning, and repository archival.
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+Useful checks:
+
+```powershell
+cd frontend
+npm run lint
+npm run format:check
+npm run build
+npm run test:admin
+
+cd ..\functions
+npm ci
+npm test
+
+cd ..\scripts
+npm ci
+npm run lint
+npm test
+```
+
+The frontend needs `VITE_AZURE_FUNCTIONS_URL`, `VITE_ENTRA_CLIENT_ID`,
+`VITE_ENTRA_TENANT_ID`, and `VITE_ENTRA_API_SCOPE` for a fully connected local
+session. Copy `frontend/.env.example` to a local `.env`; never place secrets,
+Cosmos keys, or integration credentials in Vite variables.
+
+## Delivery and documentation
+
+Every pull request runs the frontend, Functions, operational-script, and VPS
+agent checks, plus repository, dependency, CodeQL, and infrastructure policy
+validation as applicable. Azure releases are explicit GitHub Actions dispatches
+and infrastructure changes are reviewed through HCP Terraform. All repository
+workflows use GitHub-hosted runners.
+
+The [Engineering Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki)
+contains runbooks, ADRs, naming, cost, and operational guidance. The reviewed
+Wiki source is under [`wiki/`](wiki/). Read [CONTRIBUTING](.github/CONTRIBUTING.md)
+before changing repository structure, deployment, or documentation.
+
+Current work and human-only dependencies are intentionally separated:
+
+- [TODO.md](TODO.md) — engineer-resolvable pending work.
+- [REVIEW.md](REVIEW.md) — owner decisions, approvals, access, and credentials.
+- [CHANGELOG.md](CHANGELOG.md) — verified completed work.

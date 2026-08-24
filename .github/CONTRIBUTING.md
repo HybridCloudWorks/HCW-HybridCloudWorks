@@ -1,14 +1,14 @@
 # Contributing
 
-This repository is the application, infrastructure, migration, and delivery
-source of truth for HybridCloudWorks. It runs under a strict documentation and
+This repository is the HybridCloudWorks website, its Azure backend, supporting
+infrastructure, and delivery source. It runs under a strict documentation and
 review discipline — read this before your first pull request.
 
 ## Where things go
 
 | Content | Home |
 | --- | --- |
-| Narrative documentation (architecture, runbooks, ADRs, analysis) | [GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki) — never free-floating in-repo Markdown. Operational pages that deserve PR review (runbooks, standards) are staged in `.github/wiki/` and auto-synced to the Wiki on merge |
+| Narrative documentation (architecture, runbooks, ADRs, analysis) | [GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki) — staged in `wiki/` and auto-synced to the Wiki on merge |
 | Review state (work, blockers, inputs, completed) | `TODO.md`, `REVIEW.md`, `CHANGELOG.md` at the root |
 | Tooling-adjacent docs (this file, `infra/README.md`, templates) | Next to the tooling, allowlisted in `scripts/validate-repository-structure.ps1` |
 

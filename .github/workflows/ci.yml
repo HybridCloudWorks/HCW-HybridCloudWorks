@@ -2,8 +2,7 @@
 #
 # This is deliberately NOT a delivery workflow: it uses no secrets, no cloud
 # credentials, and no OIDC. It only installs, builds, and runs unit tests, so
-# it is safe to run on every pull request while the prototype delivery jobs
-# stay disabled pending baseline hardening.
+# it is safe to run on every pull request.
 #
 # It exists because dependency pull requests previously had nothing validating
 # them — `npm ci` alone catches the most common failure mode, a package.json
@@ -36,10 +35,6 @@ jobs:
         include:
           - name: frontend
             dir: frontend
-            # test:admin includes functions/cms-functions.test.js, which imports
-            # firebase-functions from the sibling frontend/functions package.
-            # Without its node_modules the suite fails on a missing module.
-            extra_install: frontend/functions
             lint: npm run lint
             format: npm run format:check
             build: npm run build
@@ -47,20 +42,10 @@ jobs:
           - name: functions (azure)
             dir: functions
             test: npm test
-          - name: scripts (migration)
+          - name: scripts (operations)
             dir: scripts
-            # no-undef is the point: an undefined identifier passes node --check
-            # and every test that never reaches the line. The first preflight
-            # dispatch (2026-08-21) failed on exactly that.
             lint: npm run lint
             test: npm test
-          - name: frontend/functions (legacy)
-            dir: frontend/functions
-          # frontend/scripts is intentionally absent: its package.json is a
-          # CommonJS boundary marker with no dependencies, so there is no
-          # lockfile to keep honest and nothing to install.
-          - name: frontend/labs/vps-agent
-            dir: frontend/labs/vps-agent
           - name: vps-agent
             dir: vps-agent
 
@@ -83,11 +68,6 @@ jobs:
       # when the lockfile is out of sync with package.json, which is exactly
       # how a bad dependency bump shows up.
       - name: Install (lockfile-strict)
-        run: npm ci
-
-      - name: Install sibling package required by tests
-        if: matrix.extra_install != ''
-        working-directory: ${{ matrix.extra_install }}
         run: npm ci
 
       # Lint and format run before the build so style feedback arrives fast.

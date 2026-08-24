@@ -16,9 +16,8 @@
              APP_HOSTNAME (function_hostname), FUNCTIONS_URL (api_base_url),
              FUNCTION_APP_NAME, RESOURCE_GROUP (web_resource_group),
              FUNCTIONS_STORAGE_ACCOUNT, STORAGE_ACCOUNT,
-             STORAGE_RESOURCE_GROUP, COSMOS_ENDPOINT (a variable — it is a
-             public URL) and, once infra/scratch.tf is enabled, the three
-             *_SCRATCH_* / SCRATCH_* values the migration rehearsal targets.
+             STORAGE_RESOURCE_GROUP, and COSMOS_ENDPOINT (a variable — it is a
+             public URL).
              RESOURCE_GROUP and FUNCTIONS_STORAGE_ACCOUNT
              are deliberately NOT wave-1 parameters even though their values
              are predictable from infra/ defaults: a hardcoded copy drifts
@@ -36,17 +35,13 @@
              this a placement error as a stored secret: correct handling is
              fetching it at deploy time (az staticwebapp secrets list) after
              azure/login, storing nothing.
-    COSMOS_KEY - must stay unset (CHECKLIST §7); provisioning it would switch
+     COSMOS_KEY - must stay unset (REVIEW.md); provisioning it would switch
              clients onto a key path the account rejects.
     VITE_ENTRA_* - Entra app-registration values, produced by the manual
              registration step, not derivable from any state this script can
              reach.
      DOCKERHUB_* and the GitHub App - not used; all workflows run on
              GitHub-hosted runners.
-    TF_API_TOKEN - opt-in via -SetTfApiToken, because it copies the token
-             this script authenticates with into a repository secret. The
-             wiki calls for a TEAM token there, so the switch is only correct
-             when the resolved token is one; the script says so loudly.
 
   Idempotent: gh variable/secret set are upserts. Variable values are printed
   (they are public identifiers); secret values never are.
@@ -77,10 +72,6 @@
   Becomes SUBSCRIPTION_ID — the subscription azure/login targets, which is
   where the Function App lives.
 
-.PARAMETER SetTfApiToken
-  Also write the resolved HCP Terraform token to the TF_API_TOKEN repository
-  secret (consumed by deploy-infra.yml). Off by default — see DESCRIPTION.
-
 .PARAMETER WhatIf
   Report what would be set without writing anything.
 
@@ -107,17 +98,7 @@ param(
   # Optional. Omit them and they are discovered from the Azure CLI sign-in —
   # see lib/deploy-console.ps1 for why nothing here is a required flag.
   [string] $TenantId,
-  [string] $SubscriptionApp,
-
-  # Wave 1 too, but optional and never discovered: the GCP Workload Identity
-  # Federation provider (projects/<n>/locations/global/workloadIdentityPools/
-  # <pool>/providers/<provider>) and the read-only service-account email that
-  # migrate-data.yml authenticates as. Both are identifiers, not secrets. Set
-  # them once the binding exists (Migration-Runbook step 2); omitted, they
-  # are left alone.
-  [string] $GcpWorkloadIdentityProvider,
-  [string] $GcpServiceAccount,
-  [switch] $SetTfApiToken
+  [string] $SubscriptionApp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -254,20 +235,6 @@ function Set-RepoVariable {
   }
 }
 
-function Set-RepoSecret {
-  [CmdletBinding(SupportsShouldProcess = $true)]
-  param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][string] $Value)
-  $verb = if ($existingSecrets -contains $Name) { 'update' } else { 'create' }
-  if ($PSCmdlet.ShouldProcess("secret $Name", "$verb repository secret")) {
-    # Value travels via stdin, not the argument list, so it never appears in
-    # a process listing. It is never printed.
-    Invoke-Gh @('secret', 'set', $Name, '-R', $Repository) -StdIn $Value | Out-Null
-    Write-Act "$verb  $Name (value not shown)"
-  } else {
-    Write-Act "would $verb  $Name (value not shown)"
-  }
-}
-
 # ===========================================================================
 # 2. Wave 1 — known before the first apply
 # ===========================================================================
@@ -284,12 +251,6 @@ Write-Step 'Wave 1: values known before the first apply'
 
 Set-RepoVariable -Name 'TENANT_ID' -Value $TenantId
 Set-RepoVariable -Name 'SUBSCRIPTION_ID' -Value $SubscriptionApp
-if ($GcpWorkloadIdentityProvider) {
-  Set-RepoVariable -Name 'GCP_WORKLOAD_IDENTITY_PROVIDER' -Value $GcpWorkloadIdentityProvider
-}
-if ($GcpServiceAccount) {
-  Set-RepoVariable -Name 'GCP_SERVICE_ACCOUNT' -Value $GcpServiceAccount
-}
 
 # ===========================================================================
 # 3. Wave 2 — Terraform outputs, via the workspace's current state
@@ -305,8 +266,7 @@ if (-not $script:tfcToken) {
   Write-Info 'script after the first apply to seed CLIENT_ID, APP_HOSTNAME,'
   Write-Info 'FUNCTIONS_URL, FUNCTION_APP_NAME, RESOURCE_GROUP,'
   Write-Info 'FUNCTIONS_STORAGE_ACCOUNT, STORAGE_ACCOUNT, STORAGE_RESOURCE_GROUP,'
-  Write-Info 'COSMOS_ENDPOINT and — once the scratch estate is applied —'
-  Write-Info 'COSMOS_SCRATCH_ENDPOINT, STORAGE_SCRATCH_ACCOUNT, SCRATCH_RESOURCE_GROUP.'
+  Write-Info 'COSMOS_ENDPOINT.'
 } else {
   if (-not $Organization -or -not $Workspace) {
     $backend = Get-BackendConfig -BackendPath (Join-Path $PSScriptRoot '../infra/backend.tf')
@@ -348,7 +308,7 @@ if ($outputs) {
     # the /api prefix.
     #
     # The route prefix is load-bearing either way: a base without /api 404s
-    # uniformly (CHECKLIST §6, VITE_AZURE_FUNCTIONS_URL).
+    # uniformly (VITE_AZURE_FUNCTIONS_URL, documented in REVIEW.md).
     @{ output = 'api_base_url'; kind = 'variable'; name = 'FUNCTIONS_URL'; transform = { param($v) $v } }
     # The bare app name the deploy action targets. Hardcoded in the workflow
     # until 2026-08-20, where it went stale across a rename and would have
@@ -367,19 +327,11 @@ if ($outputs) {
     # control-plane attribute; infra/oidc.tf). Pairs with COSMOS_ENDPOINT the
     # way STORAGE_RESOURCE_GROUP pairs with STORAGE_ACCOUNT.
     @{ output = 'cosmos_resource_group'; kind = 'variable'; name = 'COSMOS_RESOURCE_GROUP'; transform = { param($v) $v } }
-    # The CONTENT storage account and its group — what migrate-data.yml's
-    # storage modes target when target=production (behind the Terraform gate).
-    # Distinct from FUNCTIONS_STORAGE_ACCOUNT / RESOURCE_GROUP, which name the
-    # Functions host account deploy-functions.yml opens a window on.
+    # The content storage account and its group. Distinct from
+    # FUNCTIONS_STORAGE_ACCOUNT / RESOURCE_GROUP, which name the Functions host
+    # account deploy-functions.yml opens a window on.
     @{ output = 'storage_account'; kind = 'variable'; name = 'STORAGE_ACCOUNT'; transform = { param($v) $v } }
     @{ output = 'storage_resource_group'; kind = 'variable'; name = 'STORAGE_RESOURCE_GROUP'; transform = { param($v) $v } }
-    # The rehearsal estate (infra/scratch.tf). These outputs are null while
-    # cosmos_scratch_enabled / storage_scratch_enabled are false, and the loop
-    # below leaves an absent output's variable unchanged — so running this
-    # before the scratch apply is harmless, and running it after seeds them.
-    @{ output = 'cosmos_scratch_endpoint'; kind = 'variable'; name = 'COSMOS_SCRATCH_ENDPOINT'; transform = { param($v) $v } }
-    @{ output = 'storage_scratch_account'; kind = 'variable'; name = 'STORAGE_SCRATCH_ACCOUNT'; transform = { param($v) $v } }
-    @{ output = 'scratch_resource_group'; kind = 'variable'; name = 'SCRATCH_RESOURCE_GROUP'; transform = { param($v) $v } }
   )
   foreach ($entry in $waveTwo) {
     $raw = $outputs[$entry.output]
@@ -388,11 +340,7 @@ if ($outputs) {
       continue
     }
     $value = & $entry.transform $raw
-    if ($entry.kind -eq 'variable') {
-      Set-RepoVariable -Name $entry.name -Value $value
-    } else {
-      Set-RepoSecret -Name $entry.name -Value $value
-    }
+    Set-RepoVariable -Name $entry.name -Value $value
   }
 
   # COSMOS_ENDPOINT was seeded as a SECRET until 2026-08-20 (see the wave-2
@@ -409,24 +357,7 @@ if ($outputs) {
 }
 
 # ===========================================================================
-# 4. TF_API_TOKEN — opt-in only
-# ===========================================================================
-if ($SetTfApiToken) {
-  Write-Step 'TF_API_TOKEN (opt-in)'
-  if (-not $script:tfcToken) {
-    Write-Info 'No token resolved, so there is nothing to store. Skipped.'
-  } else {
-    Write-Info 'Storing the resolved HCP Terraform token as the TF_API_TOKEN secret.'
-    Write-Info 'The wiki requires a TEAM token here, so it survives any one user'
-    Write-Info 'leaving — if what terraform login stored is your USER token, create'
-    Write-Info 'a team token in HCP Terraform and re-run with it in $env:TFE_TOKEN.'
-    $plain = [System.Net.NetworkCredential]::new('', $script:tfcToken).Password
-    Set-RepoSecret -Name 'TF_API_TOKEN' -Value $plain
-  }
-}
-
-# ===========================================================================
-# 5. What this script deliberately leaves alone
+# 4. What this script deliberately leaves alone
 # ===========================================================================
 Write-Step 'Not set by this script'
 Write-Info 'AZURE_STATIC_WEB_APPS_API_TOKEN - fetch at deploy time after azure/login'
@@ -434,9 +365,6 @@ Write-Info '                (az staticwebapp secrets list); storing it is the'
 Write-Info '                placement error Variables-And-Secrets documents.'
 Write-Info 'COSMOS_KEY    - must stay unset (REVIEW §4.3); both Cosmos accounts are keyless'
 Write-Info '                and scripts/lib/cli.mjs refuses to start if it is set.'
-Write-Info 'FIREBASE_SERVICE_ACCOUNT_JSON - never. migrate-data.yml authenticates to GCP'
-Write-Info '                through Workload Identity Federation; in CI the scripts'
-Write-Info '                refuse a service-account key file outright.'
 Write-Info 'VITE_ENTRA_*  - from the manual Entra app registrations.'
 Write-Info 'DOCKERHUB_*   - not used; all workflows run on GitHub-hosted runners.'
 

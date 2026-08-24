@@ -1,6 +1,7 @@
 /**
  * Legacy-blogs read counter, ported from
- * `frontend/functions/cms-functions.js:3145-3230` (TODO.md T-316).
+ * The source implementation was retired; this Azure route remains only as a
+ * bounded compatibility counter for the admin fallback path.
  *
  * The `blogs` container is a fallback: list hooks query it only when `content`
  * comes back empty. This counter is the evidence for retiring it — without a

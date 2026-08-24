@@ -1,4 +1,4 @@
-# Wiki-as-code: pages under .github/wiki/ are the reviewed source of truth for
+# Wiki-as-code: pages under wiki/ are the reviewed source of truth for
 # the wiki pages they name, and this workflow overlays them onto the GitHub
 # Wiki after a merge to main.
 #
@@ -8,7 +8,7 @@
 # this job then publishes them with the built-in GITHUB_TOKEN — no PAT, no
 # extra GitHub App.
 #
-# Semantics are OVERLAY, not mirror: only files present in .github/wiki/ are
+# Semantics are OVERLAY, not mirror: only files present in wiki/ are
 # written; wiki pages that are not staged here remain editable in the wiki UI
 # and are never deleted by this job. A page, once staged, is owned by the
 # repository — direct wiki edits to it will be overwritten on the next sync.
@@ -19,7 +19,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/wiki/**'
+      - 'wiki/**'
       - '.github/workflows/sync-wiki.yml'
   workflow_dispatch:
 
@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki
-          cp .github/wiki/*.md /tmp/wiki/
+          cp wiki/*.md /tmp/wiki/
           cd /tmp/wiki
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -53,5 +53,5 @@ jobs:
             echo "Wiki already in sync."
             exit 0
           fi
-          git commit -m "Sync wiki pages from .github/wiki @ ${GITHUB_SHA}"
+          git commit -m "Sync wiki pages from wiki/ @ ${GITHUB_SHA}"
           git push

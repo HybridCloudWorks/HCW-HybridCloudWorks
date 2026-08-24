@@ -39,7 +39,7 @@ describe('getSecret', () => {
 
   it('returns the value', async () => {
     client.getSecret.mockResolvedValue({ value: 's3cret' });
-    expect(await getSecret('GITHUB-APP-PRIVATE-KEY')).toBe('s3cret');
+    expect(await getSecret('TEST-SECRET')).toBe('s3cret');
   });
 
   it('returns null with no vault configured, without constructing a client', async () => {

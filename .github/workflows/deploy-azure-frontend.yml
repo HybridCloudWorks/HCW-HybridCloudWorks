@@ -1,17 +1,11 @@
 name: Deploy Frontend
 
-# ENABLED 2026-08-22 for Migration_Plan §6 step 1. Dispatch-only, for the same
-# reason deploy-functions.yml is: enabling a workflow and enabling
-# auto-deploy-on-merge are two separate decisions, and only the first has been
-# made. Restore the push trigger once a dispatch run has succeeded end to end
-# and someone has looked at the site — not before, because a red auto-deploy on
-# main is discovered by whoever next visits it.
+# Manual release workflow for the public website. It remains dispatch-only so a
+# human can choose when the Static Web App receives a build; automatic deploys
+# can be enabled separately after the release process is formally approved.
 #
-# THE FIRST RUN DOES NOT TOUCH VISITORS. It publishes to the Static Web App's
-# own calm-ground-0d0e6a010.7.azurestaticapps.net hostname, which is the §6
-# step 2 preview host. DNS still points at Firebase and does not move until §6
-# step 5, so this is safe to run while Firebase is live — and running the two
-# in parallel on that hostname is the point of step 2.
+# The workflow publishes to the Static Web App hostname configured in Azure;
+# DNS and custom-domain changes are separate infrastructure decisions.
 #
 # on:
 #   push:
@@ -90,15 +84,14 @@ jobs:
           }
           test -f dist/index.html || { echo "::error::dist/index.html is missing; the build did not produce a site."; exit 1; }
 
-          # The site shipped as a bare SPA shell for the whole migration and
-          # nothing noticed: a shell builds cleanly, passes every test, and
-          # looks correct in a browser. Only a crawler sees the difference, so
-          # the count is asserted here rather than left to be discovered.
+          # A shell builds cleanly, passes component tests, and can look correct
+          # in a browser while crawlers receive no page content. Assert the
+          # rendered document count here rather than leaving that to discovery.
           # `npm run build` runs scripts/prerender.mjs, which writes ~80.
           html=$(find dist -name '*.html' | wc -l)
           echo "dist contains $html HTML documents"
           [ "$html" -ge 60 ] || {
-            echo "::error::only $html HTML documents in dist — pre-rendering did not run or mostly failed. See frontend/scripts/prerender.mjs (T-515)."
+            echo "::error::only $html HTML documents in dist — pre-rendering did not run or mostly failed. See frontend/scripts/prerender.mjs."
             exit 1
           }
           grep -q '<div id="root"><[^/]' dist/about/index.html || {

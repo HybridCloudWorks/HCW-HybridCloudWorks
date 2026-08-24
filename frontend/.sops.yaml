@@ -1,7 +1,0 @@
-# SOPS Configuration
-# Defines encryption rules for secret files using age
-# Auto-managed by scripts/bootstrap-secrets.ps1
-
-creation_rules:
-  - path_regex: infrastructure/secrets/.*\.yaml$
-    age: age1ep3upe5cqwuzqsg0xkur575tdcanywsgkj487jrqtv95xcgfvusq6acp7l

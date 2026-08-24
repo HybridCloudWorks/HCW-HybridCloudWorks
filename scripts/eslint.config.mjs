@@ -1,9 +1,5 @@
-// Lint for the migration scripts — added 2026-08-21 after the first preflight
-// dispatch failed with `ReferenceError: FIRESTORE_PROJECT_ID is not defined`.
-// `node --check` and the vitest suite both passed: an undefined identifier is
-// a runtime error, invisible to the parser and to tests that never reach the
-// line. `no-undef` is the rule that catches it at CI time; the rest is kept
-// deliberately small so this stays a correctness gate, not a style one.
+// Lint for the repository's operational scripts. This stays a correctness
+// gate, not a broad style check.
 import globals from 'globals';
 
 export default [

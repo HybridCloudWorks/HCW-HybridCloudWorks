@@ -8,7 +8,7 @@ details, tokens, endpoints, or tenant identifiers.
 
 ## Scope
 
-- Frontend SPA (`frontend/`), Azure Functions API (`functions/`), migration
+- Frontend SPA (`frontend/`), Azure Functions API (`functions/`), operational
   tooling (`scripts/`), infrastructure (`infra/`), CI workflows (`.github/`).
 - The deployed Azure environment behind hybridcloudworks.com.
 

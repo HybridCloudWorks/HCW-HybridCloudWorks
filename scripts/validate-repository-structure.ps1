@@ -16,7 +16,7 @@ $harnessDirectories = @('.agents', '.claude')
 # them tracked, so they are source-controlled rather than gitignored. Note
 # this check enumerates the live filesystem with -Force, not the git index:
 # gitignoring .vscode would not have quieted it, only allowlisting does.
-$allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent') + $harnessDirectories
+$allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent', 'wiki') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
@@ -29,8 +29,8 @@ $allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions',
 # exempt from the Wiki policy below: the Wiki holds human-facing narrative
 # documentation, these hold review state.
 #
-# CHECKLIST.md and Variables.md were merged into REVIEW.md on 2026-08-20 and
-# deleted. They had drifted into three documents describing one thing — the
+# The former CHECKLIST.md and Variables.md were merged into REVIEW.md on
+# 2026-08-20 and deleted. They had drifted into three documents describing one thing — the
 # required-input inventory, the variable catalogue, and the blockers that depend
 # on both — with the same facts recorded in each and disagreeing between them.
 # REVIEW.md Part 4 is now the single inventory. Do not recreate either file;
@@ -108,7 +108,6 @@ $prohibitedDocumentationPaths = @(
   'frontend/CHANGELOG.md',
   'frontend/TODO.md',
   'frontend/TODO2.0.md',
-  'frontend/labs/vps-agent/README.md',
   'frontend/scripts/README.md',
   'vps-agent/README.md'
 )
@@ -141,6 +140,7 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath.StartsWith('frontend/.copilot/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
+    $relativePath.StartsWith('.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath -eq '.github/pull_request_template.md' -or
     # Tooling-adjacent documentation, allowed by the same README clause that
     # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING and
@@ -154,14 +154,14 @@ foreach ($markdownFile in $markdownFiles) {
     # and overlaid onto the GitHub Wiki by .github/workflows/sync-wiki.yml on
     # merge to main. This is the one sanctioned in-repo home for narrative
     # documentation, precisely because its destination is the Wiki.
-    $relativePath.StartsWith('.github/wiki/', [System.StringComparison]::OrdinalIgnoreCase)
+    $relativePath.StartsWith('wiki/', [System.StringComparison]::OrdinalIgnoreCase)
   if (-not $isAllowed) {
     $errors.Add("Unexpected Markdown outside the Wiki: $relativePath")
   }
 }
 
 $readme = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'README.md')
-foreach ($requiredText in @('/wiki', '/wiki/Implementation-TODO', 'Production deployment: not authorized')) {
+foreach ($requiredText in @('/wiki', 'Azure Static Web Apps', 'Azure Functions')) {
   if (-not $readme.Contains($requiredText)) {
     $errors.Add("README is missing required current-state text: $requiredText")
   }

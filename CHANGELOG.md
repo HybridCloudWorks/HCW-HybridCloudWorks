@@ -5,7 +5,7 @@ Completed features, fixes, enhancements, security fixes, and released changes.
 **Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
 file records **completed work only**. Outstanding engineering work belongs in
 [TODO.md](TODO.md); human-resolvable blockers in [REVIEW.md](REVIEW.md);
-required inputs in [CHECKLIST.md](CHECKLIST.md).
+required inputs in [REVIEW.md](REVIEW.md).
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project has not cut a tagged release; entries are grouped under
@@ -14,6 +14,33 @@ This project has not cut a tagged release; entries are grouped under
 ---
 
 ## [Unreleased]
+
+### Changed
+
+- **Retired the completed migration surface and reset the repository around the
+  HybridCloudWorks website.** Removed the old Firebase Functions package and
+  Labs agent, the completed Firestore/GCS migration workflow and one-shot
+  import tooling, the disabled infrastructure-delivery workflow, and unused
+  Firebase hosting, scaffolding, screenshot, generator, and debug scripts.
+  Retained the Azure container specification because Terraform still consumes
+  it, and retained active Azure operations, CI, deployment, and smoke tooling.
+- **Reconciled repository documentation.** `README.md` now documents the
+  website's features, architecture, local development, and delivery model;
+  `TODO.md` contains only engineer-resolvable pending work; `REVIEW.md`
+  contains only human-owned access, approval, credential, and live-verification
+  items; and both plans are archived records rather than active instructions.
+- **Moved Wiki-as-code to `wiki/`.** The sync workflow and repository policy
+  now use the root `wiki/` staging directory, and the Wiki home/sidebar point
+  at current website and Azure documentation. All repository workflows use
+  GitHub-hosted runners.
+- **Removed remaining active cleanup residue.** Deleted the unused Functions
+  parity contract and duplicate Markdown bug template, updated current
+  infrastructure metadata and operator helpers to reference the website state,
+  and allowlisted the repository's reusable `.github/templates/` directory.
+- **Retired the unused frontend Firebase platform surface.** Removed the old
+  `frontend/firebase.json`, Firebase rules/indexes/storage files, GCP Terraform
+  configuration, and dangling test/lint exclusions; the current frontend
+  package now validates only the live `src/` tree.
 
 ### Security
 

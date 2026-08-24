@@ -19,9 +19,8 @@ before any plan or apply.
 - **State lives in HCP Terraform Cloud** — org `HybridCloudWorks`, workspace
   `hcw-azure` (`backend.tf`). State, saved plans, and
   `*.tfvars` with real values never enter Git.
-- **Applies are gated.** The GitHub workflow (`.github/workflows/deploy-infra.yml`)
-  is hard-disabled; production applies happen through HCP Terraform with
-  human plan review, per the guardrails in the root README.
++ **Applies are gated.** Production applies happen through HCP Terraform with
+  human plan review; GitHub Actions handles application delivery only.
 - **The target subscription is a platform subscription** that will later be
   absorbed into an Azure Landing Zone management-group hierarchy. See
   "ALZ absorption" below for what is expected to change at that point.
@@ -36,7 +35,7 @@ before any plan or apply.
 | `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, observability, budget, DNS |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |
 | `outputs.tf` | Root outputs |
-| `cosmos-containers.json` | Generated container manifest (one container per Firestore collection) — regenerate with `scripts/generate-cosmos-container-spec.mjs`, do not hand-edit |
+| `cosmos-containers.json` | Generated Cosmos container manifest — regenerate with `scripts/generate-cosmos-container-spec.mjs`, do not hand-edit |
 | `terraform.tfvars.example` | Placeholder-only example; real values live in TFC workspace variables |
 | `.tflint.hcl` | Lint ruleset used by CI |
 

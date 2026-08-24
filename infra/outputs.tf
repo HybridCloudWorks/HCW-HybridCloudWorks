@@ -54,12 +54,12 @@ output "storage_account" {
   value       = azurerm_storage_account.hcw.name
 }
 
-# The CONTENT account's group — what migrate-data.yml scopes its per-run
-# firewall window to when target=production (behind migration_writer_enabled).
+# The CONTENT account's group — used by repository-variable bootstrap and
+# operator tooling when a controlled storage firewall window is required.
 # Taken from the account's own attribute for the same pairing guarantee as
 # web_resource_group below.
 output "storage_resource_group" {
-  description = "Resource group holding the content storage account — the STORAGE_RESOURCE_GROUP repository variable migrate-data.yml scopes its firewall window to"
+  description = "Resource group holding the content storage account — used with STORAGE_RESOURCE_GROUP when controlled access is required"
   value       = azurerm_storage_account.hcw.resource_group_name
 }
 
@@ -195,13 +195,14 @@ output "cloudflare_plan" {
 }
 
 # -----------------------------------------------------------------------------
-# Migration rehearsal estate (scratch.tf) — null while disabled
+# Legacy rehearsal estate (scratch.tf) — null while disabled; retained pending
+# the owner-approved Terraform cleanup in REVIEW.md.
 # -----------------------------------------------------------------------------
 # Consumed by scripts/set-github-variables.ps1 wave 2 as COSMOS_SCRATCH_ENDPOINT,
 # STORAGE_SCRATCH_ACCOUNT and SCRATCH_RESOURCE_GROUP. `one()` turns the
 # count-gated resource into null rather than an index error when off.
 output "cosmos_scratch_endpoint" {
-  description = "Scratch Cosmos account endpoint for migration rehearsal; null when cosmos_scratch_enabled is false"
+  description = "Legacy scratch Cosmos endpoint; null when cosmos_scratch_enabled is false"
   value       = one(azurerm_cosmosdb_account.scratch[*].endpoint)
 }
 
@@ -211,7 +212,7 @@ output "cosmos_scratch_account_name" {
 }
 
 output "storage_scratch_account" {
-  description = "Scratch storage account for the storage-copy rehearsal; null when storage_scratch_enabled is false"
+  description = "Legacy scratch storage account; null when storage_scratch_enabled is false"
   value       = one(azurerm_storage_account.scratch[*].name)
 }
 

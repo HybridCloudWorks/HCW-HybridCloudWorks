@@ -19,7 +19,7 @@
 # which matches the permissions this deployment is expected to run under.
 #
 # The one thing that still needs Entra rights is the API app registration
-# behind var.entra_api_audience — see Review.md §4.1. That is a one-time manual
+# behind var.entra_api_audience — see REVIEW.md. That is a one-time manual
 # step and is deliberately not automated here.
 # =============================================================================
 
@@ -46,9 +46,9 @@ resource "azurerm_federated_identity_credential" "github_branch" {
   subject                   = "repo:${var.github_org}/${var.github_repo}:ref:${var.github_deploy_ref}"
 }
 
-# The data-migration workflow runs under a GitHub Environment, which changes the
-# subject claim shape — an environment token is not a branch token, so the
-# branch credential above does not cover it.
+# Legacy import trust retained pending the owner-only cleanup decision in
+# REVIEW.md. The former workflow used an Environment subject, which differs
+# from the branch credential above.
 resource "azurerm_federated_identity_credential" "github_data_migration" {
   name                      = "github-${var.github_repo}-env-data-migration"
   user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
@@ -144,17 +144,11 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
   principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
-# Deliberately NOT granted:
+# Deliberately NOT granted to the active deployment path:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
 #     managed identity does that at runtime.
-#   - Cosmos data-plane roles on PRODUCTION beyond the two-container exception
-#     below, until migration_writer_enabled is flipped (see the gated block at
-#     the end of this file). The data migration DOES use this identity —
-#     through the `environment:data-migration` federated credential — but on
-#     the scratch account (scratch.tf) it holds database-scope Data
-#     Contributor, and on production it holds nothing extra while the gate is
-#     off. That is what makes "the workflow cannot write to production" a
-#     property of RBAC rather than of a guard in a YAML file.
+#   - Import-only Cosmos or storage roles on PRODUCTION. The legacy role
+#     declarations remain gated off by migration_writer_enabled pending review.
 #   - anything at subscription scope.
 
 # ---------------------------------------------------------------------------
@@ -234,14 +228,11 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
 }
 
 # ---------------------------------------------------------------------------
-# The production-import gate: migration_writer_enabled
+# Legacy production-import role gate: migration_writer_enabled
 # ---------------------------------------------------------------------------
-# Both of these are count = 0 until the scratch rehearsal is signed off. While
-# they are absent the migration workflow cannot write to production Cosmos or
-# to the production content storage account no matter what its inputs say —
-# the identity simply does not hold the role. Flipping the variable is the
-# one-line, TFC-reviewed change that opens the production-import phase, and
-# reverting it closes it again without touching the workflow.
+# These are count = 0 by default and remain only for state-safe cleanup
+# sequencing. Do not enable them; remove the declarations through the
+# owner-approved Terraform cleanup in REVIEW.md.
 #
 # Database scope rather than account scope: the migration touches every
 # container under `hcw` and nothing else on the account.

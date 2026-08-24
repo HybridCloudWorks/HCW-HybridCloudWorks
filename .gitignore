@@ -24,15 +24,13 @@ local.settings.json
 *.enc.yaml
 keys.txt
 
-# Data migration (Phase 4) — see docs/data-migration/README.md
-# export/ is a full dump of the production Firestore database and must never
-# be committed. reports/ contains document ids and field values from it.
+# Local exports and reports are never part of the website source tree.
 export/
 reports/
 **/firebase-service-account.json
 
 # Bootstrap run reports — hold real subscription and client ids.
-# CHECKLIST.md keeps real values out of tracked files; this is not an exception.
+# REVIEW.md keeps real values out of tracked files; this is not an exception.
 scripts/.reports/
 
 # Editor workspace settings — machine-local, not a repository contract.
