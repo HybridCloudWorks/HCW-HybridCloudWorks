@@ -133,7 +133,11 @@ export function createRssIngest({
       }
       throw err;
     }
-    const items = (parsed?.items || []).slice(0, MAX_CACHE_ITEMS_PER_FEED);
+    // Not pre-sliced: buildCacheItems applies the cap itself, and it keeps the
+    // newest items rather than the first (T-319) — truncating in feed order
+    // here would decide that selection before it could. draftNewContent takes
+    // its own, smaller slice, so the drafted set is unaffected.
+    const items = parsed?.items || [];
     const cached = await cacheFeed(provider, feed, items);
     results.cached += 1;
     await draftNewContent(provider, feed, items, results);

@@ -373,6 +373,65 @@ const FEED_CACHE_MAX_DOCS = 200;
 const FEED_INSIGHTS_MAX_DOCS = 200;
 
 /**
+ * Items served per `rss_cache` document (TODO.md T-319).
+ *
+ * FEED_CACHE_MAX_DOCS bounds the number of feeds; this bounds the number of
+ * articles inside each one, which is the other half of the same runaway. One
+ * document holds a whole feed, so a hundred bounded documents can still be an
+ * unbounded anonymous response — and `items[]` is the part of the document
+ * that grows with the world rather than with the site.
+ *
+ * The value equals the ingest writer's own cap (MAX_CACHE_ITEMS_PER_FEED in
+ * rss/feeds.js), so a document written by the current writer is served whole
+ * and this trim only engages on one that is not: a document written before
+ * that cap existed, or one an unusually large feed produced. The two constants
+ * are deliberately not shared by import — this module has no imports so the
+ * anonymous read path cannot be broken by an ingest-side change — and
+ * public-reads.test.js asserts they agree so the pair cannot silently drift.
+ */
+const FEED_CACHE_MAX_ITEMS_PER_DOC = 20;
+
+/**
+ * Newest-first by `pubDate`, with undated items last in their stored order.
+ *
+ * Undated items sort to the tail rather than to "now": an item with no date is
+ * the one we know least about, and treating a missing date as current would
+ * let a malformed feed evict every dated article. Comparing for equality
+ * before subtracting keeps two undated items at 0 rather than at `-Infinity -
+ * -Infinity`, which is NaN — the sort is stable, so 0 preserves feed order.
+ */
+function feedItemTime(item) {
+  const parsed = Date.parse(item?.pubDate ?? '');
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+/**
+ * Bound one `rss_cache` document's `items[]`, keeping the newest.
+ *
+ * Documents whose `items` is absent or not an array are returned untouched:
+ * there is no array to bound, and inventing an empty one would turn a
+ * malformed document into a plausible-looking empty feed.
+ *
+ * `itemCount` is rewritten alongside a trim because the writer's invariant is
+ * `itemCount === items.length`; leaving the stored count would tell a client
+ * there are items in the response that are not.
+ */
+function boundFeedItems(doc) {
+  const items = doc?.items;
+  if (!Array.isArray(items) || items.length <= FEED_CACHE_MAX_ITEMS_PER_DOC) return doc;
+
+  const newest = [...items]
+    .sort((a, b) => {
+      const at = feedItemTime(a);
+      const bt = feedItemTime(b);
+      return at === bt ? 0 : bt - at;
+    })
+    .slice(0, FEED_CACHE_MAX_ITEMS_PER_DOC);
+
+  return { ...doc, items: newest, itemCount: newest.length };
+}
+
+/**
  * A curated article's image changes only when someone regenerates it, so a HIT
  * is cached hard — and this is the endpoint a news page hits up to twelve times
  * per load, which is the other reason.
@@ -677,8 +736,9 @@ export function createPublicReadHandlers({ store }) {
 
     /**
      * GET /api/public/feed?provider= — rss_cache docs plus active ai_insights
-     * for one provider (useNewsData.js). Docs returned as stored; the
-     * flatten/sort of cache items stays client-side where it lives today.
+     * for one provider (useNewsData.js). Cache documents are trimmed to their
+     * newest items (T-319) and otherwise returned as stored; the flatten/sort
+     * across feeds stays client-side where it lives today.
      */
     async getFeed(request, context) {
       try {
@@ -687,8 +747,10 @@ export function createPublicReadHandlers({ store }) {
 
         // Both queries were unbounded on an anonymous endpoint, and queryDocs
         // calls .fetchAll() (TODO.md T-203). rss_cache is TTL-bounded at seven
-        // days, but that bound is enforced by syncRssFeeds — a scheduler that
-        // is still a stub — so today nothing limits either container.
+        // days and syncRssFeeds now enforces that bound, but a document count
+        // is not an item count and the timer only rewrites feeds it still
+        // fetches — a retired feed's document keeps whatever it last held. The
+        // ceilings stay, and boundFeedItems below bounds the rest.
         const [rssCache, insights] = await Promise.all([
           store.queryDocs(
             'rss_cache',
@@ -711,7 +773,11 @@ export function createPublicReadHandlers({ store }) {
             // ai_insights visibility model — it is in the container's composite
             // index for exactly that reason — and a soft-deleted insight passed
             // it, which is the half of T-202 that was a real leak.
-            rssCache: rssCache.filter((doc) => !isSoftDeleted(doc)).map(stripInternalFields),
+            // T-319: each surviving document is trimmed to its newest items so
+            // the response is bounded in articles, not just in feeds.
+            rssCache: rssCache
+              .filter((doc) => !isSoftDeleted(doc))
+              .map((doc) => boundFeedItems(stripInternalFields(doc))),
             insights: insights
               .filter((doc) => doc.active !== false && !isSoftDeleted(doc))
               .map(stripInternalFields),

@@ -406,3 +406,144 @@ describe('AI feature switches', () => {
     ).toBe(403);
   });
 });
+
+describe('partial MCP/AI config updates never disturb a stored secret', () => {
+  // `oauthToken` on mcp_servers is the only secret VALUE these two collections
+  // store — an ai_providers document holds `apiKeyEnvVar`, the NAME of a
+  // server-side setting, never a key. Reads strip the token and synthesise
+  // `hasOauthToken` in its place, so every edit form works from a document
+  // that is missing the one field it must not destroy. These tests pin both
+  // halves of that: a partial write must not clear the token, and must not
+  // write the read artefact back in its place.
+  const storedServer = (over = {}) => ({
+    id: 'plaud',
+    url: 'https://mcp.example/sse',
+    enabled: true,
+    oauthToken: 'stored-tok',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+
+  /** patchDoc that merges like the real store, so responses are realistic. */
+  const mergingStore = (doc) => {
+    const state = { ...doc };
+    return makeStore({
+      readDoc: vi.fn(async () => ({ ...state })),
+      patchDoc: vi.fn(async (_c, _id, updates) => Object.assign(state, updates)),
+    });
+  };
+
+  const patch = (store, collection, body, id = 'plaud') =>
+    createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed }).patchConfig(
+      makeRequest({ params: { collection, id }, body }),
+      context
+    );
+
+  it('PATCH omitting oauthToken does not send it, so the merge cannot clear it', async () => {
+    const store = mergingStore(storedServer());
+    await patch(store, 'mcp-servers', { enabled: false });
+
+    const [, , updates] = store.patchDoc.mock.calls[0];
+    expect(updates).not.toHaveProperty('oauthToken');
+    expect(Object.keys(updates).sort()).toEqual(['enabled', 'updatedAt']);
+  });
+
+  it('PATCH still hides the untouched token from its own response', async () => {
+    // The merged document the store returns contains the token; the response
+    // is built from it, so this is the point where an untouched secret would
+    // leak back to the browser.
+    const store = mergingStore(storedServer());
+    const res = await patch(store, 'mcp-servers', { url: 'https://mcp.example/v2' });
+    const { item } = JSON.parse(res.body);
+
+    expect(res.body).not.toContain('stored-tok');
+    expect(item).not.toHaveProperty('oauthToken');
+    expect(item.hasOauthToken).toBe(true);
+    expect(item.url).toBe('https://mcp.example/v2');
+  });
+
+  it('PATCH drops hasOauthToken instead of persisting it next to the token', async () => {
+    // An edit form that PATCHes a field it read back sends the boolean with
+    // it. Reads recompute the flag, so persisting it shadows nothing — it is
+    // a stale copy of a secret's state that a later revoke would not clear.
+    const store = mergingStore(storedServer());
+    await patch(store, 'mcp-servers', { enabled: false, hasOauthToken: true });
+
+    expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('hasOauthToken');
+  });
+
+  it('PATCH rejects a body that is only read artefacts', async () => {
+    // Otherwise it would be a write that touches nothing but updatedAt, and
+    // report success for an edit that was never applied.
+    const store = mergingStore(storedServer());
+    for (const body of [{ hasOauthToken: true }, { id: 'plaud' }, { id: 'p', hasOauthToken: false }]) {
+      expect((await patch(store, 'mcp-servers', body)).status).toBe(400);
+    }
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('a revoke is still an explicit write, not an omission', async () => {
+    // The token is cleared by sending an empty string. Nothing else clears it,
+    // which is exactly why omission has to be safe.
+    const store = mergingStore(storedServer());
+    const res = await patch(store, 'mcp-servers', { oauthToken: '' });
+
+    expect(store.patchDoc.mock.calls[0][2].oauthToken).toBe('');
+    expect(JSON.parse(res.body).item.hasOauthToken).toBe(false);
+  });
+
+  it('a read-modify-write PUT round trip preserves the token through PATCH-style edits', async () => {
+    // putConfig is a full replace, so the same form saved with PUT must land
+    // on the same document. Pinned together because the two verbs share one
+    // edit surface and only one of them was ever at risk of dropping it.
+    const store = mergingStore(storedServer());
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const read = JSON.parse(
+      (await h.patchConfig(
+        makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { enabled: false } }),
+        context
+      )).body
+    ).item;
+
+    await h.putConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { ...read, enabled: true } }),
+      context
+    );
+
+    const saved = store.upsertDoc.mock.calls[0][1];
+    expect(saved.oauthToken).toBe('stored-tok');
+    expect(saved).not.toHaveProperty('hasOauthToken');
+    expect(saved.createdAt).toBe('2026-01-01T00:00:00.000Z'); // not reset by the replace
+  });
+
+  it('an ai-providers patch touches only the fields it names', async () => {
+    // ai_providers holds no secret value, so the assertion here is the
+    // narrower one: a partial update must not become a replace.
+    const store = mergingStore({
+      id: 'anthropic',
+      enabled: true,
+      order: 1,
+      apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+      defaultModel: 'claude-old',
+    });
+    const res = await patch(store, 'ai-providers', { defaultModel: 'claude-new' }, 'anthropic');
+    const { item } = JSON.parse(res.body);
+
+    expect(store.patchDoc.mock.calls[0][2]).toEqual({
+      defaultModel: 'claude-new',
+      updatedAt: '2026-08-06T12:00:00.000Z',
+    });
+    expect(item.apiKeyEnvVar).toBe('ANTHROPIC_API_KEY');
+    expect(item.enabled).toBe(true);
+    // ai_providers is never stripped, because it has nothing to strip — the
+    // env var NAME is what the admin page renders to explain a disabled
+    // provider.
+    expect(item).not.toHaveProperty('hasOauthToken');
+  });
+
+  it('PATCH refuses a document that does not exist rather than creating one', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => null) });
+    expect((await patch(store, 'mcp-servers', { enabled: false })).status).toBe(404);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+});

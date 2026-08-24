@@ -12,8 +12,8 @@ operations belong in [REVIEW.md](REVIEW.md). Verified completion belongs in
 | --- | ---: |
 | High | 0 |
 | Medium | 2 |
-| Low | 3 |
-| Total | 5 |
+| Low | 2 |
+| Total | 4 |
 
 ## Medium
 
@@ -25,45 +25,51 @@ text-to-speech provider, YouTube API access, and the storage/retention policy;
 those inputs are listed in [REVIEW.md](REVIEW.md). Do not port the old Firebase
 implementation wholesale.
 
-### T-319 — Bound RSS item arrays
+### T-412 — Decompose `QueuePage.jsx`
 
-Bound `items[]` in `functions/src/lib/public-reads.js` and in the future
-`syncRssFeeds` writer. Preserve the newest items based on `pubDate`, add a
-matching unit test, and keep the anonymous response bounded even when one feed
-is malformed or unusually large.
+`frontend/src/pages/admin/QueuePage.jsx` is 1,310 lines and holds the admin
+area's riskiest code: the bulk paths transition many documents one at a time
+and each partial failure has to be attributed back to its own card. Split the
+mutating actions, the banners and the item card into their own modules so the
+bulk logic can be tested without rendering the card markup, then add tests for
+the partial-failure paths. Do this against this repository's file — the
+upstream equivalent (T-410) is written against Firestore-era helpers — and keep
+the existing behaviour, including which actions each status filter allows.
 
 ## Low
 
-### T-410 — Evaluate the remaining upstream feature candidates
+### T-410 — Port the draw.io hotspot tooling
 
-Review the admin queue improvements, Architecture listing, draw.io tooling, and
-other upstream candidates as separate product changes. Port only a selected
-feature with current Azure API and authorization seams; do not merge the old
-Firebase data/auth layers or copy an entire upstream branch.
-
-### T-407 — Remove unreachable backend dependencies
-
-Confirm whether `cheerio`, `rss-parser`, `google-auth-library`, and other
-non-route dependencies in `functions/package.json` are still needed by active
-handlers. Remove only packages with no runtime or test consumer, then run the
-Functions test suite and dependency review.
+The candidate evaluation is complete and recorded in
+[CHANGELOG.md](CHANGELOG.md); the draw.io tooling is the one it recommends, and
+which candidate is actually built is an owner decision listed in
+[REVIEW.md](REVIEW.md). Once selected, port `lib/drawio/parseDrawio.js` and
+`lib/drawio/hotspotGeometry.js` with their upstream test and fixture, and the
+diagram panel that uses them, so hotspots are generated from an uploaded
+`.drawio` file instead of typed into `ArchitectureReviewBoard` by hand. Route
+the upload through `POST /api/cms/uploads/{container}`; the parsing is pure and
+carries no Firebase coupling, and `InteractiveDiagram` already consumes the
+hotspot shape. Do not bring the Architecture listing pages with it: they depend
+on `ContentReviewBrowser` and a Firestore-query data seam.
 
 ### D-001 — Revisit the ESLint 10 upgrade
 
-Re-evaluate the upgrade when `eslint-plugin-react`, `eslint-plugin-react-hooks`,
-and `eslint-plugin-jsx-a11y` support ESLint 10. Keep the current ESLint 9 line
-until the complete frontend lint suite is green on the newer major.
+Two plugins still block it as of 2026-08-24: `eslint-plugin-react` 7.37.5 caps
+its peer range at `eslint@^9.7` and `eslint-plugin-jsx-a11y` 6.10.2 at
+`eslint@^9`. `eslint-plugin-react-hooks` and `@typescript-eslint/eslint-plugin`
+already declare `^10`. Re-evaluate when the other two do, and keep the ESLint 9
+line until the complete frontend lint suite is green on the newer major.
 
 ## Test coverage follow-up
 
-Add focused tests for the remaining boundary cases:
+One boundary case is left, and it is not resolvable from the repository:
 
-- API base resolution when the Azure provider is selected.
-- Public content limits for non-numeric, zero, negative, and oversized values.
-- Partial MCP/AI configuration updates that omit an existing secret field.
-- The deployed no-op Labs job path after a human supplies the Entra access
+- The deployed no-op Labs job path, after a human supplies the Entra access
   needed for an authenticated live check (the live prerequisite remains in
   [REVIEW.md](REVIEW.md)).
+
+The API base, public content limit, and partial configuration cases are
+covered; see [CHANGELOG.md](CHANGELOG.md).
 
 Completed items are removed from this file after the corresponding regular
 entry is present in `CHANGELOG.md`; item numbers are not reused.

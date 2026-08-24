@@ -427,7 +427,17 @@ export function createAdminIntegrationHandlers({
         }
         const existing = await store.readDoc(container, id, id);
         if (!existing) return json(404, { error: `${container} ${id} not found` });
-        const { id: _ignored, ...updates } = body;
+        // `hasOauthToken` is dropped for the same reason putConfig drops it:
+        // it is synthesised by stripOAuthToken on every read, so a form that
+        // PATCHes a field it read back would persist a boolean snapshot of the
+        // token's presence next to the token. Reads recompute it, so it never
+        // shadows the real value — it is simply a stale copy of a secret's
+        // state, written into the document, that a later revoke would not
+        // clear.
+        const { id: _ignored, hasOauthToken: _readArtefact, ...updates } = body;
+        if (Object.keys(updates).length === 0) {
+          return json(400, { error: 'Body must contain at least one updatable field' });
+        }
         const updated = await store.patchDoc(container, id, {
           ...updates,
           updatedAt: now().toISOString(),

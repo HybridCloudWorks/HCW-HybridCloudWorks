@@ -34,6 +34,8 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | GCP pricing integration | If live GCP pricing is still required, provide a valid service-account JSON through Key Vault and approve its scope; otherwise approve retiring that optional feature | No GCP credential is stored in the repository |
 | AI providers | Decide which external providers should be enabled and provide their keys through Key Vault | The AI router only enables a provider when its server-side key is present |
 | Third-party integrations | Provide owner-controlled Publer, Klaviyo, YouTube, Telegram, Hostinger, or other credentials and approve webhook changes before activation | Integration secrets are server-side and optional paths remain gated |
+| Listen & Learn feature (T-411) | Choose a text-to-speech provider (Azure Speech or another), approve YouTube API access, and set the audio storage and retention policy | `TODO.md` T-411 is scoped but not started; no provider key or bucket is assumed, and no old implementation has been merged |
+| Upstream feature selection (T-410) | Choose which evaluated upstream candidate, if any, is built. The engineering evaluation is complete and recommends the draw.io hotspot tooling; the Architecture listing pages are not recommended | `TODO.md` T-410 carries the scoped port and the seams it must use; nothing is ported until a candidate is chosen |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
 
 ## Live confirmation still requiring an authorized operator
