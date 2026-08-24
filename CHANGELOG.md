@@ -15,7 +15,296 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **Listen & Learn (T-411).** One study podcast per weighted skill area of a
+  certification's official study guide, with the videos worth watching next.
+  Ported from Site-Main `functions/listen-and-learn/` (088f458) with the
+  pipeline intact — study guide → skill areas → videos per area → dialogue →
+  MP3 → draft — and three deliberate departures:
+
+  *Audio is Gemini TTS, on the key the site already holds.* Upstream
+  authenticated to Cloud Text-to-Speech with Application Default Credentials, a
+  GCP identity this Function App cannot hold — the same reason Vertex was
+  dropped from the AI router. The replacement is the Gemini API's own
+  multi-speaker TTS through `GEMINI_API_KEY`, which is the capability the
+  feature was actually for: a two-host deep dive read from source material is
+  what a NotebookLM audio overview is, and these are the models that produce it.
+  It costs no new service, no new resource and no new credential. Its contract
+  shapes the module in three ways: multi-speaker takes at most two speakers,
+  which is exactly the number here; the dialogue is a prompt rather than markup,
+  so the transcript's speaker labels must match the `speech_config` names or a
+  label is read aloud instead of switching voice; and a 32k-token session
+  comfortably holds a whole 9,000-byte script, so an episode is one request with
+  nothing to chunk.
+
+  *Episode audio is encoded to MP3, and that is not cosmetic.* Gemini returns
+  headerless 24 kHz 16-bit mono PCM with no format option — 48 KB per second, so
+  a nine-minute episode is about 26 MB. `readBlobForDelivery` buffers a whole
+  blob into memory and the media route returns it as one body with no range
+  support, so that would hold 26 MB per concurrent listener, bill Function
+  execution for the entire transfer, and make the player wait for the whole file
+  before starting. At 64 kbps mono the same episode is about 4.5 MB (measured
+  5.8x on a 24 kHz tone). `@breezystack/lamejs` is the encoder: pure JavaScript,
+  no native build, no dependencies of its own; it is LGPL-3.0 and imported
+  unmodified, and it is the only copyleft dependency in the package.
+
+  *Azure AI Speech is kept as the fallback, not deleted.* Every Gemini TTS model
+  is a **preview** model, and preview endpoints get retired on notice. Azure
+  Speech is GA, and having the second path written and tested is the difference
+  between a model retirement being a config change and being an outage. It needs
+  a Cognitive Services resource, which is a spend decision, so nothing assumes
+  one exists and an unseeded `AZURE_SPEECH_KEY` simply means the provider is not
+  offered. Its own hazard is pinned by tests: that REST API silently TRUNCATES
+  at ten minutes of audio rather than erroring, so its dialogue chunking
+  estimates duration with a slow voice — being wrong the other way deletes the
+  end of an episode and looks like a complete one.
+
+  Provider selection follows the AI router's rule — a key makes a provider
+  possible, and the first configured one in preference order runs — with
+  `LISTEN_AND_LEARN_TTS_PROVIDER` to pin one outright. A pin that is not
+  configured FAILS rather than falling through, because falling through would
+  produce episodes in a voice nobody chose. Both providers return MP3, so the
+  blob path, the stored `contentType` and the `<audio>` element are identical
+  whichever ran. Each episode records `speechProvider`, `speechModel` and
+  `durationSeconds` — provenance for AI-generated study content, and the only
+  thing that answers "why does this one sound different" after a model change.
+
+  *The script no longer asserts the hosts' gender.* Upstream's prompt said both
+  hosts were women because the Google voices it used were documented female. The
+  Gemini voice list publishes a descriptor per voice and no gender at all, so
+  the claim is not one the audio can keep. The default pairing is by descriptor
+  and follows the roles the prompt already assigns — Kore (*Firm*) leads and
+  frames, Leda (*Youthful*) asks the question a learner would ask — and both are
+  overridable per host.
+
+  *Generation is a job, not a request.* An Azure Functions HTTP response is
+  bounded at 230 seconds by the load balancer and one certification is five
+  model calls, five syntheses and five uploads, so the admin page enqueues
+  `generate-listen-and-learn` and polls, as the RSS ingest does. The run still
+  saves area by area, so a timeout leaves the finished episodes behind.
+
+  *A missing speech key degrades; a broken one fails.* Upstream treated any
+  synthesis failure as a failed area. `SpeechNotConfiguredError` — no provider
+  configured — now still saves the episode with its transcript,
+  takeaways and videos and records `audioError`, which the admin page renders
+  in place of the player. Every other synthesis failure still fails the area,
+  because those are faults to fix rather than a state to ship in. The feature
+  is useful the day it deploys and gains audio the day the key lands.
+
+  Approval is unchanged and is the point: episodes are AI-written summaries of a
+  paid exam's objectives, generated as drafts, and `GET
+  /api/public/listen-and-learn` filters on `status === 'published'` with an
+  equality test — an unrecognised status stays hidden. `listen_and_learn` and
+  `listen_and_learn_episodes` already existed in the Cosmos container spec;
+  `listenandlearn` is a new private blob container served through the media
+  route. GitHub exams are enabled alongside Azure and AWS, since they are
+  hosted on Microsoft Learn and parse with the same adapter.
+- **draw.io hotspot tooling (T-410).** `lib/drawio/parseDrawio.js` and
+  `lib/drawio/hotspotGeometry.js` port from Site-Main unchanged, with their
+  test and fixture. A hotspot now stores a draw.io **shape id** and its position
+  is derived from the diagram XML on every render (`useResolvedHotspots`), so
+  re-uploading an edited diagram moves every pin with its shape instead of
+  stranding it. `DiagramSourcePanel` replaces typing x/y percentages into two
+  number inputs and eyeballing the result. Nothing renders the `.drawio` file —
+  vendor stencils are most of what makes a cloud diagram readable, and the
+  exported image stays what visitors see. Hand-positioned hotspots, the only
+  kind this repository could write before, pass through untouched, and the
+  admin preview now resolves through the same code as the public page.
+
 ### Changed
+
+- **The frontend is on ESLint 10 (D-001 closed).** The item said two plugins
+  blocked it, on the strength of their declared peer ranges. That was half
+  right and the wrong half was load-bearing, so it is worth recording what the
+  block actually was.
+
+  Dependabot's bump failed at `npm ci`, not at lint — an ERESOLVE refusal from
+  `eslint-plugin-jsx-a11y`'s `eslint@"…|| ^9"` peer range. That is metadata, and
+  npm `overrides` pinning both plugins' `eslint` peer to `$eslint` clears it.
+  What remained was one real incompatibility: every rule that consults the React
+  version died with `contextOrFilename.getFilename is not a function`, because
+  ESLint 10 removed `context.getFilename()` and `eslint-plugin-react` calls it
+  while DETECTING the React version. Detection only runs when
+  `settings.react.version` is the literal `'detect'`, so supplying the version
+  skips the removed API entirely. The config now reads it from the installed
+  `react/package.json` rather than pinning a literal, so an upgrade cannot leave
+  the linter reasoning about the wrong React.
+
+  Verified beyond a green run, because a plugin that silently loaded no rules
+  would also look green: a probe file confirmed `react/jsx-key`,
+  `react/no-unescaped-entities`, `jsx-a11y/alt-text` and
+  `react-hooks/rules-of-hooks` all still report on ESLint 10, and `npm ci` — the
+  command that actually failed — now succeeds.
+
+  One rule stays off, for a new reason. `jsx-a11y/label-has-associated-control`
+  was disabled because it crashed on ESLint 9; on 10 it runs and reports 20 real
+  unlabelled form controls. That is an accessibility fix rather than an upgrade,
+  so it is tracked as A-001 and the config comment now says so — the stale one
+  would have told the next reader the rule was unusable.
+- **Listen & Learn spend appears in the portal, and `ai_usage` has one writer.**
+  The Usage tab has read that container since the port; until now only the AI
+  playground wrote to it, so a Listen & Learn run — the second thing here that
+  spends money on a model — would have been invisible. Each run now records a
+  row per model call: one for the script, one for the synthesis, tagged
+  `listen-and-learn:script` and `listen-and-learn:audio`.
+
+  The writer moved into `ai/usage.js` and `ai/proxy.js` now uses it, because the
+  Usage tab does its arithmetic client-side over whatever rows it finds — a
+  second writer with a slightly different shape would not error, it would
+  silently total zero. Recording is best-effort by design, and a test pins the
+  regression that made it otherwise: pricing a row used to happen outside the
+  try, so a caller passing an `ai` without `getCostEstimate` threw a TypeError
+  that propagated out and failed the episode whose cost it was recording.
+
+  TTS rates are in `COST_TABLE` from the published paid-tier pricing read on
+  2026-08-24 — `gemini-2.5-flash-preview-tts` at $0.50 in / $10.00 out per 1M
+  tokens, the other two at double that, which is why the flash model is the
+  default. Token counts come from the API's own `usage` object; when a response
+  omits it the audio count is derived from duration at the documented 32
+  tokens/second and the row is flagged `estimatedTokens`, which the portal shows
+  as "est." so a derived figure is never read as a billed one. On those rates a
+  nine-minute episode is about $0.17 and a five-area certification about $0.87.
+
+  The tab gains a **Breakdown by Feature** table beside the provider one:
+  provider answers "which vendor", which is useless when one vendor serves
+  several features at rates an order of magnitude apart. The Listen & Learn page
+  also reports the run's own cost when the job finishes. A test holds the tab's
+  source labels against the backend's `USAGE_SOURCES` so a new source cannot
+  ship as a raw slug — the same drift guard `DEFAULT_PROVIDERS` already has.
+- **`QueuePage.jsx` is decomposed (T-412).** 1,310 lines became a 320-line page
+  over `queue/itemHelpers.jsx`, `queue/QueueList.jsx`, `queue/constants.js` and
+  `queue/useQueueActions.js`. The hook is the reason for the split: the bulk
+  paths transition many documents one at a time and each partial failure has to
+  be attributed back to its own card, and that code could previously only be
+  reached by rendering four hundred lines of card markup. It now has 22 tests
+  covering the partial-failure paths — a run that half-works removes exactly the
+  documents that moved, leaves the ones that did not, and writes a reason under
+  each — plus the paging loop's zero-count guard and the rejected-filter
+  refusal. Behaviour is unchanged with one fix found by the move: `handleConfirm`
+  was `useCallback(..., [confirmTarget])` while closing over handlers rebuilt
+  every render, so it could act on `items` and `selectedIds` as they were when
+  the modal opened. It is no longer memoized; the dependencies changed every
+  render regardless, so nothing was gained by it.
+- **Publicly readable blob containers now declare their writer.**
+  `PUBLIC_MEDIA_CONTAINERS ⊂ UPLOAD_CONTAINERS` held only because every public
+  container happened to be one people upload to. Listen & Learn audio is written
+  by a job, so `GENERATED_MEDIA_CONTAINERS` names that category and the test
+  asserts each public container has exactly one declared writer and that the two
+  sets are disjoint. Satisfying the old relation would have meant opening the
+  episode container to the admin upload route, where any editor could put an
+  arbitrary file behind an anonymous URL.
+
+### Fixed
+
+- **The anonymous feed endpoint is bounded in articles, not just in feeds
+  (T-319).** `GET /api/public/feed` capped how many `rss_cache` documents it
+  returned but not how many items each one carried, and one document is one
+  whole feed — so a hundred bounded documents could still be an unbounded
+  response. Each surviving document is now trimmed to its newest twenty items
+  by `pubDate`, with `itemCount` rewritten to match so the count cannot
+  describe items that are not in the response. Undated items sort last and are
+  dropped first (`Date.parse('')` is NaN, and a missing date is not "now", so
+  one malformed item cannot evict a dated article); an all-undated feed keeps
+  its stored order, and a document whose `items` is absent or not an array is
+  passed through untouched rather than turned into a plausible-looking empty
+  feed. The read ceiling is a second copy of the ingest writer's
+  `MAX_CACHE_ITEMS_PER_FEED` because `public-reads.js` deliberately has no
+  imports; `public-reads.test.js` asserts the two agree so they cannot drift.
+- **The ingest cap keeps the newest items rather than the first (T-319).**
+  `buildCacheItems` sliced the parsed feed in arrival order. Feed order is
+  conventionally newest-first but nothing enforces it, and both readers of the
+  array sort by `pubDate` — `buildHomepageFeedItems` and `useNewsData.js` — so
+  a feed publishing oldest-first cached its archive and never showed its recent
+  articles, with the cache looking full throughout. The sort now happens before
+  the slice, and `processSingleFeed` no longer pre-slices in feed order, which
+  would have decided the selection before `buildCacheItems` could. Drafting is
+  unchanged: it still walks the first ten items of the parsed feed.
+- **`PATCH /api/cms/{ai-providers|mcp-servers}/{id}` no longer persists the
+  `hasOauthToken` read artefact.** `stripOAuthToken` synthesises the flag on
+  every read in place of the write-only token, so a form PATCHing a field it
+  read back sent the boolean with it — and `putConfig` already dropped it for
+  exactly that reason while `patchConfig` did not. Reads recompute the flag, so
+  it shadowed nothing; it was a stale copy of a secret's state written next to
+  the secret, which a later revoke would not have cleared. A PATCH body left
+  with no updatable field after `id` and `hasOauthToken` are dropped is now a
+  `400` rather than a write that touches only `updatedAt` and reports success.
+
+### Added
+
+- **The three repository-resolvable test-coverage follow-ups.**
+  *API base resolution* — the original line asked for `api.js` with
+  `VITE_BACKEND_PROVIDER=azure`, a switch that no longer exists because the GCP
+  backend is gone and the Azure base is the only one. `functionsBase.test.js`
+  now pins what replaced it: `getEndpoint` composes an authenticated route onto
+  the configured base in both topologies and throws naming the route when it is
+  unset, an anonymous `publicApi` read goes to the same base, and a source scan
+  fails if `VITE_BACKEND_PROVIDER` or any `VITE_GCP_*` variable reappears —
+  a reintroduced switch would mean a second resolution path, which is the
+  defect that file exists to prevent.
+  *Public content limits* — `limit` and `offset` come straight off an anonymous
+  query string, so `public-reads.test.js` now covers non-numeric, empty, zero,
+  negative, fractional, oversized, `Infinity` and at-the-ceiling values on both
+  `listContent` and `listPodcasts`, including that a negative limit clamps up to
+  one item rather than producing an empty slice, that an offset past the end is
+  an empty page with an honest `total`, and that `limit=0` reads as unset.
+  *Partial configuration updates* — `admin-integrations.test.js` now pins that
+  a PATCH omitting `oauthToken` never sends the key (so the merge cannot clear
+  it), that the untouched token stays out of the response built from the merged
+  document, that the read artefact is dropped, that a revoke remains an
+  explicit empty-string write, and that an `ai-providers` patch touches only
+  the fields it names. `ai_providers` documents hold `apiKeyEnvVar`, the name of
+  a server-side setting, never a key — `oauthToken` on `mcp_servers` is the only
+  secret value either collection stores.
+
+### Changed
+
+- **Every backend dependency has a live consumer (T-407); nothing was
+  removed.** The item asked whether `cheerio`, `rss-parser`,
+  `google-auth-library` and the other non-route packages in
+  `functions/package.json` still had one. All of them do, and each consumer is
+  reachable from a registered function: `cheerio` from `cms/content-quality.js`,
+  `content/scrape.js`, `rss/feeds.js` and `sanitize-html.js`; `rss-parser` from
+  `rss/ingest.js` (the `fetch-rss-feeds` job and the `syncRssFeeds` timer) and
+  `timers/podcasts.js`; `google-auth-library` from
+  `cloud-tools/pricing/gcp.js` via the pricing index; and `turndown`,
+  `jsonwebtoken`, `jwks-rsa`, `@aws-sdk/client-pricing` and the four Azure SDK
+  packages from token verification, scraping, pricing, Key Vault, Blob and
+  Cosmos. Recorded rather than closed silently, because "no packages were
+  removed" is the finding.
+- **The remaining upstream feature candidates are evaluated (T-410).** Measured
+  against the Site-Main checkout at `088f458`, the same baseline the T-409
+  delta used:
+  *draw.io hotspot tooling* is the one candidate worth porting.
+  `lib/drawio/parseDrawio.js` and `lib/drawio/hotspotGeometry.js` are 258 lines
+  of pure client-side XML parsing with no Firebase coupling and an upstream test
+  and fixture; `DiagramPanel`'s only backend seam is an image upload, which maps
+  onto the existing `POST /api/cms/uploads/{container}`. It replaces manual
+  hotspot authoring — today `ArchitectureReviewBoard` requires each hotspot's
+  coordinates and label to be typed by hand — with generation from an uploaded
+  `.drawio` file, and `InteractiveDiagram` already consumes the resulting shape.
+  *Admin queue improvements* split in two. The bulk select, bulk reject, bulk
+  delete and confirm-modal paths already exist in this repository's 1,310-line
+  `QueuePage.jsx`; the upstream delta is a decomposition into five modules with
+  tests, plus two additional actions (`bulkApprove`, `bulkForge`). The
+  decomposition is worth doing against this repository's own file rather than
+  porting upstream's, which is written against Firestore-era helpers.
+  *The Architecture listing pages* are not worth porting as they stand.
+  `ArchitectureDesignsPage` and `ArchitectureCreatePage` are 163 lines between
+  them, but they are thin wrappers over `ContentReviewBrowser` (744 lines) and
+  the `components/admin/browser/` subsystem, `useAdminBrowser` and
+  `lib/adminBrowser` — roughly 1,500 further lines — and their data seam,
+  `fetchContentList`, is built from Firestore `where()` clauses. That is the
+  whole-branch shape T-410 was written to refuse, and `EditorListPage` already
+  filters admin content by type, `architecture` included. Which candidate is
+  actually built is a product decision and now sits in
+  [REVIEW.md](REVIEW.md).
+- **The ESLint 10 upgrade is still blocked, and by fewer plugins (D-001).**
+  Re-checked against the registry on 2026-08-24: `eslint-plugin-react-hooks`
+  7.1.1 and `@typescript-eslint/eslint-plugin` 8.67.0 now declare
+  `eslint@^10`. `eslint-plugin-react` 7.37.5 still caps its peer range at
+  `^9.7` and `eslint-plugin-jsx-a11y` 6.10.2 at `^9`, so the frontend stays on
+  the ESLint 9 line.
 
 - **Retired the completed migration surface and reset the repository around the
   HybridCloudWorks website.** Removed the old Firebase Functions package and

@@ -373,6 +373,80 @@ const FEED_CACHE_MAX_DOCS = 200;
 const FEED_INSIGHTS_MAX_DOCS = 200;
 
 /**
+ * Items served per `rss_cache` document (TODO.md T-319).
+ *
+ * FEED_CACHE_MAX_DOCS bounds the number of feeds; this bounds the number of
+ * articles inside each one, which is the other half of the same runaway. One
+ * document holds a whole feed, so a hundred bounded documents can still be an
+ * unbounded anonymous response — and `items[]` is the part of the document
+ * that grows with the world rather than with the site.
+ *
+ * The value equals the ingest writer's own cap (MAX_CACHE_ITEMS_PER_FEED in
+ * rss/feeds.js), so a document written by the current writer is served whole
+ * and this trim only engages on one that is not: a document written before
+ * that cap existed, or one an unusually large feed produced. The two constants
+ * are deliberately not shared by import — this module has no imports so the
+ * anonymous read path cannot be broken by an ingest-side change — and
+ * public-reads.test.js asserts they agree so the pair cannot silently drift.
+ */
+const FEED_CACHE_MAX_ITEMS_PER_DOC = 20;
+
+/**
+ * Listen & Learn containers and the per-set episode ceiling.
+ *
+ * Named here rather than imported from listen-and-learn/publish.js because
+ * this module deliberately has no imports (see the getFeed ceiling note): the
+ * anonymous read path must not be breakable by a change on the generation
+ * side. public-reads.test.js asserts the names agree.
+ *
+ * Eight areas is the largest real study guide, so fifty is a runaway guard
+ * rather than a page size.
+ */
+const LISTEN_AND_LEARN_SET_CONTAINER = 'listen_and_learn';
+const LISTEN_AND_LEARN_EPISODE_CONTAINER = 'listen_and_learn_episodes';
+const LISTEN_AND_LEARN_MAX_EPISODES = 50;
+
+/**
+ * Newest-first by `pubDate`, with undated items last in their stored order.
+ *
+ * Undated items sort to the tail rather than to "now": an item with no date is
+ * the one we know least about, and treating a missing date as current would
+ * let a malformed feed evict every dated article. Comparing for equality
+ * before subtracting keeps two undated items at 0 rather than at `-Infinity -
+ * -Infinity`, which is NaN — the sort is stable, so 0 preserves feed order.
+ */
+function feedItemTime(item) {
+  const parsed = Date.parse(item?.pubDate ?? '');
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+/**
+ * Bound one `rss_cache` document's `items[]`, keeping the newest.
+ *
+ * Documents whose `items` is absent or not an array are returned untouched:
+ * there is no array to bound, and inventing an empty one would turn a
+ * malformed document into a plausible-looking empty feed.
+ *
+ * `itemCount` is rewritten alongside a trim because the writer's invariant is
+ * `itemCount === items.length`; leaving the stored count would tell a client
+ * there are items in the response that are not.
+ */
+function boundFeedItems(doc) {
+  const items = doc?.items;
+  if (!Array.isArray(items) || items.length <= FEED_CACHE_MAX_ITEMS_PER_DOC) return doc;
+
+  const newest = [...items]
+    .sort((a, b) => {
+      const at = feedItemTime(a);
+      const bt = feedItemTime(b);
+      return at === bt ? 0 : bt - at;
+    })
+    .slice(0, FEED_CACHE_MAX_ITEMS_PER_DOC);
+
+  return { ...doc, items: newest, itemCount: newest.length };
+}
+
+/**
  * A curated article's image changes only when someone regenerates it, so a HIT
  * is cached hard — and this is the endpoint a news page hits up to twelve times
  * per load, which is the other reason.
@@ -677,8 +751,9 @@ export function createPublicReadHandlers({ store }) {
 
     /**
      * GET /api/public/feed?provider= — rss_cache docs plus active ai_insights
-     * for one provider (useNewsData.js). Docs returned as stored; the
-     * flatten/sort of cache items stays client-side where it lives today.
+     * for one provider (useNewsData.js). Cache documents are trimmed to their
+     * newest items (T-319) and otherwise returned as stored; the flatten/sort
+     * across feeds stays client-side where it lives today.
      */
     async getFeed(request, context) {
       try {
@@ -687,8 +762,10 @@ export function createPublicReadHandlers({ store }) {
 
         // Both queries were unbounded on an anonymous endpoint, and queryDocs
         // calls .fetchAll() (TODO.md T-203). rss_cache is TTL-bounded at seven
-        // days, but that bound is enforced by syncRssFeeds — a scheduler that
-        // is still a stub — so today nothing limits either container.
+        // days and syncRssFeeds now enforces that bound, but a document count
+        // is not an item count and the timer only rewrites feeds it still
+        // fetches — a retired feed's document keeps whatever it last held. The
+        // ceilings stay, and boundFeedItems below bounds the rest.
         const [rssCache, insights] = await Promise.all([
           store.queryDocs(
             'rss_cache',
@@ -711,7 +788,11 @@ export function createPublicReadHandlers({ store }) {
             // ai_insights visibility model — it is in the container's composite
             // index for exactly that reason — and a soft-deleted insight passed
             // it, which is the half of T-202 that was a real leak.
-            rssCache: rssCache.filter((doc) => !isSoftDeleted(doc)).map(stripInternalFields),
+            // T-319: each surviving document is trimmed to its newest items so
+            // the response is bounded in articles, not just in feeds.
+            rssCache: rssCache
+              .filter((doc) => !isSoftDeleted(doc))
+              .map((doc) => boundFeedItems(stripInternalFields(doc))),
             insights: insights
               .filter((doc) => doc.active !== false && !isSoftDeleted(doc))
               .map(stripInternalFields),
@@ -721,6 +802,69 @@ export function createPublicReadHandlers({ store }) {
       } catch (error) {
         context.error('publicGetFeed failed:', error);
         return json(500, { error: 'Failed to get feed' });
+      }
+    },
+
+    /**
+     * GET /api/public/listen-and-learn?platform=&examCode= — the approved
+     * episodes for one certification (components/education/ListenAndLearn.jsx).
+     *
+     * `status === 'published'` is the ONLY thing standing between a draft and a
+     * visitor. These are AI-written summaries of a paid exam's objectives,
+     * generated as drafts and approved one at a time in the admin portal, so
+     * this filter is the whole review gate rather than a display preference —
+     * which is why it is an equality test on an explicit value and not a
+     * `!== 'draft'`. An episode whose status a future writer misspells stays
+     * hidden, which is the safe direction.
+     *
+     * A set with no approved episodes returns `episodes: []` and a 200 rather
+     * than a 404: the certification exists and the page renders its own
+     * "nothing published yet" state, which is a different thing from a
+     * certification that has never been generated.
+     */
+    async getListenAndLearn(request, context) {
+      try {
+        const platform = String(request.query.get('platform') || '')
+          .trim()
+          .toLowerCase();
+        const examCode = String(request.query.get('examCode') || '').trim();
+        if (!platform || !examCode) {
+          return json(400, { error: 'platform and examCode are required' });
+        }
+
+        const id = `${platform}_${examCode.toLowerCase()}`;
+        const [set, episodes] = await Promise.all([
+          store.readDoc(LISTEN_AND_LEARN_SET_CONTAINER, id, id),
+          store.queryDocs(
+            LISTEN_AND_LEARN_EPISODE_CONTAINER,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_EPISODES} * FROM c WHERE c.setId = @setId AND c.status = @status`,
+            [
+              { name: '@setId', value: id },
+              { name: '@status', value: 'published' },
+            ]
+          ),
+        ]);
+
+        if (!set) return json(404, { error: 'Not found' });
+
+        return json(
+          200,
+          {
+            success: true,
+            set: stripInternalFields(set),
+            // Study-guide order. Episodes are meant to be heard in the order
+            // the exam presents the areas, which is neither the order a query
+            // returns nor the order exam weighting would give.
+            episodes: episodes
+              .filter((doc) => !isSoftDeleted(doc))
+              .map(stripInternalFields)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+          },
+          300
+        );
+      } catch (error) {
+        context.error('publicGetListenAndLearn failed:', error);
+        return json(500, { error: 'Failed to get Listen & Learn episodes' });
       }
     },
   };

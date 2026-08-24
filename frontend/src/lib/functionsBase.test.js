@@ -162,3 +162,99 @@ describe('no module reads the API base outside this resolver', () => {
     expect(readers).toEqual(['/lib/functionsBase.js']);
   });
 });
+
+describe('the API base is resolved through this module at the call sites', () => {
+  // This replaces the original T-4xx coverage line, "api.js with
+  // VITE_BACKEND_PROVIDER=azure resolves to VITE_AZURE_FUNCTIONS_URL". There
+  // is no longer a provider switch to select: the GCP backend is gone and the
+  // Azure base is the only one, so the assertion worth keeping is not that
+  // choosing Azure picks the right variable but that neither client can reach
+  // a base any other way. The last test in this block is what keeps the
+  // deleted switch from coming back.
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  const AZURE_BASE = 'https://api-azure.hybridcloudworks.com/api';
+
+  async function loadApi(base) {
+    vi.resetModules();
+    vi.stubEnv('VITE_AZURE_FUNCTIONS_URL', base ?? '');
+    // MSAL is irrelevant to URL composition and expensive to instantiate.
+    vi.doMock('@/lib/entraAuth', () => ({ acquireApiToken: vi.fn(async () => 'token') }));
+    return import('./api.js');
+  }
+
+  it('composes an authenticated route onto the configured Azure base', async () => {
+    const { getEndpoint } = await loadApi(AZURE_BASE);
+    expect(getEndpoint('cms/content')).toBe(`${AZURE_BASE}/cms/content`);
+    expect(getEndpoint('submitContentUrls')).toBe(`${AZURE_BASE}/submitContentUrls`);
+  });
+
+  it('joins with exactly one slash however the base was written', async () => {
+    const { getEndpoint } = await loadApi(`${AZURE_BASE}/`);
+    expect(getEndpoint('cms/content')).toBe(`${AZURE_BASE}/cms/content`);
+  });
+
+  it('composes the same way for a same-origin deployment', async () => {
+    const { getEndpoint } = await loadApi('/api');
+    expect(getEndpoint('cms/content')).toBe('/api/cms/content');
+  });
+
+  it('throws from the call site, naming the route, when the base is unset', async () => {
+    const { getEndpoint } = await loadApi(undefined);
+    expect(() => getEndpoint('cms/content')).toThrow(/VITE_AZURE_FUNCTIONS_URL/);
+    expect(() => getEndpoint('cms/content')).toThrow(/cms\/content/);
+  });
+
+  it('sends an anonymous public read to the same base', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_AZURE_FUNCTIONS_URL', AZURE_BASE);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, items: [] }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { fetchPublicContentList } = await import('./publicApi.js');
+    await fetchPublicContentList({ type: 'architecture' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`${AZURE_BASE}/public/content`),
+      expect.anything()
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it('has no backend-provider switch left to select', async () => {
+    // The port carried a VITE_BACKEND_PROVIDER switch between the GCP and
+    // Azure bases. Removing the GCP backend removed the choice, and a
+    // reintroduced switch would mean a second resolution path — which is the
+    // shape of the original defect this whole file guards.
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(js|jsx|ts|tsx)$/.test(entry)) continue;
+        if (full.endsWith('functionsBase.test.js')) continue;
+        if (/VITE_BACKEND_PROVIDER|VITE_GCP_/.test(readFileSync(full, 'utf8'))) {
+          offenders.push(full);
+        }
+      }
+    };
+    walk(join(process.cwd(), 'src'));
+
+    expect(offenders).toEqual([]);
+  });
+});

@@ -27,6 +27,19 @@ function timeAgo(ts) {
   return date.toLocaleDateString();
 }
 
+/**
+ * Readable names for the `source` values ai/usage.js stamps.
+ *
+ * Exported so a test can hold it against the backend's own USAGE_SOURCES: a
+ * source added there without a label here shows the raw slug on screen, which
+ * is the same class of silent drift DEFAULT_PROVIDERS had.
+ */
+export const SOURCE_LABELS = {
+  admin: 'Admin playground',
+  'listen-and-learn:script': 'Listen & Learn — script',
+  'listen-and-learn:audio': 'Listen & Learn — audio',
+};
+
 export default function AIEngineUsageTab() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +58,19 @@ export default function AIEngineUsageTab() {
     cost: parseFloat(data.costUsd.toFixed(6)),
     calls: data.calls,
   }));
+
+  // Grouped by what spent the money. Provider answers "which vendor"; this
+  // answers "which feature", which is the question when one vendor serves
+  // several and their rates differ by an order of magnitude.
+  const sourceRows = Object.entries(aiEngine.aggregateBySource(records))
+    .map(([source, data]) => ({
+      source,
+      tokens: data.tokens,
+      cost: parseFloat(data.costUsd.toFixed(6)),
+      calls: data.calls,
+      estimated: data.estimated,
+    }))
+    .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
 
   const totalTokens = records.reduce((sum, record) => sum + (record.totalTokens || 0), 0);
   const totalCost = records.reduce((sum, record) => sum + (record.estimatedCostUsd || 0), 0);
@@ -129,6 +155,52 @@ export default function AIEngineUsageTab() {
                       <td className="py-1.5 text-right font-mono">{fmtCost(row.cost)}</td>
                     </tr>
                   ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {sourceRows.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Breakdown by Feature</CardTitle>
+            <p className="text-xs text-slate-500">
+              What spent the money, rather than who was paid. Listen &amp; Learn audio is priced on
+              an output rate an order of magnitude above text, so a run&apos;s cost sits almost
+              entirely in one row.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-500 border-b">
+                  <th className="text-left pb-1 font-medium">Feature</th>
+                  <th className="text-right pb-1 font-medium">Calls</th>
+                  <th className="text-right pb-1 font-medium">Tokens</th>
+                  <th className="text-right pb-1 font-medium">Est. Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceRows.map((row) => (
+                  <tr key={row.source} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-1.5 font-medium">
+                      {SOURCE_LABELS[row.source] || row.source}
+                      {row.estimated > 0 && (
+                        // Derived counts must never be shown as billed ones.
+                        <span
+                          className="ml-1.5 text-slate-400 font-normal"
+                          title={`${row.estimated} of ${row.calls} rows have token counts derived from audio duration rather than reported by the API`}
+                        >
+                          ~{row.estimated} est.
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right text-slate-500">{row.calls}</td>
+                    <td className="py-1.5 text-right">{fmtTokens(row.tokens)}</td>
+                    <td className="py-1.5 text-right font-mono">{fmtCost(row.cost)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </CardContent>

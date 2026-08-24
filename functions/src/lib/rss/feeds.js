@@ -173,16 +173,44 @@ export function cacheDocId(provider, feed) {
   return `${provider}_${String(feed.name).toLowerCase().replace(/\s+/g, '_')}`;
 }
 
-/** The compact item shape the public feed and the homepage read. */
+/**
+ * The compact item shape the public feed and the homepage read.
+ *
+ * The cap keeps the NEWEST `max` items, not the first `max` (TODO.md T-319).
+ * Feed order is conventionally newest-first but nothing enforces it, and the
+ * two readers of this array both sort by `pubDate` — buildHomepageFeedItems
+ * below and useNewsData.js in the browser — so a feed that publishes in any
+ * other order would have had its recent articles dropped here and then never
+ * shown, with the cache looking full the whole time.
+ *
+ * Undated items sort last and are therefore dropped first: `Date.parse('')`
+ * is NaN, and a missing date cannot be assumed to mean "now" without letting
+ * one malformed item evict a dated one. When no item carries a date the
+ * comparison is 0 throughout and the stable sort leaves feed order intact,
+ * which is the previous behavior.
+ */
 export function buildCacheItems(items, feed, max = MAX_CACHE_ITEMS_PER_FEED) {
-  return (items || []).slice(0, max).map((item) => ({
-    title: item.title || 'Untitled',
-    link: item.link || '',
-    pubDate: item.pubDate || item.isoDate || '',
-    summary: truncateText(item.contentSnippet || item.content || ''),
-    category: categorizeItem(item),
-    author: item.creator || item.author || feed.name,
-  }));
+  const time = (item) => {
+    const parsed = Date.parse(item?.pubDate || item?.isoDate || '');
+    return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+  };
+  return [...(items || [])]
+    .sort((a, b) => {
+      const at = time(a);
+      const bt = time(b);
+      // Equality first: two undated items would otherwise compare
+      // `-Infinity - -Infinity`, which is NaN.
+      return at === bt ? 0 : bt - at;
+    })
+    .slice(0, max)
+    .map((item) => ({
+      title: item.title || 'Untitled',
+      link: item.link || '',
+      pubDate: item.pubDate || item.isoDate || '',
+      summary: truncateText(item.contentSnippet || item.content || ''),
+      category: categorizeItem(item),
+      author: item.creator || item.author || feed.name,
+    }));
 }
 
 /**

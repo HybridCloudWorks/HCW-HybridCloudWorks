@@ -808,3 +808,323 @@ describe('getFeed', () => {
     expect(body.insights.map((d) => d.id)).toEqual(['i1']); // active:false excluded
   });
 });
+
+describe('T-319 — the feed endpoint is bounded in items, not just in documents', () => {
+  const feedStore = (docs) => ({
+    queryDocs: vi.fn(async (container) => (container === 'rss_cache' ? docs : [])),
+    readDoc: vi.fn(),
+  });
+
+  const getCache = async (docs) => {
+    const h = createPublicReadHandlers({ store: feedStore(docs) });
+    const res = await h.getFeed(makeRequest({ query: { provider: 'azure' } }), context);
+    return JSON.parse(res.body).rssCache;
+  };
+
+  // One rss_cache document is one FEED. FEED_CACHE_MAX_DOCS bounds how many
+  // feeds an anonymous caller gets; without this bound each of them could
+  // still carry an unbounded articles array.
+  const dated = (n, isoMonth) => ({ title: `item-${n}`, pubDate: `2026-${isoMonth}-01T00:00:00Z` });
+
+  it('trims an oversized feed document to the newest items', async () => {
+    // 40 items, oldest first, so a first-N truncation would keep the 20 oldest.
+    const items = Array.from({ length: 40 }, (_, i) => ({
+      title: `item-${i}`,
+      pubDate: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+    }));
+    const [doc] = await getCache([{ id: 'c1', provider: 'azure', items, itemCount: 40 }]);
+
+    expect(doc.items).toHaveLength(20);
+    expect(doc.items[0].title).toBe('item-39');
+    expect(doc.items.at(-1).title).toBe('item-20');
+    // The writer's invariant is itemCount === items.length; a stale 40 would
+    // tell the client about items that are not in the response.
+    expect(doc.itemCount).toBe(20);
+  });
+
+  it('serves a document written by the current ingest untouched', async () => {
+    // Equal to the writer's cap, so the trim must not engage — including not
+    // reordering a feed the client has not asked to be reordered.
+    const items = [dated(0, '03'), dated(1, '01'), dated(2, '02')];
+    const [doc] = await getCache([{ id: 'c1', provider: 'azure', items, itemCount: 3 }]);
+
+    expect(doc.items.map((i) => i.title)).toEqual(['item-0', 'item-1', 'item-2']);
+    expect(doc.itemCount).toBe(3);
+  });
+
+  it('drops undated items before dated ones when trimming', async () => {
+    // A feed that emits items with no pubDate must not be able to evict every
+    // dated article: Date.parse('') is NaN, and NaN is not "now".
+    const items = [
+      ...Array.from({ length: 25 }, (_, i) => ({ title: `undated-${i}` })),
+      ...Array.from({ length: 5 }, (_, i) => dated(i, '06')),
+    ];
+    const [doc] = await getCache([{ id: 'c1', provider: 'azure', items }]);
+
+    expect(doc.items).toHaveLength(20);
+    expect(doc.items.filter((i) => i.title.startsWith('item-'))).toHaveLength(5);
+  });
+
+  it('keeps stored order among undated items', async () => {
+    // All-undated compares 0 throughout, so the stable sort leaves feed order.
+    const items = Array.from({ length: 30 }, (_, i) => ({ title: `u-${i}` }));
+    const [doc] = await getCache([{ id: 'c1', provider: 'azure', items }]);
+
+    expect(doc.items.map((i) => i.title)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `u-${i}`)
+    );
+  });
+
+  it('leaves a malformed document alone rather than inventing an empty feed', async () => {
+    const cache = await getCache([
+      { id: 'c1', provider: 'azure', items: 'not-an-array' },
+      { id: 'c2', provider: 'azure' },
+    ]);
+
+    expect(cache[0].items).toBe('not-an-array');
+    expect(cache[1]).not.toHaveProperty('items');
+  });
+
+  it('does not mutate the stored document it was handed', async () => {
+    const items = Array.from({ length: 30 }, (_, i) => dated(i, '05'));
+    const stored = { id: 'c1', provider: 'azure', items, itemCount: 30 };
+    await getCache([stored]);
+
+    expect(stored.items).toHaveLength(30);
+    expect(stored.itemCount).toBe(30);
+  });
+
+  it('bounds every document, not only the first', async () => {
+    const many = (n) => Array.from({ length: n }, (_, i) => dated(i, '04'));
+    const cache = await getCache([
+      { id: 'c1', provider: 'azure', items: many(25) },
+      { id: 'c2', provider: 'azure', items: many(30) },
+    ]);
+
+    expect(cache.map((d) => d.items.length)).toEqual([20, 20]);
+  });
+
+  it('still strips internal fields from a trimmed document', async () => {
+    const items = Array.from({ length: 30 }, (_, i) => dated(i, '07'));
+    const [doc] = await getCache([{ id: 'c1', provider: 'azure', items, _etag: 'x', _ts: 1 }]);
+
+    expect(doc).not.toHaveProperty('_etag');
+    expect(doc).not.toHaveProperty('_ts');
+    expect(doc.items).toHaveLength(20);
+  });
+
+  it('is sized to the ingest writer cap it shadows', async () => {
+    // public-reads.js has no imports on purpose, so the read ceiling is a
+    // second copy of MAX_CACHE_ITEMS_PER_FEED. This is the assertion that
+    // stops the copies drifting: a read ceiling below the write cap would
+    // start trimming documents the writer considers whole.
+    const { MAX_CACHE_ITEMS_PER_FEED } = await import('./rss/feeds.js');
+    const items = Array.from({ length: MAX_CACHE_ITEMS_PER_FEED + 1 }, (_, i) => dated(i, '08'));
+    const [doc] = await getCache([{ id: 'c1', provider: 'azure', items }]);
+
+    expect(doc.items).toHaveLength(MAX_CACHE_ITEMS_PER_FEED);
+  });
+});
+
+describe('public list limits are clamped, whatever the query string says', () => {
+  // `limit` and `offset` come straight off an anonymous query string, so every
+  // value below is something a caller can actually send. The clamp is
+  // `Math.min(Math.max(Number(v) || DEFAULT, 1), MAX)`, and the cases that
+  // matter are the ones where `Number(v)` is not a usable page size.
+  const DEFAULT_LIMIT = 60;
+  const MAX_LIMIT = 250;
+
+  const docs = Array.from({ length: 300 }, (_, i) =>
+    publicDoc({
+      id: `d${String(i).padStart(3, '0')}`,
+      // Descending publish dates keep the resolved order deterministic, so a
+      // page can be identified by its first id.
+      publishedAt: new Date(Date.UTC(2026, 0, 1) - i * 86400000).toISOString(),
+    })
+  );
+
+  const listWith = async (query) => {
+    const h = createPublicReadHandlers({
+      store: { queryDocs: vi.fn(async () => docs), readDoc: vi.fn() },
+    });
+    const res = await h.listContent(makeRequest({ query }), context);
+    expect(res.status).toBe(200);
+    return JSON.parse(res.body);
+  };
+
+  it('falls back to the default for a non-numeric limit', async () => {
+    // Number('abc') is NaN, which is falsy — the `||` is what makes this the
+    // default rather than a NaN slice returning nothing.
+    for (const limit of ['abc', '', ' ', 'null', '12abc']) {
+      expect((await listWith({ limit })).items).toHaveLength(DEFAULT_LIMIT);
+    }
+  });
+
+  it('falls back to the default for a zero limit', async () => {
+    // 0 is falsy, so it takes the default rather than clamping up to 1: an
+    // explicit `limit=0` is treated as "unset", not as "an empty page".
+    expect((await listWith({ limit: '0' })).items).toHaveLength(DEFAULT_LIMIT);
+    expect((await listWith({ limit: '-0' })).items).toHaveLength(DEFAULT_LIMIT);
+  });
+
+  it('clamps a negative limit up to one item, never to a negative slice', async () => {
+    // Math.max(..., 1) matters here: slice(offset, offset + -5) would return
+    // an empty array, so a negative limit would silently blank the page.
+    for (const limit of ['-5', '-1', '-9999']) {
+      expect((await listWith({ limit })).items).toHaveLength(1);
+    }
+  });
+
+  it('clamps an oversized limit down to the ceiling', async () => {
+    for (const limit of ['5000', '250000', '1e6', 'Infinity']) {
+      expect((await listWith({ limit })).items).toHaveLength(MAX_LIMIT);
+    }
+  });
+
+  it('serves exactly the ceiling when asked for it', async () => {
+    // 250 is the widest real client fetch (useFrameworkData), so the boundary
+    // itself must not be off by one.
+    expect((await listWith({ limit: String(MAX_LIMIT) })).items).toHaveLength(MAX_LIMIT);
+    expect((await listWith({ limit: String(MAX_LIMIT - 1) })).items).toHaveLength(MAX_LIMIT - 1);
+  });
+
+  it('truncates a fractional limit rather than returning a fractional page', async () => {
+    expect((await listWith({ limit: '2.9' })).items).toHaveLength(2);
+  });
+
+  it('treats a non-numeric or negative offset as zero', async () => {
+    const first = (await listWith({ limit: '5', offset: '0' })).items[0].id;
+    for (const offset of ['abc', '-10', '', 'NaN']) {
+      expect((await listWith({ limit: '5', offset })).items[0].id).toBe(first);
+    }
+  });
+
+  it('returns an empty page, not an error, for an offset past the end', async () => {
+    const body = await listWith({ offset: '100000' });
+    expect(body.items).toEqual([]);
+    // `total` is the size of the match, not of the page, so a paginating
+    // client can tell "past the end" from "nothing matched".
+    expect(body.total).toBe(docs.length);
+  });
+
+  it('reports the unpaginated total alongside a clamped page', async () => {
+    const body = await listWith({ limit: '5000' });
+    expect(body.items).toHaveLength(MAX_LIMIT);
+    expect(body.total).toBe(docs.length);
+  });
+
+  it('clamps the podcast limit on the same rules', async () => {
+    // listPodcasts has its own copy of the clamp against the same constants.
+    const episodes = Array.from({ length: 300 }, (_, i) => ({
+      id: `p${i}`,
+      title: `Episode ${i}`,
+      publishedAt: new Date(Date.UTC(2026, 0, 1) - i * 86400000).toISOString(),
+    }));
+    const h = createPublicReadHandlers({
+      store: { queryDocs: vi.fn(async () => episodes), readDoc: vi.fn() },
+    });
+    const listed = async (limit) =>
+      JSON.parse((await h.listPodcasts(makeRequest({ query: { limit } }), context)).body).items;
+
+    expect(await listed('abc')).toHaveLength(DEFAULT_LIMIT);
+    expect(await listed('0')).toHaveLength(DEFAULT_LIMIT);
+    expect(await listed('-5')).toHaveLength(1);
+    expect(await listed('5000')).toHaveLength(MAX_LIMIT);
+  });
+});
+
+describe('getListenAndLearn — approval is the only gate', () => {
+  const store = (set, episodes) => ({
+    readDoc: vi.fn(async () => set),
+    queryDocs: vi.fn(async () => episodes),
+  });
+
+  const get = async (deps, query = { platform: 'azure', examCode: 'AZ-104' }) => {
+    const h = createPublicReadHandlers({ store: deps });
+    return h.getListenAndLearn(makeRequest({ query }), context);
+  };
+
+  it('filters to published in SQL, on an equality test', async () => {
+    // These are AI-written summaries of a paid exam's objectives. Every
+    // episode is generated as a draft and approved one at a time, so this
+    // filter IS the review gate — not a display preference. An equality test
+    // means an unrecognised status stays hidden, which is the safe direction;
+    // a `!== 'draft'` would leak anything a future writer misspells.
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps);
+
+    const [container, query, params] = deps.queryDocs.mock.calls[0];
+    expect(container).toBe('listen_and_learn_episodes');
+    expect(query).toContain('c.status = @status');
+    expect(query).not.toContain('!=');
+    expect(params).toContainEqual({ name: '@status', value: 'published' });
+    expect(params).toContainEqual({ name: '@setId', value: 'azure_az-104' });
+  });
+
+  it('returns episodes in study-guide order, not query order', async () => {
+    const deps = store({ id: 'azure_az-104' }, [
+      { id: 'c', order: 2 },
+      { id: 'a', order: 0 },
+      { id: 'b', order: 1 },
+    ]);
+    const body = JSON.parse((await get(deps)).body);
+    expect(body.episodes.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('drops a soft-deleted episode the status filter would have admitted', async () => {
+    const deps = store({ id: 'azure_az-104' }, [
+      { id: 'a', order: 0 },
+      { id: 'gone', order: 1, softDeletedAt: '2026-02-01' },
+    ]);
+    const body = JSON.parse((await get(deps)).body);
+    expect(body.episodes.map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('strips Cosmos system properties from the set and the episodes', async () => {
+    const deps = store({ id: 'azure_az-104', _etag: 'x' }, [{ id: 'a', order: 0, _ts: 1 }]);
+    const res = await get(deps);
+    expect(res.body).not.toContain('_etag');
+    expect(res.body).not.toContain('_ts');
+  });
+
+  it('serves a generated set with nothing approved as an empty list, not a 404', async () => {
+    // "Generated but not yet approved" and "never generated" are different
+    // states, and the page renders a different thing for each.
+    const res = await get(store({ id: 'azure_az-104', examCode: 'AZ-104' }, []));
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).episodes).toEqual([]);
+  });
+
+  it('404s a certification that was never generated', async () => {
+    expect((await get(store(null, []))).status).toBe(404);
+  });
+
+  it('lowercases the platform and exam code into the set id', async () => {
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps, { platform: 'AZURE', examCode: 'AZ-104' });
+    expect(deps.readDoc).toHaveBeenCalledWith('listen_and_learn', 'azure_az-104', 'azure_az-104');
+  });
+
+  it('requires both parameters', async () => {
+    expect((await get(store(null, []), { platform: 'azure' })).status).toBe(400);
+    expect((await get(store(null, []), { examCode: 'AZ-104' })).status).toBe(400);
+  });
+
+  it('bounds the episode query', async () => {
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps);
+    expect(deps.queryDocs.mock.calls[0][1]).toMatch(/SELECT TOP \d+/);
+  });
+
+  it('names the same containers the writer does', async () => {
+    // public-reads.js has no imports on purpose, so the container names are a
+    // second copy. This is what stops the copies drifting into a read that
+    // silently returns nothing.
+    const { SET_CONTAINER, EPISODE_CONTAINER } = await import('./listen-and-learn/publish.js');
+    const deps = store({ id: 'azure_az-104' }, []);
+    await get(deps);
+
+    expect(deps.readDoc.mock.calls[0][0]).toBe(SET_CONTAINER);
+    expect(deps.queryDocs.mock.calls[0][0]).toBe(EPISODE_CONTAINER);
+  });
+});

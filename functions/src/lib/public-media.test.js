@@ -10,7 +10,12 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createPublicMediaHandlers } from './public-media.js';
-import { mediaUrlFor, PUBLIC_MEDIA_CONTAINERS, UPLOAD_CONTAINERS } from './blob-paths.js';
+import {
+  GENERATED_MEDIA_CONTAINERS,
+  mediaUrlFor,
+  PUBLIC_MEDIA_CONTAINERS,
+  UPLOAD_CONTAINERS,
+} from './blob-paths.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -69,11 +74,34 @@ describe('container allowlist', () => {
     expect(storage.readBlobForDelivery).not.toHaveBeenCalled();
   });
 
-  it('is a strict subset of the containers uploads may write to', () => {
+  it('gives every publicly readable container exactly one declared writer', () => {
+    // This replaced `PUBLIC_MEDIA_CONTAINERS ⊂ UPLOAD_CONTAINERS`, which held
+    // only because every public container happened to be one people upload to.
+    // Listen & Learn audio is written by a job, not a person, so the subset
+    // relation became false — and satisfying it would have meant opening the
+    // episode container to the admin upload route.
     for (const container of PUBLIC_MEDIA_CONTAINERS) {
-      expect(UPLOAD_CONTAINERS.has(container)).toBe(true);
+      const writers =
+        Number(UPLOAD_CONTAINERS.has(container)) + Number(GENERATED_MEDIA_CONTAINERS.has(container));
+      expect(writers, `${container} must have exactly one declared writer`).toBe(1);
     }
-    expect(PUBLIC_MEDIA_CONTAINERS.size).toBeLessThan(UPLOAD_CONTAINERS.size);
+  });
+
+  it('never lets the upload route write a container a job owns', () => {
+    // A container that is both anonymously readable and reachable from the
+    // upload route lets any editor put an arbitrary file behind a public URL.
+    for (const container of GENERATED_MEDIA_CONTAINERS) {
+      expect(UPLOAD_CONTAINERS.has(container)).toBe(false);
+    }
+  });
+
+  it('still does not expose every container uploads may write to', () => {
+    // `content` and `speakerevents` are deliberately not public; the original
+    // test's size comparison was the part of it worth keeping.
+    expect(UPLOAD_CONTAINERS.has('content')).toBe(true);
+    expect(PUBLIC_MEDIA_CONTAINERS.has('content')).toBe(false);
+    expect(UPLOAD_CONTAINERS.has('speakerevents')).toBe(true);
+    expect(PUBLIC_MEDIA_CONTAINERS.has('speakerevents')).toBe(false);
   });
 });
 

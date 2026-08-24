@@ -93,6 +93,67 @@ describe('cache documents', () => {
       author: 'Azure Blog',
     });
   });
+
+  // T-319. Feed order is conventionally newest-first, but nothing enforces
+  // it, and both readers of this array sort by pubDate — so anything the cap
+  // drops here is dropped from the site, not merely from the top of a list.
+  it('keeps the newest items, not the first, when a feed exceeds the cap', () => {
+    const items = Array.from({ length: 25 }, (_, i) => ({
+      title: `t${i}`,
+      link: `https://x/${i}`,
+      // Ascending: oldest first, which a first-N cap would keep.
+      pubDate: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+    }));
+    const cached = buildCacheItems(items, feed);
+
+    expect(cached).toHaveLength(MAX_CACHE_ITEMS_PER_FEED);
+    expect(cached[0].title).toBe('t24');
+    expect(cached.at(-1).title).toBe('t5');
+  });
+
+  it('falls back to isoDate when an item has no pubDate', () => {
+    const items = [
+      { title: 'old', link: 'https://x/o', isoDate: '2026-01-01T00:00:00Z' },
+      { title: 'new', link: 'https://x/n', isoDate: '2026-06-01T00:00:00Z' },
+    ];
+    const cached = buildCacheItems(items, feed, 1);
+
+    expect(cached[0].title).toBe('new');
+    expect(cached[0].pubDate).toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('sorts undated items last so they are dropped before dated ones', () => {
+    // Date.parse('') is NaN. Treating a missing date as "now" would let one
+    // malformed item evict a real article.
+    const items = [
+      ...Array.from({ length: 22 }, (_, i) => ({ title: `u${i}`, link: `https://x/u${i}` })),
+      { title: 'dated', link: 'https://x/d', pubDate: '2026-07-01T00:00:00Z' },
+    ];
+    const cached = buildCacheItems(items, feed);
+
+    expect(cached).toHaveLength(MAX_CACHE_ITEMS_PER_FEED);
+    expect(cached[0].title).toBe('dated');
+  });
+
+  it('leaves an all-undated feed in its original order', () => {
+    const items = Array.from({ length: 22 }, (_, i) => ({ title: `u${i}`, link: `https://x/${i}` }));
+    const cached = buildCacheItems(items, feed);
+
+    expect(cached.map((c) => c.title)).toEqual(
+      Array.from({ length: MAX_CACHE_ITEMS_PER_FEED }, (_, i) => `u${i}`)
+    );
+  });
+
+  it('does not mutate the parsed feed array it was handed', () => {
+    const items = [
+      { title: 'a', link: 'https://x/a', pubDate: '2026-01-01T00:00:00Z' },
+      { title: 'b', link: 'https://x/b', pubDate: '2026-09-01T00:00:00Z' },
+    ];
+    buildCacheItems(items, feed);
+
+    // draftNewContent reads the same array afterwards and drafts in feed order.
+    expect(items.map((i) => i.title)).toEqual(['a', 'b']);
+  });
 });
 
 describe('buildRssContentDoc', () => {

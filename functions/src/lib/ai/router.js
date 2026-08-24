@@ -122,6 +122,15 @@ export const COST_TABLE = Object.freeze({
     'gemini-2.5-pro': [3.5, 10.5],
     'gemini-2.5-flash': [0.3, 2.5],
     'gemini-2.5-flash-lite': [0.1, 0.4],
+    // Text-to-speech (Listen & Learn). The output rate prices AUDIO tokens and
+    // is an order of magnitude above the text rates, which is why an episode's
+    // cost is dominated by its length rather than its prompt. Read from the
+    // published paid-tier pricing on 2026-08-24; the flash TTS model is half
+    // the price of the other two, which is why it is the default in
+    // listen-and-learn/speech/gemini.js.
+    'gemini-2.5-flash-preview-tts': [0.5, 10.0],
+    'gemini-2.5-pro-preview-tts': [1.0, 20.0],
+    'gemini-3.1-flash-tts-preview': [1.0, 20.0],
     default: [0.3, 2.5],
   },
   vertex: {

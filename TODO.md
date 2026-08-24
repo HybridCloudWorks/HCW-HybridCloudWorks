@@ -11,59 +11,32 @@ operations belong in [REVIEW.md](REVIEW.md). Verified completion belongs in
 | Priority | Open items |
 | --- | ---: |
 | High | 0 |
-| Medium | 2 |
-| Low | 3 |
-| Total | 5 |
-
-## Medium
-
-### T-411 — Port Listen & Learn as a scoped website feature
-
-Implement the worker, API reads, player, and admin experience as one coherent
-feature. The work depends on an owner decision about Azure Speech or another
-text-to-speech provider, YouTube API access, and the storage/retention policy;
-those inputs are listed in [REVIEW.md](REVIEW.md). Do not port the old Firebase
-implementation wholesale.
-
-### T-319 — Bound RSS item arrays
-
-Bound `items[]` in `functions/src/lib/public-reads.js` and in the future
-`syncRssFeeds` writer. Preserve the newest items based on `pubDate`, add a
-matching unit test, and keep the anonymous response bounded even when one feed
-is malformed or unusually large.
+| Medium | 0 |
+| Low | 1 |
+| Total | 1 |
 
 ## Low
 
-### T-410 — Evaluate the remaining upstream feature candidates
+### A-001 — Associate the unlabelled form controls
 
-Review the admin queue improvements, Architecture listing, draw.io tooling, and
-other upstream candidates as separate product changes. Port only a selected
-feature with current Azure API and authorization seams; do not merge the old
-Firebase data/auth layers or copy an entire upstream branch.
-
-### T-407 — Remove unreachable backend dependencies
-
-Confirm whether `cheerio`, `rss-parser`, `google-auth-library`, and other
-non-route dependencies in `functions/package.json` are still needed by active
-handlers. Remove only packages with no runtime or test consumer, then run the
-Functions test suite and dependency review.
-
-### D-001 — Revisit the ESLint 10 upgrade
-
-Re-evaluate the upgrade when `eslint-plugin-react`, `eslint-plugin-react-hooks`,
-and `eslint-plugin-jsx-a11y` support ESLint 10. Keep the current ESLint 9 line
-until the complete frontend lint suite is green on the newer major.
+`jsx-a11y/label-has-associated-control` reports 20 violations across
+`frontend/src` — `<label>` elements with no associated control. The rule is
+disabled in `eslint.config.js`; it was off because it crashed on ESLint 9, and
+since the ESLint 10 upgrade it runs correctly and these are real findings.
+Associate each label with its control (nesting, or `htmlFor`/`id`), then delete
+the rule's `off` entry so it cannot regress. Screen-reader users get no field
+name from an unassociated label, so each one is a small but genuine defect.
 
 ## Test coverage follow-up
 
-Add focused tests for the remaining boundary cases:
+One boundary case is left, and it is not resolvable from the repository:
 
-- API base resolution when the Azure provider is selected.
-- Public content limits for non-numeric, zero, negative, and oversized values.
-- Partial MCP/AI configuration updates that omit an existing secret field.
-- The deployed no-op Labs job path after a human supplies the Entra access
+- The deployed no-op Labs job path, after a human supplies the Entra access
   needed for an authenticated live check (the live prerequisite remains in
   [REVIEW.md](REVIEW.md)).
+
+The API base, public content limit, and partial configuration cases are
+covered; see [CHANGELOG.md](CHANGELOG.md).
 
 Completed items are removed from this file after the corresponding regular
 entry is present in `CHANGELOG.md`; item numbers are not reused.

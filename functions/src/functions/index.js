@@ -20,6 +20,8 @@ import './change-feed.js';
 import './jobs-http.js';
 import './jobs-worker.js';
 import './lab-agent-http.js';
+import './listen-and-learn-http.js';
+import './listen-and-learn-jobs.js';
 import './labs-http.js';
 import './legacy-blogs-telemetry-http.js';
 import './ops-health-http.js';

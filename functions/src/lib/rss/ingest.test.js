@@ -86,6 +86,40 @@ describe('processRssFeeds', () => {
     expect(home.items.map((i) => i.provider).slice(0, 2)).toEqual(['azure', 'aws']);
   });
 
+  it('caches the newest items of an oldest-first feed, and still drafts in feed order', async () => {
+    // The cap used to be applied here, in feed order, before buildCacheItems
+    // could choose by date (T-319) — so a feed that publishes oldest-first
+    // cached only its archive. Drafting deliberately still walks feed order.
+    const store = makeStore();
+    const oldestFirst = Array.from({ length: 30 }, (_, i) => ({
+      title: `Item ${i}`,
+      link: `https://example.test/${i}`,
+      isoDate: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+      contentSnippet: `snippet ${i}`,
+    }));
+    const ingest = createRssIngest({
+      store,
+      parser: { parseURL: vi.fn(async () => ({ items: oldestFirst })) },
+      dedup: dedupNone,
+      now: () => NOW,
+      uuid: (() => {
+        let n = 0;
+        return () => `id-${n++}`;
+      })(),
+    });
+
+    await ingest.processRssFeeds({ feeds: { azure: feeds.azure } });
+
+    const cached = store.docs.rss_cache.azure_azure_blog;
+    expect(cached.items).toHaveLength(20);
+    expect(cached.items[0].title).toBe('Item 29');
+    expect(cached.itemCount).toBe(20);
+    // Drafting is unchanged: the first 10 of the parsed feed, as before.
+    expect(Object.values(store.docs.content).map((d) => d.Title)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `Item ${i}`)
+    );
+  });
+
   it('skips duplicates and items without a link, and counts them separately', async () => {
     const store = makeStore();
     const parser = {

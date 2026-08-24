@@ -100,6 +100,20 @@ variable "azure_location" {
 # This is a control-plane location only. The site is served from Azure's global
 # edge network either way, so the region does not decide where users are served
 # from.
+# Only for the FALLBACK speech provider. Listen & Learn synthesises with Gemini
+# TTS by default, on the GEMINI_API_KEY the text models already use, and that
+# path needs no variable at all. No Speech resource is declared in this
+# configuration — provisioning a Cognitive Services account is a spend decision
+# (REVIEW.md) — so this merely names the region whose endpoint would be called
+# if one is ever created, keeping the setting correct in advance. If the
+# resource is created elsewhere, set this to that region or set
+# AZURE_SPEECH_ENDPOINT to its full custom-subdomain URL.
+variable "speech_region" {
+  description = "Azure region of the fallback Speech resource for Listen & Learn audio — read as AZURE_SPEECH_REGION; unused while Gemini TTS is the provider"
+  type        = string
+  default     = "centralus"
+}
+
 variable "static_web_app_location" {
   description = "Region for the Static Web App — must be one of the five that offer it; equals azure_location today, kept separate because the constraint has not gone away"
   type        = string

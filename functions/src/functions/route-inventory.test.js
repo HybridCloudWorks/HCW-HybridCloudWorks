@@ -119,6 +119,13 @@ const PUBLIC_ROUTES = new Set([
   // is here because the public news pages were calling the editor-gated
   // equivalent and rendering nothing (TODO.md T-210).
   'public/curated-image/{id}',
+  // Approved Listen & Learn episodes for one certification. The generator
+  // writes every episode as a draft and an editor approves them one at a time,
+  // so this route returns only `status === 'published'` documents — the review
+  // gate, not a display preference. Drafts, failures and transcripts awaiting
+  // approval are reachable only through the editor-gated
+  // `cms/listen-and-learn/*` routes.
+  'public/listen-and-learn',
   // Reads no database, returns four enum values. The reason it is here rather
   // than guarded is that it backs indicators rendered to every anonymous
   // visitor on the landing page; the reason it is safe is that its cache bounds
