@@ -34,8 +34,8 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | GCP pricing integration | If live GCP pricing is still required, provide a valid service-account JSON through Key Vault and approve its scope; otherwise approve retiring that optional feature | No GCP credential is stored in the repository |
 | AI providers | Decide which external providers should be enabled and provide their keys through Key Vault | The AI router only enables a provider when its server-side key is present |
 | Third-party integrations | Provide owner-controlled Publer, Klaviyo, YouTube, Telegram, Hostinger, or other credentials and approve webhook changes before activation | Integration secrets are server-side and optional paths remain gated |
-| Listen & Learn feature (T-411) | Choose a text-to-speech provider (Azure Speech or another), approve YouTube API access, and set the audio storage and retention policy | `TODO.md` T-411 is scoped but not started; no provider key or bucket is assumed, and no old implementation has been merged |
-| Upstream feature selection (T-410) | Choose which evaluated upstream candidate, if any, is built. The engineering evaluation is complete and recommends the draw.io hotspot tooling; the Architecture listing pages are not recommended | `TODO.md` T-410 carries the scoped port and the seams it must use; nothing is ported until a candidate is chosen |
+| Listen & Learn speech | Nothing to provide: it synthesises with Gemini TTS on the existing `GEMINI-API-KEY`. Audio is billed against that key at roughly $0.17 an episode / $0.87 a certification on the default model; every run is logged to the AI Engine usage tab under "Breakdown by Feature", so the spend is checkable there rather than estimated. Azure AI Speech is a written, tested fallback for the day the preview Gemini TTS models are retired; using it means creating a Cognitive Services resource, which is a spend decision and is not assumed | Provider is chosen by key presence, Gemini first. With no key at all the feature still publishes each episode's transcript, takeaways and videos and records `audioError` instead of failing |
+| Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
 
 ## Live confirmation still requiring an authorized operator
@@ -49,6 +49,10 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
   credentials still exist before removing `infra/scratch.tf` and `infra/oidc.tf`.
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
+- Apply the Terraform change that creates the `listenandlearn` blob container.
+  Until it runs, Listen & Learn generation saves episodes and their transcripts
+  but the audio upload has nowhere to land. The same apply declares the fallback
+  `AZURE_SPEECH_*` settings, which stay unresolved and inert.
 
 ## Handling rules
 

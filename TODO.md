@@ -11,46 +11,11 @@ operations belong in [REVIEW.md](REVIEW.md). Verified completion belongs in
 | Priority | Open items |
 | --- | ---: |
 | High | 0 |
-| Medium | 2 |
-| Low | 2 |
-| Total | 4 |
-
-## Medium
-
-### T-411 — Port Listen & Learn as a scoped website feature
-
-Implement the worker, API reads, player, and admin experience as one coherent
-feature. The work depends on an owner decision about Azure Speech or another
-text-to-speech provider, YouTube API access, and the storage/retention policy;
-those inputs are listed in [REVIEW.md](REVIEW.md). Do not port the old Firebase
-implementation wholesale.
-
-### T-412 — Decompose `QueuePage.jsx`
-
-`frontend/src/pages/admin/QueuePage.jsx` is 1,310 lines and holds the admin
-area's riskiest code: the bulk paths transition many documents one at a time
-and each partial failure has to be attributed back to its own card. Split the
-mutating actions, the banners and the item card into their own modules so the
-bulk logic can be tested without rendering the card markup, then add tests for
-the partial-failure paths. Do this against this repository's file — the
-upstream equivalent (T-410) is written against Firestore-era helpers — and keep
-the existing behaviour, including which actions each status filter allows.
+| Medium | 0 |
+| Low | 1 |
+| Total | 1 |
 
 ## Low
-
-### T-410 — Port the draw.io hotspot tooling
-
-The candidate evaluation is complete and recorded in
-[CHANGELOG.md](CHANGELOG.md); the draw.io tooling is the one it recommends, and
-which candidate is actually built is an owner decision listed in
-[REVIEW.md](REVIEW.md). Once selected, port `lib/drawio/parseDrawio.js` and
-`lib/drawio/hotspotGeometry.js` with their upstream test and fixture, and the
-diagram panel that uses them, so hotspots are generated from an uploaded
-`.drawio` file instead of typed into `ArchitectureReviewBoard` by hand. Route
-the upload through `POST /api/cms/uploads/{container}`; the parsing is pure and
-carries no Firebase coupling, and `InteractiveDiagram` already consumes the
-hotspot shape. Do not bring the Architecture listing pages with it: they depend
-on `ContentReviewBrowser` and a Firestore-query data seam.
 
 ### D-001 — Revisit the ESLint 10 upgrade
 

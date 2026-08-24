@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Download, ExternalLink, Code, Loader2 } from 'lucide-react';
 import { awsArchitectures } from '@/data/architectures';
 import InteractiveDiagram from '@/components/widgets/InteractiveDiagram';
+import { useResolvedHotspots } from '@/hooks/useResolvedHotspots';
 import ContextSidebar from '@/components/layout/ContextSidebar';
 import ShareVia from '@/components/shared/ShareVia';
 
@@ -39,6 +40,15 @@ export default function ArchitectureDetailTemplate({ provider = 'aws' }) {
   const dynamicArchitecture =
     item && String(item.type || '').toLowerCase() === 'architecture' ? item : null;
   const architecture = dynamicArchitecture || staticData;
+
+  // Before the early returns: hooks must run in the same order on every
+  // render, and the loading branch below returns before the diagram exists.
+  // Shape-anchored hotspots resolve from the diagram XML; hand-positioned ones
+  // pass straight through, so an architecture with no XML is unaffected.
+  const resolvedHotspots = useResolvedHotspots(
+    architecture?.diagramXml,
+    architecture?.hotspots || []
+  );
 
   if (loading && !staticData && !architecture) {
     return (
@@ -175,7 +185,7 @@ export default function ArchitectureDetailTemplate({ provider = 'aws' }) {
               {architecture.diagramUrl ? (
                 <InteractiveDiagram
                   imageUrl={architecture.diagramUrl}
-                  hotspots={architecture.hotspots || []}
+                  hotspots={resolvedHotspots}
                   onHotspotClick={() => {}}
                 />
               ) : (

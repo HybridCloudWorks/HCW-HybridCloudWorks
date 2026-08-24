@@ -15,6 +15,158 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **Listen & Learn (T-411).** One study podcast per weighted skill area of a
+  certification's official study guide, with the videos worth watching next.
+  Ported from Site-Main `functions/listen-and-learn/` (088f458) with the
+  pipeline intact — study guide → skill areas → videos per area → dialogue →
+  MP3 → draft — and three deliberate departures:
+
+  *Audio is Gemini TTS, on the key the site already holds.* Upstream
+  authenticated to Cloud Text-to-Speech with Application Default Credentials, a
+  GCP identity this Function App cannot hold — the same reason Vertex was
+  dropped from the AI router. The replacement is the Gemini API's own
+  multi-speaker TTS through `GEMINI_API_KEY`, which is the capability the
+  feature was actually for: a two-host deep dive read from source material is
+  what a NotebookLM audio overview is, and these are the models that produce it.
+  It costs no new service, no new resource and no new credential. Its contract
+  shapes the module in three ways: multi-speaker takes at most two speakers,
+  which is exactly the number here; the dialogue is a prompt rather than markup,
+  so the transcript's speaker labels must match the `speech_config` names or a
+  label is read aloud instead of switching voice; and a 32k-token session
+  comfortably holds a whole 9,000-byte script, so an episode is one request with
+  nothing to chunk.
+
+  *Episode audio is encoded to MP3, and that is not cosmetic.* Gemini returns
+  headerless 24 kHz 16-bit mono PCM with no format option — 48 KB per second, so
+  a nine-minute episode is about 26 MB. `readBlobForDelivery` buffers a whole
+  blob into memory and the media route returns it as one body with no range
+  support, so that would hold 26 MB per concurrent listener, bill Function
+  execution for the entire transfer, and make the player wait for the whole file
+  before starting. At 64 kbps mono the same episode is about 4.5 MB (measured
+  5.8x on a 24 kHz tone). `@breezystack/lamejs` is the encoder: pure JavaScript,
+  no native build, no dependencies of its own; it is LGPL-3.0 and imported
+  unmodified, and it is the only copyleft dependency in the package.
+
+  *Azure AI Speech is kept as the fallback, not deleted.* Every Gemini TTS model
+  is a **preview** model, and preview endpoints get retired on notice. Azure
+  Speech is GA, and having the second path written and tested is the difference
+  between a model retirement being a config change and being an outage. It needs
+  a Cognitive Services resource, which is a spend decision, so nothing assumes
+  one exists and an unseeded `AZURE_SPEECH_KEY` simply means the provider is not
+  offered. Its own hazard is pinned by tests: that REST API silently TRUNCATES
+  at ten minutes of audio rather than erroring, so its dialogue chunking
+  estimates duration with a slow voice — being wrong the other way deletes the
+  end of an episode and looks like a complete one.
+
+  Provider selection follows the AI router's rule — a key makes a provider
+  possible, and the first configured one in preference order runs — with
+  `LISTEN_AND_LEARN_TTS_PROVIDER` to pin one outright. A pin that is not
+  configured FAILS rather than falling through, because falling through would
+  produce episodes in a voice nobody chose. Both providers return MP3, so the
+  blob path, the stored `contentType` and the `<audio>` element are identical
+  whichever ran. Each episode records `speechProvider`, `speechModel` and
+  `durationSeconds` — provenance for AI-generated study content, and the only
+  thing that answers "why does this one sound different" after a model change.
+
+  *The script no longer asserts the hosts' gender.* Upstream's prompt said both
+  hosts were women because the Google voices it used were documented female. The
+  Gemini voice list publishes a descriptor per voice and no gender at all, so
+  the claim is not one the audio can keep. The default pairing is by descriptor
+  and follows the roles the prompt already assigns — Kore (*Firm*) leads and
+  frames, Leda (*Youthful*) asks the question a learner would ask — and both are
+  overridable per host.
+
+  *Generation is a job, not a request.* An Azure Functions HTTP response is
+  bounded at 230 seconds by the load balancer and one certification is five
+  model calls, five syntheses and five uploads, so the admin page enqueues
+  `generate-listen-and-learn` and polls, as the RSS ingest does. The run still
+  saves area by area, so a timeout leaves the finished episodes behind.
+
+  *A missing speech key degrades; a broken one fails.* Upstream treated any
+  synthesis failure as a failed area. `SpeechNotConfiguredError` — no provider
+  configured — now still saves the episode with its transcript,
+  takeaways and videos and records `audioError`, which the admin page renders
+  in place of the player. Every other synthesis failure still fails the area,
+  because those are faults to fix rather than a state to ship in. The feature
+  is useful the day it deploys and gains audio the day the key lands.
+
+  Approval is unchanged and is the point: episodes are AI-written summaries of a
+  paid exam's objectives, generated as drafts, and `GET
+  /api/public/listen-and-learn` filters on `status === 'published'` with an
+  equality test — an unrecognised status stays hidden. `listen_and_learn` and
+  `listen_and_learn_episodes` already existed in the Cosmos container spec;
+  `listenandlearn` is a new private blob container served through the media
+  route. GitHub exams are enabled alongside Azure and AWS, since they are
+  hosted on Microsoft Learn and parse with the same adapter.
+- **draw.io hotspot tooling (T-410).** `lib/drawio/parseDrawio.js` and
+  `lib/drawio/hotspotGeometry.js` port from Site-Main unchanged, with their
+  test and fixture. A hotspot now stores a draw.io **shape id** and its position
+  is derived from the diagram XML on every render (`useResolvedHotspots`), so
+  re-uploading an edited diagram moves every pin with its shape instead of
+  stranding it. `DiagramSourcePanel` replaces typing x/y percentages into two
+  number inputs and eyeballing the result. Nothing renders the `.drawio` file —
+  vendor stencils are most of what makes a cloud diagram readable, and the
+  exported image stays what visitors see. Hand-positioned hotspots, the only
+  kind this repository could write before, pass through untouched, and the
+  admin preview now resolves through the same code as the public page.
+
+### Changed
+
+- **Listen & Learn spend appears in the portal, and `ai_usage` has one writer.**
+  The Usage tab has read that container since the port; until now only the AI
+  playground wrote to it, so a Listen & Learn run — the second thing here that
+  spends money on a model — would have been invisible. Each run now records a
+  row per model call: one for the script, one for the synthesis, tagged
+  `listen-and-learn:script` and `listen-and-learn:audio`.
+
+  The writer moved into `ai/usage.js` and `ai/proxy.js` now uses it, because the
+  Usage tab does its arithmetic client-side over whatever rows it finds — a
+  second writer with a slightly different shape would not error, it would
+  silently total zero. Recording is best-effort by design, and a test pins the
+  regression that made it otherwise: pricing a row used to happen outside the
+  try, so a caller passing an `ai` without `getCostEstimate` threw a TypeError
+  that propagated out and failed the episode whose cost it was recording.
+
+  TTS rates are in `COST_TABLE` from the published paid-tier pricing read on
+  2026-08-24 — `gemini-2.5-flash-preview-tts` at $0.50 in / $10.00 out per 1M
+  tokens, the other two at double that, which is why the flash model is the
+  default. Token counts come from the API's own `usage` object; when a response
+  omits it the audio count is derived from duration at the documented 32
+  tokens/second and the row is flagged `estimatedTokens`, which the portal shows
+  as "est." so a derived figure is never read as a billed one. On those rates a
+  nine-minute episode is about $0.17 and a five-area certification about $0.87.
+
+  The tab gains a **Breakdown by Feature** table beside the provider one:
+  provider answers "which vendor", which is useless when one vendor serves
+  several features at rates an order of magnitude apart. The Listen & Learn page
+  also reports the run's own cost when the job finishes. A test holds the tab's
+  source labels against the backend's `USAGE_SOURCES` so a new source cannot
+  ship as a raw slug — the same drift guard `DEFAULT_PROVIDERS` already has.
+- **`QueuePage.jsx` is decomposed (T-412).** 1,310 lines became a 320-line page
+  over `queue/itemHelpers.jsx`, `queue/QueueList.jsx`, `queue/constants.js` and
+  `queue/useQueueActions.js`. The hook is the reason for the split: the bulk
+  paths transition many documents one at a time and each partial failure has to
+  be attributed back to its own card, and that code could previously only be
+  reached by rendering four hundred lines of card markup. It now has 22 tests
+  covering the partial-failure paths — a run that half-works removes exactly the
+  documents that moved, leaves the ones that did not, and writes a reason under
+  each — plus the paging loop's zero-count guard and the rejected-filter
+  refusal. Behaviour is unchanged with one fix found by the move: `handleConfirm`
+  was `useCallback(..., [confirmTarget])` while closing over handlers rebuilt
+  every render, so it could act on `items` and `selectedIds` as they were when
+  the modal opened. It is no longer memoized; the dependencies changed every
+  render regardless, so nothing was gained by it.
+- **Publicly readable blob containers now declare their writer.**
+  `PUBLIC_MEDIA_CONTAINERS ⊂ UPLOAD_CONTAINERS` held only because every public
+  container happened to be one people upload to. Listen & Learn audio is written
+  by a job, so `GENERATED_MEDIA_CONTAINERS` names that category and the test
+  asserts each public container has exactly one declared writer and that the two
+  sets are disjoint. Satisfying the old relation would have meant opening the
+  episode container to the admin upload route, where any editor could put an
+  arbitrary file behind an anonymous URL.
+
 ### Fixed
 
 - **The anonymous feed endpoint is bounded in articles, not just in feeds

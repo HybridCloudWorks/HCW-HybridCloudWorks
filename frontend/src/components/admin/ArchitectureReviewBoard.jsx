@@ -20,6 +20,8 @@ import {
   MousePointer,
 } from 'lucide-react';
 import InteractiveDiagram from '@/components/widgets/InteractiveDiagram';
+import DiagramSourcePanel from '@/components/admin/architecture/DiagramSourcePanel';
+import { useResolvedHotspots } from '@/hooks/useResolvedHotspots';
 
 /**
  * Architecture Review Board
@@ -41,11 +43,19 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
     costAnalysis: blog.costAnalysis || { estimatedMonthly: '$0', breakdown: [] },
     terraformCode: blog.terraformCode || '# Terraform HCL',
     deploymentSteps: blog.deploymentSteps || [],
-    // Hotspots for interactive diagram
+    // Hotspots for interactive diagram. A hotspot is either shape-anchored
+    // ({shapeId}) or hand-positioned ({x, y}); both render, and the diagram
+    // source below is what makes the first kind resolvable.
     hotspots: blog.hotspots || [],
+    diagramXml: blog.diagramXml || '',
   });
 
   const [activeTab, setActiveTab] = useState('overview');
+
+  // The preview resolves hotspots the same way the public page does. An admin
+  // positioning a pin against different maths than the visitor sees is
+  // authoring blind.
+  const previewHotspots = useResolvedHotspots(formData.diagramXml, formData.hotspots);
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -69,6 +79,26 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
       link: '',
     };
     setFormData((prev) => ({ ...prev, hotspots: [...prev.hotspots, newHotspot] }));
+  };
+
+  /**
+   * Pin a hotspot to a draw.io shape.
+   *
+   * No x/y is stored: the position is derived from the diagram on every render,
+   * so editing the diagram moves the pin instead of stranding it.
+   */
+  const addShapeHotspot = ({ shapeId, label }) => {
+    setFormData((prev) =>
+      prev.hotspots.some((h) => h.shapeId === shapeId)
+        ? prev
+        : {
+            ...prev,
+            hotspots: [
+              ...prev.hotspots,
+              { id: `shape-${shapeId}`, shapeId, label, description: '', link: '' },
+            ],
+          }
+    );
   };
 
   const updateHotspot = (id, field, value) => {
@@ -106,12 +136,7 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
           <CardContent>
             {formData.diagramUrl ? (
               <div className="border border-dashed border-border rounded-lg overflow-hidden bg-muted/20">
-                <InteractiveDiagram
-                  imageUrl={formData.diagramUrl}
-                  hotspots={formData.hotspots}
-                  // Admin mode: Clicking a hotspot selects it for editing?
-                  // For now just preview
-                />
+                <InteractiveDiagram imageUrl={formData.diagramUrl} hotspots={previewHotspots} />
               </div>
             ) : (
               <div className="aspect-video bg-muted/20 rounded-lg flex items-center justify-center border border-dashed border-border">
@@ -127,6 +152,13 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
             />
           </CardContent>
         </Card>
+
+        <DiagramSourcePanel
+          diagramXml={formData.diagramXml}
+          hotspots={formData.hotspots}
+          onDiagramXmlChange={(xml) => handleChange('diagramXml', xml)}
+          onAddHotspot={addShapeHotspot}
+        />
 
         {/* Hotspots Editor */}
         <Card className="bg-card/50 border-l-4 border-l-blue-500">
@@ -168,26 +200,35 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
                   placeholder="Label"
                   className="h-7 text-xs"
                 />
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">X %</label>
-                    <Input
-                      type="number"
-                      value={spot.x}
-                      onChange={(e) => updateHotspot(spot.id, 'x', Number(e.target.value))}
-                      className="h-6 text-xs"
-                    />
+                {spot.shapeId ? (
+                  // Position is derived from the diagram, so there is nothing
+                  // to type. Showing the coordinates as editable fields would
+                  // invite an edit that the next render silently discards.
+                  <p className="text-[10px] text-muted-foreground font-mono truncate">
+                    Pinned to shape {spot.shapeId}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">X %</label>
+                      <Input
+                        type="number"
+                        value={spot.x}
+                        onChange={(e) => updateHotspot(spot.id, 'x', Number(e.target.value))}
+                        className="h-6 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">Y %</label>
+                      <Input
+                        type="number"
+                        value={spot.y}
+                        onChange={(e) => updateHotspot(spot.id, 'y', Number(e.target.value))}
+                        className="h-6 text-xs"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">Y %</label>
-                    <Input
-                      type="number"
-                      value={spot.y}
-                      onChange={(e) => updateHotspot(spot.id, 'y', Number(e.target.value))}
-                      className="h-6 text-xs"
-                    />
-                  </div>
-                </div>
+                )}
                 <Textarea
                   value={spot.description}
                   onChange={(e) => updateHotspot(spot.id, 'description', e.target.value)}
