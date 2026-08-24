@@ -114,6 +114,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The frontend is on ESLint 10 (D-001 closed).** The item said two plugins
+  blocked it, on the strength of their declared peer ranges. That was half
+  right and the wrong half was load-bearing, so it is worth recording what the
+  block actually was.
+
+  Dependabot's bump failed at `npm ci`, not at lint — an ERESOLVE refusal from
+  `eslint-plugin-jsx-a11y`'s `eslint@"…|| ^9"` peer range. That is metadata, and
+  npm `overrides` pinning both plugins' `eslint` peer to `$eslint` clears it.
+  What remained was one real incompatibility: every rule that consults the React
+  version died with `contextOrFilename.getFilename is not a function`, because
+  ESLint 10 removed `context.getFilename()` and `eslint-plugin-react` calls it
+  while DETECTING the React version. Detection only runs when
+  `settings.react.version` is the literal `'detect'`, so supplying the version
+  skips the removed API entirely. The config now reads it from the installed
+  `react/package.json` rather than pinning a literal, so an upgrade cannot leave
+  the linter reasoning about the wrong React.
+
+  Verified beyond a green run, because a plugin that silently loaded no rules
+  would also look green: a probe file confirmed `react/jsx-key`,
+  `react/no-unescaped-entities`, `jsx-a11y/alt-text` and
+  `react-hooks/rules-of-hooks` all still report on ESLint 10, and `npm ci` — the
+  command that actually failed — now succeeds.
+
+  One rule stays off, for a new reason. `jsx-a11y/label-has-associated-control`
+  was disabled because it crashed on ESLint 9; on 10 it runs and reports 20 real
+  unlabelled form controls. That is an accessibility fix rather than an upgrade,
+  so it is tracked as A-001 and the config comment now says so — the stale one
+  would have told the next reader the rule was unusable.
 - **Listen & Learn spend appears in the portal, and `ai_usage` has one writer.**
   The Usage tab has read that container since the port; until now only the AI
   playground wrote to it, so a Listen & Learn run — the second thing here that

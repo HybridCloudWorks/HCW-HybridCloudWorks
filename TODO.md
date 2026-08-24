@@ -17,13 +17,15 @@ operations belong in [REVIEW.md](REVIEW.md). Verified completion belongs in
 
 ## Low
 
-### D-001 — Revisit the ESLint 10 upgrade
+### A-001 — Associate the unlabelled form controls
 
-Two plugins still block it as of 2026-08-24: `eslint-plugin-react` 7.37.5 caps
-its peer range at `eslint@^9.7` and `eslint-plugin-jsx-a11y` 6.10.2 at
-`eslint@^9`. `eslint-plugin-react-hooks` and `@typescript-eslint/eslint-plugin`
-already declare `^10`. Re-evaluate when the other two do, and keep the ESLint 9
-line until the complete frontend lint suite is green on the newer major.
+`jsx-a11y/label-has-associated-control` reports 20 violations across
+`frontend/src` — `<label>` elements with no associated control. The rule is
+disabled in `eslint.config.js`; it was off because it crashed on ESLint 9, and
+since the ESLint 10 upgrade it runs correctly and these are real findings.
+Associate each label with its control (nesting, or `htmlFor`/`id`), then delete
+the rule's `off` entry so it cannot regress. Screen-reader users get no field
+name from an unassociated label, so each one is a small but genuine defect.
 
 ## Test coverage follow-up
 

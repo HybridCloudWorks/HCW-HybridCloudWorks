@@ -1,9 +1,27 @@
+import { createRequire } from 'node:module';
 import globals from 'globals';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
+
+/**
+ * The installed React version, read rather than hardcoded.
+ *
+ * `version: 'detect'` is what eslint-plugin-react documents, and it is also
+ * what stops the plugin working on ESLint 10: detection calls
+ * `context.getFilename()`, which v9 deprecated and v10 removed, so every rule
+ * that consults the React version dies with
+ * "contextOrFilename.getFilename is not a function". Supplying the version
+ * skips detection altogether — the plugin only calls `detectReactVersion` when
+ * the setting is the literal string 'detect'.
+ *
+ * Read from the installed package rather than pinned to a literal so an
+ * upgrade cannot silently leave the linter reasoning about the wrong React.
+ */
+const require = createRequire(import.meta.url);
+const reactVersion = require('react/package.json').version;
 
 export default [
   {
@@ -44,7 +62,7 @@ export default [
     },
     settings: {
       react: {
-        version: 'detect',
+        version: reactVersion,
       },
     },
     rules: {
@@ -76,7 +94,12 @@ export default [
 
       // Accessibility rules
       ...jsxA11y.configs.recommended.rules,
-      // Disabled: crashes with ESLint v9 due to minimatch API incompatibility in jsx-a11y v6
+      // Off for a DIFFERENT reason than it used to be, and the distinction
+      // matters to whoever reads this next. It was disabled because the rule
+      // crashed on ESLint 9 (a minimatch API incompatibility in jsx-a11y v6);
+      // on ESLint 10 it runs fine. It stays off because it reports 20 real
+      // violations across src — unlabelled form controls — which is an
+      // accessibility fix, not an upgrade. Tracked as A-001 in TODO.md.
       'jsx-a11y/label-has-associated-control': 'off',
 
       // General code quality rules
