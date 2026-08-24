@@ -731,12 +731,40 @@ function AddServerForm({ onAdd }) {
 function McpTab({ servers }) {
   const { toast } = useToast();
 
-  const handleToggle = (id, enabled) => aiEngine.setEnabled('mcp_servers', id, enabled);
-  const handleSync = (id) => aiEngine.syncMcpTools(id);
+  const handleToggle = async (id, enabled) => {
+    try {
+      await aiEngine.setEnabled('mcp_servers', id, enabled);
+      toast({ title: enabled ? 'Server enabled' : 'Server disabled' });
+    } catch (err) {
+      toast({
+        title: 'Unable to update server',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleSync = async (id) => {
+    try {
+      return await aiEngine.syncMcpTools(id);
+    } catch (err) {
+      toast({ title: 'Sync failed', description: err.message, variant: 'destructive' });
+      return { ok: false, error: err.message };
+    }
+  };
+
   const handleRemove = async (id) => {
     if (!window.confirm('Remove this MCP server?')) return;
-    await aiEngine.removeMcpServer(id);
-    toast({ title: 'Server removed' });
+    try {
+      await aiEngine.removeMcpServer(id);
+      toast({ title: 'Server removed' });
+    } catch (err) {
+      toast({
+        title: 'Unable to remove server',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
   };
   const handleAdd = (data) => aiEngine.addMcpServer(data);
 
@@ -748,8 +776,8 @@ function McpTab({ servers }) {
         <div>
           <h2 className="font-semibold text-lg">MCP Servers</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            {enabledCount} enabled — all tool calls proxy through your Cloud Functions so API keys
-            never reach the browser
+            {enabledCount} enabled — all tool calls proxy through the Azure Functions API so
+            credentials never reach the browser
           </p>
         </div>
       </div>
@@ -757,10 +785,11 @@ function McpTab({ servers }) {
       <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-blue-700 dark:text-blue-300 flex gap-2">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <div>
-          <strong>Transport:</strong> All MCP connections use{' '}
-          <strong>Firebase Function proxy</strong> (Streamable HTTP, May 2026 standard). API keys
-          are stored server-side in <code>functions/.env</code> — never exposed to the browser.
-          Click <em>Sync Tools</em> to fetch the tool list from any server.
+          <strong>Transport:</strong> MCP requests go through the{' '}
+          <strong>Azure Functions API</strong>. Each server uses its configured transport
+          (Streamable HTTP or SSE). API keys come from Azure Function App settings / Key Vault
+          references, and OAuth tokens are stored in Cosmos DB — never exposed to the browser. Click{' '}
+          <em>Sync Tools</em> to fetch the tool list server-side.
         </div>
       </div>
 

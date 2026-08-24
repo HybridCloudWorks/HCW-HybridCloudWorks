@@ -65,7 +65,6 @@ Every ADR includes:
 | [0018](0018-as-built-plan-v02) | Supersede plan v0.1 with the as-built v0.2 plan | Accepted | Make the approved plan describe the real system; disposition every deviation |
 | [0019](0019-single-function-app) | One Function App execution boundary | Accepted | Ratify least-privilege-by-contract over process separation |
 | [0020](0020-native-terraform-root-module) | Flat native-provider Terraform root module (no AVM) | Accepted | Keep resource addresses stable on a live state |
-| [0021](0021-container-apps-ci-runner) | Container Apps self-hosted CI runner failover | Accepted | Keep delivery alive through GitHub-hosted runner outages |
 
 ## Template
 

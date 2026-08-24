@@ -58,7 +58,7 @@ migration tooling 2026-08-20.
 > | Phase 2 exit: applied to a **non-production** subscription | **Applied to the production subscriptions**, across three: Application `b9e02281…`, Management `02dfb8ad…`, Connectivity `8f3c6d82…` | There is no non-production subscription. The Identity landing zone is deliberately empty. Cost control is the budget resource — `budget_amount_usd` (default 150 USD) from `budget_start_date`. **The §7 cost gate still applies and has not been run.** |
 > | Data living in Cosmos                                    | The `hcw` database and all **73 containers exist and are EMPTY**                          | Phase 4 has not run. The **8,064** documents (measured 2026-08-21; the 1,395 figure was the editor's collections only) are still only in Firestore. |
 > | Wildcard CORS origins on storage                         | **Exact origins only, ports included**                                                    | Azure Storage accepts a literal `*` or fully-qualified origins and nothing in between; `https://*.<domain>` and `http://localhost:*` are rejected outright.  |
-> | A CI runner                                              | **Not deployed** — `ci_runner_enabled = false`                                            | Deferred; ADR 0021 superseded.                                                                                                                              |
+> | A CI runner                                              | **GitHub-hosted only** — every workflow uses `ubuntu-latest`; no self-hosted runner infrastructure | No Docker Hub image or `CI_RUNNER` override is required. |
 >
 > **Two of these change how you work, not just what you read:**
 >

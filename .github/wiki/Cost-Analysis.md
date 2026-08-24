@@ -135,7 +135,7 @@ bill full price.
 | --- | --- |
 | Blob Hot LRS 5 GB + operations, egress 15 GB | Automatic billing discounts on the existing accounts; nothing to configure |
 | Cosmos free tier (25 GB + RU/s) | **Unusable by design** — applies only to provisioned-throughput accounts; ours is serverless (irreversible, ADR-0003/0018). Correctly shows "Not in use" forever |
-| Container Registry (12-month Standard) | **Rejected** — runner image stays on the owner's free Docker Hub account; ACR adds a month-13 cost (~$20/mo Standard) for a failover-only image. If the Docker Hub dependency ever needs removing, land on ACR Basic (~$5/mo), never the free-Standard-then-cliff path |
+| Container Registry | **Not needed** — all GitHub Actions jobs use GitHub-hosted runners, so HCW has no runner image or container-registry dependency |
 | Service Bus Standard 750 h | **Rejected** for the pending async fabric — 12-month cliff to ~$10/mo; Storage Queues (ADR-0012's choice) cost pennies, never expire, and support managed identity |
 | VMs / SQL / MySQL / PostgreSQL / LB / VPN GW / Public IP meters | **Not applicable** — the architecture deliberately contains none of these; standing one up to harvest an expiring freebie needs an ADR and plants month-13 bill shock |
 | Key Vault Premium HSM ops, Media Services | Irrelevant (Standard-SKU vault; Media Services is retired) |

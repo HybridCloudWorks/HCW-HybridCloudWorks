@@ -27,8 +27,7 @@ permissions:
 jobs:
   surface:
     name: DNS, TLS and site surface
-    # Same failover switch as ci.yml — see REVIEW.md §4.4.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     steps:
       - name: DNS
         run: |
@@ -69,7 +68,7 @@ jobs:
 
   smoke:
     name: Smoke tier 1 (anonymous API surface)
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

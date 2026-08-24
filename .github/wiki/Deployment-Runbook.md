@@ -279,7 +279,6 @@ Terraform rollback is **roll-forward to the previous definition**:
 | Computed properties | `heal-computed-properties.yml` re-applies `cp_sortDate` on relevant pushes and every 6 h | `.github/workflows/` |
 | Secrets | Values live only in Key Vault, seeded manually during an `admin_ip_rules` window, then window closed. References in `REVIEW.md` §4.6 | `infra/variables.tf` (`admin_ip_rules`), Key Vault |
 | Purge protection | `purge_protection_enabled` **must be `true` before production secrets are written** — flip the TFC variable and apply; it is one-way | `infra/variables.tf` |
-| CI runner outage | Flip repo variable `CI_RUNNER` to `'["self-hosted","aca"]'` | REVIEW.md §4.4, `infra/ci-runner.tf` |
 | Dependency and action updates | Dependabot (npm + github-actions) with CI as the gate | `.github/dependabot.yml` |
 
 ## 7. ALZ absorption

@@ -2,11 +2,12 @@
  * AI Engine — browser client library
  *
  * Provides a unified interface for:
- *   • Calling any configured AI provider (via the aiProxy RPC)
- *   • Calling MCP server tools (via the mcpProxy RPC)
+ *   • Calling any configured AI provider (via the Azure aiProxy RPC)
+ *   • Calling MCP server tools (via the Azure mcpProxy RPC)
  *   • Reading/writing provider and server configs via cms/config/*
  *
- * All calls are authenticated with the current user's Entra access token.
+ * All calls are authenticated with the current user's Entra access token and
+ * terminate at the Azure Functions API.
  *
  * Config reads note: mcp_servers documents carry hasOauthToken (boolean)
  * instead of the token itself — the value is write-only on the API.
@@ -130,7 +131,7 @@ export const DEFAULT_MCP_SERVERS = [
     status: 'untested',
     order: 1,
     notes:
-      'OAuth auth. To connect: go to the Recordings page → Connect tab, follow the OAuth flow, and paste your access token. Token is stored server-side in Firestore — never in the browser. Docs: https://docs.plaud.ai/documentation/plaud_app/mcp',
+      'OAuth auth. To connect: go to the Recordings page → Connect tab, follow the OAuth flow, and paste your access token. Token is stored server-side in Cosmos DB — never in the browser. Docs: https://docs.plaud.ai/documentation/plaud_app/mcp',
   },
   {
     id: 'firecrawl',
@@ -263,7 +264,7 @@ async function fetchConfig(route) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Config subscriptions
 //
-// The Firestore onSnapshot listeners are replaced with fetch-plus-notify:
+// Realtime config listeners use fetch-plus-notify:
 // every subscriber gets the current list on subscribe, and every write helper
 // in this module re-fetches and re-notifies after it lands. Same reactive UX
 // on the admin pages, no polling.
@@ -464,7 +465,7 @@ export async function removeMcpServer(serverId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cloud Function calls
+// Azure Function calls
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
