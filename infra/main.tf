@@ -778,17 +778,51 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     application_insights_key               = azurerm_application_insights.hcw.instrumentation_key
 
     # DECISION 7 — CORS is handled in code
-    # (functions/src/lib/auth/cors.js), not here.
+    # (functions/src/lib/auth/cors.js) for real requests, and HERE for
+    # preflights, because the platform gives no choice about the second.
     #
-    # Two allowlists drift, and when a request is rejected you cannot tell which
-    # one did it. The in-code version also returns 403 on a disallowed origin
-    # (matching Site-Main's applyCors) rather than silently omitting the header,
-    # and can express any localhost port rather than the two hardcoded here.
+    # The original decision removed this block entirely on the reasoning that two
+    # allowlists drift and the in-code one is better: it 403s a disallowed origin
+    # instead of silently omitting the header, and it can express any localhost
+    # port rather than the two that used to be hardcoded. All of that still holds
+    # for actual requests.
     #
-    # support_credentials = true was additionally wrong on its own merits: it
-    # makes the platform intercept OPTIONS preflights itself, so the in-code
-    # preflight would never run — and this is a bearer-token API, not a cookie
-    # API.
+    # It was wrong about preflights, and the site proved it on 2026-08-23. The
+    # admin portal could authenticate and then every API call failed with
+    # "Failed to fetch" — a browser-side CORS rejection with no server-side trace.
+    #
+    # The Functions host answers a GENUINE preflight itself: OPTIONS carrying both
+    # `Origin` and `Access-Control-Request-Method`. With no origins configured
+    # here it answers 204 with no Access-Control-* headers at all, which every
+    # browser rejects. Measured against production:
+    #
+    #   OPTIONS + Origin + Access-Control-Request-Method  -> 204, no headers
+    #   OPTIONS + Origin, no Access-Control-Request-Method -> reaches the app,
+    #                                                        204 WITH headers
+    #   GET + disallowed Origin                            -> 403 from the app
+    #
+    # The middle line is the proof: the in-code preflight is correct and simply
+    # never runs for the only kind of preflight a browser sends. Removing this
+    # block did not return preflight handling to the application; it left the
+    # platform answering preflights with nothing.
+    #
+    # So the platform gets exactly the origins it needs to answer a preflight,
+    # and nothing else changes: the in-code allowlist still decides actual
+    # requests, still 403s, still owns localhost. Drift between the two is
+    # contained by `cors_platform_origins.test.js`, which reads this file and
+    # fails if it stops matching PRODUCTION_ORIGINS + PREVIEW_ORIGINS.
+    #
+    # support_credentials stays FALSE. This is a bearer-token API, not a cookie
+    # API, and true would additionally make the platform intercept far more than
+    # preflights.
+    cors {
+      allowed_origins = concat(
+        ["https://hybridcloudworks.com", "https://www.hybridcloudworks.com"],
+        ["https://calm-ground-0d0e6a010.7.azurestaticapps.net"],
+        var.cors_extra_origins,
+      )
+      support_credentials = false
+    }
 
     # -------------------------------------------------------------------------
     # The Azure half of the origin lock (DECISION 6). Off by default — see
