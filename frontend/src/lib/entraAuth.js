@@ -163,6 +163,41 @@ export async function getCurrentUser() {
  * initialization (mirroring onAuthStateChanged), then on every change.
  * Returns an unsubscribe function.
  */
+/**
+ * Subscribers, kept alongside MSAL's own event callbacks rather than instead of
+ * them.
+ *
+ * MSAL announces LOGIN_SUCCESS and LOGOUT_SUCCESS itself, and those still drive
+ * the callbacks below. But `clearCache()` — how signOutUser ends a session —
+ * emits NO event: the EventType enum has logoutStart/Success/Failure/End and
+ * nothing for a cache clear. Without this set, signing out would empty the cache
+ * and leave every subscriber believing the user was still signed in, so the
+ * guard would keep rendering the portal until something else forced a re-render.
+ */
+const authSubscribers = new Set();
+
+/**
+ * Call one subscriber without letting it break anything else.
+ *
+ * Used on every path, not only the fan-out. A subscriber that throws inside the
+ * initialisation `.then()` lands in the `.catch()` below it, which calls the
+ * same subscriber again with null, which throws again — and the second throw
+ * has nowhere to go, so it surfaces as an unhandled rejection with a stack
+ * pointing at MSAL rather than at the component that threw.
+ */
+function deliver(subscriber, user) {
+  try {
+    subscriber(user);
+  } catch (error) {
+    console.error('Auth subscriber threw:', error);
+  }
+}
+
+function notifyAuthSubscribers(user) {
+  // One bad subscriber must not stop the others learning about a sign-out.
+  for (const subscriber of authSubscribers) deliver(subscriber, user);
+}
+
 export function onAuthStateChanged(callback) {
   const msal = getMsalInstance();
   let cancelled = false;
@@ -180,12 +215,14 @@ export function onAuthStateChanged(callback) {
   // that can actually recover the situation.
   initializeAuth()
     .then(() => {
-      if (!cancelled) callback(toUser(msal.getActiveAccount()));
+      if (!cancelled) deliver(callback, toUser(msal.getActiveAccount()));
     })
     .catch((error) => {
       console.error('[auth] MSAL initialisation failed; treating as signed out.', error);
-      if (!cancelled) callback(null);
+      if (!cancelled) deliver(callback, null);
     });
+
+  authSubscribers.add(callback);
 
   const callbackId = msal.addEventCallback((event) => {
     if (
@@ -204,6 +241,7 @@ export function onAuthStateChanged(callback) {
 
   return () => {
     cancelled = true;
+    authSubscribers.delete(callback);
     if (callbackId) msal.removeEventCallback(callbackId);
   };
 }
@@ -241,11 +279,40 @@ export async function signIn() {
   }
 }
 
+/**
+ * Sign out locally, the way Firebase did.
+ *
+ * This was `logoutPopup().catch(() => logoutRedirect())` and it had the same
+ * defect as the sign-in popup, plus a worse failure shape: when the browser
+ * makes a top-level window instead of a child popup the promise HANGS rather
+ * than rejecting, so the `.catch()` never runs and the fallback never fires.
+ * Sign-out silently did nothing. Seen on 2026-08-23 as a return to
+ * `/admin?state=…"interactionType":"popup"` with the session still live.
+ *
+ * The behaviour being migrated from is the reason to prefer local. Site-Main's
+ * `signOutSession()` is `signOut(getAuth(app))` — Firebase clears the
+ * application's own session and returns immediately. It does not navigate, and
+ * it does not end the Google SSO session either; the identity provider's cookie
+ * survives and the next sign-in is quick. `clearCache()` is the same contract:
+ * this app's session is gone, the Entra session is not.
+ *
+ * That is a deliberate limit, not an oversight. Ending the Entra session means
+ * `logoutRedirect()`, which navigates the whole tab to Microsoft and back and
+ * would sign the user out of every other Microsoft property in the browser —
+ * strictly more than Firebase ever did, and more than a "Sign out" button on
+ * one admin portal should do.
+ *
+ * Switching accounts still works because `loginRequest` asks for
+ * `prompt: 'select_account'`; see msalConfig.js.
+ */
 export async function signOutUser() {
   await initializeAuth();
   const msal = getMsalInstance();
   const account = msal.getActiveAccount();
-  await msal.logoutPopup({ account }).catch(() => msal.logoutRedirect({ account }));
+
+  await msal.clearCache(account ? { account } : undefined);
+  msal.setActiveAccount(null);
+  notifyAuthSubscribers(null);
 }
 
 /**
