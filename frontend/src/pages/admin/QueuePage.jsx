@@ -284,7 +284,7 @@ function getConfirmModalCopy(confirmTarget) {
     return {
       title: 'Delete rejected content permanently?',
       description:
-        'This removes the rejected item from Firestore immediately. This cannot be undone — use soft-delete instead if you want a 7-day recovery window.',
+        'This removes the rejected item from the content store immediately. This cannot be undone — use soft-delete instead if you want a 7-day recovery window.',
       confirmLabel: 'Delete Permanently',
       destructive: true,
     };

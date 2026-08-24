@@ -32,7 +32,7 @@ const ROADMAP_CHECKS = [
     status: 'Due now',
     variant: 'destructive',
     summary:
-      'Pull the last 7 days of Vertex and Replicate billing and compare against the AI inventory projections.',
+      'Pull the last 7 days of Gemini and Replicate billing and compare against the AI inventory projections.',
     docs: [
       { label: 'TODO', href: `${REPO_URL}/blob/main/TODO.md` },
       {
@@ -196,7 +196,7 @@ const ACTION_CONFIG = {
     buttonLabel: 'Run Now',
     runningLabel: 'Generating Digest...',
     details:
-      'Generates digest metrics for reviewer operations. If Firestore reports index building, retry once the index status is Enabled.',
+      'Generates digest metrics for reviewer operations. If the Azure backend reports a query or index configuration error, check the Cosmos DB indexing policy and Azure Function logs before retrying.',
     runner: async () => {
       const result = await postJSON('generateReviewerDigestManual', {});
       return `Reviewer digest generated: ${result.totalQueued || 0} queued items, ${result.recentRssCount || 0} recent RSS entries.`;
@@ -206,7 +206,7 @@ const ACTION_CONFIG = {
 
 function normalizeDigestError(message) {
   if (message.includes('FAILED_PRECONDITION') && message.toLowerCase().includes('index')) {
-    return 'Reviewer digest index is still building in Firestore. Wait until status is Enabled, then retry S3.3.';
+    return 'Reviewer digest query or index configuration is not ready in the Azure backend. Check the Cosmos DB indexing policy and Azure Function logs, then retry S3.3.';
   }
   return message;
 }

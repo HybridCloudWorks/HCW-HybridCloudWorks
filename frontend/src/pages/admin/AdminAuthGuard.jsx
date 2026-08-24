@@ -1,7 +1,7 @@
 /**
  * AdminAuthGuard — Entra ID (MSAL) edition.
  *
- * The Firebase version carried ~200 lines of Google-popup fallback logic and
+ * The previous auth implementation carried ~200 lines of Google-popup fallback logic and
  * a hand-rolled phone-MFA + reCAPTCHA flow. None of that has an equivalent
  * here on purpose: MSAL owns popup-vs-redirect recovery, and MFA is an Entra
  * Conditional Access policy enforced inside the Microsoft sign-in — the SPA

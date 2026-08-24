@@ -1,12 +1,12 @@
 /**
  * Mailing List — Klaviyo integration.
  *
- * All Klaviyo API calls route through the `klaviyoProxy` Cloud Function
- * (KLAVIYO_PRIVATE_KEY lives in Secret Manager — never in the client bundle).
+ * All Klaviyo API calls route through the `klaviyoProxy` Azure Function
+ * (KLAVIYO_PRIVATE_KEY lives in Azure Key Vault — never in the client bundle).
  * Public signups happen through the separate rate-limited `newsletterSubscribe`
  * function consumed by <NewsletterSignup />.
  *
- * Required Cloud Function secrets (set via `firebase functions:secrets:set`):
+ * Required Azure Function App settings (prefer Key Vault references):
  *   KLAVIYO_PRIVATE_KEY — Klaviyo private API key
  *   KLAVIYO_LIST_ID     — default newsletter list ID (used by newsletterSubscribe)
  */
@@ -379,8 +379,8 @@ function ConnectionTab({ onStatusChange }) {
         <CardHeader>
           <CardTitle className="text-base">Klaviyo API Connection</CardTitle>
           <CardDescription>
-            KLAVIYO_PRIVATE_KEY and KLAVIYO_LIST_ID are stored in Google Secret Manager and used
-            server-side by the klaviyoProxy / newsletterSubscribe Cloud Functions — they are never
+            KLAVIYO_PRIVATE_KEY and KLAVIYO_LIST_ID are stored in Azure Key Vault and used
+            server-side by the klaviyoProxy / newsletterSubscribe Azure Functions — they are never
             sent to the browser.
           </CardDescription>
         </CardHeader>

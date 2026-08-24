@@ -9,7 +9,7 @@
  *  Plaud CLI   — https://docs.plaud.ai/documentation/plaud_app/cli
  *  Anthropic   — https://docs.anthropic.com
  *  OpenAI      — https://platform.openai.com/docs
- *  Vertex AI   — https://cloud.google.com/vertex-ai/generative-ai/docs
+ *  Gemini API   — https://ai.google.dev/gemini-api/docs
  *  Perplexity  — https://docs.perplexity.ai
  *  Azure OAI   — https://learn.microsoft.com/en-us/azure/ai-services/openai
  *  AWS Bedrock — https://docs.aws.amazon.com/bedrock/latest/userguide
@@ -93,8 +93,8 @@ export const SERVICE_DOCS = {
             codes: [],
           },
           {
-            heading: '3. Add the key to your Functions environment',
-            body: 'Add the key to functions/.env. Never commit this file to git — it is already in .gitignore.',
+            heading: '3. Configure the provider key',
+            body: 'For local Azure Functions development, add the key to functions/.env. Production uses an Azure Function App setting backed by Key Vault. Never commit the local file or expose the key to the browser.',
             codes: [
               {
                 lang: 'bash',
@@ -105,7 +105,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: '4. (Optional) Make Anthropic the default ContentForge provider',
-            body: 'The project defaults to Vertex AI. To switch, change the provider env var and restart your Functions emulator.',
+            body: 'The project defaults to Gemini (Google AI). To switch, change the provider env var and restart your Azure Functions emulator.',
             codes: [
               {
                 lang: 'bash',
@@ -146,7 +146,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Direct API call (for custom Functions)',
-            body: 'Use the existing callProvider() helper from ai-model-router.js inside any Cloud Function.',
+            body: 'Use the existing callProvider() helper from the AI router inside any Azure Function.',
             codes: [
               {
                 lang: 'js',
@@ -180,7 +180,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Remove the API key',
-            body: 'Delete the ANTHROPIC_API_KEY line from functions/.env and redeploy Functions.',
+            body: 'Remove the ANTHROPIC_API_KEY local setting and its Azure Function App setting / Key Vault reference, then restart the Function App and revoke the key in the Anthropic Console.',
             codes: [
               {
                 lang: 'bash',
@@ -253,31 +253,31 @@ export const SERVICE_DOCS = {
     ],
   },
 
-  // ── Google Vertex AI (Gemini) ────────────────────────────────────────────
-  vertex: {
-    id: 'vertex',
-    name: 'Gemini (Google Vertex AI)',
+  // ── Gemini (Google AI) ───────────────────────────────────────────────────
+  gemini: {
+    id: 'gemini',
+    name: 'Gemini (Google AI)',
     type: 'ai_provider',
-    tagline: "Google's Gemini models — the active default provider for HCW.",
+    tagline: "Google's Gemini models through the public Generative Language API.",
     requirements: [
       {
-        label: 'Google Cloud account',
-        detail: 'cloud.google.com — $300 free credit for new accounts',
+        label: 'Google AI Studio API key',
+        detail: 'Create a key at aistudio.google.com/app/apikey',
         required: true,
       },
       {
-        label: 'GCP Project with billing',
-        detail: 'Project hybridcloudworks-61e8d already configured',
+        label: 'Azure Function App setting',
+        detail: 'Production uses a Key Vault reference for GEMINI_API_KEY',
         required: true,
       },
       {
-        label: 'Vertex AI API enabled',
-        detail: 'Already enabled for this project',
+        label: 'Entra admin access',
+        detail: 'Required to use the authenticated AI Engine routes',
         required: true,
       },
       {
-        label: 'ADC (Application Default Credentials)',
-        detail: 'Automatic in Cloud Functions; for local dev: run gcloud auth',
+        label: 'Local Azure Functions environment',
+        detail: 'Use functions/.env for local development only',
         required: true,
       },
     ],
@@ -285,63 +285,59 @@ export const SERVICE_DOCS = {
       {
         feature: 'ContentForge Pipeline',
         usage:
-          'PRIMARY provider — all draft, analysis, and multimodal operations by default (CONTENTFORGE_AI_PROVIDER=vertex)',
-        files: ['functions/lib/ai-model-router.js'],
+          'Primary text provider for draft, analysis, and multimodal operations when enabled (CONTENTFORGE_AI_PROVIDER=gemini)',
+        files: ['functions/src/lib/ai/router.js'],
         status: HCW_STATUS.ACTIVE,
       },
       {
         feature: 'Cover Image Generation',
         usage: 'Imagen 4 (google/imagen-4-fast) generates article cover images via Replicate',
-        files: ['functions/index.js'],
+        files: ['functions/src/lib/triggers/ai-cover.js'],
         status: HCW_STATUS.ACTIVE,
       },
       {
         feature: 'AI Engine Playground',
-        usage: 'Immediately available — no key setup needed',
-        files: ['functions/index.js (aiProxy)'],
+        usage: 'Available through the authenticated Azure aiProxy route',
+        files: ['functions/src/lib/ai/proxy.js'],
         status: HCW_STATUS.ACTIVE,
       },
       {
         feature: 'createContentFromRecording',
-        usage: 'Summarizes Plaud transcripts into content drafts (planned)',
-        files: ['functions/index.js (to be implemented)'],
+        usage:
+          'Intended to summarize Plaud transcripts into ContentForge drafts; the current Azure API surface still marks this route as not implemented.',
+        files: ['.azure/api-surface.json', 'frontend/src/pages/admin/RecordingsPage.jsx'],
         status: HCW_STATUS.PLANNED,
       },
     ],
     sections: {
       install: {
-        title: 'Install & Configure',
+        title: 'Configure',
         steps: [
           {
-            heading: 'Already active — no setup required for Cloud Functions',
-            body: 'Vertex AI is the current default. In Firebase Cloud Functions, Application Default Credentials (ADC) are automatically available — no API key or credentials file needed. The @google-cloud/vertexai SDK is already in functions/package.json.',
+            heading: 'Create the API key',
+            body: 'Create a Google AI Studio API key. Do not put it in browser code, source control, or the Admin Portal configuration document.',
             codes: [],
           },
           {
-            heading: 'Local development setup',
-            body: 'For running Cloud Functions locally with the emulator, authenticate with your Google Cloud account.',
+            heading: 'Configure local development',
+            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store.',
             codes: [
               {
                 lang: 'bash',
-                label: 'Terminal',
-                content:
-                  'gcloud auth application-default login\ngcloud config set project hybridcloudworks-61e8d',
+                label: 'functions/.env',
+                content: 'GEMINI_API_KEY=replace-with-your-key\nCONTENTFORGE_AI_PROVIDER=gemini',
               },
             ],
           },
           {
-            heading: 'Verify the active model configuration',
-            body: 'The current model assignments in functions/.env control which Gemini model handles each task type.',
+            heading: 'Configure production',
+            body: 'Set GEMINI_API_KEY as an Azure Function App setting backed by Azure Key Vault, then restart the Function App. The browser calls Azure Functions and never receives the key.',
             codes: [
               {
                 lang: 'bash',
-                label: 'functions/.env — current settings',
+                label: 'Azure CLI pattern',
                 content:
-                  'CONTENTFORGE_AI_PROVIDER=vertex\n' +
-                  'CONTENTFORGE_VERTEX_LOCATION=us-central1\n' +
-                  'CONTENTFORGE_VERTEX_DRAFT_MODEL=gemini-2.5-flash-lite\n' +
-                  'CONTENTFORGE_VERTEX_ANALYSIS_MODEL=gemini-2.5-flash\n' +
-                  'CONTENTFORGE_VERTEX_MULTIMODAL_MODEL=gemini-2.5-flash',
+                  'az functionapp config appsettings set \\\n  --name <function-app> \\\n  --resource-group <resource-group> \\\n  --settings GEMINI_API_KEY="@Microsoft.KeyVault(SecretUri=<secret-uri>)"',
               },
             ],
           },
@@ -352,50 +348,49 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Available models',
-            body: 'Gemini 2.5 Flash is the recommended balance of speed and capability. Flash-Lite is cheapest for simple tasks.',
+            body: 'The Admin Portal seeds the current Gemini model list. Select a model in AI Engine, or let the router use its purpose-specific defaults.',
             codes: [
               {
                 lang: 'text',
                 label: 'Model reference',
                 content:
-                  'gemini-2.5-pro        — Most capable. Best for complex reasoning. ~$3.50/1M in, $10.50/1M out\n' +
-                  'gemini-2.5-flash      — Balanced default. ~$0.30/1M in, $2.50/1M out\n' +
-                  'gemini-2.5-flash-lite — Fastest, cheapest. ~$0.10/1M in, $0.40/1M out',
+                  'gemini-3.5-flash-lite — default low-cost model\n' +
+                  'gemini-3.6-flash      — default analysis and multimodal model\n' +
+                  'gemini-2.5-pro        — higher-quality reasoning option',
               },
             ],
           },
           {
-            heading: 'Change the model for a specific task type',
-            body: 'Update the relevant env var in functions/.env and redeploy. Changes take effect on the next function invocation.',
+            heading: 'Use the AI Engine Playground',
+            body: 'Navigate to /admin/ai-engine → AI Services or Playground → select "Gemini (Google AI)" → choose a model → click Test or Send. Requests are authenticated with Entra and proxied by Azure Functions.',
             codes: [
               {
                 lang: 'bash',
-                label: 'functions/.env',
+                label: 'Routing note',
                 content:
-                  '# Upgrade drafts to the Pro model for higher quality\nCONTENTFORGE_VERTEX_DRAFT_MODEL=gemini-2.5-pro',
+                  'The browser calls Azure Functions; provider credentials and usage logging remain server-side.',
               },
             ],
           },
           {
-            heading: 'Via the AI Engine Playground',
-            body: 'Vertex AI is available immediately in the Playground — no additional setup. Select "Gemini (Google Vertex AI)" and choose your model.',
+            heading: 'Route a recording',
+            body: 'The Recordings page is prepared to send transcripts with provider gemini, but createContentFromRecording is still listed as not implemented in the Azure API surface. Do not describe this action as live until the route is registered.',
             codes: [],
           },
         ],
       },
       uninstall: {
-        title: 'Switch Away',
+        title: 'Disconnect',
         steps: [
           {
-            heading: 'Change the default provider',
-            body: 'Vertex AI cannot be uninstalled (it uses ADC, not a revocable key). To stop using it, switch CONTENTFORGE_AI_PROVIDER to another provider.',
-            codes: [
-              {
-                lang: 'bash',
-                label: 'functions/.env',
-                content: 'CONTENTFORGE_AI_PROVIDER=anthropic  # or openai',
-              },
-            ],
+            heading: 'Disable in AI Engine',
+            body: 'Turn Gemini off or change the provider order in /admin/ai-engine. The Azure API honors the stored provider configuration on every request.',
+            codes: [],
+          },
+          {
+            heading: 'Remove the production secret',
+            body: 'Remove the GEMINI_API_KEY Function App setting or Key Vault reference, then restart the Function App and revoke the key in Google AI Studio.',
+            codes: [],
           },
         ],
       },
@@ -404,73 +399,42 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Multimodal input (images in prompts)',
-            body: 'The callVertex() function already supports multimodal input via the parts parameter. Pass base64-encoded images alongside text to analyze visual content.',
+            body: 'Use the shared Azure Function AI router with the parts parameter for image or other supported inline content. This keeps retries, usage logging, and provider errors consistent.',
             codes: [
               {
                 lang: 'js',
                 label: 'Multimodal call via generateJsonResponse()',
                 content:
                   'const result = await generateJsonResponse({\n' +
-                  "  prompt: 'Describe what you see and extract any text.',\n" +
-                  '  parts: [\n' +
-                  "    { text: 'Analyze this image:' },\n" +
-                  "    { inlineData: { mimeType: 'image/jpeg', data: base64String } },\n" +
-                  '  ],\n' +
+                  "  prompt: 'Describe this image.',\n" +
+                  "  parts: [{ inlineData: { mimeType: 'image/jpeg', data: base64String } }],\n" +
                   "  purpose: 'multimodal',\n" +
                   '});',
               },
             ],
           },
           {
-            heading: 'Grounding with Google Search',
-            body: 'Gemini can be grounded to Google Search results for up-to-date information. This is a Vertex AI feature — add the grounding config to the generateContent() call.',
-            codes: [
-              {
-                lang: 'js',
-                label: 'Grounding config',
-                content:
-                  'const generativeModel = vertexAI.getGenerativeModel({\n' +
-                  "  model: 'gemini-2.5-flash',\n" +
-                  '  tools: [{ googleSearch: {} }],\n' +
-                  '});',
-              },
-            ],
+            heading: 'Provider safety and limits',
+            body: 'The public Gemini API applies provider safety controls. Use the shared Azure Function router so authentication, retries, usage logging, and error handling remain centralized.',
+            codes: [],
           },
           {
             heading: 'Safety settings',
             body: 'Adjust safety thresholds if the model blocks legitimate content. Use with caution in production.',
-            codes: [
-              {
-                lang: 'js',
-                label: 'Safety settings example',
-                content:
-                  'const generativeModel = vertexAI.getGenerativeModel({\n' +
-                  "  model: 'gemini-2.5-flash',\n" +
-                  '  safetySettings: [{\n' +
-                  "    category: 'HARM_CATEGORY_DANGEROUS_CONTENT',\n" +
-                  "    threshold: 'BLOCK_ONLY_HIGH',\n" +
-                  '  }],\n' +
-                  '});',
-              },
-            ],
+            codes: [],
           },
         ],
       },
     },
     references: [
       {
-        label: 'Vertex AI Generative AI Docs',
-        url: 'https://cloud.google.com/vertex-ai/generative-ai/docs',
+        label: 'Gemini API Documentation',
+        url: 'https://ai.google.dev/gemini-api/docs',
       },
       {
-        label: 'Gemini Model Reference',
-        url: 'https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/gemini',
+        label: 'Google AI Studio',
+        url: 'https://aistudio.google.com/app/apikey',
       },
-      {
-        label: 'Application Default Credentials',
-        url: 'https://cloud.google.com/docs/authentication/application-default-credentials',
-      },
-      { label: 'Google Cloud Console', url: 'https://console.cloud.google.com' },
     ],
   },
 
@@ -509,8 +473,8 @@ export const SERVICE_DOCS = {
             codes: [],
           },
           {
-            heading: '2. Add the key to functions/.env',
-            body: 'Perplexity uses an OpenAI-compatible REST API — no SDK needed. The callPerplexity() function in ai-model-router.js handles all calls.',
+            heading: '2. Configure the provider key',
+            body: 'Perplexity uses an OpenAI-compatible REST API — no SDK needed. For local development use functions/.env; production uses an Azure Function App setting backed by Key Vault. The current router does not list Perplexity as an implemented text provider.',
             codes: [
               { lang: 'bash', label: 'functions/.env', content: 'PERPLEXITY_API_KEY=pplx-...' },
             ],
@@ -572,7 +536,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Remove key and disable',
-            body: 'Toggle off in AI Engine, remove PERPLEXITY_API_KEY from functions/.env, and revoke the key at perplexity.ai/settings/api.',
+            body: 'Toggle off in AI Engine, remove the local PERPLEXITY_API_KEY setting and any Azure Function App / Key Vault setting, and revoke the key at perplexity.ai/settings/api.',
             codes: [],
           },
         ],
@@ -664,8 +628,8 @@ export const SERVICE_DOCS = {
             codes: [],
           },
           {
-            heading: '4. Add to functions/.env',
-            body: 'Set all three variables. The AZURE_OPENAI_DEPLOYMENT value must exactly match the deployment name you created in step 2.',
+            heading: '4. Configure the provider settings',
+            body: 'For local Azure Functions development, set all three variables in functions/.env. Production uses Azure Function App settings / Key Vault. The AZURE_OPENAI_DEPLOYMENT value must exactly match the deployment name you created in step 2.',
             codes: [
               {
                 lang: 'bash',
@@ -711,7 +675,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Remove env vars and disable',
-            body: 'Toggle off in AI Engine, remove the three AZURE_OPENAI_* vars from functions/.env, and optionally delete the Azure OpenAI resource in the Azure Portal to stop any charges.',
+            body: 'Toggle off in AI Engine, remove the local AZURE_OPENAI_* settings and any Azure Function App / Key Vault settings, and optionally delete the Azure OpenAI resource in the Azure Portal to stop any charges.',
             codes: [],
           },
         ],
@@ -831,8 +795,8 @@ export const SERVICE_DOCS = {
             ],
           },
           {
-            heading: '4. Add credentials to functions/.env',
-            body: 'Nova models are available in us-east-1 (and a few other regions). Use us-east-1 unless you have a specific reason.',
+            heading: '4. Configure the provider credentials',
+            body: 'For local Azure Functions development, use functions/.env. Production should use Azure Function App settings / Key Vault or the approved AWS credential federation path. Nova models are available in us-east-1 (and a few other regions).',
             codes: [
               {
                 lang: 'bash',
@@ -899,7 +863,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Remove credentials and disable',
-            body: 'Toggle off in AI Engine, remove AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION from functions/.env. In the AWS Console, deactivate or delete the IAM access key.',
+            body: 'Toggle off in AI Engine, remove the local AWS settings and any production Function App / Key Vault configuration. In the AWS Console, deactivate or delete the IAM access key.',
             codes: [],
           },
         ],
@@ -1329,7 +1293,7 @@ export const SERVICE_DOCS = {
             codes: [
               {
                 lang: 'js',
-                label: 'SDK usage in Cloud Functions',
+                label: 'SDK usage in Azure Functions',
                 content:
                   "const FirecrawlApp = require('@mendable/firecrawl-js').default;\n\n" +
                   'const app = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });\n' +
@@ -1569,7 +1533,7 @@ export const SERVICE_DOCS = {
       {
         feature: 'AI Engine Playground',
         usage:
-          'Look up current docs for any library used in HCW (React, Firebase, Vite, etc.) without leaving the admin UI',
+          'Look up current docs for any library used in HCW (React, Azure Functions, Vite, Cosmos DB, etc.) without leaving the admin UI',
         files: ['src/pages/admin/AIEnginePage.jsx (mcpProxy)'],
         status: HCW_STATUS.AVAILABLE,
       },
@@ -1614,21 +1578,21 @@ export const SERVICE_DOCS = {
               {
                 lang: 'json',
                 label: 'resolve-library-id arguments',
-                content: '{ "libraryName": "firebase" }',
+                content: '{ "libraryName": "vite" }',
               },
             ],
           },
           {
             heading: 'Step 2 — Get the docs',
-            body: 'Use the resolved library ID (e.g. "/firebase/firebase-js-sdk") to fetch documentation. Optionally specify a version and topic.',
+            body: 'Use the resolved library ID (for example, "/vitejs/vite") to fetch documentation. Optionally specify a version and topic.',
             codes: [
               {
                 lang: 'json',
                 label: 'get-library-docs arguments',
                 content: JSON.stringify(
                   {
-                    context7CompatibleLibraryID: '/firebase/firebase-js-sdk',
-                    topic: 'firestore',
+                    context7CompatibleLibraryID: '/vitejs/vite',
+                    topic: 'plugins',
                     tokens: 5000,
                   },
                   null,
@@ -1646,7 +1610,6 @@ export const SERVICE_DOCS = {
                 label: 'Frequently used library IDs',
                 content:
                   'React:              /facebook/react\n' +
-                  'Firebase JS SDK:    /firebase/firebase-js-sdk\n' +
                   'React Router:       /remix-run/react-router\n' +
                   'Vite:               /vitejs/vite\n' +
                   'Tailwind CSS:       /tailwindlabs/tailwindcss\n' +
@@ -1881,7 +1844,7 @@ export const SERVICE_DOCS = {
                 lang: 'json',
                 label: 'Arguments example',
                 content:
-                  '{\n  "prompt": "Create a flowchart showing a git push triggering a webhook that calls a cloud function"\n}',
+                  '{\n  "prompt": "Create a flowchart showing a git push triggering a webhook that calls an Azure Function"\n}',
               },
             ],
           },
@@ -1936,7 +1899,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: '2. Synchronize secrets',
-            body: 'Run the setup script or trigger a secrets sync workflow to import the token from Notion to the Firebase functions environment.',
+            body: 'Run the setup script or trigger a secrets sync workflow to import the token into the Azure Function App settings / Key Vault workflow.',
             codes: [
               { lang: 'bash', label: 'Terminal', content: 'node setup-api-keys-from-notion.js' },
             ],
@@ -1963,7 +1926,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Disable and clean secrets',
-            body: 'Toggle Off in the AI Engine and optionally remove the VPS_API_TOKEN from the Cloud Functions secrets configurations.',
+            body: 'Toggle Off in the AI Engine and optionally remove the VPS_API_TOKEN from the Azure Function App settings / Key Vault configuration.',
             codes: [],
           },
         ],

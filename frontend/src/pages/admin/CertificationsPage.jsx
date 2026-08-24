@@ -47,14 +47,10 @@ import { resolveMediaUrl } from '@/lib/functionsBase';
 
 const COLLECTION = 'certifications';
 
-/** Convert legacy storage.googleapis.com GCS URLs to firebasestorage REST format so
- *  storage rules apply and the browser can fetch without auth. */
+/** Resolve current API media paths while preserving absolute URLs on migrated records. */
 const normalizeUrl = (raw) => {
   if (!raw || typeof raw !== 'string') return raw;
-  const m = raw.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
-  if (!m) return raw;
-  const [, bucket, path] = m;
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+  return resolveMediaUrl(raw);
 };
 
 /** Build an ordered list of candidate image URLs from a cert doc. CertImage walks
@@ -670,8 +666,8 @@ function CertEditor({ cert, allCerts, onClose, onSaved }) {
                     )}
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    PNG / JPG / SVG · max 5\u202fMB. Uploaded to Firebase Storage and saved as the
-                    Image URL on save.
+                    PNG / JPG / SVG · max 5\u202fMB. Uploaded through the Azure API to Blob Storage
+                    and saved as the Image URL on save.
                   </p>
                 </div>
                 {form.imageUrl && (
@@ -931,10 +927,10 @@ export default function CertificationsPage() {
           <ServicePageHeader
             icon={Award}
             title="Certifications"
-            service="Firestore"
+            service="Cosmos DB"
             connected={loading ? 'checking' : !loadError}
             description="Curate the certification showcase on the About page — feature the wins, hide the noise, and stay ahead of renewals."
-            poweredBy="Firestore"
+            poweredBy="Cosmos DB"
             accent="amber"
           />
         </div>
@@ -945,7 +941,7 @@ export default function CertificationsPage() {
         <div className="rounded-md border border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-800 p-3 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <p className="font-semibold">Failed to read Firestore</p>
+            <p className="font-semibold">Failed to read certification data</p>
             <p className="font-mono text-[11px] mt-0.5 break-all">{loadError}</p>
           </div>
           <Button size="sm" variant="outline" className="h-7" onClick={load}>

@@ -58,7 +58,7 @@ const toLocalDateInputValue = (value) => {
 
 /**
  * BlogReviewBoard — full review UI for standard blog content items.
- * Handles all state, Firestore writes, and Cloud Function calls internally.
+ * Handles all state, content writes, and Azure Function calls internally.
  *
  * @param {{ blog: object, blogId: string }} props
  */
@@ -136,7 +136,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
     if (!blog) return undefined;
     const timer = setTimeout(() => {
       // `toDate`, not `.toDate()`. `scheduledPublishDate` is an ISO string
-      // since the migration, and calling the Firestore Timestamp method on it
+      // since the migration, and calling a legacy timestamp method on it
       // threw — inside a setTimeout, so outside the error boundary, blanking
       // the review page for any scheduled item (TODO.md T-303). A null here
       // now falls through to the same default as an unscheduled item rather
@@ -1080,7 +1080,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
               </div>
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer hover:text-foreground">
-                  View Raw Firestore Data
+                  View Raw Content Record
                 </summary>
                 <pre className="mt-2 p-2 bg-muted rounded overflow-auto max-h-60">
                   {JSON.stringify(blog, null, 2)}

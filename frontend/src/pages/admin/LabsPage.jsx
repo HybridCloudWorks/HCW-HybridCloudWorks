@@ -14,7 +14,7 @@
  * Tabs:
  *   Dashboard — agent status cards + queue depth + recent jobs table (live)
  *   Console   — submit a job from the server-side allowlist, watch live output
- *   Setup     — Hostinger connect runbook (mirrors labs/vps-agent/README.md)
+ *   Setup     — Hostinger connect runbook (mirrors the current vps-agent/ package)
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -101,7 +101,7 @@ function formatTime(ts) {
 
 /**
  * Polling view of lab_agents + recent lab_jobs (admin read-only) — the
- * getLabsSnapshot RPC every 15s replaces the two Firestore subscriptions,
+ * getLabsSnapshot RPC every 15s replaces the two legacy subscription streams,
  * and also supplies the server's job-type allowlist.
  */
 function useLabsLive(enabled) {
@@ -393,7 +393,7 @@ function ConsoleTab({ jobTypes }) {
     jobTypes.length && !jobTypes.some((jt) => jt.type === type) ? jobTypes[0].type : type;
 
   // Status/output for the submitted job — poll getLabJob until it reaches a
-  // terminal state (replaces the per-doc Firestore subscription).
+  // terminal state (replaces the per-job API polling request).
   //
   // Self-scheduling rather than an interval, so exactly one request is ever in
   // flight regardless of how slow the backend is.
@@ -553,20 +553,20 @@ const SETUP_STEPS = [
     body: 'SSH key-only auth (PasswordAuthentication no, PermitRootLogin no), then enable the Hostinger firewall / ufw allowing only outbound traffic plus your SSH port. The agent is pull-based — it needs zero inbound ports.',
   },
   {
-    title: 'Install Docker + Node.js 20',
-    body: 'curl -fsSL https://get.docker.com | sh, then install Node 20 from NodeSource. Pre-pull the sandbox images: alpine:3.20, hashicorp/terraform:1.9, alpine/ansible:2.17.0.',
+    title: 'Install Docker + Node.js 22',
+    body: 'curl -fsSL https://get.docker.com | sh, then install Node 22 from NodeSource. Pre-pull the sandbox images: alpine:3.20, hashicorp/terraform:1.9, alpine/ansible:2.17.0.',
   },
   {
-    title: 'Create a least-privilege service account',
-    body: 'In the Firebase project\'s Google Cloud Console: IAM → Service Accounts → create "labs-vps-agent" with ONLY roles/datastore.user (Firestore read/write — nothing else). Download a JSON key and copy it to /opt/hcw-labs-agent/service-account.json (chmod 600).',
+    title: 'Provision the Entra agent identity',
+    body: 'Create one confidential Entra app registration per VPS host, assign the LabAgent app role on the API app, upload only the public certificate, and register lab_agents/{agentId} with its object ID, active flag, and allowed capabilities. No Firebase/GCP project, service account, or database key is required.',
   },
   {
-    title: 'Install the agent',
-    body: 'Copy labs/vps-agent/* to /opt/hcw-labs-agent, npm install --omit=dev, cp .env.example .env and set LABS_AGENT_SERVICE_ACCOUNT plus an LABS_AGENT_ID. Create a dedicated "labsagent" user in the docker group and chown the directory.',
+    title: 'Install the Azure API agent',
+    body: 'Copy vps-agent/* to /opt/hcw-labs-agent, run npm ci --omit=dev, copy .env.example to .env, and set LABS_AGENT_API_BASE, LABS_AGENT_TENANT_ID, LABS_AGENT_CLIENT_ID, LABS_AGENT_CERT_PATH, LABS_AGENT_API_SCOPE, and LABS_AGENT_ID. Keep the PEM private key root-owned with chmod 600.',
   },
   {
     title: 'Enable the systemd service',
-    body: 'Install the hcw-labs-agent.service unit from labs/vps-agent/README.md, then systemctl enable --now hcw-labs-agent. Tail logs with journalctl -u hcw-labs-agent -f.',
+    body: 'Run vps-agent/index.js under a dedicated hcw-labs-agent user with systemd or your process supervisor. The agent calls the Azure Functions API and holds no Cosmos DB or Firebase credential.',
   },
   {
     title: 'Run the smoke test',
@@ -621,8 +621,10 @@ function SetupTab({ agents, now }) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Full runbook with copy-paste commands: <code>labs/vps-agent/README.md</code> and{' '}
-        <code>documentation/labs-platform-guide.md</code> in the repo.
+        Current agent source and environment template: <code>vps-agent/index.js</code> and{' '}
+        <code>vps-agent/.env.example</code> in the repo. The legacy{' '}
+        <code>frontend/labs/vps-agent</code> package uses Firebase Admin/Firestore and must not be
+        deployed.
       </p>
     </div>
   );
@@ -657,7 +659,7 @@ export default function LabsPage() {
         service="VPS Agent"
         connected={connected}
         poweredBy="Hostinger VPS"
-        description="Run sandboxed lab jobs (Terraform validate, Ansible checks) on the VPS via a pull-based Firestore queue — no inbound ports."
+        description="Run sandboxed lab jobs (Terraform validate, Ansible checks) on the VPS via the Azure Functions API-backed lab queue — no inbound ports."
         accent="emerald"
       />
 

@@ -3,7 +3,7 @@
  *
  * Plaud now has a real MCP server at https://mcp.plaud.ai/mcp (Streamable HTTP, OAuth).
  * This page connects live to your Plaud library via the AI Engine's mcpProxy
- * Cloud Function — no manual exports needed.
+ * Azure Function — no manual exports needed.
  *
  * Three tabs:
  *   1. Library       — live recordings from Plaud MCP: list_files → get_transcript
@@ -13,10 +13,10 @@
  * Auth flow:
  *   • User runs `npx -y @plaud-ai/mcp@latest install` or connects via Claude Web
  *   • Copies the resulting OAuth access token
- *   • Pastes it in the Connect tab → stored in Firestore (server-side only)
+ *   • Pastes it in the Connect tab → stored in Cosmos DB (server-side only)
  *   • mcpProxy uses the token; it never reaches the browser after saving
  *
- * Firestore collections:
+ * Cosmos DB containers:
  *   recordings  — local copies routed into ContentForge pipeline
  *   mcp_servers/plaud — stores oauthToken (admin-write only)
  */
@@ -277,7 +277,7 @@ function RouteModal({ recording, onClose, onRouted }) {
         transcript: recording.transcript,
         title: recording.title,
         contentType,
-        provider: 'vertex',
+        provider: 'gemini',
       });
       if (result?.contentId) {
         await sendJSON(`cms/recordings/${recording.id}`, 'PATCH', {
@@ -330,8 +330,8 @@ function RouteModal({ recording, onClose, onRouted }) {
             </select>
           </div>
           <p className="text-xs text-slate-500">
-            Vertex AI will summarize and structure the transcript into a new draft. You&apos;ll
-            review it in the Editor.
+            Gemini (Google AI) will summarize and structure the transcript into a new draft.
+            You&apos;ll review it in the Editor.
           </p>
           <div className="flex gap-2">
             <Button className="flex-1" onClick={handleRoute} disabled={routing}>
@@ -807,7 +807,7 @@ function ConnectTab({ isConnected, onConnected }) {
                   </div>
                   <p className="text-xs text-slate-400 flex items-center gap-1">
                     <ShieldCheck className="h-3 w-3" />
-                    Token is stored server-side in Firestore and never sent back to the browser
+                    Token is stored server-side in Cosmos DB and never sent back to the browser
                     after saving.
                   </p>
                 </div>

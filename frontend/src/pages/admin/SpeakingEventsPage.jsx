@@ -112,7 +112,7 @@ function buildManualSpeakingPayload(form) {
 
 function buildSessionizeSpeakingPayload(editingEvent) {
   const payload = {};
-  const existingDoc = editingEvent._firestoreDoc || null;
+  const existingDoc = editingEvent._storedDoc || null;
 
   if (!existingDoc?.eventId) payload.eventId = Number(editingEvent.id);
   if (!existingDoc?.sessionizeId) payload.sessionizeId = Number(editingEvent.id);
@@ -159,12 +159,12 @@ function getDateTimestamp(dateValue) {
 export default function SpeakingEventsPage() {
   const { authReady } = useAuthReady();
   const [sessionizeEvents, setSessionizeEvents] = useState([]);
-  const [firestoreDocs, setFirestoreDocs] = useState([]);
+  const [storedDocs, setStoredDocs] = useState([]);
   const [loadingSessionize, setLoadingSessionize] = useState(true);
-  const [loadingFirestore, setLoadingFirestore] = useState(false);
+  const [loadingStored, setLoadingStored] = useState(false);
   const [saving, setSaving] = useState(null);
   const [deleting, setDeleting] = useState(null);
-  // editingId: null=closed, 'new'=manual entry, else docId of existing Firestore doc
+  // editingId: null=closed, 'new'=manual entry, else docId of an existing stored override
   // editingEvent: the Sessionize event row being enriched (for 'new' from table row)
   const [editingId, setEditingId] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -196,15 +196,15 @@ export default function SpeakingEventsPage() {
     }
   }, []);
 
-  const loadFirestore = useCallback(async () => {
-    setLoadingFirestore(true);
+  const loadStoredDocs = useCallback(async () => {
+    setLoadingStored(true);
     try {
       const res = await getJSON('cms/speakerevents');
-      setFirestoreDocs((res.items || []).map((item) => ({ _docId: item.id, ...item })));
+      setStoredDocs((res.items || []).map((item) => ({ _docId: item.id, ...item })));
     } catch (err) {
-      setError(`Failed to load Firestore events: ${err.message}`);
+      setError(`Failed to load stored event data: ${err.message}`);
     } finally {
-      setLoadingFirestore(false);
+      setLoadingStored(false);
     }
   }, []);
 
@@ -212,16 +212,16 @@ export default function SpeakingEventsPage() {
     loadSessionize(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadSessionize]);
 
-  // Wait for auth before hitting Firestore
+  // Wait for auth before loading stored overrides through the Azure API.
   useEffect(() => {
-    if (authReady) loadFirestore(); // eslint-disable-line react-hooks/set-state-in-effect
-  }, [authReady, loadFirestore]);
+    if (authReady) loadStoredDocs(); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [authReady, loadStoredDocs]);
 
-  // Safely convert any value to a display string — handles Firestore GeoPoints and other objects
+  // Safely convert any value to a display string — handles structured location objects.
   const safeString = (val) => {
     if (!val) return null;
     if (typeof val === 'string') return val;
-    // Firestore GeoPoint: { _lat, _long } or { latitude, longitude }
+    // Structured location: { _lat, _long } or { latitude, longitude }
     if (typeof val === 'object') {
       const lat = val._lat ?? val.latitude;
       const lng = val._long ?? val.longitude;
@@ -231,18 +231,18 @@ export default function SpeakingEventsPage() {
     return String(val);
   };
 
-  // Helper: resolve the canonical numeric ID from a Firestore doc (eventId preferred, then sessionizeId)
+  // Helper: resolve the canonical numeric ID from a stored record.
   const fdNumericId = (fd) => {
     const v = fd.eventId ?? fd.sessionizeId;
     return v ? Number(v) : null;
   };
 
-  // Merged: each Sessionize event paired with its Firestore doc (if any)
+  // Merged: each Sessionize event paired with its stored override (if any).
   // Match by eventId only — consistent with sync logic
   const mergedEvents = sessionizeEvents
     .map((se) => {
-      const fd = firestoreDocs.find((d) => fdNumericId(d) === Number(se.id));
-      return { ...se, _firestoreDoc: fd || null };
+      const fd = storedDocs.find((d) => fdNumericId(d) === Number(se.id));
+      return { ...se, _storedDoc: fd || null };
     })
     .sort((a, b) => {
       // Sort by date descending (newest first)
@@ -251,8 +251,8 @@ export default function SpeakingEventsPage() {
       return dateB - dateA;
     });
 
-  // Firestore-only manual entries (no matching Sessionize event by eventId)
-  const manualEntries = firestoreDocs
+  // Manual entries with no matching Sessionize event by eventId.
+  const manualEntries = storedDocs
     .filter((fd) => {
       const id = fdNumericId(fd);
       if (id && sessionizeEvents.some((se) => Number(se.id) === id)) return false;
@@ -266,7 +266,7 @@ export default function SpeakingEventsPage() {
     });
 
   const openEnrich = (sessionizeEvent) => {
-    const fd = sessionizeEvent._firestoreDoc;
+    const fd = sessionizeEvent._storedDoc;
     setEditingEvent(sessionizeEvent);
     setForm({
       description: fd?.description || '',
@@ -318,7 +318,7 @@ export default function SpeakingEventsPage() {
         const seId = Number(se.id);
 
         // Match ONLY by eventId — name matching is no longer used for sync
-        const existing = firestoreDocs.find((fd) => fdNumericId(fd) === seId) || null;
+        const existing = storedDocs.find((fd) => fdNumericId(fd) === seId) || null;
 
         if (existing) {
           const patch = buildSyncPatch(existing, se, seId);
@@ -344,7 +344,7 @@ export default function SpeakingEventsPage() {
         });
         created++;
       }
-      await loadFirestore();
+      await loadStoredDocs();
       setSyncResult({ created, patched, skipped });
     } catch (err) {
       setError(`Sync failed: ${err.message}`);
@@ -371,7 +371,7 @@ export default function SpeakingEventsPage() {
         data: payload,
         merge: true,
       });
-      await loadFirestore();
+      await loadStoredDocs();
       closeEdit();
     } catch (err) {
       setError(`Save failed: ${err.message}`);
@@ -383,14 +383,14 @@ export default function SpeakingEventsPage() {
   const handleDelete = async (docId) => {
     if (
       !window.confirm(
-        'Delete this Firestore override? The event will still show from Sessionize without custom data.'
+        'Delete this stored override? The event will still show from Sessionize without custom data.'
       )
     )
       return;
     setDeleting(docId);
     try {
       await postJSON('deleteSpeakerEvent', { docId });
-      await loadFirestore();
+      await loadStoredDocs();
       if (editingId === docId) closeEdit();
     } catch (err) {
       setError(`Delete failed: ${err.message}`);
@@ -399,7 +399,7 @@ export default function SpeakingEventsPage() {
     }
   };
 
-  const loading = loadingSessionize || loadingFirestore;
+  const loading = loadingSessionize || loadingStored;
 
   const renderForm = () => {
     const isManual = !editingEvent;
@@ -502,7 +502,7 @@ export default function SpeakingEventsPage() {
               <input
                 type="url"
                 className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
-                placeholder="https://firebasestorage.googleapis.com/..."
+                placeholder="https://example.com/event-image.jpg"
                 value={form.eventImageUrl}
                 onChange={(e) => setForm((f) => ({ ...f, eventImageUrl: e.target.value }))}
               />
@@ -561,7 +561,7 @@ export default function SpeakingEventsPage() {
             size="sm"
             onClick={() => {
               loadSessionize();
-              if (authReady) loadFirestore();
+              if (authReady) loadStoredDocs();
             }}
             disabled={loading || syncing}
           >
@@ -576,8 +576,8 @@ export default function SpeakingEventsPage() {
             variant="outline"
             size="sm"
             onClick={handleSyncAll}
-            disabled={loading || syncing || firestoreDocs.length === 0}
-            title="Create Firestore docs for any new Sessionize events — existing docs are never touched"
+            disabled={loading || syncing || storedDocs.length === 0}
+            title="Create stored records for any new Sessionize events — existing records are never touched"
           >
             {syncing ? (
               <Loader2 className="h-4 w-4 animate-spin mr-1" />
@@ -648,14 +648,14 @@ export default function SpeakingEventsPage() {
                       Location
                     </th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground w-28">
-                      Firestore
+                      Stored override
                     </th>
                     <th className="px-4 py-2.5 w-24" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {mergedEvents.map((ev) => {
-                    const fd = ev._firestoreDoc;
+                    const fd = ev._storedDoc;
                     const isEditing = editingEvent?.id === ev.id;
                     return (
                       <tr
@@ -762,7 +762,7 @@ export default function SpeakingEventsPage() {
           {manualEntries.length > 0 && (
             <div>
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                Manual Entries — Firestore Only ({manualEntries.length})
+                Manual Entries — Stored Only ({manualEntries.length})
               </h2>
               <div className="rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-sm">
@@ -832,7 +832,7 @@ export default function SpeakingEventsPage() {
             <p className="font-medium">How it works</p>
             <p>
               Sessionize is fetched live — ID, name, and date are always taken from the API and
-              saved to Firestore automatically when you click Save.
+              saved through the Azure API when you click Save.
             </p>
             <p>
               Any field you leave blank here falls back to the Sessionize value on the public site.

@@ -82,7 +82,7 @@ function StatusBadge({ status }) {
 function ProviderIcon({ provider }) {
   const icons = {
     anthropic: '🟣',
-    vertex: '🔵',
+    gemini: '🔵',
     perplexity: '🔍',
     azure: '🪟',
     bedrock: '🟠',
@@ -1150,14 +1150,14 @@ const SITE_PAGES = [
     label: 'ContentForge Pipeline',
     path: '/admin/submit-urls',
     description: 'Ingest URLs → AI analysis, content generation, cover image creation',
-    services: ['vertex', 'anthropic', 'perplexity', 'replicate', 'firecrawl'],
+    services: ['gemini', 'anthropic', 'perplexity', 'replicate', 'firecrawl'],
   },
   {
     id: 'recordings',
     label: 'Recordings',
     path: '/admin/recordings',
     description: 'Plaud MCP integration — browse recordings, transcripts, AI notes',
-    services: ['plaud', 'anthropic', 'vertex'],
+    services: ['plaud', 'anthropic', 'gemini'],
   },
   {
     id: 'ai-playground',
@@ -1166,7 +1166,7 @@ const SITE_PAGES = [
     description: 'Interactive chat with any enabled AI provider or MCP tool',
     services: [
       'anthropic',
-      'vertex',
+      'gemini',
       'perplexity',
       'azure',
       'bedrock',
@@ -1181,7 +1181,7 @@ const SITE_PAGES = [
     label: 'Submit URLs',
     path: '/admin/submit-urls',
     description: 'Firecrawl-powered URL scraping and content ingestion',
-    services: ['firecrawl', 'vertex', 'anthropic'],
+    services: ['firecrawl', 'gemini', 'anthropic'],
   },
   {
     id: 'dashboard',
@@ -1199,7 +1199,7 @@ const SITE_PAGES = [
 const SERVICES = {
   // AI providers
   anthropic: { label: 'Claude (Anthropic)', icon: '🟣', type: 'ai', exclusiveWith: [] },
-  vertex: { label: 'Gemini (Vertex AI)', icon: '🔵', type: 'ai', exclusiveWith: [] },
+  gemini: { label: 'Gemini (Google AI)', icon: '🔵', type: 'ai', exclusiveWith: [] },
   perplexity: { label: 'Perplexity Sonar', icon: '🔍', type: 'ai', exclusiveWith: [] },
   azure: { label: 'Azure OpenAI', icon: '🪟', type: 'ai', exclusiveWith: [] },
   bedrock: { label: 'AWS Bedrock (Nova)', icon: '🟠', type: 'ai', exclusiveWith: [] },

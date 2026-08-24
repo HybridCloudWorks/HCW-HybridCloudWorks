@@ -1,11 +1,11 @@
 /**
  * Linkie Hub - manage Linkie links, view analytics, push published content.
  *
- * All Linkie API calls route through the `linkieProxy` Cloud Function
- * (LINKIE_API_KEY lives in Secret Manager - never in the client bundle).
+ * All Linkie API calls route through the `linkieProxy` Azure Function
+ * (LINKIE_API_KEY lives in Azure Key Vault - never in the client bundle).
  * Mirrors the SocialHubPage integration pattern.
  *
- * Required Cloud Function secret (set via `firebase functions:secrets:set`):
+ * Required Azure Function App setting (prefer a Key Vault reference):
  *   LINKIE_API_KEY - Linkie Admin API key
  */
 
@@ -536,8 +536,8 @@ function ConnectionTab({ onStatusChange }) {
         <CardHeader>
           <CardTitle className="text-base">Linkie API Connection</CardTitle>
           <CardDescription>
-            The LINKIE_API_KEY is stored in Google Secret Manager and used server-side by the
-            linkieProxy Cloud Function - it is never sent to the browser.
+            The LINKIE_API_KEY is stored in Azure Key Vault and used server-side by the linkieProxy
+            Azure Function - it is never sent to the browser.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -7,10 +7,10 @@
  * Publer API reference: https://publer.io/help/article/publer-api
  *
  * FINDING-04 fix: all Publer API calls are routed through the `publerProxy`
- * Cloud Function. The PUBLER_API_KEY and PUBLER_WORKSPACE_ID are stored in
- * Secret Manager and never bundled into the client JS build.
+ * Azure Function. The PUBLER_API_KEY and PUBLER_WORKSPACE_ID are stored in
+ * Azure Key Vault and never bundled into the client JS build.
  *
- * Required Cloud Function secrets (set via `firebase functions:secrets:set`):
+ * Required Azure Function App settings (prefer Key Vault references):
  *   PUBLER_API_KEY        — Publer API key
  *   PUBLER_WORKSPACE_ID   — Publer workspace ID
  */
@@ -199,16 +199,16 @@ function ScheduleButtonContent({ submitting, jobStatus, scheduledAt }) {
 
 // ── Publer API wrappers ───────────────────────────────────────────────────────
 // FINDING-04 (HIGH): API key removed from client. All Publer calls now route
-// through the `publerProxy` Cloud Function which holds the key in Secret Manager.
+// through the `publerProxy` Azure Function which holds the key in Key Vault.
 
 // publerReady is always true — readiness is now determined by the function's
 // ability to resolve its secrets, not by client-side env vars.
 const publerReady = () => true;
 
 /**
- * Route a Publer API request through the server-side publerProxy Cloud Function.
+ * Route a Publer API request through the server-side publerProxy Azure Function.
  * The function enforces admin auth and injects the Publer credentials from
- * Secret Manager — no API key is ever sent to or stored on the client.
+ * Azure Key Vault — no API key is ever sent to or stored on the client.
  *
  * @param {string} path - Publer API path, e.g. '/accounts'
  * @param {{ method?: string, body?: string }} options - fetch-style options
@@ -413,7 +413,7 @@ function ComposeTab({ recentContent, initialContentId }) {
         await publerPollJob(scheduleRes.data.job_id);
       }
 
-      // Save to Firestore social_posts
+      // Save to the social_posts content container
       await saveSocialPost({
         contentId: selectedContent?.id || null,
         caption: caption.trim(),
@@ -783,7 +783,7 @@ function QueueTab() {
         })}
       </div>
 
-      {/* Local Firestore records */}
+      {/* Local social-post records */}
       {totalLocal > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">

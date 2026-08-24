@@ -24,7 +24,7 @@ import PipelineStepper from '@/components/admin/PipelineStepper';
 
 // ── Pre-publish validation ────────────────────────────────────────────────────
 // Client-side checklist run before publishContent is invoked. `item` is
-// the snapshot row merged with the full Firestore doc (for body length).
+// the snapshot row merged with the full content record (for body length).
 
 const MIN_BODY_CHARS = 200;
 
@@ -90,7 +90,7 @@ function getPublicUrl(item) {
   return publicPath ? `https://hybridcloudworks.com${publicPath}` : '';
 }
 
-// Both of these were Firestore-only (`?.toMillis?.() || 0`), so against the ISO
+// Both of these were timestamp-object-only (`?.toMillis?.() || 0`), so against the ISO
 // strings Cosmos returns they scored every document 0 and the comparators were
 // permanent no-ops (TODO.md T-304).
 const sortByUpdatedAtDesc = byNewest('updatedAt');
@@ -122,7 +122,7 @@ function buildPublishDebug(item, result, mapping) {
 
 function getPublishErrorMessage(mapping) {
   if (!mapping) {
-    return 'Publish completed without mapping diagnostics. Check Cloud Function logs.';
+    return 'Publish completed without mapping diagnostics. Check Azure Function logs.';
   }
 
   if (!mapping.expectedPublicUrl) {
@@ -160,7 +160,7 @@ function usePublishWorkflow({ navigate, withImageOverride, setLocalLiveOverrides
   const [autoPostSocial, setAutoPostSocial] = useState(false);
 
   // Step 1 — validate before publishing. Merges the snapshot row with the full
-  // Firestore doc (the snapshot omits body text) and opens the checklist modal.
+  // content record (the snapshot omits body text) and opens the checklist modal.
   const handlePublishRequest = async (item) => {
     setPublishError('');
     setValidatingId(item.id);

@@ -158,8 +158,8 @@ export default function KeywordMatrixPanel() {
       <CardContent className="space-y-8">
         <p className="text-sm text-slate-600 dark:text-slate-400">
           The matrix collapses messy article tags into canonical tags and injects scene directives
-          when specific keywords are found. Changes save to Firestore and take effect on the next
-          hero generation.
+          when specific keywords are found. Changes save to the content configuration store and take
+          effect on the next hero generation.
         </p>
 
         {/* Live tester */}

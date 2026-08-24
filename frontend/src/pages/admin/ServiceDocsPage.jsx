@@ -69,7 +69,7 @@ function CodeBlock({ lang = 'bash', label, content }) {
       return code
         .replace(/(#.*)$/gm, '<span class="text-slate-500 italic">$1</span>')
         .replace(
-          /\b(npm|npx|node|gcloud|plaud|firebase|rm|cat|mkdir)\b/g,
+          /\b(npm|npx|node|az|openssl|plaud|rm|cat|mkdir)\b/g,
           '<span class="text-sky-300">$1</span>'
         );
     }

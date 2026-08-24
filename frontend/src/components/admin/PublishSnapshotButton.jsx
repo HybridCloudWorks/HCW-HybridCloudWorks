@@ -5,8 +5,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { postJSON } from '@/lib/api';
 
 /**
- * Triggers the publishSnapshot Cloud Function, which snapshots both the
- * certifications and speakerevents Firestore collections into _snapshots/
+ * Triggers the publishSnapshot Azure Function, which snapshots both the
+ * certifications and speakerevents content containers into _snapshots/
  * documents. The About page and speaking-events widget read from those
  * documents, so visitors see new content without a full site redeploy.
  */

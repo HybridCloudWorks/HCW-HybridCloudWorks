@@ -3,7 +3,8 @@
  *
  * One card per service with a Test Connection button where a server-side
  * test endpoint exists. Also owns editable integration settings (currently
- * the Sessionize speaker ID, stored in Firestore admin_settings/integrations).
+ * the Sessionize speaker ID, stored by the Azure API in the admin_settings/integrations
+ * Cosmos DB container).
  */
 
 import React, { useEffect, useState } from 'react';
@@ -265,8 +266,8 @@ export default function ConnectionsPage() {
           Connections
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          One place to check every 3rd-party integration. API keys live in Google Secret Manager and
-          are only used server-side.
+          One place to check every 3rd-party integration. API keys live in Azure Key Vault and are
+          only used server-side.
         </p>
       </div>
 
@@ -281,7 +282,7 @@ export default function ConnectionsPage() {
         <CardHeader>
           <CardTitle className="text-base">Integration Settings</CardTitle>
           <CardDescription>
-            Stored in Firestore (admin_settings/integrations) — editable here instead of being
+            Stored in Cosmos DB (admin_settings/integrations) — editable here instead of being
             hard-coded.
           </CardDescription>
         </CardHeader>
