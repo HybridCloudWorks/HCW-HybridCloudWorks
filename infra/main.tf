@@ -1180,7 +1180,34 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "CMS_BOOTSTRAP_ALLOWED_EMAILS" = join(",", var.bootstrap_admin_emails)
 
     "RUNTIME_CONFIG_GENERATION" = var.config_generation
-    "RUNTIME_CONFIG_WRITER"     = "azurerm"
+
+    # THIS KEY MAKES EVERY PLAN SHOW A DIFF, AND THAT IS EXPECTED.
+    #
+    # azapi_update_resource below rewrites it to "azapi-strip" in the same
+    # apply, so the live value is never what this line declares. Every
+    # subsequent plan therefore reports:
+    #
+    #   ~ "RUNTIME_CONFIG_WRITER" = "azapi-strip" -> "azurerm"
+    #   Plan: 2 to add, 1 to change, 2 to destroy
+    #
+    # — the change being this key, and the 2/2 being the two azapi resources
+    # replaced by their `replace_triggered_by`. A plan reporting exactly that
+    # and nothing else means NO DRIFT. It is noise, it is permanent, and the
+    # only thing worse than the noise is silencing it wrongly.
+    #
+    # Do NOT "fix" it with ignore_changes on this key. That would make azurerm
+    # carry the live "azapi-strip" into its own write, so a worker that
+    # consumed the FIRST write and missed the strip would report "azapi-strip"
+    # too — which is the one thing this marker exists to make impossible. The
+    # strip is what keeps AzureWebJobsStorage from breaking SyncTriggers, and
+    # three production incidents were diagnosed by exactly this distinction.
+    #
+    # The drift is structural: two writers manage one settings map, and telling
+    # them apart requires them to disagree. It cannot be removed without
+    # removing the signal. It goes away on its own when
+    # hashicorp/terraform-provider-azurerm#29149 closes and both azapi
+    # resources are deleted — see the T-511 block below.
+    "RUNTIME_CONFIG_WRITER" = "azurerm"
   })
 
   identity {
