@@ -32,6 +32,9 @@ const mocks = vi.hoisted(() => ({
   removeEventCallback: vi.fn(),
   loginPopup: vi.fn(),
   loginRedirect: vi.fn(),
+  logoutPopup: vi.fn(),
+  logoutRedirect: vi.fn(),
+  clearCache: vi.fn(),
 }));
 
 vi.mock('@azure/msal-browser', () => ({
@@ -45,6 +48,9 @@ vi.mock('@azure/msal-browser', () => ({
     removeEventCallback = mocks.removeEventCallback;
     loginPopup = mocks.loginPopup;
     loginRedirect = mocks.loginRedirect;
+    logoutPopup = mocks.logoutPopup;
+    logoutRedirect = mocks.logoutRedirect;
+    clearCache = mocks.clearCache;
   },
   InteractionRequiredAuthError: class extends Error {},
   EventType: {
@@ -71,6 +77,9 @@ beforeEach(() => {
   mocks.addEventCallback.mockReturnValue('cb-id');
   mocks.loginPopup.mockResolvedValue({ account: ACCOUNT });
   mocks.loginRedirect.mockResolvedValue(undefined);
+  mocks.clearCache.mockResolvedValue(undefined);
+  mocks.logoutPopup.mockResolvedValue(undefined);
+  mocks.logoutRedirect.mockResolvedValue(undefined);
   setPointer('fine');
   setHash('');
 });
@@ -285,5 +294,82 @@ describe('recoverable initialisation errors', () => {
     await expect(initializeAuth()).rejects.toMatchObject({
       errorCode: 'something_genuinely_broken',
     });
+  });
+});
+
+describe('signOut — local, the way Firebase did it', () => {
+  it('clears the local session and never opens a popup or navigates', async () => {
+    // This was logoutPopup().catch(() => logoutRedirect()). The catch never ran
+    // when the browser made a top-level window, because the promise HANGS
+    // rather than rejecting — so sign-out silently did nothing at all.
+    const { signOutUser } = await freshModule();
+
+    await signOutUser();
+
+    expect(mocks.clearCache).toHaveBeenCalledTimes(1);
+    expect(mocks.logoutPopup).not.toHaveBeenCalled();
+    expect(mocks.logoutRedirect).not.toHaveBeenCalled();
+  });
+
+  it('drops the active account', async () => {
+    const { signOutUser } = await freshModule();
+    await signOutUser();
+    expect(mocks.setActiveAccount).toHaveBeenCalledWith(null);
+  });
+
+  it('tells subscribers, which MSAL will not do for a cache clear', async () => {
+    // clearCache emits no event — the EventType enum has logoutStart/Success/
+    // Failure/End and nothing for a cache clear. Without a local notification
+    // the guard keeps rendering the portal to a signed-out user.
+    const { onAuthStateChanged, signOutUser } = await freshModule();
+    const callback = vi.fn();
+    onAuthStateChanged(callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalled());
+    callback.mockClear();
+
+    await signOutUser();
+
+    expect(callback).toHaveBeenCalledWith(null);
+  });
+
+  it('does not notify a subscriber that has unsubscribed', async () => {
+    const { onAuthStateChanged, signOutUser } = await freshModule();
+    const callback = vi.fn();
+    const unsubscribe = onAuthStateChanged(callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalled());
+    unsubscribe();
+    callback.mockClear();
+
+    await signOutUser();
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('one throwing subscriber does not stop the others', async () => {
+    const { onAuthStateChanged, signOutUser } = await freshModule();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error('subscriber blew up');
+    });
+    const good = vi.fn();
+    onAuthStateChanged(bad);
+    onAuthStateChanged(good);
+    await vi.waitFor(() => expect(good).toHaveBeenCalled());
+    good.mockClear();
+
+    await signOutUser();
+    expect(good).toHaveBeenCalledWith(null);
+  });
+});
+
+describe('no interactive flow anywhere uses a popup', () => {
+  it('is the whole point — a popup can become a top-level window and hang', async () => {
+    // Sign-in and sign-out both failed this way, three days apart, for the same
+    // underlying reason: the browser decides what window.open produces.
+    const { signIn, signOutUser } = await freshModule();
+    await signIn();
+    await signOutUser();
+
+    expect(mocks.loginPopup).not.toHaveBeenCalled();
+    expect(mocks.logoutPopup).not.toHaveBeenCalled();
   });
 });

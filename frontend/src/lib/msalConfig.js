@@ -33,6 +33,13 @@ export const API_SCOPE = import.meta.env.VITE_ENTRA_API_SCOPE || '';
 /** Interactive sign-in request: identity claims + the API scope. */
 export const loginRequest = {
   scopes: ['openid', 'profile', 'email', ...(API_SCOPE ? [API_SCOPE] : [])],
+  // Sign-out is local (entraAuth.js signOutUser calls clearCache), matching what
+  // Firebase's signOut did: this application's session ends, the identity
+  // provider's does not. Without this the next sign-in would silently reuse the
+  // surviving Entra session and there would be no way to change account from the
+  // portal at all. Firebase's Google popup showed the chooser by default, so
+  // this is the behaviour being migrated from, not a new prompt.
+  prompt: 'select_account',
 };
 
 /** Silent token request for backend calls — the API scope only. */
