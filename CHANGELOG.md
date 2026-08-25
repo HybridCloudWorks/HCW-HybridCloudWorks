@@ -114,6 +114,40 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The migration-era rehearsal estate is destroyed and the three
+  production-write grants are revoked (B6/B7, applied 2026-08-25).** The apply
+  reported **3 added, 2 changed, 92 destroyed**. The destroy count matched the
+  authorisation in `REVIEW.md` exactly — 90 real destroys plus the 2 azapi
+  resources replaced on every apply — which is the number that mattered, since
+  the record insisted on approving against addresses rather than a count. The
+  adds and changes came in below the recorded 17/5, and that is not a short
+  apply: that figure was written before any of it ran, most of those adds were
+  the alert rules, and #218 and #219 had already created them (ten of thirteen
+  targeted resources, then the remaining three after ARM rejected them at
+  create time). By the time this run planned, they were no longer adds.
+  Everything was verified after the apply rather than inferred from the plan:
+  `rg-db-site-sbx-cus` no longer exists; all four alert rules are still present
+  and enabled; and the deploy identity is down to four operational roles — HCW
+  Cosmos Container Definition Writer on the production account, Storage Account
+  Contributor and Storage Blob Data Contributor on `stsitefuncprodcus01` (the
+  Functions **host** account, needed for the deploy firewall window), and
+  Website Contributor on the Function App. The three revoked grants were scoped
+  to `dbs/hcw` and to `stsiteprodcus01`, the **content** account; none of them
+  appears. What this cost is already recorded: with the grants gone the deploy
+  identity has no write path into the production Cosmos database or the content
+  account, so the delta import is retired for good. The two `data-migration`
+  federated credentials survive — `federated_subjects` still emits
+  `environment:data-migration` twice — and remain an owner decision (T-524).
+
+- **`REVIEW.md` §4.10 listed the wrong number of Terraform outputs.** It said
+  twenty-three and omitted `deploy_principal_id`, because it was assembled by
+  reading `infra/outputs.tf` alone while three outputs live in `infra/oidc.tf`.
+  There are **twenty-four**, and the section now lists them by file. Corrected
+  against the apply's own output block, which is the only listing guaranteed to
+  be complete. Recorded rather than quietly fixed because it is precisely the
+  drift Part 4 exists to prevent, and it was introduced by the change that
+  restored Part 4 four commits earlier.
+
 - **The IaC checks are required to merge, and the three orphaned repository
   variables are gone (T-523 owner half, T-525, 2026-08-25).** Ruleset
   `20680114` now requires **12** contexts rather than 10, the two additions
