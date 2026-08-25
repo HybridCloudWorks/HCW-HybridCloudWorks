@@ -32,7 +32,7 @@
  *   COSMOS_ENDPOINT   required
  *   COSMOS_DATABASE   optional, defaults to 'hcw'
  */
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -204,8 +204,17 @@ async function main() {
   // Compare ignoring the timestamp, so an unchanged corpus does not produce a
   // commit whose only content is the time it ran.
   const next = JSON.stringify(manifest, null, 2);
-  if (existsSync(OUT_PATH)) {
-    const previous = readFileSync(OUT_PATH, 'utf8');
+  // Read straight through instead of existsSync-then-read. The check-then-use
+  // pair is a race the single read does not have, and a file that disappeared
+  // between the two calls is the same "no previous manifest" outcome as one
+  // that was never there.
+  let previous = null;
+  try {
+    previous = readFileSync(OUT_PATH, 'utf8');
+  } catch {
+    previous = null;
+  }
+  if (previous !== null) {
     const strip = (text) => text.replace(/"generatedAt": "[^"]*"/, '"generatedAt": ""');
     if (strip(previous) === strip(next)) {
       console.log(`[content-manifest] unchanged — ${manifest.routes.length} routes`);

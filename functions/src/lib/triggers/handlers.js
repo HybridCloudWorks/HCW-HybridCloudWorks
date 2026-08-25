@@ -18,7 +18,7 @@
  * `_etag` of the delivered item is the "event id" a rising-edge claim records:
  * stable across redeliveries of the same write, different for a new write.
  */
-import { SKIP_REASONS, claimRisingEdge, releaseRisingEdgeClaim } from './rising-edge-claim.js';
+import { claimRisingEdge, releaseRisingEdgeClaim } from './rising-edge-claim.js';
 import { evaluateActivationNotice, ACTIVATION_NOTIFIED_FIELD } from './activation-notice.js';
 import { markerForFields, shouldProcessValue } from './value-marker.js';
 import { generateSlug } from '../rss/feeds.js';
