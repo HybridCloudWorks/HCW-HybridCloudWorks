@@ -1,0 +1,65 @@
+# Code scanning, advanced setup.
+#
+# .github/codeql/codeql-config.yml has existed and been referenced by nothing:
+# the repository turned off CodeQL Default setup in favour of an advanced
+# workflow that was never added, so code scanning has been off entirely while
+# .github/CONTRIBUTING.md lists it as a required gate. This is that workflow.
+#
+# The language matrix is deliberately narrow. The config file explains that the
+# retired Default setup grew erroring language:go and language:java-kotlin
+# configurations from vendored harness snippets; those stay out. python stays
+# out for the same reason and not by oversight — there is currently no
+# first-party Python in the tracked tree, and CodeQL fails a language that
+# resolves to no source. Add it when that stops being true.
+
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published query finds existing code rather than
+    # waiting for the next pull request to touch the affected file.
+    - cron: '31 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    permissions:
+      # Uploading results to the code-scanning API is the only write this
+      # workflow performs. It uses no secrets, no cloud credentials, no OIDC.
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      # One language failing should not mask the state of the other.
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827 # v4
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yml
+          queries: security-and-quality
+
+      # No build step: both languages are analysed by interpretation, which is
+      # why the config's paths-ignore applies to them.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827 # v4
+        with:
+          category: /language:${{ matrix.language }}

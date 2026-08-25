@@ -1,5 +1,17 @@
 version: 2
 
+# Grouping policy. Every ecosystem batches minor and patch into one PR and
+# majors into a second. Majors are deliberately kept out of the safe batch: a
+# breaking bump that fails review would otherwise hold back the routine updates
+# alongside it. Leaving majors ungrouped entirely was the noisier failure --
+# 2026-08-24 produced three grouped PRs for fourteen updates and six separate
+# single-package PRs, all of them majors.
+#
+# cooldown keeps a release from landing the day it is published. That is a
+# supply-chain control as much as a noise control: a compromised or yanked
+# release is usually caught within days, and nothing here is urgent enough to
+# need same-day adoption. Security updates ignore cooldown.
+
 updates:
   - package-ecosystem: npm
     directory: /frontend
@@ -7,11 +19,17 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
       frontend-minor-patch:
         update-types:
           - minor
           - patch
+      frontend-major:
+        update-types:
+          - major
 
   - package-ecosystem: npm
     directory: /functions
@@ -19,11 +37,17 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
       azure-functions-minor-patch:
         update-types:
           - minor
           - patch
+      azure-functions-major:
+        update-types:
+          - major
 
   - package-ecosystem: npm
     directory: /scripts
@@ -31,11 +55,17 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
       operations-scripts-minor-patch:
         update-types:
           - minor
           - patch
+      operations-scripts-major:
+        update-types:
+          - major
 
   - package-ecosystem: npm
     directory: /vps-agent
@@ -43,22 +73,54 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      vps-agent-minor-patch:
+        update-types:
+          - minor
+          - patch
+      vps-agent-major:
+        update-types:
+          - major
 
+  # Actions are SHA-pinned with a version comment, so every bump is the same
+  # two-line shape and they review well as one PR regardless of semver level.
+  # Splitting majors out here would only recreate the three-same-day-PRs case.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 3
     groups:
-      github-actions-minor-patch:
+      github-actions:
         update-types:
+          - major
           - minor
           - patch
 
-  - package-ecosystem: docker
-    directory: /infra/runner-image
+  # infra/.terraform.lock.hcl is deliberately committed (see .gitignore) because
+  # the azurerm pin is `~> 4.0` and an uncommitted lock lets CI resolve a
+  # different provider version than a developer does. Nothing kept that lock
+  # current until now, so the pin quietly drifted from what CI actually ran.
+  - package-ecosystem: terraform
+    directory: /infra
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      infra-terraform-minor-patch:
+        update-types:
+          - minor
+          - patch
+      infra-terraform-major:
+        update-types:
+          - major
