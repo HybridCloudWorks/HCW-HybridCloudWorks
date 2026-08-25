@@ -616,8 +616,10 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "logs_daily_cap" {
 # supported pattern is Microsoft's custom-header identifier below plus a
 # Cloudflare rule that admits it, or the ApplicationInsightsAvailability
 # service tag — confirm one execution succeeds, then set
-# availability_test_enabled = true in the workspace. The alert rule underneath
-# already exists and starts working the moment results appear.
+# availability_test_enabled = true in the workspace. That one variable arms the
+# test and creates the alert together: the alert is gated on the same variable,
+# so that an inventory of alert rules cannot show a reachability alert that
+# nothing can fire.
 #
 # The X-Customer-InstanceId header is Microsoft's documented way to prove a
 # request came from THIS test rather than from anyone else sharing the
@@ -691,9 +693,10 @@ resource "azurerm_application_insights_standard_web_test" "api_health" {
 # every 15 minutes, so a 15-minute window would count some locations zero times
 # and the alert would simply never fire. Derived from the frequency variable
 # for the same reason as the count above.
+#
 # Gated on the same variable as the web test it watches. Created unconditionally
 # it would sit enabled against a disabled test, so `az monitor metrics alert list`
-# would report six rules when only five can fire -- and the inert one is
+# would report six rules when only five can fire — and the inert one is
 # reachability, the only signal that survives the app being completely down. An
 # inventory that overstates coverage is worse than one rule fewer.
 resource "azurerm_monitor_metric_alert" "api_availability" {

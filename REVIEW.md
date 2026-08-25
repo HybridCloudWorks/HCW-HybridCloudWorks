@@ -80,9 +80,17 @@ both imports reconciled at 8,023/8,023 with zero field mismatches
 ([Phase-4-Data-Migration](wiki/Phase-4-Data-Migration.md), P2 and P4).
 
 **What is authorised is the removal, not the mechanism.** The apply still needs
-an owner approval in HCP Terraform like any other. Expected shape is **13 to
+an owner approval in HCP Terraform like any other. Expected shape is **17 to
 add, 5 to change, 92 to destroy** — 90 real destroys plus the 2 azapi resources
-that are replaced on every apply. Approve it against the resource **addresses**,
+that are replaced on every apply.
+
+The add count moved twice after the figure of 13 was first recorded, which is
+why it is reconciled here rather than restated: `eec36ce` gated the availability
+alert on its web test, removing one add, and `e2f502a` added two user-assigned
+identities and three role assignments for the log alert rules, adding five.
+13 − 1 + 5 = 17. Changes and destroys are untouched by both, because none of
+those resources exists yet, so giving a rule an identity is another create
+rather than a modification. Approve it against the resource **addresses**,
 not the count: a near-miss number reads as close enough while meaning something
 entirely different happened.
 

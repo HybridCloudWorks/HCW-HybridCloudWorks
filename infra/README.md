@@ -36,7 +36,7 @@ before any plan or apply.
 | `variables.tf` | All inputs; names must match TFC workspace variable keys exactly |
 | `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, Log Analytics + Application Insights, budgets, DNS |
 | `hub.tf` | Platform Connectivity: hub VNet, NSG, route table, and the peering to the workload spoke |
-| `observability.tf` | Action group, diagnostic settings, and every alert rule |
+| `observability.tf` | Action group, diagnostic settings, every alert rule, and the two user-assigned identities the log alert rules query as |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |
 | `scratch.tf` | Removal record for the retired rehearsal estate — no resources |
 | `outputs.tf` | Root outputs |

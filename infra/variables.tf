@@ -554,8 +554,9 @@ variable "availability_test_enabled" {
     Arm it only after one execution has been observed succeeding — give the
     agents a path through Cloudflare (a rule matching the test's
     X-Customer-InstanceId header, or the ApplicationInsightsAvailability
-    service tag), then flip this. The metric alert on the test already exists
-    and starts working as soon as results appear.
+    service tag), then flip this. The metric alert on the test is gated on this
+    same variable, so flipping it creates the alert and arms the test together
+    rather than leaving a reachability alert that nothing can fire.
   EOT
   type        = bool
   default     = false
