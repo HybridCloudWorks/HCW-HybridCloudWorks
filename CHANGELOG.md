@@ -17,6 +17,40 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The alert fabric can now be verified against what is actually deployed.**
+  `.github/workflows/verify-alert-state.yml` reads the three workload rules
+  through ARM with the existing OIDC deployment identity and prints
+  `autoMitigate`, mute duration, frequency, window and severity into the job
+  summary; a stateless or missing rule fails the run and is named in the table.
+
+  It closes a gap that only became visible while trying to confirm the previous
+  entry had taken effect. Applies run in HCP Terraform Cloud on a human's
+  confirmation, and a green TFC run proves ARM **accepted** the change — not
+  that the deployed rule behaves differently. Those come apart exactly at
+  `autoMitigate`, the attribute that decides whether a firing rule mails once or
+  every five minutes, and which is invisible from the repository, from CI and
+  from the TFC run list. Nothing short of asking ARM answers it.
+
+  The identity's new grant is **Monitoring Reader on `rg-web-site-prod-cus`**
+  (`infra/oidc.tf`), chosen over Reader deliberately: both carry the `*/read`
+  the operation needs, and Monitoring Reader does not carry `listKeys` on the
+  workspace — so the identity cannot read ingestion keys and cannot forge or
+  drown the telemetry the rules evaluate. That is the same reasoning that chose
+  Log Analytics Reader for the alert rules' own identities in ADR 0022 decision
+  4. Scope is the resource group rather than the individual rules, so renaming a
+  rule cannot silently break the verification path.
+
+  Two constraints shaped it. The job declares **no `environment:`** — doing so
+  changes the OIDC subject GitHub presents from `ref:` to `environment:`, which
+  the branch credential cannot match (the AADSTS700213 failure documented in
+  `infra/oidc.tf`). And it is `workflow_dispatch` only: this reads production,
+  so a human decides when.
+
+  Note the sequencing — **the workflow cannot report until the apply carrying
+  its own role assignment has landed.** Until then it fails at `azure/login` or
+  on the read, which is the self-arming behaviour the `vars.CLIENT_ID` gate
+  already models elsewhere.
+
 - **Listen & Learn (T-411).** One study podcast per weighted skill area of a
   certification's official study guide, with the videos worth watching next.
   Ported from Site-Main `functions/listen-and-learn/` (088f458) with the

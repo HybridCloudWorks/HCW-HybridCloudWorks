@@ -189,6 +189,41 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
   principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
+# Read the workload alert rules, so their LIVE state can be verified after an
+# apply (.github/workflows/verify-alert-state.yml).
+#
+# THE GAP THIS CLOSES. Applies run in TFC on a human's confirmation, and a
+# green run proves ARM accepted the change — not that the deployed rule now
+# behaves differently. For the alert fabric those come apart precisely where it
+# matters: `autoMitigate` decides whether a firing rule mails once or every
+# five minutes (ADR 0022 decision 6), and nothing in the repository, in CI, or
+# in the TFC run list can show its value. This grant is what lets a workflow
+# read it back.
+#
+# MONITORING READER, not Reader. Both satisfy the requirement — the operation
+# is a control-plane GET on Microsoft.Insights/scheduledQueryRules, which
+# `*/read` covers — and the two differ in what ELSE they carry at this scope.
+# Reader grants read over every resource in the group: the Function App's
+# configuration, the storage account, the Application Insights component. This
+# identity already deploys to that Function App, so the marginal risk is small,
+# but "small" is not "none" and the narrower role names the actual job. Note
+# what Monitoring Reader deliberately does NOT carry, which is the point:
+# `listKeys` on the workspace, so this identity cannot read the ingestion keys
+# and so cannot forge or drown the telemetry the rules evaluate — the same
+# reasoning that chose Log Analytics Reader for the alert identities themselves
+# (ADR 0022 decision 4).
+#
+# SCOPE IS THE RESOURCE GROUP, not the individual rules. Three rules live here
+# and a fourth would be a fourth role assignment; more importantly a per-rule
+# grant would have to be re-declared every time a rule is renamed, which is
+# exactly the coupling that leaves a verification path quietly broken. The
+# group is the smallest scope that survives the rules changing.
+resource "azurerm_role_assignment" "github_deploy_alert_reader" {
+  scope                = azurerm_resource_group.app["web"].id
+  role_definition_name = "Monitoring Reader"
+  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
+}
+
 # Deliberately NOT granted to the active deployment path:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
 #     managed identity does that at runtime.
