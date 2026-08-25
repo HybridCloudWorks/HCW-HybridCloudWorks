@@ -34,8 +34,11 @@ before any plan or apply.
 | `backend.tf` | HCP Terraform Cloud backend declaration |
 | `providers.tf` | Required providers and provider configuration (`azurerm ~> 5.0`, `azapi ~> 2.0`, `cloudflare ~> 4.0`) |
 | `variables.tf` | All inputs; names must match TFC workspace variable keys exactly |
-| `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, observability, budget, DNS |
+| `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, Log Analytics + Application Insights, budgets, DNS |
+| `hub.tf` | Platform Connectivity: hub VNet, NSG, route table, and the peering to the workload spoke |
+| `observability.tf` | Action group, diagnostic settings, and every alert rule |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |
+| `scratch.tf` | Removal record for the retired rehearsal estate — no resources |
 | `outputs.tf` | Root outputs |
 | `cosmos-containers.json` | Generated Cosmos container manifest — regenerate with `scripts/generate-cosmos-container-spec.mjs`, do not hand-edit |
 | `terraform.tfvars.example` | Placeholder-only example; real values live in TFC workspace variables |

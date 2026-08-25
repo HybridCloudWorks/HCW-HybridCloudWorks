@@ -319,46 +319,23 @@ variable "cosmos_allow_azure_datacenter_ips" {
 }
 
 # -----------------------------------------------------------------------------
-# Legacy import rehearsal controls (scratch.tf)
+# REMOVED 2026-08-24 — the legacy rehearsal switches
 #
-# These switches are all off by default. The declarations remain only until an
-# owner confirms the state and approves their removal; no current workflow
-# enables them.
+# cosmos_scratch_enabled, storage_scratch_enabled and migration_writer_enabled
+# all said "retained until an owner confirms the state and approves removal".
+# The owner confirmed on 2026-08-24 that the migration rehearsal is finished, so
+# they are gone along with everything they gated: the scratch estate (see the
+# removal record in scratch.tf) and the three production-import role assignments
+# (see the one at the end of oidc.tf).
+#
+# Each of the three read `default = false` here while the thing it gated was
+# LIVE in Azure. That is why the resources were deleted outright rather than
+# left behind a default that could not be trusted to be the effective value.
+#
+# Do not reintroduce these as variables. A rehearsal that needs a sandbox again
+# should get a declaration with an owner-set lifetime written next to it, so the
+# thing that decides when it is destroyed lives beside the thing being created.
 # -----------------------------------------------------------------------------
-
-# The legacy scratch Cosmos account was intended for import rehearsal before
-# production. It is off by default and is retained pending the owner-only
-# state check recorded in REVIEW.md.
-#
-# Holds a full copy of production data while on. Turn it off — which
-# destroys the account and the copy — when the rehearsal is signed off, and
-# write the intended lifetime down in the Phase-4 wiki page.
-variable "cosmos_scratch_enabled" {
-  description = "Legacy: create the scratch Cosmos account for rehearsal. Off = zero resources; remove after owner-approved state review."
-  type        = bool
-  default     = false
-}
-
-# Legacy scratch storage account for a content-copy rehearsal. Implies
-# cosmos_scratch_enabled (same resource group).
-variable "storage_scratch_enabled" {
-  description = "Legacy: create the scratch storage account for rehearsal. Requires cosmos_scratch_enabled."
-  type        = bool
-  default     = false
-
-  validation {
-    condition     = !var.storage_scratch_enabled || var.cosmos_scratch_enabled
-    error_message = "storage_scratch_enabled requires cosmos_scratch_enabled — both live in the scratch resource group."
-  }
-}
-
-# Legacy production-import role gate. It remains false and is retained only
-# until an owner approves removing its state-backed declarations in oidc.tf.
-variable "migration_writer_enabled" {
-  description = "Legacy: grant the deploy identity import roles on production. Leave false; remove with the owner-approved Terraform cleanup."
-  type        = bool
-  default     = false
-}
 
 variable "cosmos_admin_ip_rules" {
   description = <<-EOT

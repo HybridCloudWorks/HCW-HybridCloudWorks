@@ -195,28 +195,16 @@ output "cloudflare_plan" {
 }
 
 # -----------------------------------------------------------------------------
-# Legacy rehearsal estate (scratch.tf) — null while disabled; retained pending
-# the owner-approved Terraform cleanup in REVIEW.md.
+# REMOVED 2026-08-24 — cosmos_scratch_endpoint, cosmos_scratch_account_name,
+# storage_scratch_account and scratch_resource_group.
+#
+# They described the rehearsal estate, which is destroyed by this change
+# (scratch.tf). The header above them also claimed they were consumed by
+# scripts/set-github-variables.ps1 wave 2; that script's $waveTwo list holds no
+# scratch entry, so the claim was already untrue before the estate went.
+#
+# The GitHub repository variables COSMOS_SCRATCH_ENDPOINT, STORAGE_SCRATCH_ACCOUNT
+# and SCRATCH_RESOURCE_GROUP are therefore orphaned rather than merely stale:
+# nothing writes them and nothing reads them. Clearing them is a repository
+# settings change, not a Terraform one.
 # -----------------------------------------------------------------------------
-# Consumed by scripts/set-github-variables.ps1 wave 2 as COSMOS_SCRATCH_ENDPOINT,
-# STORAGE_SCRATCH_ACCOUNT and SCRATCH_RESOURCE_GROUP. `one()` turns the
-# count-gated resource into null rather than an index error when off.
-output "cosmos_scratch_endpoint" {
-  description = "Legacy scratch Cosmos endpoint; null when cosmos_scratch_enabled is false"
-  value       = one(azurerm_cosmosdb_account.scratch[*].endpoint)
-}
-
-output "cosmos_scratch_account_name" {
-  description = "Scratch Cosmos account name; null when disabled"
-  value       = one(azurerm_cosmosdb_account.scratch[*].name)
-}
-
-output "storage_scratch_account" {
-  description = "Legacy scratch storage account; null when storage_scratch_enabled is false"
-  value       = one(azurerm_storage_account.scratch[*].name)
-}
-
-output "scratch_resource_group" {
-  description = "Resource group holding the rehearsal estate; null when disabled"
-  value       = one(azurerm_resource_group.scratch[*].name)
-}
