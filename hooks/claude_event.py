@@ -71,7 +71,11 @@ def main() -> int:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, KeyError, json.JSONDecodeError):
         return 0
-    if not state.get("enforce_stop", False) or state.get("status") == "completed":
+    # "abandoned" releases the guard exactly like "completed" does. Only
+    # `workflow.py close` writes either, and it will not write "completed" over a
+    # missing handoff -- so an operator who must end the session leaves an honest
+    # record instead of hand-editing the status, which is what used to happen.
+    if not state.get("enforce_stop", False) or state.get("status") in ("completed", "abandoned"):
         return 0
     validator = root / "tooling" / "workflow.py"
     if not validator.is_file():
@@ -88,9 +92,10 @@ def main() -> int:
     print(json.dumps({
         "decision": "block",
         "reason": (
-            f"Workflow {workflow_id} is not complete. Validate required subagent handoffs "
-            f"(python tooling/workflow.py validate --workflow {workflow_id}) or mark the "
-            f"workflow appropriately before ending the session."
+            f"Workflow {workflow_id} is not complete. Run the outstanding subagents, then "
+            f"'python tooling/workflow.py validate --workflow {workflow_id}'. To end the "
+            f"session without them, close it on the record: 'python tooling/workflow.py "
+            f"close --workflow {workflow_id} --reason <why> --abandon'."
         ),
     }))
     return 0

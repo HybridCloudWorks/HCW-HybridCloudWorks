@@ -13,6 +13,8 @@ Commands:
   discover   report which registry agents are installed (project + user scope)
   init       create .agentic/workflows/<id>/ before any delegation
   validate   check required handoffs; exit 0 only when the workflow is clean
+  close      end a workflow: 'completed' only when validation is clean,
+             otherwise --abandon records it as abandoned with its open errors
   status     print a workflow's WORKFLOW.json
 """
 from __future__ import annotations
@@ -29,6 +31,12 @@ from pathlib import Path
 PACK_HOME = Path(__file__).resolve().parent
 REGISTRY = PACK_HOME / "agent-registry.yml"
 ORCHESTRATOR_NAME = "claude-agentic-orchestrator"
+
+# A workflow in one of these states no longer holds the Stop guard. Nothing but
+# close() may put a workflow here, and close() will not write "completed" over
+# missing handoffs -- an operator with no exit was the reason WORKFLOW.json got
+# hand-edited into "completed" while its own validation still listed 11 errors.
+TERMINAL_STATUSES = ("completed", "abandoned")
 
 
 def now() -> str:
@@ -200,7 +208,33 @@ def selected_nodes(discovery: dict, mode: str, names: list[str]) -> list[dict]:
     return nodes
 
 
+def armed_workflow(root: Path) -> dict | None:
+    """The active workflow, but only while it is still armed: enforce_stop set and
+    not closed. init used to overwrite active-workflow.json unconditionally, so a
+    second init silently orphaned the first workflow's Stop guard."""
+    active = root / ".agentic" / "active-workflow.json"
+    if not active.is_file():
+        return None
+    try:
+        workflow_id = json.loads(active.read_text(encoding="utf-8"))["workflow_id"]
+        state_path = root / ".agentic" / "workflows" / workflow_id / "WORKFLOW.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, KeyError, json.JSONDecodeError):
+        return None
+    if state.get("enforce_stop") and state.get("status") not in TERMINAL_STATUSES:
+        return state
+    return None
+
+
 def init_workflow(args: argparse.Namespace, root: Path) -> int:
+    armed = armed_workflow(root)
+    if armed and not args.force:
+        raise SystemExit(
+            f"active workflow {armed['workflow_id']} is armed (enforce_stop) and not closed; "
+            f"opening another would orphan its Stop guard. Close it first with "
+            f"'workflow.py close --workflow {armed['workflow_id']} --reason <why> [--abandon]', "
+            f"or pass --force to open a new workflow anyway."
+        )
     workflow_id = args.workflow_id or "wf-" + datetime.now().strftime("%Y%m%d-%H%M%S")
     directory = root / ".agentic" / "workflows" / workflow_id
     if directory.exists():
@@ -266,13 +300,18 @@ def handoff_valid(path: Path, node_id: str, workflow_id: str) -> tuple[bool, lis
     return not errors, errors
 
 
-def validate_workflow(args: argparse.Namespace, root: Path) -> int:
-    directory = root / ".agentic" / "workflows" / args.workflow
+def load_state(root: Path, workflow_id: str) -> tuple[Path, Path, dict] | None:
+    directory = root / ".agentic" / "workflows" / workflow_id
     state_path = directory / "WORKFLOW.json"
     if not state_path.is_file():
-        print(f"workflow not found: {args.workflow}", file=sys.stderr)
-        return 2
-    state = json.loads(state_path.read_text(encoding="utf-8"))
+        return None
+    return directory, state_path, json.loads(state_path.read_text(encoding="utf-8"))
+
+
+def evaluate_workflow(state: dict, directory: Path) -> tuple[list[str], list[dict]]:
+    """Score every node against its handoff and set state["status"] accordingly.
+    Shared by validate and close so the two can never disagree about whether a
+    workflow is finished."""
     errors: list[str] = []
     results = []
     for node in state.get("nodes", []):
@@ -301,11 +340,81 @@ def validate_workflow(args: argparse.Namespace, root: Path) -> int:
     else:
         state["status"] = "partial"
     state["updated_at"] = now()
-    state["validation"] = {"validated_at": now(), "errors": errors, "results": results}
+    # Report skipped nodes alongside the errors. A workflow whose agents are all
+    # absent validates with zero errors and exits 0, which reads as "everything
+    # ran" -- it means the opposite. Naming them makes an empty run visible.
+    skipped = [node["id"] for node in state.get("nodes", []) if node.get("status") == "skipped_optional"]
+    state["validation"] = {
+        "validated_at": now(),
+        "errors": errors,
+        "skipped": skipped,
+        "completed": sum(1 for node in required if node.get("status") == "completed"),
+        "required": len(required),
+        "results": results,
+    }
+    return errors, results
+
+
+def validate_workflow(args: argparse.Namespace, root: Path) -> int:
+    loaded = load_state(root, args.workflow)
+    if loaded is None:
+        print(f"workflow not found: {args.workflow}", file=sys.stderr)
+        return 2
+    directory, state_path, state = loaded
+    errors, _ = evaluate_workflow(state, directory)
     if not args.check:
         state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(dict(state["validation"], workflow_status=state["status"]), indent=2))
     return 0 if not errors else 1
+
+
+def close_workflow(args: argparse.Namespace, root: Path) -> int:
+    """End a workflow and release the Stop guard, honestly.
+
+    A clean validation closes it "completed". Anything else closes only under
+    --abandon, which records "abandoned" together with the errors still open.
+    There is deliberately no path here that writes "completed" over a missing
+    handoff. That state is what an operator produces by hand when the tool
+    offers no exit, and it makes the audit trail assert work that never ran.
+    """
+    loaded = load_state(root, args.workflow)
+    if loaded is None:
+        print(f"workflow not found: {args.workflow}", file=sys.stderr)
+        return 2
+    directory, state_path, state = loaded
+    errors, _ = evaluate_workflow(state, directory)
+    if errors and not args.abandon:
+        print(json.dumps({
+            "workflow_id": state["workflow_id"],
+            "closed": False,
+            "status": state["status"],
+            "errors": errors,
+            "hint": "run the outstanding agents, or record the truth with --abandon",
+        }, indent=2), file=sys.stderr)
+        return 1
+    state["status"] = "abandoned" if errors else "completed"
+    state["closed_at"] = now()
+    state["closed_reason"] = args.reason
+    if errors:
+        state["outstanding_at_close"] = errors
+    state["updated_at"] = now()
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    active = root / ".agentic" / "active-workflow.json"
+    if active.is_file():
+        try:
+            pointer = json.loads(active.read_text(encoding="utf-8")).get("workflow_id")
+            if pointer == state["workflow_id"]:
+                active.unlink()
+        except (OSError, json.JSONDecodeError):
+            pass
+    print(json.dumps({
+        "workflow_id": state["workflow_id"],
+        "closed": True,
+        "status": state["status"],
+        "reason": args.reason,
+        "outstanding": errors,
+    }, indent=2))
+    return 0
 
 
 def main() -> int:
@@ -327,9 +436,14 @@ def main() -> int:
     init_parser.add_argument("--require-all", action="store_true", help="in all mode, block when any registry agent is unavailable")
     init_parser.add_argument("--enforce-stop", action="store_true", help="opt in: let the Stop hook block session end until required handoffs validate")
     init_parser.add_argument("--no-user", action="store_true")
+    init_parser.add_argument("--force", action="store_true", help="open a new workflow even if an armed one is still active")
     validate_parser = sub.add_parser("validate")
     validate_parser.add_argument("--workflow", required=True)
     validate_parser.add_argument("--check", action="store_true", help="read-only: report without rewriting WORKFLOW.json")
+    close_parser = sub.add_parser("close", help="end a workflow and release the Stop guard")
+    close_parser.add_argument("--workflow", required=True)
+    close_parser.add_argument("--reason", required=True, help="why it is being closed; recorded in WORKFLOW.json")
+    close_parser.add_argument("--abandon", action="store_true", help="close as abandoned when required handoffs are still missing")
     status_parser = sub.add_parser("status")
     status_parser.add_argument("--workflow", required=True)
     args = parser.parse_args()
@@ -344,6 +458,8 @@ def main() -> int:
         return init_workflow(args, root)
     if args.command == "validate":
         return validate_workflow(args, root)
+    if args.command == "close":
+        return close_workflow(args, root)
     state_path = root / ".agentic" / "workflows" / args.workflow / "WORKFLOW.json"
     if not state_path.is_file():
         print(f"workflow not found: {args.workflow}", file=sys.stderr)
