@@ -39,7 +39,6 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered; provide/rotate the Static Web App deployment credential through the approved Azure/GitHub path | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Migration-era Azure resources | **Decided 2026-08-24** — the rehearsal is finished; revoking the three production-write grants and tearing down the rehearsal estate are both authorised. See [Authorised: the migration-era teardown](#authorised-the-migration-era-teardown-2026-08-24) below for what that destroys. What remains is approving the plan that carries it out | The declarations are deleted from `infra/scratch.tf`, `infra/oidc.tf` and `infra/variables.tf`, each leaving a removal record naming what an apply removes. Nothing is applied yet |
 | Apex DNS cutover | Repoint `hybridcloudworks.com` from Firebase Hosting to the Static Web App and complete custom-domain validation (B1). In flight as of 2026-08-24 | The apex is the only host still served by Firebase; `www` and the SWA default hostname already serve the Azure site. Nothing in the repository can move it — the record lives at Cloudflare and the domain binding at Azure |
 | Timers and the availability test | Decide whether to arm the 18 schedulers (`schedulers_master_enabled`, then `enabled_timers` one name at a time) and the `/api/health` availability test (`availability_test_enabled`). All three are workspace edits in `hcw-azure` | Every one defaults to the safe value, so the repository state is "nothing armed" and stays that way without a decision. Arming the availability test needs a Cloudflare change first: Bot Fight Mode answers Azure's availability agents with a 403, and a WAF skip rule against it was built, applied and confirmed inert |
 | Migration-era identity trust | Decide whether to retire the two `data-migration` federated credentials in `infra/oidc.tf`. No workflow references `environment: data-migration` | With the production-write grants revoked, a `data-migration` token inherits the same reduced role set as a branch token. Retiring a trust relationship is an identity change and was deliberately not folded into a Terraform cleanup |
@@ -52,7 +51,7 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
 
-## Authorised: the migration-era teardown (2026-08-24)
+## Executed: the migration-era teardown (applied 2026-08-25)
 
 This section exists because the confirmation behind an **irreversible** destroy
 was asserted only in Terraform comments. A code comment is not where this
@@ -88,10 +87,28 @@ that gap is unexplained and is not treated as a reason to keep the copy, because
 both imports reconciled at 8,023/8,023 with zero field mismatches
 ([Phase-4-Data-Migration](wiki/Phase-4-Data-Migration.md), P2 and P4).
 
-**What is authorised is the removal, not the mechanism.** The apply still needs
-an owner approval in HCP Terraform like any other. Expected shape is **17 to
-add, 5 to change, 92 to destroy** — 90 real destroys plus the 2 azapi resources
-that are replaced on every apply.
+**Applied 2026-08-25: 3 added, 2 changed, 92 destroyed.**
+
+The destroy count matched the authorisation exactly, which is the number that
+mattered — 90 real destroys plus the 2 azapi resources replaced on every apply.
+
+The adds and changes came in **below** the 17/5 recorded here, and the reason is
+worth stating so nobody reads it as a short apply. That figure was written before
+any of it ran. Most of those adds were the alert rules, and they were created by
+the earlier applies instead: #218 landed ten of thirteen targeted resources and
+#219 landed the remaining three after ARM rejected them at create time. By the
+time this run planned, those resources already existed, so they were no longer
+adds. Verified after the apply: all four alert rules are still present and
+enabled.
+
+Also verified after the apply — the three production-write grants are gone. The
+deploy identity now holds four roles, all operational: HCW Cosmos Container
+Definition Writer on the production account, Storage Account Contributor and
+Storage Blob Data Contributor on `stsitefuncprodcus01` (the Functions **host**
+account, for the deploy firewall window), and Website Contributor on the
+Function App. The revoked grants were scoped to `dbs/hcw` and to
+`stsiteprodcus01`, the **content** account; neither appears. And
+`az group list` no longer returns `rg-db-site-sbx-cus`.
 
 The add count moved twice after the figure of 13 was first recorded, which is
 why it is reconciled here rather than restated: `eec36ce` gated the availability
@@ -116,11 +133,13 @@ what that costs.
   response in the deployed environment.
 - Confirm the public API and Static Web App custom domain after any DNS or edge
   change.
-- **Closed 2026-08-24 — the migration-era scratch estate and the three
-  production-write grants.** Both were confirmed live and Terraform-managed, and
-  their removal is authorised above. The two `data-migration` federated
-  credentials in `infra/oidc.tf` are the part still open; they are a decision,
-  not a confirmation, and now sit in the table above.
+- **Closed 2026-08-25 — the migration-era scratch estate and the three
+  production-write grants are gone**, confirmed after the apply rather than
+  assumed from the plan: `rg-db-site-sbx-cus` no longer exists and the deploy
+  identity retains only its four operational roles. The two `data-migration`
+  federated credentials in `infra/oidc.tf` remain — `federated_subjects` still
+  emits `environment:data-migration` twice — and are a decision rather than a
+  confirmation, so they stay in the table above (TODO.md T-524).
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
 - Apply the Terraform change that creates the `listenandlearn` blob container.
@@ -384,13 +403,23 @@ Their role in this inventory is that they are the *source* of §4.2 rather than
 a thing to be provisioned. `scripts/set-github-variables.ps1` reads them and
 writes the repository variables; nothing there is set by hand.
 
-`api_base_url` · `app_principal_id` · `blob_endpoint` · `client_id` ·
-`cloudflare_plan` · `cosmos_database` · `cosmos_endpoint` ·
-`cosmos_resource_group` · `federated_subjects` · `function_app_name` ·
-`function_hostname` · `function_url` · `functions_storage_account` ·
-`insights_connection` · `storage_account` · `storage_resource_group` ·
-`subnet_id` · `swa_hostname` · `swa_token` · `vault_name` · `vault_uri` ·
-`web_resource_group` · `workspace_id`
+**Twenty-four, and they live in two files.** Twenty-one in `infra/outputs.tf`
+and three in `infra/oidc.tf` — `client_id`, `deploy_principal_id` and
+`federated_subjects`. This section listed twenty-three when it was first
+written, omitting `deploy_principal_id`, because it was built by reading
+`outputs.tf` alone. Corrected 2026-08-25 against the apply's own output block,
+which is the only listing guaranteed to be complete.
 
-The four scratch outputs that fed §4.2's three `RETIRED` variables are already
-deleted from `infra/outputs.tf`.
+From `infra/outputs.tf`: `api_base_url` · `app_principal_id` · `blob_endpoint` ·
+`cloudflare_plan` · `cosmos_database` · `cosmos_endpoint` ·
+`cosmos_resource_group` · `function_app_name` · `function_hostname` ·
+`function_url` · `functions_storage_account` · `insights_connection` ·
+`storage_account` · `storage_resource_group` · `subnet_id` · `swa_hostname` ·
+`swa_token` · `vault_name` · `vault_uri` · `web_resource_group` ·
+`workspace_id`
+
+From `infra/oidc.tf`: `client_id` · `deploy_principal_id` ·
+`federated_subjects`
+
+The four scratch outputs that fed §4.2's three now-deleted variables are gone
+from `infra/outputs.tf`.
