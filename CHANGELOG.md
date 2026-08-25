@@ -197,6 +197,106 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **SCM reachability is closed by a per-run deploy window (T-520, #220).**
+  `scm_ip_restriction_default_action` was the literal `"Allow"` while the
+  front-end origin was locked to `Deny`. Verified against the live app
+  2026-08-25: SCM default `Allow`, main site `Deny` with 17 rules,
+  `scmIpSecurityRestrictionsUseMain` false. Changing the literal was never the
+  fix — the Flex Consumption deploy publishes *through* Kudu and GitHub-hosted
+  runners have no stable egress IPs, so a standing `Deny` breaks every deploy.
+  `deploy-functions.yml` now opens a window before the deploy and unwinds it
+  before the storage window closes. Three things differ from the storage window
+  and each is deliberate: no default-action flip is needed, because App Service
+  honours SCM IP rules normally where the storage firewall ignores them for
+  same-region callers, so the standing posture is never widened; the baseline is
+  read rather than assumed and the close step asserts the posture it found is
+  the posture it left, which is correct both before and after arming, where
+  asserting "`Deny` is back" would fail every deploy until the flip; and the
+  open step fails if `scmIpSecurityRestrictionsUseMain` is not false, since SCM
+  would then inherit the Cloudflare-only origin lock and the runner would be
+  refused with the window apparently open. The close step also asserts no
+  `ci-deploy-scm-*` rule survives — a window that silently failed to close is
+  worse than one that never opened, because the deploy stays green while the
+  endpoint stays admitted. `functions_scm_lock_enabled` defaults to `false`, so
+  the apply is a no-op on behaviour; arming it is a workspace edit and the
+  window must be observed working on a real deploy first. The credential half
+  was already closed: basic authentication is off on both SCM and FTP.
+
+- **`iac-validate` reports on every pull request, so it can become required
+  (T-523, #220).** Both jobs are meant to be required contexts on the `main`
+  ruleset, and adding them while the workflow stayed path-filtered to `infra/**`
+  would have deadlocked the repository: GitHub does not auto-satisfy a required
+  context whose workflow was filtered out, so every pull request not touching
+  `infra/` would have held at *"Expected — waiting for status to be reported"*
+  indefinitely. The trigger therefore changes before the ruleset does.
+  `pull_request` loses its `paths:` filter and the filtering moves inside each
+  job — check out, diff against the base commit, skip the expensive steps when
+  `infra/` did not change — while the job still completes and posts its context.
+  `push` keeps its path filter, because required contexts are a pull request
+  concern. Two details fail silently if got wrong and are recorded in the
+  workflow: `fetch-depth: 0`, since a shallow clone does not contain the base
+  commit; and the detect step overriding the terraform job's
+  `working-directory: infra`, since run from `infra/` the `^infra/` prefix match
+  never matches. Skipping is at step level rather than job level because whether
+  a *skipped* context satisfies a required check is behaviour worth not
+  depending on. The ruleset half remains owner-gated.
+
+- **The unlabelled form controls are associated, and the rule that finds them
+  now runs (A-001, #220).** The rule could not run at all, so the twenty
+  violations recorded against it had never been observed: it crashed with
+  `(0 , _minimatch.default) is not a function` on the first file containing a
+  label, and an ESLint rule crash aborts the entire run. The cause was this
+  repository's own supply-chain override rather than the ESLint version.
+  `eslint-plugin-jsx-a11y` declares `minimatch: ^3.1.2` and imports it as a
+  default export, while `package.json` overrode minimatch to `^10` tree-wide to
+  carry the brace-expansion advisory fix — and minimatch v10 exports no default.
+  The override that closed one supply-chain hole had silently disabled an
+  accessibility rule. Repaired with a scoped override giving the plugin
+  minimatch `^3.1.2` (resolves 3.1.5, past the 3.0.5 ReDoS fix) and
+  brace-expansion `^1.1.12` (resolves 1.1.18, past the advisory), leaving the
+  rest of the tree on 10.2.5; the lockfile change is 38 lines, all additions.
+  With the rule running, the twenty findings proved to be two different things.
+  Seventeen are genuine — a `<label>` that is a sibling of its control with no
+  association, so a screen-reader user gets no field name — fixed by pairing
+  `htmlFor`/`id` across `ArchitectureReviewBoard` (2, keyed per hotspot id since
+  they render in a map), `FrameworkReviewBoard` (4), `MetadataTab` (4) and
+  `SpeakingEventsPage` (7). The other three are not defects: in
+  `ListenAndLearnPage` the label already wraps its control, which is an
+  association, and the rule reported them only because it cannot see a custom
+  `<Input>` as a control. Those are fixed by configuring `controlComponents`,
+  because rewriting working markup to satisfy a misconfigured linter would have
+  been the wrong repair. The rule is now `error` rather than `off`, so neither
+  half can regress.
+
+- **`REVIEW.md` Part 4 is restored as the required-inputs inventory (T-521,
+  #220).** `59e471b` cut `REVIEW.md` from 1,011 lines to 58 and moved the
+  narrative to the Wiki, leaving twelve references to `PART 4 — REQUIRED INPUTS`
+  across eight files pointing at a section that no longer existed. Two of them
+  were live procedure with nowhere to land: `CONTRIBUTING` tells a contributor
+  to record new required inputs there, and the Deployment Runbook tells an
+  operator to move an entry from `SET` to `VERIFIED` after an apply. The defect
+  was the absent section rather than the references, so the section is restored
+  and all twelve pointers are untouched. Only the inventory comes back — the
+  original §4.0 naming and placement rules are now
+  `wiki/Variables-And-Secrets.md`'s job, and restoring them verbatim would have
+  recreated exactly the duplication the Wiki move ended; each file's intro now
+  names the other. The statuses do not share one confidence level and the
+  section says so rather than presenting a uniform claim: GitHub variables (23),
+  secrets (1) and environments (3) were enumerated live on 2026-08-25, so their
+  presence is observed; Key Vault was **not** readable, `az keyvault secret
+  list` returning `ForbiddenByRbac` because the caller holds no data-plane role,
+  which is itself the correct posture, so §4.6 lists the nineteen secrets
+  `infra/main.tf` references — establishing each name and consumer but not its
+  presence; and the HCP Terraform workspace was likewise not read, so §4.1's
+  statuses are labelled as carried forward from 2026-08-20. The Terraform tables
+  are generated from the configuration rather than transcribed: 8 of 58
+  variables have no default and must be set in the workspace, and the seven
+  posture switches are listed with what arming each one does, since those are
+  the entries most likely to be misread as settings. The same live pass is what
+  confirms T-525's three scratch variables are still set with no reader, and
+  that the `data-migration` environment outlives the workflow deleted in
+  `59e471b`.
+
 - **The anonymous feed endpoint is bounded in articles, not just in feeds
   (T-319).** `GET /api/public/feed` capped how many `rss_cache` documents it
   returned but not how many items each one carried, and one document is one

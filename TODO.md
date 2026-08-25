@@ -8,29 +8,41 @@ second document. What has not changed: nothing is resolved here that only a
 human holding tenant, Cloudflare or repository-admin access can resolve.
 Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
-## Status — 2026-08-24
+## Status — 2026-08-25
 
-> The items below describe the estate **as it will be once PR #218 is applied**.
-> Nothing in that pull request has been applied yet, so several read ahead of
-> the live tenant: FTP basic auth is still `allow: true`, no alert rule of any
-> kind exists in either subscription, and versioning is still off on the content
-> account. `REVIEW.md` is scrupulous about this distinction and this file should
-> be too — a tracker that describes a future estate in the present tense is how
-> a reviewer concludes work is done that has not started.
+> PR #218 is **partly** applied, and the distinction matters when reading the
+> items below. The alerting half is live: `alert-cosmos-throttle-prod-cus` as a
+> metric rule, plus `alert-func-http5xx-prod-cus`, `alert-func-latency-prod-cus`
+> and `alert-app-exceptions-prod-cus` as log rules, all enabled — verified
+> against the tenant 2026-08-25, after #219 fixed the three ARM rejected at
+> create time. The **teardown has not applied**: `rg-db-site-sbx-cus` still
+> holds `cosmos-site-sbx-cus` and `stsitesbxcus01`, and the plan authorised in
+> `REVIEW.md` is still waiting on an approval. A tracker that describes a future
+> estate in the present tense is how a reviewer concludes work is done that has
+> not started; one that keeps saying "not applied" after it applied is how the
+> same reviewer stops trusting the file.
 
 | Priority | Open items |
 | --- | ---: |
 | High | 2 |
-| Medium | 6 |
-| Low | 2 |
-| Total | 10 |
+| Medium | 3 |
+| Low | 1 |
+| Total | 6 |
 
-Nine of these are new on 2026-08-24: the Go-Live readiness review's open
-findings, plus what the `fix/go-live-remediation` branch deliberately leaves
-open. Seven carry **Gate: owner** — the remaining work is a decision, a tenant
-or Cloudflare change, or a repository setting, and no amount of engineering here
-closes it. They are listed anyway, because a tracker that omits them is quietly
-shorter than the truth.
+Four items closed on 2026-08-25 in #220 — T-520, T-521, T-523 and A-001, the
+four that did not need access outside the repository. Their entries are in
+[CHANGELOG.md](CHANGELOG.md).
+
+**All six that remain carry Gate: owner.** That is the whole character of what
+is left: every one is a decision, a tenant or Cloudflare change, or a repository
+setting, and no amount of engineering here closes any of them. They are listed
+anyway, because a tracker that omits them is quietly shorter than the truth.
+
+Two of the six have a repository-side half that is already done, so what remains
+really is only the owner action: T-523's workflow now reports on every pull
+request, leaving the ruleset change; T-520's per-run SCM window is merged,
+leaving the `functions_scm_lock_enabled` flip once a deploy is observed working
+through it.
 
 ## High
 
@@ -84,38 +96,6 @@ anything. It matters more than one rule out of six suggests: every other alert
 needs the app healthy enough to emit telemetry, and reachability is the only
 signal that survives the app being completely down.
 
-### T-520 — The SCM endpoint is publicly reachable
-
-`scm_ip_restriction_default_action` is `"Allow"` while the front-end origin is
-locked to `Deny`, and that is a live gap rather than a decision. The Flex
-Consumption deploy publishes *through* Kudu and GitHub-hosted runners have no
-stable egress IPs, so denying SCM outright breaks every deploy. The credential
-half is already closed — basic authentication is off on both SCM and FTP, so
-anything reaching the endpoint must present an Entra token — but the endpoint
-itself still answers the internet. Closing it properly means a per-run SCM
-firewall window in `deploy-functions.yml`, opened and closed the way the storage
-account's already is, with an `always()` restore step that fails if the `Deny` is
-not back. The comment beside the setting in `main.tf` points at `REVIEW.md` for
-this item; move the pointer here the next time that file is edited.
-
-### T-521 — Twelve files point at a `REVIEW.md` Part 4 that no longer exists
-
-`REVIEW.md` held `PART 4 — REQUIRED INPUTS` — the single inventory of every
-variable, secret and setting with a live status (`SET`, `VERIFIED`, `MISSING`,
-`RETIRED`) — until `59e471b` cut the file from 1,011 lines to 58 and moved the
-narrative to the Wiki. Twelve references survived the move:
-`.github/CONTRIBUTING.md` (twice), `.github/templates/infrastructure_change.md`,
-`scripts/validate-repository-structure.ps1`, `infra/README.md`,
-`infra/outputs.tf`, `infra/variables.tf`, `wiki/Deployment-Runbook.md` (three
-times) and `wiki/Variables-And-Secrets.md` (twice). Two of them are live
-procedure: CONTRIBUTING tells a contributor to record new required inputs there,
-and the Deployment Runbook tells an operator to move an entry from `SET` to
-`VERIFIED` after an apply. Both instructions have nowhere to land. The defect is
-the absent section, not the references — editing one of the twelve deepens the
-inconsistency. Decide once between restoring Part 4 as the status inventory
-(`wiki/Variables-And-Secrets.md` is the *placement* rule and deliberately holds
-no status) and repointing all twelve in a single change.
-
 ### T-522 — No RTO or RPO is stated anywhere
 
 **Gate: owner for the two numbers** — [REVIEW.md](REVIEW.md), *Recovery
@@ -130,34 +110,6 @@ generous or short, and no test would fail if a restore took a week. Once the
 owner supplies the two numbers this becomes a Wiki page, and it should state
 what has actually been *restored* rather than what is configured: nothing here
 has ever been recovery-tested.
-
-### T-523 — The IaC checks are not required to merge
-
-**Gate: owner (repository administration)** — [REVIEW.md](REVIEW.md).
-
-`iac-validate.yml` runs `terraform fmt`, `validate` and `tflint` in one job and
-Trivy at HIGH/CRITICAL in a second, on every `infra/**` change, and
-`.github/CONTRIBUTING.md` states that CI must be green before merge — but the
-`main` ruleset does not require either job, so the statement is a convention
-rather than a gate. A branch with a red Trivy run merges exactly as easily as
-one with a green run, which makes every "CI enforces this" line in CONTRIBUTING
-true only while someone is watching.
-
-**This is a code change first, and a repository setting second — in that order.**
-The obvious fix is to add the two contexts to ruleset `20680114`, and on its own
-that deadlocks the repository. `iac-validate.yml` is path-filtered to `infra/**`
-and its own file, and GitHub does not auto-satisfy a required context whose
-workflow was filtered out: it holds the pull request at *"Expected — waiting for
-status to be reported"* forever. Every pull request that does not touch `infra/`
-would be unmergeable, which is most of them.
-
-So the trigger has to change before the ruleset does. Drop `paths:` from the
-`pull_request` trigger so the job always reports, and move the filtering inside —
-detect whether `infra/**` changed and skip the expensive steps when it did not,
-while the job itself still completes and posts its context. Then add
-`fmt, validate, tflint` and `Trivy IaC misconfiguration scan` to the ruleset.
-
-Doing it in the other order is a self-inflicted outage on the merge queue.
 
 ### T-524 — The two `data-migration` federated credentials outlive the job they were for
 
@@ -176,16 +128,6 @@ identity change rather than a Terraform cleanup — which is why the remediation
 branch escalated it instead of deleting it.
 
 ## Low
-
-### A-001 — Associate the unlabelled form controls
-
-`jsx-a11y/label-has-associated-control` reports 20 violations across
-`frontend/src` — `<label>` elements with no associated control. The rule is
-disabled in `eslint.config.js`; it was off because it crashed on ESLint 9, and
-since the ESLint 10 upgrade it runs correctly and these are real findings.
-Associate each label with its control (nesting, or `htmlFor`/`id`), then delete
-the rule's `off` entry so it cannot regress. Screen-reader users get no field
-name from an unassociated label, so each one is a small but genuine defect.
 
 ### T-525 — Three repository variables have no reader
 
