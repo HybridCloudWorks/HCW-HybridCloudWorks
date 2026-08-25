@@ -2,8 +2,12 @@
 # but agent_name must equal the agent file's frontmatter `name` exactly.
 version: 1
 client: claude-code
-generated_at: 2026-08-25T00:36:38Z
+generated_at: 2026-08-25T17:16:19Z
 agents:
+  - id: agent-evaluation-engineer
+    agent_name: agent-evaluation-engineer
+    capability: "Evaluation engineer for agentic Python systems, tool use, MCP interactions, retrieval, safety, reliability, cost, and human review."
+    enabled_by_default: true
   - id: ansible-expert-engineer
     agent_name: ansible-expert-engineer
     capability: "Expert Ansible engineer for playbooks, roles, collections, inventories, conversion, debugging, validation, secrets, and rollout safety. Use when Ansible is in s"
@@ -44,7 +48,55 @@ agents:
     agent_name: infrastructure-pr-reviewer
     capability: "Review pull requests that change infrastructure-as-code, configuration"
     enabled_by_default: true
+  - id: microsoft-certified-trainer
+    agent_name: microsoft-certified-trainer
+    capability: "Microsoft Certified Trainer specialist for official Microsoft curriculum delivery, course design, labs, demonstrations, assessment, and Microsoft 365 Copilot le"
+    enabled_by_default: true
+  - id: microsoft-copilot-learning-reviewer
+    agent_name: microsoft-copilot-learning-reviewer
+    capability: "Microsoft 365 Copilot, Copilot Studio, Designer, responsible AI, privacy, licensing, and current-feature reviewer for trainer content."
+    enabled_by_default: true
+  - id: microsoft-course-architect
+    agent_name: microsoft-course-architect
+    capability: "Learning architect for Microsoft Official Curriculum, Microsoft Learn paths, syllabus design, objectives, sequencing, timing, and assessment."
+    enabled_by_default: true
+  - id: microsoft-courseware-engineer
+    agent_name: microsoft-courseware-engineer
+    capability: "Courseware production engineer for PowerPoint decks, instructor notes, Microsoft Learn alignment, interactive activities, accessibility, and versioned training "
+    enabled_by_default: true
+  - id: microsoft-lab-demo-engineer
+    agent_name: microsoft-lab-demo-engineer
+    capability: "Training lab and live demonstration engineer for Microsoft 365, Copilot, Copilot Studio, Office, Azure handoffs, and reproducible learner environments."
+    enabled_by_default: true
+  - id: python-distinguished-engineer
+    agent_name: python-distinguished-engineer
+    capability: "A production-oriented Python and agentic-systems Distinguished Engineer for repository investigation, architecture, implementation, specialist coordination, and"
+    enabled_by_default: true
+  - id: python-performance-engineer
+    agent_name: python-performance-engineer
+    capability: "Measurement-led Python performance and cost engineer for latency, throughput, memory, concurrency, database, browser, and agent workloads."
+    enabled_by_default: true
+  - id: python-security-reviewer
+    agent_name: python-security-reviewer
+    capability: "Read-only security reviewer for Python, dependencies, APIs, agents, MCP tools, browser automation, data handling, and supply chain."
+    enabled_by_default: true
+  - id: python-test-engineer
+    agent_name: python-test-engineer
+    capability: "Test engineer for Python unit, integration, contract, property, browser, security, evaluation, and regression coverage."
+    enabled_by_default: true
   - id: terraform-expert-engineer
     agent_name: terraform-expert-engineer
     capability: "Expert Terraform and HCL engineer for configuration, modules, providers, remote state, HCP Terraform, Stacks, policy, testing, CI/CD, imports, and Azure Verifie"
+    enabled_by_default: true
+  - id: typescript-distinguished-engineer
+    agent_name: typescript-distinguished-engineer
+    capability: "Hands-on Distinguished Engineer for enterprise TypeScript and JavaScript systems, Node.js, React, APIs, MCP, agentic applications, testing, security, operations"
+    enabled_by_default: true
+  - id: typescript-security-reviewer
+    agent_name: typescript-security-reviewer
+    capability: "Read-only security reviewer for TypeScript, Node.js, React, APIs, MCP servers and clients, agentic workflows, dependencies, and CI/CD trust boundaries."
+    enabled_by_default: true
+  - id: typescript-test-engineer
+    agent_name: typescript-test-engineer
+    capability: "Test engineering specialist for TypeScript, Node.js, React, APIs, integration boundaries, and Playwright browser journeys."
     enabled_by_default: true
