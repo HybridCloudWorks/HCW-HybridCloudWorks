@@ -272,10 +272,14 @@ export default function FrameworkReviewBoard({ blog, onSave, onPublish, onDelete
                       placeholder="HTML overview content for the Overview tab..."
                     />
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground">
+                      <label
+                        htmlFor="framework-architecture-recommendation"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
                         Architecture Recommendation
                       </label>
                       <Textarea
+                        id="framework-architecture-recommendation"
                         value={formData.architectureRecommendation}
                         onChange={(e) => handleChange('architectureRecommendation', e.target.value)}
                         className="min-h-[90px] mt-2 text-sm"
@@ -421,30 +425,42 @@ export default function FrameworkReviewBoard({ blog, onSave, onPublish, onDelete
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">
+                    <label
+                      htmlFor="framework-knowledge-prompt"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
                       Knowledge Prompt
                     </label>
                     <Textarea
+                      id="framework-knowledge-prompt"
                       value={formData.frameworkKnowledgePrompt}
                       onChange={(e) => handleChange('frameworkKnowledgePrompt', e.target.value)}
                       className="min-h-[70px] mt-1 text-xs"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">
+                    <label
+                      htmlFor="framework-diagram-prompt"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
                       Diagram Prompt
                     </label>
                     <Textarea
+                      id="framework-diagram-prompt"
                       value={formData.frameworkDiagramPrompt}
                       onChange={(e) => handleChange('frameworkDiagramPrompt', e.target.value)}
                       className="min-h-[70px] mt-1 text-xs"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">
+                    <label
+                      htmlFor="framework-image-prompt"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
                       Image Prompt
                     </label>
                     <Textarea
+                      id="framework-image-prompt"
                       value={formData.frameworkImagePrompt}
                       onChange={(e) => handleChange('frameworkImagePrompt', e.target.value)}
                       className="min-h-[70px] mt-1 text-xs"

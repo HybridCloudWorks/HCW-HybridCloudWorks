@@ -94,13 +94,32 @@ export default [
 
       // Accessibility rules
       ...jsxA11y.configs.recommended.rules,
-      // Off for a DIFFERENT reason than it used to be, and the distinction
-      // matters to whoever reads this next. It was disabled because the rule
-      // crashed on ESLint 9 (a minimatch API incompatibility in jsx-a11y v6);
-      // on ESLint 10 it runs fine. It stays off because it reports 20 real
-      // violations across src — unlabelled form controls — which is an
-      // accessibility fix, not an upgrade. Tracked as A-001 in TODO.md.
-      'jsx-a11y/label-has-associated-control': 'off',
+      // ON as of A-001. The note that used to sit here said this rule "runs
+      // fine on ESLint 10". It did not, and the error was worth correcting
+      // rather than deleting: the rule crashed with
+      // `(0 , _minimatch.default) is not a function` on the first file
+      // containing a label, and a rule crash aborts the entire ESLint run —
+      // so "it reports 20 violations" had never actually been observed.
+      //
+      // The cause was this repository's own supply-chain override, not the
+      // ESLint version. jsx-a11y declares `minimatch: ^3.1.2` and imports it
+      // as a DEFAULT export; package.json overrode minimatch to ^10 tree-wide
+      // to carry the brace-expansion advisory fix, and v10 exports no default.
+      // The repair is a SCOPED override pinning jsx-a11y's own minimatch back
+      // to ^3.1.2 (see the overrides block in package.json), which leaves
+      // everything else on v10. 3.1.x is past the 3.0.5 ReDoS fix, and its
+      // brace-expansion is pinned to ^1.1.12 for the same advisory.
+      //
+      // controlComponents is required rather than cosmetic. Without it the
+      // rule cannot see the custom <Input>/<Textarea> wrappers as controls, so
+      // a label that correctly WRAPS one is still reported. Three of the
+      // twenty findings were exactly that — already-accessible markup — and
+      // "fixing" them would have meant rewriting working code to satisfy a
+      // misconfigured linter.
+      'jsx-a11y/label-has-associated-control': [
+        'error',
+        { controlComponents: ['Input', 'Textarea'] },
+      ],
 
       // General code quality rules
       'no-console': [

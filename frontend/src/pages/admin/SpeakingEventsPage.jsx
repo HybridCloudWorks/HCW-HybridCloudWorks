@@ -430,20 +430,32 @@ export default function SpeakingEventsPage() {
             {isManual && (
               <>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Event Name *</label>
+                  <label
+                    htmlFor="speaking-event-name"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Event Name *
+                  </label>
                   <input
                     type="text"
                     className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
                     placeholder="Event name as shown on site"
+                    id="speaking-event-name"
                     value={form._manualName || ''}
                     onChange={(e) => setForm((f) => ({ ...f, _manualName: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Date</label>
+                  <label
+                    htmlFor="speaking-event-date"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Date
+                  </label>
                   <input
                     type="date"
                     className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
+                    id="speaking-event-date"
                     value={form._manualDate || ''}
                     onChange={(e) => setForm((f) => ({ ...f, _manualDate: e.target.value }))}
                   />
@@ -452,57 +464,85 @@ export default function SpeakingEventsPage() {
             )}
 
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground">Description</label>
+              <label
+                htmlFor="speaking-event-description"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Description
+              </label>
               <textarea
                 rows={3}
                 className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background resize-none"
                 placeholder="Override the Sessionize description, or add one if missing"
+                id="speaking-event-description"
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Location override</label>
+              <label
+                htmlFor="speaking-event-location"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Location override
+              </label>
               <input
                 type="text"
                 className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
                 placeholder="e.g. Chicago, IL or Virtual"
+                id="speaking-event-location"
                 value={form.location}
                 onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">
+              <label
+                htmlFor="speaking-event-url"
+                className="text-xs font-medium text-muted-foreground"
+              >
                 Event URL override
               </label>
               <input
                 type="url"
                 className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
                 placeholder="https://..."
+                id="speaking-event-url"
                 value={form.eventUrl}
                 onChange={(e) => setForm((f) => ({ ...f, eventUrl: e.target.value }))}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Presentation URL</label>
+              <label
+                htmlFor="speaking-event-presentation-url"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Presentation URL
+              </label>
               <input
                 type="url"
                 className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
                 placeholder="https://..."
+                id="speaking-event-presentation-url"
                 value={form.presentationUrl}
                 onChange={(e) => setForm((f) => ({ ...f, presentationUrl: e.target.value }))}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Event Image URL</label>
+              <label
+                htmlFor="speaking-event-image-url"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Event Image URL
+              </label>
               <input
                 type="url"
                 className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background"
                 placeholder="https://example.com/event-image.jpg"
+                id="speaking-event-image-url"
                 value={form.eventImageUrl}
                 onChange={(e) => setForm((f) => ({ ...f, eventImageUrl: e.target.value }))}
               />
