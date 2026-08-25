@@ -99,6 +99,54 @@ jobs:
             --name "${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}" \
             --default-action Allow --output none
           sleep 30
+      # T-520: SCM (Kudu) is the endpoint this deploy publishes through, and it
+      # answers the internet. The credential half is already closed — basic
+      # authentication is off on SCM and FTP, so a caller must present an Entra
+      # token — but the endpoint itself is reachable, which is the half this
+      # window closes.
+      #
+      # Unlike the storage account above, SCM needs NO default-action flip. The
+      # storage firewall ignores IP rules for requests from the account's own
+      # region, which forced Allow for the length of the upload; App Service
+      # honours SCM IP rules normally, so an allow rule for this runner is
+      # sufficient and the standing posture is never widened. That is why this
+      # step adds a rule and the close step asserts the posture is unchanged,
+      # rather than restoring a Deny it took away.
+      #
+      # The baseline is READ rather than assumed. While
+      # infra/variables.tf functions_scm_lock_enabled is false the default
+      # action is Allow and this window is a no-op that costs one API call;
+      # when the owner flips it to Deny the same steps become load-bearing with
+      # no edit here. Asserting "unchanged" works in both postures, where
+      # asserting "Deny is back" would fail every deploy until the flip.
+      - name: Open SCM firewall window for this runner
+        id: scmfw
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+        run: |
+          set -euo pipefail
+          RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
+          RULE="ci-deploy-scm-${{ github.run_id }}"
+
+          # If SCM inherits the main site's rules, an SCM rule is ignored and
+          # the Cloudflare-only origin lock applies to Kudu as well — a runner
+          # would be refused with the window apparently open. Fail loudly here
+          # rather than as an opaque 403 mid-deploy.
+          use_main=$(az functionapp config access-restriction show -n "$APP" -g "$RG"             --query "scmIpSecurityRestrictionsUseMain" -o tsv)
+          if [ "$use_main" != "false" ]; then
+            echo "::error::scmIpSecurityRestrictionsUseMain is '$use_main'; SCM inherits the main site's rules, so an SCM allow rule cannot admit this runner. Set scm_use_main_ip_restriction = false in infra/ before arming the SCM lock."
+            exit 1
+          fi
+
+          BASELINE=$(az functionapp config access-restriction show -n "$APP" -g "$RG"             --query "scmIpSecurityRestrictionsDefaultAction" -o tsv)
+          echo "scm default action before the window: $BASELINE"
+
+          az functionapp config access-restriction add             --resource-group "$RG"             --name "$APP"             --rule-name "$RULE"             --action Allow --ip-address "${RUNNER_IP}/32" --priority 300             --scm-site true             --output none
+
+          echo "rule_name=${RULE}" >> "$GITHUB_OUTPUT"
+          echo "baseline=${BASELINE}" >> "$GITHUB_OUTPUT"
+          sleep 20
 
       # A repository VARIABLE, seeded from the `function_app_name` Terraform
       # output by scripts/set-github-variables.ps1 — never a literal here.
@@ -167,6 +215,36 @@ jobs:
           echo "functions registered after sync: $count"
           [ "$count" -gt 0 ] || { echo "::error::no functions registered after SyncTriggers"; exit 1; }
 
+      # Deliberately BEFORE the storage window closes, so the two unwind in the
+      # reverse of the order they opened.
+      #
+      # The assertions are the point of this step, not the removal. A window
+      # that silently failed to close is worse than one that never opened: the
+      # deploy stays green while the endpoint stays admitted, and the next
+      # reader sees a workflow that claims to close it.
+      - name: Close SCM firewall window
+        if: ${{ always() && steps.scmfw.outputs.rule_name != '' }}
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          RULE: ${{ steps.scmfw.outputs.rule_name }}
+          BASELINE: ${{ steps.scmfw.outputs.baseline }}
+        run: |
+          set -euo pipefail
+          az functionapp config access-restriction remove             --resource-group "$RG"             --name "$APP"             --rule-name "$RULE"             --scm-site true             --output none
+
+          after=$(az functionapp config access-restriction show -n "$APP" -g "$RG"             --query "scmIpSecurityRestrictionsDefaultAction" -o tsv)
+          if [ "$after" != "$BASELINE" ]; then
+            echo "::error::scm default action is '$after' after the window closed, expected '$BASELINE'"
+            exit 1
+          fi
+
+          left=$(az functionapp config access-restriction show -n "$APP" -g "$RG"             --query "length(scmIpSecurityRestrictions[?starts_with(name, 'ci-deploy-scm-')])" -o tsv)
+          if [ "$left" != "0" ]; then
+            echo "::error::${left} ci-deploy-scm-* rule(s) still present on SCM after the window closed"
+            exit 1
+          fi
+          echo "scm window closed — default action '$after', no temporary rules left"
       - name: Close storage firewall window
         if: ${{ always() && steps.fw.outputs.runner_ip != '' }}
         run: |

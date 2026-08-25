@@ -105,7 +105,9 @@ export function MetadataTab() {
       {/* Title */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-medium">Title</label>
+          <label htmlFor="metadata-title" className="text-xs font-medium">
+            Title
+          </label>
           <Button
             variant="ghost"
             size="sm"
@@ -122,6 +124,7 @@ export function MetadataTab() {
           </Button>
         </div>
         <Input
+          id="metadata-title"
           value={title}
           onChange={(e) => setField('title', e.target.value)}
           placeholder="Article title"
@@ -132,8 +135,11 @@ export function MetadataTab() {
       {/* Author + Date */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium">Author</label>
+          <label htmlFor="metadata-author" className="text-xs font-medium">
+            Author
+          </label>
           <Input
+            id="metadata-author"
             value={authorName}
             onChange={(e) => setField('authorName', e.target.value)}
             placeholder="Author name"
@@ -141,9 +147,12 @@ export function MetadataTab() {
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium">Published Date</label>
+          <label htmlFor="metadata-published-date" className="text-xs font-medium">
+            Published Date
+          </label>
           <Input
             type="date"
+            id="metadata-published-date"
             value={publishedDate}
             onChange={(e) => setField('publishedDate', e.target.value)}
             className="text-sm"
@@ -153,8 +162,11 @@ export function MetadataTab() {
 
       {/* Tags */}
       <div className="space-y-1.5">
-        <label className="text-xs font-medium">Tags</label>
+        <label htmlFor="metadata-tags" className="text-xs font-medium">
+          Tags
+        </label>
         <Input
+          id="metadata-tags"
           value={tags}
           onChange={(e) => setField('tags', e.target.value)}
           placeholder="aws, kubernetes, terraform"

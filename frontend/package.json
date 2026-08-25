@@ -139,7 +139,9 @@
     "nanoid": "^3.3.18",
     "js-yaml": "^4.3.1",
     "eslint-plugin-jsx-a11y": {
-      "eslint": "$eslint"
+      "eslint": "$eslint",
+      "minimatch": "^3.1.2",
+      "brace-expansion": "^1.1.12"
     },
     "eslint-plugin-react": {
       "eslint": "$eslint"

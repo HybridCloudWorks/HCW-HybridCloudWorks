@@ -210,18 +210,30 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[10px] text-muted-foreground">X %</label>
+                      <label
+                        htmlFor={`hotspot-${spot.id}-x`}
+                        className="text-[10px] text-muted-foreground"
+                      >
+                        X %
+                      </label>
                       <Input
                         type="number"
+                        id={`hotspot-${spot.id}-x`}
                         value={spot.x}
                         onChange={(e) => updateHotspot(spot.id, 'x', Number(e.target.value))}
                         className="h-6 text-xs"
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] text-muted-foreground">Y %</label>
+                      <label
+                        htmlFor={`hotspot-${spot.id}-y`}
+                        className="text-[10px] text-muted-foreground"
+                      >
+                        Y %
+                      </label>
                       <Input
                         type="number"
+                        id={`hotspot-${spot.id}-y`}
                         value={spot.y}
                         onChange={(e) => updateHotspot(spot.id, 'y', Number(e.target.value))}
                         className="h-6 text-xs"

@@ -1052,21 +1052,29 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # `0.0.0.0/0` rule was trying to say.
     ip_restriction_default_action = var.functions_origin_lock_enabled ? "Deny" : "Allow"
 
-    # SCM is deliberately NOT locked by IP, and that is a live gap rather than a
-    # decision — see TODO.md T-520. It was raised again as S2 in the 2026-08-24
-    # Go-Live review; the pointer said REVIEW.md, but this is engineering work
-    # rather than an owner decision, so it is tracked where it can be picked up.
-    # The Flex Consumption deploy runs THROUGH Kudu
-    # ("Will use Kudu https://<scmsite>/api/publish to deploy since Flex
-    # consumption plan is detected"), and GitHub-hosted runners have no stable
-    # egress IPs, so denying SCM breaks every deploy. Closing it properly needs
-    # a per-run SCM firewall window like the storage account already gets.
+    # SCM (Kudu) reachability, closed by a per-run window rather than a standing
+    # rule — see TODO.md T-520, raised as S2 in the 2026-08-24 Go-Live review.
     #
-    # What IS closed below is basic authentication on that endpoint, which is
-    # the credential half of the exposure and costs nothing here: this app
-    # deploys with OIDC and a federated identity, and has never used a
-    # publish profile.
-    scm_ip_restriction_default_action = "Allow"
+    # The Flex Consumption deploy runs THROUGH Kudu ("Will use Kudu
+    # https://<scmsite>/api/publish to deploy since Flex consumption plan is
+    # detected") and GitHub-hosted runners have no stable egress IPs, so a
+    # standing Deny breaks every deploy. That is why this was Allow, and why
+    # simply changing the literal was never the fix.
+    #
+    # deploy-functions.yml now opens a window instead: it adds the runner's IP
+    # as an SCM allow rule before the deploy and removes it in an always-run
+    # step that asserts the posture it found is the posture it left. That makes
+    # Deny survivable, so the posture becomes a variable.
+    #
+    # Still false by default. The window has to be merged and observed working
+    # on a real deploy before this flips, because the first deploy after a
+    # premature flip is the one that cannot get in to fix it.
+    #
+    # This closes the REACHABILITY half. The credential half is already closed
+    # below: basic authentication is off on both SCM and FTP, so anything
+    # reaching the endpoint must present an Entra token. This app deploys with
+    # OIDC and a federated identity and has never used a publish profile.
+    scm_ip_restriction_default_action = var.functions_scm_lock_enabled ? "Deny" : "Allow"
   }
 
   # Kudu and FTP username/password publishing, off. Anyone reaching the SCM
