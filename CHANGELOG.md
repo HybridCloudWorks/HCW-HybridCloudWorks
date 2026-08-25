@@ -252,6 +252,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Production deploys could not authenticate at all, and the cause was a
+  workflow edit rather than an identity problem.** `de99aa0` put
+  `deploy-functions.yml` behind `environment: production` to gate production
+  deploys. That is correct in itself and had a consequence nothing accounted
+  for: **declaring an environment changes the OIDC subject GitHub composes.**
+  It becomes `repo:<org>/<repo>:environment:<name>` rather than
+  `repo:<org>/<repo>:ref:<ref>`, so the branch credential cannot match a job
+  that names an environment — the ref form is simply not what is presented.
+  `infra/oidc.tf` trusted `ref:refs/heads/main` and `environment:data-migration`
+  and nothing else, so every production deploy failed at `azure/login`:
+
+  ```
+  AADSTS700213: No matching federated identity record found for presented
+  assertion subject 'repo:HybridCloudWorks@312844660/
+  HCW-HybridCloudWorks@1268997852:environment:production'
+  ```
+
+  Observed on run 32892582041, the first dispatch after that merge. It had been
+  broken since 2026-08-24 and stayed invisible because no deploy ran in
+  between — the failure is silent until someone deploys, and by then it reads
+  as a permissions or tenant problem rather than as the consequence of a
+  workflow edit.
+
+  Fixed by trusting `environment:production` in both the name and
+  immutable-ID forms, matching the existing pair for every other subject: six
+  federated credentials against a cap of 20. The branch pair is **not**
+  redundant now and must not be swept up in a future `data-migration` cleanup —
+  `heal-computed-properties.yml` and `publish-content-manifest.yml` declare no
+  environment, so they still present the ref subject. The rule is per-workflow,
+  not per-repository.
+
+  **A guard now fails the build instead of a deploy.** `scripts/oidc-subjects.test.mjs`
+  cross-references every workflow that uses `azure/login` against the subjects
+  `infra/oidc.tf` declares, and fails naming the missing credential and the
+  error it would have produced. No linter or `terraform validate` could have
+  caught this — both files were individually valid, and only the relationship
+  between them was wrong. The guard was verified by reverting the fix and
+  confirming it fails, rather than assumed to work because it passes. It also
+  asserts both subject forms exist for each environment, since one without the
+  other is half a credential that fails on whichever form the token carries.
+
 - **SCM reachability is closed by a per-run deploy window (T-520, #220).**
   `scm_ip_restriction_default_action` was the literal `"Allow"` while the
   front-end origin was locked to `Deny`. Verified against the live app
