@@ -3,6 +3,7 @@
 - [Home](Home)
 - [Architecture decision records](Architecture-Decision-Records)
 - [Deployment runbook](Deployment-Runbook)
+- [Alerting and support](Alerting-And-Support)
 - [IaC repository standard](IaC-Repository-Standard)
 - [Naming convention](Naming-Convention)
 - [Variables and secrets](Variables-And-Secrets)

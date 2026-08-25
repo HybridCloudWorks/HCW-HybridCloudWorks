@@ -6,15 +6,19 @@ is the way it is, so a decision is never re-litigated from a log line. Plan-leve
 [Migration_Plan.md](../../Migration_Plan.md) §5.
 
 Baseline: **Site-Main @ `088f458`** (2026-08-18, v1.7.0) — 68 Firestore collections, one GCS bucket.
-Target: 73 Cosmos containers (72 generated from the manifest + `leases`), 5 blob containers.
+Target: 74 Cosmos containers (73 generated from the manifest + `leases`, declared separately in
+`infra/main.tf`), 5 blob containers.
 
 ## Decisions
 
 > **Retired 2026-08-24 — read D1 and D2 in the past tense.** The migration
 > execution surface is gone: `migrate-data.yml` and the five scripts were
-> deleted in `59e471b`, the rehearsal estate is deleted, and the three
-> production-write grants are revoked. D1 describes an account that no longer
-> exists and D2 a gate variable that no longer exists. Both are kept because
+> deleted in `59e471b`. The rehearsal estate and the three production-write
+> grants are **authorised for removal and deleted from the configuration, but
+> the apply that carries it out has not run** — as of 2026-08-25 the sandbox
+> and the grants are still live in Azure. D1 therefore describes an account
+> that is on its way out, and D2 a gate variable that no longer exists in code
+> at all. Both are kept because
 > they are the record of *why* the rehearsal was built the way it was — a
 > keyless account so the rehearsal exercised the same auth path production
 > takes, and RBAC rather than a workflow guard as the production lock. Q5 and
@@ -23,7 +27,7 @@ Target: 73 Cosmos containers (72 generated from the manifest + `leases`), 5 blob
 ### D1. The rehearsal account is keyless, serverless and identical in shape to production
 
 `cosmos-site-sbx-cus` ([infra/scratch.tf](../../infra/scratch.tf)) has keys off, the same
-firewall shape, the same database name `hcw`, and the same 72 containers from the same generated
+firewall shape, the same database name `hcw`, and the same 73 containers from the same generated
 spec. A key-authenticated rehearsal against an open account would pass while proving nothing about
 `DefaultAzureCredential` + native RBAC — which is the path production takes. The healer's 2026-08-20
 failure ("cannot be authorized by AAD token in data plane", see D9) is exactly the class of defect a

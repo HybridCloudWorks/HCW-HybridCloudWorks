@@ -308,8 +308,8 @@ redeployable; the others hold things whose deletion is a decision.
 | Application Insights | `appi-site-prod-cus-01` | |
 | Managed identity (Function App) | `id-site-func-prod-cus-01` | |
 | Managed identity (GitHub deploy) | `id-site-github-deploy-prod-cus-01` | |
-| Private endpoint (Cosmos) | `pep-web-cosmos-prod-cus-01` | |
-| Network security group | `nsg-web-func-prod-cus-01` | |
+| Private endpoint (Cosmos) | ~~`pep-web-cosmos-prod-cus-01`~~ | **RESERVED, NOT BUILT** — no private endpoint exists; the posture is service endpoints plus default-`Deny`. [ADR 0008](0008-selective-private-link) is unimplemented. The `web` token here is also off-convention |
+| Network security group (Functions integration) | `nsg-site-func-prod-cus-01` | **Declared, not applied.** An earlier revision read `nsg-web-func-prod-cus-01`, which was never the name in code |
 | Route table | `rt-site-prod-cus` | |
 
 Subnets and managed identities omit the region: both are children of (or bound

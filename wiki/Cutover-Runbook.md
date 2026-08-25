@@ -19,7 +19,7 @@ file is the mechanics.
 >
 > | What | Why | Last deployed |
 > | --- | --- | --- |
-> | `terraform apply` | Adds `GEMINI_API_KEY`. Expect **2 add / 1 change / 2 destroy** — the two azapi resources are the T-511 strip pair and are replaced on every settings change. | — |
+> | `terraform apply` | Adds `GEMINI_API_KEY`. **The 2 add / 1 change / 2 destroy expectation recorded here is superseded** — the next apply also carries the Go-Live remediation (PR #218), whose shape is **17 add / 5 change / 92 destroy**, 87 of those destroys being the migration rehearsal estate. Approve it against the resource *addresses* and the authorisation record in `REVIEW.md`, not against a count on this page. The steady-state signature afterwards is 3 add / 1 change / 3 destroy. | — |
 > | `deploy-functions` | Adds the `cms/ai-features` route (T-516). Expect **98 functions**, verified by counting registrations on `main`. | 2026-08-22 17:00, commit `a93029d` — predates T-516 |
 > | `deploy-azure-frontend` | The deployed site is still the **bare SPA shell**; pre-rendering (T-515) landed after it. Expect the payload check to report **82 HTML documents**. | 2026-08-23 02:17, commit `ca596dc` — predates T-515 |
 >
@@ -29,9 +29,12 @@ file is the mechanics.
 > exactly what T-515 warned about.
 >
 > **Step 4 — the delta import — was retired on 2026-08-24 and cannot be run.**
-> The workflow and the scripts behind it are deleted and the grants it needed
-> are revoked. The step is kept below as the record of what it was and of what
-> retiring it costs. Every other step here is still live.
+> The workflow and the scripts behind it are deleted. The grants it needed are
+> deleted from the configuration and are revoked by the next apply — as of
+> 2026-08-25 they are still live in Azure, which changes nothing about the step:
+> without the workflow there is nothing to run them from. The step is kept below
+> as the record of what it was and of what retiring it costs. Every other step
+> here is still live.
 
 ---
 
@@ -299,12 +302,15 @@ does not, an unauthorized chat id is ignored *silently* by design — check
 > **This step cannot be run.** `migrate-data.yml` and the five scripts behind it
 > were deleted on 2026-08-24 (`59e471b`), so both commands below fail before
 > they reach Azure. The three role assignments that let the CI identity write to
-> the production Cosmos database and to the content storage account are revoked,
-> and the rehearsal estate they wrote to is gone — `infra/oidc.tf` and
-> `infra/scratch.tf` hold the removal records. There is no variable to flip back
-> either; those are deleted too. Reinstating a delta import means restoring the
-> workflow, the scripts and the grants, which is a new decision rather than a
-> re-run of this step.
+> the production Cosmos database and to the content storage account, and the
+> rehearsal estate they wrote to, are deleted from the configuration and are
+> revoked and destroyed by the apply that carries the removal — `infra/oidc.tf`
+> and `infra/scratch.tf` hold the removal records. **As of 2026-08-25 that apply
+> has not run**, so both are still live in Azure; that changes nothing here,
+> because the workflow that would have used them is already gone. There is no
+> variable to flip back either; those are deleted too. Reinstating a delta
+> import means restoring the workflow, the scripts and the grants, which is a
+> new decision rather than a re-run of this step.
 >
 > **What retiring it costs, stated plainly.** The production import ran on
 > 2026-08-21 — 8,023 documents / 62 containers, 1,438 blobs. Anything written on

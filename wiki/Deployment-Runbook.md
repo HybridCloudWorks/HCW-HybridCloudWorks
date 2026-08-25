@@ -227,6 +227,13 @@ live — not on laptops, not on GitHub-hosted runners holding tokens.
 
 ## 3. Apply
 
+**Before confirming, if the run creates a budget: check `budget_start_date`.**
+Azure rejects a monthly budget whose start date falls outside the current month,
+and the constraint is checked on *create*, so an existing budget is unaffected
+while a new one fails. Set the workspace value to the first of the month the
+apply actually lands in. Otherwise the failure arrives at the end of the graph,
+after everything else has run, for a reason unrelated to anything under review.
+
 1. Apply is confirmed in HCP Terraform by a human who is **not** the change
    author where role separation permits.
 2. The GitHub delivery workflow (`deploy-infra.yml`) stays hard-disabled
@@ -240,24 +247,69 @@ live — not on laptops, not on GitHub-hosted runners holding tokens.
 
 ## 4. Post-apply verification
 
-1. `terraform plan` again → **empty plan** (no immediate drift).
-2. Smoke: from the repository root, `node scripts/smoke-deployed.mjs`
+Do these **in order**. Step 1 is first because it is the only one where a
+problem means production is already degraded rather than merely unchanged.
+
+1. **Assert the Function App is not degraded.** Any apply that writes to
+   `azurerm_function_app_flex_consumption.hcw` — including one that only
+   changes a site setting — has `azurerm` re-inject a keyless
+   `AzureWebJobsStorage`, which the azapi pair strips two graph hops later. A
+   failure between those two ARM calls leaves the site in the state three
+   recorded incidents came from, and **no alert rule detects it**
+   ([Alerting and support](Alerting-And-Support)). Expect
+   `AzureWebJobsStorage` absent and `RUNTIME_CONFIG_WRITER` equal to
+   `azapi-strip`; the commands are on that page. Re-apply to convergence if
+   either is wrong — do not edit the setting by hand.
+2. `terraform plan` again → **empty plan** (no immediate drift). Expect the
+   permanent 3-add / 1-change / 3-destroy signature from the two azapi
+   resources and the FTP policy; `infra/main.tf` documents it beside them.
+3. **Prove alert delivery, if the run created or changed an alert rule.** Two
+   tests, answering different questions, and neither substitutes for the other:
+   - `az monitor action-group test-notifications create` against
+     `ag-plat-prod-cus-01` in `rg-mgmt-plat-prod-cus` — pass `--subscription`
+     explicitly or it resolves in the wrong one. This exercises the action
+     group's own receivers.
+   - Then make an **application-subscription** rule actually fire once:
+     temporarily lower `function_response_time` or `cosmos_throttled` to a
+     threshold certain to trip, wait one evaluation window, restore. Only this
+     exercises a rule in one subscription invoking an action group in another,
+     which is the hop nothing has yet proven.
+
+   A rule that exists and pages nobody is worse than a visibly empty alert
+   inventory, because it looks fixed.
+4. Smoke: from the repository root, `node scripts/smoke-deployed.mjs`
    (see script header for flags) — anonymous surface filtered, admin guards
-   refusing, health endpoint answering. The credential-free half of this
-   (DNS, TLS, frontend surface, smoke tier 1) is also runnable on demand as
-   the **Validate Deployed Surface** workflow
-   (`.github/workflows/validate-deployed.yml`, Actions → Run workflow);
-   tiers 2–3 need credentials and stay operator-run.
-3. Azure portal / CLI spot checks for the changed resources.
-4. Application Insights: no new exception cluster in the 30 minutes after
-   apply; budget alert configuration intact after any resource-group-level
-   change.
-5. Update `REVIEW.md` Part 4 status (`SET` → `VERIFIED`) for
+   refusing, health endpoint answering. **Run it from an operator machine, not
+   from Actions.** The **Validate Deployed Surface** workflow
+   (`.github/workflows/validate-deployed.yml`) still runs the DNS, TLS and
+   frontend-surface job usefully, but its smoke job **cannot pass**: both jobs
+   execute on a GitHub-hosted runner whoever dispatches them, and through
+   Cloudflare that runner is answered by Bot Fight Mode with a 403, while
+   direct to the origin it is answered by the origin lock with a 403.
+   `deploy-functions.yml` depends on exactly that behaviour — it fails the
+   deploy if the same URL returns 200 from a runner. Making the smoke job pass
+   from CI needs the same Cloudflare change that gates arming the availability
+   test (TODO **T-519**); the alternatives are weakening the origin lock or
+   asserting against a host that answers without touching the API. Tiers 2–3
+   need credentials and stay operator-run regardless.
+5. Azure portal / CLI spot checks for the changed resources.
+6. Application Insights: no new exception cluster in the 30 minutes after
+   apply; both budgets' configuration intact after any change that touches
+   them.
+7. Update `REVIEW.md` Part 4 status (`SET` → `VERIFIED`) for
    any input exercised for the first time.
 
 ## 5. Rollback
 
-Terraform rollback is **roll-forward to the previous definition**:
+**A failed apply is not a rollback.** Terraform converges forward: on error it
+stops scheduling new nodes, lets the in-flight ones finish, and leaves state
+wherever it got to. Nothing is undone, and a destroy that has already run is
+gone. So the response to a red apply is §4 step 1 followed by re-running to
+convergence — investigate from a known state, not from a half-applied one. Most
+partial applies are harmless and self-heal on the next run; the one that does
+not announce itself is the Function App case in §4 step 1.
+
+Deliberate rollback is **roll-forward to the previous definition**:
 
 1. Revert the merge commit in Git (`git revert`), PR it, merge.
 2. Plan and apply the revert through the same gates (§2–§3).
@@ -274,11 +326,13 @@ Terraform rollback is **roll-forward to the previous definition**:
 
 | Concern | Mechanism | Where |
 | --- | --- | --- |
-| Cost | Budget alerts at resource-group scope; USD 150 ceiling | `azurerm_consumption_budget_resource_group` in `main.tf`, [Cost analysis](Cost-Analysis) |
+| Cost | Two **subscription**-scoped budgets — USD 150 on the application subscription, USD 25 on Platform Management for Log Analytics — each at 50/75/90/100% actual plus a forecast alert | `azurerm_consumption_budget_subscription` (two) in `main.tf`, [Cost analysis](Cost-Analysis) |
+| Alerting | Five metric and log rules routed through `ag-plat-prod-cus-01` — **declared, not yet applied**; the live estate has none. What each one means, what to check first, and what nothing watches | [Alerting and support](Alerting-And-Support), `infra/observability.tf` |
 | Drift | Periodic TFC plan (enable a scheduled speculative plan); investigate non-empty plans — portal edits are defects | TFC workspace settings |
 | Computed properties | `heal-computed-properties.yml` re-applies `cp_sortDate` on relevant pushes and every 6 h | `.github/workflows/` |
 | Secrets | Values live only in Key Vault, seeded manually during an `admin_ip_rules` window, then window closed. References in `REVIEW.md` §4.6 | `infra/variables.tf` (`admin_ip_rules`), Key Vault |
-| Purge protection | `purge_protection_enabled` **must be `true` before production secrets are written** — flip the TFC variable and apply; it is one-way | `infra/variables.tf` |
+| Storage access | Account keys are disabled on both production accounts **by `fix/go-live-remediation` — declared, not yet applied**. From that apply on, `az storage` data-plane commands and the portal Storage Browser default to key auth and answer 403: use `--auth-mode login` plus a data-plane role, and note the content account has no operator network path at all | [Alerting and support](Alerting-And-Support#break-glass-storage-after-shared-key-authentication-is-disabled) |
+| Purge protection | `purge_protection_enabled` stays **`false`** by an owner decision of 2026-08-24 — it is a one-way switch that removes the teardown-and-recreate path a single-environment estate depends on. Soft delete at 90 days is the compensating control | `REVIEW.md` *Accepted risks*, [ADR 0021](0021-key-vault-purge-protection) |
 | Dependency and action updates | Dependabot (npm + github-actions) with CI as the gate | `.github/dependabot.yml` |
 
 ## 7. ALZ absorption
