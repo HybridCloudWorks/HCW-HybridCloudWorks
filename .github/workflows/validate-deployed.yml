@@ -19,7 +19,10 @@ on:
       base_url:
         description: 'API base including the /api prefix'
         required: false
-        default: 'https://hybridcloudworks.com/api'
+        # The apex serves the SPA shell, so /api/health there returns HTTP 200
+        # with HTML and a status-only assertion passes falsely. Point at the API
+        # hostname, which is what vars.FUNCTIONS_URL already holds.
+        default: 'https://api-azure.hybridcloudworks.com/api'
 
 permissions:
   contents: read

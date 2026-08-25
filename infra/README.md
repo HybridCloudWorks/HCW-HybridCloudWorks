@@ -78,8 +78,10 @@ holds all variable values, including the sensitive ones catalogued in
 - **Stateful resources carry `prevent_destroy`** (Cosmos account, both storage
   accounts, Key Vault). Removing one of those guards is itself a reviewed,
   human-approved change.
-- Key Vault `purge_protection_enabled` must be `true` before production
-  secrets are written (`variables.tf`).
+- Key Vault `purge_protection_enabled` is **off by accepted owner decision**
+  (2026-08-24) even though production secrets are written. It was raised as a
+  Go-Live blocker and knowingly declined to retain teardown-and-recreate; soft
+  delete at 90 days is the compensating control. See `variables.tf`.
 - Secret **values** are never managed by Terraform and never enter state.
   Seeding is a manual, windowed operation via `var.admin_ip_rules` — see the
   variable's description.

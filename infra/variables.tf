@@ -472,8 +472,16 @@ variable "key_vault_name" {
   default = "kv-site-prod-cus-01"
 }
 
+# ACCEPTED RISK 2026-08-24, owner decision. The Go-Live review raised this as a
+# blocker: 18 production secrets are written and resolving while purge protection
+# is off, which contradicts the "must be true" wording this description carried.
+# The owner chose to keep it off to retain the ability to tear down and recreate
+# the vault. Compensating control: soft delete is on with a 90-day retention
+# window, so a deleted vault is recoverable unless someone deliberately purges it.
+# Recorded here rather than left implicit -- an accepted risk with no record is
+# indistinguishable from an unfixed finding, and the next reviewer re-raises it.
 variable "purge_protection_enabled" {
-  description = "Enable Key Vault purge protection. Set false only during initial dev; must be true before production secrets are written."
+  description = "Enable Key Vault purge protection. Off by accepted owner decision (2026-08-24) despite production secrets being written; soft delete at 90 days is the compensating control."
   type        = bool
   default     = false
 }

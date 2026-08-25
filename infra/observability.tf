@@ -521,7 +521,13 @@ resource "azurerm_application_insights_standard_web_test" "api_health" {
 # every 15 minutes, so a 15-minute window would count some locations zero times
 # and the alert would simply never fire. Derived from the frequency variable
 # for the same reason as the count above.
+# Gated on the same variable as the web test it watches. Created unconditionally
+# it would sit enabled against a disabled test, so `az monitor metrics alert list`
+# would report six rules when only five can fire -- and the inert one is
+# reachability, the only signal that survives the app being completely down. An
+# inventory that overstates coverage is worse than one rule fewer.
 resource "azurerm_monitor_metric_alert" "api_availability" {
+  count               = var.availability_test_enabled ? 1 : 0
   name                = "alert-api-availability-${var.environment}-${var.region_abbreviation}"
   resource_group_name = azurerm_resource_group.app["web"].name
   scopes              = [azurerm_application_insights_standard_web_test.api_health.id, azurerm_application_insights.hcw.id]
