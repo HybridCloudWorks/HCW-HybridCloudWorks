@@ -20,8 +20,22 @@ on:
         description: 'API base including the /api prefix'
         required: false
         # The apex serves the SPA shell, so /api/health there returns HTTP 200
-        # with HTML and a status-only assertion passes falsely. Point at the API
-        # hostname, which is what vars.FUNCTIONS_URL already holds.
+        # with HTML and a status-only assertion passed falsely. This is the real
+        # API host, byte-for-byte vars.FUNCTIONS_URL.
+        #
+        # KNOWN: this job cannot pass from a GitHub-hosted runner today, and that
+        # is a property of the estate rather than of this default. Through
+        # Cloudflare the runner gets a Bot Fight Mode 403; direct to origin it
+        # gets the origin lock's 403, because the site denies every address
+        # outside the Cloudflare ranges. deploy-functions.yml depends on exactly
+        # that: it curls this URL from a runner and FAILS the deploy if it sees
+        # 200, which is how it proves the origin lock enforces.
+        #
+        # So run this dispatch from an operator machine that Cloudflare admits.
+        # Making it pass from CI needs the same Cloudflare change that blocks
+        # arming the availability test — tracked as TODO T-519, not worked around
+        # here, because the alternatives are to weaken the origin lock or to
+        # assert against a host that answers without touching the API.
         default: 'https://api-azure.hybridcloudworks.com/api'
 
 permissions:

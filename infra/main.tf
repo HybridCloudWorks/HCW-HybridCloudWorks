@@ -1518,6 +1518,14 @@ resource "azapi_update_resource" "function_app_ftp_basic_auth" {
   type        = "Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01"
   resource_id = "${azurerm_function_app_flex_consumption.hcw.id}/basicPublishingCredentialsPolicies/ftp"
 
+  # Ordered after the app-settings strip rather than left to the graph. Both
+  # write children of the same site and both are replaced on every apply via
+  # replace_triggered_by, so without an edge their relative order is incidental.
+  # The strip is the one that matters: until it completes the site is carrying a
+  # keyless AzureWebJobsStorage, which is the state three recorded incidents came
+  # from. Finish that first, then harden FTP.
+  depends_on = [azapi_update_resource.function_app_settings_without_webjobs_storage]
+
   body = {
     properties = {
       allow = false

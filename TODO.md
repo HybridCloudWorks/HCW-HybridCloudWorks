@@ -10,6 +10,14 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
 ## Status — 2026-08-24
 
+> The items below describe the estate **as it will be once PR #218 is applied**.
+> Nothing in that pull request has been applied yet, so several read ahead of
+> the live tenant: FTP basic auth is still `allow: true`, no alert rule of any
+> kind exists in either subscription, and versioning is still off on the content
+> account. `REVIEW.md` is scrupulous about this distinction and this file should
+> be too — a tracker that describes a future estate in the present tense is how
+> a reviewer concludes work is done that has not started.
+
 | Priority | Open items |
 | --- | ---: |
 | High | 2 |

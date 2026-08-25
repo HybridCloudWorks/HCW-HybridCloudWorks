@@ -519,6 +519,15 @@ variable "budget_alert_email" {
 # Must be the first of the current month or later, in UTC — Azure rejects
 # anything earlier for a monthly budget. Update it when a first apply into a
 # new subscription lands in a later month than this default.
+#
+# LIVE CONSTRAINT: the Management budget added for S10 is a CREATE, so this
+# value has to be inside the month the apply lands in. At 2026-08-01 that apply
+# must happen before 2026-09-01 or ARM rejects it — "past start date should be
+# selected within the timegrain period". The existing app-subscription budget is
+# already in state and unaffected; only the new one is exposed. The failure
+# lands at the END of the graph, after the teardown, for a reason unrelated to
+# anything else in the change, so it is cheap to fix and expensive to diagnose
+# in the moment. Set it to the first of the applying month before applying.
 variable "budget_start_date" {
   description = "Budget period start (RFC3339, first of a month). Azure rejects a start date before the current month"
   type        = string
