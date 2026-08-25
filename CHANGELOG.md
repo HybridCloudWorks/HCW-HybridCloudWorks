@@ -252,6 +252,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The SCM lock is armed, and the per-run window is proven under `Deny`
+  (T-520 closed, 2026-08-25).** `functions_scm_lock_enabled` was set to `true`
+  on the `hcw-azure` workspace and applied; `az functionapp config
+  access-restriction show` now reports
+  `scmIpSecurityRestrictionsDefaultAction: Deny` with a single `Deny all` rule.
+  The Kudu endpoint no longer answers the internet.
+
+  Deploy run **32902534458** is the evidence that matters, because arming a
+  lock is only half a claim until something has to get through it:
+
+  ```
+  scm default action before the window: Deny
+  Will use Kudu https://<scmsite>/api/publish to deploy since Flex consumption
+    plan is detected.
+  Successfully deployed web package to Function App.
+  functions registered after sync: 109
+  scm window closed — default action 'Deny', no temporary rules left
+  ```
+
+  Every part of the design did what it was written to do. The open step read
+  the baseline as `Deny` rather than assuming `Allow`, which is why the same
+  steps worked unchanged before and after the flip. The deploy published
+  through Kudu with the standing default denying everyone else. The close step
+  removed the rule, confirmed the posture it found was the posture it left, and
+  confirmed no `ci-deploy-scm-*` rule survived — the assertion that keeps a
+  window which silently failed to close from passing as a green deploy.
+
+  Sequencing mattered and is recorded because it is the part that would bite on
+  a repeat: the window shipped in #220 and was observed working under `Allow`
+  (run 32894382986) **before** the variable was flipped. The first deploy after
+  a premature flip is the one that cannot get in to fix itself.
+
+  This closes the reachability half of the exposure. The credential half was
+  already closed — basic authentication is off on both SCM and FTP — so the
+  endpoint now requires an Entra token *and* an allow-listed source.
+
 - **Production deploys could not authenticate at all, and the cause was a
   workflow edit rather than an identity problem.** `de99aa0` put
   `deploy-functions.yml` behind `environment: production` to gate production

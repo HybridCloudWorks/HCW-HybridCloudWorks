@@ -41,9 +41,10 @@ tenant or edge access, and no amount of engineering here closes any of them.
 They are listed anyway, because a tracker that omits them is quietly shorter
 than the truth.
 
-One of the five still has a repository-side half already merged: T-520's per-run
-SCM window is in `deploy-functions.yml`, leaving only the
-`functions_scm_lock_enabled` flip once a deploy is observed working through it.
+Nothing on this list has a repository-side half left. T-520 finished the same
+day it was written: `functions_scm_lock_enabled` is armed, SCM answers `Deny`,
+and run 32902534458 published through Kudu inside the per-run window and
+restored the lock behind itself.
 The ruleset half of T-523 is done — `20680114` now requires 12 contexts,
 including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
 
