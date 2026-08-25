@@ -141,8 +141,23 @@ Trivy at HIGH/CRITICAL in a second, on every `infra/**` change, and
 `main` ruleset does not require either job, so the statement is a convention
 rather than a gate. A branch with a red Trivy run merges exactly as easily as
 one with a green run, which makes every "CI enforces this" line in CONTRIBUTING
-true only while someone is watching. Requiring the two check contexts is a
-repository setting, not a code change.
+true only while someone is watching.
+
+**This is a code change first, and a repository setting second — in that order.**
+The obvious fix is to add the two contexts to ruleset `20680114`, and on its own
+that deadlocks the repository. `iac-validate.yml` is path-filtered to `infra/**`
+and its own file, and GitHub does not auto-satisfy a required context whose
+workflow was filtered out: it holds the pull request at *"Expected — waiting for
+status to be reported"* forever. Every pull request that does not touch `infra/`
+would be unmergeable, which is most of them.
+
+So the trigger has to change before the ruleset does. Drop `paths:` from the
+`pull_request` trigger so the job always reports, and move the filtering inside —
+detect whether `infra/**` changed and skip the expensive steps when it did not,
+while the job itself still completes and posts its context. Then add
+`fmt, validate, tflint` and `Trivy IaC misconfiguration scan` to the ruleset.
+
+Doing it in the other order is a self-inflicted outage on the merge queue.
 
 ### T-524 — The two `data-migration` federated credentials outlive the job they were for
 
