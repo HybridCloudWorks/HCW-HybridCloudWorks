@@ -96,6 +96,42 @@ resource "azurerm_application_insights" "hcw" {
   tags                = var.tags
 }
 
+# `sampling_percentage` is DELIBERATELY NOT SET, and the reason is not
+# oversight — it was proposed as the fix for the OverQuota workspace on
+# 2026-08-24 and it is the wrong instrument here. Recorded so it is not
+# proposed again.
+#
+# That argument configures INGESTION sampling, which Microsoft documents as
+# operating "only when no other sampling is in effect: if the SDK samples your
+# telemetry, ingestion sampling is disabled". Azure Functions enables ADAPTIVE
+# sampling by default and functions/host.json enables it explicitly, with
+# `excludedTypes: "Request"`. The consequence is exact and backwards:
+#
+#   - AppTraces, the table that is ~38% of the daily cap, IS sampled by the
+#     host, so ingestion sampling does not touch it. Setting this would not
+#     reduce the volume that caused the problem.
+#   - Requests are EXCLUDED from host sampling, so they are the telemetry
+#     ingestion sampling would actually discard. AppRequests and AppExceptions
+#     are 0.3% of the cap each and are the two tables an incident is read from
+#     — and observability.tf now runs an alert rule that counts AppExceptions
+#     rows, which Microsoft's own guidance says sampling degrades ("alerts can
+#     only trigger upon sampled data").
+#
+# So the setting would cost the alerting that landed in the same change and
+# save nothing. The ingestion problem is fixed where the volume actually is:
+# the Cosmos categories in observability.tf. The size of that reduction is
+# stated there as a floor rather than a measurement — the figures behind it were
+# sampled while the workspace was already capped, so they understate the true
+# volume — and it has to be confirmed after a full uncapped day. Repeating a
+# precise before/after number here would put two different claims in two files.
+#
+# If more headroom is ever needed, the levers in order are: host.json
+# `logLevel` (Information-level host traces are what AppTraces mostly is),
+# host.json `maxTelemetryItemsPerSecond` on the adaptive sampler, and then a
+# workspace ingestion-time transformation — which is what Microsoft's daily-cap
+# guidance recommends over a cap in the first place. All three are deterministic
+# about WHAT they drop. This one is not.
+
 # =============================================================================
 # Azure Static Web App (frontend hosting)
 #
@@ -407,7 +443,33 @@ resource "azurerm_storage_account" "hcw" {
   # `GET /api/public/media/{container}/{*path}` (functions/src/lib/public-media.js).
   allow_nested_items_to_be_public = false
 
+  # Account keys off. Nothing here reads one: the Function App uses its managed
+  # identity, and azurerm_storage_container below takes storage_account_id,
+  # which is the Resource Manager API rather than the shared-key data plane.
+  # Leaving it on kept two standing credentials alive that no code path used —
+  # and a key that is never used is a key nobody notices leaking.
+  # var.storage_shared_access_key_enabled is the one-edit rollback.
+  shared_access_key_enabled = var.storage_shared_access_key_enabled
+
   blob_properties {
+    # Versioning, because this account holds the ONLY copy of the site's media
+    # and the CMS overwrites blobs in place. delete_retention_policy below
+    # recovers a DELETED blob; it does nothing for an overwritten one, so
+    # replacing a cover image with the wrong file was, until now, permanent and
+    # silent. With versioning the previous content becomes a non-current
+    # version and is recoverable for as long as the lifecycle rule keeps it.
+    #
+    # PITR (`restore_policy`) is deliberately NOT enabled with it. It requires
+    # change_feed_enabled, which is a second continuous cost, and it buys
+    # account-wide rollback to a point in time — a bigger tool than the failure
+    # this account actually has, which is one blob overwritten by hand.
+    # Versioning answers that one exactly.
+    #
+    # The cost of versioning is bounded by the expire-noncurrent-versions rule
+    # in azurerm_storage_management_policy.cleanup below. Without that rule an
+    # account whose write pattern is "overwrite in place" grows forever.
+    versioning_enabled = true
+
     cors_rule {
       allowed_headers = ["*"]
       allowed_methods = ["GET", "HEAD", "OPTIONS"]
@@ -428,6 +490,13 @@ resource "azurerm_storage_account" "hcw" {
     }
 
     delete_retention_policy {
+      days = 7
+    }
+
+    # A deleted CONTAINER used to take its blobs with it irrecoverably, even
+    # with blob soft delete on above — the two policies are separate and the
+    # container is the bigger blast radius of the two. Seven days to match.
+    container_delete_retention_policy {
       days = 7
     }
   }
@@ -527,6 +596,34 @@ resource "azurerm_storage_management_policy" "cleanup" {
       }
     }
   }
+
+  # The bound on versioning_enabled above, and it is not optional.
+  #
+  # This account's write pattern is overwrite-in-place from the CMS. Versioning
+  # turns every one of those overwrites into a retained non-current version, so
+  # without an expiry the account grows monotonically with editing activity and
+  # never with content — a cost line that only ever goes up, on a platform with
+  # a USD 150 ceiling.
+  #
+  # 30 days is chosen against the failure it exists for: someone replaces the
+  # wrong image and finds out when they next look at the page. That is a
+  # days-to-weeks discovery, not a months one. NO prefix_match, unlike the rule
+  # above — this applies to every container, because the mistake can happen in
+  # any of them.
+  rule {
+    name    = "expire-noncurrent-versions"
+    enabled = true
+
+    filters {
+      blob_types = ["blockBlob"]
+    }
+
+    actions {
+      version {
+        delete_after_days_since_creation = 30
+      }
+    }
+  }
 }
 
 # =============================================================================
@@ -602,6 +699,40 @@ resource "azurerm_subnet" "functions_integration" {
   }
 }
 
+# The spoke's half of the same argument hub.tf makes for nsg-plat-shared: this
+# NSG exists so that adding a rule is an edit to an existing, reviewed object
+# rather than a decision to create security controls under time pressure. The
+# integration subnet was the one subnet in the estate with no NSG at all
+# (`networkSecurityGroup: null` on the live subnet, 2026-08-24), which is the
+# state that makes "add a deny rule" a four-step change during an incident.
+#
+# EMPTY OF CUSTOM RULES, AND THAT IS THE WHOLE DESIGN. Azure's default rules
+# still apply and are what this subnet needs: VNet-to-VNet in and out allowed,
+# Azure Load Balancer in allowed, Internet in denied, Internet out allowed.
+# Nothing about the running app changes. Inbound HTTP does not arrive here —
+# it arrives at the App Service front end and the subnet carries only the app's
+# OUTBOUND traffic — so the Internet-inbound deny costs nothing, and the
+# Internet-outbound allow is what the app needs to reach the external model and
+# ingest APIs it exists to call.
+#
+# Do NOT add an outbound deny here without first enumerating those APIs. The
+# failure mode is a handler that hangs until its timeout rather than one that
+# errors, which reads as a slow provider rather than as a blocked egress.
+#
+# Rollback if the app misbehaves after this lands is deleting the association
+# (not the NSG); an unassociated NSG affects nothing.
+resource "azurerm_network_security_group" "functions_integration" {
+  name                = "nsg-${var.workload_name}-func-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  location            = azurerm_resource_group.app["conn"].location
+  resource_group_name = azurerm_resource_group.app["conn"].name
+  tags                = var.tags
+}
+
+resource "azurerm_subnet_network_security_group_association" "functions_integration" {
+  subnet_id                 = azurerm_subnet.functions_integration.id
+  network_security_group_id = azurerm_network_security_group.functions_integration.id
+}
+
 
 resource "azurerm_storage_account" "functions" {
   name                     = var.functions_storage_account_name
@@ -611,6 +742,33 @@ resource "azurerm_storage_account" "functions" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
   tags                     = var.tags
+
+  # Account keys off — the credential half of the same posture the network
+  # rules below take. All three access paths listed there are Entra-based
+  # already: the host authenticates with its managed identity
+  # (storage_authentication_type = "SystemAssignedIdentity" on the function
+  # app), and the workflow uploads with the deploy identity's token inside its
+  # firewall window. Nothing presents a key, so nothing breaks by removing the
+  # ability to. var.storage_shared_access_key_enabled is the one-edit rollback,
+  # and its description says what a key-auth failure looks like — which is not
+  # like a storage failure.
+  shared_access_key_enabled = var.storage_shared_access_key_enabled
+
+  # Soft delete on the deployment packages and the host's own state. The
+  # content account has had this since it was created; this one did not, so a
+  # mistaken delete here — the release container, or a host-state blob — was
+  # unrecoverable and takes the API down until a redeploy. Same 7 days, because
+  # there is no reason for the two accounts to differ and every reason for an
+  # operator not to have to remember which is which.
+  blob_properties {
+    delete_retention_policy {
+      days = 7
+    }
+
+    container_delete_retention_policy {
+      days = 7
+    }
+  }
 
   # T-503: the last publicly-open storage surface, closed. Three access paths
   # survive default Deny, each deliberate:
@@ -786,6 +944,14 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     application_insights_connection_string = azurerm_application_insights.hcw.connection_string
     application_insights_key               = azurerm_application_insights.hcw.instrumentation_key
 
+    # The platform default is HTTP/1.1 only, which the live app was still on.
+    # There is no compatibility question to weigh: HTTP/2 is negotiated over
+    # TLS by ALPN, so a client that does not speak it is served 1.1 exactly as
+    # before, and this app is https_only. Cloudflare already terminates HTTP/2
+    # for browsers; this is about the leg BEHIND it and about any client
+    # reaching the origin hostname directly.
+    http2_enabled = true
+
     # DECISION 7 — CORS is handled in code
     # (functions/src/lib/auth/cors.js) for real requests, and HERE for
     # preflights, because the platform gives no choice about the second.
@@ -887,7 +1053,10 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     ip_restriction_default_action = var.functions_origin_lock_enabled ? "Deny" : "Allow"
 
     # SCM is deliberately NOT locked by IP, and that is a live gap rather than a
-    # decision — see REVIEW.md. The Flex Consumption deploy runs THROUGH Kudu
+    # decision — see TODO.md T-520. It was raised again as S2 in the 2026-08-24
+    # Go-Live review; the pointer said REVIEW.md, but this is engineering work
+    # rather than an owner decision, so it is tracked where it can be picked up.
+    # The Flex Consumption deploy runs THROUGH Kudu
     # ("Will use Kudu https://<scmsite>/api/publish to deploy since Flex
     # consumption plan is detected"), and GitHub-hosted runners have no stable
     # egress IPs, so denying SCM breaks every deploy. Closing it properly needs
@@ -1104,11 +1273,24 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # the scheduled publisher would also have armed cleanupTempStorage — an
     # unimplemented TODO that deletes blobs (TODO.md T-302).
     #
-    # FEATURE_FLAG_SCHEDULERS is now a master kill switch only: "false" holds
-    # every timer off regardless of the individual flags, and any other value
-    # defers to them. Set an individual flag to "true" once that timer's logic
-    # is ported and reviewed.
-    "FEATURE_FLAG_SCHEDULERS" = "false"
+    # FEATURE_FLAG_SCHEDULERS is a master kill switch only: "false" holds every
+    # timer off regardless of the individual flags, and any other value defers
+    # to them (schedulers.js: `masterDisabled = FEATURE_FLAG_SCHEDULERS ===
+    # 'false'`, checked before the per-timer flag).
+    #
+    # IT WAS A HARDCODED "false" HERE UNTIL 2026-08-24, which quietly cancelled
+    # the design the next twenty lines describe. `enabled_timers` is a workspace
+    # variable so that arming a timer is a variable edit, but the master switch
+    # sat above it as a literal — so adding a timer to `enabled_timers` produced
+    # a green apply, a changed app setting, and a timer that still returned
+    # "disabled — skipping" on every tick. All 18 were permanent no-ops and
+    # nothing said so. A cutover step cannot be verified by the thing it
+    # configures if that thing is a constant.
+    #
+    # var.schedulers_master_enabled defaults to false, so this line writes the
+    # same "false" it wrote before until an owner decides otherwise. What
+    # changed is that the decision is now reachable.
+    "FEATURE_FLAG_SCHEDULERS" = var.schedulers_master_enabled ? "true" : "false"
 
     # One flag per timer (functions/src/functions/schedulers.js, Migration_Plan
     # §4.2). All implemented; each is turned on ONE AT A TIME at cutover after
@@ -1188,10 +1370,12 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # subsequent plan therefore reports:
     #
     #   ~ "RUNTIME_CONFIG_WRITER" = "azapi-strip" -> "azurerm"
-    #   Plan: 2 to add, 1 to change, 2 to destroy
+    #   Plan: 3 to add, 1 to change, 3 to destroy
     #
-    # — the change being this key, and the 2/2 being the two azapi resources
-    # replaced by their `replace_triggered_by`. A plan reporting exactly that
+    # — the change being this key, and the 3/3 being the three azapi resources
+    # replaced by their `replace_triggered_by`: the settings read, the settings
+    # strip, and the FTP basic-auth policy below them. (It was 2/2 until
+    # 2026-08-24, when the FTP policy was added.) A plan reporting exactly that
     # and nothing else means NO DRIFT. It is noise, it is permanent, and the
     # only thing worse than the noise is silencing it wrongly.
     #
@@ -1294,6 +1478,65 @@ resource "azapi_update_resource" "function_app_settings_without_webjobs_storage"
 
   lifecycle {
     replace_triggered_by = [azapi_resource_action.function_app_settings]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# FTP basic publishing credentials, off.
+# ---------------------------------------------------------------------------
+#
+# `webdeploy_publish_basic_authentication_enabled = false` above closes the SCM
+# half of publishing credentials. It reads like it closed both, and it did not:
+# Azure keeps two independent `basicPublishingCredentialsPolicies` child
+# resources, `scm` and `ftp`, and the azurerm argument writes only the first.
+# On the live app that left `scm.allow = false` next to `ftp.allow = true` —
+# a username/password publishing surface still open on a production app that
+# has never used a publish profile and deploys with OIDC.
+#
+# There is no azurerm argument for the FTP half on this resource type.
+# `azurerm_linux_function_app` has `ftp_publish_basic_authentication_enabled`;
+# `azurerm_function_app_flex_consumption` does not expose it in 5.1.0 —
+# confirmed against the installed provider's own schema, whose only publishing
+# argument is the webdeploy one. So this is the same shape as the strip above:
+# azapi writes the one property azurerm cannot reach, and nothing else.
+#
+# `replace_triggered_by` on the whole function app for the same reason the pair
+# above carries it. The FTP policy is a CHILD of the site: replace the site and
+# the child comes back at its default, which is `allow: true`. Without this the
+# lock would come off silently on the one event that recreates the app, and the
+# only way to notice would be to go and look. This costs one more add/destroy
+# pair in every plan (see the RUNTIME_CONFIG_WRITER note above, which counts
+# them) and buys a setting that cannot quietly revert.
+#
+# THE WAY BACK IS NOT DELETING THIS RESOURCE. Every other control in this
+# configuration reverts by changing a value and applying; this one does not,
+# because destroying an azapi_update_resource performs no API call — it drops
+# the resource from state and leaves the property exactly as it last wrote it.
+# So removing this block leaves FTP basic auth OFF permanently and silently.
+# That is the desirable direction and it is still a surprise if nobody says so.
+# To actually restore FTP publishing, set `allow = true` here and apply, or
+# write the property directly with `az resource update` against the same
+# basicPublishingCredentialsPolicies/ftp child — then remove the block.
+resource "azapi_update_resource" "function_app_ftp_basic_auth" {
+  type        = "Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01"
+  resource_id = "${azurerm_function_app_flex_consumption.hcw.id}/basicPublishingCredentialsPolicies/ftp"
+
+  # Ordered after the app-settings strip rather than left to the graph. Both
+  # write children of the same site and both are replaced on every apply via
+  # replace_triggered_by, so without an edge their relative order is incidental.
+  # The strip is the one that matters: until it completes the site is carrying a
+  # keyless AzureWebJobsStorage, which is the state three recorded incidents came
+  # from. Finish that first, then harden FTP.
+  depends_on = [azapi_update_resource.function_app_settings_without_webjobs_storage]
+
+  body = {
+    properties = {
+      allow = false
+    }
+  }
+
+  lifecycle {
+    replace_triggered_by = [azurerm_function_app_flex_consumption.hcw]
   }
 }
 
@@ -1506,12 +1749,18 @@ resource "azurerm_role_assignment" "admin_kv_secrets" {
 # than none, because it reads as reassurance. The application subscription is
 # now the boundary that means "this workload", so that is what it watches.
 #
-# contact_groups crosses a subscription boundary: the budget lives in App,
-# the action group in Management. Cross-subscription action groups on budgets
-# are doubtfully supported by the ARM API. If the apply rejects this
-# reference, the fallback is a second action group in the App subscription —
-# contact_emails below is an independent path either way, so alerting
-# degrades rather than disappears.
+# contact_groups crosses a subscription boundary: the budget lives in App, the
+# action group in Management. This said the ARM API "doubtfully" supported that
+# until 2026-08-24; the doubt is half resolved and the half that remains is the
+# half that matters. This budget applied, so ARM ACCEPTS the reference. Whether
+# a notification is ever DELIVERED through it is still unobserved, and this
+# resource cannot tell anyone: contact_emails below is an independent path, so
+# the mail arrives either way and an inert action group looks identical to a
+# working one from here.
+#
+# That indifference is exactly what the alert rules in observability.tf do not
+# have — they can only route through an action group — so the delivery test
+# belongs there, and the note in that file's Alert rules header says how.
 resource "azurerm_consumption_budget_subscription" "hcw" {
   name            = "${var.workload_name}-monthly-budget"
   subscription_id = "/subscriptions/${var.subscription_app}"
@@ -1549,6 +1798,62 @@ resource "azurerm_consumption_budget_subscription" "hcw" {
 
   # Forecasted overrun fires before the money is spent — the alert that
   # actually leaves time to act.
+  notification {
+    enabled        = true
+    threshold      = 100
+    operator       = "GreaterThanOrEqualTo"
+    threshold_type = "Forecasted"
+    contact_emails = [var.budget_alert_email]
+    contact_groups = [azurerm_monitor_action_group.ops.id]
+  }
+}
+
+# The second budget, because the first one is scoped to a subscription that
+# does not contain the platform's most variable cost.
+#
+# The workload subscription is where almost everything lives, and almost
+# everything there is serverless and near-free at this traffic. The one line
+# that scales with load rather than with inventory is Log Analytics ingestion —
+# and the workspace bills in Platform Management, which had no budget at all.
+# So the thing worth watching was the thing nothing watched, and the estate
+# would have looked in-budget right up to a surprise.
+#
+# `provider = azurerm.mgmt` for the same reason the workspace and the action
+# group carry it: subscription_id below names the scope, but the provider
+# decides which subscription the ARM call goes to, and without the alias this
+# is written into the application subscription — where the name would collide
+# with nothing and simply watch the wrong thing.
+#
+# Deliberately NOT scoped to the resource group. A subscription budget catches
+# a cost that appears somewhere nobody expected, which is the case a budget is
+# for; a resource-group budget silently ignores everything outside it.
+#
+# Same threshold ladder as the workload budget, and the same action group, so
+# the two read identically in the inbox and neither needs its own runbook.
+resource "azurerm_consumption_budget_subscription" "platform_mgmt" {
+  provider = azurerm.mgmt
+
+  name            = "plat-mgmt-monthly-budget"
+  subscription_id = "/subscriptions/${var.subscription_mgmt}"
+  amount          = var.budget_amount_mgmt_usd
+  time_grain      = "Monthly"
+
+  time_period {
+    start_date = var.budget_start_date
+  }
+
+  dynamic "notification" {
+    for_each = [50, 75, 90, 100]
+    content {
+      enabled        = true
+      threshold      = notification.value
+      operator       = "GreaterThanOrEqualTo"
+      threshold_type = "Actual"
+      contact_emails = [var.budget_alert_email]
+      contact_groups = [azurerm_monitor_action_group.ops.id]
+    }
+  }
+
   notification {
     enabled        = true
     threshold      = 100

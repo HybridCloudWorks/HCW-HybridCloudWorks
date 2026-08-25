@@ -319,46 +319,23 @@ variable "cosmos_allow_azure_datacenter_ips" {
 }
 
 # -----------------------------------------------------------------------------
-# Legacy import rehearsal controls (scratch.tf)
+# REMOVED 2026-08-24 — the legacy rehearsal switches
 #
-# These switches are all off by default. The declarations remain only until an
-# owner confirms the state and approves their removal; no current workflow
-# enables them.
+# cosmos_scratch_enabled, storage_scratch_enabled and migration_writer_enabled
+# all said "retained until an owner confirms the state and approves removal".
+# The owner confirmed on 2026-08-24 that the migration rehearsal is finished, so
+# they are gone along with everything they gated: the scratch estate (see the
+# removal record in scratch.tf) and the three production-import role assignments
+# (see the one at the end of oidc.tf).
+#
+# Each of the three read `default = false` here while the thing it gated was
+# LIVE in Azure. That is why the resources were deleted outright rather than
+# left behind a default that could not be trusted to be the effective value.
+#
+# Do not reintroduce these as variables. A rehearsal that needs a sandbox again
+# should get a declaration with an owner-set lifetime written next to it, so the
+# thing that decides when it is destroyed lives beside the thing being created.
 # -----------------------------------------------------------------------------
-
-# The legacy scratch Cosmos account was intended for import rehearsal before
-# production. It is off by default and is retained pending the owner-only
-# state check recorded in REVIEW.md.
-#
-# Holds a full copy of production data while on. Turn it off — which
-# destroys the account and the copy — when the rehearsal is signed off, and
-# write the intended lifetime down in the Phase-4 wiki page.
-variable "cosmos_scratch_enabled" {
-  description = "Legacy: create the scratch Cosmos account for rehearsal. Off = zero resources; remove after owner-approved state review."
-  type        = bool
-  default     = false
-}
-
-# Legacy scratch storage account for a content-copy rehearsal. Implies
-# cosmos_scratch_enabled (same resource group).
-variable "storage_scratch_enabled" {
-  description = "Legacy: create the scratch storage account for rehearsal. Requires cosmos_scratch_enabled."
-  type        = bool
-  default     = false
-
-  validation {
-    condition     = !var.storage_scratch_enabled || var.cosmos_scratch_enabled
-    error_message = "storage_scratch_enabled requires cosmos_scratch_enabled — both live in the scratch resource group."
-  }
-}
-
-# Legacy production-import role gate. It remains false and is retained only
-# until an owner approves removing its state-backed declarations in oidc.tf.
-variable "migration_writer_enabled" {
-  description = "Legacy: grant the deploy identity import roles on production. Leave false; remove with the owner-approved Terraform cleanup."
-  type        = bool
-  default     = false
-}
 
 variable "cosmos_admin_ip_rules" {
   description = <<-EOT
@@ -405,6 +382,36 @@ variable "functions_storage_admin_ip_rules" {
     condition     = alltrue([for ip in var.functions_storage_admin_ip_rules : can(cidrnetmask("${ip}/32")) || can(cidrnetmask(ip))])
     error_message = "functions_storage_admin_ip_rules entries must be IPv4 addresses or CIDR ranges."
   }
+}
+
+# Same shape as functions_storage_network_default_action above: the secure
+# value is the default and the variable exists so the insecure one is a
+# workspace edit rather than a code change under pressure.
+variable "storage_shared_access_key_enabled" {
+  description = <<-EOT
+    Allow shared-key (account key) authentication on the content and Functions
+    host storage accounts. False is the intended posture and disables the
+    account keys entirely for data-plane access; Entra tokens still work.
+
+    Both consumers are already identity-based and neither reads a key:
+
+      - the Function App authenticates with its managed identity
+        (storage_authentication_type = "SystemAssignedIdentity" plus
+        AzureWebJobsStorage__accountName, main.tf);
+      - deploy-functions.yml opens a network window and uploads with the
+        deploy identity's Entra token, not with a key.
+
+    Terraform itself is unaffected: azurerm_storage_container here takes
+    storage_account_id, which is the Resource Manager API, not the data plane.
+
+    ROLLBACK is one edit to `true` and an apply. Reach for it if a deploy
+    starts failing with an authentication error against storage, or if the host
+    stops cold-starting — the failure mode to expect is a 403 on a storage
+    call, which does NOT present as storage (see the AzureWebJobsStorage note
+    in main.tf: it presents as 404s on every route).
+  EOT
+  type        = bool
+  default     = false
 }
 
 # The two storage accounts are the one place the CAF pattern cannot be read
@@ -465,8 +472,16 @@ variable "key_vault_name" {
   default = "kv-site-prod-cus-01"
 }
 
+# ACCEPTED RISK 2026-08-24, owner decision. The Go-Live review raised this as a
+# blocker: 18 production secrets are written and resolving while purge protection
+# is off, which contradicts the "must be true" wording this description carried.
+# The owner chose to keep it off to retain the ability to tear down and recreate
+# the vault. Compensating control: soft delete is on with a 90-day retention
+# window, so a deleted vault is recoverable unless someone deliberately purges it.
+# Recorded here rather than left implicit -- an accepted risk with no record is
+# indistinguishable from an unfixed finding, and the next reviewer re-raises it.
 variable "purge_protection_enabled" {
-  description = "Enable Key Vault purge protection. Set false only during initial dev; must be true before production secrets are written."
+  description = "Enable Key Vault purge protection. Off by accepted owner decision (2026-08-24) despite production secrets being written; soft delete at 90 days is the compensating control."
   type        = bool
   default     = false
 }
@@ -475,9 +490,25 @@ variable "purge_protection_enabled" {
 # Budget
 # -----------------------------------------------------------------------------
 variable "budget_amount_usd" {
-  description = "Monthly budget ceiling in USD"
+  description = "Monthly budget ceiling in USD for the APPLICATION subscription"
   type        = number
   default     = 150
+}
+
+# A second ceiling, because the first one could not see the largest
+# controllable cost on the platform.
+#
+# The application budget watches sub-app-site-prod-cus. Log Analytics bills in
+# sub-plat-mgmt-prod-cus, which had no budget at all — so the one line that
+# actually varies with load (ingestion, at roughly USD 2.30-2.76/GB) was the
+# one line nothing was watching. A 0.25 GB/day cap is about 7.5 GB/month, so
+# 25 is a ceiling the workspace should never reach while the cap holds, and one
+# that fires early if the cap is ever raised without the spend being thought
+# about.
+variable "budget_amount_mgmt_usd" {
+  description = "Monthly budget ceiling in USD for the Platform Management subscription — Log Analytics ingestion and retention"
+  type        = number
+  default     = 25
 }
 
 variable "budget_alert_email" {
@@ -488,6 +519,15 @@ variable "budget_alert_email" {
 # Must be the first of the current month or later, in UTC — Azure rejects
 # anything earlier for a monthly budget. Update it when a first apply into a
 # new subscription lands in a later month than this default.
+#
+# LIVE CONSTRAINT: the Management budget added for S10 is a CREATE, so this
+# value has to be inside the month the apply lands in. At 2026-08-01 that apply
+# must happen before 2026-09-01 or ARM rejects it — "past start date should be
+# selected within the timegrain period". The existing app-subscription budget is
+# already in state and unaffected; only the new one is exposed. The failure
+# lands at the END of the graph, after the teardown, for a reason unrelated to
+# anything else in the change, so it is cheap to fix and expensive to diagnose
+# in the moment. Set it to the first of the applying month before applying.
 variable "budget_start_date" {
   description = "Budget period start (RFC3339, first of a month). Azure rejects a start date before the current month"
   type        = string
@@ -496,6 +536,91 @@ variable "budget_start_date" {
   validation {
     condition     = can(regex("^\\d{4}-\\d{2}-01T00:00:00Z$", var.budget_start_date))
     error_message = "budget_start_date must be the first of a month, e.g. 2026-08-01T00:00:00Z."
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Observability — availability test
+#
+# The only alert rule in observability.tf that costs money per evaluation and
+# depends on something outside Azure to succeed. Hence three variables rather
+# than three literals: arming it, and deciding what it costs, are workspace
+# decisions.
+# -----------------------------------------------------------------------------
+variable "availability_test_enabled" {
+  description = <<-EOT
+    Run the /api/health availability test. FALSE until the Cloudflare side is
+    settled.
+
+    The test asks https://api-azure.<domain>/api/health from Azure's
+    availability agents, which are datacenter clients. deploy-functions.yml
+    records that a datacenter client asking this host for /api/health is served
+    Cloudflare's Bot Fight Mode interstitial and a 403, and that a WAF skip
+    rule against it was built, applied and confirmed inert. So arming this
+    first would most likely create a permanently-firing alert, and an alert
+    that always fires is an alert nobody reads.
+
+    Arm it only after one execution has been observed succeeding — give the
+    agents a path through Cloudflare (a rule matching the test's
+    X-Customer-InstanceId header, or the ApplicationInsightsAvailability
+    service tag), then flip this. The metric alert on the test is gated on this
+    same variable, so flipping it creates the alert and arms the test together
+    rather than leaving a reachability alert that nothing can fire.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "availability_test_geo_locations" {
+  description = <<-EOT
+    Availability-test agent locations, as Azure population tags (NOT region
+    names — "us-tx-sn1-azr", not "southcentralus").
+
+    Five is Microsoft's recommended minimum and is what makes the alert's
+    3-of-5 vote meaningful: with fewer locations a single agent's network
+    problem is a larger fraction of the vote. The five here are all US, because
+    the audience is, and because each additional location is a recurring
+    per-execution charge rather than a one-off.
+
+    The alert's failure threshold is derived from the LENGTH of this list
+    (observability.tf), so trimming it to cut cost narrows the vote with it
+    rather than leaving a threshold that can no longer be reached.
+  EOT
+  type        = list(string)
+  default = [
+    "us-fl-mia-edge", # Central US — same region as the workload
+    "us-tx-sn1-azr",  # South Central US
+    "us-il-ch1-azr",  # North Central US
+    "us-va-ash-azr",  # East US
+    "us-ca-sjc-azr",  # West US
+  ]
+
+  validation {
+    condition     = length(var.availability_test_geo_locations) >= 3
+    error_message = "availability_test_geo_locations needs at least 3 entries; below that a single agent's network problem is a majority of the vote."
+  }
+}
+
+variable "availability_test_frequency_seconds" {
+  description = <<-EOT
+    How often EACH location runs the test. Azure accepts 300, 600 or 900 only.
+
+    This is the cost dial. Standard tests bill per execution and the free URL
+    ping test retires 2026-09-30, so at 5 locations: 900 is 14,400 executions a
+    month, 600 is 21,600, and 300 is 43,200. Against a platform spending about
+    USD 3.23 a month on Azure today, the difference between the ends of that
+    range is real money.
+
+    900 buys detection within about 15 minutes while the five locations are
+    staggered, so in practice the endpoint is asked roughly every 3 minutes.
+    Drop to 300 when something depends on tighter detection than that.
+  EOT
+  type        = number
+  default     = 900
+
+  validation {
+    condition     = contains([300, 600, 900], var.availability_test_frequency_seconds)
+    error_message = "availability_test_frequency_seconds must be 300, 600 or 900 — the only values Azure accepts."
   }
 }
 
@@ -529,7 +654,13 @@ variable "entra_tenant_id" {
 # validation and successfully verifies any Microsoft-signed token for the
 # tenant, including a Graph token.
 variable "entra_api_audience" {
-  description = "Application ID URI of the API registration (e.g. api://<guid>) — validated as the JWT audience"
+  # This said `api://<guid>` until 2026-08-24 and the live value is a bare
+  # GUID, which is not a discrepancy — it is the v1/v2 token distinction. Entra
+  # puts the App ID URI in `aud` for v1 access tokens and the API
+  # registration's CLIENT ID in `aud` for v2 ones. The SPA requests v2, so the
+  # bare GUID is correct here and the URI form would reject every real token.
+  # Read the registration's `accessTokenAcceptedVersion` before changing it.
+  description = "Audience the API validates `aud` against: the API registration's client id (a bare GUID) for v2 tokens, or its api://<guid> App ID URI for v1. Live value is the bare GUID"
   type        = string
 
   validation {
@@ -772,6 +903,40 @@ variable "tags" {
 # Cutover switches
 # -----------------------------------------------------------------------------
 
+# The master kill switch, which was a hardcoded string until 2026-08-24.
+#
+# main.tf wrote FEATURE_FLAG_SCHEDULERS = "false" as a literal while the
+# comment beside it described a workspace-variable design and enabled_timers
+# below documented "arming the first timer means setting BOTH". Only one of
+# those two was actually settable, so every one of the 18 timers was a
+# guaranteed no-op no matter what enabled_timers said — schedulers.js gates
+# every timer on `FEATURE_FLAG_SCHEDULERS === 'false'` before it looks at the
+# per-timer flag. A cutover step that reads "add the timer to enabled_timers
+# and apply" would have completed successfully and changed nothing.
+#
+# Default false, so this change alone arms NOTHING: the live setting stays
+# exactly the "false" it is today until an owner decides otherwise.
+variable "schedulers_master_enabled" {
+  description = <<-EOT
+    Master kill switch for all 18 timers (FEATURE_FLAG_SCHEDULERS).
+
+    False holds every timer off regardless of enabled_timers.
+    schedulers.js checks this first and skips the handler before reading the
+    per-timer flag, so it is a genuine kill switch and not a default.
+
+    True hands control back to enabled_timers, which is still empty by default
+    — so turning this on by itself also arms nothing. Both are required, which
+    is the point: the master switch is what an operator flips to stop
+    everything during an incident without editing eighteen entries.
+
+    Migration_Plan §6 step 7 arms timers ONE AT A TIME. Set this true first,
+    then add timers to enabled_timers one per apply, each observed firing at
+    its intended Chicago local time before the next.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "enabled_timers" {
   description = <<-EOT
     Timers to arm, by flag suffix — e.g. ["SYNC_RSS_FEEDS"] sets
@@ -784,8 +949,8 @@ variable "enabled_timers" {
     in the HCP Terraform workspace so a cutover flip is a variable edit and an
     apply, not a pull request.
 
-    FEATURE_FLAG_SCHEDULERS is a separate master kill switch and is still
-    "false": it holds every timer off regardless of what is listed here, so
+    schedulers_master_enabled above is a separate master kill switch and is
+    still false: it holds every timer off regardless of what is listed here, so
     arming the first timer means setting BOTH.
   EOT
   type        = set(string)

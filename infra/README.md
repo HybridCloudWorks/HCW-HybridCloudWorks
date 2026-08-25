@@ -16,10 +16,12 @@ before any plan or apply.
 
 - **One environment: production.** There is no dev/staging state (ADR-0009).
   `var.environment` exists for naming, not for a second workspace.
-- **State lives in HCP Terraform Cloud** — org `HybridCloudWorks`, workspace
-  `hcw-azure` (`backend.tf`). State, saved plans, and
-  `*.tfvars` with real values never enter Git.
-+ **Applies are gated.** Production applies happen through HCP Terraform with
+- **State lives in HCP Terraform Cloud** — org `hcw`, project `Site`,
+  workspace `hcw-azure` (`backend.tf`). The org is `hcw` and not
+  `HybridCloudWorks`; this line said the latter, which is the exact assumption
+  `backend.tf` records as having made every run 404 before it started. State,
+  saved plans, and `*.tfvars` with real values never enter Git.
+- **Applies are gated.** Production applies happen through HCP Terraform with
   human plan review; GitHub Actions handles application delivery only.
 - **The target subscription is a platform subscription** that will later be
   absorbed into an Azure Landing Zone management-group hierarchy. See
@@ -30,10 +32,13 @@ before any plan or apply.
 | File | Holds |
 | --- | --- |
 | `backend.tf` | HCP Terraform Cloud backend declaration |
-| `providers.tf` | Required providers and provider configuration (`azurerm ~> 4.0`, `cloudflare ~> 4.0`) |
+| `providers.tf` | Required providers and provider configuration (`azurerm ~> 5.0`, `azapi ~> 2.0`, `cloudflare ~> 4.0`) |
 | `variables.tf` | All inputs; names must match TFC workspace variable keys exactly |
-| `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, observability, budget, DNS |
+| `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, Log Analytics + Application Insights, budgets, DNS |
+| `hub.tf` | Platform Connectivity: hub VNet, NSG, route table, and the peering to the workload spoke |
+| `observability.tf` | Action group, diagnostic settings, every alert rule, and the two user-assigned identities the log alert rules query as |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |
+| `scratch.tf` | Removal record for the retired rehearsal estate — no resources |
 | `outputs.tf` | Root outputs |
 | `cosmos-containers.json` | Generated Cosmos container manifest — regenerate with `scripts/generate-cosmos-container-spec.mjs`, do not hand-edit |
 | `terraform.tfvars.example` | Placeholder-only example; real values live in TFC workspace variables |
@@ -73,8 +78,10 @@ holds all variable values, including the sensitive ones catalogued in
 - **Stateful resources carry `prevent_destroy`** (Cosmos account, both storage
   accounts, Key Vault). Removing one of those guards is itself a reviewed,
   human-approved change.
-- Key Vault `purge_protection_enabled` must be `true` before production
-  secrets are written (`variables.tf`).
+- Key Vault `purge_protection_enabled` is **off by accepted owner decision**
+  (2026-08-24) even though production secrets are written. It was raised as a
+  Go-Live blocker and knowingly declined to retain teardown-and-recreate; soft
+  delete at 90 days is the compensating control. See `variables.tf`.
 - Secret **values** are never managed by Terraform and never enter state.
   Seeding is a manual, windowed operation via `var.admin_ip_rules` — see the
   variable's description.

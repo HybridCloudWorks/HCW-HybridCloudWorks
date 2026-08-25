@@ -11,6 +11,15 @@ The phase-level picture is [Migration_Plan.md](../../Migration_Plan.md) §5.
 **Who:** **[CI]** a `Migrate data` workflow run · **[OP]** the operator at a terminal · **[OWN]** the
 owner, deciding.
 
+> **Archived 2026-08-24 — none of this runs any more.** The `Migrate data`
+> workflow and the five scripts it dispatched were deleted in `59e471b`; the
+> rehearsal estate is torn down and the deploy identity's production-write
+> grants are revoked. Every command below now fails at the first step. The
+> sequence is kept as the record of how the migration was actually performed
+> and what each gate proved — the Wiki sidebar files it under *Historical* for
+> the same reason. It is evidence, not a current procedure, and it is not a
+> route back to Firebase.
+
 ## Rules that apply to every step
 
 1. **Nothing here writes to production.** Every workflow mode is read-only against Firestore and

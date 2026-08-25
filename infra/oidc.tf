@@ -147,8 +147,13 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # Deliberately NOT granted to the active deployment path:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
 #     managed identity does that at runtime.
-#   - Import-only Cosmos or storage roles on PRODUCTION. The legacy role
-#     declarations remain gated off by migration_writer_enabled pending review.
+#   - Import-only Cosmos or storage roles on PRODUCTION. These were declared
+#     behind migration_writer_enabled and were LIVE on this identity until
+#     2026-08-24; the gate and all three declarations were removed with the
+#     rehearsal itself. See the removal record at the end of this file.
+#   - Data-plane access to the CONTENT storage account. This identity writes a
+#     deployment package to the FUNCTIONS host account and nothing else; the
+#     media the site serves is the Function App's to write, not CI's.
 #   - anything at subscription scope.
 
 # ---------------------------------------------------------------------------
@@ -228,42 +233,65 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
 }
 
 # ---------------------------------------------------------------------------
-# Legacy production-import role gate: migration_writer_enabled
+# REMOVED 2026-08-24 — the production-import grants, and the gate that held them
 # ---------------------------------------------------------------------------
-# These are count = 0 by default and remain only for state-safe cleanup
-# sequencing. Do not enable them; remove the declarations through the
-# owner-approved Terraform cleanup in REVIEW.md.
 #
-# Database scope rather than account scope: the migration touches every
-# container under `hcw` and nothing else on the account.
-resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_migration" {
-  count = var.migration_writer_enabled ? 1 : 0
-
-  resource_group_name = azurerm_resource_group.app["db"].name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
-  principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}"
-}
-
-resource "azurerm_role_assignment" "github_deploy_content_blob_migration" {
-  count = var.migration_writer_enabled ? 1 : 0
-
-  scope                = azurerm_storage_account.hcw.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
-}
-
-# Storage Account Contributor on the content account, for the per-run firewall
-# window the storage copy needs — same role, same reasoning, same narrow scope
-# as github_deploy_funcsa_network above.
-resource "azurerm_role_assignment" "github_deploy_content_network_migration" {
-  count = var.migration_writer_enabled ? 1 : 0
-
-  scope                = azurerm_storage_account.hcw.id
-  role_definition_name = "Storage Account Contributor"
-  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
-}
+# Three role assignments and var.migration_writer_enabled went together:
+#
+#   github_deploy_cosmos_migration          Cosmos DB Built-in Data Contributor
+#                                           at DATABASE scope, dbs/hcw
+#   github_deploy_content_blob_migration    Storage Blob Data Contributor on the
+#                                           production content account
+#   github_deploy_content_network_migration Storage Account Contributor on the
+#                                           production content account
+#
+# The owner confirmed the migration rehearsal is finished. This is a REVOCATION,
+# not a tidy-up: all three were live on the identity, so a CI principal held
+# write access to every container in the production database and to the account
+# holding the site's media, for a job that no longer exists.
+#
+# WHY THE DECLARATIONS ARE DELETED RATHER THAN LEFT AT count = 0. A variable gate
+# is only "off" while the workspace agrees with the checked-in default, and here
+# it demonstrably did not: variables.tf said false while all three assignments
+# were live in Azure. Deleting the resources removes the configuration's ability
+# to grant them at all — a workspace value for a variable that no longer exists
+# is a warning, not a re-grant. It also means an apply that finds them in state
+# destroys them, which a default nobody can see from here would not guarantee.
+#
+# WHAT SURVIVES, and the job each one is still doing:
+#
+#   github_deploy_functions                Website Contributor on the Function
+#                                          App — deploy-functions.yml publishes.
+#   github_deploy_releases                 Blob Data Contributor on the FUNCTIONS
+#                                          host account only, for the deployment
+#                                          package. Never the content account.
+#   github_deploy_funcsa_network           Storage Account Contributor on the
+#                                          FUNCTIONS host account only, for the
+#                                          per-run firewall window.
+#   github_deploy_cosmos_container_writer  the custom container-definition role
+#                                          at account scope, for the healer's
+#                                          ARM PUT of computedProperties.
+#   github_deploy_cosmos_content           data-plane Data Contributor scoped to
+#   github_deploy_cosmos_blogs             colls/content and colls/blogs, for
+#                                          apply-computed-sortdate --inspect.
+#
+# The two container-scoped Cosmos grants are UNAFFECTED by dropping the
+# database-scoped one. They are separate assignments; the database scope was a
+# superset sitting alongside them, not their parent. The healer keeps data-plane
+# access to exactly the two containers it reads, and loses everything else.
+#
+# The two storage grants had no consumer to lose. Nothing in .github/workflows
+# addresses the content storage account, and scripts/apply-computed-sortdate.mjs
+# imports @azure/cosmos and @azure/identity and no blob client at all.
+#
+# NOT REMOVED, and worth a decision of its own: the two `data-migration`
+# federated credentials near the top of this file. A federated credential grants
+# no permissions — it decides which OIDC subject may act AS this identity — so
+# with the grants above gone, a data-migration token now inherits the same
+# reduced role set as a branch token. No workflow references
+# `environment: data-migration`. Retiring that trust is an identity change and
+# belongs with whoever owns the identity, not with this cleanup.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Values the GitHub workflows need. None are secret: federation means

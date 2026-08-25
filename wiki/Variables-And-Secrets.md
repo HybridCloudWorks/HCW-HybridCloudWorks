@@ -334,8 +334,19 @@ dictated by HashiCorp and Microsoft and are contractual.
 | `budget_alert_email` | Notification target | no |
 | `admin_ip_rules`, `cosmos_admin_ip_rules`, `functions_storage_admin_ip_rules` | Populated only for a seeding or inspection window; empty is the steady state | no |
 
-Everything else in `infra/variables.tf` has a default and needs no workspace
-entry at all.
+Most of the rest of `infra/variables.tf` has a default and needs no workspace
+entry. Four are the exception, and they are the ones an operator actually
+reaches for. Each carries the *safe* value as its default, so the unsafe or
+armed value is a deliberate workspace edit and the default is the rollback:
+
+| Value | Default | Why it is a workspace entry |
+| --- | --- | --- |
+| `schedulers_master_enabled` | `false` | Master kill switch for all 18 timers — it is what `FEATURE_FLAG_SCHEDULERS` is set from. A hardcoded literal until 2026-08-24, which meant no timer could be armed without a code change and nothing said so |
+| `enabled_timers` | `[]` | Which timers are armed, by flag suffix. Arming one needs **both** this and the master switch. An unrecognised name fails the plan rather than silently arming nothing |
+| `availability_test_enabled` | `false` | Runs the `/api/health` availability test. Off until the Cloudflare side is settled: Bot Fight Mode serves datacenter clients a 403, so arming it first would create a permanently-firing alert |
+| `storage_shared_access_key_enabled` | `false` | Shared-key auth on the content and Functions host accounts. False is the intended posture — both consumers use Entra — and `true` is the one-variable rollback if a key path turns out to be needed |
+
+Everything else there is a default nobody is expected to override.
 
 ### Store 3 — GitHub Actions variables
 
@@ -372,7 +383,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | --- | --- | --- |
 | `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `KEY_VAULT_URI`, `AZURE_OPENAI_ENDPOINT` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/main.tf` |
 | `NODE_ENV`, `REGION_NAME`, `WEBSITE_SITE_NAME` | §5 | Host-provided, or a literal in `main.tf` |
-| `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Literal app settings; the master flag stays `"false"` |
+| `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the eighteen per-timer flags via `local.timer_flags`. Both still resolve to `"false"` today. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
 | `ENTRA_TENANT_ID`, `ENTRA_API_AUDIENCE` (app settings) | §1 | Derived from store 2 Terraform variables |
 | `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` | §2 | Deliberately absent; two are test-enforced |
 | `COSMOS_KEY` | §7 | Deliberately absent |

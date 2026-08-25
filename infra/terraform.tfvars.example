@@ -1,3 +1,21 @@
-azure_subscription_id = "your-azure-subscription-id"
-cloudflare_api_token  = "your-cloudflare-api-token"
-cloudflare_zone_id    = "your-cloudflare-zone-id"
+# Placeholder values only. Real values live as HCP Terraform workspace
+# variables (backend.tf), never in a committed file — see infra/README.md.
+#
+# These are the eight variables with NO default in variables.tf, so a plan
+# fails without them. Everything else has a default that is correct for this
+# deployment. `azure_subscription_id` was listed here until 2026-08-24 and is
+# not a variable in this configuration at all: the subscriptions are declared
+# one per landing zone, and a file naming a variable that does not exist cannot
+# be used as the example it claims to be.
+
+subscription_app  = "00000000-0000-0000-0000-000000000000"
+subscription_mgmt = "00000000-0000-0000-0000-000000000000"
+subscription_conn = "00000000-0000-0000-0000-000000000000"
+
+entra_tenant_id    = "00000000-0000-0000-0000-000000000000"
+entra_api_audience = "00000000-0000-0000-0000-000000000000"
+
+budget_alert_email = "ops@example.com"
+
+cloudflare_api_token = "your-cloudflare-api-token"
+cloudflare_zone_id   = "your-cloudflare-zone-id"

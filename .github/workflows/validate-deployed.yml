@@ -19,7 +19,31 @@ on:
       base_url:
         description: 'API base including the /api prefix'
         required: false
-        default: 'https://hybridcloudworks.com/api'
+        # The apex serves the SPA shell, so /api/health there returns HTTP 200
+        # with HTML and a status-only assertion passed falsely. This is the real
+        # API host, byte-for-byte vars.FUNCTIONS_URL.
+        #
+        # KNOWN: this job cannot pass from a GitHub-hosted runner today, and that
+        # is a property of the estate rather than of this default. Through
+        # Cloudflare the runner gets a Bot Fight Mode 403; direct to origin it
+        # gets the origin lock's 403, because the site denies every address
+        # outside the Cloudflare ranges. deploy-functions.yml depends on exactly
+        # that: it curls this URL from a runner and FAILS the deploy if it sees
+        # 200, which is how it proves the origin lock enforces.
+        #
+        # Dispatching from an operator machine does NOT help: both jobs are
+        # runs-on: ubuntu-latest, so a workflow_dispatch runs on a GitHub-hosted
+        # runner whoever presses the button. This workflow simply cannot pass
+        # today. To validate the deployed surface now, run the same script
+        # locally from a machine Cloudflare admits:
+        #
+        #   node scripts/smoke-deployed.mjs --base https://api-azure.hybridcloudworks.com/api
+        #
+        # Making the workflow itself pass needs the same Cloudflare change that
+        # blocks arming the availability test — TODO T-519. It is not worked
+        # around here, because the alternatives are to weaken the origin lock or
+        # to assert against a host that answers without touching the API.
+        default: 'https://api-azure.hybridcloudworks.com/api'
 
 permissions:
   contents: read

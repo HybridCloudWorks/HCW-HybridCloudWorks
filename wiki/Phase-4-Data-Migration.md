@@ -6,14 +6,28 @@ is the way it is, so a decision is never re-litigated from a log line. Plan-leve
 [Migration_Plan.md](../../Migration_Plan.md) §5.
 
 Baseline: **Site-Main @ `088f458`** (2026-08-18, v1.7.0) — 68 Firestore collections, one GCS bucket.
-Target: 73 Cosmos containers (72 generated from the manifest + `leases`), 5 blob containers.
+Target: 74 Cosmos containers (73 generated from the manifest + `leases`, declared separately in
+`infra/main.tf`), 5 blob containers.
 
 ## Decisions
+
+> **Retired 2026-08-24 — read D1 and D2 in the past tense.** The migration
+> execution surface is gone: `migrate-data.yml` and the five scripts were
+> deleted in `59e471b`. The rehearsal estate and the three production-write
+> grants are **authorised for removal and deleted from the configuration, but
+> the apply that carries it out has not run** — as of 2026-08-25 the sandbox
+> and the grants are still live in Azure. D1 therefore describes an account
+> that is on its way out, and D2 a gate variable that no longer exists in code
+> at all. Both are kept because
+> they are the record of *why* the rehearsal was built the way it was — a
+> keyless account so the rehearsal exercised the same auth path production
+> takes, and RBAC rather than a workflow guard as the production lock. Q5 and
+> P6 below carry the closing decisions.
 
 ### D1. The rehearsal account is keyless, serverless and identical in shape to production
 
 `cosmos-site-sbx-cus` ([infra/scratch.tf](../../infra/scratch.tf)) has keys off, the same
-firewall shape, the same database name `hcw`, and the same 72 containers from the same generated
+firewall shape, the same database name `hcw`, and the same 73 containers from the same generated
 spec. A key-authenticated rehearsal against an open account would pass while proving nothing about
 `DefaultAzureCredential` + native RBAC — which is the path production takes. The healer's 2026-08-20
 failure ("cannot be authorized by AAD token in data plane", see D9) is exactly the class of defect a
@@ -21,7 +35,9 @@ key would have hidden.
 
 It differs only where a sandbox should: its own resource group, no `prevent_destroy`, the CAF `sbx`
 environment token in every name. It holds a full copy of production data while on; the variables
-that create it also destroy it. **Lifetime: to be recorded at runbook step 12.**
+that create it also destroy it. **Lifetime: recorded at Q5, closed 2026-08-24**
+— the estate is deleted outright rather than switched off, because the switches
+are deleted with it.
 
 ### D2. Production is locked by RBAC, not by a guard
 
@@ -151,7 +167,7 @@ The post-import verify (P4) found `social_posts` and `lab_agents` drifted within
 | Q2b | `covers/` is 3.10 GiB of the 3.17 GiB bucket — 1,011 AI/uploaded covers for 1,142 content documents. Copy all, or only covers still referenced by a document? | before step 10 copy | **Decided 2026-08-21: copy all.** Referenced-only pruning is a later cleanup with the document set in hand |
 | Q3 | `published-images/` public on Azure? | before Go-Live | **Signed 2026-08-21: not public.** The prefix holds **0 objects**; `content` stays out of `PUBLIC_MEDIA_CONTAINERS`. Revisit only if the ported publisher starts writing there |
 | Q4 | Partition-key list (D3) signed? | before step 9 | **Signed 2026-08-21.** Spec and the live scratch account agree: 67 on `/id`; `admin_config` `/configScope`, `content_versions` `/contentId`, `image_prompts_sets` `/pageId`, `image_prompt_sets_prompts` `/setName`, `listen_and_learn_episodes` `/setId`. Window closes at the first production import |
-| Q5 | Scratch copy lifetime after sign-off? | step 12 | **Decided 2026-08-21: keep through the production dress rehearsal.** Flip `cosmos_scratch_enabled` / `storage_scratch_enabled` off after the production import is verified |
+| Q5 | Scratch copy lifetime after sign-off? | step 12 | **Decided 2026-08-21: keep through the production dress rehearsal.** Flip `cosmos_scratch_enabled` / `storage_scratch_enabled` off after the production import is verified. **Closed 2026-08-24:** it was never flipped off and the readiness review found it still live holding a full copy of production. The owner authorised removal; the estate is deleted rather than switched off, and both switches are deleted with it — P6 |
 
 ## Evidence log
 
@@ -178,4 +194,5 @@ The post-import verify (P4) found `social_posts` and `lab_agents` drifted within
 | 2026-08-21 | P3 | [Run 32444817361](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32444817361) `mode=storage-rehearse target=production` #1 re-run — out-of-region runner; **1,438 copied, 0 unchanged**; every prefix verified on count, bytes, MD5 and sampled content; 2 min 58 s | **pass** |
 | 2026-08-21 | P3 | [Run 32445335767](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32445335767) `mode=storage-rehearse target=production` #2 — first run on the D11 window (PR #134): **0 copied, 1,438 unchanged**, every prefix re-verified; close step restored `Deny`, no IP rule left behind (checked live) | **pass** |
 | 2026-08-21 | P4 | [Run 32445527271](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32445527271) `mode=verify target=production` — fresh export 8,023; **60 of 62 containers reconcile**; `social_posts` (15/15) and `lab_agents` (1/1) show field mismatches with counts, ids and everything else matching. Cause confirmed in Site-Main source: `reconcilePublerCalendar` (the 5-minute `syncSocialCalendarScheduled`) stamps `lastSyncedAt` on every social post each run, and `labs/vps-agent/index.js:62` re-`set()`s the agent document on heartbeat. Live machine writers, not a defect — D12 | **pass with D12** |
-| 2026-08-21 | P5 | `PRODUCTION_IMPORT_ENABLED` deleted (API 404 confirmed). `migration_writer_enabled` left `true` for the cutover delta run — owner to flip after cutover | closed |
+| 2026-08-21 | P5 | `PRODUCTION_IMPORT_ENABLED` deleted (API 404 confirmed). `migration_writer_enabled` left `true` for the cutover delta run — owner to flip after cutover | closed → superseded by P6 |
+| 2026-08-24 | P6 | **The delta import is retired and the execution surface is gone.** `migrate-data.yml` and the five migration scripts were deleted in `59e471b`; the same commit staged these pages to the Wiki. The owner confirmed that day that the rehearsal is finished, and authorised both removals: the three `migration_writer_enabled` grants are revoked, and `rg-db-site-sbx-cus` — `cosmos-site-sbx-cus` with 73 containers and a measured **77,763 documents**, `stsitesbxcus01` with 6 containers, 4 role assignments — is torn down irreversibly, since a Cosmos account cannot be restored from its own continuous backup. All three variables are **deleted** rather than set `false`: the checked-in `false` was demonstrably not the effective value, so only removing the declarations settles it. Consequence: anything written on Firebase after the 2026-08-21 import does not come across, and the cutover moves DNS without a second pass ([Cutover-Runbook](Cutover-Runbook) step 4). Authorisation recorded in `REVIEW.md` | **retired** |
