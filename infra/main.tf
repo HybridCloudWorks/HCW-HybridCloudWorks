@@ -1050,7 +1050,10 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     ip_restriction_default_action = var.functions_origin_lock_enabled ? "Deny" : "Allow"
 
     # SCM is deliberately NOT locked by IP, and that is a live gap rather than a
-    # decision — see REVIEW.md. The Flex Consumption deploy runs THROUGH Kudu
+    # decision — see TODO.md T-520. It was raised again as S2 in the 2026-08-24
+    # Go-Live review; the pointer said REVIEW.md, but this is engineering work
+    # rather than an owner decision, so it is tracked where it can be picked up.
+    # The Flex Consumption deploy runs THROUGH Kudu
     # ("Will use Kudu https://<scmsite>/api/publish to deploy since Flex
     # consumption plan is detected"), and GitHub-hosted runners have no stable
     # egress IPs, so denying SCM breaks every deploy. Closing it properly needs
