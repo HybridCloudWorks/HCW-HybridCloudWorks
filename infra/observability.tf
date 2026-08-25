@@ -1,5 +1,6 @@
 # =============================================================================
-# observability.tf — the plan's operational alarm fabric (TODO T-505)
+# observability.tf — the plan's operational alarm fabric (T-505, closed —
+# CHANGELOG.md; it is no longer an open item in TODO.md)
 #
 # Action group, diagnostic settings, and the alert rules that route through it.
 #
@@ -66,20 +67,36 @@ resource "azurerm_monitor_diagnostic_setting" "key_vault" {
 # were the reason the workspace stopped ingesting anything at all.
 #
 # The workspace was found in dataIngestionStatus OverQuota against a 0.25
-# GB/day cap. Three days of `Usage` explain why:
+# GB/day cap. Three days of `Usage` show where the volume goes:
 #
-#   AppTraces                      0.284 GB   ~38% of the cap
-#   CDBDataPlaneRequests           0.268 GB   ~36%
-#   CDBPartitionKeyRUConsumption   0.076 GB   ~10%
-#   AppRequests                    0.002 GB    ~0.3%
-#   AppExceptions                  0.002 GB    ~0.3%
+#   AppTraces                      0.284 GB
+#   CDBDataPlaneRequests           0.268 GB
+#   CDBPartitionKeyRUConsumption   0.076 GB
+#   AppRequests                    0.002 GB
+#   AppExceptions                  0.002 GB
 #
-# Two Cosmos categories were burning ~46% of the cap, and the two tables an
-# incident is actually read from were burning 0.5% — and then losing even that
-# because the cap had tripped. Dropping DataPlaneRequests,
-# PartitionKeyRUConsumption and QueryRuntimeStatistics takes total ingestion
-# from ~0.21 GB/day to ~0.10 GB/day, roughly 38% of the cap. That is the whole
-# fix; nothing else had to be sacrificed for it.
+# READ THOSE AS A FLOOR, NOT A MEASUREMENT. They were sampled while the cap was
+# already tripping, so every one of them is what survived the cap rather than
+# what the source produced, and the shortfall is not distributed evenly — the
+# cap stops collection mid-day, so a high-rate table loses proportionally more
+# than a low-rate one. The list is also partial: it excludes AzureMetrics and
+# the StorageRead/StorageWrite/StorageDelete categories the content_blob
+# setting below ships, both of which land in the same workspace. An independent
+# reading of the same period put the real figures roughly 20% away from these.
+#
+# What the numbers are good enough to establish is the ORDERING, which is the
+# whole basis of the change: two Cosmos data-plane categories dominate, and the
+# two tables an incident is actually read from are a rounding error that was
+# being dropped anyway. Removing DataPlaneRequests, PartitionKeyRUConsumption
+# and QueryRuntimeStatistics is therefore a large reduction — it is NOT a
+# reduction to a number anyone can state in advance.
+#
+# CONFIRM AFTER APPLY, do not assume. Once ingestion has run uncapped for a
+# full day, re-run the daily-cap usage query (the one in the logs_daily_cap
+# rule below reports the same figure) and check the result against the cap. If
+# it is not comfortably under, the next lever is AppTraces via host.json
+# logLevel — see the sampling note on azurerm_application_insights.hcw in
+# main.tf — and not another diagnostic category.
 #
 # WHAT THIS COSTS, stated plainly rather than buried: DataPlaneRequests was the
 # per-request audit record of who read what. Losing it means a data-access
@@ -139,15 +156,37 @@ resource "azurerm_monitor_diagnostic_setting" "content_blob" {
 # All of them route to azurerm_monitor_action_group.ops above, for the reason
 # that action group exists: changing who gets paged is one edit, not eight.
 #
-# CROSS-SUBSCRIPTION ACTION GROUP. The action group lives in the Management
-# subscription; the rules below that watch workload resources must be created
-# in the APPLICATION subscription, because an Azure Monitor alert rule has to
-# sit in the same subscription as the resource it scopes. Referencing an action
-# group across that boundary is the same thing
-# azurerm_consumption_budget_subscription.hcw already does successfully in this
-# tenant, which is the only evidence available without an apply. If ARM rejects
-# one of these references, the fallback is the same one the budget documents: a
-# second action group in the application subscription.
+# CROSS-SUBSCRIPTION ACTION GROUP, AND EXACTLY WHAT IS PROVEN ABOUT IT. The
+# action group lives in the Management subscription; every rule below that
+# watches a workload resource has to be created in the APPLICATION
+# subscription, because an Azure Monitor alert rule sits in the same
+# subscription as the resource it scopes. So every one of these references
+# crosses a subscription boundary.
+#
+# PROVEN: azurerm_consumption_budget_subscription.hcw carries the same
+# cross-subscription contact_groups reference and applied successfully, so ARM
+# ACCEPTS the reference. That is the whole of it.
+#
+# NOT PROVEN: that a notification is ever DELIVERED through it. Nobody has
+# observed one arrive. The budget is not evidence either way, because it also
+# carries contact_emails as an independent path and would still mail on that
+# alone with the action group completely inert.
+#
+# The rules here have no second path. azurerm_monitor_metric_alert and
+# azurerm_monitor_scheduled_query_rules_alert_v2 can only route through an
+# action group — there is no per-rule email field to fall back to. So if the
+# reference is accepted and silently inert, this file produces alert rules that
+# exist, make `az monitor metrics alert list` non-empty, and page nobody. That
+# is strictly WORSE than the visible emptiness this file was written against,
+# because it looks fixed.
+#
+# So: fire a test notification at the action group after the apply and confirm
+# it reaches the ops mailbox — the action group blade has a "Test action group"
+# function and the CLI has an equivalent under `az monitor action-group
+# test-notifications`. Until someone has seen one arrive, treat every rule
+# below as unproven plumbing rather than as coverage. If it does not arrive,
+# the fallback is the one the budget comment in main.tf names: a second action
+# group in the application subscription, referenced alongside this one.
 #
 # WHERE THEY LIVE. Every application-subscription rule is in the `web` resource
 # group, next to Application Insights, rather than beside the resource it
@@ -161,6 +200,117 @@ resource "azurerm_monitor_diagnostic_setting" "content_blob" {
 # keep evaluating through an OverQuota window. Only the two conditions with no
 # metric equivalent (application exceptions, workspace capacity) are log alerts.
 # =============================================================================
+
+# ---------------------------------------------------------------------------
+# Identities for the two log alert rules
+# ---------------------------------------------------------------------------
+#
+# A scheduled query rule with no identity runs as whoever last edited it.
+# Microsoft: "If you don't use a managed identity, the alert rule will inherit
+# the permissions of the last user or service principal who edited it, based on
+# their permissions at the time of that edit." Here that would be the HCP
+# Terraform run principal, frozen at apply time, recorded nowhere in this
+# configuration and invisible in the portal.
+#
+# That is a bad property for any rule and an actively dangerous one for
+# logs_daily_cap, whose entire job is that the workspace cap cannot trip
+# quietly again. A rule running on borrowed, unrecorded permissions fails
+# SILENTLY when those permissions lapse — and the thing it was watching for is
+# itself silent. Two silences on top of each other is how the original
+# OverQuota went unnoticed.
+#
+# TWO IDENTITIES, NOT ONE, and that is not symmetry for its own sake. The rules
+# sit in different subscriptions, and Microsoft's managed identity FAQ is
+# explicit: "If you need to use a managed identity in a different resource
+# group or subscription, you would need to create a new user-assigned managed
+# identity and assign the necessary permissions to it." Attaching one identity
+# across the boundary is not a supported shape, and this apply cannot be
+# rehearsed. Separating them also draws a real line: the platform capacity
+# alert's identity cannot read application telemetry, and the application
+# alert's identity cannot read anything in Management beyond the workspace.
+#
+# USER-ASSIGNED, NOT SYSTEM-ASSIGNED, because of ordering. Microsoft describes
+# system-assigned as "This identity has no permissions... AFTER you create the
+# rule, you must assign permissions", and user-assigned as "BEFORE you create
+# the alert rule, you create an identity and assign it appropriate permissions".
+# Only the second can be expressed as one deterministic apply. It also avoids a
+# documented trap: managed identity tokens are cached per resource URI for
+# around 24 hours and "it can take several hours for changes to a managed
+# identity's permissions to take effect" — so granting a role after the
+# identity has already been refused once is not reliably a quick fix.
+#
+# The depends_on on each rule is what actually enforces the ordering. Without
+# it Terraform sees the rule depend on the IDENTITY (through identity_ids) and
+# not on the role assignment, and is free to create the rule first — which
+# throws away the only reason to prefer user-assigned. Role assignment
+# propagation is still eventually consistent, so a first apply can occasionally
+# fail query validation on a role that has not landed yet; re-applying is the
+# fix, and it converges rather than needing repair.
+
+resource "azurerm_user_assigned_identity" "alerts_mgmt" {
+  provider = azurerm.mgmt
+
+  name                = "id-plat-alerts-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  location            = azurerm_resource_group.platform_mgmt.location
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  tags                = var.tags
+}
+
+resource "azurerm_user_assigned_identity" "alerts_app" {
+  name                = "id-${var.workload_name}-alerts-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
+  tags                = var.tags
+}
+
+# LOG ANALYTICS READER RATHER THAN READER OR MONITORING READER, and the
+# difference is a credential rather than a preference. All three carry `*/read`
+# and so all three satisfy the documented requirement, which is a "reader role
+# for all workspaces that the query accesses". Only Log Analytics Reader
+# carries `notActions: Microsoft.OperationalInsights/workspaces/sharedKeys/read`.
+# On a Log Analytics workspace those shared keys are the INGESTION keys: a
+# principal holding them can write arbitrary data into this workspace, which
+# means forging or drowning the very telemetry these rules read. Reader and
+# Monitoring Reader both hand that to an alert rule that needs to run a query.
+#
+# The alias on the two workspace grants is belt and braces. A role assignment
+# addresses its scope by absolute resource ID, so in principle the subscription
+# is already in the scope and the provider's own never enters the call — but
+# every other Management-subscription write in this file carries the alias, and
+# a reader should not have to know how the provider parses a scope in order to
+# know which subscription a GRANT lands in. It costs nothing if it is redundant
+# and it is the difference between an apply and a support ticket if it is not.
+resource "azurerm_role_assignment" "alerts_mgmt_workspace" {
+  provider = azurerm.mgmt
+
+  scope                = azurerm_log_analytics_workspace.hcw.id
+  role_definition_name = "Log Analytics Reader"
+  principal_id         = azurerm_user_assigned_identity.alerts_mgmt.principal_id
+}
+
+# The application rule needs the workspace too, not just the component. The
+# component is workspace-based: AppExceptions rows physically live in the
+# Management-subscription workspace, and the documented requirement covers
+# every workspace a query reaches "even if those workspaces are in different
+# subscriptions".
+resource "azurerm_role_assignment" "alerts_app_workspace" {
+  provider = azurerm.mgmt
+
+  scope                = azurerm_log_analytics_workspace.hcw.id
+  role_definition_name = "Log Analytics Reader"
+  principal_id         = azurerm_user_assigned_identity.alerts_app.principal_id
+}
+
+# And on the component itself, which is the rule's scope. Monitoring Reader
+# here rather than Log Analytics Reader: on a microsoft.insights/components
+# scope the two are functionally identical — the workspace-specific actions in
+# Log Analytics Reader have nothing to act on and its sharedKeys notAction
+# excludes nothing — so the tie is broken by which one names the job.
+resource "azurerm_role_assignment" "alerts_app_component" {
+  scope                = azurerm_application_insights.hcw.id
+  role_definition_name = "Monitoring Reader"
+  principal_id         = azurerm_user_assigned_identity.alerts_app.principal_id
+}
 
 # ---------------------------------------------------------------------------
 # Function App — the API is returning errors
@@ -335,7 +485,20 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
     action_groups = [azurerm_monitor_action_group.ops.id]
   }
 
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
   tags = var.tags
+
+  # Permissions before the rule, which is the entire reason this identity is
+  # user-assigned. identity_ids alone orders the rule after the IDENTITY, not
+  # after its grants.
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -414,7 +577,14 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "logs_daily_cap" {
     action_groups = [azurerm_monitor_action_group.ops.id]
   }
 
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
   tags = var.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
 }
 
 # ---------------------------------------------------------------------------

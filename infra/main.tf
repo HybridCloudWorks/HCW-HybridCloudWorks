@@ -1501,6 +1501,16 @@ resource "azapi_update_resource" "function_app_settings_without_webjobs_storage"
 # only way to notice would be to go and look. This costs one more add/destroy
 # pair in every plan (see the RUNTIME_CONFIG_WRITER note above, which counts
 # them) and buys a setting that cannot quietly revert.
+#
+# THE WAY BACK IS NOT DELETING THIS RESOURCE. Every other control in this
+# configuration reverts by changing a value and applying; this one does not,
+# because destroying an azapi_update_resource performs no API call — it drops
+# the resource from state and leaves the property exactly as it last wrote it.
+# So removing this block leaves FTP basic auth OFF permanently and silently.
+# That is the desirable direction and it is still a surprise if nobody says so.
+# To actually restore FTP publishing, set `allow = true` here and apply, or
+# write the property directly with `az resource update` against the same
+# basicPublishingCredentialsPolicies/ftp child — then remove the block.
 resource "azapi_update_resource" "function_app_ftp_basic_auth" {
   type        = "Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01"
   resource_id = "${azurerm_function_app_flex_consumption.hcw.id}/basicPublishingCredentialsPolicies/ftp"
@@ -1725,12 +1735,18 @@ resource "azurerm_role_assignment" "admin_kv_secrets" {
 # than none, because it reads as reassurance. The application subscription is
 # now the boundary that means "this workload", so that is what it watches.
 #
-# contact_groups crosses a subscription boundary: the budget lives in App,
-# the action group in Management. Cross-subscription action groups on budgets
-# are doubtfully supported by the ARM API. If the apply rejects this
-# reference, the fallback is a second action group in the App subscription —
-# contact_emails below is an independent path either way, so alerting
-# degrades rather than disappears.
+# contact_groups crosses a subscription boundary: the budget lives in App, the
+# action group in Management. This said the ARM API "doubtfully" supported that
+# until 2026-08-24; the doubt is half resolved and the half that remains is the
+# half that matters. This budget applied, so ARM ACCEPTS the reference. Whether
+# a notification is ever DELIVERED through it is still unobserved, and this
+# resource cannot tell anyone: contact_emails below is an independent path, so
+# the mail arrives either way and an inert action group looks identical to a
+# working one from here.
+#
+# That indifference is exactly what the alert rules in observability.tf do not
+# have — they can only route through an action group — so the delivery test
+# belongs there, and the note in that file's Alert rules header says how.
 resource "azurerm_consumption_budget_subscription" "hcw" {
   name            = "${var.workload_name}-monthly-budget"
   subscription_id = "/subscriptions/${var.subscription_app}"
