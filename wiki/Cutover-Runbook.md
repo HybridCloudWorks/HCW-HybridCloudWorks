@@ -27,6 +27,11 @@ file is the mechanics.
 > `<title>`, no content for crawlers. Moving DNS in that state would swap a
 > pre-rendered Firebase site for a shell at every indexed URL at once, which is
 > exactly what T-515 warned about.
+>
+> **Step 4 — the delta import — was retired on 2026-08-24 and cannot be run.**
+> The workflow and the scripts behind it are deleted and the grants it needed
+> are revoked. The step is kept below as the record of what it was and of what
+> retiring it costs. Every other step here is still live.
 
 ---
 
@@ -289,7 +294,28 @@ does not, an unauthorized chat id is ignored *silently* by design — check
 
 ---
 
-## Step 4 — The delta import
+## Step 4 — The delta import — RETIRED 2026-08-24
+
+> **This step cannot be run.** `migrate-data.yml` and the five scripts behind it
+> were deleted on 2026-08-24 (`59e471b`), so both commands below fail before
+> they reach Azure. The three role assignments that let the CI identity write to
+> the production Cosmos database and to the content storage account are revoked,
+> and the rehearsal estate they wrote to is gone — `infra/oidc.tf` and
+> `infra/scratch.tf` hold the removal records. There is no variable to flip back
+> either; those are deleted too. Reinstating a delta import means restoring the
+> workflow, the scripts and the grants, which is a new decision rather than a
+> re-run of this step.
+>
+> **What retiring it costs, stated plainly.** The production import ran on
+> 2026-08-21 — 8,023 documents / 62 containers, 1,438 blobs. Anything written on
+> Firebase after that date does not come across, and DNS moves without a second
+> pass. The owner decided that on 2026-08-24 with the rehearsal finished; it is
+> not an oversight for the cutover to correct.
+>
+> The rest of the step is kept because it is still true about the *system*: the
+> two live writers below are why `social_posts` and `lab_agents` were the only
+> containers that failed to reconcile (D12), and `SYNC_SOCIAL_CALENDAR` is still
+> the timer that would make Azure a third writer.
 
 **Pause the live writers first.** Two things rewrite migrated containers every
 few minutes, and importing over them produces field mismatches that look like
@@ -301,9 +327,10 @@ corruption (D12):
 Keep `SYNC_SOCIAL_CALENDAR` **out of** `enabled_timers` until the import is done,
 or Azure becomes the third writer.
 
-**Gate, then import:**
+**The gate and the import, as they would have been run. Neither command
+resolves today — the workflow does not exist:**
 
-```bash
+```text
 gh workflow run migrate-data.yml -f mode=inventory-gate
 gh workflow run migrate-data.yml -f mode=rehearse -f target=production
 ```
@@ -315,8 +342,13 @@ upstream in between is exactly what it catches.
 container. `social_posts` and `lab_agents` mismatches mean a writer is still
 running.
 
-`migration_writer_enabled = true` is already on for this run. Flip it, plus
-`cosmos_scratch_enabled` and `storage_scratch_enabled`, off afterwards.
+`migration_writer_enabled = true` was on for this run and was never flipped
+back. The readiness review of 2026-08-24 found all three assignments still live
+on the CI identity, which is why the remediation branch **deletes** the
+declarations rather than setting the gate to `false`: a gate is only off while
+the workspace agrees with the checked-in default, and here it demonstrably did
+not. `cosmos_scratch_enabled` and `storage_scratch_enabled` are deleted on the
+same reasoning, together with the estate they created.
 
 ---
 
@@ -341,7 +373,10 @@ here is indistinguishable from a timer that does not fire.
 
 **`FEATURE_FLAG_SCHEDULERS` is a separate master kill switch** and is still
 `"false"`. It holds every timer off regardless of `enabled_timers`, so arming
-the first timer means setting **both**.
+the first timer means setting **both**. Since 2026-08-24 both are workspace
+variables: the master switch is `schedulers_master_enabled`, default `false`. It
+was a hardcoded literal in `main.tf` until then, so `enabled_timers` could not
+arm anything at all without a code change, and nothing on this page said so.
 
 ### The four gates
 

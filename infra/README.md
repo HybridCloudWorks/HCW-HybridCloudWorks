@@ -21,7 +21,7 @@ before any plan or apply.
   `HybridCloudWorks`; this line said the latter, which is the exact assumption
   `backend.tf` records as having made every run 404 before it started. State,
   saved plans, and `*.tfvars` with real values never enter Git.
-+ **Applies are gated.** Production applies happen through HCP Terraform with
+- **Applies are gated.** Production applies happen through HCP Terraform with
   human plan review; GitHub Actions handles application delivery only.
 - **The target subscription is a platform subscription** that will later be
   absorbed into an Azure Landing Zone management-group hierarchy. See
