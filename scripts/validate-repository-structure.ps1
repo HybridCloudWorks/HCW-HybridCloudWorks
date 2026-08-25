@@ -3,12 +3,17 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $errors = [System.Collections.Generic.List[string]]::new()
 
-# `.agents` and `.claude` are the agent harness — agent definitions, skills and
-# playbooks that drive tooling against this repository. They are deliberately
-# source-controlled, but they are not the site and they are not human-facing
-# project documentation, so the documentation policy below does not apply to
-# them and they are excluded from the Markdown scan entirely.
-$harnessDirectories = @('.agents', '.claude')
+# `.agents`, `.claude`, `hooks` and `tooling` are the agent harness — agent
+# definitions, skills, playbooks, the Claude Code lifecycle hooks and the local
+# workflow state manager that drive tooling against this repository. They are
+# deliberately source-controlled, but they are not the site and they are not
+# human-facing project documentation, so the documentation policy below does
+# not apply to them and they are excluded from the Markdown scan entirely.
+#
+# `.agentic` is that harness's per-run state and is gitignored, but the check
+# below enumerates the live filesystem with -Force rather than the git index,
+# so it must be allowlisted here or every local run reports it as unexpected.
+$harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 
 # .vscode is the Azure Functions dev loop — the tasks.json that runs
 # `func host start` against functions/, and the launch.json that attaches the
@@ -16,7 +21,12 @@ $harnessDirectories = @('.agents', '.claude')
 # them tracked, so they are source-controlled rather than gitignored. Note
 # this check enumerates the live filesystem with -Force, not the git index:
 # gitignoring .vscode would not have quieted it, only allowlisting does.
-$allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions', 'infra', 'scripts', 'vps-agent', 'wiki') + $harnessDirectories
+# node_modules is gitignored and never reaches a CI checkout, but a root-level
+# `vitest` run leaves a .vite cache there and this check walks the live
+# filesystem, not the git index. It is already pruned from the Markdown scan by
+# $unscannedDirectories below; allowlisting it here keeps local runs from going
+# red on a regenerable cache that CI will never see.
+$allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'vps-agent', 'wiki') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
