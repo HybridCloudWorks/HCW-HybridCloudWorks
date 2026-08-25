@@ -31,11 +31,18 @@ on:
         # that: it curls this URL from a runner and FAILS the deploy if it sees
         # 200, which is how it proves the origin lock enforces.
         #
-        # So run this dispatch from an operator machine that Cloudflare admits.
-        # Making it pass from CI needs the same Cloudflare change that blocks
-        # arming the availability test — tracked as TODO T-519, not worked around
-        # here, because the alternatives are to weaken the origin lock or to
-        # assert against a host that answers without touching the API.
+        # Dispatching from an operator machine does NOT help: both jobs are
+        # runs-on: ubuntu-latest, so a workflow_dispatch runs on a GitHub-hosted
+        # runner whoever presses the button. This workflow simply cannot pass
+        # today. To validate the deployed surface now, run the same script
+        # locally from a machine Cloudflare admits:
+        #
+        #   node scripts/smoke-deployed.mjs --base https://api-azure.hybridcloudworks.com/api
+        #
+        # Making the workflow itself pass needs the same Cloudflare change that
+        # blocks arming the availability test — TODO T-519. It is not worked
+        # around here, because the alternatives are to weaken the origin lock or
+        # to assert against a host that answers without touching the API.
         default: 'https://api-azure.hybridcloudworks.com/api'
 
 permissions:

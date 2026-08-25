@@ -119,8 +119,11 @@ resource "azurerm_application_insights" "hcw" {
 #
 # So the setting would cost the alerting that landed in the same change and
 # save nothing. The ingestion problem is fixed where the volume actually is:
-# the Cosmos categories in observability.tf, which take the workspace from
-# ~0.21 to ~0.10 GB/day against a 0.25 cap.
+# the Cosmos categories in observability.tf. The size of that reduction is
+# stated there as a floor rather than a measurement — the figures behind it were
+# sampled while the workspace was already capped, so they understate the true
+# volume — and it has to be confirmed after a full uncapped day. Repeating a
+# precise before/after number here would put two different claims in two files.
 #
 # If more headroom is ever needed, the levers in order are: host.json
 # `logLevel` (Information-level host traces are what AppTraces mostly is),
