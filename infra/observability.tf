@@ -326,28 +326,59 @@ resource "azurerm_role_assignment" "alerts_app_component" {
 # scales to zero and a cold start can fail a request, so one or two in a window
 # is noise. Nothing has fired yet to calibrate this; if the first week is
 # quiet, lower it.
-resource "azurerm_monitor_metric_alert" "function_http_5xx" {
+# A LOG rule, not a metric alert. Flex Consumption does not publish HTTP
+# metrics at all: `az monitor metrics list-definitions` on this app returns
+# exactly nine names, all execution and memory counters, and Http5xx is not
+# among them. Http5xx and HttpResponseTime belong to App Service and Elastic
+# Premium plans. ARM rejects the metric alert outright -- "Couldn't find a
+# metric named Http5xx" -- which is how this was found, on the first apply
+# (2026-08-25), after four reviews had all assumed the metric existed.
+#
+# The cost of the switch is real and worth stating: a log rule stops evaluating
+# when the workspace hits its daily cap, so this alert is silent in exactly the
+# condition alert-logs-capacity exists to catch. There is no metric alternative
+# on this plan, so that capacity alert is now load-bearing rather than a
+# nice-to-have.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
   name                = "alert-func-http5xx-${var.environment}-${var.region_abbreviation}"
   resource_group_name = azurerm_resource_group.app["web"].name
-  scopes              = [azurerm_function_app_flex_consumption.hcw.id]
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
   description         = "Function App returned more than 5 HTTP 5xx responses in 15 minutes."
   severity            = 1
-  frequency           = "PT5M"
-  window_size         = "PT15M"
+
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT15M"
 
   criteria {
-    metric_namespace = "Microsoft.Web/sites"
-    metric_name      = "Http5xx"
-    aggregation      = "Total"
-    operator         = "GreaterThan"
-    threshold        = 5
+    # Classic schema, because the scope is the component. toint() because
+    # resultCode is a string here and a lexical compare would match "50" too.
+    query                   = "requests | where toint(resultCode) >= 500"
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 5
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
   }
 
   action {
-    action_group_id = azurerm_monitor_action_group.ops.id
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
   tags = var.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -363,28 +394,55 @@ resource "azurerm_monitor_metric_alert" "function_http_5xx" {
 # instances by design (see the scale block in main.tf) — can dominate a short
 # window's mean. Thirty minutes is long enough that one cold start cannot fire
 # it and short enough to catch a genuinely degraded dependency.
-resource "azurerm_monitor_metric_alert" "function_response_time" {
+# A log rule for the same reason as the 5xx rule above: HttpResponseTime is an
+# App Service metric and Flex Consumption does not publish it.
+#
+# P95 rather than the mean the metric alert used. The original comment worried
+# that one cold start could dominate a short window's mean on a plan with no
+# always-ready instances -- with a percentile that concern mostly goes away,
+# and a P95 over 30 minutes describes what users actually experienced rather
+# than an average one outlier can drag.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_response_time" {
   name                = "alert-func-latency-${var.environment}-${var.region_abbreviation}"
   resource_group_name = azurerm_resource_group.app["web"].name
-  scopes              = [azurerm_function_app_flex_consumption.hcw.id]
-  description         = "Function App mean response time above 5 seconds over 30 minutes."
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "Function App P95 response time above 5 seconds over 30 minutes."
   severity            = 2
-  frequency           = "PT5M"
-  window_size         = "PT30M"
+
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT30M"
 
   criteria {
-    metric_namespace = "Microsoft.Web/sites"
-    metric_name      = "HttpResponseTime"
-    aggregation      = "Average"
-    operator         = "GreaterThan"
-    threshold        = 5
+    # duration is milliseconds in the classic schema; 5000 is the 5 seconds the
+    # metric alert expressed in its own units.
+    query                   = "requests | summarize P95DurationMs = percentile(duration, 95)"
+    time_aggregation_method = "Average"
+    metric_measure_column   = "P95DurationMs"
+    operator                = "GreaterThan"
+    threshold               = 5000
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
   }
 
   action {
-    action_group_id = azurerm_monitor_action_group.ops.id
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
   tags = var.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -470,7 +528,14 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
   criteria {
     # No summarize and no metric_measure_column: the measure is table rows, so
     # the aggregation is Count and the query has to return the rows themselves.
-    query                   = "AppExceptions"
+    # `exceptions`, not `AppExceptions`. The scope below is the Application
+    # Insights COMPONENT, and a component resolves the classic schema
+    # (requests/exceptions/traces). `App*` names are the workspace schema and
+    # are only resolvable when the rule scopes the workspace itself, which is
+    # what alert-logs-capacity does. Getting this wrong is not a warning: ARM
+    # rejects the create with "Failed to resolve table expression named
+    # 'AppExceptions'", which is exactly how it was found (2026-08-25).
+    query                   = "exceptions"
     time_aggregation_method = "Count"
     operator                = "GreaterThan"
     threshold               = 5
