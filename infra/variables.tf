@@ -841,6 +841,31 @@ variable "functions_origin_lock_enabled" {
   default     = true
 }
 
+# SCM (Kudu) is the deploy endpoint, and locking it is a per-run window rather
+# than a standing rule — which is why this is a switch and not simply "Deny".
+#
+# The Flex Consumption deploy publishes THROUGH Kudu, and GitHub-hosted runners
+# have no stable egress IPs, so a standing Deny breaks every deploy. The
+# mechanism that makes Deny survivable lives in deploy-functions.yml: it adds
+# this runner's IP as an SCM allow rule, deploys, and removes it in an
+# always-run step that asserts the posture it found is the posture it left.
+#
+# Default false, matching the estate today (verified 2026-08-25:
+# scmIpSecurityRestrictionsDefaultAction = Allow). Arming it is a workspace
+# edit, and the order is not optional: the window must be merged and observed
+# working on a real deploy BEFORE this flips, because the first deploy after a
+# premature flip is the one that cannot get in to fix it.
+#
+# Turning it on does not remove the credential half, which is already closed —
+# basic authentication is off on both SCM and FTP, so anything reaching the
+# endpoint must present an Entra token. This closes the reachability half.
+variable "functions_scm_lock_enabled" {
+  description = "Deny SCM/Kudu by default, admitting deploy runners through a per-run firewall window. Requires the SCM window steps in deploy-functions.yml"
+  type        = bool
+  default     = false
+}
+
+
 # Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4).
 #
 # A literal list rather than an http data source on purpose: a data source puts
