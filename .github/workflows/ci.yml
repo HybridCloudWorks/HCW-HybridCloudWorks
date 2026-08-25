@@ -88,3 +88,53 @@ jobs:
       - name: Test
         if: matrix.test != ''
         run: ${{ matrix.test }}
+
+  # hooks/claude_event.py runs on every Claude Code session start and stop, and
+  # tooling/workflow.py owns the state the Stop guard reads. Both were shipped
+  # with nothing checking them. This is a smoke test rather than a linter on
+  # purpose: the failure that matters is the round trip breaking, not style.
+  harness:
+    name: harness (python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Compile
+        run: python -m compileall -q hooks tooling
+
+      - name: Workflow round trip
+        run: |
+          set -euo pipefail
+          python tooling/workflow.py init --mode selected --agents ci-probe \
+            --optional-agents ci-probe --objective 'ci smoke' --workflow-id wf-ci-smoke
+          python tooling/workflow.py validate --workflow wf-ci-smoke
+          python tooling/workflow.py status --workflow wf-ci-smoke > /dev/null
+          python tooling/workflow.py close --workflow wf-ci-smoke --reason 'ci smoke'
+          test "$(python -c 'import json;print(json.load(open(".agentic/workflows/wf-ci-smoke/WORKFLOW.json"))["status"])')" = completed
+
+      - name: Close refuses to fake a completed workflow
+        run: |
+          set -euo pipefail
+          python tooling/workflow.py init --mode selected --agents ci-required \
+            --objective 'ci dirty' --workflow-id wf-ci-dirty --enforce-stop
+          if python tooling/workflow.py close --workflow wf-ci-dirty --reason 'should refuse'; then
+            echo 'close accepted a workflow with missing handoffs'
+            exit 1
+          fi
+          python tooling/workflow.py close --workflow wf-ci-dirty --reason 'ci dirty' --abandon
+          test "$(python -c 'import json;print(json.load(open(".agentic/workflows/wf-ci-dirty/WORKFLOW.json"))["status"])')" = abandoned
+
+      - name: Stop hook stays fail-open without state
+        run: |
+          set -euo pipefail
+          rm -rf .agentic
+          echo '{}' | python hooks/claude_event.py --event Stop
