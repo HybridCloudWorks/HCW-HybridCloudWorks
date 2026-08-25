@@ -7,10 +7,13 @@
 #
 # The language matrix is deliberately narrow. The config file explains that the
 # retired Default setup grew erroring language:go and language:java-kotlin
-# configurations from vendored harness snippets; those stay out. python stays
-# out for the same reason and not by oversight — there is currently no
-# first-party Python in the tracked tree, and CodeQL fails a language that
-# resolves to no source. Add it when that stops being true.
+# configurations from vendored harness snippets; those stay out, because CodeQL
+# fails a language that resolves to no source.
+#
+# python is in the matrix as of hooks/claude_event.py and tooling/workflow.py
+# landing on main. Both run on every Claude Code session, which makes them the
+# first first-party Python here worth analysing. The config's paths-ignore keeps
+# the vendored harness demonstration code out of the results.
 
 name: CodeQL
 
@@ -45,7 +48,7 @@ jobs:
       # One language failing should not mask the state of the other.
       fail-fast: false
       matrix:
-        language: [javascript-typescript, actions]
+        language: [javascript-typescript, actions, python]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -135,7 +135,9 @@ export function createPublerClient({
     const results = [];
     for (const state of SYNC_STATES) {
       let page = 0;
-      let totalPages = 1;
+      // Assigned from the first response before the while condition reads it;
+      // the do-while guarantees one pass, so there is no initial value to seed.
+      let totalPages;
       do {
         const response = await request(`/posts?state=${state}&per_page=100&page=${page}`);
         results.push(...extractPublerList(response));

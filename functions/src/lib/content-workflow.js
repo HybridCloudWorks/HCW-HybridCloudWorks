@@ -517,7 +517,6 @@ export function createContentWorkflowHandlers({
         let resolvedId = contentId || null;
         let doc = resolvedId ? await store.readDoc('content', resolvedId, resolvedId) : null;
         if (!doc && blogId) {
-          resolvedId = blogId;
           doc = await store.readDoc('content', blogId, blogId);
         }
         if (!doc) return json(404, { error: 'No matching live page record found' });

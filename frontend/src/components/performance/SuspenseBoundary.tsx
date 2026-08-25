@@ -53,7 +53,7 @@ class ErrorBoundary extends React.Component<
     fallback?: ReactNode;
     onError?: (error: Error, info: ErrorInfo) => void;
   },
-  { hasError: boolean; error?: Error }
+  { hasError: boolean }
 > {
   constructor(props: {
     children: ReactNode;
@@ -64,8 +64,11 @@ class ErrorBoundary extends React.Component<
     this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
+  // The error itself is not held in state: render() shows a fixed fallback and
+  // never reads it, while componentDidCatch already logs it and forwards it to
+  // props.onError. Storing a copy nothing reads only looks like it is reported.
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
