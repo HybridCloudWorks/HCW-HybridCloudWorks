@@ -34,6 +34,9 @@ def resolve_root(event: dict) -> Path:
         if proc.returncode == 0 and proc.stdout.strip():
             return Path(proc.stdout.strip()).resolve()
     except (OSError, subprocess.TimeoutExpired):
+        # No git on PATH, not a repository, or git hung past the timeout. Fall
+        # through to the event cwd: resolving a root must never raise, because
+        # this hook runs on every session start and stop.
         pass
     cwd = event.get("cwd")
     return Path(cwd).resolve() if cwd else Path.cwd().resolve()

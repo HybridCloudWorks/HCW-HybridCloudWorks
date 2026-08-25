@@ -58,6 +58,9 @@ def project_dir(cli_root: str | None) -> Path:
         if proc.returncode == 0 and proc.stdout.strip():
             return Path(proc.stdout.strip()).resolve()
     except (OSError, subprocess.TimeoutExpired):
+        # No git on PATH, not a repository, or git hung past the timeout. Fall
+        # through to cwd rather than failing: this is the last of three
+        # fallbacks and the caller has no better answer to offer.
         pass
     return Path.cwd().resolve()
 
@@ -406,6 +409,9 @@ def close_workflow(args: argparse.Namespace, root: Path) -> int:
             if pointer == state["workflow_id"]:
                 active.unlink()
         except (OSError, json.JSONDecodeError):
+            # An unreadable or malformed pointer is already the outcome this
+            # block wants: nothing valid points at the workflow being closed,
+            # so there is no stale pointer left to clear.
             pass
     print(json.dumps({
         "workflow_id": state["workflow_id"],
