@@ -43,7 +43,6 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | Apex DNS cutover | Repoint `hybridcloudworks.com` from Firebase Hosting to the Static Web App and complete custom-domain validation (B1). In flight as of 2026-08-24 | The apex is the only host still served by Firebase; `www` and the SWA default hostname already serve the Azure site. Nothing in the repository can move it — the record lives at Cloudflare and the domain binding at Azure |
 | Timers and the availability test | Decide whether to arm the 18 schedulers (`schedulers_master_enabled`, then `enabled_timers` one name at a time) and the `/api/health` availability test (`availability_test_enabled`). All three are workspace edits in `hcw-azure` | Every one defaults to the safe value, so the repository state is "nothing armed" and stays that way without a decision. Arming the availability test needs a Cloudflare change first: Bot Fight Mode answers Azure's availability agents with a 403, and a WAF skip rule against it was built, applied and confirmed inert |
 | Migration-era identity trust | Decide whether to retire the two `data-migration` federated credentials in `infra/oidc.tf`. No workflow references `environment: data-migration` | With the production-write grants revoked, a `data-migration` token inherits the same reduced role set as a branch token. Retiring a trust relationship is an identity change and was deliberately not folded into a Terraform cleanup |
-| GitHub repository administration | Make both `iac-validate.yml` jobs required to merge on the `main` ruleset (S8), and delete the three orphaned repository variables `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT`, `SCRATCH_RESOURCE_GROUP` | CI runs `fmt`, `validate`, `tflint` and Trivy on every `infra/**` change; nothing requires them to pass before a merge. The three variables have no reader left — the Terraform outputs that fed them are deleted |
 | Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6) | Cosmos carries continuous backup on the free 7-day tier and both storage accounts now carry versioning and soft delete. None of it is justified against a stated objective, so nothing says whether it is enough |
 | Key Vault | Provide only the secrets needed by enabled features through the approved vault procedure; never put values in GitHub variables or Vite config | Code reads secrets server-side and degrades optional integrations when absent |
 | GCP pricing integration | If live GCP pricing is still required, provide a valid service-account JSON through Key Vault and approve its scope; otherwise approve retiring that optional feature | No GCP credential is stored in the repository |
@@ -228,8 +227,11 @@ changes behaviour without a workspace edit first:
 
 ## 4.2 GitHub repository variables
 
-Enumerated live 2026-08-25. Twenty-three present. Seeded from Terraform outputs
-by `scripts/set-github-variables.ps1` — never written by hand.
+Enumerated live 2026-08-25. Twenty present, and twenty is the whole list — the
+three scratch variables that used to sit here were deleted the same day (T-525),
+so a reader comparing this table against `gh variable list` should find no
+difference. Seeded from Terraform outputs by `scripts/set-github-variables.ps1`
+— never written by hand.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
@@ -253,9 +255,6 @@ by `scripts/set-github-variables.ps1` — never written by hand.
 | `VITE_SOCIAL_GITHUB_URL` | **SET** | Frontend build — footer links |
 | `VITE_SOCIAL_LINKEDIN_URL` | **SET** | Frontend build |
 | `VITE_SOCIAL_X_URL` | **SET** | Frontend build |
-| `COSMOS_SCRATCH_ENDPOINT` | **RETIRED** | No reader. The Terraform outputs that fed it are deleted; delete the variable — TODO.md T-525 |
-| `STORAGE_SCRATCH_ACCOUNT` | **RETIRED** | As above |
-| `SCRATCH_RESOURCE_GROUP` | **RETIRED** | As above |
 
 ## 4.3 GitHub repository secrets
 

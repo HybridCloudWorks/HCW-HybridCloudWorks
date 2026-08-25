@@ -26,23 +26,26 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 | --- | ---: |
 | High | 2 |
 | Medium | 3 |
-| Low | 1 |
-| Total | 6 |
+| Low | 0 |
+| Total | 5 |
 
-Four items closed on 2026-08-25 in #220 — T-520, T-521, T-523 and A-001, the
-four that did not need access outside the repository. Their entries are in
+Five items closed on 2026-08-25. Four in #220 — T-520, T-521, T-523 and A-001,
+the ones that did not need access outside the repository — and T-525, which the
+owner closed directly by deleting the three variables. Their entries are in
 [CHANGELOG.md](CHANGELOG.md).
 
-**All six that remain carry Gate: owner.** That is the whole character of what
-is left: every one is a decision, a tenant or Cloudflare change, or a repository
-setting, and no amount of engineering here closes any of them. They are listed
-anyway, because a tracker that omits them is quietly shorter than the truth.
+**All five that remain carry Gate: owner, and none of them is a repository
+setting any more.** What is left is a DNS record, a Cloudflare change, two
+numbers, an identity decision and a set of feature flags — every one needs
+tenant or edge access, and no amount of engineering here closes any of them.
+They are listed anyway, because a tracker that omits them is quietly shorter
+than the truth.
 
-Two of the six have a repository-side half that is already done, so what remains
-really is only the owner action: T-523's workflow now reports on every pull
-request, leaving the ruleset change; T-520's per-run SCM window is merged,
-leaving the `functions_scm_lock_enabled` flip once a deploy is observed working
-through it.
+One of the five still has a repository-side half already merged: T-520's per-run
+SCM window is in `deploy-functions.yml`, leaving only the
+`functions_scm_lock_enabled` flip once a deploy is observed working through it.
+The ruleset half of T-523 is done — `20680114` now requires 12 contexts,
+including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
 
 ## High
 
@@ -126,21 +129,6 @@ token gets. That is why this is a tidy-up rather than an incident. It is still a
 standing trust relationship for a job that cannot run, and retiring one is an
 identity change rather than a Terraform cleanup — which is why the remediation
 branch escalated it instead of deleting it.
-
-## Low
-
-### T-525 — Three repository variables have no reader
-
-**Gate: owner (repository administration)** — [REVIEW.md](REVIEW.md).
-
-`COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
-`SCRATCH_RESOURCE_GROUP` are set on the repository and nothing consumes them:
-the four Terraform outputs that fed them are deleted along with the scratch
-estate, and the `$waveTwo` list in `scripts/set-github-variables.ps1` never held
-a scratch entry — the outputs' own header claiming that script consumed them was
-already untrue. After the teardown applies they name resources that no longer
-exist. Harmless, and worth deleting for the same reason the outputs were: a
-value nothing reads is a value the next person assumes is load-bearing.
 
 ## Test coverage follow-up
 
