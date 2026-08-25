@@ -108,6 +108,51 @@ resource "azurerm_federated_identity_credential" "github_data_migration_immutabl
 }
 
 # ---------------------------------------------------------------------------
+# environment:production — the subject the Function App deploy actually presents
+#
+# `de99aa0` put deploy-functions.yml behind `environment: production` to gate
+# production deploys. That is a good change with a consequence nothing here
+# accounted for: **declaring an environment changes the OIDC subject.** GitHub
+# composes it as repo:<org>/<repo>:environment:<name>, NOT
+# repo:<org>/<repo>:ref:<ref>, so the branch credential above cannot match a
+# job that names an environment — the ref form is simply not what is presented.
+#
+# The result was a production deploy path that could not authenticate at all,
+# and it stayed invisible because no deploy ran between that merge and
+# 2026-08-25. The first dispatch after it failed at azure/login:
+#
+#   AADSTS700213: No matching federated identity record found for presented
+#   assertion subject 'repo:HybridCloudWorks@312844660/
+#   HCW-HybridCloudWorks@1268997852:environment:production'
+#
+# Both forms again, for the reasons given above the immutable block: the name
+# form survives an org rename breaking the IDs' association, the ID form
+# survives a rename outright. Six credentials against a cap of 20.
+#
+# The branch pair is NOT redundant now and must not be deleted alongside a
+# future data-migration cleanup. heal-computed-properties.yml and
+# publish-content-manifest.yml declare no environment, so they still present
+# the ref subject. The rule is per-workflow, not per-repository: a workflow
+# that names an environment needs an environment credential, one that does not
+# needs the branch credential, and this identity serves both kinds.
+# ---------------------------------------------------------------------------
+resource "azurerm_federated_identity_credential" "github_production" {
+  name                      = "github-${var.github_repo}-env-production"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_org}/${var.github_repo}:environment:production"
+}
+
+resource "azurerm_federated_identity_credential" "github_production_immutable" {
+  name                      = "github-${var.github_repo}-env-production-immutable"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_immutable_prefix}:environment:production"
+}
+
+# ---------------------------------------------------------------------------
 # Roles for the deployment identity — scoped, not subscription Contributor
 # ---------------------------------------------------------------------------
 
@@ -312,8 +357,10 @@ output "federated_subjects" {
   description = "Exact OIDC subject claims trusted by this identity — compare against a failing token"
   value = [
     azurerm_federated_identity_credential.github_branch.subject,
+    azurerm_federated_identity_credential.github_production.subject,
     azurerm_federated_identity_credential.github_data_migration.subject,
     azurerm_federated_identity_credential.github_branch_immutable.subject,
+    azurerm_federated_identity_credential.github_production_immutable.subject,
     azurerm_federated_identity_credential.github_data_migration_immutable.subject,
   ]
 }
