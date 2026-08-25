@@ -22,6 +22,12 @@ jobs:
   build-and-deploy:
     name: Build and Deploy to Azure Static Web Apps
     runs-on: ubuntu-latest
+    # Binding the job to an environment gives production deploys a deployment
+    # history and a place to hang an approval gate. It does NOT create the gate
+    # on its own: GitHub auto-creates a missing environment with no protection
+    # rules, so until required reviewers are configured on the `production`
+    # environment this records who deployed without gating whether they may.
+    environment: production
     defaults:
       run:
         working-directory: frontend
