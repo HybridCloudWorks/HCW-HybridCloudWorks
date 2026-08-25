@@ -350,6 +350,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
   evaluation_frequency = "PT5M"
   window_duration      = "PT15M"
 
+  # Stateful for the reason set out on alert-app-exceptions below: stateless is
+  # the azurerm default and re-notifies every evaluation. Same frequency, same
+  # threshold, same detection — one mail per incident instead of one every five
+  # minutes until it clears.
+  auto_mitigation_enabled = true
+
   criteria {
     # Classic schema, because the scope is the component. toint() because
     # resultCode is a string here and a lexical compare would match "50" too.
@@ -412,6 +418,11 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_response_tim
 
   evaluation_frequency = "PT5M"
   window_duration      = "PT30M"
+
+  # Stateful, as on the two rules above. It matters most here: the window is six
+  # times the frequency, so a stateless version re-notifies for a full half hour
+  # after latency has already recovered.
+  auto_mitigation_enabled = true
 
   criteria {
     # duration is milliseconds in the classic schema; 5000 is the 5 seconds the
@@ -524,6 +535,31 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
 
   evaluation_frequency = "PT5M"
   window_duration      = "PT15M"
+
+  # STATEFUL, and this attribute is the whole reason the mail volume dropped.
+  # At the azurerm default (false) a log rule is STATELESS: it fires on every
+  # evaluation whose condition is met, so at PT5M Azure sends a fresh Sev1 mail
+  # every five to ten minutes for as long as exceptions keep arriving — and
+  # because the window is three times the frequency, the same burst is counted
+  # by three consecutive evaluations, so the mail continues for fifteen minutes
+  # after the last exception. `alert-app-exceptions-prod-cus` did exactly that
+  # on 2026-08-25, the first night these rules were live, which is how the
+  # default was found to be the wrong one.
+  #
+  # Stateful means one alert per condition: it fires once, stays fired, and
+  # resolves when the condition has not been met for three evaluation periods
+  # (fifteen minutes here), sending one Resolved mail. The rule still evaluates
+  # every five minutes against the same threshold — DETECTION IS UNCHANGED and
+  # nothing is suppressed; only the repeats go. That is why this was the change
+  # made without evidence: it costs no coverage. The levers that do cost
+  # coverage — a filter on the query below, a higher threshold, a severity that
+  # is not 1 — need a week of real firing to set, not a guess.
+  #
+  # Mutually exclusive with mute_actions_after_alert_duration, which is why
+  # alert-logs-capacity uses that one instead: its condition cannot clear
+  # before the 08:00 UTC reset, so there is nothing for auto-resolution to
+  # resolve.
+  auto_mitigation_enabled = true
 
   criteria {
     # No summarize and no metric_measure_column: the measure is table rows, so

@@ -109,17 +109,71 @@ logs go away with the same change that adds this rule — `CDBDataPlaneRequests`
 is pruned for being most of the daily cap — so from that apply on this is
 answered from metrics, not from logs.
 
+**One mail per incident, not one every five minutes.** The four workload rules
+are *stateful* (`auto_mitigation_enabled = true`): each fires once, stays fired
+while the condition holds, and sends a single Resolved mail once the condition
+has been clear for three evaluation periods — fifteen minutes on the PT5M rules.
+They were not stateful when they first went live, and `alert-app-exceptions`
+demonstrated the difference on the night of 2026-08-25: a stateless log rule
+re-notifies on *every* evaluation whose condition is met, and because each
+window is three to six times the evaluation frequency, the same burst is counted
+by several consecutive evaluations and the mail continues after the exceptions
+have stopped. Nothing about detection changed — same frequency, same query, same
+threshold. **If a rule is still noisy after this, it is firing too often, not
+notifying too often**, and the fix is the query or the threshold, below.
+
 **The capacity alert is muted for 6 hours after it fires**, deliberately.
 Ingestion only goes up between resets, so once it is past 80% it stays past, and
 an hourly rule would send the same mail until 08:00 UTC. When it fires, prune a
 diagnostic category before raising the cap; raising the cap moves spend into the
 Platform Management budget ([Cost analysis](Cost-Analysis)).
 
-**Every threshold here is a first estimate.** There has never been an alert on
-this platform to be wrong, so none of these numbers is incident-derived. Each
-one records its assumption beside the resource. Tune them against the first week
-of real firing rather than leaving an estimate in place because it is written
-down — and tune rather than mute.
+**Every threshold here is a first estimate.** None of these numbers is
+incident-derived; each records its assumption beside the resource. Tune them
+against the first week of real firing rather than leaving an estimate in place
+because it is written down — and tune rather than mute.
+
+That week has started. `alert-app-exceptions` fired at 23:06 on 2026-08-25, the
+first firing of any rule on this platform. Before changing its threshold or its
+severity, find out what is actually throwing — a rule that pages on five
+exceptions is right if those five are one broken handler and wrong if they are a
+retried dependency being logged five times:
+
+```kusto
+AppExceptions
+| where TimeGenerated > ago(24h)
+| summarize Count = count(),
+            Sample = any(OuterMessage)
+        by ProblemId, OperationName, SeverityLevel
+| order by Count desc
+```
+
+Then choose per finding, in this order — each costs more coverage than the one
+before it:
+
+1. **Fix the throw.** The cheapest alert to silence is one with nothing to fire
+   on, and a handler that throws six times an hour is telling you something.
+2. **Filter the query**, if the exceptions are genuine but expected — a
+   dependency that is retried and recovers, a client abort. Excluding a named
+   `ProblemId` keeps the rule sensitive to everything else; raising the
+   threshold blinds it to everything equally. The query is `exceptions` on the
+   component (classic schema — see the note in `infra/observability.tf`), so a
+   filter reads `exceptions | where problemId != "…"`.
+3. **Require it to persist.** `failing_periods` is 1-of-1 on every rule, so one
+   spike pages. Two of two means the condition has to survive a second
+   evaluation, which costs five minutes of detection latency and removes
+   single-burst noise.
+4. **Raise the threshold**, once there is a baseline to raise it against.
+5. **Lower the severity.** Sev1 on exceptions asserts that a throwing handler is
+   as urgent as the API returning 5xx. If a week of firing says otherwise, Sev2
+   is the honest number — but change it because the evidence says so, not to
+   make the mail quieter, and note that severity alone does not change what the
+   action group sends.
+
+An [alert processing rule](https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-processing-rules)
+is the right tool for a *planned* silence — a deploy window, a known-bad
+weekend — because it is time-boxed and visible. It is the wrong tool for a rule
+that is simply mis-tuned, because the suppression outlives the reason for it.
 
 ## The failure with no alert
 

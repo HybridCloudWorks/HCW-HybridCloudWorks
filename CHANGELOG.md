@@ -252,6 +252,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The alert rules re-notified every five minutes, because a scheduled query
+  rule is stateless by default.** `alert-app-exceptions-prod-cus` fired at 23:06
+  on 2026-08-25 — the first firing of any rule on this platform — and then kept
+  firing. That was not the rule detecting anything new. `autoMitigate` defaults
+  to false on `azurerm_monitor_scheduled_query_rules_alert_v2`, and a stateless
+  log rule notifies on *every* evaluation whose condition is met, so at `PT5M`
+  Azure sends a fresh Sev1 mail every five to ten minutes for as long as the
+  condition holds. The window makes it worse rather than better: `PT15M`
+  evaluated every `PT5M` means the same burst of exceptions is counted by three
+  consecutive evaluations, so the mail continues for a full fifteen minutes
+  after the last exception was thrown. `alert-func-latency` was the worst of the
+  three at a `PT30M` window — half an hour of mail about latency that had
+  already recovered.
+
+  `auto_mitigation_enabled = true` on `alert-func-http5xx`, `alert-func-latency`
+  and `alert-app-exceptions`. Each now fires once, stays fired while the
+  condition holds, and sends one Resolved mail after the condition has been
+  clear for three evaluation periods.
+
+  **Detection is unchanged and nothing is suppressed** — same evaluation
+  frequency, same query, same threshold, same severity. That is the entire
+  reason this change was made on one night's evidence rather than waiting for
+  the week of firing data ADR 0022 asks for: it is the only available remedy
+  that does not trade coverage for quiet. Every other lever — filtering the
+  query, requiring two failing periods, raising the threshold, lowering the
+  severity from Sev1 — makes the rule detect less, and none of them should be
+  pulled before the diagnostic query now in
+  [Alerting and support](wiki/Alerting-And-Support.md) says what is actually
+  throwing. Those levers are documented and ordered there; the thresholds
+  themselves remain the first estimates ADR 0022 declared them to be.
+
+  `mute_actions_after_alert_duration` is mutually exclusive with auto-mitigation
+  and stays where it already was, on `alert-logs-capacity` alone: its condition
+  cannot clear before the 08:00 UTC cap reset, so there is nothing for
+  auto-resolution to resolve. The two metric alerts needed no change — metric
+  alerts are stateful by default. Recorded as decision 6 in
+  [ADR 0022](wiki/0022-alerting-fabric.md).
+
 - **The SCM lock is armed, and the per-run window is proven under `Deny`
   (T-520 closed, 2026-08-25).** `functions_scm_lock_enabled` was set to `true`
   on the `hcw-azure` workspace and applied; `az functionapp config

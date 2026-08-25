@@ -98,6 +98,30 @@ would sit enabled and inert, and `az monitor metrics alert list` would report
 six rules when five can fire — with the inert one being reachability, the only
 signal that survives the application being completely down.
 
+**6. The four workload rules are stateful; only the capacity rule is muted.**
+Added 2026-08-25 after the first firing. `autoMitigate` defaults to false on a
+scheduled query rule, and a stateless log rule notifies on *every* evaluation
+whose condition is met — at PT5M that is a fresh Sev1 mail every five to ten
+minutes, continuing for a further window-length after the condition clears,
+because a 15-minute window evaluated every 5 minutes counts the same burst three
+times. `alert-app-exceptions-prod-cus` demonstrated this the night the rules
+went live. Statefulness costs nothing: the rule evaluates at the same frequency
+against the same threshold and detects exactly what it detected before, and adds
+a Resolved notification the stateless form cannot send. It is deliberately the
+*only* change made without firing data, because it is the only one that does not
+trade coverage for quiet. `mute_actions_after_alert_duration` is mutually
+exclusive with it and stays on `alert-logs-capacity` alone, where the condition
+cannot clear before the 08:00 UTC reset and there is nothing to auto-resolve.
+
+The corollary is recorded so it is not lost: **after this, a noisy rule is one
+that fires too often, and the remedies all cost coverage.** They are ordered in
+[Alerting and support](Alerting-And-Support) — fix the throw, filter the query
+on a named `problemId`, require two failing periods, raise the threshold, lower
+the severity — and none of them should be applied before the query in that
+section says what is actually throwing. Suppression by
+[alert processing rule](https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-processing-rules)
+is for planned windows only; it outlives the reason for it otherwise.
+
 ## Consequences and accepted risks
 
 - **Reachability has no alert, and that is the failure class this platform has
@@ -127,7 +151,10 @@ signal that survives the application being completely down.
   §4).
 - **Every threshold is an estimate**, stated as such beside each resource. They
   are to be tuned against the first week of real firing, not preserved because
-  they are written down.
+  they are written down. That week began on 2026-08-25 with
+  `alert-app-exceptions-prod-cus`, and the first thing it calibrated was
+  notification behaviour rather than a threshold (decision 6). The thresholds
+  themselves are still untuned.
 - Cost is small but not zero, and the one line that is not a rounding error is
   arming the web test at 14,400 executions a month
   ([Cost analysis](Cost-Analysis)).
