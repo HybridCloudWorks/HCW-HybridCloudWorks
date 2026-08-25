@@ -239,7 +239,7 @@ changes behaviour without a workspace edit first:
 | `schedulers_master_enabled` | `false` | Master switch for all 18 timers. Both this and a name in `enabled_timers` are required — TODO.md T-518 |
 | `enabled_timers` | `[]` | Per-timer allow-list, armed one name at a time |
 | `availability_test_enabled` | `false` | Standard web test and its alert. Blocked on a Cloudflare change first — TODO.md T-519 |
-| `functions_scm_lock_enabled` | `false` | Denies SCM/Kudu by default. Requires the per-run window in `deploy-functions.yml` — TODO.md T-520 |
+| `functions_scm_lock_enabled` | `false` in code, **set `true` in the workspace 2026-08-25** | Denies SCM/Kudu by default; `deploy-functions.yml` opens a per-run window. Proven under `Deny` by run 32902534458 |
 | `functions_origin_lock_enabled` | `true` | Restricts the origin to Cloudflare ranges. Already on |
 | `purge_protection_enabled` | `false` | Key Vault purge protection. Off as an accepted risk — see [Accepted risks](#accepted-risks) |
 | `cloudflare_origin_secret` | — (sensitive) | Must match Key Vault `CF-ORIGIN-SECRET` exactly; a mismatch throws on every anonymous request |
