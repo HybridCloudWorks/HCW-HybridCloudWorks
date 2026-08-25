@@ -16,9 +16,11 @@ before any plan or apply.
 
 - **One environment: production.** There is no dev/staging state (ADR-0009).
   `var.environment` exists for naming, not for a second workspace.
-- **State lives in HCP Terraform Cloud** — org `HybridCloudWorks`, workspace
-  `hcw-azure` (`backend.tf`). State, saved plans, and
-  `*.tfvars` with real values never enter Git.
+- **State lives in HCP Terraform Cloud** — org `hcw`, project `Site`,
+  workspace `hcw-azure` (`backend.tf`). The org is `hcw` and not
+  `HybridCloudWorks`; this line said the latter, which is the exact assumption
+  `backend.tf` records as having made every run 404 before it started. State,
+  saved plans, and `*.tfvars` with real values never enter Git.
 + **Applies are gated.** Production applies happen through HCP Terraform with
   human plan review; GitHub Actions handles application delivery only.
 - **The target subscription is a platform subscription** that will later be
@@ -30,7 +32,7 @@ before any plan or apply.
 | File | Holds |
 | --- | --- |
 | `backend.tf` | HCP Terraform Cloud backend declaration |
-| `providers.tf` | Required providers and provider configuration (`azurerm ~> 4.0`, `cloudflare ~> 4.0`) |
+| `providers.tf` | Required providers and provider configuration (`azurerm ~> 5.0`, `azapi ~> 2.0`, `cloudflare ~> 4.0`) |
 | `variables.tf` | All inputs; names must match TFC workspace variable keys exactly |
 | `main.tf` | Core workload: resource group, Static Web App, Cosmos DB (serverless), storage, Functions (Flex Consumption), Key Vault, observability, budget, DNS |
 | `oidc.tf` | GitHub Actions deployment identity — user-assigned managed identity + federated credentials, least-privilege role assignments |

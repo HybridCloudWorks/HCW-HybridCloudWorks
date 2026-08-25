@@ -201,6 +201,15 @@ resource "azurerm_storage_account" "scratch" {
   # deploy-functions.yml does for the Functions host account.
   allow_nested_items_to_be_public = false
 
+  # Keys off, and hardcoded rather than following
+  # var.storage_shared_access_key_enabled — the same argument the Cosmos
+  # account above makes for local_authentication_enabled. A rehearsal that
+  # uploads with an account key passes while proving nothing about the
+  # identity-based path production takes, so a rollback switch here would only
+  # ever be used to make the rehearsal less like production. The copy runs on
+  # the deploy identity's Storage Blob Data Contributor grant below.
+  shared_access_key_enabled = false
+
   network_rules {
     default_action = "Deny"
     bypass         = ["AzureServices"]
