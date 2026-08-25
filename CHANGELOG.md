@@ -114,6 +114,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The IaC checks are required to merge, and the three orphaned repository
+  variables are gone (T-523 owner half, T-525, 2026-08-25).** Ruleset
+  `20680114` now requires **12** contexts rather than 10, the two additions
+  being `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`. Every
+  "CI enforces this" line in `CONTRIBUTING` is now true when nobody is
+  watching, where before a branch with a red Trivy run merged exactly as
+  easily as one with a green run. The ordering the item insisted on held:
+  #220 removed the `paths:` filter from the `pull_request` trigger first, and
+  PR #221 — which touches only `tooling/agent-registry.yml` and no
+  infrastructure at all — then confirmed the skip path end to end, its
+  `fmt, validate, tflint` job reporting green in 22s with `Detect infra
+  changes` succeeded and all six Terraform steps `skipped`. Had the ruleset
+  been changed first, that same pull request would have been unmergeable.
+  `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
+  `SCRATCH_RESOURCE_GROUP` were deleted in the same pass; `gh variable list`
+  now returns 20 names and `REVIEW.md` §4.2 lists exactly those 20, so the
+  inventory and the live repository agree with no residue to reconcile. The
+  variables named resources that will stop existing when the rehearsal
+  teardown applies, and a value nothing reads is a value the next person
+  assumes is load-bearing.
+
 - **The frontend is on ESLint 10 (D-001 closed).** The item said two plugins
   blocked it, on the strength of their declared peer ranges. That was half
   right and the wrong half was load-bearing, so it is worth recording what the
