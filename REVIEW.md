@@ -41,8 +41,7 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
 | Apex DNS cutover | Repoint `hybridcloudworks.com` from Firebase Hosting to the Static Web App and complete custom-domain validation (B1). In flight as of 2026-08-24 | The apex is the only host still served by Firebase; `www` and the SWA default hostname already serve the Azure site. Nothing in the repository can move it — the record lives at Cloudflare and the domain binding at Azure |
 | Timers and the availability test | Decide whether to arm the 18 schedulers (`schedulers_master_enabled`, then `enabled_timers` one name at a time) and the `/api/health` availability test (`availability_test_enabled`). All three are workspace edits in `hcw-azure` | Every one defaults to the safe value, so the repository state is "nothing armed" and stays that way without a decision. Arming the availability test needs a Cloudflare change first: Bot Fight Mode answers Azure's availability agents with a 403, and a WAF skip rule against it was built, applied and confirmed inert |
-| Migration-era identity trust | Decide whether to retire the two `data-migration` federated credentials in `infra/oidc.tf`. No workflow references `environment: data-migration` | With the production-write grants revoked, a `data-migration` token inherits the same reduced role set as a branch token. Retiring a trust relationship is an identity change and was deliberately not folded into a Terraform cleanup |
-| Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6) | Cosmos carries continuous backup on the free 7-day tier and both storage accounts now carry versioning and soft delete. None of it is justified against a stated objective, so nothing says whether it is enough |
+| Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6). Tracked as **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** since 2026-08-26, with the design, cost model and acceptance criteria | Cosmos carries continuous backup on the free 7-day tier and both storage accounts carry versioning and soft delete — but both are `LRS`, and every mechanism sits inside the subscription it protects, so none of it survives account loss. None of it is justified against a stated objective, and nothing here has ever been recovery-tested |
 | Key Vault | Provide only the secrets needed by enabled features through the approved vault procedure; never put values in GitHub variables or Vite config | Code reads secrets server-side and degrades optional integrations when absent |
 | GCP pricing integration | If live GCP pricing is still required, provide a valid service-account JSON through Key Vault and approve its scope; otherwise approve retiring that optional feature | No GCP credential is stored in the repository |
 | AI providers | Decide which external providers should be enabled and provide their keys through Key Vault | The AI router only enables a provider when its server-side key is present |
@@ -136,10 +135,16 @@ what that costs.
 - **Closed 2026-08-25 — the migration-era scratch estate and the three
   production-write grants are gone**, confirmed after the apply rather than
   assumed from the plan: `rg-db-site-sbx-cus` no longer exists and the deploy
-  identity retains only its four operational roles. The two `data-migration`
-  federated credentials in `infra/oidc.tf` remain — `federated_subjects` still
-  emits `environment:data-migration` twice — and are a decision rather than a
-  confirmation, so they stay in the table above (TODO.md T-524).
+  identity retains only its four operational roles.
+- **Closed 2026-08-26 — the two `data-migration` federated credentials are
+  retired** (T-524). The owner authorised it; both forms were removed from
+  `infra/oidc.tf` together, taking the identity from six trusted subjects to
+  four, and `federated_subjects` no longer emits `environment:data-migration`.
+  Validated before the change rather than after: nothing in `.github/workflows`
+  names that environment, its only consumer `migrate-data.yml` was deleted in
+  `59e471b`, and `scripts/oidc-subjects.test.mjs` passes with the pair gone —
+  the same check fails on a half-deletion and on sweeping up the branch pair by
+  mistake.
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
 - Apply the Terraform change that creates the `listenandlearn` blob container.
@@ -294,7 +299,7 @@ Enumerated live 2026-08-25.
 | --- | --- | --- |
 | `production` | **VERIFIED** | Gates production deploys (`de99aa0`) |
 | `copilot` | **SET** | Copilot code review agent |
-| `data-migration` | **RETIRED** | Its only consumer, `migrate-data.yml`, was deleted in `59e471b`. The two federated credentials still trusting it are an owner decision — see *Migration-era identity trust* above and TODO.md T-524 |
+| `data-migration` | **RETIRED** | Its only consumer, `migrate-data.yml`, was deleted in `59e471b`. The two federated credentials that still trusted it were removed on 2026-08-26 (T-524), so nothing in Azure trusts the subject either |
 
 ## 4.5 Function App settings — Terraform-managed
 

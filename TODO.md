@@ -8,36 +8,59 @@ second document. What has not changed: nothing is resolved here that only a
 human holding tenant, Cloudflare or repository-admin access can resolve.
 Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
-## Status — 2026-08-25
+## Status — 2026-08-26
 
-> PR #218 is **partly** applied, and the distinction matters when reading the
-> items below. The alerting half is live: `alert-cosmos-throttle-prod-cus` as a
-> metric rule, plus `alert-func-http5xx-prod-cus`, `alert-func-latency-prod-cus`
-> and `alert-app-exceptions-prod-cus` as log rules, all enabled — verified
-> against the tenant 2026-08-25, after #219 fixed the three ARM rejected at
-> create time. The **teardown has not applied**: `rg-db-site-sbx-cus` still
-> holds `cosmos-site-sbx-cus` and `stsitesbxcus01`, and the plan authorised in
-> `REVIEW.md` is still waiting on an approval. A tracker that describes a future
-> estate in the present tense is how a reviewer concludes work is done that has
-> not started; one that keeps saying "not applied" after it applied is how the
-> same reviewer stops trusting the file.
+> **PR #218 is fully applied, and this note said otherwise for a day.** Its own
+> closing sentence — that a tracker which keeps saying "not applied" after it
+> applied is how a reviewer stops trusting the file — described this paragraph.
+> Corrected 2026-08-26.
+>
+> The alerting half is live and now **stateful**: `alert-cosmos-throttle-prod-cus`
+> as a metric rule, plus `alert-func-http5xx-prod-cus`,
+> `alert-func-latency-prod-cus` and `alert-app-exceptions-prod-cus` as log
+> rules, after #219 fixed the three ARM rejected at create time and #226 set
+> `auto_mitigation_enabled` on the three log rules. Read back from ARM on
+> 2026-08-26 by `Verify Alert Rule State`: all three report
+> `autoMitigate: true`.
+>
+> The **teardown applied on 2026-08-25** — 3 added, 2 changed, 92 destroyed, the
+> destroy count matching the authorisation exactly. `rg-db-site-sbx-cus`,
+> `cosmos-site-sbx-cus` and `stsitesbxcus01` are gone and `az group list` no
+> longer returns the group ([REVIEW.md](REVIEW.md), *Executed: the migration-era
+> teardown*).
+>
+> The `hcw-azure` workspace is **VCS-connected** as of 2026-08-26, working
+> directory `infra`, auto-apply off. Merged infra code now reaches HCP Terraform
+> on its own; before that it only arrived when someone ran `terraform` from a
+> checkout, which is why several merged changes sat unapplied.
 
 | Priority | Open items |
 | --- | ---: |
 | High | 2 |
-| Medium | 3 |
+| Medium | 1 |
 | Low | 0 |
-| Total | 5 |
+| Total | 3 |
 
 Five items closed on 2026-08-25. Four in #220 — T-520, T-521, T-523 and A-001,
 the ones that did not need access outside the repository — and T-525, which the
 owner closed directly by deleting the three variables. Their entries are in
 [CHANGELOG.md](CHANGELOG.md).
 
-**All five that remain carry Gate: owner, and none of them is a repository
-setting any more.** What is left is a DNS record, a Cloudflare change, two
-numbers, an identity decision and a set of feature flags — every one needs
-tenant or edge access, and no amount of engineering here closes any of them.
+T-524 closed on 2026-08-26: the owner authorised retiring the two
+`data-migration` federated credentials and they are removed from
+`infra/oidc.tf`. Its entry is in [CHANGELOG.md](CHANGELOG.md).
+
+T-522 moved to **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)**
+on 2026-08-26 — the recovery objectives and the Cosmos export that would support
+them. It is not closed and it is not abandoned; it is tracked where a feature
+with a design, a cost model and acceptance criteria belongs, rather than as a
+tracker line that only ever said "two numbers are missing". The analysis behind
+it is in the issue so it does not get redone.
+
+**All three that remain carry Gate: owner, and none of them is a repository
+setting any more.** What is left is a DNS record, a Cloudflare change and a set
+of feature flags — every one needs tenant or edge access, and no amount of
+engineering here closes any of them.
 They are listed anyway, because a tracker that omits them is quietly shorter
 than the truth.
 
@@ -99,37 +122,6 @@ the Ruleset Engine. So the Cloudflare side has to change before the test means
 anything. It matters more than one rule out of six suggests: every other alert
 needs the app healthy enough to emit telemetry, and reachability is the only
 signal that survives the app being completely down.
-
-### T-522 — No RTO or RPO is stated anywhere
-
-**Gate: owner for the two numbers** — [REVIEW.md](REVIEW.md), *Recovery
-objectives*.
-
-Neither term appears in any file in the repository. The recovery settings do
-exist — Cosmos continuous backup on the free 7-day tier, 7-day blob and
-container soft delete on the Functions host account, versioning plus a 30-day
-non-current-version expiry on the content account — but each was chosen against
-a plausible default rather than a target, so nothing says whether seven days is
-generous or short, and no test would fail if a restore took a week. Once the
-owner supplies the two numbers this becomes a Wiki page, and it should state
-what has actually been *restored* rather than what is configured: nothing here
-has ever been recovery-tested.
-
-### T-524 — The two `data-migration` federated credentials outlive the job they were for
-
-**Gate: owner (identity)** — [REVIEW.md](REVIEW.md), *Migration-era identity
-trust*.
-
-`infra/oidc.tf` still declares federated credentials for
-`environment:data-migration`, and nothing references that environment —
-`migrate-data.yml` was the only consumer and it was deleted in `59e471b`. A
-federated credential grants no permission of its own; it decides which OIDC
-subject may act *as* the deploy identity, so with the production-write grants
-revoked a `data-migration` token now inherits the same reduced role set a branch
-token gets. That is why this is a tidy-up rather than an incident. It is still a
-standing trust relationship for a job that cannot run, and retiring one is an
-identity change rather than a Terraform cleanup — which is why the remediation
-branch escalated it instead of deleting it.
 
 ## Test coverage follow-up
 

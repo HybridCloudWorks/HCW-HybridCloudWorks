@@ -46,16 +46,33 @@ resource "azurerm_federated_identity_credential" "github_branch" {
   subject                   = "repo:${var.github_org}/${var.github_repo}:ref:${var.github_deploy_ref}"
 }
 
-# Legacy import trust retained pending the owner-only cleanup decision in
-# REVIEW.md. The former workflow used an Environment subject, which differs
-# from the branch credential above.
-resource "azurerm_federated_identity_credential" "github_data_migration" {
-  name                      = "github-${var.github_repo}-env-data-migration"
-  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
-  audience                  = ["api://AzureADTokenExchange"]
-  issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = "repo:${var.github_org}/${var.github_repo}:environment:data-migration"
-}
+# RETIRED 2026-08-26 (T-524): the two `environment:data-migration` credentials,
+# name form here and immutable form below.
+#
+# They trusted a subject nothing presents. `migrate-data.yml` was the only
+# consumer and was deleted in `59e471b`; of the four workflows that call
+# azure/login, one names `environment: production` and three name no
+# environment at all, so they present the ref form. Verified against
+# scripts/oidc-subjects.test.mjs, which is the check that would have caught a
+# mistake here: removing this pair leaves it passing, removing only one half
+# fails it on the missing form, and sweeping up the branch pair by mistake
+# fails it naming all three ref-form workflows.
+#
+# Retiring it was always an identity decision rather than a Terraform cleanup,
+# which is why the remediation branch escalated it instead of deleting it. The
+# owner authorised it on 2026-08-26. Recorded here rather than only in git
+# because "why does this identity trust four subjects and not six" should be
+# answerable from the file.
+#
+# What it cost: nothing operational. A federated credential grants no
+# permission of its own — it decides which OIDC subject may act AS this
+# identity — and with the production-write grants already revoked, a
+# data-migration token inherited the same reduced role set a branch token gets.
+# What it removes is a standing trust relationship for a job that cannot run.
+#
+# If a migration workflow is ever rebuilt: it needs BOTH forms back, name and
+# immutable, or the guard fails and azure/login fails with AADSTS700213 on
+# whichever form the token happens to carry.
 
 # ---------------------------------------------------------------------------
 # The SAME two subjects again, in GitHub's immutable-identifier form.
@@ -99,13 +116,10 @@ resource "azurerm_federated_identity_credential" "github_branch_immutable" {
   subject                   = "${local.github_immutable_prefix}:ref:${var.github_deploy_ref}"
 }
 
-resource "azurerm_federated_identity_credential" "github_data_migration_immutable" {
-  name                      = "github-${var.github_repo}-env-data-migration-immutable"
-  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
-  audience                  = ["api://AzureADTokenExchange"]
-  issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = "${local.github_immutable_prefix}:environment:data-migration"
-}
+# The immutable half of the data-migration pair was removed here on 2026-08-26
+# with its name-form twin above (T-524). Both went together deliberately: one
+# without the other is half a credential and fails on whichever form the token
+# carries.
 
 # ---------------------------------------------------------------------------
 # environment:production — the subject the Function App deploy actually presents
@@ -364,13 +378,12 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
 # addresses the content storage account, and scripts/apply-computed-sortdate.mjs
 # imports @azure/cosmos and @azure/identity and no blob client at all.
 #
-# NOT REMOVED, and worth a decision of its own: the two `data-migration`
-# federated credentials near the top of this file. A federated credential grants
-# no permissions — it decides which OIDC subject may act AS this identity — so
-# with the grants above gone, a data-migration token now inherits the same
-# reduced role set as a branch token. No workflow references
-# `environment: data-migration`. Retiring that trust is an identity change and
-# belongs with whoever owns the identity, not with this cleanup.
+# REMOVED 2026-08-26, one cleanup later: the two `data-migration` federated
+# credentials that used to sit near the top of this file. They were held back
+# from this pass because retiring a trust relationship is an identity change
+# rather than a Terraform cleanup, and that decision was the owner's to make
+# (T-524). It was made on 2026-08-26 and the pair is gone; the reasoning is
+# recorded where they used to be declared.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -388,14 +401,17 @@ output "deploy_principal_id" {
   value       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
+# Four entries since 2026-08-26, down from six: the data-migration pair was
+# retired (T-524). Keeping this list in step with the resources above is not
+# cosmetic — it is what an operator diffs a failing token's subject against, so
+# it has to name exactly what Entra trusts. Deleting the credentials without
+# deleting these two entries is what broke `terraform validate` on PR #230.
 output "federated_subjects" {
   description = "Exact OIDC subject claims trusted by this identity — compare against a failing token"
   value = [
     azurerm_federated_identity_credential.github_branch.subject,
     azurerm_federated_identity_credential.github_production.subject,
-    azurerm_federated_identity_credential.github_data_migration.subject,
     azurerm_federated_identity_credential.github_branch_immutable.subject,
     azurerm_federated_identity_credential.github_production_immutable.subject,
-    azurerm_federated_identity_credential.github_data_migration_immutable.subject,
   ]
 }
