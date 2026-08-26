@@ -116,13 +116,23 @@ anything. It matters more than one rule out of six suggests: every other alert
 needs the app healthy enough to emit telemetry, and reachability is the only
 signal that survives the app being completely down.
 
-### T-522 — No RTO or RPO is stated anywhere
+### T-522 — No RTO or RPO is stated for this platform
 
 **Gate: owner for the two numbers** — [REVIEW.md](REVIEW.md), *Recovery
 objectives*.
 
-Neither term appears in any file in the repository. The recovery settings do
-exist — Cosmos continuous backup on the free 7-day tier, 7-day blob and
+Neither objective is stated anywhere for this platform. The wording here read
+"neither term appears in any file in the repository" until 2026-08-26, and that
+was wrong — both terms appear about a hundred times, in the frontend components
+and architecture pages that *display* RPO and RTO figures for the reference
+architectures the site publishes, and in some bundled font filenames. Those are
+content about other people's architectures, not a claim about this one. The
+distinction matters because a reader who greps for `RTO`, finds matches and
+concludes the objectives exist would be reading the site's subject matter as its
+own posture. What is genuinely absent is any statement of what THIS platform is
+held to: `wiki/` returns zero matches.
+
+The recovery settings do exist — Cosmos continuous backup on the free 7-day tier, 7-day blob and
 container soft delete on the Functions host account, versioning plus a 30-day
 non-current-version expiry on the content account — but each was chosen against
 a plausible default rather than a target, so nothing says whether seven days is
