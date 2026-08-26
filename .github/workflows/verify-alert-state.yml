@@ -91,11 +91,25 @@ jobs:
           for rule in $RULES; do
             # A rule that cannot be read is a real finding, not a reason to
             # abort the loop: report every rule, then decide what it means.
-            if ! json=$(az monitor scheduled-query show -n "$rule" -g "$RG" -o json 2>"$err"); then
-              reason=$(tr -d '\r' < "$err" | tr '\n' ' ' | cut -c1-200)
+            # --only-show-errors keeps az's extension/preview warnings out of
+            # stderr, so $err holds the error and nothing else. Belt and
+            # braces with the full-text match below: the classifier is now
+            # correct even if a warning does slip through, and this stops one
+            # from slipping through in the first place.
+            if ! json=$(az monitor scheduled-query show -n "$rule" -g "$RG" -o json --only-show-errors 2>"$err"); then
+              # CLASSIFY ON THE WHOLE STDERR, DISPLAY A TRUNCATION. Getting
+              # this backwards mislabelled the first rule on 2026-08-26 (run
+              # 32921152872's predecessor): az emits an unrelated extension
+              # warning on its first invocation of a job, that warning landed
+              # at the front of stderr, and matching against the 200-character
+              # truncation never reached the AuthorizationFailed text behind
+              # it. Two rules read NOT AUTHORIZED and the first read READ
+              # FAILED, from identical underlying errors.
+              full=$(tr -d '\r' < "$err" | tr '\n' ' ')
+              reason=$(printf '%s' "$full" | cut -c1-200)
               # AuthorizationFailed and ResourceNotFound are OPPOSITE
               # diagnoses. Never collapse them into one label again.
-              case "$reason" in
+              case "$full" in
                 *AuthorizationFailed*|*does\ not\ have\ authorization*|*Forbidden*)
                   label="**NOT AUTHORIZED**"; denied=1 ;;
                 *ResourceNotFound*|*ResourceGroupNotFound*|*was\ not\ found*)
