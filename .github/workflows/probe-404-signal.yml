@@ -1,0 +1,163 @@
+# Answers one question, so an alert can be built on evidence instead of on an
+# assumption: DOES A 404 FROM AN UNREGISTERED ROUTE PRODUCE A `requests` ROW?
+#
+# WHY THIS EXISTS AS A WORKFLOW RATHER THAN A GUESS. T-519's reachability gap
+# has an interim detector recorded in ADR 0022 — an `Http404` metric alert on
+# Microsoft.Web/sites. That alternative is stale: #219 read
+# `az monitor metrics list-definitions` on this Function App and found nine
+# metric names, all execution or memory counters, and no HTTP metric of any
+# kind. Http5xx and HttpResponseTime belong to App Service and Elastic Premium
+# plans, not Flex Consumption. The metric alert cannot be built.
+#
+# The KQL equivalent — `requests | where resultCode == "404"` — can be built.
+# Whether it can FIRE on the incident it is meant to catch is a different
+# question, and the answer is not obvious: the three recorded incidents
+# (2026-08-20 mass 404, two on 2026-08-21) share the shape "host up, functions
+# unregistered, every route 404". ADR 0022 already established that
+# `AppExceptions` cannot fire in that state because no handler runs. If
+# `requests` is populated by the same host pipeline, a 404 rule would be an
+# alert that appears in the inventory and can never page — which ADR 0022 calls
+# worse than a visibly empty inventory, because it looks fixed.
+#
+# So this probe reads the historical windows and reports what a rule WOULD have
+# seen. Two outcomes are useful and one is a warning:
+#
+#   404 rows present during the incident windows -> build the rule, and the
+#     hourly baseline below gives it a threshold calibrated against real
+#     traffic rather than a guess.
+#   404 rows absent during the windows but present otherwise -> the host does
+#     not record unmatched-route requests. Do NOT build the rule; it would be
+#     inventory that cannot fire.
+#   no rows at all in the period -> inconclusive, and probably the daily cap.
+#     The workspace was found OverQuota on 2026-08-24 dropping every billable
+#     table, and AppRequests is billable, so the incident-window telemetry may
+#     simply have been discarded. That is an answer too, and it is an argument
+#     for the capacity alert being load-bearing rather than for this rule.
+#
+# READ-ONLY. Monitoring Reader on the resource group (infra/oidc.tf), no verb
+# here that can change anything. workflow_dispatch only: it reads production.
+#
+# NO `environment:` KEY — declaring one changes the OIDC subject from
+# repo:<org>/<repo>:ref:<ref> to :environment:<name>, which the branch
+# credential cannot match (AADSTS700213, documented in infra/oidc.tf).
+#
+# DELETE THIS WORKFLOW once the question is answered and recorded. It is a
+# measurement, not a monitor.
+
+name: Probe 404 Signal
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'How many days back to look (Log Analytics retention is 30)'
+        required: false
+        default: '30'
+      app_insights:
+        description: 'Application Insights component name'
+        required: false
+        default: 'appi-site-prod-cus-01'
+      resource_group:
+        description: 'Resource group holding the component'
+        required: false
+        default: 'rg-web-site-prod-cus'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    if: ${{ vars.CLIENT_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Query the request telemetry
+        env:
+          APPI: ${{ inputs.app_insights }}
+          RG: ${{ inputs.resource_group }}
+          DAYS: ${{ inputs.days }}
+        run: |
+          set -uo pipefail
+
+          # The extension is not preinstalled and dynamic install is disabled on
+          # the runner, so add it explicitly rather than relying on a prompt
+          # that cannot be answered in CI.
+          az extension add --name application-insights --only-show-errors --yes 2>/dev/null || true
+
+          report=$(mktemp)
+          err=$(mktemp)
+
+          run_query() {
+            # $1 = heading, $2 = KQL
+            {
+              echo
+              echo "### $1"
+              echo
+            } >> "$report"
+            if out=$(az monitor app-insights query \
+                       --app "$APPI" -g "$RG" \
+                       --analytics-query "$2" \
+                       -o table --only-show-errors 2>"$err"); then
+              if [ -n "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
+                { echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$report"
+              else
+                echo "_No rows returned._" >> "$report"
+              fi
+            else
+              reason=$(tr -d '\r' < "$err" | tr '\n' ' ')
+              case "$reason" in
+                *AuthorizationFailed*|*does\ not\ have\ authorization*|*Forbidden*)
+                  echo "**NOT AUTHORIZED** — the deploy identity cannot query this component. Monitoring Reader covers the component; the data lives in the workspace in the Management subscription, which it does not cover." >> "$report" ;;
+                *)
+                  echo "**QUERY FAILED** — \`$(printf '%s' "$reason" | cut -c1-300)\`" >> "$report" ;;
+              esac
+              echo "::warning title=$1::$(printf '%s' "$reason" | cut -c1-200)"
+            fi
+          }
+
+          echo "## Does a 404 reach \`requests\`?" >> "$report"
+          echo >> "$report"
+          echo "Component \`$APPI\`, last ${DAYS}d, read $(date -u '+%Y-%m-%d %H:%M UTC')." >> "$report"
+
+          # 1. Is there ANY request telemetry at all? Distinguishes "no 404s"
+          #    from "no data", which the cap makes a live possibility.
+          run_query "Request telemetry present at all, by day" \
+            "requests | where timestamp > ago(${DAYS}d) | summarize total=count(), distinctCodes=dcount(resultCode) by bin(timestamp, 1d) | order by timestamp asc"
+
+          # 2. The actual question: do 404s appear, and when?
+          run_query "404s by day" \
+            "requests | where timestamp > ago(${DAYS}d) | where resultCode == '404' | summarize count404=count() by bin(timestamp, 1d) | order by timestamp asc"
+
+          # 3. The incident windows, at hourly resolution. If the mass-404
+          #    incidents are visible here, the rule can fire on them.
+          run_query "Hourly 404s across the recorded incident windows (2026-08-19 to 2026-08-22)" \
+            "requests | where timestamp between (datetime(2026-08-19) .. datetime(2026-08-22)) | summarize count404=countif(resultCode == '404'), total=count() by bin(timestamp, 1h) | order by timestamp asc"
+
+          # 4. Threshold calibration: what does a NORMAL hour look like? A rule
+          #    set above the busiest ordinary hour is a rule that does not cry
+          #    wolf. ADR 0022's objection to this alert was that its threshold
+          #    would be a guess -- this is what unguesses it.
+          run_query "404s per hour, distribution over the period (threshold calibration)" \
+            "requests | where timestamp > ago(${DAYS}d) | summarize c=countif(resultCode == '404') by bin(timestamp, 1h) | summarize hours=count(), p50=percentile(c, 50), p95=percentile(c, 95), p99=percentile(c, 99), max=max(c)"
+
+          # 5. What the 404s actually are, when they happen. A steady trickle of
+          #    one bad path is noise; every route failing is the incident.
+          run_query "Top 404 operations" \
+            "requests | where timestamp > ago(${DAYS}d) | where resultCode == '404' | summarize c=count() by operation_Name, name | top 15 by c desc"
+
+          {
+            echo
+            echo "---"
+            echo
+            echo "**How to read this.** If section 3 shows 404 rows during 2026-08-20 or 2026-08-21, the host does record unmatched-route requests and a scheduled query rule can detect that failure class — use section 4 to set a threshold above the ordinary p99. If section 1 shows traffic but sections 2 and 3 show none, the host does not emit telemetry for those requests and the rule must NOT be built: it would be an alert that cannot fire. If section 1 is empty too, the result is inconclusive — most likely the daily cap discarded the billable tables, which is an argument about \`alert-logs-capacity\`, not about this rule."
+          } >> "$report"
+
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
