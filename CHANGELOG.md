@@ -148,6 +148,39 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The two `data-migration` federated credentials are retired (T-524 closed,
+  2026-08-26).** `infra/oidc.tf` trusted six OIDC subjects and now trusts four.
+  The pair granted no permission of its own — a federated credential decides
+  which subject may act *as* the deploy identity — and with the production-write
+  grants already revoked, a `data-migration` token inherited the same reduced
+  role set a branch token gets. What it removed was a standing trust
+  relationship for a job that cannot run.
+
+  Held back from the earlier cleanup deliberately: retiring a trust
+  relationship is an identity change rather than a Terraform tidy-up, which is
+  why the remediation branch escalated it instead of deleting it. The owner
+  authorised it on 2026-08-26.
+
+  **Validated before the change, not after.** Nothing in `.github/workflows`
+  names that environment; its only consumer, `migrate-data.yml`, was deleted in
+  `59e471b`. Of the four workflows that call `azure/login`, one declares
+  `environment: production` and three declare none, so they present the `ref`
+  form — `deploy-azure-frontend.yml` names an environment but deploys through
+  `Azure/static-web-apps-deploy` and never logs into Azure at all.
+
+  `scripts/oidc-subjects.test.mjs` was then run against three variants of the
+  deletion, because the check that matters is the one that fails:
+
+  | Variant | Guard |
+  | --- | --- |
+  | Both credentials removed | **passes** |
+  | Only the name form removed | **fails** — no immutable-ID-form credential |
+  | Branch pair swept up with them | **fails** — names all three ref-form workflows |
+
+  Both forms went together for the reason the second row states: one without the
+  other is half a credential and fails on whichever form the token happens to
+  carry. If a migration workflow is ever rebuilt it needs both back.
+
 - **The migration-era rehearsal estate is destroyed and the three
   production-write grants are revoked (B6/B7, applied 2026-08-25).** The apply
   reported **3 added, 2 changed, 92 destroyed**. The destroy count matched the
