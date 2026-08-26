@@ -1,0 +1,231 @@
+# The reachability check that already existed, on a timer.
+#
+# WHY THIS IS THE RIGHT DETECTOR FOR T-519, AND A 404 ALERT IS NOT.
+#
+# Three recorded incidents share one shape: host up, functions unregistered,
+# every route 404 (2026-08-20 mass 404; two on 2026-08-21). `Http5xx` does not
+# count 404s. `AppExceptions` cannot fire because no handler runs to throw. The
+# availability web test is the only rule that asks from outside and it cannot be
+# armed, because Cloudflare's Bot Fight Mode answers Azure's agents with a 403
+# and the WAF skip rule against it was built, applied and confirmed inert.
+#
+# ADR 0022 recorded an interim `Http404` metric alert as the cheapest partial
+# cover. That is not available: #219 read
+# `az monitor metrics list-definitions` on this Function App and found nine
+# metric names, all execution or memory counters, and no HTTP metric of any
+# kind — Http5xx and HttpResponseTime belong to App Service and Elastic Premium,
+# not Flex Consumption. The ADR's alternative predates that measurement.
+#
+# A KQL rule on `requests | where resultCode == '404'` would detect the SYMPTOM
+# on a host that is by then already failing, and might not fire at all: if no
+# function runs, it is unproven that the host emits request telemetry for the
+# unmatched route — the same reason AppExceptions cannot fire.
+#
+# So this checks the CONDITION instead, which
+# `wiki/Alerting-And-Support.md` already documents as the detector:
+#
+#   "A function count of 0, or an AzureWebJobsStorage count of 1, is the
+#    condition behind all three recorded incidents."
+#
+# It beats an alert rule on every axis that matters here. It reads ARM rather
+# than telemetry, so it survives the Log Analytics daily cap that silences every
+# log rule in observability.tf. It does not traverse Cloudflare, so Bot Fight
+# Mode is irrelevant. It needs no metric that does not exist. And it names the
+# cause, not a downstream symptom.
+#
+# The check was never missing — it was manual, or inside deploy-functions.yml,
+# which only runs when someone deploys. Nobody deployed during any of the three
+# incidents. The gap was the timer, not the test.
+#
+# HOW IT PAGES. A failed scheduled run emails the repository owner through
+# GitHub's own notifications. No action group, no Azure alert rule, no cost. It
+# deliberately does not route through ag-plat-prod-cus-01: that path depends on
+# the subscription this job exists to watch.
+#
+# HOURLY, and the number is a budget decision rather than a detection one.
+# GitHub bills Actions by the minute and rounds up per job, so hourly is ~720
+# minutes a month against the free allowance, alongside heal-computed-properties
+# (every 6h) and publish-content-manifest (daily). Every 30 minutes would double
+# it. Tighten the cron if the allowance allows; an hour of detection latency on
+# a personal site is not the binding constraint.
+#
+# NO `environment:` KEY — declaring one changes the OIDC subject from
+# repo:<org>/<repo>:ref:<ref> to :environment:<name>, which the branch
+# credential cannot match (AADSTS700213, documented in infra/oidc.tf).
+
+name: Monitor Functions Registered
+
+on:
+  schedule:
+    # Offset from the top of the hour, as heal-computed-properties.yml is.
+    - cron: '41 * * * *'
+  workflow_dispatch:
+    inputs:
+      function_app:
+        description: 'Function App to check'
+        required: false
+        default: 'func-site-prod-cus-01'
+      resource_group:
+        description: 'Resource group holding the Function App'
+        required: false
+        default: 'rg-web-site-prod-cus'
+      minimum_functions:
+        description: 'Fail below this many registered functions. 1 is the documented condition; raise it only against an observed count.'
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    # Self-arming, as heal-computed-properties.yml is: before the first apply
+    # there is no identity to log in as, and an hourly red run would read as a
+    # permissions bug while actually meaning "not deployed yet".
+    if: ${{ vars.CLIENT_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Are the functions registered?
+        env:
+          APP: ${{ inputs.function_app || 'func-site-prod-cus-01' }}
+          RG: ${{ inputs.resource_group || 'rg-web-site-prod-cus' }}
+          MIN: ${{ inputs.minimum_functions || '1' }}
+        run: |
+          set -uo pipefail
+
+          report=$(mktemp)
+          err=$(mktemp)
+          warnings=$(mktemp)
+          failed=0
+
+          # probe() IS CALLED INSIDE $( ), so its stdout is the return value and
+          # NOTHING ELSE may be written there. An earlier draft echoed the
+          # ::warning:: from in here; the warning text became part of the
+          # captured value, the token comparisons below stopped matching, and a
+          # denial rendered as a HEALTHY function count. Caught by
+          # scratch-testing against a mocked az, not by review. Warnings are
+          # stashed and emitted after the substitutions instead.
+          #
+          # --only-show-errors keeps az's extension warnings out of stderr, so
+          # the classifier reads the error and not a warning in front of it
+          # (#229).
+          probe() {   # $1 = label, $2... = az args
+            local label="$1"; shift
+            local out reason
+            if out=$("$@" --only-show-errors 2>"$err"); then
+              printf '%s' "$out"
+              return 0
+            fi
+            reason=$(tr -d '\r' < "$err" | tr '\n' ' ' | cut -c1-200)
+            # An authorization failure is NOT an outage. Saying so is the whole
+            # difference between a useful page and a distrusted one.
+            case "$(tr -d '\r' < "$err" | tr '\n' ' ')" in
+              *AuthorizationFailed*|*does\ not\ have\ authorization*|*Forbidden*)
+                printf '%s\t%s\n' "$label" "NOT AUTHORIZED — $reason" >> "$warnings"
+                printf 'UNAUTHORIZED' ;;
+              *)
+                printf '%s\t%s\n' "$label" "$reason" >> "$warnings"
+                printf 'ERROR' ;;
+            esac
+            return 1
+          }
+
+          count=$(probe "function list" \
+            az functionapp function list -n "$APP" -g "$RG" --query "length(@)" -o tsv) || true
+
+          webjobs=$(probe "AzureWebJobsStorage" \
+            az functionapp config appsettings list -n "$APP" -g "$RG" \
+              --query "[?name=='AzureWebJobsStorage'] | length(@)" -o tsv) || true
+
+          writer=$(probe "RUNTIME_CONFIG_WRITER" \
+            az functionapp config appsettings list -n "$APP" -g "$RG" \
+              --query "[?name=='RUNTIME_CONFIG_WRITER'].value | [0]" -o tsv) || true
+
+          # Outside every substitution, so the annotations reach the run without
+          # contaminating a captured value.
+          while IFS=$'\t' read -r wlabel wreason; do
+            echo "::warning title=${wlabel}::${wreason}"
+          done < "$warnings"
+
+          {
+            echo "## Function registration"
+            echo
+            echo "\`$APP\` in \`$RG\`, checked $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            echo "| Check | Value | Healthy |"
+            echo "| --- | ---: | :---: |"
+          } >> "$report"
+
+          # Registered function count. Zero is the documented condition behind
+          # all three incidents.
+          if [ "$count" = "UNAUTHORIZED" ] || [ "$count" = "ERROR" ]; then
+            echo "| Registered functions | \`$count\` | ⚠️ |" >> "$report"
+            failed=1
+          elif [ "$count" -lt "$MIN" ] 2>/dev/null; then
+            echo "| Registered functions | **$count** | ❌ |" >> "$report"
+            failed=1
+          else
+            echo "| Registered functions | $count | ✅ |" >> "$report"
+          fi
+
+          # AzureWebJobsStorage present means the azurerm write came back and
+          # the host is preferring a connection string with an empty account
+          # key — the mechanism behind the incidents, documented beside the
+          # azapi strip pair in infra/main.tf. Expected count is 0.
+          if [ "$webjobs" = "0" ]; then
+            echo "| \`AzureWebJobsStorage\` present | 0 | ✅ |" >> "$report"
+          elif [ "$webjobs" = "UNAUTHORIZED" ] || [ "$webjobs" = "ERROR" ]; then
+            echo "| \`AzureWebJobsStorage\` present | \`$webjobs\` | ⚠️ |" >> "$report"
+            failed=1
+          else
+            echo "| \`AzureWebJobsStorage\` present | **$webjobs** | ❌ |" >> "$report"
+            failed=1
+          fi
+
+          # Should read azapi-strip. `azurerm` means the strip did not complete
+          # and the app is running on the first write.
+          if [ "$writer" = "azapi-strip" ]; then
+            echo "| \`RUNTIME_CONFIG_WRITER\` | azapi-strip | ✅ |" >> "$report"
+          elif [ "$writer" = "UNAUTHORIZED" ] || [ "$writer" = "ERROR" ]; then
+            echo "| \`RUNTIME_CONFIG_WRITER\` | \`$writer\` | ⚠️ |" >> "$report"
+            failed=1
+          else
+            echo "| \`RUNTIME_CONFIG_WRITER\` | **${writer:-unset}** | ❌ |" >> "$report"
+            failed=1
+          fi
+
+          # A run where nothing could be read is a broken check, not an outage,
+          # and must not be reported as one. Counted rather than pattern-matched
+          # over the concatenation, which got mixed results wrong.
+          unreadable=0
+          for v in "$count" "$webjobs" "$writer"; do
+            case "$v" in UNAUTHORIZED|ERROR) unreadable=$((unreadable + 1)) ;; esac
+          done
+
+          {
+            echo
+            if [ "$failed" -eq 0 ]; then
+              echo "Functions are registered and the host is not running on an \`azurerm\`-written config."
+            elif [ "$unreadable" -eq 3 ]; then
+              echo "**This check could not read anything, so the platform's state is unknown.** That is a broken check, not an outage — do not read it as one. Every row failed the same way, which points at the identity rather than at the Function App: \`Website Contributor\` on the app is what \`az functionapp function list\` and \`config appsettings list\` need (\`infra/oidc.tf\`). Confirm the grant is applied before trusting or distrusting this workflow."
+            else
+              echo "**Investigate.** A function count below \`$MIN\`, or an \`AzureWebJobsStorage\` setting that exists, is the condition behind the 2026-08-20 and 2026-08-21 incidents: the host answers, the functions are not registered, and every route returns 404 — which no alert rule in \`observability.tf\` detects."
+              echo
+              echo "The repair is to re-apply \`infra/\` so the azapi strip runs again. **Do not delete the setting by hand** — that hides the regression from the assertion in \`deploy-functions.yml\`, which is the only other automated detector this failure class has. See *The failure with no alert* in \`wiki/Alerting-And-Support.md\`."
+              echo
+              echo "A ⚠️ row means the check could not run, not that the platform is down. An authorization failure is not an outage."
+            fi
+          } >> "$report"
+
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+          exit "$failed"
