@@ -37,9 +37,9 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 | Priority | Open items |
 | --- | ---: |
 | High | 2 |
-| Medium | 2 |
+| Medium | 1 |
 | Low | 0 |
-| Total | 4 |
+| Total | 3 |
 
 Five items closed on 2026-08-25. Four in #220 — T-520, T-521, T-523 and A-001,
 the ones that did not need access outside the repository — and T-525, which the
@@ -50,10 +50,17 @@ T-524 closed on 2026-08-26: the owner authorised retiring the two
 `data-migration` federated credentials and they are removed from
 `infra/oidc.tf`. Its entry is in [CHANGELOG.md](CHANGELOG.md).
 
-**All four that remain carry Gate: owner, and none of them is a repository
-setting any more.** What is left is a DNS record, a Cloudflare change, two
-numbers and a set of feature flags — every one needs tenant or edge access, and
-no amount of engineering here closes any of them.
+T-522 moved to **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)**
+on 2026-08-26 — the recovery objectives and the Cosmos export that would support
+them. It is not closed and it is not abandoned; it is tracked where a feature
+with a design, a cost model and acceptance criteria belongs, rather than as a
+tracker line that only ever said "two numbers are missing". The analysis behind
+it is in the issue so it does not get redone.
+
+**All three that remain carry Gate: owner, and none of them is a repository
+setting any more.** What is left is a DNS record, a Cloudflare change and a set
+of feature flags — every one needs tenant or edge access, and no amount of
+engineering here closes any of them.
 They are listed anyway, because a tracker that omits them is quietly shorter
 than the truth.
 
@@ -115,31 +122,6 @@ the Ruleset Engine. So the Cloudflare side has to change before the test means
 anything. It matters more than one rule out of six suggests: every other alert
 needs the app healthy enough to emit telemetry, and reachability is the only
 signal that survives the app being completely down.
-
-### T-522 — No RTO or RPO is stated for this platform
-
-**Gate: owner for the two numbers** — [REVIEW.md](REVIEW.md), *Recovery
-objectives*.
-
-Neither objective is stated anywhere for this platform. The wording here read
-"neither term appears in any file in the repository" until 2026-08-26, and that
-was wrong — both terms appear about a hundred times, in the frontend components
-and architecture pages that *display* RPO and RTO figures for the reference
-architectures the site publishes, and in some bundled font filenames. Those are
-content about other people's architectures, not a claim about this one. The
-distinction matters because a reader who greps for `RTO`, finds matches and
-concludes the objectives exist would be reading the site's subject matter as its
-own posture. What is genuinely absent is any statement of what THIS platform is
-held to: `wiki/` returns zero matches.
-
-The recovery settings do exist — Cosmos continuous backup on the free 7-day tier, 7-day blob and
-container soft delete on the Functions host account, versioning plus a 30-day
-non-current-version expiry on the content account — but each was chosen against
-a plausible default rather than a target, so nothing says whether seven days is
-generous or short, and no test would fail if a restore took a week. Once the
-owner supplies the two numbers this becomes a Wiki page, and it should state
-what has actually been *restored* rather than what is configured: nothing here
-has ever been recovery-tested.
 
 ## Test coverage follow-up
 
