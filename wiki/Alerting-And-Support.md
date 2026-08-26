@@ -122,6 +122,19 @@ have stopped. Nothing about detection changed — same frequency, same query, sa
 threshold. **If a rule is still noisy after this, it is firing too often, not
 notifying too often**, and the fix is the query or the threshold, below.
 
+**To check what is actually deployed, run the workflow — do not read it off the
+repository.** Actions → **Verify Alert Rule State** → Run workflow. It logs in
+with the deployment identity, reads the three workload rules through ARM, and
+prints `autoMitigate`, the mute duration, frequency, window and severity into
+the job summary, which is legible from a phone. This exists because a green TFC
+run proves ARM *accepted* an apply, not that a rule now behaves differently, and
+because `autoMitigate` is invisible from the repository, from CI and from the
+run list — the one attribute that decides whether a firing rule mails once or
+every five minutes. The job is read-only by construction: the identity's grant
+on this group is Monitoring Reader (`infra/oidc.tf`), which carries no verb that
+can change anything, and notably not `listKeys` on the workspace. A red run
+means at least one rule is stateless or missing, and the summary says which.
+
 **The capacity alert is muted for 6 hours after it fires**, deliberately.
 Ingestion only goes up between resets, so once it is past 80% it stays past, and
 an hourly rule would send the same mail until 08:00 UTC. When it fires, prune a

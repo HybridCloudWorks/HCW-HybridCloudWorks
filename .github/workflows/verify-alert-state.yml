@@ -1,0 +1,106 @@
+# Reads the LIVE state of the alert rules and says whether the deployed
+# configuration matches what infra/observability.tf declares.
+#
+# WHY THIS EXISTS. The Deployment Runbook's §4 asks for post-apply
+# verification, and for the alert fabric there was no way to do it: applies
+# happen in HCP Terraform Cloud on a human's confirmation, and a green TFC run
+# proves ARM ACCEPTED the change, not that the rule now behaves differently.
+# The two come apart exactly where it matters — `autoMitigate` is the attribute
+# that decides whether a firing rule mails once or every five minutes, and it
+# is invisible from the repository, from CI, and from the TFC run list.
+#
+# It also exists because operators are sometimes on a phone. `az` is not, and
+# the TFC run list answers a different question. This prints the answer into
+# the job summary so it is readable from the GitHub mobile app.
+#
+# READ-ONLY, and structurally so: the identity's grant for this resource group
+# is Monitoring Reader (infra/oidc.tf), whose actions are `*/read` plus alert
+# state. There is no verb here that can change anything.
+#
+# NO `environment:` KEY, deliberately. Declaring one changes the OIDC subject
+# GitHub presents from repo:<org>/<repo>:ref:<ref> to
+# repo:<org>/<repo>:environment:<name>, and this job is trusted through the
+# BRANCH credential. Adding an environment here breaks authentication with
+# AADSTS700213 — the failure mode documented at length in infra/oidc.tf.
+
+name: Verify Alert Rule State
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: 'Resource group holding the workload alert rules'
+        required: false
+        default: 'rg-web-site-prod-cus'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    # Same self-arming gate as heal-computed-properties.yml: before the first
+    # apply there is no identity to log in as, and a red run would read as a
+    # permissions bug while actually meaning "not deployed yet".
+    if: ${{ vars.CLIENT_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Read the live scheduled query rules
+        env:
+          RG: ${{ inputs.resource_group }}
+        run: |
+          set -euo pipefail
+
+          RULES="alert-app-exceptions-prod-cus alert-func-http5xx-prod-cus alert-func-latency-prod-cus"
+
+          {
+            echo "## Live alert rule state"
+            echo
+            echo "Resource group \`$RG\`, read $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            echo "| Rule | autoMitigate | muteActions | frequency | window | severity |"
+            echo "| --- | :---: | :---: | --- | --- | :---: |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          stateless=0
+          for rule in $RULES; do
+            # A missing rule is a real finding, not a reason to abort the loop:
+            # report every rule, then decide.
+            if ! json=$(az monitor scheduled-query show -n "$rule" -g "$RG" -o json 2>/dev/null); then
+              echo "| \`$rule\` | **NOT FOUND** | — | — | — | — |" >> "$GITHUB_STEP_SUMMARY"
+              stateless=1
+              continue
+            fi
+
+            read -r am mad freq win sev < <(echo "$json" | jq -r '
+              [ (.autoMitigate|tostring),
+                (.muteActionsDuration // "—"),
+                (.evaluationFrequency // "—"),
+                (.windowSize // "—"),
+                (.severity|tostring)
+              ] | @tsv' | tr '\t' ' ')
+
+            mark="✅"
+            if [ "$am" != "true" ]; then mark="❌"; stateless=1; fi
+            echo "| \`$rule\` | $mark \`$am\` | \`$mad\` | \`$freq\` | \`$win\` | $sev |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          {
+            echo
+            if [ "$stateless" -eq 0 ]; then
+              echo "**All three rules are stateful.** Each fires once per condition and sends a single Resolved mail — the change in ADR 0022 decision 6 is live."
+            else
+              echo "**At least one rule is still stateless (or missing).** A stateless rule re-notifies on every evaluation whose condition is met — at PT5M that is a fresh mail every five to ten minutes. The apply carrying \`auto_mitigation_enabled = true\` has not landed for the rules marked above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # The summary is the deliverable; the exit code just makes an
+          # unattended run legible. A stateless rule is a real finding.
+          exit "$stateless"
