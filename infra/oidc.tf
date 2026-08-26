@@ -401,14 +401,17 @@ output "deploy_principal_id" {
   value       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
+# Four entries since 2026-08-26, down from six: the data-migration pair was
+# retired (T-524). Keeping this list in step with the resources above is not
+# cosmetic — it is what an operator diffs a failing token's subject against, so
+# it has to name exactly what Entra trusts. Deleting the credentials without
+# deleting these two entries is what broke `terraform validate` on PR #230.
 output "federated_subjects" {
   description = "Exact OIDC subject claims trusted by this identity — compare against a failing token"
   value = [
     azurerm_federated_identity_credential.github_branch.subject,
     azurerm_federated_identity_credential.github_production.subject,
-    azurerm_federated_identity_credential.github_data_migration.subject,
     azurerm_federated_identity_credential.github_branch_immutable.subject,
     azurerm_federated_identity_credential.github_production_immutable.subject,
-    azurerm_federated_identity_credential.github_data_migration_immutable.subject,
   ]
 }
