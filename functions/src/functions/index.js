@@ -26,6 +26,7 @@ import './listen-and-learn-http.js';
 import './listen-and-learn-jobs.js';
 import './labs-http.js';
 import './legacy-blogs-telemetry-http.js';
+import './manual-images-http.js';
 import './ops-health-http.js';
 import './platform-health-http.js';
 import './public-media.js';
