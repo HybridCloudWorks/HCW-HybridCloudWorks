@@ -23,6 +23,7 @@ import {
   buildUrlSourceDoc,
 } from '../lib/content/draft-from-url.js';
 import { runVoiceCalibration } from '../lib/content/forge-studio.js';
+import { createJobFailureOnComplete } from '../lib/job-failure-notify.js';
 import { registerJobType } from '../lib/jobs.js';
 
 export const FORGE_MAX_BATCH = 10;
@@ -31,6 +32,10 @@ const store = { readDoc, queryDocs, patchDoc, upsertDoc };
 // The process-wide loader, shared with Forge Studio so a config edit there
 // clears the cache THIS worker reads (see forge-config-default.js).
 const config = defaultForgeConfig;
+// Failure-only Telegram ping for the autonomous content path (T-607) — the
+// interactive Studio jobs (voice-calibration, weekly digest) stay silent, the
+// owner is watching those in the UI.
+const notifyOnFailure = createJobFailureOnComplete({ store });
 
 /** `{ sourceContentId }` or `{ sourceContentIds: [...] }` (≤ FORGE_MAX_BATCH) → the ids to forge. */
 export function resolveForgeTargets(payload = {}) {
@@ -95,6 +100,7 @@ registerJobType('forge-article', {
           outcomes,
         };
   },
+  onComplete: notifyOnFailure,
 });
 
 /**
@@ -151,6 +157,7 @@ registerJobType('forge-from-url', {
       log: context,
       actor: job?.requestedBy || {},
     }),
+  onComplete: notifyOnFailure,
 });
 
 registerJobType('voice-calibration', {

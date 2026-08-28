@@ -11,6 +11,7 @@
 import * as store from '../lib/cosmos-client.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { createPublishHandlers } from '../lib/cms/publish.js';
+import { createJobFailureOnComplete } from '../lib/job-failure-notify.js';
 import { registerJobType } from '../lib/jobs.js';
 
 /** Split for tests: the worker body with its dependencies injectable. */
@@ -44,4 +45,6 @@ registerJobType('publish-content', {
     const publish = createPublishHandlers({ guard: getDefaultGuard(), store });
     return runPublishContent(payload, { job, publish });
   },
+  // A failed approval-from-the-phone must come back to the phone (T-607).
+  onComplete: createJobFailureOnComplete({ store }),
 });

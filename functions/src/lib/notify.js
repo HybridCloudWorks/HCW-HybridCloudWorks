@@ -34,12 +34,16 @@ export const SOURCE_DISPLAY_NAMES = Object.freeze({
 });
 
 export function formatTelegramText({ title, message, severity, source }) {
-  // Dynamic per-document sources ('forge_ready:{contentId}' — the per-post
-  // cooldown key from lib/triggers/forge-ready-notify.js) display as their
-  // prefix's name rather than the raw key.
-  const displayName =
-    SOURCE_DISPLAY_NAMES[source] ||
-    (String(source || '').startsWith('forge_ready:') ? 'ContentForge' : source);
+  // Dynamic prefixed sources — 'forge_ready:{contentId}' (per-post cooldown,
+  // lib/triggers/forge-ready-notify.js) and 'job_failed:{type}' (per-job-type
+  // cooldown, lib/job-failure-notify.js) — display as their prefix's name
+  // rather than the raw key.
+  const raw = String(source || '');
+  let displayName = SOURCE_DISPLAY_NAMES[source] || source;
+  if (!SOURCE_DISPLAY_NAMES[source]) {
+    if (raw.startsWith('forge_ready:')) displayName = 'ContentForge';
+    else if (raw.startsWith('job_failed:')) displayName = 'the job worker';
+  }
   return `${severityPrefix(severity)} ${title}\n\n${message}\n\nReported by ${displayName}.`;
 }
 
