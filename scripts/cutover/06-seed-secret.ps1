@@ -167,6 +167,54 @@ if (-not $vaultId) {
 }
 Write-Host "vault     : found in the current subscription"
 
+# --- Confirm a DATA-PLANE role before prompting or opening anything ----------
+# Management-plane rights and data-plane rights are separate, and this estate
+# deliberately grants the operator only the first: REVIEW.md §4.6 records
+# `az keyvault secret list` answering ForbiddenByRbac and calls that "the
+# correct posture". So you can change the vault's firewall and still not be
+# able to write a secret.
+#
+# Checked HERE — at the management plane, before anything — because the
+# alternative is finding out at the data plane: 04-telegram-webhook.ps1 did
+# exactly that on 2026-08-28, opening a firewall window on the production vault
+# and only then failing with ForbiddenByRbac. Without this, the same run would
+# also have prompted for a credential first and left it in memory for nothing.
+#
+# Role assignments are eventually consistent, so a role granted seconds ago may
+# not be visible yet. That is why this WARNS rather than throws — a false
+# negative that blocks a legitimate seed would be worse than the wasted window
+# it prevents.
+$dataPlaneRoles = @('Key Vault Secrets Officer', 'Key Vault Administrator')
+$held = @()
+try {
+    $me = az ad signed-in-user show --query id -o tsv 2>$null
+    if ($me) {
+        $held = @(az role assignment list --assignee $me --scope $vaultId --include-inherited `
+                --query '[].roleDefinitionName' -o tsv 2>$null)
+    }
+}
+catch { $held = @() }
+
+if ($held.Count -gt 0 -and -not ($held | Where-Object { $dataPlaneRoles -contains $_ })) {
+    Write-Warning "You hold [$($held -join ', ')] on this vault, none of which can WRITE a secret."
+    Write-Warning 'Expect ForbiddenByRbac. Grant yourself the data-plane role first:'
+    Write-Warning "  az role assignment create --assignee $me --role 'Key Vault Secrets Officer' --scope $vaultId"
+    Write-Warning '  # allow a minute or two to propagate, then re-run this script'
+    Write-Warning 'And remove it when the vault work is done:'
+    Write-Warning "  az role assignment delete --assignee $me --role 'Key Vault Secrets Officer' --scope $vaultId"
+    if (-not $PSCmdlet.ShouldContinue('Continue anyway?', 'No data-plane write role found')) {
+        throw 'Stopped before prompting for a value. Nothing was opened and nothing was written.'
+    }
+}
+elseif ($held.Count -gt 0) {
+    Write-Host "role      : $($held -join ', ')"
+}
+else {
+    # Listing role assignments needs its own permission. Not being able to read
+    # them is not evidence of anything either way, so it must not block.
+    Write-Host 'role      : could not enumerate role assignments; proceeding'
+}
+
 # --- Obtain the value -------------------------------------------------------
 if ($Generate) {
     if ($GENERATABLE -notcontains $Name) {
