@@ -9,8 +9,15 @@ stays exactly as it is; the machine is an addition, not a replacement.
 This page is the program of record: the architecture, the phase plan the
 tracker entries (TODO.md **T-601…T-607**) point at, the module-grammar
 contract both packages must match, the decisions already made, and the
-backlog. Update it as phases land; close each phase to CHANGELOG.md per
-house rules.
+backlog.
+
+**Status: engineering complete (2026-08-28).** All seven phases landed —
+Phase 0 + plan (#236), Phase 1 (#237), Phase 2 (#238), Phase 3 (#239),
+Phase 4 (#240), Phase 5 (#241), Phases 6–7 (#242 and the close-out PR) —
+closed to CHANGELOG.md as one program entry. What remains is the
+owner-gated activation checklist (below) and the backlog. Per-phase
+"As built" notes record where the landed code deliberately differs from
+the original spec text.
 
 ## What already exists — the load-bearing fact
 
@@ -214,6 +221,21 @@ in-editor preview stops rendering with the wrong typography.
   the owner must run anyway), dispatch `callback_query`, answer with
   `answerCallbackQuery`.
 
+**As built (#241).** Three deliberate deltas from the spec text above. The
+token verification lives in a new `lib/public-preview.js` rather than
+`lib/public-reads.js`, preserving that module's zero-imports invariant
+(node:crypto is needed). The notification's failure semantics invert
+ai-cover's: an unsent notification writes NOTHING to the document — a
+failure marker would re-fire the change feed and loop — so the flag stays
+armed and the fresh claim quiets retries for its 15-minute window; the flag
+clears only after a confirmed send, and an unseeded secret still notifies,
+saying the link is unavailable. `/reject` runs
+`createContentStatusTransitioner`, the state-machine core extracted from the
+HTTP handler so the guarded route and the bot share one writer (audit rows
+carry `authMethod: telegram_webhook`). Found and fixed in passing: the
+bot's `/ack`/`/resolve` passed the alertId as `patchDoc`'s updates argument
+and had never persisted anything (T-512-era).
+
 ### Phase 6 — Throughput: the machine runs itself (T-607)
 
 Arm `forgeScheduled`, `syncRssFeeds` and `publishScheduledContent`
@@ -224,11 +246,31 @@ per-job-type `onComplete` hook in `lib/jobs.js` used for **failure**
 notifications only — successes already ride the Phase 5 rising edge, and
 double-pinging the owner defeats the point.
 
+**As built (#242).** The counter is a rolling `forge_stats.today` bucket
+(`{ date, forged }`, reset on UTC date change) bumped by every forge run —
+scheduled, `/forge`, and forge-from-url — so the daily limit is one ledger,
+not a per-caller count; `forgeScheduled` spends only the day's remaining
+budget and skips at the limit. Ranking: an interest area scores when any of
+its keywords hits the candidate's title/topics/provider; ties keep query
+order (`scoreCandidate`/`rankCandidates` in `lib/timers/forge-scheduled.js`).
+The `onComplete` hook fires after the terminal status write for all three
+outcomes and is best-effort; `createJobFailureOnComplete`
+(`lib/job-failure-notify.js`, cooldown per `job_failed:{type}`) is wired to
+forge-article, forge-from-url and publish-content. The timer also adopted
+the process-wide `defaultForgeConfig` (the #239 singleton lesson).
+
 ### Phase 7 — Polish and program close (T-607)
 
 Grade sorting and a forged-today `n/dailyLimit` indicator on the queue; a
 `/queue`-style bot view of pending `forge_ready` items; this page updated to
 as-built; tracker entries closed to CHANGELOG.
+
+**As built (close-out PR).** "Forge grade" joined the queue's sort dropdown
+(ungraded items sort last in descending); the header shows a
+`Forged today: n/limit` meter read from the same `forge_stats.today` bucket
+the scheduler enforces (via `getForgeConfig`, which now returns it); the
+bot's `/queue` appends a "Staged for approval" list — newest five
+forge_ready items with grade and an inline `/approve {id}` per row.
 
 ## Owner-gated dependencies
 
