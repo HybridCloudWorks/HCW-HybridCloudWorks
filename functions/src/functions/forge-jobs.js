@@ -11,7 +11,7 @@
  */
 import { readDoc, queryDocs, patchDoc, upsertDoc } from '../lib/cosmos-client.js';
 import * as ai from '../lib/ai/router.js';
-import { createForgeConfigLoader } from '../lib/content/forge-config.js';
+import { defaultForgeConfig } from '../lib/content/forge-config-default.js';
 import { createDrafter } from '../lib/content/drafting.js';
 import { createGrader } from '../lib/content/forge-grader.js';
 import { createForge } from '../lib/content/forge.js';
@@ -28,7 +28,9 @@ import { registerJobType } from '../lib/jobs.js';
 export const FORGE_MAX_BATCH = 10;
 
 const store = { readDoc, queryDocs, patchDoc, upsertDoc };
-const config = createForgeConfigLoader({ store });
+// The process-wide loader, shared with Forge Studio so a config edit there
+// clears the cache THIS worker reads (see forge-config-default.js).
+const config = defaultForgeConfig;
 
 /** `{ sourceContentId }` or `{ sourceContentIds: [...] }` (≤ FORGE_MAX_BATCH) → the ids to forge. */
 export function resolveForgeTargets(payload = {}) {

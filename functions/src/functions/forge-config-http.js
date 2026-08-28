@@ -11,11 +11,15 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
 import { createForgeStudioHandlers } from '../lib/content/forge-studio.js';
+import { defaultForgeConfig } from '../lib/content/forge-config-default.js';
 
 const handlers = () =>
   createForgeStudioHandlers({
     guard: getDefaultGuard(),
     store: { readDoc, upsertDoc },
+    // The process-wide loader the forge worker also uses — an update here
+    // must clear the cache the next forge run reads, not a private copy.
+    config: defaultForgeConfig,
   });
 
 httpRoute('getForgeConfig', {

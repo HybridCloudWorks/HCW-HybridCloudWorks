@@ -101,6 +101,33 @@ describe('ForgeStudioPage', () => {
     expect(postJSON.mock.calls[0][1].profile.suggestionsKept).toEqual([]);
   });
 
+  it('removing the first row keeps the remaining row’s values (stable keys)', async () => {
+    getJSON.mockResolvedValue({
+      ...CONFIG,
+      profile: {
+        ...CONFIG.profile,
+        // No other row lists in this fixture, so "Remove row 1" is
+        // unambiguous — it can only be the first certification.
+        interestAreas: [],
+        certifications: [
+          { name: 'AZ-104', issuer: 'Microsoft', keywords: ['azure'] },
+          { name: 'SAA-C03', issuer: 'AWS', keywords: ['aws'] },
+        ],
+      },
+    });
+    render(<ForgeStudioPage />);
+    await screen.findByText('Forge Studio');
+
+    const nameInputs = () => screen.getAllByLabelText('Name');
+    expect(nameInputs().map((input) => input.value)).toEqual(['AZ-104', 'SAA-C03']);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove row 1' })[0]);
+
+    // The exact bug class index keys cause: the survivor must be SAA-C03,
+    // not AZ-104's DOM node wearing SAA-C03's position.
+    expect(nameInputs().map((input) => input.value)).toEqual(['SAA-C03']);
+  });
+
   it('calibration runs the job and reloads the config', async () => {
     runJob.mockResolvedValue({ status: 'succeeded', result: {} });
     render(<ForgeStudioPage />);

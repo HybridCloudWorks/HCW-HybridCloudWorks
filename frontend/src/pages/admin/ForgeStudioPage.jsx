@@ -36,22 +36,30 @@ const commas = (value) =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+/** Client-only stable identity for editable rows — React keys, never sent
+ * to the server (toUpdatePayload maps explicit fields only). Index keys made
+ * a removed row's neighbours inherit the wrong input values (#239 review). */
+const newRowId = () => crypto.randomUUID();
+
 /** Fetched config → the flat editable shape the form binds to. */
 function toFormState(config) {
   return {
     wordSoup: config.profile.wordSoup || '',
     interestAreas: config.profile.interestAreas.map((area) => ({
+      rowId: newRowId(),
       key: area.key,
       label: area.label,
       weight: area.weight,
       keywords: (area.keywords || []).join(', '),
     })),
     certifications: config.profile.certifications.map((cert) => ({
+      rowId: newRowId(),
       name: cert.name,
       issuer: cert.issuer,
       keywords: (cert.keywords || []).join(', '),
     })),
     speakingTopics: config.profile.speakingTopics.map((topic) => ({
+      rowId: newRowId(),
       title: topic.title,
       keywords: (topic.keywords || []).join(', '),
     })),
@@ -108,7 +116,7 @@ function RowList({ rows, columns, onChange, onAdd, onRemove, addLabel }) {
   return (
     <div className="space-y-2">
       {rows.map((row, index) => (
-        <div key={index} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div key={row.rowId} className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {columns.map((col) => (
             <Input
               key={col.field}
@@ -174,7 +182,13 @@ function VoiceProfileCard({ form, setField, setRows }) {
             onAdd={() =>
               setField('interestAreas', [
                 ...form.interestAreas,
-                { key: `custom_${Date.now()}`, label: '', weight: 50, keywords: '' },
+                {
+                  rowId: newRowId(),
+                  key: `custom_${Date.now()}`,
+                  label: '',
+                  weight: 50,
+                  keywords: '',
+                },
               ])
             }
             onRemove={(index) =>
@@ -200,7 +214,7 @@ function VoiceProfileCard({ form, setField, setRows }) {
               onAdd={() =>
                 setField('certifications', [
                   ...form.certifications,
-                  { name: '', issuer: '', keywords: '' },
+                  { rowId: newRowId(), name: '', issuer: '', keywords: '' },
                 ])
               }
               onRemove={(index) =>
@@ -222,7 +236,10 @@ function VoiceProfileCard({ form, setField, setRows }) {
               ]}
               onChange={(index, field, value) => setRows('speakingTopics', index, field, value)}
               onAdd={() =>
-                setField('speakingTopics', [...form.speakingTopics, { title: '', keywords: '' }])
+                setField('speakingTopics', [
+                  ...form.speakingTopics,
+                  { rowId: newRowId(), title: '', keywords: '' },
+                ])
               }
               onRemove={(index) =>
                 setField(
