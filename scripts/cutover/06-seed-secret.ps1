@@ -122,6 +122,47 @@ if ($referenced -notcontains $Name) {
 }
 Write-Host "name      : $Name (referenced by infra/main.tf)"
 
+# --- Confirm the CLI is pointed at the subscription holding the vault --------
+# Before prompting for a value, and before opening anything.
+#
+# The estate spans three subscriptions, and every other cutover script assumes
+# the current one is right. When it is not, Azure answers
+#
+#     The Vault 'kv-site-prod-cus-01' not found within subscription.
+#
+# which reads as "this vault does not exist" and sends you looking for a
+# deleted resource. It means "you are pointed somewhere else". Observed
+# 2026-08-28 on 04-telegram-webhook.ps1, after it had already printed
+# "opening a firewall window" — the window did not open, because the same
+# wrong-subscription error failed that call too, but the operator had no way to
+# know that from the output.
+# try/catch, not just 2>$null: PowerShell 7.4+ turns a non-zero native exit
+# into a terminating error by default ($PSNativeCommandUseErrorActionPreference),
+# which would throw past the message below on the not-signed-in path. A missing
+# vault in the CURRENT subscription is exit 0 with empty output, so both cases
+# have to be handled and only one of them raises.
+$vaultId = $null
+try { $vaultId = az keyvault list --query "[?name=='$VaultName'].id" -o tsv 2>$null } catch { $vaultId = $null }
+if (-not $vaultId) {
+    $current = $null
+    try { $current = az account show --query 'name' -o tsv 2>$null } catch { $current = $null }
+    $lines = @(
+        "Key Vault '$VaultName' is not in the subscription the az CLI is currently using" +
+        $(if ($current) { " ('$current')." } else { '. You may not be signed in — try: az login' }),
+        '',
+        'This is almost never a missing vault. Find the right subscription with:',
+        '',
+        '  foreach ($s in (az account list --query "[].id" -o tsv)) {',
+        "    `$rg = az keyvault list --subscription `$s --query `"[?name=='$VaultName'].resourceGroup`" -o tsv 2>`$null",
+        '    if ($rg) { "FOUND  sub=$s  rg=$rg" }',
+        '  }',
+        '',
+        '  az account set --subscription <the id that printed>'
+    )
+    throw ($lines -join [Environment]::NewLine)
+}
+Write-Host "vault     : found in the current subscription"
+
 # --- Obtain the value -------------------------------------------------------
 if ($Generate) {
     if ($GENERATABLE -notcontains $Name) {
