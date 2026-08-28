@@ -336,6 +336,15 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
 
       applyPublishTimeCoverTrigger(contentUpdate, contentData);
 
+      // Social caption auto-queue (backlog #1): armed once per document, on a
+      // LIVE publish only — a republish or an edit-and-republish must not
+      // post to social again. The change-feed trigger
+      // (lib/triggers/social-caption-trigger.js) decides everything else,
+      // including whether autoposting is enabled at all.
+      if (params.markLive && !contentData.socialCaptionGeneratedAt) {
+        contentUpdate.socialCaptionTrigger = true;
+      }
+
       const persistedIso = ctx.persistedPublishedDate
         ? ctx.persistedPublishedDate.toISOString()
         : null;
