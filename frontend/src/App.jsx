@@ -135,6 +135,7 @@ const FrameworkDetailTemplate = lazyPage(
   () => import('@/components/templates/FrameworkDetailTemplate')
 );
 const BlogDetailTemplate = lazyPage(() => import('@/components/templates/BlogDetailTemplate'));
+const PreviewPage = lazyPage(() => import('@/pages/PreviewPage'));
 const RosettaStoneSubmissionPage = lazyPage(
   () => import('@/pages/submissions/RosettaStoneSubmissionPage')
 );
@@ -330,6 +331,9 @@ function App() {
               <Route path="/tools/comparison" element={<ToolsComparisonPage />} />
               <Route path="/tools/resources" element={<ToolsResourcesPage />} />
               <Route path="/tools/decisions" element={<ToolsDecisionsPage />} />
+              {/* --- Staging preview (T-606): signed-link view of unpublished
+                  drafts. Static segment outranks /:provider in route ranking. --- */}
+              <Route path="/preview/:id" element={<PreviewPage />} />
               {/* --- Templates --- */}
               <Route path="/templates/framework" element={<FrameworkSubmissionPage />} />
               <Route path="/templates/architecture" element={<ArchitectureSubmissionPage />} />

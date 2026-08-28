@@ -58,6 +58,20 @@ export async function fetchPublicContentItem(slugOrId) {
 }
 
 /**
+ * GET public/preview/{contentId}?t={token} — the signed staging preview
+ * (T-606). The HMAC token is the whole authorization; the server answers an
+ * identical 404 for anything invalid, so null covers bad token, expiry and
+ * missing document alike.
+ */
+export async function fetchPreviewContentItem(contentId, token) {
+  if (!contentId || !token) return null;
+  const body = await publicGet(
+    `public/preview/${encodeURIComponent(contentId)}?t=${encodeURIComponent(token)}`
+  );
+  return body?.item || null;
+}
+
+/**
  * GET public/snapshots/{id} — items from a build-time snapshot document
  * ('certifications' | 'speakerevents'). Returns [] when missing or on error,
  * matching the quiet-fallback contract of loadPublicDataSnapshot.

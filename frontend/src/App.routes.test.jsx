@@ -200,4 +200,12 @@ describe('public route contract', () => {
     expect(await screen.findByText(expectedText)).toBeInTheDocument();
     expect(screen.queryByText(/PAGES Not Found/i)).not.toBeInTheDocument();
   });
+
+  it('mounts the staging preview route instead of the provider fallback', async () => {
+    // usePublicData is mocked to no data, so PreviewPage shows its own
+    // unavailable view — proving /preview/:id routes there, not to /:provider.
+    renderRoute('/preview/some-id?t=token');
+
+    expect(await screen.findByText(/Preview unavailable/i)).toBeInTheDocument();
+  });
 });
