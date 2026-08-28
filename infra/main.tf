@@ -47,7 +47,7 @@ resource "azurerm_resource_group" "app" {
 
   name     = "rg-${each.key}-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
-  tags     = var.tags
+  tags     = local.tags
 }
 
 # Platform Management. Holds the central Log Analytics workspace every other
@@ -59,7 +59,7 @@ resource "azurerm_resource_group" "platform_mgmt" {
 
   name     = "rg-mgmt-plat-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
-  tags     = var.tags
+  tags     = local.tags
 }
 
 # =============================================================================
@@ -81,7 +81,7 @@ resource "azurerm_log_analytics_workspace" "hcw" {
   # stops until the daily reset — Cosmos DataPlaneRequests (observability.tf)
   # is the likeliest culprit; prune that category before raising the cap.
   daily_quota_gb = 0.25
-  tags           = var.tags
+  tags           = local.tags
 }
 
 # =============================================================================
@@ -93,7 +93,7 @@ resource "azurerm_application_insights" "hcw" {
   resource_group_name = azurerm_resource_group.app["web"].name
   workspace_id        = azurerm_log_analytics_workspace.hcw.id
   application_type    = "Node.JS"
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # `sampling_percentage` is DELIBERATELY NOT SET, and the reason is not
@@ -154,7 +154,7 @@ resource "azurerm_static_web_app" "hcw" {
   resource_group_name = azurerm_resource_group.app["web"].name
   sku_tier            = "Standard"
   sku_size            = "Standard"
-  tags                = var.tags
+  tags                = local.tags
 
   lifecycle {
     # These two are written by the deploy, not by Terraform.
@@ -313,7 +313,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
     prevent_destroy = true
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Cosmos DB SQL Database
@@ -386,6 +386,15 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # prevent_destroy (T-708): the guard has to come off deliberately, in its own
 # reviewed PR, before any such change can apply.
 # -----------------------------------------------------------------------------
+
+locals {
+  # The applied tag map (T-752). var.tags carries the org-stable keys; the
+  # environment is derived from var.environment so a deployment of this root
+  # into a non-prod environment cannot tag every resource `prod` unless the
+  # operator remembers to override the whole map. Value-identical today
+  # (var.environment is "prod"), so this lands as a no-op plan.
+  tags = merge(var.tags, { environment = var.environment })
+}
 
 locals {
   cosmos_container_spec = jsondecode(file("${path.module}/cosmos-containers.json"))
@@ -577,7 +586,7 @@ resource "azurerm_storage_account" "hcw" {
     prevent_destroy = true
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Blob containers — every one private, because the account override above means
@@ -700,7 +709,7 @@ resource "azurerm_virtual_network" "hcw" {
   location            = azurerm_resource_group.app["conn"].location
   resource_group_name = azurerm_resource_group.app["conn"].name
   address_space       = [var.vnet_address_space]
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_subnet" "functions_integration" {
@@ -786,7 +795,7 @@ resource "azurerm_network_security_group" "functions_integration" {
   name                = "nsg-${var.workload_name}-func-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["conn"].location
   resource_group_name = azurerm_resource_group.app["conn"].name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_subnet_network_security_group_association" "functions_integration" {
@@ -802,7 +811,7 @@ resource "azurerm_storage_account" "functions" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
-  tags                     = var.tags
+  tags                     = local.tags
 
   # Account keys off — the credential half of the same posture the network
   # rules below take. All three access paths listed there are Entra-based
@@ -875,7 +884,7 @@ resource "azurerm_service_plan" "hcw" {
   resource_group_name = azurerm_resource_group.app["web"].name
   os_type             = "Linux"
   sku_name            = "FC1" # Flex Consumption — VNet integration, scales to zero
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # Deployment container for Flex Consumption.
@@ -1052,9 +1061,16 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # API, and true would additionally make the platform intercept far more than
     # preflights.
     cors {
+      # Derived, not hardcoded (T-750). The storage account's CORS block a few
+      # hundred lines above already built its origins from var.domain, while
+      # this one repeated the apex literally and pinned the SWA hostname as a
+      # string — so a domain change updated one surface and not the other, and
+      # a recreated Static Web App silently invalidated the literal. The SWA
+      # hostname is an attribute of the resource; using it means the two can
+      # never disagree. Value-identical today, so a no-op plan proves it.
       allowed_origins = concat(
-        ["https://hybridcloudworks.com", "https://www.hybridcloudworks.com"],
-        ["https://calm-ground-0d0e6a010.7.azurestaticapps.net"],
+        ["https://${var.domain}", "https://www.${var.domain}"],
+        ["https://${azurerm_static_web_app.hcw.default_host_name}"],
         var.cors_extra_origins,
       )
       support_credentials = false
@@ -1472,7 +1488,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     type = "SystemAssigned"
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # ---------------------------------------------------------------------------
@@ -1771,7 +1787,7 @@ resource "azurerm_key_vault" "hcw" {
     prevent_destroy = true
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Key Vault Secrets User — Function App managed identity (read-only at runtime)

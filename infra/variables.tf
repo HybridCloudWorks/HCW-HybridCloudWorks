@@ -968,8 +968,15 @@ variable "domain" {
 # -----------------------------------------------------------------------------
 # Tags
 # -----------------------------------------------------------------------------
+# NOTE (T-752): `environment` here is a fallback only — local.tags in main.tf
+# overrides it from var.environment, so the two cannot drift. `workload` is
+# deliberately NOT derived from var.workload_name: the live estate is tagged
+# `hybridcloudworks` while resource NAMES carry the workload token `site`, and
+# reconciling them rewrites the tag on every resource in the subscription. That
+# is a deliberate, owner-visible change rather than a side effect of this one,
+# so it is recorded in the review and left alone here.
 variable "tags" {
-  description = "Default tags applied to all Azure resources"
+  description = "Default tags applied to all Azure resources (see local.tags)"
   type        = map(string)
   default = {
     workload           = "hybridcloudworks"

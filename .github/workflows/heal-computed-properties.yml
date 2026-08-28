@@ -91,4 +91,10 @@ jobs:
           # infra/oidc.tf, not by the data-plane grants.
           SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
           COSMOS_RESOURCE_GROUP: ${{ vars.COSMOS_RESOURCE_GROUP }}
-        run: node apply-computed-sortdate.mjs --${{ inputs.mode || 'apply' }}
+          # Through env, not spliced into the command (T-756). A type:choice
+          # input is validated at dispatch and dispatching needs write access,
+          # so exploitability is near nil — but this was the one place in the
+          # repository that deviated from the env-var pattern used deliberately
+          # everywhere else, and the exception is what a reader has to check.
+          MODE: ${{ inputs.mode || 'apply' }}
+        run: node apply-computed-sortdate.mjs --"$MODE"

@@ -39,7 +39,7 @@ resource "azurerm_resource_group" "platform_conn" {
 
   name     = "rg-conn-hub-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
-  tags     = var.tags
+  tags     = local.tags
 }
 
 resource "azurerm_virtual_network" "hub" {
@@ -51,7 +51,7 @@ resource "azurerm_virtual_network" "hub" {
   location            = azurerm_resource_group.platform_conn.location
   resource_group_name = azurerm_resource_group.platform_conn.name
   address_space       = [var.hub_address_space]
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # A shared-services subnet is the only one with a tenant today. The reserved
@@ -75,7 +75,7 @@ resource "azurerm_network_security_group" "hub_shared" {
   name                = "nsg-plat-shared-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.platform_conn.location
   resource_group_name = azurerm_resource_group.platform_conn.name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_subnet_network_security_group_association" "hub_shared" {
@@ -98,7 +98,7 @@ resource "azurerm_route_table" "hub" {
   name                = "rt-plat-spoke-${var.environment}-${var.region_abbreviation}"
   location            = azurerm_resource_group.platform_conn.location
   resource_group_name = azurerm_resource_group.platform_conn.name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # =============================================================================

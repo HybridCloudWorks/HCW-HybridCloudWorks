@@ -60,7 +60,7 @@ resource "azurerm_monitor_action_group" "ops" {
     }
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Key Vault — who touched the vault. AuditEvent is the category the plan
@@ -270,14 +270,14 @@ resource "azurerm_user_assigned_identity" "alerts_mgmt" {
   name                = "id-plat-alerts-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.platform_mgmt.location
   resource_group_name = azurerm_resource_group.platform_mgmt.name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_user_assigned_identity" "alerts_app" {
   name                = "id-${var.workload_name}-alerts-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # LOG ANALYTICS READER RATHER THAN READER OR MONITORING READER, and the
@@ -396,7 +396,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [
     azurerm_role_assignment.alerts_app_workspace,
@@ -465,7 +465,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_response_tim
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [
     azurerm_role_assignment.alerts_app_workspace,
@@ -521,7 +521,7 @@ resource "azurerm_monitor_metric_alert" "cosmos_throttled" {
     action_group_id = azurerm_monitor_action_group.ops.id
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # ---------------------------------------------------------------------------
@@ -608,7 +608,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   # Permissions before the rule, which is the entire reason this identity is
   # user-assigned. identity_ids alone orders the rule after the IDENTITY, not
@@ -700,7 +700,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "logs_daily_cap" {
     identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
 }
@@ -786,7 +786,7 @@ resource "azurerm_application_insights_standard_web_test" "api_health" {
     ssl_check_enabled = false
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # The alert on the test above.
@@ -837,7 +837,7 @@ resource "azurerm_monitor_metric_alert" "api_availability" {
     action_group_id = azurerm_monitor_action_group.ops.id
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # ---------------------------------------------------------------------------
@@ -914,7 +914,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [
     azurerm_role_assignment.alerts_app_workspace,
