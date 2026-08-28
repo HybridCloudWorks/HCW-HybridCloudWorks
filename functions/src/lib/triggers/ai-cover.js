@@ -14,6 +14,7 @@
  */
 import { readKey } from '../ai/router.js';
 import { mediaUrlFor } from '../blob-paths.js';
+import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { claimRisingEdge, releaseRisingEdgeClaim, SKIP_REASONS } from './rising-edge-claim.js';
 import { fetchImage as defaultFetchImage } from './fetch-image.js';
 
@@ -22,6 +23,45 @@ export const AI_COVER_CLAIM_FIELDS = Object.freeze({
   claimField: 'altCoverImageRunId',
   claimedAtField: 'altCoverImageRunAt',
 });
+
+/**
+ * The curated per-provider default heroes (T-606): admin_config/default_heroes
+ * carries { heroes: { Azure: '/api/public/media/covers/…', AWS: …, Multi: … } }
+ * — uploaded once by the owner through the image gallery. Absent doc or
+ * provider key = no fallback, same behavior as before the feature.
+ */
+export const DEFAULT_HEROES_CONFIG_ID = 'default_heroes';
+
+/** Case-insensitive provider → hero URL, with Multi as the catch-all. */
+export function pickDefaultHero(heroes = {}, providerRaw = '') {
+  const provider = String(providerRaw || '')
+    .trim()
+    .toLowerCase();
+  const entries = Object.entries(heroes || {});
+  const byKey = (wanted) =>
+    entries.find(([key]) => key.toLowerCase() === wanted)?.[1] || null;
+  if (provider) {
+    const exact = byKey(provider);
+    if (exact) return exact;
+    if (provider.includes('google')) {
+      const gcp = byKey('gcp');
+      if (gcp) return gcp;
+    }
+  }
+  return byKey('multi');
+}
+
+/** Mirrors applyPublishTimeCoverTrigger's "already has a cover" field list. */
+function hasCover(data = {}) {
+  return Boolean(
+    data.altCoverImage ||
+      data['Cover Image'] ||
+      data.contentImageUrl ||
+      data.aiImageUrls?.hero ||
+      data.heroImageUrl ||
+      data.coverImage
+  );
+}
 
 export const PROVIDER_THEMES = Object.freeze({
   Azure: { color: 'blue and white', vibe: 'modern and corporate' },
@@ -234,12 +274,49 @@ export function createAiCoverGenerator({
         `[generateAiCover:content] Failed for content/${contentId}: ${err?.message || err}`
       );
       // Releasing the claim is required: a claim left behind blocks the next request for the whole window.
-      await store.patchDoc('content', contentId, {
+      const errorUpdate = {
         ...releaseRisingEdgeClaim(AI_COVER_CLAIM_FIELDS),
         altCoverImageTrigger: false,
         altCoverImageError: String(err?.message || err).slice(0, 500),
-      });
-      return { ran: false, reason: `error: ${err?.message || err}` };
+      };
+      // Deterministic fallback (T-606): generation failed or is unconfigured,
+      // but a post should still stage with a designed cover. Best effort — a
+      // failure reading the mapping keeps the plain error patch.
+      let fallbackApplied = false;
+      if (!hasCover(data)) {
+        try {
+          const config = await store.readDoc(
+            'admin_config',
+            DEFAULT_HEROES_CONFIG_ID,
+            ADMIN_CONFIG_PARTITION
+          );
+          const fallback = pickDefaultHero(
+            config?.heroes,
+            data['Cloud Provider'] || data.cloudProvider || ''
+          );
+          if (fallback) {
+            // contentImageUrl too: the public list projection carries it but
+            // not heroImageUrl (lib/public-reads.js PUBLIC_CONTENT_LIST_FIELDS).
+            errorUpdate.altCoverImage = fallback;
+            errorUpdate.contentImageUrl = fallback;
+            errorUpdate.altCoverImageError = `fallback: default hero (${String(
+              err?.message || err
+            ).slice(0, 400)})`;
+            fallbackApplied = true;
+          }
+        } catch (fallbackErr) {
+          log.warn?.(
+            `[generateAiCover:content] default-hero fallback failed for content/${contentId}: ${fallbackErr?.message || fallbackErr}`
+          );
+        }
+      }
+      await store.patchDoc('content', contentId, errorUpdate);
+      return {
+        ran: false,
+        reason: fallbackApplied
+          ? `error_with_default_hero: ${err?.message || err}`
+          : `error: ${err?.message || err}`,
+      };
     }
   }
   return { run };

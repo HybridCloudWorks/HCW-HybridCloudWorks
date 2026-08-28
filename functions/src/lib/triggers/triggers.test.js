@@ -19,6 +19,7 @@ import {
 } from './dashboard-stats.js';
 import {
   createAiCoverGenerator,
+  pickDefaultHero,
   createReplicateClient,
   resolveAiCoverTargets,
 } from './ai-cover.js';
@@ -435,6 +436,65 @@ describe('AI cover', () => {
       altCoverImageError: 'Replicate HTTP 503',
     });
   });
+
+  it('assigns the curated default hero on failure when a mapping exists (T-606)', async () => {
+    const store = memStore({
+      content: [
+        { id: 'c3', altCoverImageTrigger: true, 'Cloud Provider': 'AWS', _etag: 'e' },
+        // Already has a cover: the default must not overwrite it.
+        {
+          id: 'c4',
+          altCoverImageTrigger: true,
+          contentImageUrl: '/api/public/media/covers/manual.png',
+          _etag: 'e',
+        },
+      ],
+      admin_config: [
+        {
+          id: 'default_heroes',
+          heroes: {
+            AWS: '/api/public/media/covers/default-aws.png',
+            Multi: '/api/public/media/covers/default-multi.png',
+          },
+        },
+      ],
+    });
+    const replicate = { generate: vi.fn(async () => Promise.reject(new Error('boom'))) };
+    const gen = createAiCoverGenerator({
+      store,
+      storage: { uploadBlob: vi.fn() },
+      replicate,
+      fetchImage: vi.fn(),
+      now,
+      uuid: () => 'g1',
+    });
+
+    expect((await gen.run('c3', 'ev3')).reason).toBe('error_with_default_hero: boom');
+    expect(store.data.content.get('c3')).toMatchObject({
+      altCoverImageTrigger: false,
+      altCoverImage: '/api/public/media/covers/default-aws.png',
+      contentImageUrl: '/api/public/media/covers/default-aws.png',
+      altCoverImageError: 'fallback: default hero (boom)',
+    });
+
+    expect((await gen.run('c4', 'ev4')).reason).toBe('error: boom');
+    expect(store.data.content.get('c4')).toMatchObject({
+      contentImageUrl: '/api/public/media/covers/manual.png',
+      altCoverImageError: 'boom',
+    });
+    expect(store.data.content.get('c4').altCoverImage).toBeUndefined();
+  });
+
+  it('pickDefaultHero: case-insensitive keys, Google Cloud → GCP, Multi catch-all', () => {
+    const heroes = { AWS: '/aws.png', gcp: '/gcp.png', Multi: '/multi.png' };
+    expect(pickDefaultHero(heroes, 'aws')).toBe('/aws.png');
+    expect(pickDefaultHero(heroes, 'AWS')).toBe('/aws.png');
+    expect(pickDefaultHero(heroes, 'Google Cloud')).toBe('/gcp.png');
+    expect(pickDefaultHero(heroes, 'vmware')).toBe('/multi.png');
+    expect(pickDefaultHero(heroes, '')).toBe('/multi.png');
+    expect(pickDefaultHero({}, 'aws')).toBe(null);
+    expect(pickDefaultHero(undefined, 'aws')).toBe(null);
+  });
 });
 
 describe('feed handlers', () => {
@@ -447,6 +507,7 @@ describe('feed handlers', () => {
       },
       inspector: { executeInspection: vi.fn(async () => ({ contentStatus: 'inspected' })) },
       aiCover: { run: vi.fn(async () => ({ ran: true, reason: 'generated' })) },
+      forgeReadyNotify: { run: vi.fn(async () => ({ ran: true, reason: 'sent' })) },
       dashboardStats: { applyTransition: vi.fn(async () => ({})) },
       notifier: { notifyTelegram: vi.fn(async () => ({ sent: true })) },
       publer: { configured: true, request: vi.fn(async () => ({})) },
@@ -483,16 +544,31 @@ describe('feed handlers', () => {
 
   it('content: inspect on flag (recording errors), AI cover on flag, counters always', async () => {
     const store = memStore({
-      content: [{ id: 'c1', inspectTrigger: true, altCoverImageTrigger: true, url: 'https://s' }],
+      content: [
+        {
+          id: 'c1',
+          inspectTrigger: true,
+          altCoverImageTrigger: true,
+          forgeReadyNotifyTrigger: true,
+          url: 'https://s',
+        },
+      ],
     });
     const d = deps(store);
     const h = createFeedHandlers(d);
     const ctx = { error: vi.fn() };
     expect(await h.content([store.data.content.get('c1'), { id: 'c2' }], ctx)).toEqual([
-      { id: 'c1', inspected: 'inspected', aiCover: 'generated', statsMoved: false },
+      {
+        id: 'c1',
+        inspected: 'inspected',
+        aiCover: 'generated',
+        forgeReadyNotify: 'sent',
+        statsMoved: false,
+      },
       { id: 'c2', statsMoved: false },
     ]);
     expect(d.dashboardStats.applyTransition).toHaveBeenCalledTimes(2);
+    expect(d.forgeReadyNotify.run).toHaveBeenCalledTimes(1);
     d.inspector.executeInspection.mockRejectedValueOnce(new Error('Status code 403'));
     const [r] = await h.content([{ id: 'c3', inspectTrigger: true }], ctx);
     expect(r.inspected).toBe('error');

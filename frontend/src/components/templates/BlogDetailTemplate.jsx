@@ -29,7 +29,15 @@ import { resolveMediaUrl } from '../../lib/functionsBase';
  * the six Firestore lookups and candidate-ranking this component carried.
  * - Displays: hero image, title, meta, AI summary, full content, source link.
  */
-export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' }) {
+export default function BlogDetailTemplate({
+  provider = 'aws',
+  section = 'blog',
+  // Staging preview (T-606): when previewItem is set the template renders it
+  // instead of fetching by slug, and previewMode swaps the public chrome
+  // (canonical/OG, back link) for a noindex meta and a status banner.
+  previewItem = null,
+  previewMode = false,
+}) {
   const backPath =
     section === 'news'
       ? `/${provider}/rss`
@@ -50,10 +58,14 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
 
   const { slug } = useParams();
 
-  const { data: article, loading } = usePublicData(
+  // A falsy key disables usePublicData's fetch (its documented contract), so
+  // preview renders never hit the public content route.
+  const { data: fetchedArticle, loading: fetchLoading } = usePublicData(
     () => fetchPublicContentItem(slug),
-    slug ? `article:${slug}` : ''
+    slug && !previewItem ? `article:${slug}` : ''
   );
+  const article = previewItem || fetchedArticle;
+  const loading = previewItem ? false : fetchLoading;
 
   // Normalize field names across blogs/content documents
   const post = useMemo(() => {
@@ -170,37 +182,68 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
 
   return (
     <div className="pt-28 pb-20 px-4 md:px-8 max-w-[1200px] mx-auto w-full">
-      <Helmet>
-        <title>{`${post.title} | HCW`}</title>
-        <meta name="description" content={post.summary} />
-        <link
-          rel="canonical"
-          href={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
-        />
-        {/* Open Graph */}
-        <meta property="og:type" content="article" />
-        <meta property="og:title" content={`${post.title} | HCW`} />
-        <meta property="og:description" content={post.summary} />
-        <meta
-          property="og:url"
-          content={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
-        />
-        {post.imageUrl && <meta property="og:image" content={resolveMediaUrl(post.imageUrl)} />}
-        {/* Twitter Card */}
-        <meta name="twitter:card" content={post.imageUrl ? 'summary_large_image' : 'summary'} />
-        <meta name="twitter:title" content={`${post.title} | HCW`} />
-        <meta name="twitter:description" content={post.summary} />
-        {post.imageUrl && <meta name="twitter:image" content={resolveMediaUrl(post.imageUrl)} />}
-      </Helmet>
+      {previewMode ? (
+        <Helmet>
+          <title>{`Preview: ${post.title} | HCW`}</title>
+          {/* A preview URL is semi-secret and temporary — never indexed. */}
+          <meta name="robots" content="noindex, nofollow" />
+        </Helmet>
+      ) : (
+        <Helmet>
+          <title>{`${post.title} | HCW`}</title>
+          <meta name="description" content={post.summary} />
+          <link
+            rel="canonical"
+            href={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
+          />
+          {/* Open Graph */}
+          <meta property="og:type" content="article" />
+          <meta property="og:title" content={`${post.title} | HCW`} />
+          <meta property="og:description" content={post.summary} />
+          <meta
+            property="og:url"
+            content={`https://hybridcloudworks.com/${provider}/${section}/${slug}`}
+          />
+          {post.imageUrl && <meta property="og:image" content={resolveMediaUrl(post.imageUrl)} />}
+          {/* Twitter Card */}
+          <meta name="twitter:card" content={post.imageUrl ? 'summary_large_image' : 'summary'} />
+          <meta name="twitter:title" content={`${post.title} | HCW`} />
+          <meta name="twitter:description" content={post.summary} />
+          {post.imageUrl && <meta name="twitter:image" content={resolveMediaUrl(post.imageUrl)} />}
+        </Helmet>
+      )}
 
-      {/* Back link */}
-      <Link
-        to={backPath}
-        className="inline-flex items-center gap-2 text-sm text-foreground hover:text-primary transition-colors mb-8 group"
-      >
-        <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
-        {backLabel}
-      </Link>
+      {/* Back link (not in preview — the preview URL stands alone) */}
+      {!previewMode && (
+        <Link
+          to={backPath}
+          className="inline-flex items-center gap-2 text-sm text-foreground hover:text-primary transition-colors mb-8 group"
+        >
+          <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
+          {backLabel}
+        </Link>
+      )}
+
+      {/* Preview banner: what this is and where it stands */}
+      {previewMode && (
+        <div className="mb-8 rounded-xl border border-amber-400/50 bg-amber-500/10 px-5 py-4">
+          <p className="eyebrow-label text-amber-700 dark:text-amber-300">Preview — not live</p>
+          <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">
+            Status: <span className="font-medium">{article.contentStatus || 'unknown'}</span>
+            {typeof article.forgeGrade?.overall === 'number' && (
+              <>
+                {' · '}Forge grade:{' '}
+                <span className="font-medium">
+                  {article.forgeGrade.overall}
+                  {typeof article.forgeGrade.threshold === 'number'
+                    ? ` / threshold ${article.forgeGrade.threshold}`
+                    : ''}
+                </span>
+              </>
+            )}
+          </p>
+        </div>
+      )}
 
       <article className="blog-detail-article">
         {/* Hero Image */}

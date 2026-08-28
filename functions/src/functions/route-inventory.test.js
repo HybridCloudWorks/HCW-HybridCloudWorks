@@ -119,6 +119,13 @@ const PUBLIC_ROUTES = new Set([
   // is here because the public news pages were calling the editor-gated
   // equivalent and rendering nothing (TODO.md T-210).
   'public/curated-image/{id}',
+  // Staging preview for the Telegram approval loop (T-606). Anonymous, but the
+  // HMAC token in ?t= is the authorization: signed over contentId + expiry
+  // with PREVIEW_SIGNING_SECRET, 72 h TTL. Serves only forge_ready/editing/
+  // approved documents, and every refusal — bad token, expired, unconfigured
+  // secret, missing doc, wrong status — answers the identical 404, so the
+  // route cannot be used as an existence oracle — lib/public-preview.js.
+  'public/preview/{contentId}',
   // Approved Listen & Learn episodes for one certification. The generator
   // writes every episode as a draft and an editor approves them one at a time,
   // so this route returns only `status === 'published'` documents — the review

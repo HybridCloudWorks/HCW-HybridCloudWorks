@@ -56,6 +56,8 @@ export const TOGGLEABLE_COMMANDS = Object.freeze([
   'ack',
   'resolve',
   'forge',
+  'approve',
+  'reject',
 ]);
 
 export const HELP_TEXT = `Commands:
@@ -69,6 +71,8 @@ export const HELP_TEXT = `Commands:
 /ack <alertId> - acknowledge an alert
 /resolve <alertId> <note> - resolve an alert
 /forge <contentId> - queue the forge pipeline on a candidate
+/approve <contentId> - publish a staged draft live
+/reject <contentId> [reason] - reject a staged draft
 /help - this message
 
 Anything else is answered as a free-form question grounded in current platform status.`;
@@ -245,7 +249,12 @@ export function createTelegramBot({
       normalizedResolutionNote: note,
       alertData: alert,
     });
-    await store.patchDoc('workflow_alerts', alertId, alertId, updates);
+    // patchDoc's third argument is the updates object (partitionKey rides in
+    // options and defaults to the id). This used to pass alertId there, which
+    // Object.entries() exploded into per-character junk fields while the real
+    // updates were silently dropped — /ack and /resolve confirmed without
+    // persisting anything.
+    await store.patchDoc('workflow_alerts', alertId, updates);
     await logActivity({ command: `/${action}`, args: alertId, ok: true, detail: `${action}d` });
     return `Done — alert ${alertId} is now ${action === 'acknowledge' ? 'acknowledged' : 'resolved'}.`;
   }
@@ -298,6 +307,51 @@ export function createTelegramBot({
         { sourceContentId: contentId },
         `Queued the forge pipeline for ${contentId}.`
       );
+    },
+    approve: async (argText) => {
+      const contentId = argText.trim();
+      if (!contentId) return 'Usage: /approve <contentId>';
+      // The publish-content worker calls the injected processPublishContent
+      // with markLive: true — the same pipeline as the admin portal and the
+      // scheduled publisher, every gate included (T-606).
+      return queue(
+        'publish-content',
+        { contentId },
+        `Queued publish for ${contentId} — it goes live once every gate passes.`
+      );
+    },
+    reject: async (argText) => {
+      const [contentId, ...reasonParts] = argText.split(/\s+/);
+      const reason = reasonParts.join(' ').trim();
+      if (!contentId) return 'Usage: /reject <contentId> [reason]';
+      // Same lazy-import shape as updateAlert: the transition core is the
+      // portal's own writer (one state machine, not a bot-side copy).
+      const { createContentStatusTransitioner } = await import('../cms/content-update.js');
+      const applyTransition = createContentStatusTransitioner({ store, now, uuid });
+      const result = await applyTransition({
+        contentId,
+        newStatus: 'rejected',
+        reviewNotes: reason,
+        reviewedBy: 'telegram-bot',
+        authMethod: 'telegram_webhook',
+      });
+      if (!result.ok) {
+        await logActivity({ command: '/reject', args: argText, ok: false, detail: result.error });
+        if (result.status === 404) {
+          return `I couldn't find content ${contentId}.`;
+        }
+        const allowed = result.allowedTransitions?.length
+          ? ` (allowed next: ${result.allowedTransitions.join(', ')})`
+          : '';
+        return `Can't reject ${contentId}: ${result.error}${allowed}`;
+      }
+      await logActivity({
+        command: '/reject',
+        args: argText,
+        ok: true,
+        detail: `${result.from} -> rejected`,
+      });
+      return `Done — ${contentId} is rejected (was ${result.from})${reason ? `, noted: ${reason}` : ''}.`;
     },
   };
 

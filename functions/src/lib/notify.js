@@ -34,7 +34,13 @@ export const SOURCE_DISPLAY_NAMES = Object.freeze({
 });
 
 export function formatTelegramText({ title, message, severity, source }) {
-  return `${severityPrefix(severity)} ${title}\n\n${message}\n\nReported by ${SOURCE_DISPLAY_NAMES[source] || source}.`;
+  // Dynamic per-document sources ('forge_ready:{contentId}' — the per-post
+  // cooldown key from lib/triggers/forge-ready-notify.js) display as their
+  // prefix's name rather than the raw key.
+  const displayName =
+    SOURCE_DISPLAY_NAMES[source] ||
+    (String(source || '').startsWith('forge_ready:') ? 'ContentForge' : source);
+  return `${severityPrefix(severity)} ${title}\n\n${message}\n\nReported by ${displayName}.`;
 }
 
 /**

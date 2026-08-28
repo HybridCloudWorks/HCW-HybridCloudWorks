@@ -310,8 +310,13 @@ export function createForge({
       updatedBy: by,
     };
     // Cover at forge_ready so the image pipeline fires at staging; the
-    // publish-time call stays as the idempotent safety net.
-    if (nextStatus === 'forge_ready') applyPublishTimeCoverTrigger(update, data);
+    // publish-time call stays as the idempotent safety net. The notify flag
+    // is boolean because the rising-edge claim requires one — contentStatus
+    // itself is not a flag (lib/triggers/forge-ready-notify.js).
+    if (nextStatus === 'forge_ready') {
+      applyPublishTimeCoverTrigger(update, data);
+      update.forgeReadyNotifyTrigger = true;
+    }
 
     await store.patchDoc('content', contentId, update);
     await store.upsertDoc('content_versions', {

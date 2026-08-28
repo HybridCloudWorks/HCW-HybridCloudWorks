@@ -184,12 +184,22 @@ describe('long commands enqueue rather than run inline', () => {
 });
 
 describe('alert actions', () => {
-  it('/ack patches the alert and confirms', async () => {
+  it('/ack patches the alert with the UPDATES as the third argument and confirms', async () => {
     const { bot, store, send } = makeBot({
       store: { readDoc: vi.fn(async () => ({ id: 'a1', status: 'open' })) },
     });
     await bot.handleUpdate(message('/ack a1'));
-    expect(store.patchDoc).toHaveBeenCalledWith('workflow_alerts', 'a1', 'a1', expect.any(Object));
+    // The third patchDoc argument is the updates object. This call used to
+    // pass the alertId there, which Object.entries() exploded into
+    // per-character junk fields while the real updates were dropped — the
+    // command confirmed without persisting anything.
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    const [container, id, updates] = store.patchDoc.mock.calls[0];
+    expect(container).toBe('workflow_alerts');
+    expect(id).toBe('a1');
+    expect(typeof updates).toBe('object');
+    expect(updates).not.toBeNull();
+    expect(Object.keys(updates).length).toBeGreaterThan(0);
     expect(send).toHaveBeenCalledWith(expect.stringContaining('acknowledged'));
   });
 
@@ -205,6 +215,78 @@ describe('alert actions', () => {
     await bot.handleUpdate(message('/resolve a1'));
     expect(store.patchDoc).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith('Usage: /resolve <alertId> <note>');
+  });
+});
+
+describe('approval loop (T-606)', () => {
+  it('/approve enqueues publish-content with the exact payload key the worker reads', async () => {
+    const { bot, enqueueJob, send } = makeBot();
+    await bot.handleUpdate(message('/approve doc-9'));
+    // Payload KEY pinned, not just the type — the /forge lesson (T-601).
+    expect(enqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'publish-content', payload: { contentId: 'doc-9' } })
+    );
+    expect(send).toHaveBeenCalledWith(expect.stringContaining('job-1'));
+  });
+
+  it('/approve without an id explains itself instead of queueing a nameless job', async () => {
+    const { bot, enqueueJob, send } = makeBot();
+    await bot.handleUpdate(message('/approve'));
+    expect(enqueueJob).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith('Usage: /approve <contentId>');
+  });
+
+  it('/reject runs the real state machine: patch + audit row with the bot identity', async () => {
+    const { bot, store, send } = makeBot({
+      store: {
+        readDoc: vi.fn(async (container, id) =>
+          container === 'content' && id === 'doc-9'
+            ? { id: 'doc-9', contentStatus: 'forge_ready', Title: 'Staged post' }
+            : null
+        ),
+      },
+    });
+    await bot.handleUpdate(message('/reject doc-9 too generic'));
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'content',
+      'doc-9',
+      expect.objectContaining({ contentStatus: 'rejected', Live: false })
+    );
+    const auditRow = store.upsertDoc.mock.calls.find((call) => call[0] === 'audits')?.[1];
+    expect(auditRow).toBeDefined();
+    expect(auditRow.action).toBe('status_transition');
+    expect(auditRow.metadata.authMethod).toBe('telegram_webhook');
+    expect(auditRow.metadata.reviewedBy).toBe('telegram-bot');
+    expect(auditRow.changes.notes).toBe('too generic');
+    expect(send).toHaveBeenCalledWith(expect.stringContaining('rejected'));
+  });
+
+  it('/reject refuses an invalid edge and names the allowed next steps', async () => {
+    // rejected → rejected is not in VALID_TRANSITIONS — the double-tap case.
+    const { bot, store, send } = makeBot({
+      store: {
+        readDoc: vi.fn(async (container) =>
+          container === 'content' ? { id: 'doc-9', contentStatus: 'rejected' } : null
+        ),
+      },
+    });
+    await bot.handleUpdate(message('/reject doc-9'));
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(expect.stringContaining('Invalid transition'));
+    expect(send).toHaveBeenCalledWith(expect.stringContaining('allowed next'));
+  });
+
+  it('/reject on a missing document says so and writes nothing', async () => {
+    const { bot, store, send } = makeBot();
+    await bot.handleUpdate(message('/reject ghost'));
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(expect.stringContaining("couldn't find content ghost"));
+  });
+
+  it('/reject without an id explains itself', async () => {
+    const { bot, send } = makeBot();
+    await bot.handleUpdate(message('/reject'));
+    expect(send).toHaveBeenCalledWith('Usage: /reject <contentId> [reason]');
   });
 });
 

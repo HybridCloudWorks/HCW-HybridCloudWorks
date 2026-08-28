@@ -176,6 +176,7 @@ describe('runForgePipeline', () => {
       format: 'comparison',
       keyTopics: ['AWS EBS', 'gp3'],
       altCoverImageTrigger: true,
+      forgeReadyNotifyTrigger: true,
       updatedBy: 'ed@hcw',
       forgeGrade: { overall: 90, gradedBy: 'forge_pipeline' },
       forgeMeta: { formatKey: 'comparison', forgedBy: 'ed@hcw', forgedAt: NOW.toISOString() },
@@ -218,6 +219,7 @@ describe('runForgePipeline', () => {
     expect(out.result.status).toBe('editing');
     const [, , update] = d.writes.patches.find(([c]) => c === 'content');
     expect(update.altCoverImageTrigger).toBeUndefined();
+    expect(update.forgeReadyNotifyTrigger).toBeUndefined();
     expect(update.contentQuality.critique.verdict).toBe('revise');
     expect(update.contentQuality.issues).toContain(
       'Editorial critique: Forge grade 50% is below threshold 80%.'

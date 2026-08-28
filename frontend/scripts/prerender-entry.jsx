@@ -54,6 +54,9 @@ const PROVIDER_SECTIONS = [
  *
  * Admin routes are excluded on purpose: they are behind Entra sign-in, have no
  * search value, and pre-rendering them would publish the shell of a private UI.
+ * /preview/:id (the signed staging view, T-606) is excluded by the same
+ * construction — nothing below enumerates it, and it must stay that way: a
+ * prerendered preview would publish an unpublished draft.
  */
 export function routes(manifest = null) {
   return [
