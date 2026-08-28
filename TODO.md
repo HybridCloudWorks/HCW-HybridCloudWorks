@@ -133,7 +133,7 @@ success-counting alert (`edge_probe_availability`, gated on
 every other rule. What remains is owner-held but no longer a plan decision:
 deploy the Worker with wrangler, seed the connection-string secret, observe a
 `success == 1` row, then flip the variable
-([README](edge/availability-probe/README.md) is the procedure). The standard
+([Availability-Probe](wiki/Availability-Probe.md) is the procedure). The standard
 web test stays in Terraform, disarmed, for the day #127 upgrades the plan.
 
 ## Test coverage follow-up

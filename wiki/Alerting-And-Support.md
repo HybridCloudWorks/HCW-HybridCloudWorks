@@ -59,7 +59,7 @@ not challenge — reporting into `availabilityResults`, with a success-counting
 rule (`edge_probe_availability`, gated on `availability_probe_alert_enabled`)
 that fires as readily on a dead probe as on an unreachable API. Deploying the
 Worker and arming the rule are the owner procedure in
-`edge/availability-probe/README.md`.
+[Availability-Probe](Availability-Probe).
 
 ### Delivery is unproven
 

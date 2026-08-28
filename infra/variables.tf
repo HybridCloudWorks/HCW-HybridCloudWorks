@@ -617,7 +617,7 @@ variable "availability_probe_alert_enabled" {
     Worker, a dead cron and an unreachable API are all the same incident. The
     corollary: arming it before the probe is deployed and observed writing
     success rows creates a rule that fires immediately and permanently. Flip
-    this only after the query in edge/availability-probe/README.md shows
+    this only after the query in wiki/Availability-Probe.md shows
     success == 1 rows, per the same observed-behaviour rule as everything
     else armed from this workspace (Cutover-Runbook step 5).
   EOT

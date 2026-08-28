@@ -100,7 +100,7 @@ signal existing and not existing.
 
 - **One component lives outside Terraform.** The Worker is deployed by the
   owner with wrangler, like every other Cloudflare-side change in this
-  estate; `edge/availability-probe/README.md` is the deploy-and-verify
+  estate; [Availability-Probe](Availability-Probe) is the deploy-and-verify
   procedure, and CI runs its unit tests. Drift risk is bounded by the alert
   itself: a probe that stops matching its documentation stops writing
   successes, and the rule fires.

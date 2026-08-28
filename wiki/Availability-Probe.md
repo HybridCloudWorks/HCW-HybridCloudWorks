@@ -4,8 +4,9 @@ A Cloudflare Worker on a 5-minute cron asks
 `https://api-azure.hybridcloudworks.com/api/health` and reports each attempt
 to Application Insights as an availability result. The design, and why the
 built-in Azure availability test cannot do this job on this Cloudflare plan,
-is [ADR 0024](../../wiki/0024-edge-availability-probe.md); the alert that
-watches the results is `edge_probe_availability` in `infra/observability.tf`.
+is [ADR 0024](0024-edge-availability-probe); the alert that watches the
+results is `edge_probe_availability` in `infra/observability.tf`, and the
+Worker source is `edge/availability-probe/` in the repository.
 
 Why a Worker: Bot Fight Mode answers datacenter clients — Azure's
 availability agents, GitHub runners, every external monitoring vendor — with
@@ -59,8 +60,8 @@ that fires immediately on the missing data it watches for.
 ## Tests
 
 ```bash
-npm test
+cd edge/availability-probe && npm test
 ```
 
 Pure `node:test`, no dependencies, no Workers runtime needed: the probe logic
-takes its `fetch` as a parameter.
+takes its `fetch` as a parameter. CI runs these on every pull request.
