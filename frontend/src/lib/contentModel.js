@@ -1,3 +1,5 @@
+import { canonicalizeProvider } from './providers.js';
+
 export const CONTENT_TYPES = new Set(['blog', 'framework', 'architecture', 'coder_corner', 'news']);
 
 export function normalizeContentType(value) {
@@ -50,22 +52,17 @@ export function getPublishTargetForItem(item = {}) {
   return getPublishTargetForType(item.publishTarget || getCanonicalContentType(item));
 }
 
-export function normalizeContentProvider(value = '') {
-  const aliases = {
-    amazon: 'aws',
-    'amazon web services': 'aws',
-    'google cloud': 'gcp',
-    google: 'gcp',
-    microsoft: 'azure',
-  };
-
-  const key = String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, '')
-    .trim();
-
-  return aliases[key] || key.replace(/\s+/g, '') || '';
-}
+/**
+ * Retained as a named export because several modules import it; the
+ * implementation is now the shared one (T-738).
+ *
+ * The exact-key alias map this replaces matched only whole strings, so
+ * "Microsoft Azure" fell through to `microsoftazure` and "AWS Lambda" to
+ * `awslambda`. Because this function feeds `getContentPublicPath`, that
+ * produced a public URL no route serves — for real documents, since a
+ * multi-word provider field is the normal case rather than the exotic one.
+ */
+export const normalizeContentProvider = canonicalizeProvider;
 
 export function getContentPublicPath(item = {}) {
   const provider = normalizeContentProvider(

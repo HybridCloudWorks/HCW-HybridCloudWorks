@@ -4,6 +4,11 @@ import { fetchPublicContentList, PUBLIC_CORPUS_LIMIT } from '@/lib/publicApi';
 import { formatPostDate } from '@/lib/blogUtils';
 import { toMillis } from '@/lib/dateUtils';
 import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
+// One canonicaliser for the whole app (T-738). The alias table this file
+// used to own privately — vmware/broadcom, ansible/redhat — is the table
+// every other reader now shares, which is what stops those documents
+// showing here and vanishing from their own provider's blog list.
+import { canonicalizeProvider, inferProviderFromText } from '@/lib/providers';
 
 const DISPLAY_TYPE_LABELS = {
   blog: 'Blog',
@@ -14,48 +19,6 @@ const DISPLAY_TYPE_LABELS = {
 };
 
 const SUPPORTED_TYPES = new Set(Object.keys(DISPLAY_TYPE_LABELS));
-
-function normalizeProvider(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function canonicalizeProvider(value) {
-  const normalized = normalizeProvider(value);
-  if (!normalized) return '';
-
-  if (normalized.includes('github')) return 'github';
-  if (normalized.includes('terraform')) return 'terraform';
-  if (normalized.includes('finops')) return 'finops';
-  if (normalized.includes('azure') || normalized.includes('microsoft')) return 'azure';
-  if (normalized.includes('gcp') || normalized.includes('googlecloud')) return 'gcp';
-  if (normalized.includes('aws') || normalized.includes('amazon')) return 'aws';
-  if (normalized.includes('vmware') || normalized.includes('broadcom')) return 'vmware';
-  if (normalized.includes('ansible') || normalized.includes('redhat')) return 'ansible';
-
-  return normalized;
-}
-
-function inferProviderFromText(value) {
-  const text = String(value || '').toLowerCase();
-  if (!text) return '';
-
-  if (text.includes('github')) return 'github';
-  if (text.includes('terraform')) return 'terraform';
-  if (text.includes('finops')) return 'finops';
-  if (text.includes('azure') || text.includes('microsoft')) return 'azure';
-  if (text.includes('gcp') || text.includes('google cloud') || text.includes('cloud.google')) {
-    return 'gcp';
-  }
-  if (text.includes('aws') || text.includes('amazon web services') || text.includes('amazon')) {
-    return 'aws';
-  }
-  if (text.includes('vmware')) return 'vmware';
-  if (text.includes('ansible')) return 'ansible';
-
-  return '';
-}
 
 function inferProviderFromDoc(doc = {}) {
   const explicit = canonicalizeProvider(
