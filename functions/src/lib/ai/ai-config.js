@@ -87,6 +87,11 @@ export const AI_FEATURES = Object.freeze({
     description: 'Free-form replies to messages sent to the Telegram bot.',
     route: 'The bot answers commands either way; only AI replies stop.',
   }),
+  voiceCalibration: Object.freeze({
+    label: 'Voice calibration',
+    description: 'Suggests voice-profile additions from recent published posts.',
+    route: 'The Calibrate button in Forge Studio. Suggestions only, never auto-applied.',
+  }),
 });
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));

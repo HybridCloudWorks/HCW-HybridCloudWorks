@@ -12,6 +12,7 @@ import './admin-snapshots-http.js';
 import './cms-http.js';
 import './content-workflow-http.js';
 import './draft-http.js';
+import './forge-config-http.js';
 import './gallery-images-http.js';
 import './image-prompts-http.js';
 import './inspect-jobs.js';
