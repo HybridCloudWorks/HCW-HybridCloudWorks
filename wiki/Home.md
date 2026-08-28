@@ -23,6 +23,9 @@ release records; this Wiki holds the longer narrative.
 ## Engineering references
 
 - [Architecture decision records](Architecture-Decision-Records)
+- [Architecture review 2026-08](Architecture-Review-2026-08) — the six-layer
+  review of record: 62 findings with evidence, failure mode and
+  recommendation, plus the areas that came back sound
 - [Deployment runbook](Deployment-Runbook)
 - [Alerting and support](Alerting-And-Support)
 - [IaC repository standard](IaC-Repository-Standard)
