@@ -157,11 +157,16 @@ describe('runForgePipeline', () => {
       imagePackSlots: 2,
       usage: { calls: 2, promptTokens: 1200, completionTokens: 550, costUsd: 0.0133 },
     });
-    // the forge instruction carried the master prompt, the rotated format and the module override
-    const instruction = d.drafter.generateDraft.mock.calls[0][0].customInstructionPrompt;
-    expect(instruction).toMatch(/^You are writing for Hybrid Cloud Works/);
-    expect(instruction).toMatch(/Comparison \/ Trade-off/);
-    expect(instruction).toMatch(/ContentForge module requirements/);
+    // the forge instruction carried the master prompt, the rotated format and
+    // the module override — as the drafter's voiceBlock (replacing its own
+    // unconfigured copy), with the picked format alongside so the two sides
+    // cannot rotate to different formats.
+    const draftCall = d.drafter.generateDraft.mock.calls[0][0];
+    expect(draftCall.voiceBlock).toMatch(/^You are writing for Hybrid Cloud Works/);
+    expect(draftCall.voiceBlock).toMatch(/Comparison \/ Trade-off/);
+    expect(draftCall.voiceBlock).toMatch(/ContentForge module requirements/);
+    expect(draftCall.format?.key).toBe('comparison');
+    expect(draftCall.customInstructionPrompt).toBeUndefined();
     const [, id, update] = d.writes.patches.find(([c]) => c === 'content');
     expect(id).toBe('c-1');
     expect(update).toMatchObject({
@@ -264,6 +269,30 @@ describe('runForgePipeline', () => {
 });
 
 describe('drafter', () => {
+  it('a caller-composed voiceBlock + format replaces the base block and skips the rotation query', async () => {
+    const store = { queryDocs: vi.fn(async () => []) };
+    const ai = {
+      getActiveAiProvider: () => 'gemini',
+      generateJsonResponse: vi.fn(async () => ({ title: 'T', postContent: 'P' })),
+    };
+    const drafter = createDrafter({ store, ai, env: {} });
+    const out = await drafter.generateDraft({
+      url: 'https://u',
+      cloudProvider: 'aws',
+      scrapedTitle: 'S',
+      markdown: 'body',
+      voiceBlock: 'THE CONFIGURED VOICE BLOCK',
+      format: { key: 'contrarian' },
+    });
+    // no second pickNextFormat — the caller's format is authoritative
+    expect(store.queryDocs).not.toHaveBeenCalled();
+    expect(out.format).toBe('contrarian');
+    const prompt = ai.generateJsonResponse.mock.calls[0][0].prompt;
+    expect(prompt).toContain('THE CONFIGURED VOICE BLOCK');
+    // the base (unconfigured) voice block must NOT also be present
+    expect(prompt).not.toMatch(/Write as an AWS-focused practitioner/);
+  });
+
   it('composes the instruction with voice/format, admin additions, and PDF parts', async () => {
     const store = { queryDocs: vi.fn(async () => []) };
     const ai = {

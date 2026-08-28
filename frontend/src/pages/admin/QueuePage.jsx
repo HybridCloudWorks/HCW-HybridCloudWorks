@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { postJSON } from '@/lib/api';
 import {
@@ -17,7 +18,16 @@ import {
 import { QueueList } from './queue/QueueList';
 import { CONTENT_TYPE_OPTIONS, STATUS_FILTERS } from './queue/constants';
 import { useQueueActions } from './queue/useQueueActions';
-import { XCircle, RefreshCw, Loader2, Filter, Trash2 } from 'lucide-react';
+import { XCircle, RefreshCw, Loader2, Filter, Trash2, Flame } from 'lucide-react';
+
+function isValidHttpUrl(value = '') {
+  try {
+    const parsed = new URL(String(value).trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 export default function QueuePage() {
   const navigate = useNavigate();
@@ -39,6 +49,10 @@ export default function QueuePage() {
     return v === 'asc' ? 'asc' : 'desc';
   });
   const [loadError, setLoadError] = useState(null);
+  const [forgeUrl, setForgeUrl] = useState('');
+  const [forgingUrl, setForgingUrl] = useState(false);
+  const [forgeUrlNotice, setForgeUrlNotice] = useState('');
+  const [forgeUrlError, setForgeUrlError] = useState('');
   const [pageSize, setPageSize] = useState(() => {
     const fromUrl = Number(searchParams.get('pageSize'));
     return [50, 100, 200].includes(fromUrl) ? fromUrl : 100;
@@ -200,6 +214,65 @@ export default function QueuePage() {
           </Button>
         </div>
       </div>
+
+      {/* Forge from URL — the unattended paste-a-URL entry point (T-602).
+          Fire-and-forget on purpose: the forge runs for minutes under the job
+          budget, so this enqueues and lets the result land back in this queue
+          as forge_ready or editing rather than holding the page open. */}
+      <Card>
+        <CardContent className="pt-6">
+          <form
+            className="flex flex-col gap-2 sm:flex-row sm:items-center"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const url = forgeUrl.trim();
+              setForgeUrlNotice('');
+              if (!isValidHttpUrl(url)) {
+                setForgeUrlError('Enter a valid http(s) article URL.');
+                return;
+              }
+              setForgeUrlError('');
+              setForgingUrl(true);
+              try {
+                const accepted = await postJSON('enqueueJob', {
+                  type: 'forge-from-url',
+                  payload: { url },
+                });
+                if (!accepted?.ok || !accepted.jobId) {
+                  throw new Error(accepted?.error || 'Job was not accepted');
+                }
+                setForgeUrl('');
+                setForgeUrlNotice(
+                  `Forge queued (job ${accepted.jobId}). The scraped source and its forged draft land in this queue as forge_ready or editing — refresh in a few minutes.`
+                );
+              } catch (err) {
+                setForgeUrlError(err?.message || 'Failed to queue the forge.');
+              } finally {
+                setForgingUrl(false);
+              }
+            }}
+          >
+            <Label htmlFor="forge-from-url" className="flex items-center gap-1 whitespace-nowrap">
+              <Flame className="h-4 w-4 text-primary" /> Forge from URL
+            </Label>
+            <Input
+              id="forge-from-url"
+              type="text"
+              inputMode="url"
+              placeholder="https://… paste an article to forge into a post"
+              value={forgeUrl}
+              onChange={(event) => setForgeUrl(event.target.value)}
+              disabled={forgingUrl}
+              className="flex-1"
+            />
+            <Button type="submit" size="sm" disabled={forgingUrl || !forgeUrl.trim()}>
+              {forgingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Forge'}
+            </Button>
+          </form>
+          {forgeUrlError && <p className="mt-2 text-sm text-destructive">{forgeUrlError}</p>}
+          {forgeUrlNotice && <p className="mt-2 text-sm text-muted-foreground">{forgeUrlNotice}</p>}
+        </CardContent>
+      </Card>
 
       {/* Rejected decay-countdown explanation banner */}
       {statusFilter === 'rejected' && (

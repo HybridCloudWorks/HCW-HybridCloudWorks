@@ -402,7 +402,11 @@ export function createForge({
         scrapedTitle: sourceTitle,
         description: data.Summary || data.summary || '',
         markdown: sourceMarkdown,
-        customInstructionPrompt: forgeInstruction,
+        // The composed block IS the authority for this draft, not an additive
+        // admin note: passed as voiceBlock (with its format) it replaces the
+        // drafter's own unconfigured copy instead of stacking under it.
+        voiceBlock: forgeInstruction,
+        format,
         usageOut,
       });
     } catch (err) {

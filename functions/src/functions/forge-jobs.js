@@ -16,6 +16,12 @@ import { createDrafter } from '../lib/content/drafting.js';
 import { createGrader } from '../lib/content/forge-grader.js';
 import { createForge } from '../lib/content/forge.js';
 import { createDigest } from '../lib/content/digest.js';
+import { scrapeArticle } from '../lib/content/scrape.js';
+import {
+  scrapeToSource,
+  inferProviderFromUrl,
+  buildUrlSourceDoc,
+} from '../lib/content/draft-from-url.js';
 import { registerJobType } from '../lib/jobs.js';
 
 export const FORGE_MAX_BATCH = 10;
@@ -86,6 +92,62 @@ registerJobType('forge-article', {
           outcomes,
         };
   },
+});
+
+/**
+ * The unattended half of "paste a URL" (Blog Machine T-602): scrape → source
+ * document → the same pipeline `forge-article` runs. Split from the worker
+ * for tests; the registered worker below wires the real dependencies.
+ *
+ * @param {{ url: string, provider?: string }} payload
+ * @param {object} deps — { scrape, forge, store, now, uuid, log, actor }
+ */
+export async function runForgeFromUrl(payload, { scrape, forge, store: docStore, now, uuid, log, actor }) {
+  const source = await scrapeToSource(String(payload?.url || '').trim(), { scrape, log });
+  const provider = String(payload?.provider || '').trim() || inferProviderFromUrl(source.url);
+  const doc = buildUrlSourceDoc({ source, provider, now, uuid });
+  await docStore.upsertDoc('content', doc);
+  log.log?.(`[forge-from-url] ${source.url} → content/${doc.id} (${source.wordCount} words)`);
+
+  const outcome = await forge.runForgePipeline({ contentId: doc.id, actor });
+  log.log?.(`[forge-from-url] ${doc.id} → ${outcome.ok ? outcome.result.status : outcome.error}`);
+  // A duplicate (409) is a legitimate answer — the URL's story is already
+  // published — so it reports rather than fails, same as forge-article.
+  if (!outcome.ok && outcome.httpStatus !== 409) throw new Error(outcome.error);
+  return outcome.ok
+    ? { ...outcome.result, sourceUrl: source.url }
+    : {
+        success: false,
+        contentId: doc.id,
+        skipped: true,
+        sourceUrl: source.url,
+        error: outcome.error,
+        duplicateOf: outcome.duplicateOf,
+      };
+}
+
+registerJobType('forge-from-url', {
+  description:
+    'Blog Machine: scrape a URL into a source content document, then run the forge pipeline on it — staged forge_ready above the publish threshold, otherwise editing.',
+  maxPayloadBytes: 4096,
+  // One scrape plus the same generation + grading budget forge-article gets.
+  timeoutMs: 28 * 60 * 1000,
+  worker: async (payload, { context, job }) =>
+    runForgeFromUrl(payload, {
+      scrape: scrapeArticle,
+      forge: createForge({
+        store,
+        config,
+        drafter: createDrafter({ store, ai }),
+        grader: createGrader({ ai }),
+        log: context,
+      }),
+      store,
+      now: () => new Date(),
+      uuid: () => crypto.randomUUID(),
+      log: context,
+      actor: job?.requestedBy || {},
+    }),
 });
 
 registerJobType('generate-weekly-digest', {
