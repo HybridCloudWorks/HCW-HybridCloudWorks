@@ -14,7 +14,13 @@ import { createSkillsHubScrape, buildCertEvent, extractExamCodes } from './skill
 import { createPlaudTokenRefresh } from './plaud-token.js';
 import { createAgentHealthCheck, STALE_AFTER_MS } from './agent-health.js';
 import { createTempStorageCleanup, parsePrefixes } from './temp-storage.js';
-import { createForgeScheduled, FORGE_SCHEDULER_ACTOR } from './forge-scheduled.js';
+import {
+  createForgeScheduled,
+  FORGE_SCHEDULER_ACTOR,
+  forgedTodayCount,
+  scoreCandidate,
+  rankCandidates,
+} from './forge-scheduled.js';
 
 const NOW = new Date('2026-08-21T12:00:00.000Z');
 const now = () => NOW;
@@ -529,11 +535,15 @@ describe('forge scheduled', () => {
     };
     const off = {
       loadForgePrompts: async () => ({ autoForge: { enabled: false, dailyLimit: 3 } }),
+      loadForgeProfile: async () => ({ interestAreas: [] }),
     };
     expect(
       (await createForgeScheduled({ store: memStore(), config: off, forge }).run()).skippedRun
     ).toBe(true);
-    const on = { loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 4 } }) };
+    const on = {
+      loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 4 } }),
+      loadForgeProfile: async () => ({ interestAreas: [] }),
+    };
     const store = memStore({}, () => [
       { id: 'forged', forgeMeta: {} },
       { id: 'ok' },
@@ -542,7 +552,7 @@ describe('forge scheduled', () => {
       { id: 'bad' },
       { id: 'overflow' },
     ]);
-    const r = await createForgeScheduled({ store, config: on, forge }).run();
+    const r = await createForgeScheduled({ store, config: on, forge, now }).run();
     expect(r).toEqual({
       skippedRun: false,
       attempted: 4,
@@ -557,6 +567,81 @@ describe('forge scheduled', () => {
     ).toBe(true);
     expect(forge.runForgePipeline).not.toHaveBeenCalledWith(
       expect.objectContaining({ contentId: 'overflow' })
+    );
+  });
+
+  it("spends only the day's REMAINING budget and skips entirely at the limit (T-607)", async () => {
+    const todayKey = NOW.toISOString().slice(0, 10);
+    const forge = {
+      runForgePipeline: vi.fn(async () => ({ ok: true, result: { status: 'forge_ready' } })),
+    };
+    const config = {
+      loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 3 } }),
+      loadForgeProfile: async () => ({ interestAreas: [] }),
+    };
+    // 2 of 3 already forged today (by /forge, forge-from-url, or an earlier run).
+    const store = memStore(
+      {
+        admin_config: [{ id: 'forge_stats', today: { date: todayKey, forged: 2 } }],
+      },
+      () => [{ id: 'a' }, { id: 'b' }]
+    );
+    const r = await createForgeScheduled({ store, config, forge, now }).run();
+    expect(r.attempted).toBe(1);
+    expect(forge.runForgePipeline).toHaveBeenCalledTimes(1);
+
+    // At the limit: no run at all.
+    store.data.admin_config.set('forge_stats', {
+      id: 'forge_stats',
+      today: { date: todayKey, forged: 3 },
+    });
+    forge.runForgePipeline.mockClear();
+    const full = await createForgeScheduled({ store, config, forge, now }).run();
+    expect(full).toMatchObject({ skippedRun: true, reason: 'daily_limit_reached', forgedToday: 3 });
+    expect(forge.runForgePipeline).not.toHaveBeenCalled();
+
+    // Yesterday's bucket does not count against today.
+    expect(forgedTodayCount({ today: { date: '2020-01-01', forged: 9 } }, todayKey)).toBe(0);
+    expect(forgedTodayCount(null, todayKey)).toBe(0);
+  });
+
+  it('ranks candidates by interest-area weight before the daily cut', async () => {
+    const interestAreas = [
+      { key: 'finops', weight: 90, keywords: ['cost', 'finops'] },
+      { key: 'k8s', weight: 40, keywords: ['kubernetes', 'aks'] },
+    ];
+    expect(scoreCandidate({ Title: 'Cut AKS cost with spot nodes' }, interestAreas)).toBe(130);
+    expect(scoreCandidate({ keyTopics: ['Kubernetes'] }, interestAreas)).toBe(40);
+    expect(scoreCandidate({ Title: 'Unrelated' }, interestAreas)).toBe(0);
+    // Already-forged rows drop out; ties keep query order.
+    expect(
+      rankCandidates(
+        [
+          { id: 'plain', Title: 'Networking notes' },
+          { id: 'forged', Title: 'FinOps cost', forgeMeta: {} },
+          { id: 'hot', Title: 'FinOps cost deep dive' },
+          { id: 'warm', Title: 'AKS upgrade' },
+        ],
+        interestAreas
+      ).map((c) => c.id)
+    ).toEqual(['hot', 'warm', 'plain']);
+
+    const forge = {
+      runForgePipeline: vi.fn(async () => ({ ok: true, result: { status: 'forge_ready' } })),
+    };
+    const config = {
+      loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 1 } }),
+      loadForgeProfile: async () => ({ interestAreas }),
+    };
+    const store = memStore({}, () => [
+      { id: 'plain', Title: 'Networking notes' },
+      { id: 'hot', Title: 'FinOps cost deep dive' },
+    ]);
+    await createForgeScheduled({ store, config, forge, now }).run();
+    // The one budget slot goes to the highest-scoring candidate, not the first row.
+    expect(forge.runForgePipeline).toHaveBeenCalledTimes(1);
+    expect(forge.runForgePipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ contentId: 'hot' })
     );
   });
 });

@@ -98,15 +98,17 @@ timer('fetchBlogListings', 'FETCH_BLOG_LISTINGS', '0 15 */6 * * *', (context) =>
 timer('forgeScheduled', 'FORGE_SCHEDULED', '0 30 3 * * *', async (context) => {
   // Site-Main: `every 24 hours`. Off twice over: this flag and the Auto-Forge
   // toggle in Forge Memory (admin_config/forge_prompts.autoForge).
-  const [{ createForgeConfigLoader }, { createDrafter }, { createGrader }, { createForge }, ai] =
+  const [{ defaultForgeConfig }, { createDrafter }, { createGrader }, { createForge }, ai] =
     await Promise.all([
-      import('../lib/content/forge-config.js'),
+      // The process-wide loader, NOT a private instance: a Forge Studio edit
+      // clears the cache this timer reads (forge-config-default.js, #239).
+      import('../lib/content/forge-config-default.js'),
       import('../lib/content/drafting.js'),
       import('../lib/content/forge-grader.js'),
       import('../lib/content/forge.js'),
       import('../lib/ai/router.js'),
     ]);
-  const config = createForgeConfigLoader({ store });
+  const config = defaultForgeConfig;
   const forge = createForge({
     store,
     config,
