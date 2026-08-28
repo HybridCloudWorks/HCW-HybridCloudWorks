@@ -190,6 +190,9 @@ describe('runForgePipeline', () => {
       forgeMeta: { formatKey: 'comparison', forgedBy: 'ed@hcw', forgedAt: NOW.toISOString() },
     });
     expect(update.contentQuality.critique.verdict).toBe('pass');
+    // SEO lint rides along as advisory data: the fixture's summary is short,
+    // its slug and headings are fine — and the finding gates nothing.
+    expect(update.forgeGrade.seo.findings.map((f) => f.key)).toEqual(['meta_description_short']);
     expect(update.forgeImagePack).toHaveLength(2);
     const [, version] = d.writes.upserts.find(([c]) => c === 'content_versions');
     expect(version).toMatchObject({

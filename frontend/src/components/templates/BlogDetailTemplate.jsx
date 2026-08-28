@@ -242,6 +242,15 @@ export default function BlogDetailTemplate({
               </>
             )}
           </p>
+          {/* SEO advisories: informational only — they never gate approval */}
+          {Array.isArray(article.forgeGrade?.seo?.findings) &&
+            article.forgeGrade.seo.findings.length > 0 && (
+              <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-300">
+                {article.forgeGrade.seo.findings.map((finding) => (
+                  <li key={finding.key}>{finding.message}</li>
+                ))}
+              </ul>
+            )}
         </div>
       )}
 

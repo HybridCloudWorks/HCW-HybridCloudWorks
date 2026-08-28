@@ -29,6 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { findBannedPhrases, validateModules, MAX_MODULES } from '../cms/content-modules.js';
 import { findRelatedPublished, buildRelatedReadingModule } from './related-posts.js';
+import { lintSeo } from './seo-lint.js';
 import {
   buildContentQualityReport,
   buildImageReadinessReport,
@@ -164,6 +165,14 @@ export function buildForgeArtifacts({
     gradedAt: stamp,
     gradedBy: 'forge_pipeline',
     promptVersion: prompts.version,
+    // Advisory only (backlog #6): surfaced in the preview banner and the
+    // forge_ready note; never moves the overall or the staging decision.
+    seo: lintSeo({
+      title: forged.forgedTitle,
+      summary: forged.forgedSummary,
+      content: forged.forgedContent,
+      keyTopics: draft.keyTopics || data.keyTopics,
+    }),
   };
   const contentQuality = buildContentQualityReport(
     {

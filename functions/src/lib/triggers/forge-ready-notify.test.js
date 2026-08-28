@@ -48,6 +48,23 @@ describe('buildForgeReadyMessage', () => {
   it('says the preview link is unavailable when there is none, instead of omitting it silently', () => {
     expect(buildForgeReadyMessage(doc(), null)).toContain('PREVIEW_SIGNING_SECRET');
   });
+
+  it('mentions SEO advisories only when the lint found some', () => {
+    const flagged = doc({
+      forgeGrade: {
+        overall: 8.4,
+        threshold: 7,
+        seo: { findings: [{ key: 'meta_description_short', message: 'short' }] },
+      },
+    });
+    const withPreview = buildForgeReadyMessage(flagged, 'https://hybridcloudworks.com/preview/doc-1?t=x');
+    expect(withPreview).toContain('SEO: 1 advisory note(s) — details in the preview banner.');
+    // No preview link → no pointer to a banner the owner cannot reach.
+    const withoutPreview = buildForgeReadyMessage(flagged, null);
+    expect(withoutPreview).toContain('SEO: 1 advisory note(s).');
+    expect(withoutPreview).not.toContain('preview banner');
+    expect(buildForgeReadyMessage(doc(), null)).not.toContain('SEO:');
+  });
 });
 
 describe('createForgeReadyNotifier', () => {

@@ -331,7 +331,16 @@ forge_ready items with grade and an inline `/approve {id}` per row.
    follow is worse than none — and there is no score ceiling: true
    duplicates never reach this code because the dedupe gate already
    refused to forge them.
-6. **SEO lint in the grader** — meta-description length, slug/keyword alignment, heading hierarchy as advisory dimensions.
+6. **SEO lint in the grader** — **LANDED** (post-program). A deterministic
+   lint (`lib/content/seo-lint.js`, no model call) runs inside
+   `buildForgeArtifacts` and stamps `forgeGrade.seo.findings`: summary
+   length vs the 70–160 meta-description window, slug/key-topic alignment
+   (against the real `slugify` the publisher uses), and heading hierarchy
+   (H1 in body, too-deep first heading, skipped levels — code fences and
+   module tags stripped first). Strictly advisory: findings never move the
+   overall, the staging decision, or any publish gate. Surfaced where the
+   approve decision happens — as a bullet list in the preview banner and a
+   one-line count in the forge_ready Telegram note.
 7. **Voice-drift monitor** — periodic re-grade of recent posts against the profile; Telegram alert on drift.
 8. **Stale-post refresh bot** — old posts feeding a news_analysis/update-format forge run on the owner's own content.
 9. **A/B titles** — drafter emits three candidates; owner picks via Telegram buttons (5b infrastructure).
