@@ -82,6 +82,80 @@ describe('selection', () => {
   });
 });
 
+describe('select all', () => {
+  it('selects every visible id, then clears when all are already selected', () => {
+    const { result } = setup();
+    act(() => result.current.toggleSelectAll(['a', 'b', 'c']));
+    expect([...result.current.selectedIds].sort()).toEqual(['a', 'b', 'c']);
+
+    act(() => result.current.toggleSelectAll(['a', 'b', 'c']));
+    expect(result.current.selectedIds.size).toBe(0);
+  });
+
+  it('completes a partial selection instead of clearing it', () => {
+    const { result } = setup();
+    act(() => result.current.toggleSelected('a'));
+    act(() => result.current.toggleSelectAll(['a', 'b', 'c']));
+    expect(result.current.selectedIds.size).toBe(3);
+  });
+});
+
+describe('forge selected', () => {
+  const select = (result, ids) =>
+    act(() => {
+      ids.forEach((id) => result.current.toggleSelected(id));
+    });
+
+  it('enqueues one forge-article job with the exact payload key the worker reads', async () => {
+    // The payload KEY is the contract: /forge shipped sending the wrong one
+    // (T-601), so the frontend pins it too.
+    postJSON.mockResolvedValue({ ok: true, jobId: 'job-9' });
+    const { result } = setup();
+    select(result, ['a', 'b']);
+
+    await act(() => result.current.handleForgeSelected());
+
+    expect(postJSON).toHaveBeenCalledWith('enqueueJob', {
+      type: 'forge-article',
+      payload: { sourceContentIds: ['a', 'b'] },
+    });
+    expect(logAdminAction).toHaveBeenCalledWith('content_forge_enqueued', {
+      count: 2,
+      jobIds: ['job-9'],
+    });
+    expect(result.current.selectedIds.size).toBe(0);
+    expect(result.current.forgeMessage).toMatch(/job-9/);
+  });
+
+  it('chunks a selection larger than the batch cap into multiple jobs', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, Title: `T${i}` }));
+    postJSON.mockResolvedValue({ ok: true, jobId: 'job-x' });
+    const { result } = setup({ items: many });
+    select(
+      result,
+      many.map((it) => it.id)
+    );
+
+    await act(() => result.current.handleForgeSelected());
+
+    const enqueues = postJSON.mock.calls.filter(([fn]) => fn === 'enqueueJob');
+    expect(enqueues).toHaveLength(2);
+    expect(enqueues[0][1].payload.sourceContentIds).toHaveLength(10);
+    expect(enqueues[1][1].payload.sourceContentIds).toHaveLength(2);
+  });
+
+  it('surfaces a refused enqueue without clearing the selection silently', async () => {
+    postJSON.mockResolvedValue({ ok: false, error: 'Forbidden' });
+    const { result } = setup();
+    select(result, ['a']);
+
+    await act(() => result.current.handleForgeSelected());
+
+    expect(result.current.forgeError).toMatch(/Forbidden/);
+    expect(result.current.forgeMessage).toBeNull();
+  });
+});
+
 describe('bulk reject', () => {
   const selectAll = (result, ids) =>
     act(() => {

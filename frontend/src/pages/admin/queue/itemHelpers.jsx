@@ -231,7 +231,34 @@ export function getSourceBadge(item) {
     );
   }
 
+  if (item.source === 'forge-url') {
+    return (
+      <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+        Forged URL
+      </Badge>
+    );
+  }
+
   return null;
+}
+
+/**
+ * The forge pipeline's verdict on a card (Blog Machine T-603). The grade is
+ * written by forge.js as forgeGrade.overall; forge_ready means it cleared
+ * the publish threshold, anything else landed in editing.
+ */
+export function getForgeBadge(item) {
+  const overall = item?.forgeGrade?.overall;
+  if (typeof overall !== 'number') return null;
+  const staged = item?.contentStatus === 'forge_ready';
+  return (
+    <Badge
+      variant={staged ? 'default' : 'secondary'}
+      className="text-[10px] uppercase tracking-wide"
+    >
+      Forge {Math.round(overall)}
+    </Badge>
+  );
 }
 
 export function getConfirmModalCopy(confirmTarget) {
