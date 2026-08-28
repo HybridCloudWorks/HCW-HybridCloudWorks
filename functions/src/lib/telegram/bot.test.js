@@ -161,6 +161,20 @@ describe('long commands enqueue rather than run inline', () => {
     expect(send).toHaveBeenCalledWith(expect.stringContaining('job-1'));
   });
 
+  // The payload KEY matters, not just the type: /forge shipped sending
+  // { contentId }, which resolveForgeTargets rejects, and the type-only
+  // assertion above never noticed. Pin the exact payload shape (T-601).
+  it('/forge enqueues the payload key resolveForgeTargets accepts', async () => {
+    const { bot, enqueueJob } = makeBot();
+    await bot.handleUpdate(message('/forge abc123'));
+    expect(enqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'forge-article',
+        payload: { sourceContentId: 'abc123' },
+      })
+    );
+  });
+
   it('/forge without a content id explains itself instead of queueing a nameless job', async () => {
     const { bot, enqueueJob, send } = makeBot();
     await bot.handleUpdate(message('/forge'));

@@ -361,7 +361,10 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
                               />
                             ) : (
                               <div key={item.key} className={ARTICLE_PROSE_CLASS}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={markdownCodeComponents}
+                                >
                                   {item.text}
                                 </ReactMarkdown>
                               </div>
@@ -416,7 +419,10 @@ export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' 
                               key={`${item.key}-${textBetweenItem.key}-${moduleAfterTextItem.key}-heading`}
                               className={HEADING_PROSE_CLASS}
                             >
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={markdownCodeComponents}
+                              >
                                 {textBetweenItem.text}
                               </ReactMarkdown>
                             </div>
