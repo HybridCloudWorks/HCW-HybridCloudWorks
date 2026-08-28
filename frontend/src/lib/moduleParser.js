@@ -11,7 +11,33 @@
  * <module type="spacer">{"style": "gradient"}</module>
  * <module type="text" align="left">plain text content</module>
  * <module type="code" align="left">code snippet content</module>
+ * <module type="design" align="all">mermaid diagram source</module>
+ * <module type="pull_quote">{"text": "...", "attribution": "..."}</module>
+ * <module type="stat_board">{"stats": [{"value": "40%", "label": "..."}]}</module>
+ * <module type="comparison">{"columns": [...], "rows": [[...]]}</module>
+ * <module type="timeline">{"steps": [{"title": "...", "body": "..."}]}</module>
+ * <module type="callout">{"eyebrow": "...", "title": "...", "body": "..."}</module>
  */
+
+// The type list and each JSON payload schema are specified in
+// wiki/Blog-Machine.md (the cross-package contract of record); the backend
+// twin sets live in functions/src/lib/cms/content-modules.js, and each side
+// carries a test asserting its list matches the documented set.
+export const RAW_MODULE_TYPES = ['fact', 'recommendation', 'text', 'code', 'design'];
+
+export const JSON_MODULE_TYPES = [
+  'links',
+  'picture',
+  'video',
+  'spacer',
+  'pull_quote',
+  'stat_board',
+  'comparison',
+  'timeline',
+  'callout',
+];
+
+export const MAX_MODULES = 14;
 
 export function parseModulesFromMarkdown(markdown) {
   if (!markdown) return { text: '', modules: [] };
@@ -36,16 +62,8 @@ export function parseModulesFromMarkdown(markdown) {
 
     // Parse content based on type
     try {
-      if (
-        moduleType === 'fact' ||
-        moduleType === 'recommendation' ||
-        moduleType === 'text' ||
-        moduleType === 'code'
-      ) {
+      if (RAW_MODULE_TYPES.includes(moduleType)) {
         moduleData.content = content;
-      } else if (moduleType === 'links' || moduleType === 'picture' || moduleType === 'video') {
-        // Try to parse as JSON
-        moduleData = { ...moduleData, ...JSON.parse(content) };
       } else if (moduleType === 'spacer') {
         // Try to parse as JSON, or use defaults
         try {
@@ -54,6 +72,8 @@ export function parseModulesFromMarkdown(markdown) {
           moduleData.style = 'gradient';
           moduleData.height = 'h-1';
         }
+      } else if (JSON_MODULE_TYPES.includes(moduleType)) {
+        moduleData = { ...moduleData, ...JSON.parse(content) };
       }
     } catch {
       console.warn(`Failed to parse module data for type ${moduleType}:`, content);
@@ -105,11 +125,11 @@ export function rebuildMarkdownWithModules(text, modules = []) {
 export function moduleDataToString(module) {
   const { type, align = 'left', ...data } = module;
 
-  if (type === 'fact' || type === 'recommendation' || type === 'text' || type === 'code') {
-    return `<module type="${type}" align="${align}">${data.content}</module>`;
+  if (RAW_MODULE_TYPES.includes(type)) {
+    return `<module type="${type}" align="${align}">${data.content || ''}</module>`;
   }
 
-  if (type === 'links' || type === 'picture' || type === 'video' || type === 'spacer') {
+  if (JSON_MODULE_TYPES.includes(type)) {
     const jsonContent = JSON.stringify(data);
     return `<module type="${type}" align="${align}">${jsonContent}</module>`;
   }

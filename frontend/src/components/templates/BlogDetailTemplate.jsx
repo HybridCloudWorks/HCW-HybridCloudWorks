@@ -14,6 +14,7 @@ import { Calendar, User, Clock, ArrowLeft, Tag } from 'lucide-react';
 import { Skeleton } from '@/components/performance/Skeleton';
 import { ModuleContainer } from '@/components/modules/InlineModules';
 import { parseModulesFromMarkdown } from '@/lib/moduleParser';
+import { canPairModules, isHeadingOnlyTextSegment } from '@/lib/modulePairing';
 import ShareVia from '@/components/shared/ShareVia';
 import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
 import NewsletterSignup from '@/components/shared/NewsletterSignup';
@@ -49,27 +50,6 @@ const HEADING_PROSE_CLASS =
  * the six Firestore lookups and candidate-ranking this component carried.
  * - Displays: hero image, title, meta, AI summary, full content, source link.
  */
-function isHeadingOnlyTextSegment(value = '') {
-  const normalized = String(value || '')
-    .replace(/\r\n/g, '\n')
-    .trim();
-  if (!normalized) return false;
-  return (
-    /^#{1,6}\s+.+$/m.test(normalized) &&
-    normalized.split('\n').every((line) => !line.trim() || /^#{1,6}\s+.+$/.test(line.trim()))
-  );
-}
-
-function canPairModules(currentModule, nextModule) {
-  if (!currentModule || !nextModule) return false;
-  if (currentModule.type === 'spacer' || nextModule.type === 'spacer') return false;
-  if (currentModule.align === 'all' || nextModule.align === 'all') return false;
-  return (
-    (currentModule.align === 'left' && nextModule.align === 'right') ||
-    (currentModule.align === 'right' && nextModule.align === 'left')
-  );
-}
-
 export default function BlogDetailTemplate({ provider = 'aws', section = 'blog' }) {
   const backPath =
     section === 'news'
