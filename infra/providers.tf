@@ -24,14 +24,14 @@ terraform {
       version = "~> 2.0"
     }
     # Cloudflare remains for DNS management
+    # 4.52 is the real floor, not 4.0 (T-725): cloudflare_record.content uses an
+    # attribute that only exists from 4.52, so the older versions the previous
+    # constraint admitted fail `validate`. Only the lock file was keeping it
+    # honest, so a workspace or CI re-resolve without the lock would have broken
+    # confusingly. (Provider v5 renames cloudflare_record to
+    # cloudflare_dns_record — an upgrade ADR, tracked separately.)
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      # 4.52 is the real floor, not 4.0 (T-725): cloudflare_record.content uses
-      # an attribute that only exists from 4.52, so the older versions this
-      # constraint admitted fail `validate`. Only the lock file was keeping it
-      # honest, so a workspace or CI re-resolve without the lock would have
-      # broken confusingly. (Provider v5 renames cloudflare_record to
-      # cloudflare_dns_record — an upgrade ADR, tracked separately.)
       version = "~> 4.52"
     }
   }
