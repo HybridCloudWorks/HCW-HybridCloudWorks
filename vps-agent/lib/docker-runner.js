@@ -58,6 +58,85 @@ function runProcess(cmd, args, timeoutMs) {
 }
 
 /**
+ * The sandbox flags, in the order `buildDockerArgs` emits them.
+ *
+ * Exported so `docker-runner.test.js` asserts against a named list rather than
+ * re-typing the array it is checking — a test that restates the implementation
+ * passes whatever the implementation says (T-743). Each entry is
+ * `[flag, value]`; a value of `null` means the flag takes no argument.
+ *
+ * Nothing here is per-capability. A capability contributes `extraDockerArgs`,
+ * which are appended AFTER these and therefore cannot displace them — but note
+ * that Docker's own last-wins behaviour means an `extraDockerArgs` entry
+ * repeating one of these flags would still override it. `buildDockerArgs`
+ * refuses that case rather than trusting the capability list to stay honest.
+ */
+export const SANDBOX_FLAGS = [
+  ['--network', 'none'],
+  ['--read-only', null],
+  ['--security-opt', 'no-new-privileges'],
+  ['--cap-drop', 'ALL'],
+  ['--user', '65534:65534'],
+];
+
+/** Flags a capability may never set, because they weaken the sandbox. */
+const RESERVED_FLAGS = new Set([
+  ...SANDBOX_FLAGS.map(([flag]) => flag),
+  '--privileged',
+  '--pid',
+  '--ipc',
+  '--userns',
+  '--cap-add',
+  '--device',
+  '--memory',
+  '--cpus',
+  '--pids-limit',
+  '-v',
+  '--volume',
+  '--mount',
+]);
+
+/**
+ * Build the full `docker` argv for one job.
+ *
+ * Pure and exported for testing: the sandbox flag list is this component's
+ * entire security boundary, and before T-743 nothing asserted it stayed
+ * intact — an edit dropping `--network none` shipped green.
+ *
+ * @param {object} capability entry from lib/capabilities.js
+ * @param {object} ctx        { jobDir, containerName }
+ * @param {object} limits     { memory, cpus, pidsLimit }
+ * @returns {string[]} argv after the `docker` executable itself
+ */
+export function buildDockerArgs(capability, { jobDir, containerName }, limits) {
+  const extra = capability.extraDockerArgs || [];
+  const reserved = extra.filter((arg) => RESERVED_FLAGS.has(arg));
+  if (reserved.length > 0) {
+    // Refuse rather than emit a weakened sandbox. A capability is repository
+    // code, so this is a developer error caught at run time, not an attacker
+    // path — but the failure has to be loud, because the alternative is a
+    // container that looks sandboxed in this file and is not.
+    throw new Error(
+      `capability may not set sandbox-controlled docker flags: ${reserved.join(', ')}`
+    );
+  }
+
+  return [
+    'run',
+    '--rm',
+    '--name', containerName,
+    ...SANDBOX_FLAGS.flatMap(([flag, value]) => (value === null ? [flag] : [flag, value])),
+    '--memory', limits.memory,
+    '--cpus', limits.cpus,
+    '--pids-limit', String(limits.pidsLimit),
+    '-v', `${jobDir}:/workspace:ro`,
+    ...extra,
+    capability.image,
+    ...capability.buildCommand(`/workspace/${capability.payloadFileName}`),
+  ];
+}
+
+/**
  * Execute a job in a sandboxed container.
  * @param {object} capability entry from lib/capabilities.js
  * @param {string} payload   job payload string
@@ -71,26 +150,7 @@ export async function runInDocker(capability, payload, limits) {
     const hostPayloadPath = path.join(jobDir, capability.payloadFileName);
     await fs.writeFile(hostPayloadPath, payload, 'utf8');
 
-    const containerPayloadPath = `/workspace/${capability.payloadFileName}`;
-    const command = capability.buildCommand(containerPayloadPath);
-
-    const dockerArgs = [
-      'run',
-      '--rm',
-      '--name', containerName,
-      '--network', 'none',
-      '--read-only',
-      '--memory', limits.memory,
-      '--cpus', limits.cpus,
-      '--pids-limit', String(limits.pidsLimit),
-      '--security-opt', 'no-new-privileges',
-      '--cap-drop', 'ALL',
-      '--user', '65534:65534',
-      '-v', `${jobDir}:/workspace:ro`,
-      ...(capability.extraDockerArgs || []),
-      capability.image,
-      ...command,
-    ];
+    const dockerArgs = buildDockerArgs(capability, { jobDir, containerName }, limits);
 
     const timeoutMs = (capability.timeoutSeconds + 15) * 1000; // grace for image pull/start
     const result = await runProcess('docker', dockerArgs, timeoutMs);

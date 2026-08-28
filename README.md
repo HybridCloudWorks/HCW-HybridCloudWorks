@@ -71,7 +71,7 @@ cd frontend
 npm run lint
 npm run format:check
 npm run build
-npm run test:admin
+npm run test
 
 cd ..\functions
 npm ci
