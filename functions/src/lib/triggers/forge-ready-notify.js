@@ -41,6 +41,10 @@ export function buildForgeReadyMessage(data, previewUrl) {
   }
   const format = data.format || data.forgeMeta?.formatKey;
   if (format) lines.push(`Format: ${format}`);
+  const seoFindings = Array.isArray(grade.seo?.findings) ? grade.seo.findings : [];
+  if (seoFindings.length) {
+    lines.push(`SEO: ${seoFindings.length} advisory note(s) — details in the preview banner.`);
+  }
   lines.push(
     previewUrl
       ? `Preview: ${previewUrl}`

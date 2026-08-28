@@ -48,6 +48,18 @@ describe('buildForgeReadyMessage', () => {
   it('says the preview link is unavailable when there is none, instead of omitting it silently', () => {
     expect(buildForgeReadyMessage(doc(), null)).toContain('PREVIEW_SIGNING_SECRET');
   });
+
+  it('mentions SEO advisories only when the lint found some', () => {
+    const flagged = doc({
+      forgeGrade: {
+        overall: 8.4,
+        threshold: 7,
+        seo: { findings: [{ key: 'meta_description_short', message: 'short' }] },
+      },
+    });
+    expect(buildForgeReadyMessage(flagged, null)).toContain('SEO: 1 advisory note(s)');
+    expect(buildForgeReadyMessage(doc(), null)).not.toContain('SEO:');
+  });
 });
 
 describe('createForgeReadyNotifier', () => {
