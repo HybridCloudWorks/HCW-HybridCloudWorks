@@ -192,6 +192,8 @@ table plan — rather than waiting for the 80% alert to become routine.
 
 ### T-720 — Key Vault reference failures are silent and indistinguishable (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED** — `/api/health` reports a COUNT of unresolved `@Microsoft.KeyVault(…)` references (a count, not names: the endpoint is anonymous and T-402 already ruled out an unauthenticated inventory). `secrets-health.test.js` asserts agreement with `readKey` against the real function, since a disagreement there would report a healthy estate while the app behaves as though the key is absent. The alert on it needs an apply — owner.
+
 `infra/main.tf:1174-1260,665-673,1699-1703`
 
 More than twenty app settings are `@Microsoft.KeyVault(...)` references. An
@@ -291,6 +293,8 @@ account already imposes. Refresh the stale comment in the same change.
 
 ### T-722 — The `swa_token` output contradicts its own file header (Medium, verified)
 
+> **Status (2026-08-28):** **RESOLVED as a recorded exception.** The header no longer contradicts itself. The output is kept because the token is in state via the resource attribute regardless, so deleting it would hide rather than retire it; it is now in REVIEW.md accepted risks, and `deploy-azure-frontend.yml` isolates it in a job that installs nothing. Retiring it is T-727, owner-gated.
+
 `infra/outputs.tf:5-7` vs `18-22`
 
 The header states that sensitive key and connection-string outputs are
@@ -310,6 +314,8 @@ so the file stops contradicting itself.
 
 ### T-723 — Two secrets-in-state surfaces (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED, better than recommended.** `cloudflare_origin_secret` is recorded in accepted risks with its rotation consequence. For the azapi export, the invariant it depends on is now ENFORCED rather than the symptom hidden: `app-settings-secrets.test.js` fails when a secret-shaped setting is not a Key Vault reference, reporting the name only — printing the value would put a credential in a CI log. Marking the export sensitive would not have stopped a credential being there.
+
 `infra/main.tf:1454-1465,1467-1495,2029-2035` · `infra/variables.tf:834-839`
 
 The IaC standard says values never transit Terraform state. Two places
@@ -328,6 +334,8 @@ origin-secret exposure, with its rotation consequence, in REVIEW.md's accepted
 risks.
 
 ### T-724 — The permanent plan diff is asserted only in a comment (Medium, verified)
+
+> **Status (2026-08-28):** **FIXED.** `scripts/assert-expected-plan.mjs` compares a plan against the three azapi ADDRESSES and one attribute, catches a destroy hiding beside the expected three, catches a second setting changing on the resource that is legitimately expected to change, and fails when an expected change STOPS appearing (a strip that is not running is how AzureWebJobsStorage returns). Its test pins EXPECTED against `main.tf` both ways. Not in CI: the plan lives in HCP Terraform and `iac-validate.yml` has no token — owner.
 
 `infra/main.tf:1379-1407,1462-1464,1492-1494,1551-1553` ·
 `wiki/0018-as-built-plan-v02.md:71-72`
@@ -420,6 +428,8 @@ keeping `var.tags` for org-stable keys. Verify against live tag values first —
 if the live tag really is `hybridcloudworks`, changing it is harmless but wide.
 
 ### T-753 — Variable names exceed the standard's two-word rule (Low, reported)
+
+> **Status (2026-08-28):** **RESOLVED by amending the standard, which is now marked as the loser.** Posture switches are counted by parts, not words, with each half allowed to be compound when the resource genuinely is. The rename was rejected on cost with the reason recorded: every one of these defaults to the SAFE value, so a variable renamed in code but not in the workspace would quietly disarm the estate.
 
 `infra/variables.tf:359,370,390,550,574,628,315` among others
 
@@ -581,6 +591,8 @@ other than 200.
 
 ### T-731 — The change feed has no per-invocation work budget (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED, not as recommended.** The content feed drops to 8 items and the handler carries a 10-minute budget (inside `DEFAULT_CLAIM_TIMEOUT_MS`, which is the bound that matters). The review said "return early"; that would advance the lease past documents never looked at, and the feed only redelivers on a subsequent write, so their triggers would never fire again. It throws instead. Never checked before the first document, or one heavier than the budget would redeliver forever.
+
 `functions/src/functions/change-feed.js:86-93` ·
 `functions/src/lib/triggers/handlers.js:128-166`
 
@@ -697,6 +709,8 @@ referenced anywhere in `src/`; the real feed is `app.cosmosDB` in
 partition keys.
 
 ### T-761 — The daily forge budget has one enforcement point and a race (Low, reported)
+
+> **Status (2026-08-28):** **FIXED.** `claimForgeBudget` is a server-side compare-and-increment taken before any model call, after the dedupe check (a duplicate costs no tokens) and before generation (a half-finished run has already spent). Editor forging stays uncapped as allowed, but is now COUNTED — otherwise the ceiling is measured against a number ignoring half the spending.
 
 `functions/src/lib/timers/forge-scheduled.js:82-98` ·
 `functions/src/lib/content/forge.js:263-293` ·
@@ -815,6 +829,8 @@ retry for network and 5xx failures in `publicGet`.
 
 ### T-736 — MSAL is in the static import graph of a public route (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED and measured.** Two static edges, not the one reported: `useAdminAuth` AND `lib/api.js`, the latter inherited by anything importing `postJSON`. Both dynamic now. NewsPage static closure 1,060,504 → 816,158 bytes, `entraAuth` and `vendor-msal` gone from it. A chunk-graph test holds the line, with a guard-the-guard case.
+
 `frontend/src/hooks/useGenerateCuratedImages.js:4,80` →
 `frontend/src/hooks/useAdminAuth.js:17-18` → `frontend/src/lib/entraAuth.js`
 
@@ -833,6 +849,8 @@ small module that does not pull `entraAuth`. Add a chunk-graph assertion that
 no public page chunk reaches `vendor-msal`.
 
 ### T-737 — Eleven public routes are neither pre-rendered nor in the sitemap (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED.** 16 standalone routes pre-rendered; build 104 → 120 documents and sitemap 104 → 120 entries. `routes-are-complete.test.js` checks both directions — a declared route not pre-rendered, and a pre-rendered route that no longer exists (which would publish a 200-status NotFound page). `X-Robots-Tag: noindex` added for `/admin/*` and `/preview/*`, ordered before the `/*.html` rule since SWA applies the first match.
 
 `frontend/scripts/prerender-entry.jsx:26-37,61-72` ·
 `frontend/scripts/prerender.mjs:245-253` · `frontend/dist/sitemap.xml`
@@ -858,6 +876,8 @@ appears in `routes()`. Extend `seedFor` to the other detail sections, and add
 
 ### T-738 — Provider normalization is reimplemented four times and has diverged (Medium, verified)
 
+> **Status (2026-08-28):** **FIXED, and the finding under-stated itself.** One table-driven normalizer in `lib/providers.js`, walked by its own test so a new provider is covered when added. Separately: `contentModel.normalizeContentProvider` matched EXACT keys, so "Microsoft Azure" became `microsoftazure` and "AWS Lambda" became `awslambda` — and it feeds `getContentPublicPath`, so it built public URLs no route serves, for the normal case rather than an exotic one.
+
 `frontend/src/hooks/useBlogData.js:13-53` ·
 `frontend/src/hooks/useProviderLandingContent.js:24-57` ·
 `frontend/src/lib/contentModel.js:53-68` · `frontend/src/lib/blogUtils.js:8-19`
@@ -879,6 +899,8 @@ alias set is the cheap guard against re-divergence.
 
 ### T-739 — N+1 fetch on the public news grid (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED.** New anonymous `GET public/curated-images?ids=…`, one ARRAY_CONTAINS query for the grid, bounded at 50 ids so it cannot become a point-read amplifier. Seven disclosure cases are run through BOTH handlers and compared, so a rule changed in one and not the other fails rather than leaking. A failed batch yields `undefined` per id, not null, so the hook falls back per-article instead of reading one bad request as "no article has a cover".
+
 `frontend/src/hooks/useGenerateCuratedImages.js:209-216,120`
 
 `generateImagesForArticles` maps over the article list and issues one
@@ -892,6 +914,8 @@ the image URL on the feed document itself — `fetchPublicFeed` already folds tw
 queries into one round trip — and memoize resolved ids across mounts.
 
 ### T-740 — Route transitions are silent and unfocused (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED.** Focus moves to `#main-content` (`preventScroll`, or it fights the scroll reset), a polite live region announces the new title, `PageLoader` gains `role="status"` and a name, `Skeleton` gains a dark token. Hash links are left alone entirely — `#section` means "go here", and stealing focus would undo it.
 
 `frontend/src/components/shared/ScrollToTop.jsx:7-9` ·
 `frontend/src/App.jsx:174-178,273` ·
@@ -914,6 +938,8 @@ new document title, give `PageLoader` `role="status"` and a label, and
 tokenize the Skeleton background.
 
 ### T-762 — Duplicate route declarations leave dead branches (Low, reported)
+
+> **Status (2026-08-28):** **FIXED.** Three shadowed static routes removed; the `/:provider` block already served all three, and does it inside `ProviderLayout`. The dispatchers read `slug` from `useParams` instead of sniffing the pathname. The first version of the guard MISSED the bug — it compared absolute paths to each other, but the shape is an absolute route shadowing a RELATIVE child — and now detects that; all four shadowing shapes fail.
 
 `frontend/src/App.jsx:227-228,282-311,317-333,510-535` ·
 `frontend/src/context/ProviderContext.jsx:169-183`
@@ -993,6 +1019,8 @@ hour instead of persisting silently.
 
 ### T-726 — A scheduled workflow pushes to main past the gate (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED.** Two jobs: `build` holds the Azure identity and never `contents: write`; `commit` holds `contents: write`, installs nothing, and runs only git and node built-ins. `build` installs with `--ignore-scripts`. The ruleset bypass itself is owner-gated.
+
 `.github/workflows/publish-content-manifest.yml:28-29,60,71-86` ·
 `.github/workflows/sync-wiki.yml:27`
 
@@ -1012,6 +1040,8 @@ with `--ignore-scripts`, or in a job separate from the one holding
 `contents: write`.
 
 ### T-727 — The SWA deployment token is the last long-lived credential (Medium, reported)
+
+> **Status (2026-08-28):** **MITIGATED.** The token now lives in a job that installs nothing, so a compromised build dependency cannot reach it. It can still poison that deploy's content — it produced it — but not take the credential and publish again tomorrow, which is the harm named. Retiring it (OIDC, or an environment secret on a protected `production`) is owner-gated.
 
 `.github/workflows/deploy-azure-frontend.yml:46-57,152`
 
@@ -1042,6 +1072,8 @@ workflow's dependency chain yields the full deploy blast radius.
 deploy identity for the rest, each with its own federated credential.
 
 ### T-729 — No concurrency control on the frontend deploy, and no rollback anywhere (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED.** `concurrency: swa-deploy`, cancel-in-progress false. Rollback is documented with the constraint that makes it non-obvious: you cannot roll back by dispatching an older ref, because the T-705 guard refuses any ref but main. Deliberately not automated — a post-deploy check from a GitHub runner is a datacenter client, which Bot Fight Mode 403s, so it would roll back healthy deploys.
 
 `.github/workflows/deploy-azure-frontend.yml:15-30` ·
 `.github/workflows/deploy-functions.yml:302-345`
@@ -1089,6 +1121,8 @@ env-var pattern the repository otherwise applies deliberately.
 `validate-deployed.yml:106-109`.
 
 ### T-757 — Gate coverage gaps (Low, reported)
+
+> **Status (2026-08-28):** **HALF FIXED, HALF WRONG.** The `vps-agent` half is closed (see T-743). The frontend half is wrong: `test:admin` is plain `vitest run` with no include filter and has been since T-320 closed exactly this — 33 files, 315 tests, all of them. The finding was inferred from the script's NAME. The name was the defect and is gone: `test` is the CI-correct run, `test:watch` the watch mode.
 
 `.github/workflows/ci.yml:41,49-50`
 
@@ -1218,6 +1252,8 @@ the CI assertion to match.
 
 ### T-742 — The harness CI check never exercises the validator (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED.** A CI step now manufactures an available agent (none is committed, which is why every node took the unavailable branch), asserts it IS available or the step would silently re-test the broken path, then proves a valid handoff passes and two forgeries do not. Verified by mutating the validator three ways.
+
 `.github/workflows/ci.yml:117-137` · `tooling/workflow.py:273-301,322-329` ·
 `hooks/claude_event.py:86-94`
 
@@ -1233,6 +1269,8 @@ and asserting `validate` exits 0, plus a mutated copy (wrong agent id, missing
 evidence) asserting exit 1.
 
 ### T-743 — The `vps-agent` CI check runs no tests (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED.** `buildDockerArgs` extracted and pinned by 37 tests using `node:test` — no dependency added, since this package's single-dependency lockfile was its one virtue as a check. It also refuses a capability that sets a sandbox-controlled flag. The first version of the test was WRONG (it compared against the module's own constant, so `--user 0:0` passed); mutation testing caught it and the contract is now written out literally.
 
 `.github/workflows/ci.yml:49-50` · `vps-agent/package.json:10-12` ·
 `vps-agent/lib/docker-runner.js:77-93`
@@ -1326,6 +1364,8 @@ that adding a dependency later does not silently enter an unwatched package.
 no findings attached.
 
 ### T-759 — Job images are pinned by mutable tag on a root-equivalent socket (Low, reported)
+
+> **Status (2026-08-28):** **FIXED.** All three images pinned by digest, each read from the registry's `Docker-Content-Digest` header and cross-checked against the Docker Hub API. `capabilities.test.js` fails on a tag-only reference, and the update procedure is written beside the digests.
 
 `vps-agent/lib/capabilities.js:19,30,45` · `vps-agent/lib/api.js:16-21`
 

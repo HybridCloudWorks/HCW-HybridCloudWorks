@@ -17,6 +17,94 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The architecture review's remaining Medium and Low findings, 20 more
+  closed (2026-08-28; #257, #258 and this change).** The review's own tally
+  goes 35 → 55 of 62. What is left is seven: T-714 (an owner decision on
+  hydration), T-718 and T-728 (each needs an Azure apply to mean anything),
+  T-719 and T-721 (measurements and a cost decision), T-749 (a workspace flip),
+  and T-754 (splitting `main.tf`, which the review itself asks for in a PR
+  whose plan shows nothing else).
+
+  **The gate was not checking what it was believed to check.** `vps-agent` —
+  the component that shells to `docker run` with a payload from the platform
+  API and holds a certificate on a third-party VPS — had its CI row run
+  `npm ci` and stop, so an edit dropping `--network none` shipped green. Its
+  sandbox flag list is the entire security boundary and now has 37 tests over
+  the argv it produces, plus a refusal for any capability that tries to set a
+  sandbox-controlled flag: Docker is last-wins, so `extraDockerArgs` could
+  previously have overridden the boundary silently. Job images move from
+  mutable tags to digests, because `docker run` pulls *before* any sandbox flag
+  applies. Separately, the harness check drove every node through the
+  unavailable-agent branch, so the handoff validator it exists to protect was
+  never called — root cause being that no agent definition is committed, so no
+  node could ever be available.
+
+  **Two unbounded runtime paths got bounds.** The change feed handed 50
+  documents to an invocation in which one `content` document can require four
+  Replicate generations, an inspection, a caption and a Publer call; it now
+  takes 8 and carries a wall-clock budget that *throws* rather than returns,
+  because returning would advance the lease past documents it never looked at
+  and their triggers would never fire again. And the daily forge budget — the
+  system's only AI-spend ceiling — was enforced in one place, against a count
+  written by a best-effort write that swallows its own failures, computed once
+  before a loop so a concurrent manual forge was invisible, and incremented
+  *after* the model calls so a run killed mid-flight spent tokens the ledger
+  never recorded. It is now a server-side compare-and-increment taken before
+  any model call.
+
+  **Two live user-visible frontend bugs.** An anonymous visitor to
+  `/{provider}/news` downloaded and executed 236 kB of MSAL to look at a news
+  grid: the hook's own header claimed its role gate prevented that, but a
+  runtime gate cannot stop a bundler resolving a static import. Measured
+  against real builds, the route's static closure drops 1,060,504 → 816,158
+  bytes. And four copies of provider canonicalisation had drifted — one knew
+  `vmware`/`ansible`, another did not — so those documents appeared on the
+  landing page and vanished from their own provider's blog list.
+
+  **Claims became checks.** `outputs.tf` said sensitive key outputs are
+  "intentionally omitted" eleven lines above one that is not. A comment said a
+  plan of a particular shape "and nothing else means NO DRIFT", where "and
+  nothing else" is the whole claim and the part a human reading a summary line
+  cannot verify — three destroys look like three destroys whichever three they
+  are. The azapi read-back exports the entire live app-settings map into state,
+  safe only while every secret-shaped setting is a Key Vault reference, which
+  nothing asserted. Each is now a test or a program, and the two genuinely
+  accepted exposures — the SWA token and `cloudflare_origin_secret` — are
+  recorded in REVIEW.md with their rotation consequences rather than left to be
+  rediscovered.
+
+  **Four Key Vault failures stopped being one symptom.** Unseeded, RBAC
+  revoked, firewall denying, and rotated-then-broken all arrive as the literal
+  `@Microsoft.KeyVault(…)` string, which the code correctly treats as "no key"
+  — so a feature turns itself off in production, indefinitely, with no
+  exception in Application Insights because the path taken is a clean fallback.
+  `/api/health` now reports how many settings are in that state: a count rather
+  than the names, because that endpoint is anonymous and T-402 already
+  established that an unauthenticated inventory is what host enumeration looks
+  for.
+
+  **Three things the review got wrong, and one it under-stated.** T-757 claimed
+  the frontend gate runs an admin subset; `test:admin` is plain `vitest run`
+  with no include filter and has been since T-320 closed exactly that — the
+  finding was inferred from the script's *name*, so the name is gone. T-731's
+  prescribed "return early" would have silently dropped documents. T-724's
+  recommended CI check cannot be written without a TFC token the repository
+  does not have. And T-738 under-stated itself: `normalizeContentProvider`
+  matched exact keys, so "Microsoft Azure" became `microsoftazure` and fed
+  `getContentPublicPath`, building public URLs no route serves — for the normal
+  case, since multi-word provider fields are what documents actually carry.
+
+  **Mutation testing found two tests that were green while checking nothing**,
+  and both are worth recording because the failure mode is invisible in review.
+  The sandbox test compared each flag against the module's own constant — the
+  same one a regression would edit — so `--user 0:0` passed. The route-shadowing
+  guard compared absolute paths to each other, so reintroducing
+  `/terraform/code` did not fail, because it duplicates a *relative* child of
+  `/:provider`, which is the actual shape of the bug. A third was found by
+  updating it: the curated-image hook's tests were exercising the new fallback
+  path rather than the new path, because the batched function was missing from
+  the mock factory.
+
 - **The architecture review, and 35 of its 62 findings fixed (T-701–T-762,
   2026-08-28; #249 records, #250 remediates).** Six specialist reviews, one per
   technology layer, run against merged main: Azure platform, Terraform IaC,
