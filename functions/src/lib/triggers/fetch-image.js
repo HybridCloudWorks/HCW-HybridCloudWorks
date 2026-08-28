@@ -65,9 +65,22 @@ export function isExternalUrlString(value) {
  * @param {{ fetch?: typeof fetch, resolve?: Function, maxRedirects?: number, timeoutMs?: number }} [deps]
  * @returns {Promise<{ buffer: Buffer, contentType: string }>}
  */
+/**
+ * Ceiling on a fetched image, in bytes (T-734). Generous for a cover or an
+ * in-article picture, and small enough that a hostile or broken origin cannot
+ * make the host buffer an arbitrary amount of memory.
+ */
+export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
 export async function fetchImage(
   url,
-  { fetch: fetchImpl = globalThis.fetch, resolve, maxRedirects = 5, timeoutMs = 15000 } = {}
+  {
+    fetch: fetchImpl = globalThis.fetch,
+    resolve,
+    maxRedirects = 5,
+    timeoutMs = 15000,
+    maxBytes = MAX_IMAGE_BYTES,
+  } = {}
 ) {
   let current = url;
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
@@ -99,7 +112,18 @@ export async function fetchImage(
         throw new Error(`HTTP ${response.status} fetching ${current}`);
       const rawType = response.headers.get('content-type') || '';
       const contentType = rawType.split(';')[0].trim() || 'image/png';
+      // Refuse before buffering when the server declares an oversized body
+      // (T-734). Content-Length is a hint, not a guarantee, so the buffered
+      // length is re-checked below — but honouring it avoids pulling the bytes
+      // at all in the common case.
+      const declared = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        throw new Error(`Image at ${current} declares ${declared} bytes (max ${maxBytes})`);
+      }
       const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > maxBytes) {
+        throw new Error(`Image at ${current} is ${buffer.length} bytes (max ${maxBytes})`);
+      }
       return { buffer, contentType };
     } finally {
       clearTimeout(timer);

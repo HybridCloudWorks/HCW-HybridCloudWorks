@@ -448,7 +448,25 @@ export function createTelegramBot({
         reply = `Something went wrong: ${error?.message || error}`;
       }
 
-      await send(reply);
+      // The send is INSIDE the guard, not after it (T-730). It used to sit
+      // outside the try above, so a network-level rejection from the sender
+      // propagated out of handleUpdate, out of the webhook handler, and the
+      // host answered 500 — breaking the invariant telegram-http.js states in
+      // its own header: always 200 once the secret is valid, because Telegram
+      // retries non-2xx and "a 500 on a bad command turns one broken message
+      // into a retry storm that re-runs the command". For /forge, /approve,
+      // /rss and /inspect each retry re-runs the enqueue, so one transient
+      // Telegram outage produced duplicate publish and forge jobs.
+      //
+      // A failed send is genuinely unreportable — the only channel back to the
+      // owner is the one that just failed — so it is logged and acknowledged.
+      // The command already ran; re-running it would be worse than silence.
+      try {
+        await send(reply);
+      } catch (error) {
+        log.error?.(`[telegram] reply send failed: ${error?.stack || error}`);
+        return { handled: true, reply, sendFailed: true };
+      }
       return { handled: true, reply };
     },
   };

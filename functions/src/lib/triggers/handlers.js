@@ -146,22 +146,51 @@ export function createFeedHandlers({
           out.inspected = 'error';
         }
       }
+      // Each trigger is isolated (T-733). These three used to run unguarded on
+      // the theory that every run() catches internally — but each of those
+      // catch blocks ends in a patchDoc that can itself throw, and when it did,
+      // the document-level catch took over and skipped BOTH the remaining
+      // triggers and the counter update below. Per-trigger failure semantics
+      // are deliberate and documented in each trigger's header; the isolation
+      // that makes them per-trigger was missing.
+      const runIsolated = async (label, fn) => {
+        try {
+          return await fn();
+        } catch (err) {
+          context.error?.(`[${label}:content] ${doc.id}: ${err?.message || err}`);
+          return 'error';
+        }
+      };
+
       if (doc.altCoverImageTrigger === true) {
-        const r = await aiCover.run(doc.id, eventIdOf(doc));
-        out.aiCover = r.reason;
+        out.aiCover = await runIsolated(
+          'ai-cover',
+          async () => (await aiCover.run(doc.id, eventIdOf(doc))).reason
+        );
       }
       if (doc.forgeReadyNotifyTrigger === true) {
-        const r = await forgeReadyNotify.run(doc.id, eventIdOf(doc));
-        out.forgeReadyNotify = r.reason;
+        out.forgeReadyNotify = await runIsolated(
+          'forge-ready-notify',
+          async () => (await forgeReadyNotify.run(doc.id, eventIdOf(doc))).reason
+        );
       }
       if (doc.socialCaptionTrigger === true) {
-        const r = await socialCaption.run(doc.id, eventIdOf(doc));
-        out.socialCaption = r.reason;
+        out.socialCaption = await runIsolated(
+          'social-caption',
+          async () => (await socialCaption.run(doc.id, eventIdOf(doc))).reason
+        );
       }
       // Counters last, from the document as delivered; a claim or completion
       // write above re-delivers this document and the marker then matches.
-      const deltas = await dashboardStats.applyTransition({ contentId: doc.id, afterData: doc });
-      out.statsMoved = Object.keys(deltas).length > 0;
+      // Isolated too: counter maintenance is what the comment above calls out
+      // as needing to run, so it must not be collateral damage from a trigger.
+      out.statsMoved = await runIsolated('dashboard-stats', async () => {
+        const deltas = await dashboardStats.applyTransition({
+          contentId: doc.id,
+          afterData: doc,
+        });
+        return Object.keys(deltas).length > 0;
+      });
       return out;
     });
 

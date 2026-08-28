@@ -206,17 +206,25 @@ describe('route inventory', () => {
 });
 
 describe('property 1 — every route is guarded or explicitly public', () => {
-  it('enumerates each registration', async () => {
+  it('enumerates each registration, for EVERY verb it answers', async () => {
     const unguarded = [];
 
     for (const [name, options] of httpRegistrations) {
       if (PUBLIC_ROUTES.has(options.route)) continue;
 
-      clearGuards();
-      await invoke(options, makeRequest({ method: options.methods[0] }));
+      // Every verb, not just methods[0] (T-732). httpRouteByMethod fans up to
+      // three verbs behind one registration — admin-integrations-http.js
+      // registers PUT/PATCH/DELETE on one route — so probing only the first
+      // left the rest unchecked. Nothing was actually unguarded when this was
+      // widened, but this test is the replacement for the firestore.rules
+      // default-deny catch-all, and that catch-all had no per-verb blind spot.
+      for (const method of options.methods.filter((m) => m !== 'OPTIONS')) {
+        clearGuards();
+        await invoke(options, makeRequest({ method }));
 
-      if (guardCalls() === 0) {
-        unguarded.push(`${name} (${options.methods[0]} ${options.route})`);
+        if (guardCalls() === 0) {
+          unguarded.push(`${name} (${method} ${options.route})`);
+        }
       }
     }
 

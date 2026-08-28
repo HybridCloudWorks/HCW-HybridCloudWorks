@@ -22,6 +22,7 @@
 import { generateSlug } from '../rss/feeds.js';
 import { buildVoiceAndFormatBlock, pickNextFormat } from './voice.js';
 import { extractPublishedDate, referenceScrapedImages } from './scrape.js';
+import { fetchImage as defaultFetchImage } from '../triggers/fetch-image.js';
 
 // The static system prompt — kept ≥1,024 tokens so Anthropic caches it.
 export const ANALYSIS_SYSTEM_PROMPT = `You are a technical content analyst for Hybrid Cloud Works (HCW), a publication targeting senior cloud practitioners — architects, DevOps leads, FinOps analysts, and platform engineers — at enterprises operating multi-cloud or hybrid environments. Every article you produce must be technical, concrete, and actionable. Do not write introductory-level content.
@@ -185,6 +186,9 @@ export function createInspector({
   critic,
   env = process.env,
   fetch: fetchImpl = globalThis.fetch,
+  // Injected so tests can stub it; defaults to the SSRF-validating fetcher
+  // rather than bare fetch (T-734).
+  fetchImage: fetchImageImpl = defaultFetchImage,
   now = () => new Date(),
   log = {},
 }) {
@@ -243,15 +247,25 @@ export function createInspector({
     const results = {};
     for (const url of imageUrls.slice(0, 5)) {
       try {
-        const response = await fetchImpl(url);
-        if (!response.ok) continue;
-        const buffer = Buffer.from(await response.arrayBuffer());
+        // These URLs come from `scraped.images` — whatever page sourceUrl
+        // pointed at — so they are attacker-influenced. Bare fetch performed no
+        // protocol check, no private-range refusal, no timeout and no size cap,
+        // while the repository already contained exactly the right primitive:
+        // fetch-image.js validates the protocol, refuses localhost, resolves
+        // the host to IPv4, refuses private ranges, and re-checks on every
+        // redirect hop (T-734).
+        const { buffer, contentType } = await fetchImageImpl(url, { fetch: fetchImpl });
+        // Prefer the served content-type; fall back to the extension, which is
+        // what this used before and is still better than nothing.
         const lower = url.toLowerCase();
-        const mimeType = lower.endsWith('.png')
-          ? 'image/png'
-          : lower.endsWith('.webp')
-            ? 'image/webp'
-            : 'image/jpeg';
+        const mimeType =
+          contentType && contentType.startsWith('image/')
+            ? contentType
+            : lower.endsWith('.png')
+              ? 'image/png'
+              : lower.endsWith('.webp')
+                ? 'image/webp'
+                : 'image/jpeg';
         const altText = await ai.generateTextResponse({
           parts: [
             {

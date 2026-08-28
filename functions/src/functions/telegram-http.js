@@ -107,8 +107,18 @@ httpRoute('telegramWebhook', {
       return { status: 200, body: 'ok' }; // malformed: ack, do not retry-storm
     }
 
-    const result = await bot.handleUpdate(update);
-    context.log(`[telegram] ${result.handled ? 'handled' : `ignored (${result.reason})`}`);
+    // Belt and braces for the invariant in this file's header (T-730).
+    // handleUpdate's own JSDoc promises it never throws, and it now catches
+    // its send as well — but the promise is what the retry-storm behaviour
+    // depends on, so the route enforces it rather than trusting it. Anything
+    // escaping here is logged and acknowledged: Telegram retries a non-2xx,
+    // and a retry re-runs the command that just failed.
+    try {
+      const result = await bot.handleUpdate(update);
+      context.log(`[telegram] ${result.handled ? 'handled' : `ignored (${result.reason})`}`);
+    } catch (error) {
+      context.error?.(`[telegram] handleUpdate threw: ${error?.stack || error}`);
+    }
     return { status: 200, body: 'ok' };
   },
 });
