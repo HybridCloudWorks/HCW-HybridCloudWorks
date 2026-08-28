@@ -48,10 +48,17 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
 | Priority | Open items |
 | --- | ---: |
-| High | 2 |
-| Medium | 1 |
-| Low | 0 |
-| Total | 3 |
+| High | 6 |
+| Medium | 3 |
+| Low | 1 |
+| Total | 10 |
+
+Seven of the ten are the **Blog Machine program** (T-601…T-607), opened
+2026-08-28 — the engineering initiative this tracker is now headlined by. The
+program of record, with the architecture, verified code anchors, locked owner
+decisions and backlog, is
+[wiki/Blog-Machine.md](wiki/Blog-Machine.md); the entries below carry only
+what "open" means for each phase.
 
 Five items closed on 2026-08-25. Four in #220 — T-520, T-521, T-523 and A-001,
 the ones that did not need access outside the repository — and T-525, which the
@@ -69,19 +76,89 @@ with a design, a cost model and acceptance criteria belongs, rather than as a
 tracker line that only ever said "two numbers are missing". The analysis behind
 it is in the issue so it does not get redone.
 
-**All three that remain carry Gate: owner, and none of them is a repository
-setting any more.** What is left is a webhook registration, a Worker
-deployment and a set of feature flags — every one needs tenant or edge
-access, and no amount of engineering here closes any of them.
-They are listed anyway, because a tracker that omits them is quietly shorter
-than the truth.
+**The three pre-program items (T-518, T-519, T-526) carry Gate: owner and
+have no repository-side half.** What is left of them is a webhook
+registration, a Worker deployment and a set of feature flags — every one
+needs tenant or edge access. They are listed anyway, because a tracker that
+omits them is quietly shorter than the truth. Two of them now also gate
+program phases: T-526 gates the T-606 Telegram loop, T-518 gates T-607's
+scheduled throughput.
 
-Nothing on this list has a repository-side half left. T-520 finished the same
+The program entries, by contrast, are almost entirely repository-side
+engineering — the first substantial engineering work this tracker has carried
+since the RPC surface (#180). T-520 finished the same
 day it was written: `functions_scm_lock_enabled` is armed, SCM answers `Deny`,
 and run 32902534458 published through Kudu inside the per-run window and
 restored the lock behind itself.
 The ruleset half of T-523 is done — `20680114` now requires 12 contexts,
 including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
+
+## The Blog Machine program
+
+One initiative, seven phases, each sized to one PR. Full specifications,
+verified code anchors, the locked owner decisions (signed preview links;
+Telegram approve publishes live; AI covers with designed fallback heroes;
+sources internal-only) and the backlog live in
+[wiki/Blog-Machine.md](wiki/Blog-Machine.md) — these entries track only what
+remains open.
+
+### T-601 — Phase 0: the forge has no working entry point (High)
+
+`/forge` in the Telegram bot — the only `forge-article` enqueue site in the
+repository — sends `{ contentId }` where `resolveForgeTargets` requires
+`sourceContentId`, so it has always failed; and the modular blog render path
+drops `markdownCodeComponents`, losing syntax highlighting inside modules.
+Two small fixes plus a strengthened bot test asserting the payload key.
+
+### T-602 — Phase 1: paste a URL, get a draft (High)
+
+Implement `generateArticleDraft` HTTP-direct over `scrapeArticle` +
+`createDrafter` (whose output already matches what `SubmitUrlsPage` and the
+editor expect), extract the twice-composed voice/format prompt block into one
+`voice.js` builder, and add the unattended `forge-from-url` job with a paste
+box on the queue. Contract move in `.azure/api-surface.json` same-change.
+
+### T-603 — Phase 2: checkbox posts, forge them (High)
+
+"Forge Selected (n)" on the review queue: the existing `selectedIds` Set
+(today wired only to bulk-reject) chunked ≤10 into
+`runJob('forge-article', { sourceContentIds })`, plus select-all and forge
+grade/provenance badges on queue cards.
+
+### T-604 — Phase 3: Forge Studio — the voice, editable (Medium)
+
+`getForgeConfig`/`updateForgeConfig` RPCs and an admin page for
+`forge_profile` (wordSoup, weighted interest areas) and `forge_prompts`
+(master prompt, banned phrases, style rules, publish threshold, autoForge).
+Plus voice calibration: suggestions extracted from published posts as
+accept/dismiss chips, never auto-merged. Retires the manual-Cosmos-seeding
+requirement (the T-409 remainder).
+
+### T-605 — Phase 4: five new modules; teach the forge to use them (Medium)
+
+`pull_quote`, `stat_board`, `comparison`, `timeline`, `callout` — built from
+existing components and theme tokens; serializers unified first; cap 10→14
+both sides; `MODULE_TAG_SYNTAX` + per-format module lists extended so the
+forge writes them; `PreviewPanel` adopts the production prose classes. The
+grammar table in wiki/Blog-Machine.md is the cross-package contract.
+
+### T-606 — Phase 5: staging links and approve-by-reply (High)
+
+Signed HMAC preview route (`/api/public/preview/{id}?t=…`, 72 h,
+indistinguishable 404, justified `PUBLIC_ROUTES` entry) + `/preview/:id`
+frontend; `forge_ready` rising-edge notification with title/grade/preview
+link; `/approve` → `publish-content` job via the injected
+`processPublishContent` (every gate applies), `/reject` →
+`transitionContentStatus`; designed default heroes as the ai-cover fallback.
+**Gate: owner for activation** — T-526 (webhook re-registration; inline
+buttons ride the same re-run) and `PREVIEW_SIGNING_SECRET` seeding.
+
+### T-607 — Phases 6–7: the machine runs itself (Low until T-606 lands)
+
+Arm `forgeScheduled`/`syncRssFeeds`/`publishScheduledContent`
+(**Gate: owner**, T-518), enforce `autoForge.dailyLimit`, rank candidates by
+interest-area weights, failure-only job notifications, queue polish, program
+close-out to CHANGELOG.
 
 ## High
 

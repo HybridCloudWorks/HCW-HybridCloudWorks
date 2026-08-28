@@ -5,6 +5,7 @@
 - [Deployment runbook](Deployment-Runbook)
 - [Alerting and support](Alerting-And-Support)
 - [Availability probe](Availability-Probe)
+- [Blog machine](Blog-Machine)
 - [IaC repository standard](IaC-Repository-Standard)
 - [Naming convention](Naming-Convention)
 - [Variables and secrets](Variables-And-Secrets)

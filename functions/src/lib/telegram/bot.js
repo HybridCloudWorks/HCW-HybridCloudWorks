@@ -291,7 +291,13 @@ export function createTelegramBot({
     forge: async (argText) => {
       const contentId = argText.trim();
       if (!contentId) return 'Usage: /forge <contentId>';
-      return queue('forge-article', { contentId }, `Queued the forge pipeline for ${contentId}.`);
+      // resolveForgeTargets reads sourceContentId/sourceContentIds — a bare
+      // contentId key is rejected and the job lands failed (T-601).
+      return queue(
+        'forge-article',
+        { sourceContentId: contentId },
+        `Queued the forge pipeline for ${contentId}.`
+      );
     },
   };
 
