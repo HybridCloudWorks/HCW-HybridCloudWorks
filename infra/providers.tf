@@ -3,7 +3,10 @@
 # Backend (HCP Terraform Cloud) is declared in backend.tf
 # =============================================================================
 terraform {
-  required_version = ">= 1.5"
+  # Upper-bounded (T-725). ">= 1.5" silently admits a future Terraform 2.x,
+  # whose breaking changes would arrive as a surprise on whichever runner
+  # upgraded first. The standard asks for pinned versions; this pins the major.
+  required_version = "~> 1.5"
 
   required_providers {
     azurerm = {
@@ -21,9 +24,15 @@ terraform {
       version = "~> 2.0"
     }
     # Cloudflare remains for DNS management
+    # 4.52 is the real floor, not 4.0 (T-725): cloudflare_record.content uses an
+    # attribute that only exists from 4.52, so the older versions the previous
+    # constraint admitted fail `validate`. Only the lock file was keeping it
+    # honest, so a workspace or CI re-resolve without the lock would have broken
+    # confusingly. (Provider v5 renames cloudflare_record to
+    # cloudflare_dns_record — an upgrade ADR, tracked separately.)
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "~> 4.0"
+      version = "~> 4.52"
     }
   }
 }

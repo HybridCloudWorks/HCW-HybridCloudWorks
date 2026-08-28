@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
-import { fetchPublicContentList } from '@/lib/publicApi';
+import { fetchPublicContentList, PUBLIC_CORPUS_LIMIT } from '@/lib/publicApi';
 
 const normalizeProvider = (value) =>
   String(value || '')
@@ -186,8 +186,12 @@ const sortFeaturedFirst = (frameworks = []) =>
 export function useFrameworkData(provider) {
   const providerKey = normalizeProvider(provider);
 
-  const { data: contentDocs, loading: contentLoading } = usePublicData(
-    () => fetchPublicContentList({ limit: 250 }),
+  const {
+    data: contentDocs,
+    loading: contentLoading,
+    error: contentError,
+  } = usePublicData(
+    () => fetchPublicContentList({ limit: PUBLIC_CORPUS_LIMIT }),
     'frameworks:content'
   );
   const contentFrameworks = useMemo(
@@ -195,8 +199,12 @@ export function useFrameworkData(provider) {
     [contentDocs, providerKey]
   );
   const shouldLoadLegacy = !contentLoading && contentFrameworks.length === 0;
-  const { data: legacyDocs, loading: legacyLoading } = usePublicData(
-    () => fetchPublicContentList({ limit: 150, source: 'blogs' }),
+  const {
+    data: legacyDocs,
+    loading: legacyLoading,
+    error: legacyError,
+  } = usePublicData(
+    () => fetchPublicContentList({ limit: PUBLIC_CORPUS_LIMIT, source: 'blogs' }),
     shouldLoadLegacy ? 'frameworks:legacy' : ''
   );
 
@@ -211,7 +219,9 @@ export function useFrameworkData(provider) {
   return {
     frameworks,
     loading: contentLoading || (shouldLoadLegacy && legacyLoading),
-    error: null,
+    // Was hardcoded null, so a failed fetch was indistinguishable from an
+    // empty result on the frameworks path (T-717).
+    error: contentError || legacyError || null,
   };
 }
 

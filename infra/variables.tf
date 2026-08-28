@@ -516,6 +516,40 @@ variable "budget_alert_email" {
   type        = string
 }
 
+# T-709. Every alert rule in this estate routes through one action group, and
+# that group had exactly one receiver: a single mailbox, reached across a
+# subscription boundary whose delivery has never been observed. Azure alert
+# rules cannot carry a direct email, so there is no second path anywhere — if
+# that one hop is silently inert, the estate has rules that evaluate and page
+# nobody, which observability.tf itself calls "strictly WORSE than the visible
+# emptiness" it replaced.
+#
+# An SMS receiver is the cheapest independent channel (free, and it does not
+# share the mailbox's failure modes). Empty by default: a phone number is owner
+# data, and the vault/variable rules say real values never enter tracked files.
+# Left empty the action group is exactly as it was, so this variable adds a
+# capability rather than a requirement.
+variable "ops_sms_receiver" {
+  description = "Optional second alert channel: { country_code, phone_number }. Empty disables it."
+  type = object({
+    country_code = string
+    phone_number = string
+  })
+  default = {
+    country_code = ""
+    phone_number = ""
+  }
+  validation {
+    # Both or neither — a half-configured receiver is an ARM error at apply
+    # time, which is a slow way to learn about a typo.
+    condition = (
+      (var.ops_sms_receiver.country_code == "" && var.ops_sms_receiver.phone_number == "") ||
+      (var.ops_sms_receiver.country_code != "" && var.ops_sms_receiver.phone_number != "")
+    )
+    error_message = "ops_sms_receiver needs both country_code and phone_number, or neither."
+  }
+}
+
 # Must be the first of the current month or later, in UTC — Azure rejects
 # anything earlier for a monthly budget. Update it when a first apply into a
 # new subscription lands in a later month than this default.
@@ -934,8 +968,15 @@ variable "domain" {
 # -----------------------------------------------------------------------------
 # Tags
 # -----------------------------------------------------------------------------
+# NOTE (T-752): `environment` here is a fallback only — local.tags in main.tf
+# overrides it from var.environment, so the two cannot drift. `workload` is
+# deliberately NOT derived from var.workload_name: the live estate is tagged
+# `hybridcloudworks` while resource NAMES carry the workload token `site`, and
+# reconciling them rewrites the tag on every resource in the subscription. That
+# is a deliberate, owner-visible change rather than a side effect of this one,
+# so it is recorded in the review and left alone here.
 variable "tags" {
-  description = "Default tags applied to all Azure resources"
+  description = "Default tags applied to all Azure resources (see local.tags)"
   type        = map(string)
   default = {
     workload           = "hybridcloudworks"

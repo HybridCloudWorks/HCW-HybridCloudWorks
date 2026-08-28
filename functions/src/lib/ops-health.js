@@ -86,6 +86,12 @@ export function buildWorkflowAlertUpdates({
 }
 
 const IMAGES_PROBE_BOUND = 2000;
+/**
+ * Content ids per orphan-probe query (T-711). Bounded because a Cosmos query
+ * carries its parameters in the request: one enormous ARRAY_CONTAINS would
+ * trade 2000 small reads for one request too large to serve.
+ */
+const ORPHAN_PROBE_BATCH = 100;
 
 /**
  * @param {object} deps
@@ -187,16 +193,44 @@ export function createOpsHealthHandlers({
         getWorkflowAlertStatus(alert) !== 'resolved'
     ).length;
 
-    // Orphan detection: probe content existence per image (source strategy).
-    const orphanProbes = await Promise.all(
-      generatedImages.map(async (image) => {
-        const contentId = String(image.contentId || '').trim();
-        if (!contentId) return 1; // orphan: no contentId
-        const ref = await store.readDoc('content', contentId, contentId);
-        return ref ? 0 : 1;
-      })
-    );
-    const orphanedGeneratedImages = orphanProbes.reduce((sum, v) => sum + v, 0);
+    // Orphan detection (T-711).
+    //
+    // This used to be `Promise.all(generatedImages.map(… readDoc …))` — an
+    // unthrottled fan-out of up to IMAGES_PROBE_BOUND (2000) concurrent point
+    // reads, purely to produce one count. Every /status, /queue, /alerts,
+    // /digest and /ai reaches it, AND so does every free-form Telegram
+    // message, so one chat message could exhaust the RU budget the anonymous
+    // public list endpoints share and 429 the website.
+    //
+    // Two properties do the work. Images are keyed by contentId and a single
+    // content document can carry up to four generated images, so deduplicating
+    // removes most of the reads before any I/O. What remains is answered in
+    // batches with ARRAY_CONTAINS instead of one request each: ~2000 point
+    // reads become a handful of queries, and the count is identical.
+    const idsToProbe = [
+      ...new Set(generatedImages.map((image) => String(image?.contentId || '').trim())),
+    ].filter(Boolean);
+    // An image with no contentId is an orphan by definition and needs no probe.
+    const missingIdCount = generatedImages.filter(
+      (image) => !String(image?.contentId || '').trim()
+    ).length;
+
+    const existingIds = new Set();
+    for (let i = 0; i < idsToProbe.length; i += ORPHAN_PROBE_BATCH) {
+      const batch = idsToProbe.slice(i, i + ORPHAN_PROBE_BATCH);
+      const rows = await store.queryDocs(
+        'content',
+        'SELECT c.id FROM c WHERE ARRAY_CONTAINS(@ids, c.id)',
+        [{ name: '@ids', value: batch }]
+      );
+      for (const row of rows || []) existingIds.add(row.id);
+    }
+    const orphanedGeneratedImages =
+      missingIdCount +
+      generatedImages.filter((image) => {
+        const contentId = String(image?.contentId || '').trim();
+        return contentId && !existingIds.has(contentId);
+      }).length;
 
     const operationalSignals = {
       queueBreachCount,

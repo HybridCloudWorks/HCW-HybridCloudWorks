@@ -91,6 +91,8 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
 }
 
 registerJobType('generate-listen-and-learn', {
+  // Generates and stores an episode; publishing it is a separate action.
+  role: 'editor',
   description:
     'Parse a certification study guide, script one episode per skill area, synthesise the audio and save every episode as a draft for review.',
   // Enough for the URL, the exam code and up to eight area slugs.

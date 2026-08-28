@@ -79,7 +79,14 @@ export function usePublicData(fetcher, key) {
       .catch((err) => {
         console.error('Public data fetch failed:', err);
         if (!cancelled) {
-          setState((prev) => ({ ...prev, error: err, loading: false }));
+          // data: null, not `...prev` (T-717). Keeping the previous key's data
+          // on a FAILED fetch is what made /aws/blog/a -> /aws/blog/b render
+          // article A's title, body and image underneath article B's canonical
+          // and og:url — wrong content at a correct-looking URL, with correct
+          // metadata describing something else. The carry-over is worth having
+          // while a fetch is PENDING (it avoids an empty flash) and is a
+          // correctness bug once the fetch has failed.
+          setState((prev) => ({ ...prev, data: null, error: err, loading: false }));
         }
       });
 

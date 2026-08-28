@@ -8,6 +8,11 @@
  * "not configured". Cooldown state lives in `system/notify_state`.
  */
 import { readKey } from './ai/router.js';
+import { fetchWithTimeout } from './http/fetch-with-timeout.js';
+
+// Outbound deadline (T-712): Node's fetch has none, and these calls are
+// reached from change-feed handlers where a hung socket holds the lease.
+const TELEGRAM_TIMEOUT_MS = 15_000;
 
 export const COOLDOWN_MS = 15 * 60 * 1000;
 export const NOTIFY_STATE_ID = 'notify_state';
@@ -77,14 +82,19 @@ export function createNotifier({
         log.log?.(`[notify] Cooldown active for source="${source}"; skipping Telegram send.`);
         return { sent: false, reason: 'cooldown' };
       }
-      const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: formatTelegramText({ title, message, severity, source }),
-        }),
-      });
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: formatTelegramText({ title, message, severity, source }),
+          }),
+          timeoutMs: TELEGRAM_TIMEOUT_MS,
+        }
+      );
       if (!response.ok) {
         log.error?.(`[notify] Telegram API error ${response.status}`);
         return { sent: false, reason: 'telegram_error' };

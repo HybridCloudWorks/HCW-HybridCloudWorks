@@ -151,10 +151,10 @@ describe('enqueueJob', () => {
   });
 
   it('enforces a stricter per-type role on top of editor', async () => {
-    registerJobType('admin-only', { worker: async () => 1, role: 'admin' });
+    registerJobType('admin-only', { worker: async () => 1, role: 'super_admin' });
     const guard = {
       requireRole: vi.fn(async (_r, role) =>
-        role === 'admin' ? { error: { status: 403 } } : { user: USER, role }
+        role === 'super_admin' ? { error: { status: 403 } } : { user: USER, role }
       ),
     };
     const h = createJobHandlers({ guard, store: makeStore(), ...fixed });
@@ -288,6 +288,7 @@ describe('runJob', () => {
 
   it('records a worker failure as failed, with the message, and does not throw', async () => {
     registerJobType('explode', {
+      role: 'editor',
       worker: async () => {
         throw new Error('boom ' + 'x'.repeat(3000));
       },
@@ -304,6 +305,7 @@ describe('runJob', () => {
 
   it('records a timeout as timeout', async () => {
     registerJobType('slow', {
+      role: 'editor',
       timeoutMs: 10,
       worker: () => new Promise((r) => setTimeout(r, 200)),
     });
@@ -334,10 +336,12 @@ describe('runJob', () => {
   it('invokes onComplete after the terminal write, success and failure alike (T-607)', async () => {
     const seen = [];
     registerJobType('hooked-ok', {
+      role: 'editor',
       worker: async () => ({ done: true }),
       onComplete: async ({ status, result, error }) => seen.push({ status, result, error }),
     });
     registerJobType('hooked-bad', {
+      role: 'editor',
       worker: async () => {
         throw new Error('nope');
       },
@@ -361,6 +365,7 @@ describe('runJob', () => {
 
   it('a throwing onComplete is logged and never changes the job outcome', async () => {
     registerJobType('hook-explodes', {
+      role: 'editor',
       worker: async () => 'fine',
       onComplete: async () => {
         throw new Error('hook boom');

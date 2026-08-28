@@ -107,7 +107,7 @@
   # Same, on a machine with no browser of its own.
   ./scripts/bootstrap-terraform-oidc.ps1 -DeviceCode
 #>
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
   # All three are optional and discovered interactively when omitted — see
   # lib/deploy-console.ps1 for why none of them is a required flag. Supplying
@@ -460,7 +460,20 @@ if ($missingRights.Count -gt 0) {
       '--scope', '/',
       '-o', 'json'
     ) -AllowFailure
-    if ($rootGrant) {
+    # An unreadable read-back is NOT a clean bill of health. Invoke-Az returns
+    # $null both for "no assignment" and for a throttled, denied or timed-out
+    # call, so the success branch below used to print "removed (verified)"
+    # over a grant that might still be live — the exact false-green this
+    # read-back exists to prevent (T-703).
+    if (Test-LastAzFailed) {
+      Write-Host '  [warn] Could NOT read the root-scope assignments back.' -ForegroundColor Red
+      Write-Host '         The delete may or may not have taken effect. Treat the' -ForegroundColor Red
+      Write-Host '         tenant-root grant as STILL LIVE until you have checked:' -ForegroundColor Red
+      Write-Host "         az role assignment list --assignee $signedInObjectId --scope / -o table" -ForegroundColor Red
+      Write-Host '         Remove it with:' -ForegroundColor Red
+      Write-Host "         az role assignment delete --assignee $signedInObjectId --role 'User Access Administrator' --scope /" -ForegroundColor Red
+    }
+    elseif ($rootGrant) {
       Write-Host '  [warn] Root-scope User Access Administrator is STILL ASSIGNED.' -ForegroundColor Red
       Write-Host '         This is a standing tenant-wide privilege. Remove it by hand:' -ForegroundColor Red
       Write-Host "         az role assignment delete --assignee $signedInObjectId --role 'User Access Administrator' --scope /" -ForegroundColor Red

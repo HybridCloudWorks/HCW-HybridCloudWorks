@@ -395,7 +395,26 @@ def close_workflow(args: argparse.Namespace, root: Path) -> int:
             "hint": "run the outstanding agents, or record the truth with --abandon",
         }, indent=2), file=sys.stderr)
         return 1
-    state["status"] = "abandoned" if errors else "completed"
+    # `completed` has to mean work actually ran (T-741).
+    #
+    # evaluate_workflow already refuses to call an empty required-set
+    # "completed" -- `elif required and all(...)` falls through to "partial".
+    # This line used to overwrite that with a bare `errors else "completed"`,
+    # so a workflow whose every node was skipped_optional closed as completed:
+    # an audit trail asserting work that never happened, which the module
+    # docstring says this tool exists to prevent. The CI smoke test asserted
+    # that behaviour, so it was pinned rather than accidental.
+    validation = state.get("validation") or {}
+    nothing_ran = validation.get("completed", 0) == 0
+    if errors:
+        state["status"] = "abandoned"
+    elif nothing_ran or validation.get("skipped"):
+        # Distinct from "abandoned", which means outstanding errors. This is a
+        # workflow that closed cleanly having done nothing -- worth its own
+        # word so a reader is not left inferring it from a zero count.
+        state["status"] = "empty"
+    else:
+        state["status"] = "completed"
     state["closed_at"] = now()
     state["closed_reason"] = args.reason
     if errors:

@@ -67,6 +67,19 @@ updates:
         update-types:
           - major
 
+  # The Cloudflare Worker (T-747). It has no dependencies today, so this adds
+  # nothing immediately — which is exactly why it is cheap to add now, rather
+  # than discovering later that a package entered an unwatched directory.
+  - package-ecosystem: npm
+    directory: /edge/availability-probe
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+
   - package-ecosystem: npm
     directory: /vps-agent
     schedule:
@@ -114,8 +127,13 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     cooldown:
+      # No semver-major-days here: Dependabot does not support that property
+      # for the terraform ecosystem, and its presence made the WHOLE file
+      # invalid — so no ecosystem got updates, not just this one. The failure
+      # was latent because Dependabot only re-validates when the file changes,
+      # and nothing had changed it since the property was copied over from the
+      # npm entries above. The github-actions entry already gets this right.
       default-days: 3
-      semver-major-days: 7
     groups:
       infra-terraform-minor-patch:
         update-types:

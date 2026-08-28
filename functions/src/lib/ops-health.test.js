@@ -78,7 +78,7 @@ describe('helpers', () => {
 describe('getOpsHealthSnapshot', () => {
   function opsStore() {
     return {
-      queryDocs: vi.fn(async (container, query) => {
+      queryDocs: vi.fn(async (container, query, params) => {
         if (query.includes('VALUE COUNT')) {
           if (query.includes("'published'")) return [12];
           if (query.includes("'rss'")) return [3];
@@ -86,6 +86,13 @@ describe('getOpsHealthSnapshot', () => {
         }
         if (container === 'content' && query.includes('c["slug"]')) {
           return [{ id: 'p1', slug: 'has-slug' }, { id: 'p2' }]; // one missing slug
+        }
+        // Orphan probe (T-711): one batched existence check in place of a
+        // point read per generated image. Only 'c-exists' exists, matching the
+        // readDoc branch below that this replaced.
+        if (container === 'content' && query.includes('ARRAY_CONTAINS(@ids, c.id)')) {
+          const ids = params?.[0]?.value || [];
+          return ids.filter((id) => id === 'c-exists').map((id) => ({ id }));
         }
         if (container === 'content') {
           // staged rows

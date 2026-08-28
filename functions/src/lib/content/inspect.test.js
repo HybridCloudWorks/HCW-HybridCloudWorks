@@ -246,9 +246,12 @@ describe('createInspector', () => {
   it('metadata-only mode skips the voice block and the critique; alt text runs only when enabled', async () => {
     const d = deps({
       env: { CONTENTFORGE_METADATA_ONLY: 'true', CONTENTFORGE_ALT_TEXT_ENABLED: 'true' },
-      fetch: vi.fn(async () => ({
-        ok: true,
-        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      // Alt-text image fetches now go through the SSRF-validating fetcher
+      // (T-734), which resolves the host and refuses private ranges — so the
+      // stub is at that seam rather than at bare fetch.
+      fetchImage: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: 'image/png',
       })),
     });
     d.ai.generateJsonResponse.mockResolvedValue({ ...metadata, postContent: undefined });

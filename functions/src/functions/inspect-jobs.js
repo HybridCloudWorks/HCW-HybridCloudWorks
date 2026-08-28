@@ -15,6 +15,8 @@ import { createInspectBatch } from '../lib/content/inspect-job.js';
 import { registerJobType } from '../lib/jobs.js';
 
 registerJobType('batch-inspect', {
+  // Inspection enriches drafts in place; editor, as the HTTP inspect route is.
+  role: 'editor',
   description:
     'Inspect ingested content: scrape the source, analyse it with the configured AI provider, critique and revise once, write the draft back.',
   maxPayloadBytes: 256,

@@ -48,11 +48,11 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
 | Priority | Open items |
 | --- | ---: |
-| Critical | 5 |
-| High | 14 |
-| Medium | 31 |
-| Low | 15 |
-| Total | 65 |
+| Critical | 0 (all five closed 2026-08-28) |
+| High | 3 (T-714 + the two owner gates T-518/T-526) |
+| Medium | 20 (2 of them owner-gated) |
+| Low | 9 |
+| Total | 32 |
 
 **The count changed shape on 2026-08-28.** It previously read 10, of which
 seven were the Blog Machine program (T-601…T-607) — now closed and merged, so
@@ -152,128 +152,115 @@ Deliberately **not** re-reported, being owner gates rather than findings:
 T-518, T-519, T-526, the unseeded Key Vault secrets, the unseeded
 `admin_config` documents, and the absent analytics provider.
 
-### Critical — act before the next deploy or cutover
+### Critical — CLOSED 2026-08-28
 
-**T-701 — An editor can publish content live, bypassing the publisher gate.**
-`functions/src/lib/jobs.js:106,219-222`; `functions/src/functions/publish-jobs.js:39-50`;
-`functions/src/lib/cms/publish.js:467`. *Verified.*
-`publish-content` declares no `role`, inherits `registerJobType`'s `editor`
-default, and `enqueueJob` escalates only when the role differs from `editor` —
-so an editor-level token publishes live through a guard-free worker. **None of
-the eight job types declares a role.** Fix: make `role` mandatory in
-`registerJobType`, declare `publisher` on `publish-content`, and test that each
-type's role matches its HTTP twin.
+All five are fixed in code and verified by the suite; entries move to
+[CHANGELOG.md](CHANGELOG.md) on merge. One residual owner action remains and
+is listed under T-705.
 
-**T-702 — Both PowerShell confirmation gates self-approve without a TTY.**
-`scripts/lib/deploy-console.ps1:208-209`; all eight `[CmdletBinding]` lines.
-*Verified.* `Confirm-Plan` returns `$true` on redirected stdin, and no script
-sets `ConfirmImpact = 'High'`, so `ShouldProcess` does not prompt either.
-`bootstrap-terraform-oidc.ps1 -ElevateAccess < /dev/null` reaches tenant-root
-User Access Administrator unprompted. Fix: refuse rather than assent
-non-interactively, behind an explicit `-Yes`/`-Force`.
+- **T-701** — `registerJobType` now requires an explicit `role` (no default),
+  all nine registered types declare one, `publish-content` is `publisher`
+  matching its HTTP twin, and escalation compares hierarchy level rather than
+  string inequality. `jobs.roles.test.js` asserts both properties. The new
+  validation immediately caught a ninth registration — the built-in `noop` —
+  that the review had missed.
+- **T-702** — `Confirm-Plan` refuses in a non-interactive context instead of
+  assenting, naming `-Force` as the deliberate unattended path; the six
+  destructive scripts now declare `ConfirmImpact = 'High'` so `ShouldProcess`
+  prompts too.
+- **T-703** — `Invoke-Az` records whether the call failed, `Test-LastAzFailed`
+  exposes it, and the root-elevation read-back treats an unreadable result as
+  the red path with the manual removal command printed.
+- **T-704** — the Key Vault window is `ShouldProcess`-guarded, the verify block
+  is skipped under `-WhatIf` (printing what it would check), and the decorative
+  secret line is replaced by a behavioural test: a POST without the token must
+  answer 401 and one carrying it must answer 200, which also proves the vault
+  token matches the deployed one. **T-526 is now safe to run.**
+- **T-705** — both deploy workflows now fail a dispatch from any ref but `main`,
+  and REVIEW.md §4.4 no longer claims a gate that may not exist.
+  **Owner action, still open:** confirm required reviewers and a `main`-only
+  deployment-branch rule on the `production` environment, then set that row to
+  what you find. The guard step is a backstop, not the gate.
 
-**T-703 — The root-elevation removal reports success on its own failed
-read-back.** `scripts/bootstrap-terraform-oidc.ps1:445-470`;
-`scripts/lib/deploy-console.ps1:441,444-445`. *Verified.* `Invoke-Az
--AllowFailure` returns `$null` for both "no assignment" and "the call failed",
-so a throttled read prints "removed (verified…)" over a possibly-live
-tenant-wide grant — the false-green its own comment says it prevents. Fix:
-distinguish failure from empty; treat unreadable as the red path.
+### High — 11 of 12 closed 2026-08-28
 
-**T-704 — The T-526 cutover script has no working dry run.**
-`scripts/cutover/04-telegram-webhook.ps1:68,146-153,150`. *Verified.* The Key
-Vault firewall open is not `ShouldProcess`-guarded (its twin in
-`03-keyvault-secrets.ps1:70` is), so `-WhatIf` mutates the production ACL and
-extracts the bot token; the verify block then always throws under `-WhatIf`;
-and the "custom secret: set" line is unconditionally true.
-**Land this before running T-526.**
-
-**T-705 — The production environment gates nothing and dispatch accepts any
-ref.** `.github/workflows/deploy-functions.yml:16,40`;
-`deploy-azure-frontend.yml:16,30`; `infra/oidc.tf:153-166`. *Verified, with one
-**verify** item.* The federated subject is environment-scoped, so it matches
-from any branch — the 14-check gate is bypassable by dispatching a deploy from
-an unreviewed ref. Both workflows' comments say the environment has no
-protection rules; `REVIEW.md:300` says it "Gates production deploys". The
-environments API was unreachable from the review session, so **which record is
-true still needs confirming**. Fix: required reviewers plus a `main`-only
-branch restriction, then reconcile REVIEW.md §4.4.
-
-### High
-
-Full rationale and recommendation for each:
+Full rationale for each:
 [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
 
-| ID | Layer | Finding | Evidence | Anchor |
-| --- | --- | --- | --- | --- |
-| T-706 | azure | Media storage is a single LRS copy — ADR 0018 accepted LRS only while Firebase held the second copy, and ADR 0023 removed it | verified | `main.tf:434` |
-| T-707 | azure | Cosmos recovery is 7-day PITR co-located with a single-region account that can never be made multi-region | verified | `main.tf:284-287,203-217` |
-| T-708 | tf | The Cosmos database and containers carry no `prevent_destroy`, behind a generated spec with immutable partition keys | verified | `main.tf:305,365,1886` |
-| T-709 | azure | One cross-subscription action group, one email receiver, delivery never observed | verified | `observability.tf:30-47,157-189` |
-| T-710 | backend | Jobs stranded in `running` are never reaped; the client polls forever and the failure hook never fires | verified | `jobs.js:331-335`, `jobs-sweeper.js:4-6` |
-| T-711 | backend | `buildSnapshot` fans out up to 2,000 concurrent point reads on a path every Telegram message reaches | verified | `ops-health.js:154-157,190-198` |
-| T-712 | backend | Replicate, Publer and Telegram are called with no timeout from change-feed handlers, so one hung socket stalls a lease | verified | `ai-cover.js:151,171`, `notify.js:80` |
-| T-713 | ci | The storage firewall stays open if a deploy dies mid-window, and nothing detects it | reported | `deploy-functions.yml:97-101,248-264` |
-| T-714 | frontend | 104 pre-rendered documents are discarded at boot — `createRoot`, not `hydrateRoot`, while `prerender.mjs` claims hydration | verified | `main.jsx:16`, `prerender.mjs:219` |
-| T-715 | frontend | A 456 kB chart bundle is modulepreloaded on every page to render zero charts; `d3` is a dependency nothing imports | verified | `vite.config.js:29-39`, `dist/index.html` |
-| T-716 | frontend | Public list pages download the whole corpus and filter in-browser, three times, with three cache keys | reported | `useBlogData.js:216`, `publicApi.js:37-47` |
-| T-717 | frontend | A failed fetch renders the previous route's content under the new route's canonical and OG tags | reported | `usePublicData.js:43-50,79-84` |
+| ID | Layer | Outcome |
+| --- | --- | --- |
+| T-706 | azure | **Closed.** Content/media account moves LRS → **RA-GRS**. Not ZRS: the risk is account and regional loss, which zone redundancy does not cover, and LRS→ZRS is not Terraform-expressible (Azure requires a customer-initiated conversion). The TFC plan succeeded with `prevent_destroy` in force, which proves it is an in-place update rather than a replacement |
+| T-707 | azure | **Partly closed; remainder moved to [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231).** Backup tier 7 → 30 days (cents at this data size). The out-of-account copy cannot be closed by any account setting — Microsoft's docs state continuous backups are not geo-disaster resistant — so it belongs with the recovery objectives, the same reasoning that moved T-522 there. Also gated behind T-518 |
+| T-708 | tf | **Closed.** `prevent_destroy` now covers the SQL database, the container `for_each` and `leases`; the stale "containers are empty" comment is corrected to ~70k documents |
+| T-709 | azure | **Code half closed.** Optional SMS receiver added as an independent second channel, via a `dynamic` block so an unset variable leaves the action group byte-identical. **Owner action:** run `az monitor action-group test-notifications` and set `ops_sms_receiver`; delivery has still never been observed |
+| T-710 | backend | **Closed.** The sweeper reaps jobs abandoned in `running`, using each type's own `timeoutMs` plus a grace margin rather than one blanket cutoff, and fires the type's `onComplete` so the failure notification is no longer lost. It writes a terminal status rather than re-enqueuing: a dead worker may have completed real side effects |
+| T-711 | backend | **Closed.** The 2000-point-read fan-out is now deduplicated (one document carries up to four images) and batched with `ARRAY_CONTAINS`. The existing fixture proves the count is unchanged |
+| T-712 | backend | **Closed.** Replicate, Publer and Telegram now use one shared `fetchWithTimeout`, lifted out of `scrape.js` where the pattern already existed. The Replicate poll also gains a wall-clock deadline — an iteration count does not bound elapsed time when each iteration both sleeps and requests |
+| T-713 | ci | **Closed.** The hourly monitor now probes storage default action and leftover `ci-*` rules, so a deploy window orphaned by runner loss pages within the hour instead of never |
+| T-714 | frontend | **OPEN — needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists (`hooks/prerenderData.js`) but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix |
+| T-715 | frontend | **Partly closed, measured.** The reported fix does not work: rolldown places React's jsx-runtime by its own rules, so claiming react in an earlier chunk moved only `scheduler`, and removing the manual chart chunk made it worse (shared vendor grew to 651 kB). Splitting the chart libraries so only a small chunk rides with jsx-runtime does work: **868 kB → 571 kB preloaded on every page**. recharts (237 kB) and d3 (60 kB) are now lazy-only; chart.js still rides along, which is rolldown behaviour rather than a tunable predicate. Unused `d3` dependency removed |
+| T-716 | frontend | **Closed.** Request-layer dedupe keyed on path+query, plus one `PUBLIC_CORPUS_LIMIT` so the three hooks stop issuing three different urls for one intent. Deliberately NOT pushed server-side: client provider matching includes text inference the server does not perform, so that would silently drop posts (see T-738) |
+| T-717 | frontend | **Closed.** A failed fetch now clears `data` instead of leaving the previous route's article under the new route's canonical and og:url, and the wrapper hooks surface `error` instead of hardcoding null |
 
-### Medium
+### Medium — 11 of 30 closed
+
+Status and rationale per finding:
+[wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
+
+**Closed:** T-725 (version constraints), T-730 (Telegram retry storm), T-732
+(guard test probed one verb), T-733 (trigger isolation), T-734 (SSRF guard on
+scraped images, plus the size cap the shared fetcher was missing), T-735
+(stranded forge_ready notification), T-741 (harness closed empty workflows as
+completed), T-744 (concurrency guard raced by a slow claim), T-745 (alert window
+with no ingestion-lag headroom), T-746 (failed probe left no trace), T-747
+(Dependabot coverage — which exposed that Dependabot was not running at all).
+
+**Open, repository-side:**
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the narrower per-run window pattern already exists (T-503) | `main.tf:252-269` |
-| T-719 | azure | The 5xx and latency alerts are log rules, so they stop evaluating at the workspace cap; the margin was never measured | `observability.tf:329-341` |
-| T-720 | azure | Key Vault reference failures are silent and indistinguishable across four different causes | `main.tf:1174-1260` |
-| T-721 | azure | Telemetry costs ~5x the workload; SWA Standard is justified in-file by Free-tier features | `Cost-Analysis.md:74-84`, `main.tf:138-144` |
-| T-722 | tf | `swa_token` output contradicts its own file header and the credential-free principle | `outputs.tf:5-7` vs `18-22` |
-| T-723 | tf | Secrets in state: the azapi read-back captures the whole live settings map; `cloudflare_origin_secret` stores a real value | `main.tf:1454-1465,2029-2035` |
+| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the T-503 per-run window pattern already exists | `main.tf:252-269` |
+| T-720 | azure | Key Vault reference failures are silent and indistinguishable across four causes | `main.tf:1174-1260` |
+| T-722 | tf | `swa_token` output contradicts its own file header — see T-727, they resolve together | `outputs.tf:5-7` vs `18-22` |
+| T-723 | tf | Secrets in state: the azapi read-back captures the whole live settings map | `main.tf:1454-1465,2029-2035` |
 | T-724 | tf | The permanent plan diff is asserted only in a comment, so real drift can hide beside it | `main.tf:1379-1407` |
-| T-725 | tf | `cloudflare ~> 4.0` admits versions that fail validate; `required_version` has no ceiling | `providers.tf:6,23-27` |
-| T-726 | ci | A scheduled workflow pushes to main past the gate, and runs `npm ci` holding both write and `id-token` | `publish-content-manifest.yml:28-29,60` |
-| T-727 | ci | The SWA deployment token is the last long-lived credential, used in the job that just built npm dependencies | `deploy-azure-frontend.yml:152` |
-| T-728 | ci | One OIDC identity serves everything: read-only monitors run with deploy-grade rights | `oidc.tf:41-46,176-202` |
-| T-729 | ci | No concurrency group on the frontend deploy, and neither deploy has a rollback path | `deploy-azure-frontend.yml:15-30` |
-| T-730 | backend | A Telegram send failure escapes `handleUpdate`, returns 500, and turns one command into a job-duplicating retry storm | `bot.js:436-447` |
-| T-731 | backend | The change feed has no per-invocation work budget: 50 items against documents needing four Replicate calls each | `change-feed.js:86-93` |
-| T-732 | backend | The guard test probes only `methods[0]`, so merged verbs are unchecked (28/28 verified sound by hand) | `route-inventory.test.js:216` |
-| T-733 | backend | One trigger's failure cancels the remaining triggers and the stats update for that document | `triggers/handlers.js:128-166` |
-| T-734 | backend | Scraped external URLs are fetched with no SSRF guard, timeout or size cap, while the right primitive exists unused | `content/inspect.js:246` |
-| T-735 | backend | A `forge_ready` notification lost to a transient failure is lost permanently — nothing writes to the doc again | `forge-ready-notify.js:102-117` |
-| T-736 | frontend | MSAL (236 kB) is in the static import graph of the public news route despite a correct runtime gate | `useGenerateCuratedImages.js:4,80` |
-| T-737 | frontend | Eleven public routes are neither pre-rendered nor in the sitemap; four of five detail templates are never pre-rendered | `prerender-entry.jsx:61-72` |
-| T-738 | frontend | Provider normalization is reimplemented four times and has diverged — VMware/Ansible posts vanish from their own blog | `useBlogData.js:13-53` |
-| T-739 | frontend | N+1 fetch on the public news grid, repeated on every remount | `useGenerateCuratedImages.js:209-216` |
-| T-740 | frontend | Route changes never move focus and are never announced; `PageLoader` has no role; `Skeleton` has no dark token | `ScrollToTop.jsx:7-9` |
-| T-741 | ops | The harness closes a workflow where nothing ran as `completed`, and CI asserts that behaviour | `tooling/workflow.py:398` |
-| T-742 | ops | The harness CI check never exercises the handoff validator it exists to protect | `ci.yml:117-137` |
-| T-743 | ops | The `vps-agent` CI check runs no tests — on the surface that shells to `docker run` and holds a certificate | `ci.yml:49-50` |
-| T-744 | ops | `maxConcurrentJobs` is not enforced: the guard reads the counter before awaiting the claim | `vps-agent/index.js:157-167` |
-| T-745 | ops | The availability alert's 15-minute window has no headroom for ingestion lag, so a healthy site can page Sev 1 | `observability.tf:869-883` |
-| T-746 | ops | A failed probe leaves no trace: no Worker logging, so the three conflated alert causes have no tiebreaker | `worker.js:145-149` |
-| T-747 | ops | `edge/availability-probe` is absent from Dependabot (zero impact today — no dependencies) | `.github/dependabot.yml` |
+| T-726 | ci | A scheduled workflow pushes to main past the gate, holding both write and `id-token` | `publish-content-manifest.yml:28-29,60` |
+| T-727 | ci | The SWA deployment token is the last long-lived credential | `deploy-azure-frontend.yml:152` |
+| T-728 | ci | One OIDC identity serves everything: read-only monitors run with deploy rights | `oidc.tf:41-46,176-202` |
+| T-729 | ci | No concurrency group on the frontend deploy; neither deploy has a rollback path | `deploy-azure-frontend.yml:15-30` |
+| T-731 | backend | The change feed has no per-invocation work budget | `change-feed.js:86-93` |
+| T-736 | frontend | MSAL is in the static import graph of the public news route | `useGenerateCuratedImages.js:4,80` |
+| T-737 | frontend | Eleven public routes are neither pre-rendered nor in the sitemap | `prerender-entry.jsx:61-72` |
+| T-738 | frontend | Provider normalization reimplemented four times, already diverged (VMware/Ansible) | `useBlogData.js:13-53` |
+| T-739 | frontend | N+1 fetch on the public news grid | `useGenerateCuratedImages.js:209-216` |
+| T-740 | frontend | Route changes never move focus or announce; `Skeleton` has no dark token | `ScrollToTop.jsx:7-9` |
+| T-742 | ops | The harness CI check never exercises the handoff validator it protects | `ci.yml:117-137` |
+| T-743 | ops | The `vps-agent` CI check runs no tests, on the surface that shells to `docker run` | `ci.yml:49-50` |
 
-### Low
+**Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
+T-721 (telemetry vs SWA tier cost decision).
 
-| ID | Layer | Finding | Anchor |
-| --- | --- | --- | --- |
-| T-748 | azure | The Terraform principal holds Key Vault Secrets Officer it cannot use — until a seeding window opens and it can | `main.tf:1728-1732` |
-| T-749 | azure | SCM remains default-Allow; the flip waits on an observed deploy that has presumably happened (overlaps T-520) | `main.tf:1055-1077` |
-| T-750 | tf | CORS origins and the SWA hostname are hardcoded where the sibling block derives both | `main.tf:993-1000` |
-| T-751 | tf | The 18-timer catalogue is maintained twice by hand; a mismatch makes a timer impossible to arm | `main.tf:864-890` |
-| T-752 | tf | Tag contract values diverge from their source variables (`workload` vs the `site` name token) | `variables.tf:937-949` |
-| T-753 | tf | Several variable names exceed the standard's two-word rule; report only, since they are set in the workspace | `variables.tf:359,370,390` |
-| T-754 | tf | `main.tf` is a 2,037-line six-concern file; splitting is pure file moves and state-safe by construction | `infra/main.tf` |
-| T-755 | ci | The Trivy checksum manifest shares an origin with the binary it verifies | `iac-validate.yml:159-165` |
-| T-756 | ci | A dispatch input is interpolated inline into a `run:` command — the only such deviation | `heal-computed-properties.yml:94` |
-| T-757 | ci | Gate coverage: `vps-agent` is install-only and the frontend gate runs the admin subset only | `ci.yml:41,49-50` |
-| T-758 | ci | `dependency-review` requests `pull-requests: write` on a fork-facing trigger where it degrades silently | `dependency-review.yml:21-24` |
-| T-759 | ops | VPS job images are pinned by mutable tag on a root-equivalent socket; no install or rotation runbook exists | `vps-agent/lib/capabilities.js:19` |
-| T-760 | backend | Dead exports that are wrong if used: `batchRead` omits partition keys; `watchChangeFeed` logs where nothing reads | `cosmos-client.js:571-574` |
-| T-761 | backend | The daily forge budget has one enforcement point, a read-then-act race, and a ledger that swallows failures | `forge-scheduled.js:82-98` |
-| T-762 | frontend | Duplicate route declarations leave dead dispatcher branches and a second provider-derivation path | `App.jsx:317-333,510-535` |
+### Low — 5 of 15 closed, 1 will not fix
 
+**Closed:** T-748 (unusable Key Vault grant removed), T-751 (timer catalogue
+guarded and mutation-tested), T-752 (environment tag derived; workload
+deliberately left), T-755 (Trivy digest pinned and verified), T-756 (dispatch
+input through `env:`), T-758 (fork-degraded write scope removed), T-760 (dead
+exports deleted).
+
+**T-750 — WILL NOT FIX.** The finding is wrong. Deriving the function app's
+CORS origins from `var.domain` breaks `cors-platform-origins.test.js`, which
+reads that block as text and compares literal origins against `cors.js` so it
+can fail on a checkout with no Azure credentials. Acting on it broke CI; the
+literals are load-bearing and now say so in place.
+
+**Open:** T-749 (SCM lock flip — owner, overlaps T-520), T-753 (variable names
+exceed the two-word rule — report only, they are set in the workspace), T-754
+(`main.tf` is a 2,037-line six-concern file; splitting is state-safe file
+moves), T-757 (gate coverage: `vps-agent` install-only, frontend admin subset
+only), T-759 (VPS images pinned by mutable tag; no install/rotation runbook),
+T-761 (daily forge budget has one enforcement point and a read-then-act race),
+T-762 (duplicate route declarations leave dead dispatcher branches).
 
 ## High
 

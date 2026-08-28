@@ -17,6 +17,60 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The architecture review, and 35 of its 62 findings fixed (T-701–T-762,
+  2026-08-28; #249 records, #250 remediates).** Six specialist reviews, one per
+  technology layer, run against merged main: Azure platform, Terraform IaC,
+  backend Functions, frontend React, CI/CD, and the remaining ops surfaces
+  (Cloudflare Worker, PowerShell scripts, Python harness, VPS agent). Every
+  finding carries a `file:line` anchor; the review of record, with each
+  finding's failure mode, recommendation and outcome, is
+  [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
+
+  **All five Critical findings are closed.** An editor could publish content
+  live by enqueuing a job, because `registerJobType` defaulted the required role
+  to `editor` and **no job type declared one** — so `publish-content` bypassed
+  the `publisher` gate its HTTP twin enforces. Both PowerShell confirmation
+  gates self-approved whenever stdin was not a TTY, which made
+  `bootstrap-terraform-oidc.ps1 -ElevateAccess < /dev/null` reach tenant-root
+  User Access Administrator unprompted; the code that then removes that grant
+  reported "removed (verified)" over a grant that might still be live, because
+  its read-back could not tell a failed call from an empty result. The T-526
+  cutover script's `-WhatIf` mutated the production Key Vault rather than
+  simulating, and its "custom secret: set" line was unconditionally true —
+  both fixed, so **T-526 is now safe to run**. And the `production` environment
+  gates nothing while `workflow_dispatch` accepts any ref, which is now
+  backstopped by a main-only guard in both deploy workflows.
+
+  **Data durability.** Media storage moves LRS → RA-GRS: ADR 0018 accepted LRS
+  only "while the Firebase source retains the authoritative copy", and ADR 0023
+  removed that copy. RA-GRS rather than ZRS deliberately — the risk is account
+  and regional loss, which zone redundancy does not cover, and LRS→ZRS is not
+  Terraform-expressible. Cosmos backup moves to the 30-day tier, and
+  `prevent_destroy` now covers the database and containers, which are generated
+  from a spec file with immutable partition keys.
+
+  **Also fixed:** jobs stranded in `running` forever, a 2,000-point-read
+  fan-out reachable from any Telegram message, missing timeouts on every
+  outbound call in the change-feed path, a Telegram send failure that produced
+  duplicate publish jobs, an SSRF gap on scraped image URLs, an alert window
+  with no ingestion-lag headroom, and a 297 kB reduction in what every page
+  preloads.
+
+  **Two of the review's own findings were wrong**, and that is recorded rather
+  than quietly dropped. T-750 asked for CORS origins to be derived from
+  variables; doing so broke a guard that reads those literals as text to keep
+  the platform and application allowlists in sync — the drift it prevents is a
+  dated outage. T-715 correctly diagnosed a 456 kB bundle on the critical path
+  but prescribed a fix that rolldown ignores; measurement found what actually
+  worked.
+
+  **One finding exposed something larger than itself.** T-747 — the
+  lowest-value item in the review, "add a directory to Dependabot, zero impact
+  today" — made Dependabot re-validate its config, which failed: an unsupported
+  property on the terraform entry had invalidated the whole file, so **no
+  ecosystem had been receiving dependency updates at all**. Latent because
+  Dependabot re-validates only when the file changes.
+
 - **The Blog Machine (T-601–T-607 closed, 2026-08-28; #236–#242 + the
   close-out PR).** One initiative, seven phases, each one PR, turning the
   admin portal into a content engine around the already-working forge

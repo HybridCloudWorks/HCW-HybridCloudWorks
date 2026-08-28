@@ -120,13 +120,43 @@ describe('createForgeReadyNotifier', () => {
     expect(notifier.notifyTelegram).not.toHaveBeenCalled();
   });
 
-  it('writes NOTHING when the send fails, so the failure cannot loop the change feed', async () => {
+  it('records the attempt when the send fails, but never clears the trigger', async () => {
     const { notify, store } = makeNotifier({ sent: false, reason: 'not_configured' });
     const result = await notify.run('doc-1', 'etag-1');
-    expect(result).toEqual({ ran: false, reason: 'not_sent:not_configured' });
-    // The claim replace already happened; the point is no COMPLETION write —
-    // flag stays armed for a retry after the claim window.
-    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ran: false, reason: 'not_sent:not_configured', attempts: 1 });
+
+    // One write, and it is the attempt record — NOT the completion write. The
+    // trigger flag must stay armed so a later change retries (T-735).
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    const [, , update] = store.patchDoc.mock.calls[0];
+    expect(update).toEqual({
+      forgeReadyNotifyAttempts: 1,
+      forgeReadyNotifyLastAttemptAt: NOW.toISOString(),
+      forgeReadyNotifyLastReason: 'not_configured',
+    });
+    // The load-bearing property: nothing boolean is written, because the
+    // rising-edge claim keys on a boolean and writing one would re-fire the
+    // feed on our own write — the loop this handler exists to avoid.
+    expect(Object.values(update).some((v) => typeof v === 'boolean')).toBe(false);
+    expect(update).not.toHaveProperty('forgeReadyNotifyTrigger');
+  });
+
+  it('counts attempts up across repeated failures, so a stranded draft is findable', async () => {
+    const { notify, store } = makeNotifier({
+      data: doc({ forgeReadyNotifyAttempts: 3 }),
+      sent: false,
+      reason: 'cooldown',
+    });
+    const result = await notify.run('doc-1', 'etag-1');
+    expect(result.attempts).toBe(4);
+    expect(store.patchDoc.mock.calls[0][2].forgeReadyNotifyAttempts).toBe(4);
+  });
+
+  it('a failed attempt-record write does not turn a delivery problem into an error', async () => {
+    const { notify, store } = makeNotifier({ sent: false, reason: 'telegram_error' });
+    store.patchDoc.mockRejectedValueOnce(new Error('cosmos down'));
+    const result = await notify.run('doc-1', 'etag-1');
+    expect(result).toMatchObject({ ran: false, reason: 'not_sent:telegram_error' });
   });
 
   it('never throws when the notifier does — the change feed must survive', async () => {

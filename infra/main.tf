@@ -47,7 +47,7 @@ resource "azurerm_resource_group" "app" {
 
   name     = "rg-${each.key}-${var.workload_name}-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
-  tags     = var.tags
+  tags     = local.tags
 }
 
 # Platform Management. Holds the central Log Analytics workspace every other
@@ -59,7 +59,7 @@ resource "azurerm_resource_group" "platform_mgmt" {
 
   name     = "rg-mgmt-plat-${var.environment}-${var.region_abbreviation}"
   location = var.azure_location
-  tags     = var.tags
+  tags     = local.tags
 }
 
 # =============================================================================
@@ -81,7 +81,7 @@ resource "azurerm_log_analytics_workspace" "hcw" {
   # stops until the daily reset — Cosmos DataPlaneRequests (observability.tf)
   # is the likeliest culprit; prune that category before raising the cap.
   daily_quota_gb = 0.25
-  tags           = var.tags
+  tags           = local.tags
 }
 
 # =============================================================================
@@ -93,7 +93,7 @@ resource "azurerm_application_insights" "hcw" {
   resource_group_name = azurerm_resource_group.app["web"].name
   workspace_id        = azurerm_log_analytics_workspace.hcw.id
   application_type    = "Node.JS"
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # `sampling_percentage` is DELIBERATELY NOT SET, and the reason is not
@@ -154,7 +154,7 @@ resource "azurerm_static_web_app" "hcw" {
   resource_group_name = azurerm_resource_group.app["web"].name
   sku_tier            = "Standard"
   sku_size            = "Standard"
-  tags                = var.tags
+  tags                = local.tags
 
   lifecycle {
     # These two are written by the deploy, not by Terraform.
@@ -279,11 +279,26 @@ resource "azurerm_cosmosdb_account" "hcw" {
   # security posture being asserted, and renaming it belongs to T-507.
   local_authentication_enabled = !var.cosmos_local_auth_disabled
 
-  # Continuous backup (7-day tier is free on serverless) — point-in-time
-  # restore instead of the periodic default. One-way conversion.
+  # Continuous backup — point-in-time restore instead of the periodic default.
+  # One-way conversion (continuous cannot go back to periodic).
+  #
+  # Continuous30Days since 2026-08-28 (T-707). The 7-day tier is free, and that
+  # was the whole reason it was chosen; the problem is that this platform runs
+  # cleanup timers which delete and rewrite documents, so corruption is
+  # discovered slowly and a 7-day window can close before anyone notices. The
+  # 30-day tier is billed at $0.20/GB/month × regions — cents at this data size
+  # (roughly 70k small documents), which buys four times the window.
+  #
+  # What this still does NOT buy, and what T-707 keeps open: an out-of-account
+  # copy. Microsoft's own words — "the backups aren't automatically
+  # geo-disaster resistant" — the backup lives with the account, so account
+  # deletion or a Central US failure takes it too. Serverless is single-region
+  # for life and the conversion is irreversible, so that gap is closed by
+  # exporting out of the account, not by a setting here. Tracked with the
+  # recovery objectives in issue #231.
   backup {
     type = "Continuous"
-    tier = "Continuous7Days"
+    tier = "Continuous30Days"
   }
 
   # This account holds production website data. A plan that wants to
@@ -298,7 +313,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
     prevent_destroy = true
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Cosmos DB SQL Database
@@ -318,6 +333,15 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
   name                = var.cosmos_database_name
   resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
+
+  # prevent_destroy on the ACCOUNT does not protect its children: a database or
+  # container destroy plans and applies cleanly underneath it. This database
+  # holds every production document, so dropping it is a two-step that starts
+  # with removing this guard in a reviewed PR — the same shape the account
+  # already imposes (T-708).
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -352,10 +376,25 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Full evidence, with file:line citations, in the manifest header.
 #
 # A partition key path is IMMUTABLE. Changing one on a container that already
-# holds data means destroying the container and re-importing. Every container
-# here is empty as of 2026-08-20 — the partition-key decision window is open
-# now and closes on the first import (Migration_Plan §5).
+# holds data means destroying the container and re-importing.
+#
+# THAT WINDOW IS CLOSED. This block used to read "every container here is empty
+# as of 2026-08-20 — the decision window is open now and closes on the first
+# import"; the import happened, and production holds roughly 70k documents
+# (measured 2026-08-24). A partition-key change in cosmos-containers.json is
+# now a data-destroying plan, which is why the resource carries
+# prevent_destroy (T-708): the guard has to come off deliberately, in its own
+# reviewed PR, before any such change can apply.
 # -----------------------------------------------------------------------------
+
+locals {
+  # The applied tag map (T-752). var.tags carries the org-stable keys; the
+  # environment is derived from var.environment so a deployment of this root
+  # into a non-prod environment cannot tag every resource `prod` unless the
+  # operator remembers to override the whole map. Value-identical today
+  # (var.environment is "prod"), so this lands as a no-op plan.
+  tags = merge(var.tags, { environment = var.environment })
+}
 
 locals {
   cosmos_container_spec = jsondecode(file("${path.module}/cosmos-containers.json"))
@@ -409,6 +448,16 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
       }
     }
   }
+
+  # Applies to every instance of the for_each. These containers are generated
+  # from cosmos-containers.json and partition keys are immutable, so a
+  # regenerated spec that renames a container or changes a key produces a
+  # destroy-and-create — on roughly 70k production documents. The guard turns
+  # that from a plan someone has to read carefully into a plan that fails
+  # (T-708). Dropping a container deliberately means removing this first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # The eleven `moved` blocks that used to follow — carrying the hand-declared
@@ -424,14 +473,35 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
 # Azure Storage Account (content and media)
 #
 # Hot tier for frequently accessed blog covers, cert badges, AI images.
-# LRS (locally redundant) — sufficient for a single-region deployment.
+#
+# RA-GRS since 2026-08-28 (T-706). It was LRS, and ADR 0018 accepted that
+# explicitly "while the Firebase source retains the authoritative copy", with
+# a revisit trigger of "when Firebase decommission removes the second copy".
+# ADR 0023 removed it: every blob written since the 2026-08-21 cutover — CMS
+# uploads, generated Listen & Learn audio, AI covers — existed in exactly one
+# copy in one region. Versioning and soft delete (below) protect against
+# overwrite and deletion, not against loss of the account or the region.
+#
+# RA-GRS rather than ZRS, for two reasons. The risk being closed is account and
+# regional loss, which zone redundancy does not cover — ZRS keeps three copies
+# inside one region. And LRS→ZRS is not expressible here at all: Azure requires
+# a customer-initiated *conversion* (`az storage account migration start`),
+# while LRS→GRS/RA-GRS is an ordinary settings update Terraform performs in
+# place. The RA prefix buys read access to the secondary without a failover,
+# which is what makes it useful for recovering one lost blob rather than only
+# for a disaster.
+#
+# Cost: geo-redundancy roughly doubles the per-GB rate and adds a one-time
+# egress charge for the initial sync. Against Cost-Analysis.md's figures —
+# where storage is a minor line next to telemetry — that is cheap insurance
+# for the only copy of every image the site serves.
 # =============================================================================
 resource "azurerm_storage_account" "hcw" {
   name                     = var.storage_account_name
   resource_group_name      = azurerm_resource_group.app["stor"].name
   location                 = azurerm_resource_group.app["stor"].location
   account_tier             = "Standard"
-  account_replication_type = "LRS"
+  account_replication_type = "RAGRS"
   account_kind             = "StorageV2"
   access_tier              = "Hot"
   min_tls_version          = "TLS1_2"
@@ -516,7 +586,7 @@ resource "azurerm_storage_account" "hcw" {
     prevent_destroy = true
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Blob containers — every one private, because the account override above means
@@ -639,7 +709,7 @@ resource "azurerm_virtual_network" "hcw" {
   location            = azurerm_resource_group.app["conn"].location
   resource_group_name = azurerm_resource_group.app["conn"].name
   address_space       = [var.vnet_address_space]
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_subnet" "functions_integration" {
@@ -725,7 +795,7 @@ resource "azurerm_network_security_group" "functions_integration" {
   name                = "nsg-${var.workload_name}-func-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["conn"].location
   resource_group_name = azurerm_resource_group.app["conn"].name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_subnet_network_security_group_association" "functions_integration" {
@@ -741,7 +811,7 @@ resource "azurerm_storage_account" "functions" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
-  tags                     = var.tags
+  tags                     = local.tags
 
   # Account keys off — the credential half of the same posture the network
   # rules below take. All three access paths listed there are Entra-based
@@ -814,7 +884,7 @@ resource "azurerm_service_plan" "hcw" {
   resource_group_name = azurerm_resource_group.app["web"].name
   os_type             = "Linux"
   sku_name            = "FC1" # Flex Consumption — VNet integration, scales to zero
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # Deployment container for Flex Consumption.
@@ -990,6 +1060,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # support_credentials stays FALSE. This is a bearer-token API, not a cookie
     # API, and true would additionally make the platform intercept far more than
     # preflights.
+    # Two ways to break that guard, both tried for T-750 and reverted: replacing
+    # a literal with "https://${var.domain}" or the SWA's default_host_name
+    # (the test compares strings, and an interpolation is not one), and putting
+    # a comment between `cors {` and `allowed_origins` (its block regex stops
+    # matching, so the guard passes while checking nothing). The asymmetry with
+    # the storage account's CORS block, which does derive from var.domain, is
+    # justified rather than an oversight: only this list is guarded by text.
     cors {
       allowed_origins = concat(
         ["https://hybridcloudworks.com", "https://www.hybridcloudworks.com"],
@@ -1411,7 +1488,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     type = "SystemAssigned"
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # ---------------------------------------------------------------------------
@@ -1710,7 +1787,7 @@ resource "azurerm_key_vault" "hcw" {
     prevent_destroy = true
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # Key Vault Secrets User — Function App managed identity (read-only at runtime)
@@ -1720,16 +1797,22 @@ resource "azurerm_role_assignment" "func_kv_secrets" {
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
-# Key Vault Secrets Officer — Terraform executor (write during CI/CD secret seeding)
+# REMOVED (T-748): azurerm_role_assignment.terraform_kv_secrets, which granted
+# Key Vault Secrets Officer to the HCP Terraform workspace principal for
+# "CI/CD secret seeding".
 #
-# NOTE: on a CLI-driven HCP Terraform workspace this resolves to the WORKSPACE's
-# service principal, not to whoever typed `terraform apply`. That is correct, and
-# it is also why a human operator gets nothing from it — see admin_object_ids.
-resource "azurerm_role_assignment" "terraform_kv_secrets" {
-  scope                = azurerm_key_vault.hcw.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
+# It had no consumer. Terraform manages no secret VALUES in this configuration —
+# there is not one azurerm_key_vault_secret resource in infra/ — and TFC's
+# runners are neither in this VNet nor a trusted Azure service, so the grant
+# could not write from a run even if something wanted to. Its only live effect
+# was latent: whenever admin_ip_rules opens a seeding window, a shared remote
+# execution environment would gain write access to every production secret
+# alongside the named human operator.
+#
+# Seeding is covered by the admin_object_ids window below, which grants named
+# humans. The repository's own doctrine (oidc.tf: "deploys do not read secrets")
+# argues against handing that reach to an automation principal that never
+# needed it.
 
 # Key Vault Secrets Officer — named human operators, for the seeding windows the
 # cutover scripts need.
@@ -1893,6 +1976,16 @@ resource "azurerm_cosmosdb_sql_container" "leases" {
   indexing_policy {
     indexing_mode = "consistent"
     included_path { path = "/*" }
+  }
+
+  # Lower stakes than the data containers — these are continuation tokens, not
+  # documents, and resetting the feed by dropping them is a legitimate (if
+  # disruptive) operation: every change-feed function would reprocess from the
+  # start, which the rising-edge claims make mostly idempotent. The guard is
+  # here for the accidental case, not to declare the container permanent; it
+  # comes off in a reviewed PR when a reset is what you actually want (T-708).
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

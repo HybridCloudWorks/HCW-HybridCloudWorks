@@ -297,7 +297,7 @@ Enumerated live 2026-08-25.
 
 | Name | Status | Notes |
 | --- | --- | --- |
-| `production` | **VERIFIED** | Gates production deploys (`de99aa0`) |
+| `production` | **NEEDS CONFIRMATION** | Both deploy workflows bind to it, so it records who deployed. Whether it *gates* them is unconfirmed and this row previously asserted that it does. GitHub auto-creates a missing environment with no protection rules, and the federated credential's subject is environment-scoped (`repo:…:environment:production`), so it matches from any branch — meaning an unprotected environment leaves `workflow_dispatch` able to ship an unreviewed ref past all 12 required contexts (T-705). A main-only guard step now fails such a run in both workflows, but that is a repository-side backstop, not the gate. **Owner action:** open Settings → Environments → `production` and confirm required reviewers and a `main`-only deployment-branch rule; then set this row to the state you actually find |
 | `copilot` | **SET** | Copilot code review agent |
 | `data-migration` | **RETIRED** | Its only consumer, `migrate-data.yml`, was deleted in `59e471b`. The two federated credentials that still trusted it were removed on 2026-08-26 (T-524), so nothing in Azure trusts the subject either |
 

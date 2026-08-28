@@ -144,6 +144,25 @@ export async function runProbe(env, fetcher = fetch) {
 
 export default {
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runProbe(env));
+    // The catch is for DIAGNOSIS, not recovery (T-746). runProbe deliberately
+    // does not retry or trap the ingestion POST — a probe that lies about its
+    // own health is worse than one that goes quiet — but without this, the
+    // rejection went nowhere at all. When alert-api-reachability fires it
+    // conflates three causes on purpose (API unreachable / Worker or cron dead
+    // / ingestion path dead), and this line is the only thing that tells them
+    // apart. A mistyped `wrangler secret put` otherwise produces a permanent
+    // Sev 1 with parseConnectionString throwing silently every five minutes,
+    // which is the likeliest failure at first deploy.
+    //
+    // Rethrown after logging so the invocation is still recorded as failed;
+    // swallowing it would trade one silence for another.
+    ctx.waitUntil(
+      runProbe(env).catch((error) => {
+        console.error(
+          `[availability-probe] run failed: ${error?.stack || error?.message || error}`
+        );
+        throw error;
+      })
+    );
   },
 };

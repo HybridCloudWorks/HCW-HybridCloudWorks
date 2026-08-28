@@ -31,11 +31,14 @@ app.timer('platformJobSweeper', {
       context.log('platformJobSweeper: disabled (FEATURE_FLAG_PLATFORM_JOB_SWEEPER)');
       return;
     }
-    const { requeued } = await createJobSweeper({
+    const { requeued, reaped } = await createJobSweeper({
       store: { queryDocs, patchDoc },
       log: context,
     }).sweep();
     if (requeued.length) context.extraOutputs.set(queueOutput, requeued);
-    context.log(`platformJobSweeper: re-enqueued ${requeued.length} stale job(s)`);
+    context.log(
+      `platformJobSweeper: re-enqueued ${requeued.length} stale job(s), ` +
+        `reaped ${reaped.length} abandoned running job(s)`
+    );
   },
 });

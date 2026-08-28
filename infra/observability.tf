@@ -43,7 +43,24 @@ resource "azurerm_monitor_action_group" "ops" {
     use_common_alert_schema = true
   }
 
-  tags = var.tags
+  # Second channel (T-709). Until this is set, every alert in the estate has
+  # exactly one delivery path, across a subscription boundary that is only
+  # proven to be ACCEPTED by ARM — not proven to arrive. One receiver plus one
+  # unverified hop is a single point of silence for the whole alerting fabric.
+  #
+  # dynamic, not conditional count: an empty ops_sms_receiver produces no block
+  # at all, so the action group is byte-identical to what exists today and the
+  # variable can be set later without a resource replacement.
+  dynamic "sms_receiver" {
+    for_each = var.ops_sms_receiver.phone_number == "" ? [] : [var.ops_sms_receiver]
+    content {
+      name         = "ops-sms"
+      country_code = sms_receiver.value.country_code
+      phone_number = sms_receiver.value.phone_number
+    }
+  }
+
+  tags = local.tags
 }
 
 # Key Vault — who touched the vault. AuditEvent is the category the plan
@@ -253,14 +270,14 @@ resource "azurerm_user_assigned_identity" "alerts_mgmt" {
   name                = "id-plat-alerts-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.platform_mgmt.location
   resource_group_name = azurerm_resource_group.platform_mgmt.name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 resource "azurerm_user_assigned_identity" "alerts_app" {
   name                = "id-${var.workload_name}-alerts-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # LOG ANALYTICS READER RATHER THAN READER OR MONITORING READER, and the
@@ -348,7 +365,19 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
   severity            = 1
 
   evaluation_frequency = "PT5M"
-  window_duration      = "PT15M"
+  # PT30M, not PT15M (T-745). The window had no headroom for ingestion lag:
+  # App Insights availability rows typically land 1-3 minutes after the probe
+  # runs and occasionally later, so at any evaluation the newest one or two
+  # results may not be queryable yet. Against a 15-minute window expecting 3
+  # results and firing below 2, that lag alone spent the "one dropped run is
+  # tolerated" budget the ADR claims — a single late ingestion plus one missed
+  # cron paged Sev 1 against a healthy site.
+  #
+  # 30 minutes expects 6 results and fires below 3, so it absorbs lag plus two
+  # dropped runs while still detecting a real outage inside ~15 minutes (three
+  # consecutive failures). Change this and you must change the threshold below
+  # and the cron cadence in edge/availability-probe/wrangler.toml together.
+  window_duration = "PT30M"
 
   # Stateful for the reason set out on alert-app-exceptions below: stateless is
   # the azurerm default and re-notifies every evaluation. Same frequency, same
@@ -379,7 +408,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [
     azurerm_role_assignment.alerts_app_workspace,
@@ -448,7 +477,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_response_tim
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [
     azurerm_role_assignment.alerts_app_workspace,
@@ -504,7 +533,7 @@ resource "azurerm_monitor_metric_alert" "cosmos_throttled" {
     action_group_id = azurerm_monitor_action_group.ops.id
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # ---------------------------------------------------------------------------
@@ -591,7 +620,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   # Permissions before the rule, which is the entire reason this identity is
   # user-assigned. identity_ids alone orders the rule after the IDENTITY, not
@@ -683,7 +712,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "logs_daily_cap" {
     identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
 }
@@ -769,7 +798,7 @@ resource "azurerm_application_insights_standard_web_test" "api_health" {
     ssl_check_enabled = false
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # The alert on the test above.
@@ -820,7 +849,7 @@ resource "azurerm_monitor_metric_alert" "api_availability" {
     action_group_id = azurerm_monitor_action_group.ops.id
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 # ---------------------------------------------------------------------------
@@ -863,7 +892,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
   resource_group_name = azurerm_resource_group.app["web"].name
   location            = azurerm_resource_group.app["web"].location
   scopes              = [azurerm_application_insights.hcw.id]
-  description         = "Fewer than 2 of the expected 3 edge-probe successes for GET /api/health in 15 minutes — the API is unreachable over the Cloudflare path, or the probe itself is down. Either way nobody outside can confirm the site is up."
+  description         = "Fewer than 3 of the expected 6 edge-probe successes for GET /api/health in 30 minutes — the API is unreachable over the Cloudflare path, or the probe itself is down. Either way nobody outside can confirm the site is up."
   severity            = 1
 
   evaluation_frequency = "PT5M"
@@ -880,7 +909,9 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
     query                   = "availabilityResults | where name == \"edge-api-health\" | where success == 1"
     time_aggregation_method = "Count"
     operator                = "LessThan"
-    threshold               = 2
+    # 6 expected in a 30-minute window at a 5-minute cadence; below 3 is an
+    # incident (T-745).
+    threshold = 3
 
     failing_periods {
       number_of_evaluation_periods             = 1
@@ -897,7 +928,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
     identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
   }
 
-  tags = var.tags
+  tags = local.tags
 
   depends_on = [
     azurerm_role_assignment.alerts_app_workspace,

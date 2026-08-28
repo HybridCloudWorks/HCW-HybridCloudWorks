@@ -38,6 +38,11 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readKey } from '../ai/router.js';
+import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
+
+// Outbound deadline (T-712): Node's fetch has none, and these calls are
+// reached from change-feed handlers where a hung socket holds the lease.
+const TELEGRAM_TIMEOUT_MS = 15_000;
 
 /** Cosmos containers this module reads and writes. */
 export const ACTIVITY_CONTAINER = 'telegram_bot_activity';
@@ -443,7 +448,25 @@ export function createTelegramBot({
         reply = `Something went wrong: ${error?.message || error}`;
       }
 
-      await send(reply);
+      // The send is INSIDE the guard, not after it (T-730). It used to sit
+      // outside the try above, so a network-level rejection from the sender
+      // propagated out of handleUpdate, out of the webhook handler, and the
+      // host answered 500 — breaking the invariant telegram-http.js states in
+      // its own header: always 200 once the secret is valid, because Telegram
+      // retries non-2xx and "a 500 on a bad command turns one broken message
+      // into a retry storm that re-runs the command". For /forge, /approve,
+      // /rss and /inspect each retry re-runs the enqueue, so one transient
+      // Telegram outage produced duplicate publish and forge jobs.
+      //
+      // A failed send is genuinely unreportable — the only channel back to the
+      // owner is the one that just failed — so it is logged and acknowledged.
+      // The command already ran; re-running it would be worse than silence.
+      try {
+        await send(reply);
+      } catch (error) {
+        log.error?.(`[telegram] reply send failed: ${error?.stack || error}`);
+        return { handled: true, reply, sendFailed: true };
+      }
       return { handled: true, reply };
     },
   };
@@ -467,11 +490,16 @@ export function createSender({ env = process.env, fetch: fetchImpl = globalThis.
       log.warn?.('[telegram] TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not configured; not sending.');
       return { sent: false, reason: 'not_configured' };
     }
-    const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 4096) }),
-    });
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 4096) }),
+        timeoutMs: TELEGRAM_TIMEOUT_MS,
+      }
+    );
     if (!response.ok) {
       log.error?.(`[telegram] sendMessage failed with ${response.status}`);
       return { sent: false, reason: 'telegram_error' };

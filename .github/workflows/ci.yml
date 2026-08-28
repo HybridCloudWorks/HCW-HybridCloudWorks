@@ -122,7 +122,12 @@ jobs:
           python tooling/workflow.py validate --workflow wf-ci-smoke
           python tooling/workflow.py status --workflow wf-ci-smoke > /dev/null
           python tooling/workflow.py close --workflow wf-ci-smoke --reason 'ci smoke'
-          test "$(python -c 'import json;print(json.load(open(".agentic/workflows/wf-ci-smoke/WORKFLOW.json"))["status"])')" = completed
+          # `empty`, not `completed` (T-741). ci-probe is not in the agent
+          # registry, so it is unavailable and marked skipped_optional and
+          # NOTHING RAN. This assertion used to demand `completed`, which
+          # pinned the exact failure the tool exists to prevent: an audit
+          # trail claiming work that never happened.
+          test "$(python -c 'import json;print(json.load(open(".agentic/workflows/wf-ci-smoke/WORKFLOW.json"))["status"])')" = empty
 
       - name: Close refuses to fake a completed workflow
         run: |

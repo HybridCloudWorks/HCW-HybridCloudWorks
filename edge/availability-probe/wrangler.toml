@@ -15,10 +15,12 @@ main = "worker.js"
 compatibility_date = "2026-08-01"
 
 # Every 5 minutes. The Terraform alert (infra/observability.tf,
-# edge_probe_availability) counts successful results over a 15-minute window
-# and fires below 2, so this cadence gives it 3 expected data points per
-# window — one dropped run is tolerated, two are an incident. Change one and
-# you must change the other.
+# edge_probe_availability) counts successful results over a 30-minute window
+# and fires below 3, so this cadence gives it 6 expected data points per
+# window. The extra headroom is deliberate (T-745): App Insights availability
+# rows land 1-3 minutes late and sometimes later, so a window with no slack
+# treats normal ingestion lag as a missed probe. Change one and you must change
+# the other.
 [triggers]
 crons = ["*/5 * * * *"]
 
@@ -29,3 +31,14 @@ PROBE_URL = "https://api-azure.hybridcloudworks.com/api/health"
 # Must match the name filter in the edge_probe_availability alert query —
 # infra/observability.tf points back at this line.
 PROBE_NAME = "edge-api-health"
+
+# Workers Logs, on (T-746). `scheduled` calls runProbe without a catch and
+# runProbe deliberately does not trap the ingestion POST — correct, one-sided
+# design — but with no observability block the rejection went NOWHERE. When
+# alert-api-reachability fires, the three causes it deliberately conflates (API
+# unreachable / Worker or cron dead / ingestion path dead) had no tiebreaker
+# anywhere, and a mistyped `wrangler secret put` produced a permanent Sev 1
+# with parseConnectionString throwing silently every five minutes. This is the
+# only place that distinguishes them, and it matters most at first deploy.
+[observability]
+enabled = true

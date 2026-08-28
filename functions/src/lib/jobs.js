@@ -40,6 +40,7 @@
  * whole path can be exercised end to end before that.
  */
 import { randomUUID } from 'node:crypto';
+import { ROLE_NAMES, roleLevel } from './auth/roles.js';
 
 export const JOBS_CONTAINER = 'jobs';
 export const JOBS_QUEUE = 'platform-jobs';
@@ -81,7 +82,13 @@ const registry = new Map();
  * @param {string} [spec.description]
  * @param {number} [spec.maxPayloadBytes] - JSON bytes of `payload`; default 64 KiB
  * @param {number} [spec.timeoutMs] - worker budget; default 10 minutes
- * @param {string} [spec.role] - role required to enqueue; default 'editor'
+ * @param {string} spec.role - role required to enqueue. REQUIRED and explicit:
+ *   a job type is a second door onto whatever its worker does, and the worker
+ *   calls the underlying pipeline directly, below the HTTP route's guard. When
+ *   this defaulted to 'editor', `publish-content` silently inherited it and an
+ *   editor could publish live past the `publisher` gate on POST
+ *   /api/publishContent (T-701). Declare the role of the HTTP route that
+ *   performs the same action; `jobs.roles.test.js` asserts the pairing.
  * @param {(info: {job: object, status: string, result: any, error: string|null},
  *          ctx: {context: object, now: () => Date}) => Promise<void>} [spec.onComplete]
  *   Called after the terminal status is written (succeeded/failed/timeout).
@@ -96,14 +103,25 @@ export function registerJobType(type, spec) {
   if (!spec || typeof spec.worker !== 'function') {
     throw new Error(`job type ${type}: spec.worker must be a function`);
   }
+  // No default. An omitted role used to mean 'editor', which is the wrong
+  // answer for anything a publisher-gated route performs — and being the
+  // wrong answer silently is what made T-701 a privilege escalation rather
+  // than a bug someone noticed.
+  // Identity conflicts before spec validity: re-registering a name is about
+  // the registry, not about this spec's fields, and the clearer error wins.
   if (registry.has(type)) throw new Error(`job type ${type} is already registered`);
+  if (!ROLE_NAMES.includes(spec.role)) {
+    throw new Error(
+      `job type ${type}: spec.role must be one of ${ROLE_NAMES.join(', ')} — ` +
+        `declare the role of the HTTP route that performs the same action`
+    );
+  }
   registry.set(
     type,
     Object.freeze({
       description: '',
       maxPayloadBytes: DEFAULT_MAX_PAYLOAD_BYTES,
       timeoutMs: DEFAULT_TIMEOUT_MS,
-      role: 'editor',
       ...spec,
       type,
     })
@@ -136,6 +154,8 @@ function registerBuiltins() {
   // deployed app before any real worker lands. Echoes the payload; optional
   // `delayMs` (≤ 20 s) lets a poll loop be watched.
   registerJobType('noop', {
+    // Echoes a payload and touches nothing; editor is the enqueue floor.
+    role: 'editor',
     description: 'Smoke test — echoes the payload after an optional delayMs (max 20000).',
     maxPayloadBytes: 1024,
     timeoutMs: 30_000,
@@ -216,7 +236,13 @@ export function createJobHandlers({
           error: `Unknown job type. Allowed: ${[...types.keys()].join(', ')}`,
         });
       }
-      if (spec.role !== 'editor') {
+      // Escalate to the type's own role whenever it outranks the floor above.
+      // Compared by hierarchy level, not string inequality: the old
+      // `spec.role !== 'editor'` test skipped the check for every type that
+      // had silently defaulted to 'editor', which is precisely how
+      // publish-content reached processPublishContent without a publisher
+      // token (T-701).
+      if (roleLevel(spec.role) > roleLevel('editor')) {
         const stricter = await guard.requireRole(request, spec.role);
         if (stricter.error) return stricter.error;
       }
@@ -443,6 +469,13 @@ export function createJobHandlers({
 
 export const STALE_QUEUED_MS = 10 * 60 * 1000;
 export const SWEEP_BATCH = 20;
+/**
+ * Margin added to a job type's own timeoutMs before the sweeper will call a
+ * `running` job abandoned (T-710). It absorbs clock skew between the worker
+ * and the sweeper plus the delay between a host dying and the next sweep, so
+ * the reaper never steals a job from a worker that is merely slow.
+ */
+export const RUNNING_GRACE_MS = 5 * 60 * 1000;
 
 /**
  * @param {object} deps
@@ -451,7 +484,75 @@ export const SWEEP_BATCH = 20;
  * @param {{ log?: Function, warn?: Function }} [deps.log]
  */
 export function createJobSweeper({ store, now = () => new Date(), log = {} }) {
+  /**
+   * Jobs abandoned in `running` (T-710).
+   *
+   * A worker that dies mid-run — host restart, scale-in, deploy, or the
+   * platform timeout beating the job's own budget — leaves the document
+   * `running` forever: redelivery sees `status !== 'queued'` and returns
+   * `skipped`, the queued sweep below ignores it, `getJob` reports `running`
+   * to a client that polls indefinitely, and the type's `onComplete` never
+   * fires, so the failure notification that exists to bring a failed approval
+   * back to the phone is lost too.
+   *
+   * The cutoff is per type, not one blanket value: budgets range from 5 to 28
+   * minutes, and a single conservative cutoff would leave short jobs hanging
+   * for half an hour. A job is reaped only once its OWN budget plus a grace
+   * margin has elapsed, so a slow-but-live worker is never stolen from.
+   */
+  async function reapAbandoned(types) {
+    const cutoff = new Date(now().getTime() - RUNNING_GRACE_MS).toISOString();
+    const running = await store.queryDocs(
+      JOBS_CONTAINER,
+      `SELECT TOP ${SWEEP_BATCH} c.id, c.type, c.startedAt, c.attempts FROM c WHERE c.status = 'running' AND IS_DEFINED(c.startedAt) AND c.startedAt < @cutoff`,
+      [{ name: '@cutoff', value: cutoff }]
+    );
+    const reaped = [];
+    for (const doc of running || []) {
+      // An unreadable startedAt is not evidence of abandonment. Comparing an
+      // Invalid Date returns false for every operator, so without this an
+      // undated row would fall straight through into being reaped.
+      const startedMs = Date.parse(doc.startedAt);
+      if (!Number.isFinite(startedMs)) {
+        log.warn?.(`sweep: job ${doc.id} is running with no readable startedAt; leaving it`);
+        continue;
+      }
+      const spec = types?.get?.(doc.type);
+      // An unregistered type cannot state a budget; fall back to the default
+      // rather than leaving it running forever.
+      const budget = Number(spec?.timeoutMs) || DEFAULT_TIMEOUT_MS;
+      if (startedMs > now().getTime() - budget - RUNNING_GRACE_MS) continue;
+
+      const finishedAt = now().toISOString();
+      const error = `abandoned while running: no terminal write within ${Math.round(
+        (budget + RUNNING_GRACE_MS) / 60000
+      )} minutes (worker process lost)`;
+      try {
+        await store.patchDoc(JOBS_CONTAINER, doc.id, { status: 'timeout', finishedAt, error });
+        reaped.push({ jobId: doc.id, type: doc.type });
+        // Same best-effort contract as runJob's: a throwing hook is logged and
+        // never changes the outcome that was already written.
+        if (typeof spec?.onComplete === 'function') {
+          try {
+            await spec.onComplete(
+              { job: doc, status: 'timeout', result: null, error },
+              { context: log, now }
+            );
+          } catch (hookError) {
+            log.warn?.(
+              `sweep: onComplete for ${doc.type} failed: ${hookError?.message || hookError}`
+            );
+          }
+        }
+      } catch (err) {
+        log.warn?.(`sweep: could not reap job ${doc.id}: ${err?.message || err}`);
+      }
+    }
+    return reaped;
+  }
+
   return {
+    reapAbandoned,
     /** @returns {Promise<{ requeued: {jobId: string, type: string}[] }>} */
     async sweep() {
       const cutoff = new Date(now().getTime() - STALE_QUEUED_MS).toISOString();
@@ -472,7 +573,12 @@ export function createJobSweeper({ store, now = () => new Date(), log = {} }) {
           log.warn?.(`sweep: could not stamp job ${doc.id}: ${err?.message || err}`);
         }
       }
-      return { requeued };
+      // The queued gap and the running gap are the same failure one state
+      // apart, so they are swept together (T-710). Reaping cannot re-enqueue:
+      // a job whose worker may have completed real side effects before dying
+      // must not be run again silently — it lands `timeout` and visible.
+      const reaped = await reapAbandoned(registry);
+      return { requeued, reaped };
     },
   };
 }

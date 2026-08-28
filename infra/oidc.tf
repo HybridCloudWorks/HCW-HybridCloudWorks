@@ -29,7 +29,7 @@ resource "azurerm_user_assigned_identity" "github_deploy" {
   name                = "id-${var.workload_name}-github-deploy-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name
-  tags                = var.tags
+  tags                = local.tags
 }
 
 # Trust GitHub's OIDC issuer for this repository on the deploy branch only.

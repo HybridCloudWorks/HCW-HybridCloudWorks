@@ -52,6 +52,8 @@ export function resolveForgeTargets(payload = {}) {
 }
 
 registerJobType('forge-article', {
+  // Same level as POST /api/forgeContent: forging stages a draft, never publishes.
+  role: 'editor',
   description:
     'ContentForge: generate, scrub, validate, grade and stage a draft from an ingested or inspected document (forge_ready above the publish threshold, otherwise editing).',
   maxPayloadBytes: 2048,
@@ -136,6 +138,8 @@ export async function runForgeFromUrl(payload, { scrape, forge, store: docStore,
 }
 
 registerJobType('forge-from-url', {
+  // Scrape + forge; the result is staged, not live.
+  role: 'editor',
   description:
     'Blog Machine: scrape a URL into a source content document, then run the forge pipeline on it — staged forge_ready above the publish threshold, otherwise editing.',
   maxPayloadBytes: 4096,
@@ -161,6 +165,8 @@ registerJobType('forge-from-url', {
 });
 
 registerJobType('voice-calibration', {
+  // Writes suggestions only; accept/dismiss is a separate editor action.
+  role: 'editor',
   description:
     'Blog Machine: read the owner’s recent published posts and write SUGGESTED voice-profile additions to forge_profile.suggestions — accept/dismiss happens in Forge Studio, never automatically.',
   maxPayloadBytes: 256,
@@ -169,6 +175,8 @@ registerJobType('voice-calibration', {
 });
 
 registerJobType('generate-weekly-digest', {
+  // Drafts a newsletter into storage; sending is a separate gated step.
+  role: 'editor',
   description:
     'Draft the weekly newsletter from the content published in the last N days ({ days, dryRun }); dryRun returns the preview without saving.',
   maxPayloadBytes: 256,

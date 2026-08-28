@@ -79,6 +79,10 @@ const log = (...args) => console.log(new Date().toISOString(), `[${config.agentI
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let activeJobs = 0;
+// Claims in flight: decided on, not yet owned by executeJob. Counted separately
+// from activeJobs so the concurrency guard cannot be raced by a slow claim
+// (T-744).
+let pendingClaims = 0;
 let shuttingDown = false;
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
@@ -155,14 +159,33 @@ async function executeJob(job) {
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
 async function poll() {
-  if (shuttingDown || activeJobs >= config.maxConcurrentJobs) return;
+  // The slot is reserved BEFORE the await, not after (T-744). activeJobs is
+  // only incremented inside executeJob, which runs after claimJob resolves —
+  // and claimJob's timeout (20s) is longer than the poll interval (15s), so a
+  // slow claim let a second poll pass this guard with the counter still at its
+  // old value. With the documented LABS_AGENT_MAX_CONCURRENT=1 and a
+  // 256 MB / 0.5 CPU budget, two concurrent Terraform containers is a real
+  // resource-exhaustion path on a small VPS.
+  //
+  // pendingClaims covers exactly the window between "we decided to claim" and
+  // "executeJob owns the slot", so the guard reflects work already committed
+  // to rather than only work already started.
+  if (shuttingDown || activeJobs + pendingClaims >= config.maxConcurrentJobs) return;
 
+  pendingClaims += 1;
   try {
     const job = await api.claimJob();
     if (!job) return;
     executeJob(job); // intentionally not awaited — the poll interval continues
   } catch (err) {
     log('claim failed:', err.message);
+  } finally {
+    // Released in every path. On the path that takes a slot, executeJob
+    // reaches `activeJobs += 1` with no await in front of it, so the handoff
+    // from pendingClaims to activeJobs has no gap. Its one earlier await is in
+    // the "no capability for this job type" branch, which returns without
+    // taking a slot — nothing to hand over there.
+    pendingClaims -= 1;
   }
 }
 

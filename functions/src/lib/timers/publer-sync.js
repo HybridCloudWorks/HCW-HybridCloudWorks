@@ -15,6 +15,11 @@
  * settings (Key Vault references); a missing key skips the run.
  */
 import { readKey } from '../ai/router.js';
+import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
+
+// Outbound deadline (T-712): Node's fetch has none, and these calls are
+// reached from change-feed handlers where a hung socket holds the lease.
+const PUBLER_TIMEOUT_MS = 20_000;
 
 export const PUBLER_API_BASE_URL = 'https://app.publer.com/api/v1';
 const SYNC_STATES = ['scheduled', 'published', 'failed'];
@@ -121,7 +126,12 @@ export function createPublerClient({
       },
     };
     if (body && !['GET', 'HEAD'].includes(method)) options.body = JSON.stringify(body);
-    const response = await fetchImpl(`${PUBLER_API_BASE_URL}${path}`, options);
+    // Reached from the social_posts change-feed handler as well as this
+    // timer, so an unbounded call holds a lease (T-712).
+    const response = await fetchWithTimeout(fetchImpl, `${PUBLER_API_BASE_URL}${path}`, {
+      ...options,
+      timeoutMs: PUBLER_TIMEOUT_MS,
+    });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = new Error(`Publer ${method} ${path} failed with HTTP ${response.status}`);

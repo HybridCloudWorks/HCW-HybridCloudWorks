@@ -35,7 +35,7 @@
     Requires: az CLI signed in with Key Vault Secrets Officer (or Contributor +
     an access policy) on the vault, and rights to change its network ACLs.
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory)][string] $GcpServiceAccountJsonPath,
     [string] $VaultName = 'kv-site-prod-cus-01',

@@ -10,10 +10,18 @@
  * on failure because a failed generation should not silently re-bill later.
  * A notification is the opposite: an unsent message should fire when it can.
  * So on ANY not-sent outcome (Telegram unconfigured, cooldown, API error,
- * exception) this writes NOTHING — the flag stays armed and the claim stays
- * in place. Writing a "failed" marker here would itself re-fire the feed and
- * loop; leaving the claim makes the failure quiet for the claim-timeout
- * window (15 min), after which any later write to the document retries.
+ * exception) the TRIGGER FLAG IS NEVER CLEARED — it stays armed and the claim
+ * stays in place. Clearing it, or writing any other boolean, would re-fire the
+ * feed on our own write and loop; leaving the claim makes the failure quiet
+ * for the claim-timeout window (15 min).
+ *
+ * What it does write (T-735) is a numeric attempt counter and two strings.
+ * The header used to say "writes NOTHING", and relied on "any later write to
+ * the document retries" — which is not true for a forge_ready document,
+ * because nothing writes to one again unless a human acts. A transient
+ * Telegram failure therefore stranded the draft in silence. The counter
+ * cannot re-arm the trigger (the claim keys on a boolean) and makes an
+ * undelivered notification visible to the ops snapshot and to a sweeper.
  * `notifyTelegram` uses `source: forge_ready:{id}` so the 15-minute notify
  * cooldown is per post, not global — a second post forged a minute later
  * still notifies. (Each id adds one small key to system/notify_state;
@@ -23,6 +31,18 @@ import { claimRisingEdge, releaseRisingEdgeClaim } from './rising-edge-claim.js'
 import { readKey } from '../ai/router.js';
 import { buildPreviewToken } from '../public-preview.js';
 import { toPublicUrl } from '../cms/publish.js';
+
+/**
+ * Fields recording a delivery that did NOT happen (T-735).
+ *
+ * Numbers and strings, never a boolean: the rising-edge claim keys on
+ * `forgeReadyNotifyTrigger`, so anything boolean written here could re-arm the
+ * feed on our own write. These make an undelivered notification visible to the
+ * ops snapshot and to any future sweeper, without touching the trigger.
+ */
+export const NOTIFY_ATTEMPTS_FIELD = 'forgeReadyNotifyAttempts';
+export const NOTIFY_LAST_ATTEMPT_FIELD = 'forgeReadyNotifyLastAttemptAt';
+export const NOTIFY_LAST_REASON_FIELD = 'forgeReadyNotifyLastReason';
 
 export const FORGE_READY_NOTIFY_CLAIM_FIELDS = Object.freeze({
   flagField: 'forgeReadyNotifyTrigger',
@@ -100,9 +120,40 @@ export function createForgeReadyNotifier({
       });
 
       if (!result.sent) {
-        // No write — see the header. The claim quiets retries for its window.
-        log.warn?.(`[forge-ready-notify] ${contentId}: not sent (${result.reason})`);
-        return { ran: false, reason: `not_sent:${result.reason}` };
+        // The flag stays true and the claim stays released-by-expiry, exactly
+        // as the header describes: writing a failure marker here would re-fire
+        // the feed on our own write and loop.
+        //
+        // What the header's escape hatch assumed — "any later write to the
+        // document retries" — is not true for a forge_ready document: nothing
+        // writes to one again unless a human acts. So a transient Telegram
+        // failure stranded the draft silently, and the only evidence was a flag
+        // sitting true in Cosmos (T-735).
+        //
+        // A bounded attempt counter is the smallest thing that makes the state
+        // visible without re-arming the trigger logic: it is a NUMBER, not the
+        // boolean flag the claim keys on, so writing it cannot re-trigger the
+        // rising edge. A document whose attempts climb is one nobody was told
+        // about, which is what the ops snapshot and any future sweeper need in
+        // order to find it.
+        const attempts = Number(data[NOTIFY_ATTEMPTS_FIELD] || 0) + 1;
+        log.warn?.(
+          `[forge-ready-notify] ${contentId}: not sent (${result.reason}), attempt ${attempts}`
+        );
+        try {
+          await store.patchDoc('content', contentId, {
+            [NOTIFY_ATTEMPTS_FIELD]: attempts,
+            [NOTIFY_LAST_ATTEMPT_FIELD]: now().toISOString(),
+            [NOTIFY_LAST_REASON_FIELD]: String(result.reason || 'unknown').slice(0, 200),
+          });
+        } catch (patchError) {
+          // Best effort: failing to record the attempt must not turn a
+          // delivery problem into a handler error.
+          log.warn?.(
+            `[forge-ready-notify] ${contentId}: could not record attempt: ${patchError?.message || patchError}`
+          );
+        }
+        return { ran: false, reason: `not_sent:${result.reason}`, attempts };
       }
 
       await store.patchDoc('content', contentId, {

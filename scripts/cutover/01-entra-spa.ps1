@@ -49,7 +49,7 @@
     registrations and assign app roles — Application Administrator, Cloud
     Application Administrator, or Global Administrator.
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [string] $AdminUpn,
     [string] $ApiAppId = 'ac696e96-e203-47be-ade8-c35ece8a6c4a',
