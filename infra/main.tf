@@ -1254,6 +1254,11 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "TELEGRAM_BOT_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-BOT-TOKEN)"
     "TELEGRAM_CHAT_ID"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-CHAT-ID)"
 
+    # Staging-preview link signing (T-606). Until the secret is seeded via the
+    # vault procedure, readKey() sees the unresolved reference as unconfigured
+    # and the preview route answers 404 — the loop arms itself when seeded.
+    "PREVIEW_SIGNING_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PREVIEW-SIGNING-SECRET)"
+
     "NODE_ENV" = "production"
 
     # Timer clock. NCRONTAB on Linux Flex Consumption evaluates in UTC unless

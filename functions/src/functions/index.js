@@ -29,6 +29,7 @@ import './legacy-blogs-telemetry-http.js';
 import './ops-health-http.js';
 import './platform-health-http.js';
 import './public-media.js';
+import './public-preview.js';
 import './public-reads.js';
 import './publish-http.js';
 import './rss-jobs.js';
