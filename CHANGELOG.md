@@ -148,6 +148,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The apex serves the Azure site (T-517 closed, 2026-08-28).** The cutover
+  this repository was built toward is done: `hybridcloudworks.com` — the
+  canonical hostname, the one host that was still Firebase — now resolves to
+  `calm-ground-0d0e6a010.7.azurestaticapps.net` and serves the Static Web
+  App. Evidence, in the order it arrived: the owner-supplied Cloudflare zone
+  export of 2026-08-27 23:47 showed the apex `CNAME` at the SWA with **no
+  Firebase record remaining anywhere in the zone** (the Runbook §3c repoint);
+  the owner then verified serving on 2026-08-28 — the acceptance criterion
+  this tracker holds cutovers to, because DNS state is desired state and
+  T-513 is the recorded case where the two disagreed.
+
+  Two owner decisions recorded with the close-out. First, **the DNS rollback
+  is forgone**: rather than holding the Firebase deployment through the
+  Runbook's one-week soak, GCP is scheduled for deletion. Second, that
+  decision converts the Telegram webhook re-registration (Runbook §3d) from a
+  dormant follow-through into a deadline — the bot's webhook still points at
+  the old Cloud Functions URL, and once GCP is deleted it goes quiet with no
+  error anywhere in Azure. Tracked as **T-526**, to be run before the
+  deletion.
+
+  The Runbook §3c soak criterion ("a full week including every scheduled
+  job") could never have completed as written — no timer is armed (T-518) —
+  so the owner's decision also resolves a dead-lock this tracker had flagged
+  between the two items.
+
 - **The two `data-migration` federated credentials are retired (T-524 closed,
   2026-08-26).** `infra/oidc.tf` trusted six OIDC subjects and now trusts four.
   The pair granted no permission of its own — a federated credential decides
