@@ -57,7 +57,12 @@ describe('buildForgeReadyMessage', () => {
         seo: { findings: [{ key: 'meta_description_short', message: 'short' }] },
       },
     });
-    expect(buildForgeReadyMessage(flagged, null)).toContain('SEO: 1 advisory note(s)');
+    const withPreview = buildForgeReadyMessage(flagged, 'https://hybridcloudworks.com/preview/doc-1?t=x');
+    expect(withPreview).toContain('SEO: 1 advisory note(s) — details in the preview banner.');
+    // No preview link → no pointer to a banner the owner cannot reach.
+    const withoutPreview = buildForgeReadyMessage(flagged, null);
+    expect(withoutPreview).toContain('SEO: 1 advisory note(s).');
+    expect(withoutPreview).not.toContain('preview banner');
     expect(buildForgeReadyMessage(doc(), null)).not.toContain('SEO:');
   });
 });

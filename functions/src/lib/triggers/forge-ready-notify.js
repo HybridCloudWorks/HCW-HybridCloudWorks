@@ -43,7 +43,12 @@ export function buildForgeReadyMessage(data, previewUrl) {
   if (format) lines.push(`Format: ${format}`);
   const seoFindings = Array.isArray(grade.seo?.findings) ? grade.seo.findings : [];
   if (seoFindings.length) {
-    lines.push(`SEO: ${seoFindings.length} advisory note(s) — details in the preview banner.`);
+    // Point at the banner only when the preview link below actually works.
+    lines.push(
+      previewUrl
+        ? `SEO: ${seoFindings.length} advisory note(s) — details in the preview banner.`
+        : `SEO: ${seoFindings.length} advisory note(s).`
+    );
   }
   lines.push(
     previewUrl
