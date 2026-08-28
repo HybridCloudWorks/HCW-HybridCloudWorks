@@ -19,6 +19,7 @@ import {
 } from './dashboard-stats.js';
 import {
   createAiCoverGenerator,
+  pickDefaultHero,
   createReplicateClient,
   resolveAiCoverTargets,
 } from './ai-cover.js';
@@ -434,6 +435,65 @@ describe('AI cover', () => {
       altCoverImageRunId: null,
       altCoverImageError: 'Replicate HTTP 503',
     });
+  });
+
+  it('assigns the curated default hero on failure when a mapping exists (T-606)', async () => {
+    const store = memStore({
+      content: [
+        { id: 'c3', altCoverImageTrigger: true, 'Cloud Provider': 'AWS', _etag: 'e' },
+        // Already has a cover: the default must not overwrite it.
+        {
+          id: 'c4',
+          altCoverImageTrigger: true,
+          contentImageUrl: '/api/public/media/covers/manual.png',
+          _etag: 'e',
+        },
+      ],
+      admin_config: [
+        {
+          id: 'default_heroes',
+          heroes: {
+            AWS: '/api/public/media/covers/default-aws.png',
+            Multi: '/api/public/media/covers/default-multi.png',
+          },
+        },
+      ],
+    });
+    const replicate = { generate: vi.fn(async () => Promise.reject(new Error('boom'))) };
+    const gen = createAiCoverGenerator({
+      store,
+      storage: { uploadBlob: vi.fn() },
+      replicate,
+      fetchImage: vi.fn(),
+      now,
+      uuid: () => 'g1',
+    });
+
+    expect((await gen.run('c3', 'ev3')).reason).toBe('error_with_default_hero: boom');
+    expect(store.data.content.get('c3')).toMatchObject({
+      altCoverImageTrigger: false,
+      altCoverImage: '/api/public/media/covers/default-aws.png',
+      contentImageUrl: '/api/public/media/covers/default-aws.png',
+      altCoverImageError: 'fallback: default hero (boom)',
+    });
+
+    expect((await gen.run('c4', 'ev4')).reason).toBe('error: boom');
+    expect(store.data.content.get('c4')).toMatchObject({
+      contentImageUrl: '/api/public/media/covers/manual.png',
+      altCoverImageError: 'boom',
+    });
+    expect(store.data.content.get('c4').altCoverImage).toBeUndefined();
+  });
+
+  it('pickDefaultHero: case-insensitive keys, Google Cloud → GCP, Multi catch-all', () => {
+    const heroes = { AWS: '/aws.png', gcp: '/gcp.png', Multi: '/multi.png' };
+    expect(pickDefaultHero(heroes, 'aws')).toBe('/aws.png');
+    expect(pickDefaultHero(heroes, 'AWS')).toBe('/aws.png');
+    expect(pickDefaultHero(heroes, 'Google Cloud')).toBe('/gcp.png');
+    expect(pickDefaultHero(heroes, 'vmware')).toBe('/multi.png');
+    expect(pickDefaultHero(heroes, '')).toBe('/multi.png');
+    expect(pickDefaultHero({}, 'aws')).toBe(null);
+    expect(pickDefaultHero(undefined, 'aws')).toBe(null);
   });
 });
 
