@@ -22,6 +22,7 @@ import {
   inferProviderFromUrl,
   buildUrlSourceDoc,
 } from '../lib/content/draft-from-url.js';
+import { runVoiceCalibration } from '../lib/content/forge-studio.js';
 import { registerJobType } from '../lib/jobs.js';
 
 export const FORGE_MAX_BATCH = 10;
@@ -148,6 +149,14 @@ registerJobType('forge-from-url', {
       log: context,
       actor: job?.requestedBy || {},
     }),
+});
+
+registerJobType('voice-calibration', {
+  description:
+    'Blog Machine: read the owner’s recent published posts and write SUGGESTED voice-profile additions to forge_profile.suggestions — accept/dismiss happens in Forge Studio, never automatically.',
+  maxPayloadBytes: 256,
+  timeoutMs: 10 * 60 * 1000,
+  worker: (payload, { context }) => runVoiceCalibration(payload || {}, { store, ai, log: context }),
 });
 
 registerJobType('generate-weekly-digest', {

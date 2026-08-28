@@ -26,6 +26,7 @@ import {
   Mail,
   Plug,
   FlaskConical,
+  Flame,
   Headphones,
 } from 'lucide-react';
 import { signOutUser } from '@/lib/entraAuth';
@@ -56,6 +57,7 @@ const NAV_GROUPS = [
   {
     label: 'Creative',
     items: [
+      { to: '/admin/forge-studio', icon: Flame, label: 'Forge Studio', pill: 'New' },
       { to: '/admin/ai-engine', icon: Bot, label: 'AI Engine', pill: 'New' },
       { to: '/admin/image-gallery', icon: Images, label: 'Image Gallery' },
       { to: '/admin/image-prompts', icon: Image, label: 'Prompts' },

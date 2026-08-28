@@ -162,6 +162,7 @@ const AdminSocialHubPage = lazyPage(() => import('@/pages/admin/SocialHubPage'))
 const AdminRecordingsPage = lazyPage(() => import('@/pages/admin/RecordingsPage'));
 const AdminAIEnginePage = lazyPage(() => import('@/pages/admin/AIEnginePage'));
 const AdminServiceDocsPage = lazyPage(() => import('@/pages/admin/ServiceDocsPage'));
+const AdminForgeStudioPage = lazyPage(() => import('@/pages/admin/ForgeStudioPage'));
 const AdminLinkiePage = lazyPage(() => import('@/pages/admin/LinkiePage'));
 const AdminMailingListPage = lazyPage(() => import('@/pages/admin/MailingListPage'));
 const AdminConnectionsPage = lazyPage(() => import('@/pages/admin/ConnectionsPage'));
@@ -362,6 +363,7 @@ function App() {
                 <Route path="ops-health" element={<AdminOpsHealthPage />} />
                 <Route path="social" element={<AdminSocialHubPage />} />
                 <Route path="recordings" element={<AdminRecordingsPage />} />
+                <Route path="forge-studio" element={<AdminForgeStudioPage />} />
                 <Route path="ai-engine" element={<AdminAIEnginePage />} />
                 <Route path="ai-engine/docs/:serviceId" element={<AdminServiceDocsPage />} />
                 <Route path="linkie" element={<AdminLinkiePage />} />
