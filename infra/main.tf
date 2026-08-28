@@ -1060,17 +1060,17 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # support_credentials stays FALSE. This is a bearer-token API, not a cookie
     # API, and true would additionally make the platform intercept far more than
     # preflights.
+    # Two ways to break that guard, both tried for T-750 and reverted: replacing
+    # a literal with "https://${var.domain}" or the SWA's default_host_name
+    # (the test compares strings, and an interpolation is not one), and putting
+    # a comment between `cors {` and `allowed_origins` (its block regex stops
+    # matching, so the guard passes while checking nothing). The asymmetry with
+    # the storage account's CORS block, which does derive from var.domain, is
+    # justified rather than an oversight: only this list is guarded by text.
     cors {
-      # Derived, not hardcoded (T-750). The storage account's CORS block a few
-      # hundred lines above already built its origins from var.domain, while
-      # this one repeated the apex literally and pinned the SWA hostname as a
-      # string — so a domain change updated one surface and not the other, and
-      # a recreated Static Web App silently invalidated the literal. The SWA
-      # hostname is an attribute of the resource; using it means the two can
-      # never disagree. Value-identical today, so a no-op plan proves it.
       allowed_origins = concat(
-        ["https://${var.domain}", "https://www.${var.domain}"],
-        ["https://${azurerm_static_web_app.hcw.default_host_name}"],
+        ["https://hybridcloudworks.com", "https://www.hybridcloudworks.com"],
+        ["https://calm-ground-0d0e6a010.7.azurestaticapps.net"],
         var.cors_extra_origins,
       )
       support_credentials = false
