@@ -98,6 +98,9 @@ jobs:
           APP: ${{ inputs.function_app || 'func-site-prod-cus-01' }}
           RG: ${{ inputs.resource_group || 'rg-web-site-prod-cus' }}
           MIN: ${{ inputs.minimum_functions || '1' }}
+          # Empty when the variable is unset, which skips the firewall probes
+          # rather than failing the monitor on a missing name (T-713).
+          STOR: ${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}
         run: |
           set -uo pipefail
 
@@ -148,6 +151,26 @@ jobs:
           writer=$(probe "RUNTIME_CONFIG_WRITER" \
             az functionapp config appsettings list -n "$APP" -g "$RG" \
               --query "[?name=='RUNTIME_CONFIG_WRITER'].value | [0]" -o tsv) || true
+
+          # T-713. deploy-functions.yml opens this account to the runner for
+          # the package upload and closes it in an always() step — which does
+          # NOT run on runner loss, infrastructure failure, or a force-cancel.
+          # In those cases the host's secret repository stays network-open with
+          # only Entra data-plane auth left, and nothing noticed: this workflow
+          # checked function count and app settings but never firewall posture.
+          # Two probes, because the window has two halves and either can be
+          # orphaned on its own.
+          if [ -n "${STOR:-}" ]; then
+            netaction=$(probe "storage default action" \
+              az storage account show -n "$STOR" -g "$RG" \
+                --query "networkRuleSet.defaultAction" -o tsv) || true
+
+            # The temporary allow-rules are named ci-deploy-scm-* / ci-smoke-*
+            # after the runner IP, so any that survive name a run that died.
+            cirules=$(probe "leftover CI firewall rules" \
+              az storage account network-rule list -n "$STOR" -g "$RG" \
+                --query "length(ipRules)" -o tsv) || true
+          fi
 
           # Outside every substitution, so the annotations reach the run without
           # contaminating a captured value.
@@ -200,6 +223,31 @@ jobs:
           else
             echo "| \`RUNTIME_CONFIG_WRITER\` | **${writer:-unset}** | ❌ |" >> "$report"
             failed=1
+          fi
+
+          # Firewall posture (T-713). Skipped entirely when STOR is unset, so
+          # an unconfigured variable does not manufacture a failure.
+          if [ -n "${STOR:-}" ]; then
+            if [ "$netaction" = "Deny" ]; then
+              echo "| Host storage default action | Deny | ✅ |" >> "$report"
+            elif [ "$netaction" = "UNAUTHORIZED" ] || [ "$netaction" = "ERROR" ]; then
+              echo "| Host storage default action | \`$netaction\` | ⚠️ |" >> "$report"
+              failed=1
+            else
+              # Allow means a deploy opened the window and never closed it.
+              echo "| Host storage default action | **${netaction:-unset}** | ❌ |" >> "$report"
+              failed=1
+            fi
+
+            if [ "$cirules" = "0" ]; then
+              echo "| Leftover CI firewall rules | 0 | ✅ |" >> "$report"
+            elif [ "$cirules" = "UNAUTHORIZED" ] || [ "$cirules" = "ERROR" ]; then
+              echo "| Leftover CI firewall rules | \`$cirules\` | ⚠️ |" >> "$report"
+              failed=1
+            else
+              echo "| Leftover CI firewall rules | **$cirules** | ❌ |" >> "$report"
+              failed=1
+            fi
           fi
 
           # A run where nothing could be read is a broken check, not an outage,

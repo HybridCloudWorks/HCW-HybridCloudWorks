@@ -43,6 +43,23 @@ resource "azurerm_monitor_action_group" "ops" {
     use_common_alert_schema = true
   }
 
+  # Second channel (T-709). Until this is set, every alert in the estate has
+  # exactly one delivery path, across a subscription boundary that is only
+  # proven to be ACCEPTED by ARM — not proven to arrive. One receiver plus one
+  # unverified hop is a single point of silence for the whole alerting fabric.
+  #
+  # dynamic, not conditional count: an empty ops_sms_receiver produces no block
+  # at all, so the action group is byte-identical to what exists today and the
+  # variable can be set later without a resource replacement.
+  dynamic "sms_receiver" {
+    for_each = var.ops_sms_receiver.phone_number == "" ? [] : [var.ops_sms_receiver]
+    content {
+      name         = "ops-sms"
+      country_code = sms_receiver.value.country_code
+      phone_number = sms_receiver.value.phone_number
+    }
+  }
+
   tags = var.tags
 }
 

@@ -26,14 +26,51 @@ function pickMarkdownChunk(id) {
   return null;
 }
 
-function pickChartsChunk(id) {
+/**
+ * React's own runtime, claimed before any feature predicate runs (T-715).
+ *
+ * `manualChunks` assigns a module to the first chunk that claims it, and
+ * rollup then places shared dependencies alongside whatever needs them. React's
+ * jsx-runtime is needed by every component, so when `vendor-charts` was
+ * evaluated first it captured the runtime — which made a 456 kB charting bundle
+ * a STATIC dependency of the app entry. Every page, including ones with no
+ * chart at all, modulepreloaded it.
+ *
+ * Pinning the runtime to its own chunk removes the mechanism rather than the
+ * symptom: no feature chunk can capture it, whatever order the predicates run
+ * in later.
+ */
+function pickReactChunk(id) {
   if (
-    id.includes('chart.js') ||
-    id.includes('react-chartjs-2') ||
-    id.includes('recharts') ||
-    id.includes('d3')
+    /node_modules\/(react|react-dom)\//.test(id) ||
+    id.includes('node_modules/react/jsx-runtime') ||
+    id.includes('node_modules/scheduler/')
   ) {
-    return 'vendor-charts';
+    return 'vendor-react';
+  }
+  return null;
+}
+
+function pickChartsChunk(id) {
+  // node_modules only, and matched on package directory boundaries. The old
+  // test was a bare `id.includes('d3')`, which matches any path containing
+  // those two characters anywhere — an application file, a hashed asset name.
+  if (!id.includes('node_modules/')) return null;
+  // Split per library rather than one combined bundle (T-715). rolldown places
+  // React's jsx-runtime alongside whichever of these chunks it likes, and the
+  // entry needs jsx-runtime, so ONE of these chunks is unavoidably on the
+  // critical path. Splitting decides how much rides along with it: a combined
+  // chunk meant all 456 kB of recharts + chart.js + d3 were modulepreloaded on
+  // every page, to render zero charts, because the chart components themselves
+  // are lazily imported everywhere they are used.
+  if (id.includes('node_modules/recharts/') || id.includes('node_modules/victory-vendor/')) {
+    return 'vendor-recharts';
+  }
+  if (id.includes('node_modules/chart.js/') || id.includes('node_modules/react-chartjs-2/')) {
+    return 'vendor-chartjs';
+  }
+  if (/node_modules\/d3(-[a-z-]+)?\//.test(id)) {
+    return 'vendor-d3';
   }
   return null;
 }
@@ -122,6 +159,11 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            // React first, always. Order is load-bearing here: whichever
+            // predicate claims the shared runtime pulls its whole chunk onto
+            // the entry's static import graph (T-715).
+            const reactChunk = pickReactChunk(id);
+            if (reactChunk) return reactChunk;
             const markdownChunk = pickMarkdownChunk(id);
             if (markdownChunk) return markdownChunk;
             const chartsChunk = pickChartsChunk(id);
