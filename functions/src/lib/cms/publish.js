@@ -62,6 +62,18 @@ export function toPublicUrl(pathValue) {
   return `https://hybridcloudworks.com${path}`;
 }
 
+/**
+ * The public URL a content document already carries, in the precedence the
+ * Social Hub uses. '' when the document has none (never guessed). Shared by
+ * the social-caption trigger and the related-posts interlinker.
+ */
+export function publicUrlOf(data = {}) {
+  if (data.publishedUrl) return data.publishedUrl;
+  if (data.publicUrl) return data.publicUrl;
+  const path = data.curatedSubpagePath || data.slugPageUrl || '';
+  return path ? toPublicUrl(path) : '';
+}
+
 export function getPublicSectionForPublishTarget(publishTarget) {
   switch (normalizePublishTarget(publishTarget)) {
     case 'framework':
