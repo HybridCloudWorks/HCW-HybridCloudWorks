@@ -822,3 +822,85 @@ resource "azurerm_monitor_metric_alert" "api_availability" {
 
   tags = var.tags
 }
+
+# ---------------------------------------------------------------------------
+# Availability, the path that works on this Cloudflare plan (ADR 0024)
+# ---------------------------------------------------------------------------
+#
+# The standard web test above is the design; this is the one that can run.
+# Bot Fight Mode 403s every datacenter client asking /api/health — Azure's
+# availability agents included — and does not run on the Ruleset Engine, so no
+# WAF rule exempts them (the block comment above carries the measurement). The
+# alternative is edge/availability-probe: a Cloudflare Worker on a 5-minute
+# cron, deployed by the owner with wrangler, whose subrequest to its own zone
+# is the one external-shaped client Bot Fight Mode does not challenge. It
+# reports every attempt to Application Insights as an availability result
+# named edge-api-health — wrangler.toml's PROBE_NAME, which the query below
+# must match verbatim.
+#
+# THE RULE COUNTS SUCCESSES AND FIRES ON TOO FEW, rather than counting
+# failures. Counting failures has a blind spot exactly where it matters: a
+# dead Worker, a disabled cron, or an unreachable ingestion endpoint produce
+# no failure rows at all, and a failure-counting rule reads that silence as
+# health. Counting successes makes "the probe stopped running" and "the API
+# stopped answering" the same incident, which they are from a visitor's seat.
+# The probe writes 3 results per 15-minute window; below 2 is an incident, so
+# one dropped cron run is tolerated and two are not.
+#
+# A log rule, not a metric alert on availabilityResults/availabilityPercentage,
+# for the same blind-spot reason: that metric goes silent when the probe dies,
+# and a metric alert on a silent metric does not fire.
+#
+# Gated on its own variable rather than availability_test_enabled: the two
+# paths arm independently, and arming THIS one first (or instead) is the
+# expected order — it costs nothing per execution. The gate also has the same
+# duty as every other in this file: created before the probe writes rows, the
+# rule fires immediately and permanently, so the variable's description makes
+# the observed success row the precondition for flipping it.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availability" {
+  count               = var.availability_probe_alert_enabled ? 1 : 0
+  name                = "alert-api-reachability-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "Fewer than 2 of the expected 3 edge-probe successes for GET /api/health in 15 minutes — the API is unreachable over the Cloudflare path, or the probe itself is down. Either way nobody outside can confirm the site is up."
+  severity            = 1
+
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT15M"
+
+  # Stateful like every other rule here (#226): reachability incidents are
+  # exactly the kind that run long, and one mail per incident is the design.
+  auto_mitigation_enabled = true
+
+  criteria {
+    # Classic schema, component scope, like the rules above. success == 1 in
+    # availabilityResults; the name filter keeps a future second probe from
+    # voting in this rule's window.
+    query                   = "availabilityResults | where name == \"edge-api-health\" | where success == 1"
+    time_aggregation_method = "Count"
+    operator                = "LessThan"
+    threshold               = 2
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
+}

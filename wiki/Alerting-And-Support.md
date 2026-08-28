@@ -46,10 +46,20 @@ does not count 404s. `AppExceptions` cannot fire because no handler runs to
 throw. The availability rule is the only one that asks from outside, and it is
 the one that cannot be armed.
 
-Until the Cloudflare side changes (TODO **T-519**), that failure class is caught
+Until the probe below is armed (TODO **T-519**), that failure class is caught
 by a human running the check in *[The failure with no alert](#the-failure-with-no-alert)*
-below, or by the assertion inside `deploy-functions.yml`, which only runs when
-someone deploys.
+below, by the scheduled `Monitor Functions Registered` workflow (which reads
+ARM, not the network path), or by the assertion inside `deploy-functions.yml`,
+which only runs when someone deploys.
+
+Since 2026-08-28 the arm path no longer waits on a Cloudflare plan change:
+[ADR 0024](0024-edge-availability-probe) probes `/api/health` from a
+Cloudflare Worker cron — the one external-shaped client Bot Fight Mode does
+not challenge — reporting into `availabilityResults`, with a success-counting
+rule (`edge_probe_availability`, gated on `availability_probe_alert_enabled`)
+that fires as readily on a dead probe as on an unreachable API. Deploying the
+Worker and arming the rule are the owner procedure in
+[Availability-Probe](Availability-Probe).
 
 ### Delivery is unproven
 

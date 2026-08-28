@@ -48,6 +48,9 @@ jobs:
             test: npm test
           - name: vps-agent
             dir: vps-agent
+          - name: edge (availability probe)
+            dir: edge/availability-probe
+            test: npm test
 
     defaults:
       run:

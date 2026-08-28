@@ -26,7 +26,11 @@ $harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 # filesystem, not the git index. It is already pruned from the Markdown scan by
 # $unscannedDirectories below; allowlisting it here keeps local runs from going
 # red on a regenerable cache that CI will never see.
-$allowedDirectories = @('.azure', '.github', '.vscode', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'vps-agent', 'wiki') + $harnessDirectories
+# `edge` holds Cloudflare Worker source (ADR 0024) — code that runs on the
+# edge rather than in Azure, deployed by the owner with wrangler, unit-tested
+# in CI. Its documentation lives in the Wiki (Availability-Probe) like every
+# other component's; the directory carries only source, config and tests.
+$allowedDirectories = @('.azure', '.github', '.vscode', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'vps-agent', 'wiki') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.

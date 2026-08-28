@@ -58,9 +58,10 @@ tracker line that only ever said "two numbers are missing". The analysis behind
 it is in the issue so it does not get redone.
 
 **All three that remain carry Gate: owner, and none of them is a repository
-setting any more.** What is left is a DNS record, a Cloudflare change and a set
-of feature flags — every one needs tenant or edge access, and no amount of
-engineering here closes any of them.
+setting any more.** What is left is a serving verification (the DNS record
+itself moved by 2026-08-27), a Worker deployment and a set of feature flags —
+every one needs tenant or edge access, and no amount of engineering here
+closes any of them.
 They are listed anyway, because a tracker that omits them is quietly shorter
 than the truth.
 
@@ -73,20 +74,22 @@ including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
 
 ## High
 
-### T-517 — The apex is still served by Firebase Hosting
+### T-517 — The apex DNS is repointed; serving is not yet verified
 
 **Gate: owner** — [REVIEW.md](REVIEW.md), *Apex DNS cutover*. In flight as of
-2026-08-24.
+2026-08-24; **DNS repointed by 2026-08-27**.
 
-`hybridcloudworks.com` answers with Firebase Hosting's Fastly headers and a
-Firebase-era CSP, and the reserved `/__/firebase/init.json` path returns 200
-with `projectId hybridcloudworks-61e8d`. `www` and the Static Web App's default
-hostname already serve the Azure site. Until the apex moves, the canonical
-hostname of the production system is the one host not running on the platform
-this repository builds — which makes every readiness statement about "the site"
-a statement about a host most visitors never reach. Nothing in the repository
-can move it: the record lives at Cloudflare and the custom-domain binding at
-Azure.
+The owner-supplied Cloudflare zone export of 2026-08-27 23:47 shows the apex
+`CNAME` at `calm-ground-0d0e6a010.7.azurestaticapps.net` (DNS-only, matching
+`www`), and no Firebase record remains anywhere in the zone. That is the
+Cutover-Runbook §3c repoint, done. What this tracker has not seen is the
+acceptance criterion — **observed serving**: DNS state is desired state, and
+this file has already recorded one case (T-513) where the two disagreed.
+Remaining, all owner-side: confirm the apex answers with the Azure site (no
+Fastly headers, `/__/firebase/init.json` no longer 200), re-run the Telegram
+`setWebhook` script (Runbook §3d), and hold the Firebase deployment as the
+DNS rollback through the soak. Close this item on the observed 200, with the
+entry in [CHANGELOG.md](CHANGELOG.md).
 
 ### T-518 — Nothing is scheduled: all 18 timers are permanent no-ops
 
@@ -108,20 +111,30 @@ digest.
 
 ### T-519 — Reachability is the one signal with no alert behind it
 
-**Gate: owner (Cloudflare)** — [REVIEW.md](REVIEW.md), *Timers and the
-availability test*.
+**Gate: owner (Worker deploy)** — [ADR 0024](wiki/0024-edge-availability-probe.md);
+[REVIEW.md](REVIEW.md), *Timers and the availability test*.
 
 `availability_test_enabled` defaults to `false` and both the standard web test
-and its alert are gated on it, so the alert inventory reports five rules rather
-than six with one that can never fire. The reason it is off is measured rather
-than cautious: Cloudflare's Bot Fight Mode serves datacenter clients — which is
-exactly what Azure's availability agents are — a 403 interstitial for
-`https://api-azure.<domain>/api/health`, and a WAF skip rule against it was
-built, applied and confirmed **inert**, because Bot Fight Mode does not run on
-the Ruleset Engine. So the Cloudflare side has to change before the test means
-anything. It matters more than one rule out of six suggests: every other alert
-needs the app healthy enough to emit telemetry, and reachability is the only
-signal that survives the app being completely down.
+and its alert are gated on it, for a measured reason: Cloudflare's Bot Fight
+Mode serves datacenter clients — which is exactly what Azure's availability
+agents are — a 403 interstitial for `https://api-azure.<domain>/api/health`,
+and a WAF skip rule against it was built, applied and confirmed **inert**,
+because Bot Fight Mode does not run on the Ruleset Engine. It matters more
+than one rule out of six suggests: every other alert needs the app healthy
+enough to emit telemetry, and reachability is the only signal that survives
+the app being completely down.
+
+**The gate changed shape on 2026-08-28.** ADR 0024 routes around Bot Fight
+Mode instead of waiting on it: `edge/availability-probe` is a Cloudflare
+Worker on a 5-minute cron whose same-zone subrequest is not challenged,
+reporting every `/api/health` attempt to Application Insights, with a
+success-counting alert (`edge_probe_availability`, gated on
+`availability_probe_alert_enabled`, default `false`) in the same fabric as
+every other rule. What remains is owner-held but no longer a plan decision:
+deploy the Worker with wrangler, seed the connection-string secret, observe a
+`success == 1` row, then flip the variable
+([Availability-Probe](wiki/Availability-Probe.md) is the procedure). The standard
+web test stays in Terraform, disarmed, for the day #127 upgrades the plan.
 
 ## Test coverage follow-up
 
