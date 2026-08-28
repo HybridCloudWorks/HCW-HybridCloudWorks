@@ -141,22 +141,36 @@ First commit: unify the duplicate module serializer (`BoardTab.jsx` adopts
 `lib/moduleParser.js`) so new types are implemented once. Then five new
 types, all built from components and tokens the site already owns:
 
-| type | built from | payload |
-| --- | --- | --- |
-| `pull_quote` | Bookerly + provider accent, `.accent-line-hcw` | text + optional attribution |
-| `stat_board` | `shared/StatBlock.jsx` glass tiles | `{"stats":[{"value","label","sublabel?"}]}` (2–4) |
-| `comparison` | glass-styled table + theme vars | `{"columns":[…],"rows":[[…]]}` |
-| `timeline` | `NumberedSection` / `.section-number` | `{"steps":[{"title","body"}]}` |
-| `callout` | `Eyebrow` label + titled glass frame | `{"eyebrow","title","body"}` |
+| type | body | built from | payload | pairing |
+| --- | --- | --- | --- | --- |
+| `pull_quote` | JSON | Bookerly + provider accent rule | `{"text","attribution"?}` (text required) | pairable |
+| `stat_board` | JSON | `shared/StatBlock.jsx` glass tiles | `{"stats":[{"value","label","sublabel"?}]}` (2–4, value+label required) | full width |
+| `comparison` | JSON | glass-styled table + theme vars | `{"columns":[…],"rows":[[…]]}` (≥2 columns, ≥1 row, row length = columns) | full width |
+| `timeline` | JSON | `.section-number` zero-padded markers | `{"steps":[{"title","body"?}]}` (≥2, title required) | full width |
+| `callout` | JSON | `Eyebrow` label + titled glass frame | `{"eyebrow"?,"title","body"}` (title+body required) | pairable |
+| `design` (repaired) | raw Mermaid | labelled mono frame (client-side mermaid render = backlog) | — | full width |
 
-Backend: extend `KNOWN_MODULE_TYPES` / JSON validation in
-`lib/cms/content-modules.js` (mirroring the links/picture precedent) and the
-repair pass in `lib/content/forge-pipeline.js`; raise `MAX_MODULES` 10 → 14
-on both sides. Frontend: renderers in `InlineModules.jsx`; pairing rules
-(stat_board/comparison full-width, pull_quote/callout pairable). **This
-section is the cross-package grammar contract of record** — backend and
-frontend cannot import each other's lists, so each side carries a test
-asserting its list matches this table.
+Two grammar-wide rules: a JSON module body must parse to a plain object (a
+bare `5` or an array is rejected), and `MAX_MODULES` is **14** on both
+sides. As-built (PR for T-605): `design` previously existed only in the
+backend list — the frontend parser round-tripped it to an empty body,
+destroying the diagram; it is now a raw type in both parsers with a
+regression test. The forge instruction's spacer style `dotted` was fixed to
+the renderer's key `dots`.
+
+Backend: `KNOWN_MODULE_TYPES` / `JSON_MODULE_TYPES` and per-type semantic
+validation live in `lib/cms/content-modules.js`; the repair pass in
+`lib/content/forge-pipeline.js` unwraps semantically-broken modules into
+faithful plain markdown (blockquote / stat list / GFM table / numbered
+list / bold-title paragraph) so no prose is lost. Frontend: exported
+`RAW_MODULE_TYPES` / `JSON_MODULE_TYPES` / `MAX_MODULES` in
+`lib/moduleParser.js`, renderers in `InlineModules.jsx`, pairing rules in
+`lib/modulePairing.js` (`FULL_WIDTH_MODULE_TYPES` =
+spacer/stat_board/comparison/timeline/design never pair). **This section is
+the cross-package grammar contract of record** — backend and frontend
+cannot import each other's lists, so each side carries a test asserting its
+list matches this table (`content-modules.test.js` /
+`moduleParser.test.js`).
 
 ### Phase 4b — Teach the forge; make the editor honest (T-605)
 
