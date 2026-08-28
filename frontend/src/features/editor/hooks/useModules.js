@@ -268,6 +268,18 @@ const INITIAL_FORM = {
   eyebrow: '',
 };
 
+// A fresh form for a type. callout gets a default title because a callout
+// without one is invalid — without this, "Add to Article" straight from the
+// picker would commit an invalid module.
+function defaultFormForType(nextType) {
+  return {
+    ...INITIAL_FORM,
+    type: nextType,
+    content: getDefaultModuleDraft(nextType),
+    title: nextType === 'callout' ? 'Heads up' : '',
+  };
+}
+
 /**
  * Manages module state.
  * The auto-sync useEffect from the old editor is intentionally removed.
@@ -294,11 +306,7 @@ export function useModules(draft, setDraft) {
 
   const resetModuleForm = useCallback((nextType = 'fact') => {
     setEditingModuleIndex(-1);
-    setModuleForm({
-      ...INITIAL_FORM,
-      type: nextType,
-      content: getDefaultModuleDraft(nextType),
-    });
+    setModuleForm(defaultFormForType(nextType));
   }, []);
 
   // ── Module mutations ───────────────────────────────────────────────────────
@@ -457,11 +465,7 @@ export function useModules(draft, setDraft) {
       }
 
       // Not editing — just update form
-      setModuleForm({
-        ...INITIAL_FORM,
-        type: nextType,
-        content: defaultContent,
-      });
+      setModuleForm(defaultFormForType(nextType));
     },
     [editingModuleIndex, moduleItems, parsedPreviewText, setDraft]
   );

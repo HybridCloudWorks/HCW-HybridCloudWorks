@@ -593,12 +593,22 @@ function ModuleActions({ onEdit = null, onDelete = null, className = '' }) {
   return (
     <div className={`flex gap-1 ${className}`}>
       {onEdit && (
-        <button onClick={onEdit} className="text-xs text-slate-400 hover:text-primary p-1">
+        <button
+          type="button"
+          aria-label="Edit module"
+          onClick={onEdit}
+          className="text-xs text-slate-400 hover:text-primary p-1"
+        >
           ✎
         </button>
       )}
       {onDelete && (
-        <button onClick={onDelete} className="text-xs text-slate-400 hover:text-red-400 p-1">
+        <button
+          type="button"
+          aria-label="Delete module"
+          onClick={onDelete}
+          className="text-xs text-slate-400 hover:text-red-400 p-1"
+        >
           <X className="h-3 w-3" />
         </button>
       )}

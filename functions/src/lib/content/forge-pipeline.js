@@ -55,7 +55,7 @@ export function buildForgeModuleInstruction(format) {
   const formatModules = format?.modules?.use?.join(', ') || 'fact, recommendation';
   return `ContentForge module requirements (these OVERRIDE the earlier "never emit picture/video/spacer" rule):
 - Include 4 to 8 module tags total, spread through the article where they belong contextually.
-- Vary align between "left" and "right" so consecutive modules alternate sides; use align="all" only for design modules.
+- Vary align between "left" and "right" so consecutive modules alternate sides; use align="all" for the full-width types: design, stat_board, comparison, timeline.
 - Include at least one spacer module as a visual break between major sections: <module type="spacer">{"style":"gradient"}</module>. Valid styles: gradient, solid, dots, double, glow, accent.
 - Include at least one fact or recommendation module.
 - Prioritize the format's module types (${formatModules}) plus variety from: code, links, text, design, pull_quote, stat_board, comparison, timeline, callout.
