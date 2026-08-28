@@ -13,6 +13,7 @@ import {
   isPublicDocument,
   resolvePublishedDateValue,
   stripInternalFields,
+  CURATED_IMAGE_BATCH_MAX,
 } from './public-reads.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
@@ -497,6 +498,124 @@ describe('getCuratedImage', () => {
     const h = handlersFor(cached({ imageUrl: '  https://cdn.example/img/a1.png  ' }));
     const res = await h.getCuratedImage(makeRequest({ params: { id: 'a1' } }), context);
     expect(JSON.parse(res.body).imageUrl).toBe('https://cdn.example/img/a1.png');
+  });
+
+  // T-739. The batched route exists so a twelve-card news grid costs one round
+  // trip instead of twelve. The risk it introduces is divergence: a second
+  // implementation of the same lookup is a second place for the disclosure
+  // rules to be wrong, and the anonymous one is the one that matters.
+  describe('getCuratedImages (batched)', () => {
+    const batchHandlers = (rows) =>
+      createPublicReadHandlers({
+        store: { queryDocs: vi.fn(async () => rows), readDoc: vi.fn() },
+      });
+    const ask = (ids) => makeRequest({ query: { ids } });
+
+    it('answers every requested id, keyed, including the misses', async () => {
+      // A miss must be an explicit null rather than an omission: the caller
+      // needs to distinguish "no cover" from "not asked about", or it cannot
+      // stop asking.
+      const h = batchHandlers([cached({ id: 'a1' })]);
+      const res = await h.getCuratedImages(ask('a1,a2'), context);
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).images).toEqual({
+        a1: 'https://cdn.example/img/a1.png',
+        a2: null,
+      });
+    });
+
+    it('agrees with the single-id route on every disclosure rule', async () => {
+      // The property worth protecting. Each case is run through BOTH handlers
+      // and the answers compared, so a rule changed in one and not the other
+      // fails here rather than becoming a public leak.
+      const cases = [
+        cached({ id: 'x' }),
+        cached({ id: 'x', archived: true }),
+        cached({ id: 'x', imageUrl: '' }),
+        cached({ id: 'x', imageUrl: '   ' }),
+        cached({ id: 'x', imageUrl: null }),
+        cached({ id: 'x', imageUrl: { url: 'nope' } }),
+        cached({ id: 'x', imageUrl: '  https://cdn.example/trim.png  ' }),
+      ];
+
+      for (const doc of cases) {
+        const single = await createPublicReadHandlers({
+          store: { readDoc: vi.fn(async () => doc), queryDocs: vi.fn() },
+        }).getCuratedImage(makeRequest({ params: { id: 'x' } }), context);
+
+        const batch = await batchHandlers([doc]).getCuratedImages(ask('x'), context);
+
+        expect(JSON.parse(batch.body).images.x, JSON.stringify(doc)).toBe(
+          JSON.parse(single.body).imageUrl
+        );
+      }
+    });
+
+    it('returns ONLY urls — never any part of the documents', async () => {
+      const h = batchHandlers([cached({ id: 'a1' })]);
+      const res = await h.getCuratedImages(ask('a1'), context);
+      expect(Object.keys(JSON.parse(res.body)).sort()).toEqual(['images', 'success']);
+      expect(res.body).not.toContain('storagePath');
+      expect(res.body).not.toContain('house-style-v3');
+      expect(res.body).not.toContain('cinematic');
+    });
+
+    it('is bounded, so one anonymous request cannot become an unbounded fan-out', async () => {
+      const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
+      const h = createPublicReadHandlers({ store });
+      const tooMany = Array.from({ length: CURATED_IMAGE_BATCH_MAX + 1 }, (_, i) => `a${i}`);
+      const res = await h.getCuratedImages(ask(tooMany.join(',')), context);
+      expect(res.status).toBe(400);
+      expect(store.queryDocs).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly the maximum', async () => {
+      const ids = Array.from({ length: CURATED_IMAGE_BATCH_MAX }, (_, i) => `a${i}`);
+      const res = await batchHandlers([]).getCuratedImages(ask(ids.join(',')), context);
+      expect(res.status).toBe(200);
+    });
+
+    it('deduplicates and ignores blanks before counting against the cap', async () => {
+      const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
+      const h = createPublicReadHandlers({ store });
+      const res = await h.getCuratedImages(ask('a1, a1 ,,  , a2 ,'), context);
+      expect(res.status).toBe(200);
+      expect(Object.keys(JSON.parse(res.body).images).sort()).toEqual(['a1', 'a2']);
+      expect(store.queryDocs.mock.calls[0][2]).toEqual([{ name: '@ids', value: ['a1', 'a2'] }]);
+    });
+
+    it('rejects a missing or empty ids list without reading', async () => {
+      for (const ids of [undefined, '', '   ', ',,,']) {
+        const store = { queryDocs: vi.fn(), readDoc: vi.fn() };
+        const h = createPublicReadHandlers({ store });
+        const res = await h.getCuratedImages(ask(ids), context);
+        expect(res.status).toBe(400);
+        expect(store.queryDocs).not.toHaveBeenCalled();
+      }
+    });
+
+    it('uses one query rather than a point read per id', async () => {
+      // The entire reason this route exists.
+      const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
+      const h = createPublicReadHandlers({ store });
+      await h.getCuratedImages(ask('a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12'), context);
+      expect(store.queryDocs).toHaveBeenCalledTimes(1);
+      expect(store.readDoc).not.toHaveBeenCalled();
+    });
+
+    it('does not 500 when the store throws', async () => {
+      const h = createPublicReadHandlers({
+        store: {
+          queryDocs: vi.fn(async () => {
+            throw new Error('cosmos down');
+          }),
+          readDoc: vi.fn(),
+        },
+      });
+      const res = await h.getCuratedImages(ask('a1'), context);
+      expect(res.status).toBe(500);
+      expect(res.body).not.toContain('cosmos down');
+    });
   });
 
   it('caches a hit hard — it is hit up to twelve times per news page load', async () => {

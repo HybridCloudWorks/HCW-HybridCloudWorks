@@ -209,6 +209,53 @@ export async function fetchPublicCuratedImage(articleId) {
 }
 
 /**
+ * Ids per batched curated-image request. Must not exceed the server's
+ * `CURATED_IMAGE_BATCH_MAX`, which answers 400 above it.
+ */
+export const CURATED_IMAGE_BATCH_SIZE = 50;
+
+/**
+ * GET public/curated-images — covers for a whole grid in one round trip (T-739).
+ *
+ * The news grid issued one `public/curated-image/{id}` per card: twelve extra
+ * round trips before any cover appeared, on a route that had already fetched
+ * the feed.
+ *
+ * Returns a plain `{ id: url|null }` map covering every id asked for, so a
+ * caller can tell "no cover" from "not asked about". A failed request resolves
+ * to all-null rather than throwing: a missing cover is a degraded card, not a
+ * broken page, which is the same contract `fetchPublicCuratedImage` has.
+ *
+ * @param {string[]} articleIds
+ * @returns {Promise<Record<string, string|null>>}
+ */
+export async function fetchPublicCuratedImages(articleIds) {
+  const ids = [...new Set((articleIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (ids.length === 0) return {};
+
+  const result = Object.fromEntries(ids.map((id) => [id, null]));
+
+  // Chunked so a longer grid cannot trip the server's cap. Sequential rather
+  // than parallel: the point of this function is to stop hammering the API,
+  // and a grid large enough to need two chunks is not latency-critical.
+  for (let i = 0; i < ids.length; i += CURATED_IMAGE_BATCH_SIZE) {
+    const chunk = ids.slice(i, i + CURATED_IMAGE_BATCH_SIZE);
+    try {
+      const body = await publicGet(
+        `public/curated-images?ids=${chunk.map(encodeURIComponent).join(',')}`
+      );
+      for (const [id, url] of Object.entries(body?.images || {})) {
+        if (id in result) result[id] = url || null;
+      }
+    } catch {
+      // Leave this chunk null. Covers are decoration; the grid still renders.
+    }
+  }
+
+  return result;
+}
+
+/**
  * GET public/listen-and-learn — the approved episodes of one certification.
  *
  * The server filters to `status === 'published'`, which is the whole review

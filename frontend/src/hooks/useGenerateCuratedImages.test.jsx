@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 const fetchPublicCuratedImage = vi.fn();
+const fetchPublicCuratedImages = vi.fn();
 const postJSON = vi.fn();
 const resolvePromptForPage = vi.fn();
 /**
@@ -35,6 +36,7 @@ const setAuth = ({ user = null, role = null } = {}) => {
 
 vi.mock('@/lib/publicApi', () => ({
   fetchPublicCuratedImage: (...args) => fetchPublicCuratedImage(...args),
+  fetchPublicCuratedImages: (...args) => fetchPublicCuratedImages(...args),
 }));
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
@@ -76,13 +78,26 @@ beforeEach(() => {
   vi.clearAllMocks();
   anonymous();
   fetchPublicCuratedImage.mockResolvedValue(null);
+  // The batched read is the path the grid actually takes (T-739). Default it
+  // to "asked, nothing cached" so each test states its own cache state.
+  fetchPublicCuratedImages.mockImplementation(async (ids) =>
+    Object.fromEntries((ids || []).filter(Boolean).map((id) => [id, null]))
+  );
   postJSON.mockResolvedValue({ imageUrl: 'https://cdn.example/new.png' });
   resolvePromptForPage.mockResolvedValue({ primaryPrompt: 'house style' });
 });
 
+/** Make the batched cache read answer with a url for every id it is asked. */
+const cacheHasAll = () =>
+  fetchPublicCuratedImages.mockImplementation(async (ids) =>
+    Object.fromEntries(
+      (ids || []).filter(Boolean).map((id) => [id, `https://cdn.example/${id}.png`])
+    )
+  );
+
 describe('anonymous visitor', () => {
   it('renders cached imagery — the regression, stated directly', async () => {
-    fetchPublicCuratedImage.mockImplementation(async (id) => `https://cdn.example/${id}.png`);
+    cacheHasAll();
 
     const view = await run();
 
@@ -94,9 +109,13 @@ describe('anonymous visitor', () => {
     );
   });
 
-  it('reads the cache through the anonymous endpoint, once per article', async () => {
+  it('reads the whole grid in ONE anonymous request, not one per article', async () => {
+    // T-739: this used to issue one GET per card — twelve round trips for a
+    // twelve-card grid, on a route that had already fetched the feed.
     await run();
-    expect(fetchPublicCuratedImage.mock.calls.map(([id]) => id)).toEqual(['a1', 'a2']);
+    expect(fetchPublicCuratedImages).toHaveBeenCalledTimes(1);
+    expect(fetchPublicCuratedImages).toHaveBeenCalledWith(['a1', 'a2']);
+    expect(fetchPublicCuratedImage).not.toHaveBeenCalled();
   });
 
   it('never attempts generation', async () => {
@@ -115,9 +134,7 @@ describe('anonymous visitor', () => {
   });
 
   it('leaves uncached articles without an image rather than erroring', async () => {
-    fetchPublicCuratedImage.mockImplementation(async (id) =>
-      id === 'a1' ? 'https://cdn.example/a1.png' : null
-    );
+    fetchPublicCuratedImages.mockResolvedValue({ a1: 'https://cdn.example/a1.png', a2: null });
 
     const view = await run();
 
@@ -126,10 +143,28 @@ describe('anonymous visitor', () => {
   });
 
   it('survives the public endpoint failing', async () => {
+    fetchPublicCuratedImages.mockRejectedValue(new Error('network down'));
     fetchPublicCuratedImage.mockRejectedValue(new Error('network down'));
     const view = await run();
     expect(view.result.current.imageMap).toEqual({});
     expect(view.result.current.error).toBeNull();
+  });
+
+  it('falls back to the per-article read when the batch fails', async () => {
+    // A failed batch must not be read as "no article has a cover" — that would
+    // turn one bad request into a grid with no imagery, which is the T-210
+    // regression this hook exists to prevent.
+    fetchPublicCuratedImages.mockRejectedValue(new Error('batch endpoint down'));
+    fetchPublicCuratedImage.mockImplementation(async (id) => `https://cdn.example/${id}.png`);
+
+    const view = await run();
+
+    await waitFor(() =>
+      expect(view.result.current.imageMap).toEqual({
+        a1: 'https://cdn.example/a1.png',
+        a2: 'https://cdn.example/a2.png',
+      })
+    );
   });
 });
 
@@ -137,9 +172,9 @@ describe('signed-in admin', () => {
   beforeEach(signedIn);
 
   it('still reads the cache anonymously before generating', async () => {
-    fetchPublicCuratedImage.mockResolvedValue('https://cdn.example/cached.png');
+    fetchPublicCuratedImages.mockResolvedValue({ a1: 'https://cdn.example/cached.png' });
     await run([{ id: 'a1' }]);
-    expect(fetchPublicCuratedImage).toHaveBeenCalledWith('a1');
+    expect(fetchPublicCuratedImages).toHaveBeenCalledWith(['a1']);
     expect(postJSON).not.toHaveBeenCalled(); // cached — nothing to generate
   });
 
@@ -172,7 +207,7 @@ describe('signed in below the required role', () => {
     // viewer gated only on "somebody is signed in" would collect a 403 for the
     // prompt read and one per article — the same requests-that-cannot-succeed
     // defect as T-210, with a narrower audience.
-    fetchPublicCuratedImage.mockResolvedValue('https://cdn.example/a1.png');
+    fetchPublicCuratedImages.mockResolvedValue({ a1: 'https://cdn.example/a1.png' });
     const view = await run([{ id: 'a1' }]);
 
     expect(view.result.current.imageMap).toEqual({ a1: 'https://cdn.example/a1.png' });

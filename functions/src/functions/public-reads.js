@@ -59,3 +59,12 @@ httpRoute('publicGetCuratedImage', {
   route: 'public/curated-image/{id}',
   handler: (request, context) => handlers().getCuratedImage(request, context),
 });
+
+// Batched twin of the route above (T-739). Same disclosure rules, one round
+// trip for a whole grid instead of one per card.
+httpRoute('publicGetCuratedImages', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/curated-images',
+  handler: (request, context) => handlers().getCuratedImages(request, context),
+});

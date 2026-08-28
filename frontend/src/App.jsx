@@ -171,9 +171,14 @@ const AdminLabsPage = lazyPage(() => import('@/pages/admin/LabsPage'));
 const AdminListenAndLearnPage = lazyPage(() => import('@/pages/admin/ListenAndLearnPage'));
 
 // Placeholder loader
+// Shown on every lazy route. It was a bare spinning div: no role, no
+// accessible name, so the wait between routes was silent as well as
+// unfocused (T-740). `role="status"` is implicitly aria-live="polite", which
+// is what a loading indicator wants — it should not interrupt.
 const PageLoader = () => (
-  <div className="flex items-center justify-center min-h-[50vh]">
-    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-slate-blue"></div>
+  <div className="flex items-center justify-center min-h-[50vh]" role="status">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-slate-blue" />
+    <span className="sr-only">Loading page…</span>
   </div>
 );
 
@@ -270,6 +275,23 @@ function App() {
       {!isAdminRoute && <Header />}
 
       <ScrollToTop />
+      {/*
+        Route-change announcer (T-740). ScrollToTop writes the new document
+        title here after each navigation; `aria-live="polite"` makes a screen
+        reader read it without interrupting whatever it is saying. It must be
+        in the DOM from first render and stay mounted — a live region added at
+        the same moment its text changes is not reliably announced.
+
+        `sr-only` rather than `hidden` or `display: none`, which would remove
+        it from the accessibility tree and silence it.
+      */}
+      <div
+        id="route-announcer"
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      />
       <main id="main-content" tabIndex={-1} className="grow">
         <RouteErrorBoundary isAdminRoute={isAdminRoute}>
           <Suspense fallback={<PageLoader />}>
