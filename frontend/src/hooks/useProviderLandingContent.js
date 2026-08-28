@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
-import { fetchPublicContentList } from '@/lib/publicApi';
+import { fetchPublicContentList, PUBLIC_CORPUS_LIMIT } from '@/lib/publicApi';
 import { formatPostDate } from '@/lib/blogUtils';
 import { toMillis } from '@/lib/dateUtils';
 import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
@@ -157,7 +157,7 @@ export function useProviderLandingContent(provider) {
   // Visibility is enforced server-side — the public API only returns
   // published documents — so the client filters are scoped to provider/type.
   const { data: contentDocs, loading: contentLoading } = usePublicData(
-    () => fetchPublicContentList({ limit: 250 }),
+    () => fetchPublicContentList({ limit: PUBLIC_CORPUS_LIMIT }),
     'landing:content'
   );
 
@@ -185,7 +185,7 @@ export function useProviderLandingContent(provider) {
 
   const shouldLoadLegacy = !contentLoading && contentItems.length === 0;
   const { data: blogDocs, loading: blogLoading } = usePublicData(
-    () => fetchPublicContentList({ limit: 250, source: 'blogs' }),
+    () => fetchPublicContentList({ limit: PUBLIC_CORPUS_LIMIT, source: 'blogs' }),
     shouldLoadLegacy ? 'landing:legacy' : ''
   );
 

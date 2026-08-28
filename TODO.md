@@ -49,10 +49,10 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 | Priority | Open items |
 | --- | ---: |
 | Critical | 0 (all five closed 2026-08-28) |
-| High | 14 |
+| High | 3 (T-714 + the two owner gates T-518/T-526) |
 | Medium | 31 |
 | Low | 15 |
-| Total | 60 |
+| Total | 49 |
 
 **The count changed shape on 2026-08-28.** It previously read 10, of which
 seven were the Blog Machine program (T-601…T-607) — now closed and merged, so
@@ -182,25 +182,25 @@ is listed under T-705.
   deployment-branch rule on the `production` environment, then set that row to
   what you find. The guard step is a backstop, not the gate.
 
-### High
+### High — 11 of 12 closed 2026-08-28
 
-Full rationale and recommendation for each:
+Full rationale for each:
 [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
 
-| ID | Layer | Finding | Evidence | Anchor |
-| --- | --- | --- | --- | --- |
-| T-706 | azure | Media storage is a single LRS copy — ADR 0018 accepted LRS only while Firebase held the second copy, and ADR 0023 removed it | verified | `main.tf:434` |
-| T-707 | azure | Cosmos recovery is 7-day PITR co-located with a single-region account that can never be made multi-region | verified | `main.tf:284-287,203-217` |
-| T-708 | tf | The Cosmos database and containers carry no `prevent_destroy`, behind a generated spec with immutable partition keys | verified | `main.tf:305,365,1886` |
-| T-709 | azure | One cross-subscription action group, one email receiver, delivery never observed | verified | `observability.tf:30-47,157-189` |
-| T-710 | backend | Jobs stranded in `running` are never reaped; the client polls forever and the failure hook never fires | verified | `jobs.js:331-335`, `jobs-sweeper.js:4-6` |
-| T-711 | backend | `buildSnapshot` fans out up to 2,000 concurrent point reads on a path every Telegram message reaches | verified | `ops-health.js:154-157,190-198` |
-| T-712 | backend | Replicate, Publer and Telegram are called with no timeout from change-feed handlers, so one hung socket stalls a lease | verified | `ai-cover.js:151,171`, `notify.js:80` |
-| T-713 | ci | The storage firewall stays open if a deploy dies mid-window, and nothing detects it | reported | `deploy-functions.yml:97-101,248-264` |
-| T-714 | frontend | 104 pre-rendered documents are discarded at boot — `createRoot`, not `hydrateRoot`, while `prerender.mjs` claims hydration | verified | `main.jsx:16`, `prerender.mjs:219` |
-| T-715 | frontend | A 456 kB chart bundle is modulepreloaded on every page to render zero charts; `d3` is a dependency nothing imports | verified | `vite.config.js:29-39`, `dist/index.html` |
-| T-716 | frontend | Public list pages download the whole corpus and filter in-browser, three times, with three cache keys | reported | `useBlogData.js:216`, `publicApi.js:37-47` |
-| T-717 | frontend | A failed fetch renders the previous route's content under the new route's canonical and OG tags | reported | `usePublicData.js:43-50,79-84` |
+| ID | Layer | Outcome |
+| --- | --- | --- |
+| T-706 | azure | **Closed.** Content/media account moves LRS → **RA-GRS**. Not ZRS: the risk is account and regional loss, which zone redundancy does not cover, and LRS→ZRS is not Terraform-expressible (Azure requires a customer-initiated conversion). The TFC plan succeeded with `prevent_destroy` in force, which proves it is an in-place update rather than a replacement |
+| T-707 | azure | **Partly closed; remainder moved to [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231).** Backup tier 7 → 30 days (cents at this data size). The out-of-account copy cannot be closed by any account setting — Microsoft's docs state continuous backups are not geo-disaster resistant — so it belongs with the recovery objectives, the same reasoning that moved T-522 there. Also gated behind T-518 |
+| T-708 | tf | **Closed.** `prevent_destroy` now covers the SQL database, the container `for_each` and `leases`; the stale "containers are empty" comment is corrected to ~70k documents |
+| T-709 | azure | **Code half closed.** Optional SMS receiver added as an independent second channel, via a `dynamic` block so an unset variable leaves the action group byte-identical. **Owner action:** run `az monitor action-group test-notifications` and set `ops_sms_receiver`; delivery has still never been observed |
+| T-710 | backend | **Closed.** The sweeper reaps jobs abandoned in `running`, using each type's own `timeoutMs` plus a grace margin rather than one blanket cutoff, and fires the type's `onComplete` so the failure notification is no longer lost. It writes a terminal status rather than re-enqueuing: a dead worker may have completed real side effects |
+| T-711 | backend | **Closed.** The 2000-point-read fan-out is now deduplicated (one document carries up to four images) and batched with `ARRAY_CONTAINS`. The existing fixture proves the count is unchanged |
+| T-712 | backend | **Closed.** Replicate, Publer and Telegram now use one shared `fetchWithTimeout`, lifted out of `scrape.js` where the pattern already existed. The Replicate poll also gains a wall-clock deadline — an iteration count does not bound elapsed time when each iteration both sleeps and requests |
+| T-713 | ci | **Closed.** The hourly monitor now probes storage default action and leftover `ci-*` rules, so a deploy window orphaned by runner loss pages within the hour instead of never |
+| T-714 | frontend | **OPEN — needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists (`hooks/prerenderData.js`) but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix |
+| T-715 | frontend | **Partly closed, measured.** The reported fix does not work: rolldown places React's jsx-runtime by its own rules, so claiming react in an earlier chunk moved only `scheduler`, and removing the manual chart chunk made it worse (shared vendor grew to 651 kB). Splitting the chart libraries so only a small chunk rides with jsx-runtime does work: **868 kB → 571 kB preloaded on every page**. recharts (237 kB) and d3 (60 kB) are now lazy-only; chart.js still rides along, which is rolldown behaviour rather than a tunable predicate. Unused `d3` dependency removed |
+| T-716 | frontend | **Closed.** Request-layer dedupe keyed on path+query, plus one `PUBLIC_CORPUS_LIMIT` so the three hooks stop issuing three different urls for one intent. Deliberately NOT pushed server-side: client provider matching includes text inference the server does not perform, so that would silently drop posts (see T-738) |
+| T-717 | frontend | **Closed.** A failed fetch now clears `data` instead of leaving the previous route's article under the new route's canonical and og:url, and the wrapper hooks surface `error` instead of hardcoding null |
 
 ### Medium
 

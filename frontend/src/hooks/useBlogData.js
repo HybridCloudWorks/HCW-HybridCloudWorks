@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
-import { fetchPublicContentList } from '@/lib/publicApi';
+import { fetchPublicContentList, PUBLIC_CORPUS_LIMIT } from '@/lib/publicApi';
 import { formatPostDate, normalizePublicImageUrl } from '@/lib/blogUtils';
 
 // Canonical governance source is `content`.
@@ -212,10 +212,11 @@ export function useBlogData(provider) {
   const providerKey = normalizeProvider(provider);
 
   // Canonical source — content collection (pipeline + admin published)
-  const { data: contentData, loading: contentLoading } = usePublicData(
-    () => fetchPublicContentList({ limit: 200 }),
-    'blog:content'
-  );
+  const {
+    data: contentData,
+    loading: contentLoading,
+    error: contentError,
+  } = usePublicData(() => fetchPublicContentList({ limit: PUBLIC_CORPUS_LIMIT }), 'blog:content');
   const contentPosts = useMemo(
     () =>
       mapToPublicPosts(
@@ -227,8 +228,12 @@ export function useBlogData(provider) {
   const shouldLoadLegacy = !contentLoading && contentPosts.length === 0;
 
   // Legacy source — blogs collection (older migrated content + republished docs)
-  const { data: blogsData, loading: blogsLoading } = usePublicData(
-    () => fetchPublicContentList({ limit: 200, source: 'blogs' }),
+  const {
+    data: blogsData,
+    loading: blogsLoading,
+    error: blogsError,
+  } = usePublicData(
+    () => fetchPublicContentList({ limit: PUBLIC_CORPUS_LIMIT, source: 'blogs' }),
     shouldLoadLegacy ? 'blog:legacy' : ''
   );
 
@@ -251,7 +256,10 @@ export function useBlogData(provider) {
     return blogsPosts;
   }, [blogsPosts, contentPosts]);
 
-  return { posts, loading, error: null };
+  // Was hardcoded `error: null`, so a failed fetch reached no UI anywhere on
+  // the blog path and one network blip rendered as an empty list (T-717).
+  // Either source failing is reportable; the first one is enough to show.
+  return { posts, loading, error: contentError || blogsError || null };
 }
 
 export default useBlogData;
