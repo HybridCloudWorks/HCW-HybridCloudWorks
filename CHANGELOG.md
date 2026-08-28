@@ -71,6 +71,87 @@ This project has not cut a tagged release; entries are grouped under
   ecosystem had been receiving dependency updates at all**. Latent because
   Dependabot re-validates only when the file changes.
 
+- **Five of the Blog Machine's six backlog items landed after the program
+  closed (2026-08-28; #243–#248).** Recorded here on 2026-08-28 for the same
+  reason as the entry below: they shipped without changelog entries. The
+  backlog was written as "unique and cool, deliberately unscheduled", and then
+  most of it turned out to be small once the program's machinery existed —
+  which is the useful fact, not the features individually.
+
+  **Four of them were dead frontend calls, not new ideas.** The admin UI had
+  been posting at `generateSocialCaption`, `generatePreviewImages`,
+  `generateCuratedArticleImage`, `generateReviewHeroImage`,
+  `triggerAiImageGeneration` and `generateReviewerDigestManual` since the
+  import, and every one returned a 404. Each is now implemented against the
+  contract the caller already sends, and each shares an existing core rather
+  than growing a second implementation: the four image RPCs call ai-cover's
+  extracted `generateCoversForContent`, so a manual hero and an automatic one
+  are indistinguishable in the document; the digest RPC calls the 07:00 timer's
+  own snapshot with `generatedBy: 'manual'`, merging into the same
+  `workflow_digests/{date}` document. Backlog item 3 also carried a wrong
+  guess about its own contract — the "Run Now" tile is the reviewer queue
+  snapshot, not the newsletter job — and the correction is recorded on the
+  wiki page rather than quietly implemented.
+
+  **Publishing now queues its own social post.** A first live publish arms
+  `socialCaptionTrigger` once per document (a republish never posts again, and
+  staging posts nothing), the change feed generates a practitioner-voiced
+  caption and bulk-schedules it in Publer after a delay that defaults to 60
+  minutes — deliberately, as the undo window. It is switched entirely by the
+  owner-seeded `admin_config/social_autopost`: absent or disabled means no
+  model call at all, and Publer unconfigured degrades to a Social Hub draft.
+
+  **The forge proposes its own interlinking.** After post-processing but
+  before grading, so the grader sees the real article, every published post is
+  scored against the draft with Jaccard over title and `keyTopics` tokens,
+  reusing the dedupe gate's own tokenizer. The top three above a 0.15 floor
+  become a deletable "related reading" module plus `relatedContentIds` series
+  metadata. Only posts with a resolvable public URL are ever proposed — a link
+  the reader cannot follow is worse than no link — and no score ceiling is
+  needed, because true duplicates never reach this code: the dedupe gate
+  already refused to forge them.
+
+  **And the grader gained an advisory SEO lint** (`lib/content/seo-lint.js`,
+  no model call): summary length against the 70–160 meta-description window,
+  slug/key-topic alignment against the real `slugify` the publisher uses, and
+  heading hierarchy with code fences and module tags stripped first. Strictly
+  advisory — findings never move the overall grade, the staging decision or any
+  publish gate. They surface where the approve decision is actually made: as a
+  bullet list in the preview banner and a one-line count in the `forge_ready`
+  Telegram note.
+
+  Backlog item 4, analytics-informed topic weighting, is **not** landed and is
+  not an engineering task: no engagement data source exists anywhere in the
+  system. It needs an owner to pick an analytics provider before it is
+  buildable at all.
+
+- **Reachability gets an alert, from the edge rather than from Azure (T-519
+  repository half, 2026-08-27; #234, [ADR 0024](wiki/0024-edge-availability-probe.md)).**
+  Recorded here on 2026-08-28 — it shipped without a changelog entry, which is
+  the gap this documentation pass found. Reachability was the one signal with
+  nothing behind it, and it is the signal that matters most: every other alert
+  needs the app healthy enough to emit telemetry, so it is the only one that
+  survives the app being completely down. Azure's own availability test could
+  not provide it. Cloudflare's Bot Fight Mode answers datacenter clients — which
+  is exactly what Azure's availability agents are — with a 403 interstitial on
+  `https://api-azure.<domain>/api/health`, and the WAF skip rule written against
+  it was built, applied and **confirmed inert**, because Bot Fight Mode does not
+  run on the Ruleset Engine and is not configurable on the free plan.
+
+  ADR 0024 routes around it instead of waiting on it. `edge/availability-probe`
+  is a Cloudflare Worker on a five-minute cron whose same-zone subrequest is
+  never challenged; it reports every attempt to Application Insights, and
+  `edge_probe_availability` counts *successes* and fires below two in a
+  fifteen-minute window. Counting successes rather than failures is the point:
+  it makes a dead probe and an unreachable API the same incident, where a
+  failure-counting rule would go quiet on both. Both the alert and the original
+  standard web test stay gated (`availability_probe_alert_enabled` and
+  `availability_test_enabled`, each defaulting to `false`), so the repository
+  ships armed-but-inert; deploying the Worker and seeding its connection string
+  are owner actions, and the procedure is
+  [wiki/Availability-Probe.md](wiki/Availability-Probe.md). The web test is kept
+  in Terraform, disarmed, for the day the Cloudflare plan is upgraded.
+
 - **The Blog Machine (T-601–T-607 closed, 2026-08-28; #236–#242 + the
   close-out PR).** One initiative, seven phases, each one PR, turning the
   admin portal into a content engine around the already-working forge
@@ -251,6 +332,37 @@ This project has not cut a tagged release; entries are grouped under
   admin preview now resolves through the same code as the public page.
 
 ### Changed
+
+- **The four planning documents are reconciled to their own conventions
+  (2026-08-28).** Two rules, applied consistently for the first time. **TODO.md
+  and REVIEW.md carry only open work** — completed items are removed once the
+  entry is here, which is TODO.md's own stated footer rule and which the file
+  had stopped obeying: it had accumulated `**Closed:**` enumerations for the
+  architecture review's 35 resolved findings and a "Critical — CLOSED" section,
+  so a reader could no longer tell what was outstanding without reading past a
+  page of finished work. REVIEW.md shed the executed migration-era teardown, the
+  two closed live-confirmation bullets and the completed apex-DNS row for the
+  same reason. **Architecture_Plan.md and Migration_Plan.md keep every entry and
+  strike it through** — they are archived records whose value is the reasoning,
+  so deleting a decision would delete why it was made.
+
+  Four things surfaced from doing it rather than being the point of it, and the
+  largest is the one this rule is for: **six merged pull requests had no
+  changelog entry at all** — #234's availability probe and #243–#248's
+  post-program backlog work. The removal pass caught them because removing an
+  item from TODO.md requires checking that CHANGELOG.md has it, and that check
+  had been skipped while the completed items were merely being marked closed in
+  place. Both entries are above. The open-item counts in TODO.md were also
+  wrong — Low read
+  "5 of 15 closed" against a list of seven, and the total was 32 against a real
+  30. Migration_Plan §6's
+  rollback paragraph still promised "rollback is DNS for as long as Firebase
+  remains deployed", which the owner's decision to delete GCP rather than soak
+  had already reversed; it now records the inversion, because that decision is
+  exactly what puts a deadline on T-526. And two of the plan's eight
+  verification gates — the scheduled-job proof and the cost gate — turn out to
+  be the only unmet exit criteria of the entire migration, which was not legible
+  while they sat in a list whose met items were unmarked.
 
 - **The apex serves the Azure site (T-517 closed, 2026-08-28).** The cutover
   this repository was built toward is done: `hybridcloudworks.com` — the

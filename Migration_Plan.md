@@ -6,6 +6,16 @@
 > and [REVIEW.md](REVIEW.md); current completion entries are in
 > [CHANGELOG.md](CHANGELOG.md). The migration workflow and one-shot import
 > tooling described below have been retired.
+>
+> **Reading convention.** A ~~struck-through~~ heading, step or row is **done**,
+> not deleted — the four porting tables in §4 and the partition-key reasoning in
+> §5.5 are the only record of what each upstream export and container became, so
+> removing them would lose the mapping. Completion is recorded in
+> [CHANGELOG.md](CHANGELOG.md); what is still open says so in bold. **Three
+> things in this plan are still open**, all owner-held: §6 step 6 (the Telegram
+> webhook, T-526), §6 step 7 (arming the timers, T-518), and §7's cost gate.
+> This differs from [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry
+> open work only and drop an item once its CHANGELOG entry exists.
 
 **Audience:** engineers reviewing the completed migration. **Status:** archived;
 the phase table below is the historical completion summary.
@@ -135,8 +145,14 @@ step:
   cutover; its 11 Firestore triggers already avoid `event.data.before`. **This is a cutover against
   existing contracts, not a greenfield port.**
 
-**Rule for the duration:** feature work lands in Site-Main while it is live. It reaches here only
-by deliberate port, recorded in TODO — never by merge, never by copy.
+~~**Rule for the duration:** feature work lands in Site-Main while it is live. It reaches here only
+by deliberate port, recorded in TODO — never by merge, never by copy.~~
+
+> **The duration is over.** Site-Main is no longer live — the apex serves Azure
+> (T-517) and GCP is scheduled for deletion. Feature work lands here. The
+> porting rule leaves behind one thing worth keeping: the two data layers were
+> mutually exclusive by construction, so **no file from Site-Main can be copied
+> in**, and that has not changed just because the porting is finished.
 
 ---
 
@@ -177,9 +193,11 @@ handlers, and Phase 3 needs no data to register routes.
 
 ## 3. Phase 1 — the refactors worth doing here, first
 
-> **Status 2026-08-20: 3.1–3.4 are done, with the evidence noted under each; 3.5 was done upstream;
-> 3.6 is still open.** The text below is kept as written because it explains *why* each item
-> mattered, and two of them (3.1, 3.5) shaped how Phase 3 and Phase 4 are being executed.
+> **Status: all six are closed.** 3.1–3.4 were done by 2026-08-20 with the
+> evidence noted under each, 3.5 was done upstream, and 3.6 was decided (retain
+> `blogs`). The text below is kept as written, struck through rather than
+> deleted, because it explains *why* each item mattered, and two of them
+> (3.1, 3.5) shaped how Phase 3 and Phase 4 were executed.
 
 These are the "leverage" items. **Each improves this codebase whether or not the migration ever
 happens**, which is what makes them safe to do now.
@@ -261,6 +279,11 @@ status code on the explicit 404 override needs to change.
 
 This is a one-line change, do it now.
 
+> **As built:** the override is `{"rewrite": "/app-shell.html", "statusCode": 404}`.
+> The rewrite target moved off `/index.html` when the pre-render became real
+> (T-515) — an unknown URL must not be answered with a pre-rendered page — but
+> the status code is the fix this section asked for.
+
 ### ~~3.5 Audit the 11 Firestore triggers for change-feed compatibility — DONE upstream~~
 
 Cosmos's change feed delivers current state and **does not surface deletes**. Any trigger relying on
@@ -283,7 +306,13 @@ load-bearing and must be ported.
 
 ---
 
-## 4. Phase 3 — porting 116 functions (89 HTTP · 16 timers · 11 triggers)
+## ~~4. Phase 3 — porting 116 functions (89 HTTP · 16 timers · 11 triggers)~~ — DONE 2026-08-21
+
+> **Every subsection below is closed**; they are struck through rather than
+> deleted because the four tables are the record of what each upstream export
+> became, and that mapping is the only place it exists. The one thing here that
+> is *not* closed is arming the timers — **T-518**, an owner gate in
+> [TODO.md](TODO.md), not porting work.
 
 > **Read before writing any handler — the four constraints the infrastructure now imposes.**
 >
@@ -333,7 +362,12 @@ Everything learned there applies to the other groups.
 **Carry the secrets model across deliberately:** `defineSecret` bindings become Key Vault references
 with managed identity. No connection strings, no keys in app settings.
 
-### 4.1 The six HTTP handlers that cannot survive as HTTP
+### ~~4.1 The six HTTP handlers that cannot survive as HTTP~~ — CLOSED (T-322)
+
+> All six are resolved: four ported as platform jobs, `refreshToolServiceCache`
+> demoted with Cloud Tools, and `generateListenAndLearn` deferred to T-411 —
+> which itself shipped later as the Listen & Learn feature. Entries in
+> [CHANGELOG.md](CHANGELOG.md).
 
 Flex Consumption caps an HTTP response at **230 s** at the load balancer — `host.json` cannot raise
 it. Non-HTTP triggers are unbounded (30 min default), and memory is per-app (512 / 2048 / 4096 MB).
@@ -360,7 +394,17 @@ TODO T-322.
 > of the six is now "port the worker, `registerJobType()`, switch the page to `runJob()`"; the order
 > and blockers are in TODO T-322.
 
-### 4.2 The 16 timers — NCRONTAB, and the clock
+### ~~4.2 The 16 timers — NCRONTAB, and the clock~~ — PORTED; arming is T-518
+
+> Eighteen timers are implemented and every one is flag-off. The porting
+> question this section asks — NCRONTAB's seconds column, and the app-wide
+> `WEBSITE_TIME_ZONE` replacing per-job time zones — is answered in the table
+> below and settled. **Arming them is not:** it needs both
+> `schedulers_master_enabled` and a name in `enabled_timers`, one at a time,
+> which is the owner gate T-518 in [TODO.md](TODO.md). A guard added on
+> 2026-08-28 (T-751) now fails CI if the catalogue and the `enabled_timers`
+> allowlist ever drift, because a timer in one and not the other is impossible
+> to arm and the failure looks like a typo in the cutover procedure.
 
 Two things change, not one. Cloud Scheduler accepts five-field cron *and* natural language
 (`every 24 hours`, `every friday 09:00`); Azure timer triggers take six-field NCRONTAB with a
@@ -397,7 +441,7 @@ Every timer stays behind its own `FEATURE_FLAG_<NAME>` under the `FEATURE_FLAG_S
 switch (`infra/main.tf`), and is turned on one at a time during cutover (§6 step 7) — after being
 observed firing at the intended local time (§7).
 
-### 4.3 The 11 triggers — change feed, and the deletes it cannot see
+### ~~4.3 The 11 triggers — change feed, and the deletes it cannot see~~ — DONE
 
 The Cosmos change feed delivers the **current** document and never a delete. Site-Main's 3.5 audit
 left no trigger reading `event.data.before`, which is why eight of the eleven port as
@@ -421,7 +465,7 @@ receive; each needs the logic moved into an explicit delete endpoint that the ad
 `lab_jobs` is a `transient` collection in the manifest — it is not migrated, but its container
 exists, and the change feed on it is how `syncToolExpertModeRuns` works, so the container stays.
 
-### 4.4 AI handlers — the default provider has no Azure equivalent
+### ~~4.4 AI handlers — the default provider has no Azure equivalent~~ — DECIDED AND BUILT
 
 > **Decided 2026-08-21 (owner): a provider is on when its key is present, nothing more.**
 > `functions/src/lib/ai/router.js` resolves Anthropic → OpenAI → Gemini from `ANTHROPIC_API_KEY`,
@@ -453,7 +497,23 @@ otherwise.
 
 ---
 
-## 5. Phase 4 — data migration
+## ~~5. Phase 4 — data migration~~ — DONE on production 2026-08-21
+
+> **The import ran, reconciled at 8,023/8,023 with zero field mismatches, and
+> the one-shot tooling has since been retired** (`migrate-data.yml` deleted in
+> `59e471b`, the `data-migration` environment and its two federated credentials
+> removed in T-524). Everything below is struck through and kept: §5.1's
+> manifest still drives Terraform through `infra/cosmos-containers.json`, and
+> §5.5's three irreversible decisions — serverless capacity mode, one container
+> per collection, and the five non-`/id` partition keys — are now permanent
+> properties of the estate rather than open choices. **That window is closed.**
+> The rehearsal estate §5.4 describes was torn down on 2026-08-25.
+>
+> One item from §5.7 outlived the phase and is tracked elsewhere: an
+> out-of-account copy of the data, which no Cosmos or storage setting can
+> provide, is part of
+> [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)
+> with the recovery objectives it should be measured against.
 
 > **Rebaselined 2026-08-20 against Site-Main @ `088f458`.** The 2026-08-05 pass (at `07f3123`)
 > found the collection inventory wrong and fixed it; the four corrections it recorded — the 65 + 5
@@ -501,7 +561,7 @@ transform keeps the document id and moves the field to `dataId` with an `id-fiel
 warning, so the export summary will show exactly 60 of those. Still minutes per run, which is what makes
 "rehearse until clean" cheap.
 
-### 5.2 The tooling — and the three things that were wrong with it
+### ~~5.2 The tooling — and the three things that were wrong with it~~ — RETIRED
 
 `preflight` → `export` → `import --dry-run` → `import` → `verify` were already implemented,
 idempotent, and separated so one read-only export feeds unlimited rehearsal imports. The recursive
@@ -519,7 +579,7 @@ has two unrelated causes — the firewall, or the identity reached Cosmos and la
 role — that the SDK error does not distinguish. `scripts/migration-probe.mjs` runs one
 `SELECT VALUE COUNT(1)` on `system` first and names the cause — `system` rather than `content`, because the healer's container-scoped grant on `content` makes it readable on production without the database-scope role.
 
-### 5.3 How it runs
+### ~~5.3 How it runs~~ — `migrate-data.yml` DELETED (`59e471b`)
 
 `migrate-data.yml` is dispatch-only, one run at a time, in the `data-migration` environment
 (required reviewer). Inputs: `mode` ∈ `preflight · inventory-gate · export-dry-run · rehearse ·
@@ -550,7 +610,16 @@ COSMOS_ENDPOINT=… node verify-migration.mjs --from export/           # counts 
 `--show-samples` works on a laptop and is refused in CI. The laptop's IP must be in
 `cosmos_admin_ip_rules`; one window admits both accounts.
 
-### 5.4 The rehearsal estate — `infra/scratch.tf`
+### ~~5.4 The rehearsal estate — `infra/scratch.tf`~~ — TORN DOWN 2026-08-25
+
+> The estate served its purpose and was destroyed with owner authorisation: 92
+> resources, the destroy count matching the authorisation exactly
+> ([CHANGELOG.md](CHANGELOG.md)). `infra/scratch.tf` no longer exists. The
+> reasoning below is the transferable part — a key-authenticated rehearsal
+> against an open account passes while proving nothing about the
+> `DefaultAzureCredential` + RBAC path production actually takes, and the
+> healer's 2026-08-20 failure is exactly the class of defect a key would have
+> hidden.
 
 `cosmos-site-sbx-cus` and `stsitesbxcus01` in `rg-db-site-sbx-cus`, created only while
 `cosmos_scratch_enabled` / `storage_scratch_enabled` are true (both default `false`; ~$0 when on
@@ -562,7 +631,16 @@ is exactly the class of defect a key would have hidden. Different only where a s
 its own resource group, no `prevent_destroy`, the CAF `sbx` token in every name. It holds a full
 copy of production data while on; flipping the variables off destroys it.
 
-### 5.5 Irreversible decisions — one window, still open
+### ~~5.5 Irreversible decisions — one window, still open~~ — THE WINDOW IS CLOSED
+
+> **Closed on the first production import, 2026-08-21.** All three decisions
+> below were taken as written and are now permanent properties of the estate:
+> serverless capacity mode (single-region for life), one container per
+> collection, and the five non-`/id` partition keys. Reversing any of them means
+> a re-import into a new account, not a setting change. Kept unstruck below in
+> full, because the *reasoning* — particularly why the four subcollection keys
+> are a correctness matter and not tuning — is what a reader needs before
+> proposing to change one.
 
 The three interlocking decisions from the 2026-08-05 pass stand, with corrected numbers. They are
 usually presented separately; read them together, because each constrains the others. **Every
@@ -642,28 +720,31 @@ per-timer flags; the Telegram webhook (§6 step 6); `lab_agents` / `vps-agent`; 
 
 ---
 
-## 6. Phase 5 — cutover
+## 6. Phase 5 — cutover — **steps 1–5 and 8 done; 6 and 7 are the two open gates**
 
-**Where this starts from.** The Static Web App serves Azure's placeholder page until the first
+~~**Where this starts from.** The Static Web App serves Azure's placeholder page until the first
 frontend deploy — `deploy-azure-frontend.yml` is still `if: false`, waiting on the SWA token (REVIEW
 §4.3) and the Entra SPA registration (REVIEW §2.2). The API is live. The data is not there. All
-three have to be true before step 1.
+three have to be true before step 1.~~ All three became true; the frontend deploy is live and
+dispatch-only.
 
-1. Deploy everything to Azure; keep Firebase fully live.
-2. Run both in parallel with Azure reachable on a preview hostname. The SWA's default
-   `*.azurestaticapps.net` host is that hostname; nothing needs creating.
-3. Run the production import (the phase after the rehearsal — §5.7), with a write-freeze on
-   Site-Main's admin from export to verification. Re-run the verification gates (§7) against Azure.
-4. Bind the custom domains. `hybridcloudworks.com` and `www` become SWA custom domains, and the two
+1. ~~Deploy everything to Azure; keep Firebase fully live.~~
+2. ~~Run both in parallel with Azure reachable on a preview hostname. The SWA's default
+   `*.azurestaticapps.net` host is that hostname; nothing needs creating.~~
+3. ~~Run the production import (the phase after the rehearsal — §5.7), with a write-freeze on
+   Site-Main's admin from export to verification. Re-run the verification gates (§7) against Azure.~~
+   Done 2026-08-21.
+4. ~~Bind the custom domains. `hybridcloudworks.com` and `www` become SWA custom domains, and the two
    validate by **different** mechanisms — neither of which is an `asuid` record, and neither of
    which Terraform can pre-satisfy. `www` needs a real CNAME in place first; the apex needs
    `--validation-method dns-txt-token` and the token Azure mints, added as a TXT record at `@`.
-   Binding does not move traffic, but it does wait on DNS. Done 2026-08-23; the mechanics, including
-   why `--no-wait` matters, are in the Cutover runbook step 3b.
-5. Move DNS at Cloudflare: the apex and `www` CNAMEs from the Firebase origin to the SWA hostname.
+   Binding does not move traffic, but it does wait on DNS.~~ Done 2026-08-23; the mechanics,
+   including why `--no-wait` matters, are in the Cutover runbook step 3b.
+5. ~~Move DNS at Cloudflare: the apex and `www` CNAMEs from the Firebase origin to the SWA hostname.
    **Keep TTL low for at least 48 hours beforehand.** The API host `api-azure.` does not move — it
-   has been on Azure since Phase 2.
-6. Re-point external webhooks — **Telegram is the one that will be forgotten, and it is two
+   has been on Azure since Phase 2.~~ Repointed by 2026-08-27 and owner-verified serving on
+   2026-08-28 (T-517, [CHANGELOG.md](CHANGELOG.md)).
+6. **OPEN — T-526.** Re-point external webhooks — **Telegram is the one that will be forgotten, and it is two
    changes, not one.** The receiver was missing until 2026-08-22 (this step assumed one existed);
    it is now `POST /api/telegram/webhook` (T-512, ported with the owner's decision to keep the
    bot). Deploying it changes nothing on its own: the URL and secret token are registered with
@@ -672,19 +753,34 @@ three have to be true before step 1.
    anywhere in Azure. `scripts/cutover/04-telegram-webhook.ps1` does both halves and preflights
    the receiver first, because a webhook pointed at a 404 makes Telegram back off. The secret
    derives from `sha256(TELEGRAM_BOT_TOKEN)`, which is already in Key Vault.
-7. Turn the timers on: `FEATURE_FLAG_SCHEDULERS` then the per-timer flags, one at a time, each
-   observed firing once (§7).
-8. Watch for 24–48 hours before touching GCP.
+7. **OPEN — T-518.** Turn the timers on: `FEATURE_FLAG_SCHEDULERS` then the per-timer flags, one at
+   a time, each observed firing once (§7).
+8. ~~Watch for 24–48 hours before touching GCP.~~
 
-**Rollback is DNS** for as long as Firebase remains deployed. Do not decommission anything in GCP
-until Azure has run a full week including every scheduled job — the daily and weekly timers are
-exactly what a short soak will miss. Firebase Storage stays warm the whole time: the migrated
-documents still carry their original `imageUrl` / `storagePath` values until the re-pointing step
-in §5.7 runs, deliberately, so a rollback needs nothing rewritten.
+> ~~**Rollback is DNS** for as long as Firebase remains deployed. Do not decommission anything in
+> GCP until Azure has run a full week including every scheduled job — the daily and weekly timers
+> are exactly what a short soak will miss. Firebase Storage stays warm the whole time: the migrated
+> documents still carry their original `imageUrl` / `storagePath` values until the re-pointing step
+> in §5.7 runs, deliberately, so a rollback needs nothing rewritten.~~
+>
+> **Superseded by an owner decision, 2026-08-28: there is no rollback.** The owner forwent the DNS
+> soak and scheduled Firebase/GCP for deletion rather than holding it. That inverts what step 6 costs
+> — the Telegram webhook must be re-registered **before** the deletion, or the bot goes quiet with no
+> error anywhere in Azure. It also means the soak this paragraph asked for never happened, and the
+> daily and weekly timers it warned would be missed are still unarmed (step 7 / T-518).
 
 ---
 
-## 7. Verification gates
+## 7. Verification gates — **two of eight still open**
+
+> The migration-specific gates below are struck through as they were met. **Two
+> were never run and are the only unmet exit criteria of the whole plan:** the
+> scheduled-job proof (blocked on T-518 — nothing is armed, so nothing has been
+> observed firing) and the cost gate (never measured against the USD 150
+> ceiling). Both are owner-held.
+>
+> The repository baseline that follows has moved on and is not restated here;
+> `.github/workflows/ci.yml` is the current gate and runs on every pull request.
 
 Reuse what exists. This repository's baseline is:
 
@@ -705,22 +801,28 @@ Add for the migration:
 
 - **Test against the Cloudflare host, never the origin.** `scripts/smoke-deployed.mjs --base
   https://api-azure.hybridcloudworks.com/api`. Pointing any check at `azurewebsites.net` produces a
-  403 that looks like a broken deployment and is not.
+  403 that looks like a broken deployment and is not. **Still true, and still the rule** — this one
+  is not a gate that closes, it is how every check must be pointed.
 
-- **Inventory gate.** `migrate-data.yml` `mode=inventory-gate` — Site-Main's own
+- ~~**Inventory gate.** `migrate-data.yml` `mode=inventory-gate` — Site-Main's own
   `inventory-collections.mjs --diff` against our manifest, at a recorded Site-Main SHA. Must pass
   before any import, and again immediately before the production import: a collection added
-  upstream in between is exactly what it catches.
-- **Reconciliation.** `reconciliation.summary.json` shows `failed: 0` on every container — on
+  upstream in between is exactly what it catches.~~ Passed before both imports; the workflow has
+  since been deleted with the rest of the one-shot tooling.
+- ~~**Reconciliation.** `reconciliation.summary.json` shows `failed: 0` on every container — on
   scratch during the rehearsal, on production after the import. And `SELECT VALUE COUNT(1)` on
   production `content` stays **0** until the production-import phase begins; runbook step 11 is the
-  read that proves it.
-- **Endpoint parity.** Every one of the 89 HTTP endpoints answers with the same shape as Firebase.
-  Record the Firebase responses **before** cutover; they are the fixtures.
-- **Authorisation parity.** `firestore.rules` has emulator-backed tests today; its replacement must
+  read that proves it.~~ 8,023/8,023, zero field mismatches.
+- ~~**Endpoint parity.** Every one of the 89 HTTP endpoints answers with the same shape as Firebase.
+  Record the Firebase responses **before** cutover; they are the fixtures.~~ Superseded by
+  `.azure/api-surface.json` as the contract and `route-inventory.test.js` as the check — the
+  Firebase side is gone, so parity against it is no longer measurable and no longer the question.
+- ~~**Authorisation parity.** `firestore.rules` has emulator-backed tests today; its replacement must
   be tested to at least that coverage. Architecture_Plan §5.1 — this is the most dangerous silent
-  loss in the migration.
-- **Pre-render parity.** ~80 documents, and grep the built HTML for each page's distinctive content.
+  loss in the migration.~~ Met by the server-side guard suite; `route-inventory.test.js` fails on a
+  route that reaches the database without consulting a guard, which is the property `firestore.rules`
+  used to hold.
+- ~~**Pre-render parity.** ~80 documents, and grep the built HTML for each page's distinctive content.~~
   The "three times with every unit test passing" history belongs to Site-Main, not here; the same
   confusion put a 90-document baseline on this repository when its build produced three. Closed
   2026-08-23 by `frontend/scripts/prerender.mjs` (T-515), which renders every route in its manifest
@@ -730,44 +832,55 @@ Add for the migration:
   visible to a crawler. 11 provider/section combinations have no content and are skipped by design
   — they are listed on every run. Article detail pages are NOT pre-rendered: they need the API at
   build time, which CI cannot reach (issue #175).
-- **Scheduled-job proof.** Each of the 16 timers observed firing at least once in Azure — **at the
-  right local time**. `WEBSITE_TIME_ZONE = America/Chicago` is set on the app; a timer that fires
-  five hours early passed the "fired once" test and failed the real one.
-- **Cost gate.** Actual spend measured against USD 150 after one full week, before decommissioning.
+- **Scheduled-job proof — OPEN (T-518).** Each of the 18 timers observed firing at least once in
+  Azure — **at the right local time**. `WEBSITE_TIME_ZONE = America/Chicago` is set on the app; a
+  timer that fires five hours early passed the "fired once" test and failed the real one. Nothing is
+  armed, so nothing has been observed.
+- **Cost gate — OPEN.** Actual spend measured against USD 150 after one full week, before
+  decommissioning. Never run. GCP is now scheduled for deletion without it, which removes the
+  "before decommissioning" framing but not the measurement: the estate is consumption-billed by
+  design and that design has never been checked against a bill.
 
 ---
 
 ## 8. Risk register
 
+**Three of fifteen are still live**, and all three are owner-held. The closed
+rows are struck through rather than deleted: a risk register whose retired
+entries vanish cannot show that a risk was managed rather than never real.
+
 | Risk                                               | Severity | Mitigation                                                          |
 | -------------------------------------------------- | -------- | ------------------------------------------------------------------- |
-| Authorisation rules not faithfully re-implemented  | **High** | Port `firestore.rules` tests to API tests before removing the rules |
-| AI handlers default to Vertex / ADC, which has no Azure equivalent | **High** | §4. The router's `azure` branch has no account behind it; route every AI RPC to a direct provider (Anthropic / OpenAI) keyed from Key Vault before porting the 17 RPCs |
-| Cost overrun from hourly resources                 | **High** | Architecture_Plan §3; cost gate before decommission                 |
-| Collections missed by the migration inventory      | **High** | §5. One manifest drives migrator, verifier and Terraform; `preflight` exits 2 on anything unmanifested; the inventory gate runs Site-Main's own diff |
-| Feature delta never ported — site regresses against what visitors have today | Closed | §0 disposition; T-409 ported 2026-08-21 (the D1 list, with tests); D2/D3 stay deliberate |
-| Six HTTP handlers exceed the 230 s Flex Consumption cap | Medium | §4 / T-322. Convert to jobs; fix the client/server timeout mismatch in the same change |
-| Change-feed semantics lose delete-driven behaviour | Medium   | §3.5 done upstream; §4 trigger table names the two delete endpoints to write |
-| Cron syntax differences silently disable a job, or time zone shifts it | Medium | §4 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7 scheduled-job proof at the right local time |
-| Telegram/webhook re-registration forgotten         | Medium   | §6 step 6 — the receiver exists (T-512); `setWebhook` still has to be re-run. `scripts/cutover/04-telegram-webhook.ps1` |
-| `speakerevents/` storage rule is open in Firebase  | Medium   | Do not carry it forward: `speakerevents` is a private container here, served through the API like every other |
-| Labs runner contract drift                         | Medium   | Coordinate `vps-agent` with Phase 3 labs group                      |
-| Repo divergence during the overlap                 | Closed   | §0 — resolved by pinning the baseline and porting by hand; was "reconcile weekly" |
-| Production data published through a public-repository artifact | Closed | §5.2 — summaries only, export never leaves the runner, samples refused in CI |
-| 47 browser-direct reads discovered late            | Closed   | §3.1 done on both sides                                             |
-| AI provider egress cost after cutover              | Low      | Decide provider in Architecture_Plan §7.4                           |
+| **Telegram/webhook re-registration forgotten** | **High — now a deadline** | §6 step 6 / T-526. The receiver exists (T-512) and `-WhatIf` on the cutover script is safe since T-704; `setWebhook` still has to be re-run, and the forgone DNS rollback means it must happen **before** the GCP deletion |
+| **Cron syntax differences silently disable a job, or time zone shifts it** | **Medium — unproven** | §4.2 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7's scheduled-job proof is the check and it has never run, because nothing is armed (T-518) |
+| **Cost overrun from hourly resources** | **Medium — unmeasured** | Architecture_Plan §3 removed the hourly resources by design; the §7 cost gate that would confirm it has never been run |
+| ~~Authorisation rules not faithfully re-implemented~~ | Closed | The server-side guard suite replaced `firestore.rules`; `route-inventory.test.js` fails on a route that reaches the database without a guard |
+| ~~AI handlers default to Vertex / ADC, which has no Azure equivalent~~ | Closed | §4.4 — `ai/router.js` resolves Anthropic → OpenAI → Gemini by key presence; Vertex is a disabled provider id, not a default |
+| ~~Collections missed by the migration inventory~~ | Closed | §5 — one manifest drove migrator, verifier and Terraform; the inventory gate passed before both imports |
+| ~~Feature delta never ported — site regresses against what visitors have today~~ | Closed | §0 disposition; T-409 ported 2026-08-21 (the D1 list, with tests); D2/D3 stay deliberate |
+| ~~Six HTTP handlers exceed the 230 s Flex Consumption cap~~ | Closed | §4.1 / T-322 — four became platform jobs, one was demoted, one became Listen & Learn (T-411) |
+| ~~Change-feed semantics lose delete-driven behaviour~~ | Closed | §3.5 done upstream; the three delete endpoints in the §4.3 table were written |
+| ~~`speakerevents/` storage rule is open in Firebase~~ | Closed | Not carried forward: `speakerevents` is a private container here, served through the API like every other |
+| ~~Labs runner contract drift~~ | Closed | `vps-agent` holds no database credential and takes its capabilities from the server-side registry; provisioning the host is an owner action in [REVIEW.md](REVIEW.md), not a contract risk |
+| ~~Repo divergence during the overlap~~ | Closed | §0 — resolved by pinning the baseline and porting by hand; was "reconcile weekly" |
+| ~~Production data published through a public-repository artifact~~ | Closed | §5.2 — summaries only, export never left the runner, samples refused in CI. The tooling has since been deleted entirely |
+| ~~47 browser-direct reads discovered late~~ | Closed | §3.1 done on both sides |
+| ~~AI provider egress cost after cutover~~ | Closed | Architecture_Plan §7.4 — decided; a provider is on when its key is present, and usage is logged per feature in the AI Engine tab rather than estimated |
 
 ---
 
-## 9. What to do first, concretely
+## ~~9. What to do first, concretely~~ — all three done
 
-If only one thing starts this week: **runbook steps 2–4** — the GCP Workload Identity binding, the
-`data-migration` environment, and the scratch apply. All three are owner or operator gates, nothing
-in Phase 4 moves until they exist, and together they take an afternoon.
-
-Second: **the first `mode=preflight` run.** It is read-only, it needs only step 2, and it replaces
-every document count in this plan with a measured one.
-
-Third, in parallel and independent of both: **T-322**, the six handlers that cannot survive the
-230 s cap — because every one of them is on the Phase 3 critical path and none of them is a
-mechanical port.
+> ~~If only one thing starts this week: **runbook steps 2–4** — the GCP Workload Identity binding, the
+> `data-migration` environment, and the scratch apply. All three are owner or operator gates, nothing
+> in Phase 4 moves until they exist, and together they take an afternoon.~~
+>
+> ~~Second: **the first `mode=preflight` run.** It is read-only, it needs only step 2, and it replaces
+> every document count in this plan with a measured one.~~ It did — 8,064 documents, §5.1.
+>
+> ~~Third, in parallel and independent of both: **T-322**, the six handlers that cannot survive the
+> 230 s cap — because every one of them is on the Phase 3 critical path and none of them is a
+> mechanical port.~~ Closed; §4.1.
+>
+> **What to do first now** is not a migration question. It is [TODO.md](TODO.md): T-526 before the
+> GCP deletion, then T-518.

@@ -4,6 +4,14 @@
 > and cost reasoning that shaped the current website platform. It is retained
 > for traceability, not as an implementation checklist. Use [README.md](README.md)
 > for the current website and [TODO.md](TODO.md) for pending engineering work.
+>
+> **Reading convention.** A ~~struck-through~~ heading or bullet is **done**, not
+> deleted — the reasoning under it is the point of keeping this file, and a plan
+> whose completed entries disappear cannot show which decisions were taken
+> deliberately. Completion itself is recorded in [CHANGELOG.md](CHANGELOG.md);
+> anything still open here says so in bold. This differs from
+> [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry open work only and
+> drop an item once its CHANGELOG entry exists.
 
 **Audience:** engineers implementing the Azure platform in
 [HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks). **Status:**
@@ -221,7 +229,20 @@ The plan already specifies `publicContent: "Vike-prerendered static output"` and
 
 Everything else is porting. These are re-architecture, and they should drive the schedule.
 
-### 5.1 Browser-direct database access has no Azure equivalent
+> **All three are solved, 2026-08-21.** They are struck through below rather than
+> deleted: the reasoning is what makes the next re-architecture cheaper, and 5.1
+> in particular named the failure mode (*losing `firestore.rules` silently*) that
+> the server-side guard suite was then built to prevent. Entries in
+> [CHANGELOG.md](CHANGELOG.md); the per-item evidence is Migration_Plan §3.1–3.5.
+
+### ~~5.1 Browser-direct database access has no Azure equivalent~~ — SOLVED
+
+> `frontend/src` has zero `firebase/*` imports; every read is an authenticated
+> HTTP call through `lib/api.js`. `firestore.rules` did not port — it was
+> re-implemented as server-side authorisation in the API, and the guard suite
+> that replaced it is what `route-inventory.test.js` and the per-route role
+> tests hold in place. This was the migration's most dangerous silent-loss
+> risk and it is closed by tests rather than by assertion.
 
 **47 frontend files import `firebase/firestore` and query the database directly from the browser**,
 with Firestore Security Rules as the authorisation boundary. Cosmos DB has no browser-safe
@@ -236,7 +257,13 @@ authorisation model and is covered by an emulator test suite. That logic does no
 re-implemented as server-side authorisation in the API and re-tested there. Losing it silently is
 the most dangerous failure mode in this migration.
 
-### 5.2 Authentication changes shape
+### ~~5.2 Authentication changes shape~~ — SOLVED, MSAL as recommended
+
+> MSAL sits behind `frontend/src/lib/auth/`; the API validates the token and
+> holds the control point, with SWA route rules as defence in depth exactly as
+> recommended below. `firebase/auth` is gone from the admin surface. What is
+> left is not code: the Entra `Admin` app-role assignment is an owner action in
+> [REVIEW.md](REVIEW.md).
 
 Firebase Auth is client-side with ID tokens verified in functions via `requireAdminClaims`. Entra ID
 is the approved replacement. Two viable models:
@@ -252,7 +279,12 @@ not as the boundary.
 Admin role claims currently live in custom claims plus an `admins` collection; both need an Entra
 group-to-role mapping.
 
-### 5.3 Firestore trigger semantics differ from the Cosmos change feed
+### ~~5.3 Firestore trigger semantics differ from the Cosmos change feed~~ — SOLVED
+
+> The audit was done and all 11 were ported: eight as change-feed functions
+> unchanged, and the three that depended on a delete the feed never delivers as
+> explicit delete endpoints. The per-trigger disposition is the table in
+> Migration_Plan §4.3.
 
 11 `onDocumentWritten` triggers assume before/after document images and fire on delete. The Cosmos
 change feed (standard mode) delivers current-state documents and **does not surface deletes**. Any
@@ -263,7 +295,15 @@ Audit all 11 before estimating. This is where silent behaviour loss hides.
 
 ---
 
-## 6. Do not change the build tooling
+## ~~6. Do not change the build tooling~~ — HELD
+
+> **The recommendation held and the build tooling never changed.** Vite + Vike +
+> React 19 still produce the static output Static Web Apps serves. The one
+> correction to the reasoning below is the page count: the 90-document figure
+> belonged to the source repository, and this repository's build produced three
+> until `frontend/scripts/prerender.mjs` (T-515) made the pre-render real. It
+> now renders every route in its manifest through the real application and
+> **fails the build** on one that throws or comes back shell-sized.
 
 The question was raised whether to move off Vite as part of this. **No.**
 
@@ -283,8 +323,12 @@ build-adjacent change required is the routing config (§4), and that is a new fi
 
 ## 7. Decisions the team must make before implementation
 
-**Four of these six are now closed.** Kept with their outcomes rather than deleted, because the
-reasoning is what makes the next similar decision cheaper.
+**All six are now closed.** Kept with their outcomes rather than deleted, because the
+reasoning is what makes the next similar decision cheaper. This paragraph read
+"four of these six" until 2026-08-28, while every one of the six beneath it was
+already struck through as decided — an accurate-when-written count that nobody
+updated when the list moved past it, which is the most common way a document
+like this goes quietly stale.
 
 1. ~~**Two Functions apps or three?**~~ **DECIDED — one.** ADR-0019 supersedes ADR-0004. The labs
    runner's needs did not justify a second app, and one app is one cold-start budget, one
@@ -307,8 +351,20 @@ reasoning is what makes the next similar decision cheaper.
 
 ## 8. What good looks like at the end
 
+Four of the five are met. Struck through rather than deleted, so the one that is
+not stays visible next to the four that are.
+
 - Monthly spend under USD 150 with headroom, dominated by consumption rather than idle capacity.
-- No connection strings or account keys anywhere; managed identity throughout.
-- Server-side authorisation tested to at least the coverage `firestore.rules` has today.
-- Public site pre-rendered and served statically, indistinguishable from today to a visitor.
-- A real 404 for unknown URLs (see Migration_Plan §3.4 — currently a soft 404 returning HTTP 200).
+  **Structurally true — the estate is consumption-billed throughout — but the
+  cost gate has never been run.** Migration_Plan §7 names it; measuring one full
+  week of actual spend is still owed.
+- ~~No connection strings or account keys anywhere; managed identity throughout.~~
+  Cosmos key auth is disabled at the account, storage SAS is user-delegation
+  signed, and every credential resolves from Key Vault by managed identity.
+- ~~Server-side authorisation tested to at least the coverage `firestore.rules` has today.~~
+  §5.1 — the guard suite and `route-inventory.test.js` are what hold it.
+- ~~Public site pre-rendered and served statically, indistinguishable from today to a visitor.~~
+  T-515; the deploy workflow asserts the document count independently, because a
+  shell deploys perfectly well and is visible only to a crawler.
+- ~~A real 404 for unknown URLs (see Migration_Plan §3.4 — currently a soft 404 returning HTTP 200).~~
+  Migration_Plan §3.4 — `responseOverrides.404` now returns `statusCode: 404`.

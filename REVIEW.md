@@ -7,6 +7,14 @@ live-environment confirmation. Code changes and testable implementation work
 belong in [TODO.md](TODO.md). Verified completion belongs in
 [CHANGELOG.md](CHANGELOG.md).
 
+**This file carries open work only.** An item is removed once the corresponding
+entry is in `CHANGELOG.md` — the same rule `TODO.md` states in its own footer,
+and the reason neither file accumulates a history of finished work. The two
+archived plans ([Architecture_Plan.md](Architecture_Plan.md),
+[Migration_Plan.md](Migration_Plan.md)) do the opposite on purpose: they keep
+every entry and strike the completed ones through, because their value is the
+reasoning behind each decision rather than the state of a queue.
+
 The second is [PART 4 — REQUIRED INPUTS](#part-4--required-inputs), the
 inventory of every variable, secret and setting the workload needs, with live
 status. It sits here rather than in the Wiki because the two procedures that
@@ -39,7 +47,6 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered; provide/rotate the Static Web App deployment credential through the approved Azure/GitHub path | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Apex DNS cutover | **Executed and verified.** Repointed by 2026-08-27 (zone export: apex CNAME at the SWA, no Firebase record left); owner verified serving on 2026-08-28. The owner forwent the DNS-rollback soak: Firebase/GCP is scheduled for deletion instead of being held as the rollback. T-517 closed — entry in [CHANGELOG.md](CHANGELOG.md) | The forgone rollback puts a deadline on the Telegram webhook re-registration (T-526, Runbook §3d): it must run before the GCP deletion or the bot goes quiet with no error anywhere in Azure |
 | Timers and the availability test | Decide whether to arm the 18 schedulers (`schedulers_master_enabled`, then `enabled_timers` one name at a time) and the `/api/health` availability test (`availability_test_enabled`). All three are workspace edits in `hcw-azure` | Every one defaults to the safe value, so the repository state is "nothing armed" and stays that way without a decision. Arming the availability test needs a Cloudflare change first: Bot Fight Mode answers Azure's availability agents with a 403, and a WAF skip rule against it was built, applied and confirmed inert |
 | Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6). Tracked as **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** since 2026-08-26, with the design, cost model and acceptance criteria | Cosmos carries continuous backup on the free 7-day tier and both storage accounts carry versioning and soft delete — but both are `LRS`, and every mechanism sits inside the subscription it protects, so none of it survives account loss. None of it is justified against a stated objective, and nothing here has ever been recovery-tested |
 | Key Vault | Provide only the secrets needed by enabled features through the approved vault procedure; never put values in GitHub variables or Vite config | Code reads secrets server-side and degrades optional integrations when absent |
@@ -50,81 +57,6 @@ verify these actions. Do not weaken the API guard or add a browser-side bypass.
 | Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
 
-## Executed: the migration-era teardown (applied 2026-08-25)
-
-This section exists because the confirmation behind an **irreversible** destroy
-was asserted only in Terraform comments. A code comment is not where this
-repository keeps owner decisions ([CONTRIBUTING](.github/CONTRIBUTING.md)), and
-"the owner confirmed" written next to the resource being deleted is a claim the
-reader has no way to check. This is the record.
-
-**Confirmed to exist.** The readiness review read the live tenant on 2026-08-24.
-`rg-db-site-sbx-cus` holds `cosmos-site-sbx-cus` — 73 containers, a measured
-**77,763 documents** — and `stsitesbxcus01` with 6 blob containers. That is 87
-Terraform resources in all: the resource group, the Cosmos account, its `hcw`
-database, 73 containers, the storage account, 6 blob containers and 4 role
-assignments. The three `migration_writer_enabled` grants were also live on the
-CI deploy identity: Cosmos Data Contributor at database scope `dbs/hcw`, Storage
-Blob Data Contributor and Storage Account Contributor on the production content
-account. `terraform state list` then confirmed all 90
-addresses are managed, so an apply removes them rather than leaving them
-orphaned in Azure — the question that had to be settled before the plan was the
-one thing the plan itself could not be trusted to answer.
-
-**Authorised.** The migration rehearsal is finished. The owner authorised, on
-2026-08-24, both the revocation of the three production-write grants (B6) and
-the teardown of the rehearsal estate (B7).
-
-**What that destroys, and why it cannot be undone.** Everything above, at once.
-Nothing in `infra/scratch.tf` ever carried `prevent_destroy` — deliberately, it
-was built to be thrown away — so there is no lifecycle guard to trip and no
-confirmation step beyond reading the plan. The account's `Continuous7Days`
-backup does not help: a continuous backup belongs to its account and dies with
-it, so after the apply the only route back to that data is a fresh copy from
-production. The sandbox measured 77,763 documents against 69,979 in production;
-that gap is unexplained and is not treated as a reason to keep the copy, because
-both imports reconciled at 8,023/8,023 with zero field mismatches
-([Phase-4-Data-Migration](wiki/Phase-4-Data-Migration.md), P2 and P4).
-
-**Applied 2026-08-25: 3 added, 2 changed, 92 destroyed.**
-
-The destroy count matched the authorisation exactly, which is the number that
-mattered — 90 real destroys plus the 2 azapi resources replaced on every apply.
-
-The adds and changes came in **below** the 17/5 recorded here, and the reason is
-worth stating so nobody reads it as a short apply. That figure was written before
-any of it ran. Most of those adds were the alert rules, and they were created by
-the earlier applies instead: #218 landed ten of thirteen targeted resources and
-#219 landed the remaining three after ARM rejected them at create time. By the
-time this run planned, those resources already existed, so they were no longer
-adds. Verified after the apply: all four alert rules are still present and
-enabled.
-
-Also verified after the apply — the three production-write grants are gone. The
-deploy identity now holds four roles, all operational: HCW Cosmos Container
-Definition Writer on the production account, Storage Account Contributor and
-Storage Blob Data Contributor on `stsitefuncprodcus01` (the Functions **host**
-account, for the deploy firewall window), and Website Contributor on the
-Function App. The revoked grants were scoped to `dbs/hcw` and to
-`stsiteprodcus01`, the **content** account; neither appears. And
-`az group list` no longer returns `rg-db-site-sbx-cus`.
-
-The add count moved twice after the figure of 13 was first recorded, which is
-why it is reconciled here rather than restated: `eec36ce` gated the availability
-alert on its web test, removing one add, and `e2f502a` added two user-assigned
-identities and three role assignments for the log alert rules, adding five.
-13 − 1 + 5 = 17. Changes and destroys are untouched by both, because none of
-those resources exists yet, so giving a rule an identity is another create
-rather than a modification. Approve it against the resource **addresses**,
-not the count: a near-miss number reads as close enough while meaning something
-entirely different happened.
-
-**Consequence, recorded so it is not rediscovered at cutover.** With the grants
-gone the deploy identity has no write path into the production Cosmos database
-or the content storage account, which is what a delta import needed. The delta
-import is retired; the [Cutover Runbook](wiki/Cutover-Runbook.md) step 4 records
-what that costs.
-
 ## Live confirmation still requiring an authorized operator
 
 - Verify the Entra role claim and API audience in a newly issued access token.
@@ -132,19 +64,12 @@ what that costs.
   response in the deployed environment.
 - Confirm the public API and Static Web App custom domain after any DNS or edge
   change.
-- **Closed 2026-08-25 — the migration-era scratch estate and the three
-  production-write grants are gone**, confirmed after the apply rather than
-  assumed from the plan: `rg-db-site-sbx-cus` no longer exists and the deploy
-  identity retains only its four operational roles.
-- **Closed 2026-08-26 — the two `data-migration` federated credentials are
-  retired** (T-524). The owner authorised it; both forms were removed from
-  `infra/oidc.tf` together, taking the identity from six trusted subjects to
-  four, and `federated_subjects` no longer emits `environment:data-migration`.
-  Validated before the change rather than after: nothing in `.github/workflows`
-  names that environment, its only consumer `migrate-data.yml` was deleted in
-  `59e471b`, and `scripts/oidc-subjects.test.mjs` passes with the pair gone —
-  the same check fails on a half-deletion and on sweeping up the branch pair by
-  mistake.
+- **Observe an alert actually being delivered.** `az monitor action-group
+  test-notifications` against `ag-ops-prod-cus`, then set `ops_sms_receiver` so
+  there is a second channel independent of email. The optional SMS receiver is
+  merged and inert until the variable is set; delivery through *either* channel
+  has never been observed, which means the alerting fabric is unproven end to
+  end no matter how many rules are enabled ([TODO.md](TODO.md), from T-709).
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
 - Apply the Terraform change that creates the `listenandlearn` blob container.

@@ -10,212 +10,111 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
 ## Status — 2026-08-28
 
-> **T-517 closed: the apex serves the Azure site.** The owner verified serving
-> on 2026-08-28, after the zone export of 2026-08-27 showed the apex CNAME at
-> the Static Web App with no Firebase record left. The owner also **forwent
-> the DNS rollback**: Firebase is scheduled for deletion rather than held
-> through a soak. That decision creates the one new urgency on this list —
-> T-526, the Telegram webhook re-registration, which fails *silently* the
-> moment GCP is deleted. Entry in [CHANGELOG.md](CHANGELOG.md).
+> **The Blog Machine program and the first remediation pass are closed.** All
+> seven Blog Machine phases (T-601…T-607) and 35 of the architecture review's
+> 62 findings are merged; their entries are in [CHANGELOG.md](CHANGELOG.md),
+> the per-finding record is
+> [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md),
+> and the program of record is [wiki/Blog-Machine.md](wiki/Blog-Machine.md).
+> Nothing about that work is repeated below; this file carries only what is
+> still open.
 >
-> **The T-519 probe path is merged (#234, ADR 0024)** — a Cloudflare Worker
-> cron probe and a success-counting alert, both inert until the owner deploys
-> the Worker and flips `availability_probe_alert_enabled`.
+> **The one deadline on this list is T-526.** The owner verified the apex
+> serving Azure on 2026-08-28 and **forwent the DNS rollback** — Firebase is
+> scheduled for deletion rather than held through a soak. The Telegram webhook
+> is still registered against GCP and fails *silently* the moment GCP is
+> deleted, so the re-registration is now a countdown rather than a dormancy.
 >
-> **PR #218 is fully applied, and this note said otherwise for a day.** Its own
-> closing sentence — that a tracker which keeps saying "not applied" after it
-> applied is how a reviewer stops trusting the file — described this paragraph.
-> Corrected 2026-08-26.
->
-> The alerting half is live and now **stateful**: `alert-cosmos-throttle-prod-cus`
-> as a metric rule, plus `alert-func-http5xx-prod-cus`,
-> `alert-func-latency-prod-cus` and `alert-app-exceptions-prod-cus` as log
-> rules, after #219 fixed the three ARM rejected at create time and #226 set
-> `auto_mitigation_enabled` on the three log rules. Read back from ARM on
-> 2026-08-26 by `Verify Alert Rule State`: all three report
-> `autoMitigate: true`.
->
-> The **teardown applied on 2026-08-25** — 3 added, 2 changed, 92 destroyed, the
-> destroy count matching the authorisation exactly. `rg-db-site-sbx-cus`,
-> `cosmos-site-sbx-cus` and `stsitesbxcus01` are gone and `az group list` no
-> longer returns the group ([REVIEW.md](REVIEW.md), *Executed: the migration-era
-> teardown*).
->
-> The `hcw-azure` workspace is **VCS-connected** as of 2026-08-26, working
-> directory `infra`, auto-apply off. Merged infra code now reaches HCP Terraform
-> on its own; before that it only arrived when someone ran `terraform` from a
+> The `hcw-azure` workspace is **VCS-connected** (2026-08-26), working
+> directory `infra`, auto-apply off. Merged infra code reaches HCP Terraform on
+> its own; before that it only arrived when someone ran `terraform` from a
 > checkout, which is why several merged changes sat unapplied.
 
 | Priority | Open items |
 | --- | ---: |
-| Critical | 0 (all five closed 2026-08-28) |
-| High | 3 (T-714 + the two owner gates T-518/T-526) |
-| Medium | 20 (2 of them owner-gated) |
-| Low | 9 |
-| Total | 32 |
+| Critical | 0 |
+| High | 3 |
+| Medium | 20 |
+| Low | 7 |
+| Total | 30 |
 
-**The count changed shape on 2026-08-28.** It previously read 10, of which
-seven were the Blog Machine program (T-601…T-607) — now closed and merged, so
-those seven left the list. Three platform items remained: T-526 and T-518
-(High) and T-519 (Medium). The other 62 are the **architecture review** opened
-the same day — six specialist reviews, one per technology layer, recorded as
-T-701…T-762 below. A tracker that grows by 62 in a day is not a tracker that
-got worse; it is one that was previously describing a smaller surface than the
-estate actually had. Nothing in the review is a regression from the program:
-the program's own code drew four findings, the pre-existing platform drew the
-rest.
+Twenty-seven of the thirty are architecture-review findings still to be worked
+(`T-714`, nineteen Medium, seven Low). The other three are the pre-program
+platform gates: **T-526** and **T-518** (High) and **T-519** (Medium). Every
+one of those three carries **Gate: owner** and has no repository-side half —
+what is left of them is a webhook registration, a Worker deployment and a set
+of feature flags, each needing tenant or edge access. They are listed anyway,
+because a tracker that omits them is quietly shorter than the truth.
 
-Five items closed on 2026-08-25. Four in #220 — T-520, T-521, T-523 and A-001,
-the ones that did not need access outside the repository — and T-525, which the
-owner closed directly by deleting the three variables. Their entries are in
-[CHANGELOG.md](CHANGELOG.md).
+**T-522 moved to [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)**
+on 2026-08-26 — the recovery objectives and the Cosmos export that would
+support them, joined on 2026-08-28 by the remainder of T-707 (an out-of-account
+copy of media, which no account setting can provide). Neither is closed and
+neither is abandoned; both are tracked where a feature with a design, a cost
+model and acceptance criteria belongs, rather than as a tracker line that only
+ever said "two numbers are missing".
 
-T-524 closed on 2026-08-26: the owner authorised retiring the two
-`data-migration` federated credentials and they are removed from
-`infra/oidc.tf`. Its entry is in [CHANGELOG.md](CHANGELOG.md).
+## Owner actions left behind by closed findings
 
-T-522 moved to **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)**
-on 2026-08-26 — the recovery objectives and the Cosmos export that would support
-them. It is not closed and it is not abandoned; it is tracked where a feature
-with a design, a cost model and acceptance criteria belongs, rather than as a
-tracker line that only ever said "two numbers are missing". The analysis behind
-it is in the issue so it does not get redone.
+These three are the residue of remediated findings: the code half is merged and
+in [CHANGELOG.md](CHANGELOG.md), and what remains needs access this repository
+does not have. They are not counted in the thirty above, because the
+engineering work on them is done.
 
-**The three pre-program items (T-518, T-519, T-526) carry Gate: owner and
-have no repository-side half.** What is left of them is a webhook
-registration, a Worker deployment and a set of feature flags — every one
-needs tenant or edge access. They are listed anyway, because a tracker that
-omits them is quietly shorter than the truth. Two of them now also gate
-program phases: T-526 gates the T-606 Telegram loop, T-518 gates T-607's
-scheduled throughput.
-
-The program entries, by contrast, are almost entirely repository-side
-engineering — the first substantial engineering work this tracker has carried
-since the RPC surface (#180). T-520 finished the same
-day it was written: `functions_scm_lock_enabled` is armed, SCM answers `Deny`,
-and run 32902534458 published through Kudu inside the per-run window and
-restored the lock behind itself.
-The ruleset half of T-523 is done — `20680114` now requires 12 contexts,
-including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
-
-## The Blog Machine program — closed 2026-08-28
-
-All seven phases (**T-601…T-607**) are engineering-complete and merged —
-#236 (Phase 0 + plan), #237, #238, #239, #240, #241, #242 and the Phase 7
-close-out PR. The program entry is in [CHANGELOG.md](CHANGELOG.md); the
-program of record, per-phase as-built notes and the backlog stay in
-[wiki/Blog-Machine.md](wiki/Blog-Machine.md).
-
-What remains is **activation, all owner-gated**, tracked where each gate
-already lives rather than re-opened here:
-
-- **T-526** — Telegram webhook re-registration (the entire approve-by-reply
-  loop is silent until the webhook points at Azure; run before the GCP
-  deletion). Inline approve/reject buttons (wiki §5b) ride the same re-run.
-- **T-518** — timer arming (`forgeScheduled`, `syncRssFeeds`,
-  `publishScheduledContent` are flag-off until the workspace variables and
-  four-gate procedure are run).
-- **Vault seeding** — `PREVIEW-SIGNING-SECRET` (staging links; the route
-  404s and notifications say "link unavailable" until then) and
-  `REPLICATE-API-KEY` (AI heroes; the designed default heroes cover its
-  absence once the ~8 covers are uploaded and `admin_config/default_heroes`
-  is seeded).
-- **Social autopost** (backlog #1, landed post-program) —
+- **`production` environment protection (from T-705).** Both deploy workflows
+  now refuse a dispatch from any ref but `main`, and [REVIEW.md](REVIEW.md)
+  §4.4 no longer claims a gate that may not exist. Open Settings →
+  Environments → `production`, confirm required reviewers and a `main`-only
+  deployment-branch rule, then set that row to what you find. The guard step is
+  a backstop, not the gate.
+- **Action-group delivery test (from T-709).** An optional SMS receiver is
+  wired as an independent second channel, via a `dynamic` block so an unset
+  variable leaves the action group byte-identical. Run
+  `az monitor action-group test-notifications` and set `ops_sms_receiver`;
+  delivery has still never been observed.
+- **Vault seeding and seeded documents (from the Blog Machine program).**
+  `PREVIEW-SIGNING-SECRET` (staging links; the preview route 404s and
+  notifications say "link unavailable" until then), `REPLICATE-API-KEY` (AI
+  heroes; the default heroes cover its absence once the ~8 covers are uploaded
+  and `admin_config/default_heroes` is seeded), and
   `admin_config/social_autopost` `{ enabled, accountIds: [{ id, provider }],
-  scheduleDelayMinutes }` seeded with the Publer account ids from the Social
-  Hub. Absent or disabled, publishes queue nothing; enabled, every first
-  live publish schedules a captioned post in Publer after the delay.
+  scheduleDelayMinutes }` with the Publer account ids from the Social Hub.
+  Absent or disabled, every one of these paths no-ops rather than failing.
 
-## The architecture review — opened 2026-08-28
+## The architecture review — open findings
 
 Six specialist reviews, one per technology layer, run against merged main at
 `31f9613`: Azure platform, Terraform IaC, backend Functions, frontend React,
 CI/CD, and the remaining ops surfaces (Cloudflare Worker, PowerShell scripts,
-Python harness, VPS agent). 62 findings, `T-701`…`T-762`.
+Python harness, VPS agent). 62 findings, `T-701`…`T-762`; 35 resolved on
+2026-08-28 (#249 records, #250 remediates).
 
 **The review of record is
 [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md)** —
-it carries the method, the evidence standard, every finding's failure mode and
-recommendation, the cross-cutting observations, and the areas that came back
-sound, organised by layer. The entries below carry only what "open" means for
-each finding, in the order they should be worked. This split follows the
-Blog Machine precedent: the Wiki holds the narrative, this file holds the
+it carries the method, the evidence standard, every finding's failure mode,
+recommendation and outcome, the cross-cutting observations, and the areas that
+came back sound, organised by layer. The entries below carry only what "open"
+means for each finding, in the order they should be worked. This split follows
+the Blog Machine precedent: the Wiki holds the narrative, this file holds the
 list.
 
-Every finding cites `file:line`. Three evidence levels are distinguished in
-the Wiki page and reproduced in the tables here: **verified** (re-read against
-the code by a second reader after the finding was written), **reported** (the
-anchor resolves but no second reader re-derived it), and **verify** (could not
-be settled from the repository — exactly one finding, T-705).
+Every finding cites `file:line`. Three evidence levels are distinguished in the
+Wiki page: **verified** (re-read against the code by a second reader after the
+finding was written), **reported** (the anchor resolves but no second reader
+re-derived it), and **verify** (could not be settled from the repository —
+exactly one finding, T-705).
 
 Deliberately **not** re-reported, being owner gates rather than findings:
 T-518, T-519, T-526, the unseeded Key Vault secrets, the unseeded
 `admin_config` documents, and the absent analytics provider.
 
-### Critical — CLOSED 2026-08-28
+### High — 1 of 12 open
 
-All five are fixed in code and verified by the suite; entries move to
-[CHANGELOG.md](CHANGELOG.md) on merge. One residual owner action remains and
-is listed under T-705.
+| ID | Layer | Finding | Anchor |
+| --- | --- | --- | --- |
+| T-714 | frontend | **Needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix | `main.jsx`, `hooks/prerenderData.js` |
 
-- **T-701** — `registerJobType` now requires an explicit `role` (no default),
-  all nine registered types declare one, `publish-content` is `publisher`
-  matching its HTTP twin, and escalation compares hierarchy level rather than
-  string inequality. `jobs.roles.test.js` asserts both properties. The new
-  validation immediately caught a ninth registration — the built-in `noop` —
-  that the review had missed.
-- **T-702** — `Confirm-Plan` refuses in a non-interactive context instead of
-  assenting, naming `-Force` as the deliberate unattended path; the six
-  destructive scripts now declare `ConfirmImpact = 'High'` so `ShouldProcess`
-  prompts too.
-- **T-703** — `Invoke-Az` records whether the call failed, `Test-LastAzFailed`
-  exposes it, and the root-elevation read-back treats an unreadable result as
-  the red path with the manual removal command printed.
-- **T-704** — the Key Vault window is `ShouldProcess`-guarded, the verify block
-  is skipped under `-WhatIf` (printing what it would check), and the decorative
-  secret line is replaced by a behavioural test: a POST without the token must
-  answer 401 and one carrying it must answer 200, which also proves the vault
-  token matches the deployed one. **T-526 is now safe to run.**
-- **T-705** — both deploy workflows now fail a dispatch from any ref but `main`,
-  and REVIEW.md §4.4 no longer claims a gate that may not exist.
-  **Owner action, still open:** confirm required reviewers and a `main`-only
-  deployment-branch rule on the `production` environment, then set that row to
-  what you find. The guard step is a backstop, not the gate.
-
-### High — 11 of 12 closed 2026-08-28
-
-Full rationale for each:
-[wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
-
-| ID | Layer | Outcome |
-| --- | --- | --- |
-| T-706 | azure | **Closed.** Content/media account moves LRS → **RA-GRS**. Not ZRS: the risk is account and regional loss, which zone redundancy does not cover, and LRS→ZRS is not Terraform-expressible (Azure requires a customer-initiated conversion). The TFC plan succeeded with `prevent_destroy` in force, which proves it is an in-place update rather than a replacement |
-| T-707 | azure | **Partly closed; remainder moved to [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231).** Backup tier 7 → 30 days (cents at this data size). The out-of-account copy cannot be closed by any account setting — Microsoft's docs state continuous backups are not geo-disaster resistant — so it belongs with the recovery objectives, the same reasoning that moved T-522 there. Also gated behind T-518 |
-| T-708 | tf | **Closed.** `prevent_destroy` now covers the SQL database, the container `for_each` and `leases`; the stale "containers are empty" comment is corrected to ~70k documents |
-| T-709 | azure | **Code half closed.** Optional SMS receiver added as an independent second channel, via a `dynamic` block so an unset variable leaves the action group byte-identical. **Owner action:** run `az monitor action-group test-notifications` and set `ops_sms_receiver`; delivery has still never been observed |
-| T-710 | backend | **Closed.** The sweeper reaps jobs abandoned in `running`, using each type's own `timeoutMs` plus a grace margin rather than one blanket cutoff, and fires the type's `onComplete` so the failure notification is no longer lost. It writes a terminal status rather than re-enqueuing: a dead worker may have completed real side effects |
-| T-711 | backend | **Closed.** The 2000-point-read fan-out is now deduplicated (one document carries up to four images) and batched with `ARRAY_CONTAINS`. The existing fixture proves the count is unchanged |
-| T-712 | backend | **Closed.** Replicate, Publer and Telegram now use one shared `fetchWithTimeout`, lifted out of `scrape.js` where the pattern already existed. The Replicate poll also gains a wall-clock deadline — an iteration count does not bound elapsed time when each iteration both sleeps and requests |
-| T-713 | ci | **Closed.** The hourly monitor now probes storage default action and leftover `ci-*` rules, so a deploy window orphaned by runner loss pages within the hour instead of never |
-| T-714 | frontend | **OPEN — needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists (`hooks/prerenderData.js`) but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix |
-| T-715 | frontend | **Partly closed, measured.** The reported fix does not work: rolldown places React's jsx-runtime by its own rules, so claiming react in an earlier chunk moved only `scheduler`, and removing the manual chart chunk made it worse (shared vendor grew to 651 kB). Splitting the chart libraries so only a small chunk rides with jsx-runtime does work: **868 kB → 571 kB preloaded on every page**. recharts (237 kB) and d3 (60 kB) are now lazy-only; chart.js still rides along, which is rolldown behaviour rather than a tunable predicate. Unused `d3` dependency removed |
-| T-716 | frontend | **Closed.** Request-layer dedupe keyed on path+query, plus one `PUBLIC_CORPUS_LIMIT` so the three hooks stop issuing three different urls for one intent. Deliberately NOT pushed server-side: client provider matching includes text inference the server does not perform, so that would silently drop posts (see T-738) |
-| T-717 | frontend | **Closed.** A failed fetch now clears `data` instead of leaving the previous route's article under the new route's canonical and og:url, and the wrapper hooks surface `error` instead of hardcoding null |
-
-### Medium — 11 of 30 closed
-
-Status and rationale per finding:
-[wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
-
-**Closed:** T-725 (version constraints), T-730 (Telegram retry storm), T-732
-(guard test probed one verb), T-733 (trigger isolation), T-734 (SSRF guard on
-scraped images, plus the size cap the shared fetcher was missing), T-735
-(stranded forge_ready notification), T-741 (harness closed empty workflows as
-completed), T-744 (concurrency guard raced by a slow claim), T-745 (alert window
-with no ingestion-lag headroom), T-746 (failed probe left no trace), T-747
-(Dependabot coverage — which exposed that Dependabot was not running at all).
-
-**Open, repository-side:**
+### Medium — 19 of 30 open
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
@@ -240,27 +139,17 @@ with no ingestion-lag headroom), T-746 (failed probe left no trace), T-747
 **Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
 T-721 (telemetry vs SWA tier cost decision).
 
-### Low — 5 of 15 closed, 1 will not fix
+### Low — 7 of 15 open
 
-**Closed:** T-748 (unusable Key Vault grant removed), T-751 (timer catalogue
-guarded and mutation-tested), T-752 (environment tag derived; workload
-deliberately left), T-755 (Trivy digest pinned and verified), T-756 (dispatch
-input through `env:`), T-758 (fork-degraded write scope removed), T-760 (dead
-exports deleted).
-
-**T-750 — WILL NOT FIX.** The finding is wrong. Deriving the function app's
-CORS origins from `var.domain` breaks `cors-platform-origins.test.js`, which
-reads that block as text and compares literal origins against `cors.js` so it
-can fail on a checkout with no Azure credentials. Acting on it broke CI; the
-literals are load-bearing and now say so in place.
-
-**Open:** T-749 (SCM lock flip — owner, overlaps T-520), T-753 (variable names
-exceed the two-word rule — report only, they are set in the workspace), T-754
-(`main.tf` is a 2,037-line six-concern file; splitting is state-safe file
-moves), T-757 (gate coverage: `vps-agent` install-only, frontend admin subset
-only), T-759 (VPS images pinned by mutable tag; no install/rotation runbook),
-T-761 (daily forge budget has one enforcement point and a read-then-act race),
-T-762 (duplicate route declarations leave dead dispatcher branches).
+| ID | Layer | Finding | Anchor |
+| --- | --- | --- | --- |
+| T-749 | ci | SCM lock flip — **Gate: owner**, overlaps T-520 | `main.tf`, workspace variable |
+| T-753 | tf | Variable names exceed the two-word rule — report only, they are set in the workspace | `variables.tf` |
+| T-754 | tf | `main.tf` is a 2,037-line six-concern file; splitting is state-safe file moves | `main.tf` |
+| T-757 | ci | Gate coverage: `vps-agent` install-only, frontend admin subset only | `ci.yml:36-53` |
+| T-759 | ops | VPS images pinned by mutable tag; no install/rotation runbook | `vps-agent/lib/capabilities.js` |
+| T-761 | backend | The daily forge budget has one enforcement point and a read-then-act race | `forge.js` |
+| T-762 | backend | Duplicate route declarations leave dead dispatcher branches | `functions/index.js` |
 
 ## High
 
@@ -288,6 +177,16 @@ token or a Key Vault firewall window, and network access to
 *before* the GCP deletion, not after: a webhook pointed at a dead URL makes
 Telegram back off, so the bot stays broken for a while even after the fix.
 
+T-704 closed the safety question that used to sit in front of this: the
+cutover script's `-WhatIf` mutated the production Key Vault rather than
+simulating it, and its "custom secret: set" line was unconditionally true.
+Both are fixed, so **T-526 is now safe to run.**
+
+It also gates the Blog Machine's Telegram loop: the whole approve-by-reply
+path (and the inline approve/reject buttons in
+[wiki/Blog-Machine.md](wiki/Blog-Machine.md) §5b) is silent until the webhook
+points at Azure.
+
 ### T-518 — Nothing is scheduled: all 18 timers are permanent no-ops
 
 **Gate: owner** — [REVIEW.md](REVIEW.md), *Timers and the availability test*.
@@ -303,6 +202,11 @@ name in `enabled_timers`, one timer at a time, through the four gates in
 criterion is the observed invocation, not the applied setting. Until then the
 platform runs no scheduled work of any kind: no feed sync, no cleanup, no
 digest.
+
+It gates two other things, which is why it outranks its own blast radius:
+the Blog Machine's scheduled throughput (`forgeScheduled`,
+`publishScheduledContent`), and the Cosmos backup-tier change from T-707,
+which only pays for itself once scheduled work is generating documents.
 
 ## Medium
 
