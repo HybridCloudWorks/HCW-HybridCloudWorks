@@ -601,6 +601,30 @@ variable "availability_test_geo_locations" {
   }
 }
 
+variable "availability_probe_alert_enabled" {
+  description = <<-EOT
+    Arm the alert on the Cloudflare Worker reachability probe (ADR 0024).
+
+    The probe itself lives outside Terraform: edge/availability-probe is a
+    Worker on a 5-minute cron, deployed by the owner with wrangler, reporting
+    each GET /api/health attempt to Application Insights as an availability
+    result named edge-api-health. It exists because the standard web test
+    above cannot run on this Cloudflare plan — Bot Fight Mode 403s every
+    datacenter client and no WAF rule can exempt them — so this is the
+    alternative path to the same signal, at no per-execution cost.
+
+    The alert fires on ABSENT successes, not present failures, so a dead
+    Worker, a dead cron and an unreachable API are all the same incident. The
+    corollary: arming it before the probe is deployed and observed writing
+    success rows creates a rule that fires immediately and permanently. Flip
+    this only after the query in edge/availability-probe/README.md shows
+    success == 1 rows, per the same observed-behaviour rule as everything
+    else armed from this workspace (Cutover-Runbook step 5).
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "availability_test_frequency_seconds" {
   description = <<-EOT
     How often EACH location runs the test. Azure accepts 300, 600 or 900 only.

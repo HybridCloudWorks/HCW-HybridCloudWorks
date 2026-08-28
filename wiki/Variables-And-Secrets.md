@@ -344,6 +344,7 @@ armed value is a deliberate workspace edit and the default is the rollback:
 | `schedulers_master_enabled` | `false` | Master kill switch for all 18 timers — it is what `FEATURE_FLAG_SCHEDULERS` is set from. A hardcoded literal until 2026-08-24, which meant no timer could be armed without a code change and nothing said so |
 | `enabled_timers` | `[]` | Which timers are armed, by flag suffix. Arming one needs **both** this and the master switch. An unrecognised name fails the plan rather than silently arming nothing |
 | `availability_test_enabled` | `false` | Runs the `/api/health` availability test. Off until the Cloudflare side is settled: Bot Fight Mode serves datacenter clients a 403, so arming it first would create a permanently-firing alert |
+| `availability_probe_alert_enabled` | `false` | The alert on the Cloudflare Worker reachability probe ([ADR 0024](0024-edge-availability-probe)). It fires on *missing* probe successes, so flipping it before the Worker is deployed and observed writing `success == 1` rows creates a rule that fires immediately and permanently |
 | `storage_shared_access_key_enabled` | `false` | Shared-key auth on the content and Functions host accounts. False is the intended posture — both consumers use Entra — and `true` is the one-variable rollback if a key path turns out to be needed |
 
 Everything else there is a default nobody is expected to override.

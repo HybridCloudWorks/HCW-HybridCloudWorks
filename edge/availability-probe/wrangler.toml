@@ -1,0 +1,31 @@
+# Cloudflare Worker configuration for the reachability probe (ADR 0024, T-519).
+#
+# Deployed with `wrangler deploy` by whoever holds the Cloudflare account —
+# nothing in CI deploys this, deliberately: the account credential lives with
+# the owner, like every other Cloudflare change in this estate (REVIEW.md).
+#
+# The one secret is set once, out of band:
+#   wrangler secret put APPLICATIONINSIGHTS_CONNECTION_STRING
+# with the connection string of appi-site-prod-cus (Azure portal → the
+# Application Insights resource → Connection String). It is a write-only
+# ingestion credential: it can submit telemetry and nothing else.
+
+name = "hcw-availability-probe"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+# Every 5 minutes. The Terraform alert (infra/observability.tf,
+# edge_probe_availability) counts successful results over a 15-minute window
+# and fires below 2, so this cadence gives it 3 expected data points per
+# window — one dropped run is tolerated, two are an incident. Change one and
+# you must change the other.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+# The same URL, over the same Cloudflare path, that the disarmed standard web
+# test in infra/observability.tf would have asked.
+PROBE_URL = "https://api-azure.hybridcloudworks.com/api/health"
+# Must match the name filter in the edge_probe_availability alert query —
+# infra/observability.tf points back at this line.
+PROBE_NAME = "edge-api-health"
