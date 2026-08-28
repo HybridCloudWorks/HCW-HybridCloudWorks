@@ -421,6 +421,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The Telegram webhook is registered against Azure, and the tracker was wrong
+  about it (T-526 closed, 2026-08-28).** `getWebhookInfo` returns
+  `https://api-azure.hybridcloudworks.com/api/telegram/webhook` with zero
+  pending updates, and `/help` answers in the chat — the acceptance criterion
+  `TODO.md` set for itself. **The Phase 5 approve-by-reply loop is live**, which
+  makes the whole Blog Machine Telegram path usable: a forge_ready notification
+  with a signed staging link, `/approve {id}` as a reply, and publication
+  through the full gated pipeline. The inline approve/reject buttons deferred to
+  the backlog are unblocked by the same fact.
+
+  **Nothing was re-run to close this.** It had already been done, and three
+  documents went on describing it as pending: `TODO.md` called it "the one
+  deadline on this list" and a countdown against the GCP deletion,
+  `Migration_Plan.md` §6 step 6 marked it OPEN, and its risk register read "High
+  — now a deadline". It surfaced only because `04-telegram-webhook.ps1 -Mode
+  Show` was run to *start* the work.
+
+  That step's own text warned it was "the one that will be forgotten". It was
+  right about the failure mode and wrong about the state — what got forgotten
+  was that it had happened. A tracker overstating urgency is not harmless: it
+  spends attention on finished work and, by being wrong in the direction of
+  alarm, teaches a reader to discount the next alarm.
+
+  **Three defects in the cutover scripts were found by running them**, none of
+  which reading had caught. Every script that opens a firewall window addressed
+  the vault as `az keyvault network-rule add --name <vault>` with no
+  `--resource-group`, which makes az resolve the group by searching the
+  subscription; that search fails where `az keyvault show --name` succeeds, and
+  reports `The Vault 'kv-site-prod-cus-01' not found within subscription` —
+  which reads as "the vault does not exist". Name plus resource group is an
+  unambiguous address with no search step. The vault read then failed
+  `ForbiddenByRbac`, because management-plane and data-plane rights are separate
+  and this estate deliberately grants the operator only the first (REVIEW.md
+  §4.6 records exactly that response and calls it the correct posture) — so
+  `06-seed-secret.ps1` now checks for a data-plane role at the management plane
+  *before* prompting for a credential and *before* opening anything, rather than
+  discovering it at the write.
+
 - **The four planning documents are reconciled to their own conventions
   (2026-08-28).** Two rules, applied consistently for the first time. **TODO.md
   and REVIEW.md carry only open work** — completed items are removed once the

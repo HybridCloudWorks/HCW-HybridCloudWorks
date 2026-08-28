@@ -34,7 +34,8 @@ areas that came back sound so that silence carries information.
 
 Deliberately **not** re-reported, because they are owner gates already tracked
 rather than review findings: T-518 (timers disarmed), T-519 (availability
-probe Worker undeployed), T-526 (Telegram webhook still pointing at GCP), the
+probe Worker undeployed), ~~T-526 (Telegram webhook still pointing at GCP)~~ — closed 2026-08-28, and it
+was already done when this review was written, the
 unseeded Key Vault secrets `PREVIEW-SIGNING-SECRET` and `REPLICATE-API-KEY`,
 the unseeded `admin_config` documents (`default_heroes`, `social_autopost`),
 and the absent analytics provider that blocks Blog Machine backlog #4. The
