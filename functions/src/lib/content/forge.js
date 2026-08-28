@@ -209,6 +209,21 @@ function actorName(actor) {
   return actor?.email || actor?.oid || actor?.uid || 'forge';
 }
 
+/**
+ * The rolling day bucket as an integer, e.g. 2026-08-28 → 20260828.
+ *
+ * `incrementIf`'s predicate takes numeric bindings only — deliberately, so
+ * nothing string-interpolates into SQL — and the budget claim has to compare
+ * "is this still today?" server-side. Carried alongside the human-readable
+ * `today.date`, which stays the field everything else reads.
+ */
+export function dayNumber(date) {
+  return date.getUTCFullYear() * 10000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+}
+
+/** Retries for the budget claim's rollover path; matches the submission quota. */
+export const FORGE_BUDGET_ATTEMPTS = 3;
+
 /** Apply dotted-path increments ('totals.forged': 1) to a plain object, in place. */
 export function applyIncrements(target, increments = {}) {
   for (const [path, amount] of Object.entries(increments)) {
@@ -265,6 +280,98 @@ export function createForge({
   // day bucket, reset on date change — the autoForge.dailyLimit enforcement
   // (lib/timers/forge-scheduled.js) reads it, and keeping only the current
   // day stops the document growing forever (T-607).
+  /**
+   * Claim one unit of the daily forge budget, atomically (T-761).
+   *
+   * This is the system's only AI-spend ceiling, and before this existed it was
+   * enforced in one place — the scheduler — by reading `today.forged`,
+   * computing `remaining` once, and then looping. Three things were wrong with
+   * that. The ledger it trusted was written by `bumpForgeStats`, a
+   * read-modify-write that swallows its own failures, so the count could be
+   * silently low. `remaining` was computed before the loop, so a manual forge
+   * running concurrently was never observed. And the count was incremented
+   * *after* the model calls, so a run killed mid-flight spent tokens the
+   * ledger never recorded.
+   *
+   * The claim happens before any model call and is a server-side
+   * compare-and-increment, so concurrent callers serialize on the document and
+   * exactly `limit` of them pass — the same primitive and the same two-path
+   * shape as `enforceSubmissionQuota`, for the same reason.
+   *
+   * `enforce: false` still increments. That is the point: editor-initiated
+   * forging is deliberately uncapped, but it must still be *counted*, or the
+   * scheduler's ceiling is measured against a number that ignores half the
+   * spending.
+   *
+   * @returns {Promise<{claimed: boolean, forgedToday?: number}>}
+   */
+  async function claimForgeBudget({ limit, enforce = false } = {}) {
+    const date = now();
+    const todayKey = date.toISOString().slice(0, 10);
+    const day = dayNumber(date);
+    const cap = Number.isFinite(limit) ? limit : Number.MAX_SAFE_INTEGER;
+
+    for (let attempt = 0; attempt < FORGE_BUDGET_ATTEMPTS; attempt += 1) {
+      try {
+        const doc = await store.incrementIf('admin_config', 'forge_stats', {
+          path: '/today/forged',
+          value: 1,
+          condition: enforce
+            ? 'FROM c WHERE c.today.dateNum = @day AND c.today.forged < @limit'
+            : 'FROM c WHERE c.today.dateNum = @day',
+          conditionValues: { day, limit: cap },
+          partitionKey: ADMIN_CONFIG_PARTITION,
+        });
+        return { claimed: true, forgedToday: Number(doc?.today?.forged) || 0 };
+      } catch (err) {
+        // 404: no stats document yet. 412: the predicate failed — either the
+        // day rolled over or we are genuinely at the limit, and only a read
+        // can tell which. Anything else is a real fault; a budget that fails
+        // open on an unknown error is not a budget.
+        if (err?.code !== 404 && err?.code !== 412) throw err;
+      }
+
+      const existing =
+        (await store.readDoc('admin_config', 'forge_stats', ADMIN_CONFIG_PARTITION)) || null;
+      const sameDay = Number(existing?.today?.dateNum) === day;
+      const forgedToday = sameDay ? Number(existing?.today?.forged) || 0 : 0;
+
+      if (sameDay && enforce && forgedToday >= cap) {
+        return { claimed: false, forgedToday };
+      }
+
+      // Roll the bucket over (or create it) with this claim already counted.
+      // The primitives have a loser — 412 on a concurrent replace, 409 on a
+      // concurrent create — and the loser goes back around the loop, where the
+      // winner's document now exists and the fast path applies.
+      const today = { date: todayKey, dateNum: day, forged: 1 };
+      try {
+        if (existing) {
+          await store.replaceDocIfMatch(
+            'admin_config',
+            { ...existing, today, updatedAt: date.toISOString() },
+            { partitionKey: ADMIN_CONFIG_PARTITION }
+          );
+        } else {
+          await store.createDoc('admin_config', {
+            id: 'forge_stats',
+            configScope: ADMIN_CONFIG_PARTITION,
+            today,
+            updatedAt: date.toISOString(),
+          });
+        }
+        return { claimed: true, forgedToday: 1 };
+      } catch (err) {
+        if (err?.code !== 409 && err?.code !== 412) throw err;
+      }
+    }
+
+    // Contention this sustained is not a normal condition. Refusing is the
+    // safe direction for a spend ceiling: the next scheduled run retries.
+    log.warn?.('claimForgeBudget: exhausted attempts under contention');
+    return { claimed: false, forgedToday: cap };
+  }
+
   async function bumpForgeStats(increments = {}) {
     try {
       const doc =
@@ -382,7 +489,7 @@ export function createForge({
    * `{ ok: false, httpStatus, error, duplicateOf? }`; never throws for a
    * pipeline outcome, only for a store failure on the save.
    */
-  async function runForgePipeline({ contentId, actor }) {
+  async function runForgePipeline({ contentId, actor, budget }) {
     const source = resolveForgeSource(
       contentId,
       await store.readDoc('content', contentId, contentId)
@@ -403,6 +510,22 @@ export function createForge({
         httpStatus: 409,
         error: `Skipped as likely duplicate of published "${dupe.bestTitle}" (similarity ${Math.round(dupe.bestScore * 100)}%).`,
         duplicateOf: dupe.bestTitle,
+      };
+    }
+
+    // 0b. Claim the day's budget before spending anything (T-761). After the
+    // dedupe check deliberately — a document refused as a duplicate costs no
+    // tokens, so charging it against the ceiling would under-serve the day.
+    // Before every model call, equally deliberately: a run killed halfway
+    // through has already spent, and a ceiling that only counts completed runs
+    // is not counting the spend it exists to bound.
+    const claim = await claimForgeBudget(budget);
+    if (!claim.claimed) {
+      return {
+        ok: false,
+        httpStatus: 429,
+        error: `Daily forge budget reached (${claim.forgedToday}/${budget?.limit}). The next scheduled run will retry.`,
+        budgetExhausted: true,
       };
     }
 
@@ -516,7 +639,10 @@ export function createForge({
     const statsFormatKey = format?.key || 'unknown';
     await bumpForgeStats({
       'totals.forged': 1,
-      'today.forged': 1,
+      // NOT 'today.forged' — claimForgeBudget already counted this run before
+      // the model calls. Incrementing here too would double-count, and worse,
+      // would put the ceiling's ledger back in the hands of a best-effort
+      // write that swallows its own failures (T-761).
       [`totals.${nextStatus === 'forge_ready' ? 'staged' : 'editing'}`]: 1,
       'totals.costUsd': usageTotals.costUsd,
       [`formats.${statsFormatKey}.forged`]: 1,
@@ -543,5 +669,5 @@ export function createForge({
     };
   }
 
-  return { runForgePipeline, bumpForgeStats, fetchPublishedCorpus };
+  return { runForgePipeline, bumpForgeStats, fetchPublishedCorpus, claimForgeBudget };
 }

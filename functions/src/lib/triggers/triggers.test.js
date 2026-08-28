@@ -676,6 +676,71 @@ describe('feed handlers', () => {
       removed: 0,
     });
   });
+
+  // T-731. The budget's whole job is to stop an invocation that cannot finish,
+  // without losing the documents it did not reach. Both halves are asserted:
+  // the throw (which is what leaves the lease unadvanced) and the guaranteed
+  // first document (which is what stops an over-budget singleton retrying
+  // forever).
+  describe('per-invocation work budget', () => {
+    const threeDocs = () =>
+      memStore({
+        content: [
+          { id: 'c1', inspectTrigger: true, _etag: 'e1' },
+          { id: 'c2', inspectTrigger: true, _etag: 'e2' },
+          { id: 'c3', inspectTrigger: true, _etag: 'e3' },
+        ],
+      });
+
+    it('throws rather than returning, so the lease does not advance past unprocessed documents', async () => {
+      const store = threeDocs();
+      // Elapsed time jumps past the budget after the first document.
+      let ticks = 0;
+      const d = {
+        ...deps(store),
+        feedBudgetMs: 1000,
+        monotonic: () => (ticks++ === 0 ? 0 : 5000),
+      };
+      const h = createFeedHandlers(d);
+      const docs = ['c1', 'c2', 'c3'].map((id) => store.data.content.get(id));
+
+      await expect(h.content(docs, { error: vi.fn() })).rejects.toMatchObject({
+        code: 'FEED_BUDGET_EXHAUSTED',
+        done: 1,
+        total: 3,
+      });
+
+      // Exactly one document was worked. A silent `return` here would have
+      // reported success and let the processor checkpoint past c2 and c3,
+      // whose triggers would then never fire again — the feed only redelivers
+      // on a subsequent write.
+      expect(d.inspector.executeInspection).toHaveBeenCalledTimes(1);
+    });
+
+    it('always processes at least one document, however small the budget', async () => {
+      const store = threeDocs();
+      const d = { ...deps(store), feedBudgetMs: 0, monotonic: () => 1_000_000 };
+      const h = createFeedHandlers(d);
+      const docs = ['c1', 'c2', 'c3'].map((id) => store.data.content.get(id));
+
+      // Budget already blown before the loop starts. Forward progress is still
+      // required, or a document heavier than the budget would redeliver
+      // forever and the feed would never drain.
+      await expect(h.content(docs, { error: vi.fn() })).rejects.toMatchObject({ done: 1 });
+      expect(d.inspector.executeInspection).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not interfere with a batch that fits', async () => {
+      const store = threeDocs();
+      const d = { ...deps(store), monotonic: () => 0 };
+      const h = createFeedHandlers(d);
+      const docs = ['c1', 'c2', 'c3'].map((id) => store.data.content.get(id));
+
+      const results = await h.content(docs, { error: vi.fn() });
+      expect(results).toHaveLength(3);
+      expect(d.inspector.executeInspection).toHaveBeenCalledTimes(3);
+    });
+  });
 });
 
 describe('notifier', () => {

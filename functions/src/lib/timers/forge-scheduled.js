@@ -112,8 +112,26 @@ export function createForgeScheduled({ store, config, forge, now = () => new Dat
         const outcome = await forge.runForgePipeline({
           contentId: candidate.id,
           actor: FORGE_SCHEDULER_ACTOR,
+          // The real ceiling, claimed per document inside the pipeline before
+          // any model call (T-761). The `remaining` slice above is now only a
+          // cheap early-out: it was computed once, before this loop, so it
+          // cannot see a manual forge that starts while the loop is running —
+          // and the count it read came from a best-effort write that swallows
+          // its own failures. Both are fine for "don't rank 25 candidates for
+          // nothing"; neither is fine as the only thing standing between this
+          // timer and an unbounded model bill.
+          budget: { limit: prompts.autoForge.dailyLimit, enforce: true },
         });
         if (!outcome.ok) {
+          // The budget ran out mid-loop — a manual forge consumed the rest, or
+          // the pre-loop count was stale. Stop rather than churning through
+          // the remaining candidates to be refused one at a time.
+          if (outcome.budgetExhausted) {
+            summary.attempted -= 1;
+            summary.stoppedOnBudget = true;
+            log.log?.(`[forgeScheduled] ${outcome.error}`);
+            break;
+          }
           if (outcome.httpStatus === 409) summary.skipped += 1;
           else {
             summary.errors += 1;

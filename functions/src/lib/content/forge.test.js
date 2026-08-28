@@ -6,6 +6,7 @@ import {
   sumForgeUsage,
   applyIncrements,
   resolveForgeSource,
+  dayNumber,
 } from './forge.js';
 import { createDrafter } from './drafting.js';
 import { createDigest } from './digest.js';
@@ -41,6 +42,7 @@ function makeDeps({
   docs = {},
   titles = [],
   corpus = null,
+  statsDoc = null,
 } = {}) {
   const content = {
     'c-1': {
@@ -53,8 +55,25 @@ function makeDeps({
     ...docs,
   };
   const writes = { patches: [], upserts: [] };
+
+  // admin_config/forge_stats, modelled with the Cosmos semantics the budget
+  // claim depends on (T-761): a conditional patch that returns 412 when the
+  // predicate fails and 404 when the document is absent, and a create that
+  // returns 409 to a loser. A fake that always succeeds would let the claim
+  // look correct while proving nothing about the compare-and-increment.
+  //
+  // The two predicates this code issues are interpreted structurally rather
+  // than parsed as SQL; `bindConditionValues` has its own tests for the
+  // substitution itself.
+  let stats = statsDoc ? { ...statsDoc } : null;
+  const err = (code) => Object.assign(new Error(`cosmos ${code}`), { code });
+
   const store = {
-    readDoc: vi.fn(async (c, id) => (c === 'content' ? content[id] || null : null)),
+    readDoc: vi.fn(async (c, id) => {
+      if (c === 'content') return content[id] || null;
+      if (c === 'admin_config' && id === 'forge_stats') return stats ? { ...stats } : null;
+      return null;
+    }),
     queryDocs: vi.fn(async (_c, q) =>
       q.includes('c.Live = true')
         ? corpus || titles.map((t) => ({ Title: t }))
@@ -62,12 +81,37 @@ function makeDeps({
     ),
     patchDoc: vi.fn(async (c, id, u) => {
       writes.patches.push([c, id, u]);
+      if (c === 'admin_config' && id === 'forge_stats') stats = { ...(stats || { id }), ...u };
       return { id, ...u };
     }),
     upsertDoc: vi.fn(async (c, d) => {
       writes.upserts.push([c, d]);
+      if (c === 'admin_config' && d.id === 'forge_stats') stats = { ...d };
       return d;
     }),
+    incrementIf: vi.fn(async (_c, _id, { value = 1, condition, conditionValues }) => {
+      if (!stats) throw err(404);
+      const enforcing = condition.includes('c.today.forged < @limit');
+      if (Number(stats.today?.dateNum) !== conditionValues.day) throw err(412);
+      if (enforcing && Number(stats.today?.forged ?? 0) >= conditionValues.limit) throw err(412);
+      stats = {
+        ...stats,
+        today: { ...stats.today, forged: (Number(stats.today?.forged) || 0) + value },
+      };
+      return { ...stats };
+    }),
+    createDoc: vi.fn(async (_c, d) => {
+      if (stats) throw err(409);
+      stats = { ...d };
+      return { ...stats };
+    }),
+    replaceDocIfMatch: vi.fn(async (_c, d) => {
+      stats = { ...d };
+      return { ...stats };
+    }),
+    get statsDoc() {
+      return stats;
+    },
   };
   const config = {
     loadForgeProfile: async () => DEFAULT_PROFILE,
@@ -208,14 +252,22 @@ describe('runForgePipeline', () => {
       contentId: 'c-1',
       details: { nextStatus: 'forge_ready', overall: 90 },
     });
-    const [, stats] = d.writes.upserts.find(([c]) => c === 'admin_config');
-    expect(stats).toMatchObject({
+    // The end state of admin_config/forge_stats, rather than one write in the
+    // sequence: since T-761 the document is created by the budget claim before
+    // the model calls and then patched by bumpForgeStats, so no single write
+    // carries the whole shape.
+    expect(d.store.statsDoc).toMatchObject({
       id: 'forge_stats',
       configScope: ADMIN_CONFIG_PARTITION,
       totals: { forged: 1, staged: 1, costUsd: 0.0133 },
       formats: { comparison: { forged: 1, staged: 1, costUsd: 0.0133 } },
-      // The rolling day bucket the daily-limit enforcement reads (T-607).
-      today: { date: NOW.toISOString().slice(0, 10), forged: 1 },
+      // The rolling day bucket the daily-limit enforcement reads (T-607),
+      // counted exactly once — by the claim, not by bumpForgeStats (T-761).
+      today: {
+        date: NOW.toISOString().slice(0, 10),
+        dateNum: dayNumber(NOW),
+        forged: 1,
+      },
     });
   });
 
@@ -311,6 +363,104 @@ describe('runForgePipeline', () => {
       (await createForge(makeDeps()).runForgePipeline({ contentId: 'missing', actor: {} }))
         .httpStatus
     ).toBe(404);
+  });
+
+  // T-761. This is the system's only AI-spend ceiling. Before it moved here it
+  // was enforced once, in the scheduler, against a count written by a
+  // best-effort read-modify-write that swallowed its own failures.
+  describe('daily budget claim', () => {
+    const today = dayNumber(NOW);
+    const statsAt = (forged, dateNum = today) => ({
+      id: 'forge_stats',
+      configScope: ADMIN_CONFIG_PARTITION,
+      today: { date: NOW.toISOString().slice(0, 10), dateNum, forged },
+    });
+
+    it('refuses when the day is spent, before any model call', async () => {
+      const d = makeDeps({ statsDoc: statsAt(5) });
+      const r = await createForge(d).runForgePipeline({
+        contentId: 'c-1',
+        actor: {},
+        budget: { limit: 5, enforce: true },
+      });
+
+      expect(r).toMatchObject({ ok: false, httpStatus: 429, budgetExhausted: true });
+      // The refusal is what a ceiling is for: nothing was generated or graded,
+      // so nothing was billed.
+      expect(d.drafter.generateDraft).not.toHaveBeenCalled();
+      expect(d.grader.gradeArticle).not.toHaveBeenCalled();
+      expect(d.store.statsDoc.today.forged).toBe(5);
+    });
+
+    it('claims before spending, so a run killed mid-flight is still counted', async () => {
+      const d = makeDeps({ statsDoc: statsAt(0) });
+      d.drafter.generateDraft.mockRejectedValue(new Error('killed'));
+      await createForge(d).runForgePipeline({
+        contentId: 'c-1',
+        actor: {},
+        budget: { limit: 5, enforce: true },
+      });
+      // The old design incremented after the pipeline finished, so a run that
+      // spent tokens and then died was invisible to the ceiling.
+      expect(d.store.statsDoc.today.forged).toBe(1);
+    });
+
+    it('rolls the bucket over on a new day rather than refusing forever', async () => {
+      const d = makeDeps({ statsDoc: statsAt(5, today - 1) });
+      const r = await createForge(d).runForgePipeline({
+        contentId: 'c-1',
+        actor: {},
+        budget: { limit: 5, enforce: true },
+      });
+      expect(r.ok).toBe(true);
+      expect(d.store.statsDoc.today).toMatchObject({ dateNum: today, forged: 1 });
+    });
+
+    it('counts an unenforced (editor-initiated) forge without capping it', async () => {
+      // Editor forging is deliberately uncapped — but it must still be
+      // counted, or the scheduler's ceiling is measured against a number that
+      // ignores half the spending.
+      const d = makeDeps({ statsDoc: statsAt(99) });
+      const r = await createForge(d).runForgePipeline({ contentId: 'c-1', actor: {} });
+      expect(r.ok).toBe(true);
+      expect(d.store.statsDoc.today.forged).toBe(100);
+    });
+
+    it('does not charge a document refused as a duplicate', async () => {
+      const d = makeDeps({ titles: ['EBS gp3 migration notes'], statsDoc: statsAt(0) });
+      const r = await createForge(d).runForgePipeline({ contentId: 'c-1', actor: {} });
+      expect(r.httpStatus).toBe(409);
+      expect(d.store.statsDoc.today.forged).toBe(0);
+    });
+
+    it('creates the ledger when none exists yet', async () => {
+      const d = makeDeps({ statsDoc: null });
+      const forge = createForge(d);
+      expect(await forge.claimForgeBudget({ limit: 2, enforce: true })).toMatchObject({
+        claimed: true,
+      });
+      expect(d.store.statsDoc.today).toMatchObject({ dateNum: today, forged: 1 });
+    });
+
+    it('lets exactly `limit` claims through', async () => {
+      const d = makeDeps({ statsDoc: statsAt(0) });
+      const forge = createForge(d);
+      const results = [];
+      for (let i = 0; i < 5; i += 1) {
+        results.push((await forge.claimForgeBudget({ limit: 3, enforce: true })).claimed);
+      }
+      expect(results).toEqual([true, true, true, false, false]);
+      expect(d.store.statsDoc.today.forged).toBe(3);
+    });
+
+    it('does not fail open on an unexpected store error', async () => {
+      // A budget that treats an unknown fault as "allowed" is not a budget.
+      const d = makeDeps({ statsDoc: statsAt(0) });
+      d.store.incrementIf.mockRejectedValue(Object.assign(new Error('boom'), { code: 500 }));
+      await expect(
+        createForge(d).claimForgeBudget({ limit: 5, enforce: true })
+      ).rejects.toThrow('boom');
+    });
   });
 });
 

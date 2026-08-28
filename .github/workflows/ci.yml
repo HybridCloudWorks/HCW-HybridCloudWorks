@@ -38,7 +38,7 @@ jobs:
             lint: npm run lint
             format: npm run format:check
             build: npm run build
-            test: npm run test:admin
+            test: npm test
           - name: functions (azure)
             dir: functions
             test: npm test
@@ -46,8 +46,15 @@ jobs:
             dir: scripts
             lint: npm run lint
             test: npm test
+          # vps-agent shells out to `docker run` with a payload that reached
+          # the host from the platform API, and its sandbox flag list is the
+          # entire security boundary. Until T-743 this row ran `npm ci` and
+          # nothing else, so an edit dropping `--network none` shipped green.
+          # The suite uses node:test — no dependency, which keeps this
+          # package's single-dependency lockfile intact.
           - name: vps-agent
             dir: vps-agent
+            test: npm test
           - name: edge (availability probe)
             dir: edge/availability-probe
             test: npm test
@@ -141,8 +148,91 @@ jobs:
           python tooling/workflow.py close --workflow wf-ci-dirty --reason 'ci dirty' --abandon
           test "$(python -c 'import json;print(json.load(open(".agentic/workflows/wf-ci-dirty/WORKFLOW.json"))["status"])')" = abandoned
 
+      # The two scenarios above drive every node through the UNAVAILABLE-agent
+      # branch, so `handoff_valid` and `scalar` — the parsing that decides
+      # whether an agent's claimed work is real — were never called (T-742).
+      # A regression in the frontmatter regex, the workflow/agent cross-check
+      # or the evidence requirement passed CI green, and the Stop guard would
+      # then release on a workflow carrying fabricated handoffs.
+      #
+      # No agent definition is committed (`.claude/agents/` is untracked), so
+      # nothing here can be available by accident. This step manufactures one:
+      # the file existing is the whole of what `installed_agents` checks, and
+      # the registry entry is what `discover` matches it against. Both are
+      # throwaway edits to an ephemeral checkout.
+      - name: Handoff validator accepts real work and rejects fabricated work
+        run: |
+          set -euo pipefail
+          mkdir -p .claude/agents
+          cat > .claude/agents/ci-probe.md <<'AGENT'
+          ---
+          name: ci-probe
+          description: Synthetic agent used only by this CI check. Never invoked.
+          ---
+          Its file existing is what makes the node available. Nothing runs it.
+          AGENT
+          cat >> tooling/agent-registry.yml <<'ENTRY'
+            - id: ci-probe
+              agent_name: ci-probe
+              capability: "CI harness probe"
+              enabled_by_default: true
+          ENTRY
+
+          python tooling/workflow.py init --mode selected --agents ci-probe \
+            --objective 'ci handoff' --workflow-id wf-ci-handoff
+          # The node must be AVAILABLE, or this step silently re-tests the
+          # unavailable branch and proves nothing — which is the whole bug.
+          python - <<'PY'
+          import json, sys
+          nodes = json.load(open('.agentic/workflows/wf-ci-handoff/WORKFLOW.json'))['nodes']
+          if not (len(nodes) == 1 and nodes[0]['available']):
+              sys.exit(f'ci-probe is not available; this step would prove nothing: {nodes}')
+          PY
+
+          write_handoff() {
+            cat > .agentic/workflows/wf-ci-handoff/handoffs/ci-probe.yml
+          }
+
+          # 1. A well-formed handoff validates.
+          write_handoff <<'HANDOFF'
+          workflow_id: wf-ci-handoff
+          agent_id: ci-probe
+          status: completed
+          summary: Synthetic handoff so the validator is exercised.
+          next_action: none
+          authorization_used: none
+          evidence:
+            - path: tooling/workflow.py
+              note: the validator under test
+          HANDOFF
+          python tooling/workflow.py validate --workflow wf-ci-handoff
+
+          # 2. An agent claiming another node's work is refused.
+          sed -i 's/^agent_id: ci-probe/agent_id: someone-else/' \
+            .agentic/workflows/wf-ci-handoff/handoffs/ci-probe.yml
+          if python tooling/workflow.py validate --workflow wf-ci-handoff; then
+            echo 'validate accepted a handoff whose agent_id does not match its node'
+            exit 1
+          fi
+
+          # 3. "completed" with no evidence path is refused — the property that
+          #    stops an agent claiming work it never did.
+          write_handoff <<'HANDOFF'
+          workflow_id: wf-ci-handoff
+          agent_id: ci-probe
+          status: completed
+          summary: Claims completion, offers nothing.
+          next_action: none
+          authorization_used: none
+          evidence:
+          HANDOFF
+          if python tooling/workflow.py validate --workflow wf-ci-handoff; then
+            echo 'validate accepted a completed handoff carrying no evidence'
+            exit 1
+          fi
+
       - name: Stop hook stays fail-open without state
         run: |
           set -euo pipefail
-          rm -rf .agentic
+          rm -rf .agentic .claude/agents
           echo '{}' | python hooks/claude_event.py --event Stop
