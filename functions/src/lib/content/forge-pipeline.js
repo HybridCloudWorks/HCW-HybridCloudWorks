@@ -12,6 +12,7 @@ import {
   KNOWN_MODULE_TYPES,
   JSON_MODULE_TYPES,
   MAX_MODULES,
+  MAX_STAT_BOARD_STATS,
 } from '../cms/content-modules.js';
 
 /**
@@ -54,10 +55,10 @@ export function buildForgeModuleInstruction(format) {
   const formatModules = format?.modules?.use?.join(', ') || 'fact, recommendation';
   return `ContentForge module requirements (these OVERRIDE the earlier "never emit picture/video/spacer" rule):
 - Include 4 to 8 module tags total, spread through the article where they belong contextually.
-- Vary align between "left" and "right" so consecutive modules alternate sides; use align="all" only for design modules.
-- Include at least one spacer module as a visual break between major sections: <module type="spacer">{"style":"gradient"}</module>. Valid styles: gradient, solid, dotted, double, glow, accent.
+- Vary align between "left" and "right" so consecutive modules alternate sides; use align="all" for the full-width types: design, stat_board, comparison, timeline.
+- Include at least one spacer module as a visual break between major sections: <module type="spacer">{"style":"gradient"}</module>. Valid styles: gradient, solid, dots, double, glow, accent.
 - Include at least one fact or recommendation module.
-- Prioritize the format's module types (${formatModules}) plus variety from: code, links, text, design.
+- Prioritize the format's module types (${formatModules}) plus variety from: code, links, text, design, pull_quote, stat_board, comparison, timeline, callout.
 - You MAY include one or two picture modules as placeholders for generated images. Use empty imageUrl and a detailed imagePrompt describing the image to generate: <module type="picture" align="right">{"imageUrl":"","caption":"...","imagePrompt":"detailed image generation prompt"}</module>
 - Still never emit video modules.
 - Two text modules back to back (one align="left", one align="right") render side by side; use that for comparisons.`;
@@ -92,7 +93,19 @@ function linksModuleToMarkdown(content) {
   }
 }
 
+/** Best-effort JSON body → object; null when it is not a usable object. */
+function parseJsonBody(content) {
+  try {
+    const parsed = JSON.parse(String(content || '').trim());
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 // Plain-markdown fallback for a module that has to stop being a module.
+// Every content-carrying type needs a case here: the default silently drops
+// the body, which is only acceptable for the purely visual types.
 function unwrapModuleContent(type, content) {
   const body = String(content || '').trim();
   switch (type) {
@@ -106,10 +119,104 @@ function unwrapModuleContent(type, content) {
       return body.startsWith('```') ? body : `\`\`\`mermaid\n${body}\n\`\`\``;
     case 'links':
       return linksModuleToMarkdown(body);
+    case 'pull_quote': {
+      const parsed = parseJsonBody(body);
+      const text = String(parsed?.text || '').trim();
+      if (!text) return '';
+      const attribution = String(parsed?.attribution || '').trim();
+      return attribution ? `> ${text}\n>\n> ${attribution}` : `> ${text}`;
+    }
+    case 'stat_board': {
+      const parsed = parseJsonBody(body);
+      const stats = Array.isArray(parsed?.stats) ? parsed.stats : [];
+      return stats
+        .map((stat) => ({
+          label: String(stat?.label || '').trim(),
+          value: String(stat?.value ?? '').trim(),
+        }))
+        .filter((stat) => stat.label || stat.value)
+        .map(
+          (stat) =>
+            `- ${stat.label && stat.value ? `${stat.label}: ${stat.value}` : stat.label || stat.value}`
+        )
+        .join('\n');
+    }
+    case 'comparison': {
+      const parsed = parseJsonBody(body);
+      const columns = Array.isArray(parsed?.columns) ? parsed.columns : [];
+      const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+      if (columns.length < 2) return '';
+      const line = (cells) => `| ${cells.map((cell) => String(cell ?? '').trim()).join(' | ')} |`;
+      return [line(columns), line(columns.map(() => '---')), ...rows.map(line)].join('\n');
+    }
+    case 'timeline': {
+      const parsed = parseJsonBody(body);
+      const steps = Array.isArray(parsed?.steps) ? parsed.steps : [];
+      return steps
+        .map((step) => ({
+          title: String(step?.title || '').trim(),
+          body: String(step?.body || '').trim(),
+        }))
+        .filter((step) => step.title || step.body)
+        .map(
+          (step, i) =>
+            `${i + 1}. ${step.title && step.body ? `${step.title}: ${step.body}` : step.title || step.body}`
+        )
+        .join('\n');
+    }
+    case 'callout': {
+      const parsed = parseJsonBody(body);
+      const title = String(parsed?.title || '').trim();
+      const calloutBody = String(parsed?.body || '').trim();
+      if (!title) return calloutBody;
+      return calloutBody ? `**${title}**: ${calloutBody}` : `**${title}**`;
+    }
     default:
       // picture placeholders, video, spacer: purely visual, safe to drop.
       return '';
   }
+}
+
+/**
+ * Why validateModules would reject this JSON module's parsed payload, or null
+ * when the payload is semantically sound. Mirrors the per-type checks in
+ * content-modules.js validateModules — keep the two in lockstep.
+ */
+function jsonModuleSemanticIssue(type, parsed) {
+  if (type === 'pull_quote' && !String(parsed.text || '').trim()) {
+    return 'with no text';
+  }
+  if (type === 'stat_board') {
+    const stats = Array.isArray(parsed.stats) ? parsed.stats : [];
+    if (stats.length < 2 || stats.length > MAX_STAT_BOARD_STATS) {
+      return `with ${stats.length} stats (needs 2-${MAX_STAT_BOARD_STATS})`;
+    }
+    if (stats.some((stat) => !String(stat?.value ?? '').trim() || !String(stat?.label || '').trim())) {
+      return 'with a stat missing value or label';
+    }
+  }
+  if (type === 'comparison') {
+    const columns = Array.isArray(parsed.columns) ? parsed.columns : [];
+    const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+    if (columns.length < 2 || !rows.length) {
+      return 'without at least 2 columns and 1 row';
+    }
+    if (rows.some((row) => !Array.isArray(row) || row.length !== columns.length)) {
+      return 'with a row that does not match its columns';
+    }
+  }
+  if (type === 'timeline') {
+    const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+    if (steps.length < 2) return 'with fewer than 2 steps';
+    if (steps.some((step) => !String(step?.title || '').trim())) return 'with an untitled step';
+  }
+  if (
+    type === 'callout' &&
+    (!String(parsed.title || '').trim() || !String(parsed.body || '').trim())
+  ) {
+    return 'missing title or body';
+  }
+  return null;
 }
 
 /** Pass-1 verdict for one module: a replacement when it must stop being a module, else null. */
@@ -130,18 +237,31 @@ function repairModuleStructure(mod) {
         repair: `Removed ${mod.type} module with invalid JSON`,
       };
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {
+        replacement: '',
+        repair: `Removed ${mod.type} module whose JSON body is not an object`,
+      };
+    }
     if (
       mod.type === 'picture' &&
-      !String(parsed?.imageUrl || '').trim() &&
-      !String(parsed?.imagePrompt || '').trim()
+      !String(parsed.imageUrl || '').trim() &&
+      !String(parsed.imagePrompt || '').trim()
     ) {
       return {
         replacement: '',
         repair: 'Removed picture module with neither imageUrl nor imagePrompt',
       };
     }
-    if (mod.type === 'links' && !(Array.isArray(parsed?.links) && parsed.links.length)) {
+    if (mod.type === 'links' && !(Array.isArray(parsed.links) && parsed.links.length)) {
       return { replacement: '', repair: 'Removed links module with no links' };
+    }
+    const semanticIssue = jsonModuleSemanticIssue(mod.type, parsed);
+    if (semanticIssue) {
+      return {
+        replacement: unwrapModuleContent(mod.type, mod.content),
+        repair: `Unwrapped ${mod.type} module ${semanticIssue}`,
+      };
     }
     return null;
   }

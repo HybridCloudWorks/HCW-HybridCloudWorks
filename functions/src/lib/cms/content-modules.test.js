@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   BANNED_PHRASES,
+  KNOWN_MODULE_TYPES,
+  JSON_MODULE_TYPES,
   MAX_MODULES,
+  MAX_STAT_BOARD_STATS,
   mergeBannedPhrases,
   findBannedPhrases,
   scanBannedPhrases,
@@ -86,6 +89,70 @@ describe('validateModules', () => {
     expect(validateModules('<module type="fact">   </module>').issues[0]).toMatch(/is empty/);
   });
 
+  it('rejects a JSON body that is not an object', () => {
+    expect(validateModules('<module type="callout">5</module>').issues[0]).toMatch(
+      /JSON body is not an object/
+    );
+    expect(validateModules('<module type="links">["a","b"]</module>').issues[0]).toMatch(
+      /JSON body is not an object/
+    );
+  });
+
+  it('pull_quote requires text; attribution is optional', () => {
+    expect(validateModules('<module type="pull_quote">{"attribution":"Me"}</module>').issues[0]).toMatch(
+      /has no text/
+    );
+    expect(
+      validateModules('<module type="pull_quote">{"text":"Ship it"}</module>').valid
+    ).toBe(true);
+  });
+
+  it('stat_board requires 2-4 stats, each with value and label', () => {
+    const stat = (value, label) => JSON.stringify({ value, label });
+    const board = (stats) => `<module type="stat_board">{"stats":[${stats}]}</module>`;
+    expect(validateModules(board(stat('1', 'one'))).issues[0]).toMatch(/needs 2-4 stats, has 1/);
+    expect(
+      validateModules(board(Array.from({ length: 5 }, (_, i) => stat(`${i}`, `s${i}`)).join(',')))
+        .issues[0]
+    ).toMatch(/needs 2-4 stats, has 5/);
+    expect(validateModules(board([stat('40%', 'lower cost'), stat('', 'nodes')].join(','))).issues[0]).toMatch(
+      /missing value or label/
+    );
+    expect(
+      validateModules(board([stat('40%', 'lower cost'), stat('3', 'nodes')].join(','))).valid
+    ).toBe(true);
+  });
+
+  it('comparison requires >=2 columns, >=1 row, and row length matching columns', () => {
+    const cmp = (body) => validateModules(`<module type="comparison">${body}</module>`);
+    expect(cmp('{"columns":["A"],"rows":[["x"]]}').issues[0]).toMatch(/at least 2 columns and 1 row/);
+    expect(cmp('{"columns":["A","B"],"rows":[]}').issues[0]).toMatch(/at least 2 columns and 1 row/);
+    expect(cmp('{"columns":["A","B"],"rows":[["x"]]}').issues[0]).toMatch(
+      /does not match its 2 columns/
+    );
+    expect(cmp('{"columns":["A","B"],"rows":[["x","y"]]}').valid).toBe(true);
+  });
+
+  it('timeline requires >=2 titled steps', () => {
+    const tl = (body) => validateModules(`<module type="timeline">${body}</module>`);
+    expect(tl('{"steps":[{"title":"Only"}]}').issues[0]).toMatch(/at least 2 steps/);
+    expect(tl('{"steps":[{"title":"A"},{"body":"no title"}]}').issues[0]).toMatch(
+      /step with no title/
+    );
+    expect(tl('{"steps":[{"title":"A"},{"title":"B","body":"detail"}]}').valid).toBe(true);
+  });
+
+  it('callout requires both title and body', () => {
+    expect(validateModules('<module type="callout">{"title":"Heads up"}</module>').issues[0]).toMatch(
+      /both title and body/
+    );
+    expect(
+      validateModules(
+        '<module type="callout">{"eyebrow":"Note","title":"Heads up","body":"Details."}</module>'
+      ).valid
+    ).toBe(true);
+  });
+
   it('caps the module count', () => {
     const many = '<module type="text">x</module>'.repeat(MAX_MODULES + 1);
     const r = validateModules(many);
@@ -102,5 +169,35 @@ describe('validateModules', () => {
   it('handles empty and non-string input', () => {
     expect(validateModules('')).toEqual({ valid: true, moduleCount: 0, issues: [], picturePrompts: [] });
     expect(validateModules(undefined).moduleCount).toBe(0);
+  });
+});
+
+describe('module grammar contract', () => {
+  // The set documented in wiki/Blog-Machine.md. The frontend twin of this test
+  // lives in frontend/src/lib/moduleParser.test.js — a type added on one side
+  // must land on the other in the same change.
+  it('KNOWN_MODULE_TYPES matches the documented grammar exactly', () => {
+    expect([...KNOWN_MODULE_TYPES].sort()).toEqual(
+      [
+        'fact', 'recommendation', 'text', 'code', 'design',
+        'links', 'picture', 'video', 'spacer',
+        'pull_quote', 'stat_board', 'comparison', 'timeline', 'callout',
+      ].sort()
+    );
+  });
+
+  it('JSON types are a subset of known types', () => {
+    expect([...JSON_MODULE_TYPES].sort()).toEqual(
+      [
+        'links', 'picture', 'video', 'spacer',
+        'pull_quote', 'stat_board', 'comparison', 'timeline', 'callout',
+      ].sort()
+    );
+    for (const type of JSON_MODULE_TYPES) expect(KNOWN_MODULE_TYPES.has(type)).toBe(true);
+  });
+
+  it('caps match the documented limits', () => {
+    expect(MAX_MODULES).toBe(14);
+    expect(MAX_STAT_BOARD_STATS).toBe(4);
   });
 });

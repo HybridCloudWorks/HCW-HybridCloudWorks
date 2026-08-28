@@ -1,5 +1,11 @@
 import { useState, useMemo, useCallback } from 'react';
-import { parseModulesFromMarkdown, rebuildMarkdownWithModules } from '@/lib/moduleParser';
+import {
+  parseModulesFromMarkdown,
+  rebuildMarkdownWithModules,
+  RAW_MODULE_TYPES,
+  MAX_MODULES,
+} from '@/lib/moduleParser';
+import { FULL_WIDTH_MODULE_TYPES } from '@/lib/modulePairing';
 
 // ── Pure helpers (module-private) ────────────────────────────────────────────
 
@@ -19,6 +25,69 @@ function linksToInput(links = []) {
   return links.map((link) => `- [${link.title || link.url}](${link.url})`).join('\n');
 }
 
+// stat_board form encoding: one stat per line, `value | label | sublabel?`.
+function parseStatsInput(value = '') {
+  return String(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [statValue, label, sublabel] = line.split('|').map((part) => part.trim());
+      const stat = { value: statValue || '', label: label || '' };
+      if (sublabel) stat.sublabel = sublabel;
+      return stat;
+    });
+}
+
+function statsToInput(stats = []) {
+  return stats
+    .map((stat) =>
+      [stat.value, stat.label, stat.sublabel]
+        .filter((part) => part !== undefined && part !== null && part !== '')
+        .join(' | ')
+    )
+    .join('\n');
+}
+
+// comparison form encoding: first line = pipe-separated columns, then one row per line.
+function parseComparisonInput(value = '') {
+  const lines = String(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const columns = (lines[0] || '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const rows = lines.slice(1).map((line) => line.split('|').map((part) => part.trim()));
+  return { columns, rows };
+}
+
+function comparisonToInput({ columns = [], rows = [] } = {}) {
+  return [columns.join(' | '), ...rows.map((row) => (row || []).join(' | '))].join('\n');
+}
+
+// timeline form encoding: one step per line, `Title :: detail?`.
+function parseStepsInput(value = '') {
+  return String(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [title, ...rest] = line.split('::');
+      const step = { title: (title || '').trim() };
+      const body = rest.join('::').trim();
+      if (body) step.body = body;
+      return step;
+    });
+}
+
+function stepsToInput(steps = []) {
+  return steps
+    .map((step) => (step.body ? `${step.title} :: ${step.body}` : step.title || ''))
+    .join('\n');
+}
+
 function getDefaultModuleDraft(type) {
   switch (type) {
     case 'recommendation':
@@ -35,14 +104,61 @@ function getDefaultModuleDraft(type) {
       return '';
     case 'spacer':
       return 'gradient';
+    case 'design':
+      return 'graph TD;\n  A[Start] --> B[Finish]';
+    case 'pull_quote':
+      return 'One striking sentence worth restating large.';
+    case 'stat_board':
+      return '40% | lower cost\n3x | faster deploys';
+    case 'comparison':
+      return 'Dimension | Option A | Option B\nCost | $ | $$';
+    case 'timeline':
+      return 'Assess :: Inventory what you run today\nMigrate :: Move workloads in waves';
+    case 'callout':
+      return 'One or two sentences of detail.';
     case 'fact':
     default:
       return 'Add a sharp supporting insight or important fact here.';
   }
 }
 
+// stat_board, comparison and timeline always render full width; their payloads
+// pin align="all" the same way spacer pins its own.
+function buildRichPayloadFromForm(form) {
+  const { type, align, content, attribution, title, eyebrow } = form;
+
+  if (type === 'pull_quote') {
+    const payload = { type, align, text: String(content || '').trim() };
+    if (String(attribution || '').trim()) payload.attribution = attribution.trim();
+    return payload;
+  }
+  if (type === 'stat_board') {
+    return { type, align: 'all', stats: parseStatsInput(content) };
+  }
+  if (type === 'comparison') {
+    return { type, align: 'all', ...parseComparisonInput(content) };
+  }
+  if (type === 'timeline') {
+    return { type, align: 'all', steps: parseStepsInput(content) };
+  }
+  if (type === 'callout') {
+    const payload = {
+      type,
+      align,
+      title: String(title || '').trim(),
+      body: String(content || '').trim(),
+    };
+    if (String(eyebrow || '').trim()) payload.eyebrow = eyebrow.trim();
+    return payload;
+  }
+  return null;
+}
+
 function buildPayloadFromForm(form) {
   const { type, align, content, imageUrl, videoUrl, caption } = form;
+
+  const richPayload = buildRichPayloadFromForm(form);
+  if (richPayload) return richPayload;
 
   if (type === 'links') {
     return { type: 'links', align, links: parseLinksInput(content) };
@@ -56,7 +172,47 @@ function buildPayloadFromForm(form) {
   if (type === 'spacer') {
     return { type: 'spacer', align: 'left', style: content || 'gradient', height: 'h-1' };
   }
+  if (type === 'design') {
+    return { type, align: 'all', content };
+  }
   return { type, align, content };
+}
+
+/** The form's `content` textarea representation of a committed payload. */
+function formContentFor(item) {
+  switch (item.type) {
+    case 'links':
+      return linksToInput(item.links || []);
+    case 'spacer':
+      return item.style || 'gradient';
+    case 'pull_quote':
+      return item.text || '';
+    case 'stat_board':
+      return statsToInput(item.stats || []);
+    case 'comparison':
+      return comparisonToInput(item);
+    case 'timeline':
+      return stepsToInput(item.steps || []);
+    case 'callout':
+      return item.body || '';
+    default:
+      return item.content || '';
+  }
+}
+
+/** Load a committed module payload back into the flat form representation. */
+function moduleToFormState(item) {
+  return {
+    type: item.type || 'fact',
+    align: item.align || 'left',
+    content: formContentFor(item),
+    imageUrl: item.imageUrl || '',
+    videoUrl: item.videoUrl || '',
+    caption: item.caption || '',
+    attribution: item.attribution || '',
+    title: item.title || '',
+    eyebrow: item.eyebrow || '',
+  };
 }
 
 function buildPictureModule(current, imageCandidates) {
@@ -88,10 +244,12 @@ function buildSpacerModule(current) {
 }
 
 function buildContentModule(nextType, current, defaultContent) {
-  const isContentType = ['fact', 'recommendation', 'text', 'code'].includes(current.type);
+  const isContentType = RAW_MODULE_TYPES.includes(current.type);
+  let align = current.type === 'spacer' ? 'left' : current.align || 'left';
+  if (nextType === 'design') align = 'all';
   return {
     type: nextType,
-    align: current.type === 'spacer' ? 'left' : current.align || 'left',
+    align,
     content: isContentType ? current.content || defaultContent : defaultContent,
   };
 }
@@ -105,7 +263,22 @@ const INITIAL_FORM = {
   imageUrl: '',
   videoUrl: '',
   caption: '',
+  attribution: '',
+  title: '',
+  eyebrow: '',
 };
+
+// A fresh form for a type. callout gets a default title because a callout
+// without one is invalid — without this, "Add to Article" straight from the
+// picker would commit an invalid module.
+function defaultFormForType(nextType) {
+  return {
+    ...INITIAL_FORM,
+    type: nextType,
+    content: getDefaultModuleDraft(nextType),
+    title: nextType === 'callout' ? 'Heads up' : '',
+  };
+}
 
 /**
  * Manages module state.
@@ -133,14 +306,7 @@ export function useModules(draft, setDraft) {
 
   const resetModuleForm = useCallback((nextType = 'fact') => {
     setEditingModuleIndex(-1);
-    setModuleForm({
-      type: nextType,
-      align: 'left',
-      content: getDefaultModuleDraft(nextType),
-      imageUrl: '',
-      videoUrl: '',
-      caption: '',
-    });
+    setModuleForm(defaultFormForType(nextType));
   }, []);
 
   // ── Module mutations ───────────────────────────────────────────────────────
@@ -161,7 +327,7 @@ export function useModules(draft, setDraft) {
    * Auto-selects the new module for editing.
    */
   const addModuleToDraft = useCallback(() => {
-    if (moduleItems.length >= 10) return;
+    if (moduleItems.length >= MAX_MODULES) return;
 
     const payload = buildPayloadFromForm({
       ...moduleForm,
@@ -182,31 +348,7 @@ export function useModules(draft, setDraft) {
     setEditingModuleIndex(newIndex);
 
     // Load the committed payload back into the form (normalises content representation)
-    let formContent = payload.content || '';
-    let formImageUrl = '';
-    let formVideoUrl = '';
-    let formCaption = '';
-    if (payload.type === 'links') {
-      formContent = linksToInput(payload.links || []);
-    } else if (payload.type === 'spacer') {
-      formContent = payload.style || 'gradient';
-    } else if (payload.type === 'picture') {
-      formContent = '';
-      formImageUrl = payload.imageUrl || '';
-      formCaption = payload.caption || '';
-    } else if (payload.type === 'video') {
-      formContent = '';
-      formVideoUrl = payload.videoUrl || '';
-      formCaption = payload.caption || '';
-    }
-    setModuleForm({
-      type: payload.type,
-      align: payload.align || 'left',
-      content: formContent,
-      imageUrl: formImageUrl,
-      videoUrl: formVideoUrl,
-      caption: formCaption,
-    });
+    setModuleForm(moduleToFormState(payload));
   }, [moduleForm, moduleItems, parsedPreviewText, setDraft]);
 
   /**
@@ -218,19 +360,8 @@ export function useModules(draft, setDraft) {
       const item = moduleItems[index];
       if (!item) return;
 
-      let content = item.content || '';
-      if (item.type === 'links') content = linksToInput(item.links || []);
-      else if (item.type === 'spacer') content = item.style || 'gradient';
-
       setEditingModuleIndex(index);
-      setModuleForm({
-        type: item.type || 'fact',
-        align: item.align || 'left',
-        content,
-        imageUrl: item.imageUrl || '',
-        videoUrl: item.videoUrl || '',
-        caption: item.caption || '',
-      });
+      setModuleForm(moduleToFormState(item));
     },
     [moduleItems]
   );
@@ -250,7 +381,7 @@ export function useModules(draft, setDraft) {
     (index, align) => {
       if (!['left', 'right', 'all'].includes(align)) return;
       const next = moduleItems.map((item, i) => {
-        if (i !== index || item.type === 'spacer') return item;
+        if (i !== index || FULL_WIDTH_MODULE_TYPES.includes(item.type)) return item;
         return { ...item, align };
       });
       setDraft(rebuildMarkdownWithModules(parsedPreviewText, next));
@@ -312,33 +443,29 @@ export function useModules(draft, setDraft) {
           nextModule = buildSpacerModule(current);
         } else if (nextType === 'video') {
           nextModule = buildVideoModule(current);
-        } else {
+        } else if (RAW_MODULE_TYPES.includes(nextType)) {
           nextModule = buildContentModule(nextType, current, defaultContent);
+        } else {
+          // Rich JSON types: build a fresh payload from the default form draft.
+          nextModule = buildPayloadFromForm({
+            type: nextType,
+            align: current.type === 'spacer' ? 'left' : current.align || 'left',
+            content: defaultContent,
+            attribution: '',
+            title: nextType === 'callout' ? 'Heads up' : '',
+            eyebrow: '',
+          });
         }
 
         const next = moduleItems.map((item, i) => (i === editingModuleIndex ? nextModule : item));
         setDraft(rebuildMarkdownWithModules(parsedPreviewText, next));
 
-        setModuleForm({
-          type: nextModule.type,
-          align: nextModule.align || 'left',
-          content: nextModule.content || nextModule.style || defaultContent,
-          imageUrl: nextModule.imageUrl || '',
-          videoUrl: nextModule.videoUrl || '',
-          caption: nextModule.caption || '',
-        });
+        setModuleForm(moduleToFormState(nextModule));
         return;
       }
 
       // Not editing — just update form
-      setModuleForm({
-        type: nextType,
-        align: 'left',
-        content: defaultContent,
-        imageUrl: '',
-        videoUrl: '',
-        caption: '',
-      });
+      setModuleForm(defaultFormForType(nextType));
     },
     [editingModuleIndex, moduleItems, parsedPreviewText, setDraft]
   );

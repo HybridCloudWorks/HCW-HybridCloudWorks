@@ -12,12 +12,19 @@ import {
   Video,
   Minus,
   Hash,
+  Quote,
+  BarChart3,
+  Table2,
+  ListOrdered,
+  Megaphone,
+  Workflow,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useEditor } from '../context/EditorContext';
 import { useDragDrop } from '../hooks/useDragDrop';
 import { resolveMediaUrl } from '../../../lib/functionsBase';
+import { moduleDataToString } from '../../../lib/moduleParser';
 
 // ── Module type config ────────────────────────────────────────────────────────
 
@@ -30,6 +37,12 @@ const MODULE_ICONS = {
   text: AlignLeft,
   code: FileCode2,
   spacer: Minus,
+  design: Workflow,
+  pull_quote: Quote,
+  stat_board: BarChart3,
+  comparison: Table2,
+  timeline: ListOrdered,
+  callout: Megaphone,
 };
 
 const MODULE_COLORS = {
@@ -41,6 +54,12 @@ const MODULE_COLORS = {
   text: 'border-sky-500/40 bg-sky-500/5',
   code: 'border-amber-500/40 bg-amber-500/5',
   spacer: 'border-slate-500/30 bg-slate-500/5',
+  design: 'border-teal-500/40 bg-teal-500/5',
+  pull_quote: 'border-violet-500/40 bg-violet-500/5',
+  stat_board: 'border-cyan-500/40 bg-cyan-500/5',
+  comparison: 'border-indigo-500/40 bg-indigo-500/5',
+  timeline: 'border-orange-500/40 bg-orange-500/5',
+  callout: 'border-yellow-500/40 bg-yellow-500/5',
 };
 
 // ── Board item builder ────────────────────────────────────────────────────────
@@ -100,26 +119,69 @@ export function applyBoardReorder(boardItems, originalSections, allModules) {
     if (mods.length === 0) {
       return { ...section, content: strippedContent };
     }
-    const modStrings = mods.map((m) => serializeModule(m)).join('\n\n');
+    const modStrings = mods.map((m) => moduleDataToString(m)).join('\n\n');
     return { ...section, content: `${strippedContent}\n\n${modStrings}` };
   });
 }
 
-function serializeModule(m) {
-  const { type, align = 'left' } = m;
-  if (type === 'fact' || type === 'recommendation' || type === 'text' || type === 'code') {
-    return `<module type="${type}" align="${align}">${m.content || ''}</module>`;
-  }
-  if (type === 'links' || type === 'picture' || type === 'video' || type === 'spacer') {
-    const { type: _t, align: _a, ...rest } = m;
-    return `<module type="${type}" align="${align}">${JSON.stringify(rest)}</module>`;
-  }
-  return '';
-}
-
 // ── Module preview ────────────────────────────────────────────────────────────
 
+/** Previews for the Phase 4 rich types; null hands off to getModulePreview. */
+function getRichModulePreview(module) {
+  if (module.type === 'pull_quote') {
+    return (
+      <span className="text-xs text-muted-foreground italic line-clamp-2">
+        {module.text ? `"${module.text}"` : '—'}
+        {module.attribution ? ` — ${module.attribution}` : ''}
+      </span>
+    );
+  }
+  if (module.type === 'stat_board') {
+    const stats = module.stats || [];
+    return (
+      <span className="text-xs text-muted-foreground truncate">
+        {stats.length ? stats.map((s) => `${s.value} ${s.label}`.trim()).join(' · ') : '—'}
+      </span>
+    );
+  }
+  if (module.type === 'comparison') {
+    const columns = module.columns || [];
+    const rows = module.rows || [];
+    return (
+      <span className="text-xs text-muted-foreground truncate">
+        {columns.length
+          ? `${columns.join(' vs ')} · ${rows.length} row${rows.length !== 1 ? 's' : ''}`
+          : '—'}
+      </span>
+    );
+  }
+  if (module.type === 'timeline') {
+    const steps = module.steps || [];
+    return (
+      <span className="text-xs text-muted-foreground truncate">
+        {steps.length
+          ? steps
+              .map((s) => s.title)
+              .filter(Boolean)
+              .join(' → ')
+          : '—'}
+      </span>
+    );
+  }
+  if (module.type === 'callout') {
+    return (
+      <span className="text-xs text-muted-foreground truncate">
+        {module.title || '—'}
+        {module.body ? ` — ${module.body}` : ''}
+      </span>
+    );
+  }
+  return null;
+}
+
 function getModulePreview(module) {
+  const richPreview = getRichModulePreview(module);
+  if (richPreview) return richPreview;
   if (module.type === 'picture') {
     return (
       <div className="flex items-center gap-2">

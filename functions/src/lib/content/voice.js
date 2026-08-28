@@ -57,9 +57,9 @@ export const FORMAT_LIBRARY = Object.freeze([
       'Open with the specific problem being solved (one sentence, no throat-clearing). Then numbered steps, each with a command or config snippet where the source supports it. Close with a short "Verify it worked" check, not a generic conclusion.',
     modules: {
       min: 2,
-      max: 4,
-      use: ['recommendation', 'code'],
-      note: 'A recommendation module for one best-practice callout tied to a step, plus a code module for the actual command/snippet if the source has one.',
+      max: 5,
+      use: ['recommendation', 'code', 'callout'],
+      note: 'A recommendation module for one best-practice callout tied to a step, a code module for the actual command/snippet if the source has one, and a callout module for a prerequisite or gotcha the reader must know before starting.',
     },
   },
   {
@@ -70,9 +70,9 @@ export const FORMAT_LIBRARY = Object.freeze([
       'State the two (or more) options being compared in the first sentence. Use a short comparison table or bullet contrast for the 3-4 dimensions that actually matter (cost, latency, ops burden, lock-in). End with a one-sentence recommendation tied to a specific use case, not "it depends."',
     modules: {
       min: 2,
-      max: 3,
-      use: ['text', 'text', 'fact'],
-      note: 'Two text (frame) modules placed back to back, one align="left" and one align="right", each listing one option\'s specifics — they render as a side-by-side pair. Optionally one fact module for a tangential stat.',
+      max: 4,
+      use: ['comparison', 'stat_board', 'text'],
+      note: 'A comparison module for the contrast table itself (first column = the dimension, one column per option). A stat_board when the source carries 2-4 hard numbers worth headline treatment. Text (frame) modules back to back — one align="left", one align="right" — still work for a prose-heavy side-by-side.',
     },
   },
   {
@@ -96,9 +96,9 @@ export const FORMAT_LIBRARY = Object.freeze([
       'Frame around the specific scenario from the source: the starting state, what changed, and the measurable outcome. Include at least one concrete number (before/after). Avoid generic "many organizations struggle with..." framing.',
     modules: {
       min: 2,
-      max: 4,
-      use: ['fact', 'links'],
-      note: 'One fact module for a supporting stat, one links module pointing back to the source/reference material. Add a design module only if the scenario involves an architecture worth diagramming.',
+      max: 5,
+      use: ['timeline', 'pull_quote', 'fact', 'links'],
+      note: 'A timeline module for the sequence the scenario followed (starting state, the change, the outcome). A pull_quote for the single most striking result sentence. One fact module for a supporting stat, one links module pointing back to the source/reference material. Add a design module only if the scenario involves an architecture worth diagramming.',
     },
   },
   {
@@ -109,9 +109,9 @@ export const FORMAT_LIBRARY = Object.freeze([
       'Open by stating the common assumption, then immediately state why it is wrong or incomplete, backed by a specific detail from the source. Structure as claim, then evidence, then what to do instead. Do not hedge every sentence.',
     modules: {
       min: 2,
-      max: 3,
-      use: ['recommendation', 'fact'],
-      note: 'One recommendation module for what to do instead of the myth, one fact module for a supporting data point.',
+      max: 4,
+      use: ['pull_quote', 'callout', 'recommendation'],
+      note: 'A pull_quote module restating the myth (or the counter-claim) in one striking sentence. A callout module framing the caveat or the condition under which the common advice still holds. One recommendation module for what to do instead.',
     },
   },
   {
@@ -135,9 +135,9 @@ export const FORMAT_LIBRARY = Object.freeze([
       'Cover architecture/mechanism first, then trade-offs, then a concrete implementation detail (code, config, or CLI). Reserve this format for sources with enough technical depth to sustain it — do not pad a thin source to hit this length.',
     modules: {
       min: 3,
-      max: 6,
-      use: ['design', 'code', 'fact'],
-      note: 'A design module (Mermaid diagram) of the architecture or flow being described when the topic is architectural, a code module for a real snippet, and a fact or recommendation module. The design module is the highest-value module for this format — use it whenever there is a system, pipeline, or flow to diagram.',
+      max: 7,
+      use: ['design', 'code', 'fact', 'stat_board'],
+      note: 'A design module (Mermaid diagram) of the architecture or flow being described when the topic is architectural, a code module for a real snippet, and a fact or recommendation module. A stat_board when the deep dive surfaces 2-4 hard performance or cost numbers. The design module is the highest-value module for this format — use it whenever there is a system, pipeline, or flow to diagram.',
     },
   },
 ]);
@@ -151,8 +151,13 @@ export const MODULE_TAG_SYNTAX = `Modules are inline tags embedded directly in p
 - code (a real command, config, or code snippet taken from or clearly implied by the source — plain text inside the tag, no markdown code fences): <module type="code" align="left">...</module>
 - links (reference links; content must be a single JSON object, not markdown): <module type="links" align="left">{"links":[{"title":"...","url":"..."}]}</module>
 - design (an architecture, flow, or sequence diagram as Mermaid syntax, e.g. "graph TD" or "sequenceDiagram" — plain Mermaid text inside the tag): <module type="design" align="all">...</module>
+- pull_quote (one striking sentence from the article worth restating large — a claim or takeaway, not a heading; content must be a single JSON object): <module type="pull_quote" align="left">{"text":"The bill dropped 40% before we touched a single instance type.","attribution":"optional source"}</module>
+- stat_board (2 to 4 headline numbers that deserve visual weight — each a real figure from the source, never invented): <module type="stat_board" align="all">{"stats":[{"value":"40%","label":"lower cost"},{"value":"3x","label":"faster deploys","sublabel":"optional detail"}]}</module>
+- comparison (a compact table contrasting 2-3 options across the dimensions that matter; first column is the dimension name): <module type="comparison" align="all">{"columns":["Dimension","Option A","Option B"],"rows":[["Cost","$","$$"],["Ops burden","low","high"]]}</module>
+- timeline (an ordered sequence of 2-6 steps or milestones — a rollout, a migration, an incident): <module type="timeline" align="all">{"steps":[{"title":"Assess","body":"optional one-line detail"},{"title":"Migrate"}]}</module>
+- callout (a titled aside worth a visual frame — a warning, prerequisite, or gotcha): <module type="callout" align="left">{"eyebrow":"optional label","title":"Check your quota first","body":"One or two sentences of detail."}</module>
 
-align is one of "left", "right", "all". Never emit picture, video, or spacer modules — there is no real media to put there and a broken placeholder is worse than no module. Never fabricate a links URL that isn't the source URL or a well-known official documentation page.`;
+align is one of "left", "right", "all". stat_board, comparison, and timeline always render full width — give them align="all". Never emit picture, video, or spacer modules — there is no real media to put there and a broken placeholder is worse than no module. Never fabricate a links URL that isn't the source URL or a well-known official documentation page.`;
 
 export function buildBannedPhrasesClause(extraBanned = []) {
   return `Never use these overused AI-sounding phrases or close variants of them: ${mergeBannedPhrases(

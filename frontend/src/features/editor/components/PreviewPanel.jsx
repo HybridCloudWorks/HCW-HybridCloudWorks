@@ -5,6 +5,9 @@ import { ModuleContainer } from '@/components/modules/InlineModules';
 import EditorDiffView from '@/components/admin/EditorDiffView';
 import { Button } from '@/components/ui/button';
 import { useEditor } from '../context/EditorContext';
+import { canPairModules, isHeadingOnlyTextSegment } from '@/lib/modulePairing';
+import { ARTICLE_PROSE_CLASS, HEADING_PROSE_CLASS } from '@/lib/articleStyles';
+import { markdownCodeComponents } from '@/components/shared/CodeBlock';
 
 function slugifyHeading(value = '') {
   return String(value || '')
@@ -13,27 +16,6 @@ function slugifyHeading(value = '') {
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
-}
-
-function isHeadingOnlyTextSegment(value = '') {
-  const normalized = String(value || '')
-    .replace(/\r\n/g, '\n')
-    .trim();
-  if (!normalized) return false;
-  return (
-    /^#{1,6}\s+.+$/m.test(normalized) &&
-    normalized.split('\n').every((line) => !line.trim() || /^#{1,6}\s+.+$/.test(line.trim()))
-  );
-}
-
-function canPairModules(currentModule, nextModule) {
-  if (!currentModule || !nextModule) return false;
-  if (currentModule.type === 'spacer' || nextModule.type === 'spacer') return false;
-  if (currentModule.align === 'all' || nextModule.align === 'all') return false;
-  return (
-    (currentModule.align === 'left' && nextModule.align === 'right') ||
-    (currentModule.align === 'right' && nextModule.align === 'left')
-  );
 }
 
 /**
@@ -70,8 +52,10 @@ function SectionPreview({ section, moduleItems, moduleOffset, onEditModule }) {
           const part = renderParts[i];
           if (part.kind === 'text') {
             rows.push(
-              <div key={i} className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.content}</ReactMarkdown>
+              <div key={i} className={ARTICLE_PROSE_CLASS}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
+                  {part.content}
+                </ReactMarkdown>
               </div>
             );
             continue;
@@ -112,7 +96,7 @@ function SectionPreview({ section, moduleItems, moduleOffset, onEditModule }) {
             canPairModules(module, headingBridgeModule)
           ) {
             rows.push(
-              <div key={`${i}-heading`} className="prose prose-invert prose-sm max-w-none">
+              <div key={`${i}-heading`} className={HEADING_PROSE_CLASS}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{partBetween.content}</ReactMarkdown>
               </div>
             );

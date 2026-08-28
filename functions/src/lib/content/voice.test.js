@@ -9,6 +9,7 @@ import {
   buildStyleRulesClause,
 } from './voice.js';
 import { createCritic } from './critique.js';
+import { KNOWN_MODULE_TYPES } from '../cms/content-modules.js';
 
 describe('voice and format', () => {
   it('picks the voice by provider, case-insensitively, defaulting to multi', () => {
@@ -21,6 +22,14 @@ describe('voice and format', () => {
     expect(pickFormat([]).key).toBe('how_to');
     expect(pickFormat(['how_to', 'comparison']).key).toBe('checklist');
     expect(pickFormat(FORMAT_LIBRARY.map((f) => f.key)).key).toBe('how_to');
+  });
+
+  it('every module type a format asks for exists in the module grammar', () => {
+    for (const format of FORMAT_LIBRARY) {
+      for (const type of format.modules.use) {
+        expect(KNOWN_MODULE_TYPES.has(type), `${format.key} uses unknown type ${type}`).toBe(true);
+      }
+    }
   });
 
   it('pickNextFormat reads the recent formats for the provider and fails open', async () => {
@@ -55,6 +64,11 @@ describe('voice and format', () => {
     expect(block).toMatch(/"synergy"/);
     expect(block).toMatch(/No exclamation marks/);
     expect(block).toMatch(/<module type="design" align="all">/);
+    // The rich Phase 4 types each get an exact-syntax line with a JSON example.
+    for (const type of ['pull_quote', 'stat_board', 'comparison', 'timeline', 'callout']) {
+      expect(block).toContain(`<module type="${type}"`);
+    }
+    expect(block).toMatch(/stat_board, comparison, and timeline always render full width/);
     expect(buildStyleRulesClause({ noEmDash: false, noHyphenTells: false })).toBe('');
   });
 });

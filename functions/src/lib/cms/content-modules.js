@@ -54,14 +54,24 @@ export const BANNED_PHRASES = [
 export const MODULE_TAG_REGEX =
   /<module\s+type="(\w+)"(?:\s+align="([^"]*)")?\s*>([\s\S]*?)<\/module>/g;
 
+// The type list and each JSON payload schema are specified in
+// wiki/Blog-Machine.md (the cross-package contract of record); the frontend
+// twin lists live in frontend/src/lib/moduleParser.js, and each side carries
+// a test asserting its list matches the documented set.
 export const KNOWN_MODULE_TYPES = new Set([
   'fact', 'recommendation', 'text', 'code', 'design', 'links', 'picture', 'video', 'spacer',
+  'pull_quote', 'stat_board', 'comparison', 'timeline', 'callout',
 ]);
 
 /** Types whose body must be a JSON object rather than free text. */
-export const JSON_MODULE_TYPES = new Set(['links', 'picture', 'video', 'spacer']);
+export const JSON_MODULE_TYPES = new Set([
+  'links', 'picture', 'video', 'spacer',
+  'pull_quote', 'stat_board', 'comparison', 'timeline', 'callout',
+]);
 
-export const MAX_MODULES = 10;
+export const MAX_MODULES = 14;
+
+export const MAX_STAT_BOARD_STATS = 4;
 
 /**
  * Merge extra banned phrases into the base set, de-duplicated and trimmed.
@@ -121,6 +131,13 @@ export function validateModules(markdown = '') {
     if (JSON_MODULE_TYPES.has(type)) {
       try {
         const parsed = JSON.parse(content.trim());
+        // A JSON body must be an object, not a bare value: `5` parses but no
+        // renderer can do anything with it, and the semantic checks below
+        // would silently pass for types without one.
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          issues.push(`Module ${moduleCount} (${type}) JSON body is not an object`);
+          continue;
+        }
         if (type === 'picture') {
           const prompt = String(parsed.imagePrompt || '').trim();
           if (prompt) picturePrompts.push(prompt);
@@ -131,6 +148,48 @@ export function validateModules(markdown = '') {
         if (type === 'links') {
           const links = Array.isArray(parsed.links) ? parsed.links : [];
           if (!links.length) issues.push(`Links module ${moduleCount} has no links`);
+        }
+        if (type === 'pull_quote' && !String(parsed.text || '').trim()) {
+          issues.push(`Pull-quote module ${moduleCount} has no text`);
+        }
+        if (type === 'stat_board') {
+          const stats = Array.isArray(parsed.stats) ? parsed.stats : [];
+          if (stats.length < 2 || stats.length > MAX_STAT_BOARD_STATS) {
+            issues.push(
+              `Stat-board module ${moduleCount} needs 2-${MAX_STAT_BOARD_STATS} stats, has ${stats.length}`
+            );
+          } else if (
+            stats.some(
+              (stat) => !String(stat?.value ?? '').trim() || !String(stat?.label || '').trim()
+            )
+          ) {
+            issues.push(`Stat-board module ${moduleCount} has a stat missing value or label`);
+          }
+        }
+        if (type === 'comparison') {
+          const columns = Array.isArray(parsed.columns) ? parsed.columns : [];
+          const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+          if (columns.length < 2 || !rows.length) {
+            issues.push(`Comparison module ${moduleCount} needs at least 2 columns and 1 row`);
+          } else if (rows.some((row) => !Array.isArray(row) || row.length !== columns.length)) {
+            issues.push(
+              `Comparison module ${moduleCount} has a row that does not match its ${columns.length} columns`
+            );
+          }
+        }
+        if (type === 'timeline') {
+          const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+          if (steps.length < 2) {
+            issues.push(`Timeline module ${moduleCount} needs at least 2 steps`);
+          } else if (steps.some((step) => !String(step?.title || '').trim())) {
+            issues.push(`Timeline module ${moduleCount} has a step with no title`);
+          }
+        }
+        if (
+          type === 'callout' &&
+          (!String(parsed.title || '').trim() || !String(parsed.body || '').trim())
+        ) {
+          issues.push(`Callout module ${moduleCount} needs both title and body`);
         }
       } catch {
         issues.push(`Module ${moduleCount} (${type}) content is not valid JSON`);
