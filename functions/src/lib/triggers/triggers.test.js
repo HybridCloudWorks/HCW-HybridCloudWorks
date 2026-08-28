@@ -447,6 +447,7 @@ describe('feed handlers', () => {
       },
       inspector: { executeInspection: vi.fn(async () => ({ contentStatus: 'inspected' })) },
       aiCover: { run: vi.fn(async () => ({ ran: true, reason: 'generated' })) },
+      forgeReadyNotify: { run: vi.fn(async () => ({ ran: true, reason: 'sent' })) },
       dashboardStats: { applyTransition: vi.fn(async () => ({})) },
       notifier: { notifyTelegram: vi.fn(async () => ({ sent: true })) },
       publer: { configured: true, request: vi.fn(async () => ({})) },
@@ -483,16 +484,31 @@ describe('feed handlers', () => {
 
   it('content: inspect on flag (recording errors), AI cover on flag, counters always', async () => {
     const store = memStore({
-      content: [{ id: 'c1', inspectTrigger: true, altCoverImageTrigger: true, url: 'https://s' }],
+      content: [
+        {
+          id: 'c1',
+          inspectTrigger: true,
+          altCoverImageTrigger: true,
+          forgeReadyNotifyTrigger: true,
+          url: 'https://s',
+        },
+      ],
     });
     const d = deps(store);
     const h = createFeedHandlers(d);
     const ctx = { error: vi.fn() };
     expect(await h.content([store.data.content.get('c1'), { id: 'c2' }], ctx)).toEqual([
-      { id: 'c1', inspected: 'inspected', aiCover: 'generated', statsMoved: false },
+      {
+        id: 'c1',
+        inspected: 'inspected',
+        aiCover: 'generated',
+        forgeReadyNotify: 'sent',
+        statsMoved: false,
+      },
       { id: 'c2', statsMoved: false },
     ]);
     expect(d.dashboardStats.applyTransition).toHaveBeenCalledTimes(2);
+    expect(d.forgeReadyNotify.run).toHaveBeenCalledTimes(1);
     d.inspector.executeInspection.mockRejectedValueOnce(new Error('Status code 403'));
     const [r] = await h.content([{ id: 'c3', inspectTrigger: true }], ctx);
     expect(r.inspected).toBe('error');

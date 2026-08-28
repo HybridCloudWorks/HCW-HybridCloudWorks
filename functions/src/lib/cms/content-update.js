@@ -149,6 +149,104 @@ export function createContentUpdateHandler({ guard, store, now = () => new Date(
 }
 
 /**
+ * The state machine's core: edge check → status update → audit row, with no
+ * HTTP or guard concerns. Extracted (T-606) so the Telegram bot's /reject can
+ * run the SAME transition the admin portal does — one writer, not a bot-side
+ * copy that would drift. The HTTP handler below calls this after its guard;
+ * any other caller is responsible for its own authorization story (the bot's
+ * is the webhook secret + chat-id check in lib/telegram/bot.js).
+ *
+ * @returns {{ ok: true, contentId, from, to } |
+ *           { ok: false, status: number, error: string, allowedTransitions?: string[] }}
+ */
+export function createContentStatusTransitioner({ store, now = () => new Date(), uuid = randomUUID }) {
+  return async function applyContentStatusTransition({
+    contentId,
+    newStatus,
+    publishTarget = null,
+    markLive = null,
+    reviewNotes = '',
+    reviewedBy = 'admin',
+    actor = {},
+    userAgent = null,
+    authMethod = 'entra_bearer_token',
+    legacyBlogId = null,
+  }) {
+    const normalizedStatus = normalizeStatusForBlogOnly(newStatus);
+    const normalizedPublishTarget = normalizePublishTarget(publishTarget);
+
+    const data = await store.readDoc('content', contentId, contentId);
+    if (!data) {
+      return { ok: false, status: 404, error: `Content ${contentId} not found` };
+    }
+
+    const currentStatus = data.contentStatus || 'ingested';
+    const normalizedCurrentStatus = normalizeCurrentStatusForBlogOnly(currentStatus);
+
+    const allowed = VALID_TRANSITIONS[normalizedCurrentStatus];
+    if (!allowed || !allowed.includes(normalizedStatus)) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Invalid transition: ${normalizedCurrentStatus} → ${normalizedStatus}`,
+        allowedTransitions: allowed || [],
+      };
+    }
+
+    const nowDate = now();
+    const updateData = buildStatusUpdateData(data, normalizedStatus, reviewedBy, reviewNotes, {
+      publishTarget: normalizedPublishTarget,
+      markLive,
+      now: nowDate,
+    });
+
+    // Enforce additional invariants tied to the state machine.
+    if (normalizedStatus === 'archived') {
+      updateData.archivedAt = nowDate.toISOString();
+    }
+    if (normalizedCurrentStatus === 'rejected' && normalizedStatus === 'inspected') {
+      // "Restore" should remove rejection marker so the doc no longer appears as rejected.
+      updateData.rejectedAt = null;
+    }
+
+    await store.patchDoc('content', contentId, updateData);
+
+    const changedFields = Object.keys(updateData);
+    await store.upsertDoc('audits', {
+      id: uuid(),
+      timestamp: nowDate.toISOString(),
+      action: 'status_transition',
+      resourceType: 'content',
+      resourceId: contentId,
+      resourceTitle: data.Title || data.title || '',
+      userId: actor.oid || actor.sub || reviewedBy,
+      userName: actor.name || null,
+      userEmail: actor.email || null,
+      changes: {
+        before: { contentStatus: currentStatus },
+        after: { contentStatus: normalizedStatus },
+        changedFields,
+        notes: reviewNotes,
+      },
+      ipAddress: null, // see header — no trustworthy source until client-identity is wired
+      userAgent,
+      metadata: {
+        ...(legacyBlogId ? { legacyBlogId } : {}),
+        authMethod,
+        reviewedBy,
+      },
+      compliance: {
+        dataClassification: 'internal',
+        retentionMonths: 24,
+        identityVerified: true,
+      },
+    });
+
+    return { ok: true, contentId, from: normalizedCurrentStatus, to: normalizedStatus };
+  };
+}
+
+/**
  * POST transitionContentStatus — the state machine's single writer.
  * Source :6813.
  *
@@ -159,6 +257,8 @@ export function createContentUpdateHandler({ guard, store, now = () => new Date(
  * @param {() => string} [deps.uuid]
  */
 export function createContentTransitionHandler({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+  const applyTransition = createContentStatusTransitioner({ store, now, uuid });
+
   return async function transitionContentStatus(request, context) {
     const auth = await guard.requireRole(request, 'editor');
     if (auth.error) return auth.error;
@@ -177,7 +277,6 @@ export function createContentTransitionHandler({ guard, store, now = () => new D
       } = body;
 
       const normalizedStatus = normalizeStatusForBlogOnly(newStatus);
-      const normalizedPublishTarget = normalizePublishTarget(publishTarget);
 
       // Editors may move content through the review workflow, but the live
       // transition is reserved for publishers. The dedicated publishContent
@@ -217,82 +316,33 @@ export function createContentTransitionHandler({ guard, store, now = () => new D
         legacyBlogId = blogId;
       }
 
-      const data = await store.readDoc('content', resolvedContentId, resolvedContentId);
-      if (!data) {
-        return json(404, { error: `Content ${resolvedContentId} not found` });
-      }
-
-      const currentStatus = data.contentStatus || 'ingested';
-      const normalizedCurrentStatus = normalizeCurrentStatusForBlogOnly(currentStatus);
-      const previousStatus = normalizedCurrentStatus;
-
-      const allowed = VALID_TRANSITIONS[normalizedCurrentStatus];
-      if (!allowed || !allowed.includes(normalizedStatus)) {
-        return json(400, {
-          error: `Invalid transition: ${normalizedCurrentStatus} → ${normalizedStatus}`,
-          allowedTransitions: allowed || [],
-        });
-      }
-
-      const nowDate = now();
-      const updateData = buildStatusUpdateData(data, normalizedStatus, reviewedBy, reviewNotes, {
-        publishTarget: normalizedPublishTarget,
+      const result = await applyTransition({
+        contentId: resolvedContentId,
+        newStatus,
+        publishTarget,
         markLive,
-        now: nowDate,
-      });
-
-      // Enforce additional invariants tied to the state machine.
-      if (normalizedStatus === 'archived') {
-        updateData.archivedAt = nowDate.toISOString();
-      }
-      if (normalizedCurrentStatus === 'rejected' && normalizedStatus === 'inspected') {
-        // "Restore" should remove rejection marker so the doc no longer appears as rejected.
-        updateData.rejectedAt = null;
-      }
-
-      await store.patchDoc('content', resolvedContentId, updateData);
-
-      const changedFields = Object.keys(updateData);
-      await store.upsertDoc('audits', {
-        id: uuid(),
-        timestamp: nowDate.toISOString(),
-        action: 'status_transition',
-        resourceType: 'content',
-        resourceId: resolvedContentId,
-        resourceTitle: data.Title || data.title || '',
-        userId: user.oid || user.sub || reviewedBy,
-        userName: user.name || null,
-        userEmail: user.email || null,
-        changes: {
-          before: { contentStatus: currentStatus },
-          after: { contentStatus: normalizedStatus },
-          changedFields,
-          notes: reviewNotes,
-        },
-        ipAddress: null, // see header — no trustworthy source until client-identity is wired
+        reviewNotes,
+        reviewedBy,
+        actor: user,
         userAgent: request.headers?.get?.('user-agent') || null,
-        metadata: {
-          ...(legacyBlogId ? { legacyBlogId } : {}),
-          authMethod: 'entra_bearer_token',
-          reviewedBy,
-        },
-        compliance: {
-          dataClassification: 'internal',
-          retentionMonths: 24,
-          identityVerified: true,
-        },
+        legacyBlogId,
       });
+
+      if (!result.ok) {
+        const { status, ok: _ok, ...errorBody } = result;
+        return json(status, errorBody);
+      }
 
       context.warn(
-        `transitionStatus ${resolvedContentId}: ${previousStatus} → ${normalizedStatus} by ${reviewedBy}`
+        `transitionStatus ${resolvedContentId}: ${result.from} → ${result.to} by ${reviewedBy}`
       );
       return json(200, {
         success: true,
         contentId: resolvedContentId,
         legacyBlogId,
         collectionName: 'content',
-        from: previousStatus,
-        to: normalizedStatus,
+        from: result.from,
+        to: result.to,
       });
     } catch (error) {
       context.error('transitionContentStatus failed:', error);

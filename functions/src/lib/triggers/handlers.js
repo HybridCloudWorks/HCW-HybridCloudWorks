@@ -75,6 +75,7 @@ export function createFeedHandlers({
   mirror,
   inspector,
   aiCover,
+  forgeReadyNotify,
   dashboardStats,
   notifier,
   publer,
@@ -147,6 +148,10 @@ export function createFeedHandlers({
       if (doc.altCoverImageTrigger === true) {
         const r = await aiCover.run(doc.id, eventIdOf(doc));
         out.aiCover = r.reason;
+      }
+      if (doc.forgeReadyNotifyTrigger === true) {
+        const r = await forgeReadyNotify.run(doc.id, eventIdOf(doc));
+        out.forgeReadyNotify = r.reason;
       }
       // Counters last, from the document as delivered; a claim or completion
       // write above re-delivers this document and the marker then matches.
