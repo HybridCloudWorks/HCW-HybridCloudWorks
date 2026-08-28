@@ -7,6 +7,41 @@ name: Deploy Frontend
 # The workflow publishes to the Static Web App hostname configured in Azure;
 # DNS and custom-domain changes are separate infrastructure decisions.
 #
+# ============================================================================
+# ROLLBACK (T-729)
+# ============================================================================
+# There is no "redeploy the previous version" button. Static Web Apps keeps no
+# addressable history of uploads for this SKU, and the upload here replaces the
+# content root wholesale. So rollback is a FORWARD deploy of known-good code,
+# and it has one non-obvious constraint worth knowing before you need it:
+#
+#   **You cannot roll back by dispatching an older ref.** The T-705 guard below
+#   refuses any ref but `main`, deliberately — that guard is what stops an
+#   unreviewed branch shipping to production past the required checks. It
+#   applies to a rollback dispatch exactly as it applies to a bad one.
+#
+# The procedure is therefore:
+#
+#   1. `git revert <bad commit>` on a branch, open a PR, let CI run.
+#   2. Merge it. Reverting through the normal gate is the point: a rollback is
+#      a production change and gets the same review as any other.
+#   3. Dispatch this workflow from `main`.
+#
+# If the estate is unserviceable and step 1-2 is too slow, the escape hatch is
+# an owner one and lives outside this repository: Azure Portal → the Static Web
+# App → re-point or disable the custom domain. That is a decision with DNS
+# consequences, which is why it is not automated here.
+#
+# **Not automated, and why.** The obvious automation — a post-deploy HTTP check
+# that triggers a re-deploy of the previous commit — cannot be written honestly
+# today. A GitHub-hosted runner asking `https://hybridcloudworks.com` is a
+# datacenter client, and Cloudflare's Bot Fight Mode answers those with a 403
+# interstitial; that is the whole reason the availability test is disarmed and
+# ADR 0024 routes around it with a Worker (TODO.md T-519). A smoke step written
+# against the public host would fail on a healthy deploy and trigger a rollback
+# of good code, which is worse than having no smoke step. Revisit when T-519's
+# Worker is deployed and can be asked instead.
+#
 # on:
 #   push:
 #     branches: [main]
@@ -18,16 +53,47 @@ on:
 permissions:
   contents: read
 
+# One deploy to the Static Web App at a time (T-729). `deploy-functions.yml`
+# has always had this; the frontend did not, so two overlapping dispatches
+# raced the upload with nondeterministic last-writer-wins — and because the
+# upload is not atomic, the losing run could interleave rather than simply be
+# overwritten, leaving a mix of two builds served.
+#
+# `cancel-in-progress: false`, matching the functions deploy: cancelling a
+# deploy part-way through leaves the target in exactly the half-written state
+# the group exists to prevent. Queue instead.
+concurrency:
+  group: swa-deploy
+  cancel-in-progress: false
+
+# ============================================================================
+# WHY THIS IS TWO JOBS (T-727)
+# ============================================================================
+# `AZURE_STATIC_WEB_APPS_API_TOKEN` is the last long-lived, non-expiring
+# credential in this pipeline — everything else is federated OIDC. It used to
+# live in the same job that had just run `npm ci` and executed the whole
+# frontend dependency tree, so a compromised build dependency had it in reach,
+# and exfiltrating it grants standing ability to publish arbitrary content to
+# the public site until a human notices and rotates it.
+#
+# `build` now installs, builds and verifies, and holds NO secret. `deploy`
+# holds the token and installs nothing — it downloads the verified output and
+# uploads it. A compromised build dependency can still poison this deploy's
+# content (it produced it), but it cannot take the credential and publish again
+# tomorrow, which is the harm the finding names.
+#
+# The `production` environment binding moves to `deploy`, which is the job that
+# actually touches production — and it is where an approval gate belongs, since
+# an approval that fires before the build is an approval of nothing.
+#
+# STILL OPEN, and owner-gated: moving the SWA deploy to OIDC entirely, which
+# would remove the credential rather than isolate it, and storing this secret
+# as an ENVIRONMENT secret on a protected `production` rather than a repository
+# secret. Both need repository-admin and Azure access. Tracked in TODO.md.
 jobs:
-  build-and-deploy:
-    name: Build and Deploy to Azure Static Web Apps
+  build:
+    name: Build and verify the site
     runs-on: ubuntu-latest
-    # Binding the job to an environment gives production deploys a deployment
-    # history and a place to hang an approval gate. It does NOT create the gate
-    # on its own: GitHub auto-creates a missing environment with no protection
-    # rules, so until required reviewers are configured on the `production`
-    # environment this records who deployed without gating whether they may.
-    environment: production
     defaults:
       run:
         working-directory: frontend
@@ -163,6 +229,58 @@ jobs:
             echo "::error::dist is over the Static Web Apps 500 MB limit at $bytes bytes."
             exit 1
           }
+
+      # Handed to `deploy` instead of being uploaded from here, so the token
+      # never shares a job with the dependency tree that produced this (T-727).
+      # One day's retention: this is a build artifact, not a release archive,
+      # and the rollback path in the header is a forward deploy from main.
+      - name: Upload the verified site
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: site
+          path: frontend/dist
+          retention-days: 1
+          if-no-files-found: error
+          # Already-compressed assets; re-compressing 117 MB buys little and
+          # costs minutes on both ends.
+          compression-level: 1
+
+  deploy:
+    name: Deploy to Azure Static Web Apps
+    needs: build
+    runs-on: ubuntu-latest
+    # Binding the job to an environment gives production deploys a deployment
+    # history and a place to hang an approval gate. It does NOT create the gate
+    # on its own: GitHub auto-creates a missing environment with no protection
+    # rules, so until required reviewers are configured on the `production`
+    # environment this records who deployed without gating whether they may
+    # (T-705).
+    environment: production
+    steps:
+      # The SWA action reads `app_location` from the workspace, so the
+      # repository still has to be present — but nothing here installs or runs
+      # a dependency.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download the verified site
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: site
+          path: frontend/dist
+
+      # Cheap re-assertion after the transfer. The build verified this content
+      # thoroughly; what is unverified here is that it survived upload and
+      # download intact, and deploying an empty directory would succeed and
+      # blank the site.
+      - name: Confirm the artifact arrived
+        run: |
+          set -euo pipefail
+          test -f frontend/dist/index.html || { echo "::error::artifact is missing index.html"; exit 1; }
+          test -f frontend/dist/staticwebapp.config.json || { echo "::error::artifact is missing staticwebapp.config.json — every deep link would 404"; exit 1; }
+          html=$(find frontend/dist -name '*.html' | wc -l)
+          [ "$html" -ge 60 ] || { echo "::error::only $html HTML documents survived the artifact round trip"; exit 1; }
+          echo "artifact intact: $html HTML documents"
 
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1

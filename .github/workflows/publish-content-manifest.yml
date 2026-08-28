@@ -25,18 +25,45 @@ on:
     # published by humans and by the forge, and neither tells this workflow.
     - cron: '15 6 * * *'
 
-permissions:
-  contents: write # commits the manifest
-  id-token: write # federated credential exchange for azure/login
+# No workflow-level permissions: each job declares its own, and the whole point
+# of the split below is that no job holds both (T-726).
+permissions: {}
 
 concurrency:
   group: content-manifest
   cancel-in-progress: false
 
+# ============================================================================
+# WHY THIS IS TWO JOBS (T-726)
+# ============================================================================
+# It used to be one, holding `contents: write` AND `id-token: write` — the full
+# deploy identity plus the ability to push to main — while running `npm ci` on
+# third-party packages. That was the single highest supply-chain concentration
+# in the pipeline: any postinstall script in scripts/'s dependency tree ran with
+# a token that could push arbitrary commits to a protected branch and an Azure
+# federated credential in the same environment.
+#
+# Now `build` holds the Azure identity and NEVER `contents: write`, and `commit`
+# holds `contents: write` and NEVER an Azure identity. Neither is enough on its
+# own, and the artifact between them is a plain JSON file. `build` also installs
+# with `--ignore-scripts`, so lifecycle scripts do not execute at all — verified
+# that the install and the manifest build both succeed without them.
+#
+# STILL OPEN, and it is an owner action, not a code change: for the push in
+# `commit` to land on a main protected by twelve required contexts, the ruleset
+# must bypass the Actions token — which means every workflow holding
+# `contents: write` can push past all checks. Narrowing that bypass to a deploy
+# key scoped to `frontend/data/content-manifest.json`, or replacing the push
+# with an auto-merging pull request, needs repository-admin access. Tracked in
+# TODO.md. The split above shrinks what can reach that push; it does not remove
+# the bypass.
 jobs:
-  publish:
-    name: Read Cosmos and commit the manifest
+  build:
+    name: Read Cosmos and build the manifest
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout only — this job must never be able to push
+      id-token: write # federated credential exchange for azure/login
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -55,9 +82,12 @@ jobs:
           tenant-id: ${{ vars.TENANT_ID }}
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
 
+      # `--ignore-scripts`: nothing in this tree needs a lifecycle script, and
+      # this job holds an Azure credential. Defence in depth behind the job
+      # split — the split is what makes a compromised package unable to push.
       - name: Install script dependencies
         working-directory: scripts
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # DefaultAzureCredential resolves through the CLI session azure/login
       # leaves behind. COSMOS_ENDPOINT is a repository variable, not a secret —
@@ -68,6 +98,32 @@ jobs:
           COSMOS_ENDPOINT: ${{ vars.COSMOS_ENDPOINT }}
         run: node build-content-manifest.mjs
 
+      - name: Upload the manifest
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: content-manifest
+          path: frontend/data/content-manifest.json
+          retention-days: 1
+          if-no-files-found: error
+
+  commit:
+    name: Commit the manifest if it changed
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commits the manifest — and holds no Azure identity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download the manifest
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: content-manifest
+          path: frontend/data
+
+      # No `npm ci` in this job, deliberately: it holds the token that can push
+      # to main, so it installs nothing and runs only git and node's built-ins.
       - name: Commit if the published set changed
         run: |
           set -euo pipefail
