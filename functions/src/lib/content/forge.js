@@ -27,7 +27,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
-import { findBannedPhrases, validateModules } from '../cms/content-modules.js';
+import { findBannedPhrases, validateModules, MAX_MODULES } from '../cms/content-modules.js';
+import { findRelatedPublished, buildRelatedReadingModule } from './related-posts.js';
 import {
   buildContentQualityReport,
   buildImageReadinessReport,
@@ -233,17 +234,19 @@ export function createForge({
   uuid = randomUUID,
   log = {},
 }) {
-  // Fails open: a store hiccup never blocks generation.
-  async function fetchPublishedTitles() {
+  // Fails open: a store hiccup never blocks generation. One fetch serves two
+  // consumers — the dedupe gate (titles) and the related-posts interlinker
+  // (ids, topics and URLs), so the corpus is read once per run.
+  async function fetchPublishedCorpus() {
     try {
       const rows = await store.queryDocs(
         'content',
-        'SELECT TOP 300 c.Title, c.title FROM c WHERE c.Live = true',
+        'SELECT TOP 300 c.id, c.Title, c.title, c.keyTopics, c.publishedUrl, c.publicUrl, c.curatedSubpagePath, c.slugPageUrl FROM c WHERE c.Live = true',
         []
       );
-      return (rows || []).map((row) => row?.Title || row?.title || '').filter(Boolean);
+      return rows || [];
     } catch (err) {
-      log.warn?.(`fetchPublishedTitles failed (dedupe skipped): ${err.message}`);
+      log.warn?.(`fetchPublishedCorpus failed (dedupe + interlinking skipped): ${err.message}`);
       return [];
     }
   }
@@ -302,6 +305,11 @@ export function createForge({
       blogDraft: forged.forgedContent,
       content: forged.forgedContent,
       keyTopics: Array.isArray(draft.keyTopics) ? draft.keyTopics.slice(0, 12) : [],
+      // Series metadata (backlog #5): the published posts the appended
+      // "Related reading" module links to; absent when nothing related.
+      ...(Array.isArray(forged.relatedContentIds) && forged.relatedContentIds.length
+        ? { relatedContentIds: forged.relatedContentIds }
+        : {}),
       format: format?.key || null,
       contentStatus: nextStatus,
       Live: false,
@@ -374,7 +382,11 @@ export function createForge({
     const { data, sourceMarkdown, sourceUrl, cloudProvider, sourceTitle } = source;
 
     // 0. Dedupe against the published corpus before spending tokens
-    const dupe = findSimilarTitle(sourceTitle, await fetchPublishedTitles());
+    const corpus = await fetchPublishedCorpus();
+    const dupe = findSimilarTitle(
+      sourceTitle,
+      corpus.map((row) => row?.Title || row?.title || '').filter(Boolean)
+    );
     if (dupe.similar) {
       await bumpForgeStats({ 'totals.skippedDuplicates': 1 });
       return {
@@ -429,6 +441,22 @@ export function createForge({
 
     // 4. Deterministic post-processing
     const forged = postProcessForgedDraft(draft, data, prompts);
+
+    // 4b. Series interlinking (backlog #5): propose a "Related reading"
+    // links module from the corpus fetched at step 0, plus series metadata.
+    // Appended AFTER repair (a valid links module cannot break validity) and
+    // BEFORE grading, so the grade judges what will actually publish; skipped
+    // when the draft is already at the module cap. Only posts with a real
+    // public URL qualify, so an empty corpus or URL-less rows are a no-op.
+    const related = findRelatedPublished(corpus, {
+      title: forged.forgedTitle,
+      keyTopics: draft.keyTopics || data.keyTopics,
+    });
+    if (related.length && forged.moduleReport.moduleCount < MAX_MODULES) {
+      forged.forgedContent = `${forged.forgedContent}\n\n${buildRelatedReadingModule(related)}`;
+      forged.moduleReport = validateModules(forged.forgedContent);
+      forged.relatedContentIds = related.map((entry) => entry.id);
+    }
 
     // 5. Grade
     let grade;
@@ -506,5 +534,5 @@ export function createForge({
     };
   }
 
-  return { runForgePipeline, bumpForgeStats, fetchPublishedTitles };
+  return { runForgePipeline, bumpForgeStats, fetchPublishedCorpus };
 }

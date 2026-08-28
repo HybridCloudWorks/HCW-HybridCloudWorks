@@ -35,7 +35,13 @@ const draftOf = (over = {}) => ({
   ...over,
 });
 
-function makeDeps({ draft = draftOf(), gradeOverall = 90, docs = {}, titles = [] } = {}) {
+function makeDeps({
+  draft = draftOf(),
+  gradeOverall = 90,
+  docs = {},
+  titles = [],
+  corpus = null,
+} = {}) {
   const content = {
     'c-1': {
       id: 'c-1',
@@ -50,7 +56,9 @@ function makeDeps({ draft = draftOf(), gradeOverall = 90, docs = {}, titles = []
   const store = {
     readDoc: vi.fn(async (c, id) => (c === 'content' ? content[id] || null : null)),
     queryDocs: vi.fn(async (_c, q) =>
-      q.includes('c.Live = true') ? titles.map((t) => ({ Title: t })) : [{ format: 'how_to' }]
+      q.includes('c.Live = true')
+        ? corpus || titles.map((t) => ({ Title: t }))
+        : [{ format: 'how_to' }]
     ),
     patchDoc: vi.fn(async (c, id, u) => {
       writes.patches.push([c, id, u]);
@@ -206,6 +214,37 @@ describe('runForgePipeline', () => {
       // The rolling day bucket the daily-limit enforcement reads (T-607).
       today: { date: NOW.toISOString().slice(0, 10), forged: 1 },
     });
+  });
+
+  it('interlinks a related published post as an appended links module + series metadata', async () => {
+    const d = makeDeps({
+      corpus: [
+        // Related (shares EBS/AWS/gp3 tokens) with a real URL → linked.
+        {
+          id: 'pub-1',
+          Title: 'EBS snapshot pricing explained',
+          keyTopics: ['AWS EBS', 'gp3'],
+          publishedUrl: 'https://hybridcloudworks.com/aws/blog/ebs-snapshot-pricing',
+        },
+        // Related but URL-less → must NOT be linked.
+        { id: 'pub-2', Title: 'EBS gp3 IOPS tuning', keyTopics: ['AWS EBS', 'gp3'] },
+        // Unrelated → below the relatedness floor.
+        { id: 'pub-3', Title: 'Entra ID conditional access', keyTopics: ['Entra'], publicUrl: 'https://x/3' },
+      ],
+    });
+    const out = await createForge(d).runForgePipeline({ contentId: 'c-1', actor: {} });
+    expect(out.ok).toBe(true);
+    expect(out.result.status).toBe('forge_ready');
+    // The appended module counts toward the (re-validated) module report.
+    expect(out.result.moduleCount).toBe(4);
+    const [, , update] = d.writes.patches.find(([c]) => c === 'content');
+    expect(update.relatedContentIds).toEqual(['pub-1']);
+    expect(update.content).toContain('<module type="links" align="all">');
+    expect(update.content).toContain('https://hybridcloudworks.com/aws/blog/ebs-snapshot-pricing');
+    expect(update.content).not.toContain('pub-2');
+    // The staged version snapshot carries the interlinked content too.
+    const [, version] = d.writes.upserts.find(([c]) => c === 'content_versions');
+    expect(version.draft).toBe(update.content);
   });
 
   it('routes a below-threshold or unclean draft to editing and patches existing stats', async () => {

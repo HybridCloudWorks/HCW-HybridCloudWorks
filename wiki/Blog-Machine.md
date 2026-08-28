@@ -311,8 +311,26 @@ forge_ready items with grade and an inline `/approve {id}` per row.
    that same snapshot on demand (`generatedBy: 'manual'` into the same
    `workflow_digests/{date}` doc). The newsletter job remains reachable
    through `enqueueJob` as before.
-4. **Analytics-informed topic weighting** — engagement data feeding interest-area weight *suggestions* (accept/dismiss, like voice calibration).
-5. **Series detection + interlinking** — forge finds related published posts and proposes a sibling-links module; series metadata on content docs.
+4. **Analytics-informed topic weighting** — engagement data feeding
+   interest-area weight *suggestions* (accept/dismiss, like voice
+   calibration). **BLOCKED on an owner decision**: no engagement data
+   source exists anywhere in the system (no analytics provider is wired;
+   the only external read scopes are the Linkie proxy's). Pick a provider
+   (Azure SWA analytics? Plausible? GA4?) and this becomes buildable.
+5. **Series detection + interlinking** — **LANDED** (post-program). The
+   forge pipeline's dedupe corpus fetch was widened to carry `id`,
+   `keyTopics` and the public-URL fields, and after post-processing (before
+   grading, so the grader sees the real article) the forge scores each
+   published post against the draft — Jaccard over title + keyTopics
+   tokens, reusing the dedupe gate's own tokenizer (`lib/content/related-posts.js`).
+   The top 3 above a 0.15 floor are appended as a `links` module
+   ("related reading", deletable in the editor like any module; skipped when
+   the draft is already at the module cap) and stamped as
+   `relatedContentIds` series metadata on the content doc. Only posts with
+   a resolvable public URL are ever proposed — a link the reader cannot
+   follow is worse than none — and there is no score ceiling: true
+   duplicates never reach this code because the dedupe gate already
+   refused to forge them.
 6. **SEO lint in the grader** — meta-description length, slug/keyword alignment, heading hierarchy as advisory dimensions.
 7. **Voice-drift monitor** — periodic re-grade of recent posts against the profile; Telegram alert on drift.
 8. **Stale-post refresh bot** — old posts feeding a news_analysis/update-format forge run on the owner's own content.

@@ -35,7 +35,11 @@
 import { claimRisingEdge, releaseRisingEdgeClaim, SKIP_REASONS } from './rising-edge-claim.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { generateCaptionText } from '../social-caption.js';
-import { toPublicUrl } from '../cms/publish.js';
+import { publicUrlOf } from '../cms/publish.js';
+
+// Lifted to cms/publish.js so the related-posts interlinker shares it;
+// re-exported here because this was its original home.
+export { publicUrlOf };
 
 export const SOCIAL_CAPTION_CLAIM_FIELDS = Object.freeze({
   flagField: 'socialCaptionTrigger',
@@ -45,14 +49,6 @@ export const SOCIAL_CAPTION_CLAIM_FIELDS = Object.freeze({
 
 export const AUTOPOST_CONFIG_ID = 'social_autopost';
 const DEFAULT_DELAY_MINUTES = 60;
-
-/** The article URL the caption links to — SocialHubPage's own derivation. */
-export function publicUrlOf(data = {}) {
-  if (data.publishedUrl) return data.publishedUrl;
-  if (data.publicUrl) return data.publicUrl;
-  const path = data.curatedSubpagePath || data.slugPageUrl || '';
-  return path ? toPublicUrl(path) : '';
-}
 
 /** The Publer bulk payload — the exact shape SocialHubPage's compose sends. */
 export function buildAutopostBulk(accounts, text, scheduledAtIso) {
