@@ -38,6 +38,11 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readKey } from '../ai/router.js';
+import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
+
+// Outbound deadline (T-712): Node's fetch has none, and these calls are
+// reached from change-feed handlers where a hung socket holds the lease.
+const TELEGRAM_TIMEOUT_MS = 15_000;
 
 /** Cosmos containers this module reads and writes. */
 export const ACTIVITY_CONTAINER = 'telegram_bot_activity';
@@ -467,11 +472,16 @@ export function createSender({ env = process.env, fetch: fetchImpl = globalThis.
       log.warn?.('[telegram] TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not configured; not sending.');
       return { sent: false, reason: 'not_configured' };
     }
-    const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 4096) }),
-    });
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 4096) }),
+        timeoutMs: TELEGRAM_TIMEOUT_MS,
+      }
+    );
     if (!response.ok) {
       log.error?.(`[telegram] sendMessage failed with ${response.status}`);
       return { sent: false, reason: 'telegram_error' };

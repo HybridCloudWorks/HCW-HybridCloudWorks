@@ -469,6 +469,13 @@ export function createJobHandlers({
 
 export const STALE_QUEUED_MS = 10 * 60 * 1000;
 export const SWEEP_BATCH = 20;
+/**
+ * Margin added to a job type's own timeoutMs before the sweeper will call a
+ * `running` job abandoned (T-710). It absorbs clock skew between the worker
+ * and the sweeper plus the delay between a host dying and the next sweep, so
+ * the reaper never steals a job from a worker that is merely slow.
+ */
+export const RUNNING_GRACE_MS = 5 * 60 * 1000;
 
 /**
  * @param {object} deps
@@ -477,7 +484,75 @@ export const SWEEP_BATCH = 20;
  * @param {{ log?: Function, warn?: Function }} [deps.log]
  */
 export function createJobSweeper({ store, now = () => new Date(), log = {} }) {
+  /**
+   * Jobs abandoned in `running` (T-710).
+   *
+   * A worker that dies mid-run — host restart, scale-in, deploy, or the
+   * platform timeout beating the job's own budget — leaves the document
+   * `running` forever: redelivery sees `status !== 'queued'` and returns
+   * `skipped`, the queued sweep below ignores it, `getJob` reports `running`
+   * to a client that polls indefinitely, and the type's `onComplete` never
+   * fires, so the failure notification that exists to bring a failed approval
+   * back to the phone is lost too.
+   *
+   * The cutoff is per type, not one blanket value: budgets range from 5 to 28
+   * minutes, and a single conservative cutoff would leave short jobs hanging
+   * for half an hour. A job is reaped only once its OWN budget plus a grace
+   * margin has elapsed, so a slow-but-live worker is never stolen from.
+   */
+  async function reapAbandoned(types) {
+    const cutoff = new Date(now().getTime() - RUNNING_GRACE_MS).toISOString();
+    const running = await store.queryDocs(
+      JOBS_CONTAINER,
+      `SELECT TOP ${SWEEP_BATCH} c.id, c.type, c.startedAt, c.attempts FROM c WHERE c.status = 'running' AND IS_DEFINED(c.startedAt) AND c.startedAt < @cutoff`,
+      [{ name: '@cutoff', value: cutoff }]
+    );
+    const reaped = [];
+    for (const doc of running || []) {
+      // An unreadable startedAt is not evidence of abandonment. Comparing an
+      // Invalid Date returns false for every operator, so without this an
+      // undated row would fall straight through into being reaped.
+      const startedMs = Date.parse(doc.startedAt);
+      if (!Number.isFinite(startedMs)) {
+        log.warn?.(`sweep: job ${doc.id} is running with no readable startedAt; leaving it`);
+        continue;
+      }
+      const spec = types?.get?.(doc.type);
+      // An unregistered type cannot state a budget; fall back to the default
+      // rather than leaving it running forever.
+      const budget = Number(spec?.timeoutMs) || DEFAULT_TIMEOUT_MS;
+      if (startedMs > now().getTime() - budget - RUNNING_GRACE_MS) continue;
+
+      const finishedAt = now().toISOString();
+      const error = `abandoned while running: no terminal write within ${Math.round(
+        (budget + RUNNING_GRACE_MS) / 60000
+      )} minutes (worker process lost)`;
+      try {
+        await store.patchDoc(JOBS_CONTAINER, doc.id, { status: 'timeout', finishedAt, error });
+        reaped.push({ jobId: doc.id, type: doc.type });
+        // Same best-effort contract as runJob's: a throwing hook is logged and
+        // never changes the outcome that was already written.
+        if (typeof spec?.onComplete === 'function') {
+          try {
+            await spec.onComplete(
+              { job: doc, status: 'timeout', result: null, error },
+              { context: log, now }
+            );
+          } catch (hookError) {
+            log.warn?.(
+              `sweep: onComplete for ${doc.type} failed: ${hookError?.message || hookError}`
+            );
+          }
+        }
+      } catch (err) {
+        log.warn?.(`sweep: could not reap job ${doc.id}: ${err?.message || err}`);
+      }
+    }
+    return reaped;
+  }
+
   return {
+    reapAbandoned,
     /** @returns {Promise<{ requeued: {jobId: string, type: string}[] }>} */
     async sweep() {
       const cutoff = new Date(now().getTime() - STALE_QUEUED_MS).toISOString();
@@ -498,7 +573,12 @@ export function createJobSweeper({ store, now = () => new Date(), log = {} }) {
           log.warn?.(`sweep: could not stamp job ${doc.id}: ${err?.message || err}`);
         }
       }
-      return { requeued };
+      // The queued gap and the running gap are the same failure one state
+      // apart, so they are swept together (T-710). Reaping cannot re-enqueue:
+      // a job whose worker may have completed real side effects before dying
+      // must not be run again silently — it lands `timeout` and visible.
+      const reaped = await reapAbandoned(registry);
+      return { requeued, reaped };
     },
   };
 }

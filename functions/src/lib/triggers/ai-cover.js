@@ -17,6 +17,14 @@ import { mediaUrlFor } from '../blob-paths.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { claimRisingEdge, releaseRisingEdgeClaim, SKIP_REASONS } from './rising-edge-claim.js';
 import { fetchImage as defaultFetchImage } from './fetch-image.js';
+import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
+
+// Deadlines for the Replicate calls (T-712). This runs inside a change-feed
+// handler, so a hung socket does not just fail one cover — it holds the lease
+// and queues every subsequent change behind it.
+const REPLICATE_POST_TIMEOUT_MS = 90_000; // clears the `Prefer: wait=60` hold
+const REPLICATE_POLL_TIMEOUT_MS = 30_000;
+const REPLICATE_POLL_BUDGET_MS = 5 * 60 * 1000; // wall clock for the whole poll loop
 
 export const AI_COVER_CLAIM_FIELDS = Object.freeze({
   flagField: 'altCoverImageTrigger',
@@ -148,11 +156,19 @@ export function createReplicateClient({
     };
     let prediction;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const response = await fetchImpl(`https://api.replicate.com/v1/models/${model}/predictions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ input }),
-      });
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `https://api.replicate.com/v1/models/${model}/predictions`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ input }),
+          // `Prefer: wait=60` asks Replicate to hold the connection for up to
+          // 60s, so the deadline has to clear that plus slack — otherwise the
+          // timeout would fire on the happy path (T-712).
+          timeoutMs: REPLICATE_POST_TIMEOUT_MS,
+        }
+      );
       if (response.ok) {
         prediction = await response.json();
         break;
@@ -162,15 +178,26 @@ export function createReplicateClient({
       await sleep(2 ** attempt * 1000);
     }
     // Prefer: wait returns a completed prediction in the common case; poll otherwise.
+    // An iteration count alone does not bound wall-clock time: each iteration
+    // sleeps 2s AND makes a request, so a run of slow-but-not-timing-out polls
+    // could sit here far longer than the arithmetic suggests. The deadline is
+    // the real bound (T-712).
+    const pollDeadline = Date.now() + REPLICATE_POLL_BUDGET_MS;
     for (
       let poll = 0;
       poll < 60 && !['succeeded', 'failed', 'canceled'].includes(prediction.status);
       poll += 1
     ) {
+      if (Date.now() > pollDeadline) {
+        throw new Error(
+          `Replicate prediction still ${prediction.status} after ${Math.round(REPLICATE_POLL_BUDGET_MS / 1000)}s`
+        );
+      }
       await sleep(2000);
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`,
-        { headers: { Authorization: headers.Authorization } }
+        { headers: { Authorization: headers.Authorization }, timeoutMs: REPLICATE_POLL_TIMEOUT_MS }
       );
       if (!response.ok) throw new Error(`Replicate poll HTTP ${response.status}`);
       prediction = await response.json();

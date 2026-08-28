@@ -279,11 +279,26 @@ resource "azurerm_cosmosdb_account" "hcw" {
   # security posture being asserted, and renaming it belongs to T-507.
   local_authentication_enabled = !var.cosmos_local_auth_disabled
 
-  # Continuous backup (7-day tier is free on serverless) — point-in-time
-  # restore instead of the periodic default. One-way conversion.
+  # Continuous backup — point-in-time restore instead of the periodic default.
+  # One-way conversion (continuous cannot go back to periodic).
+  #
+  # Continuous30Days since 2026-08-28 (T-707). The 7-day tier is free, and that
+  # was the whole reason it was chosen; the problem is that this platform runs
+  # cleanup timers which delete and rewrite documents, so corruption is
+  # discovered slowly and a 7-day window can close before anyone notices. The
+  # 30-day tier is billed at $0.20/GB/month × regions — cents at this data size
+  # (roughly 70k small documents), which buys four times the window.
+  #
+  # What this still does NOT buy, and what T-707 keeps open: an out-of-account
+  # copy. Microsoft's own words — "the backups aren't automatically
+  # geo-disaster resistant" — the backup lives with the account, so account
+  # deletion or a Central US failure takes it too. Serverless is single-region
+  # for life and the conversion is irreversible, so that gap is closed by
+  # exporting out of the account, not by a setting here. Tracked with the
+  # recovery objectives in issue #231.
   backup {
     type = "Continuous"
-    tier = "Continuous7Days"
+    tier = "Continuous30Days"
   }
 
   # This account holds production website data. A plan that wants to
@@ -318,6 +333,15 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
   name                = var.cosmos_database_name
   resource_group_name = azurerm_resource_group.app["db"].name
   account_name        = azurerm_cosmosdb_account.hcw.name
+
+  # prevent_destroy on the ACCOUNT does not protect its children: a database or
+  # container destroy plans and applies cleanly underneath it. This database
+  # holds every production document, so dropping it is a two-step that starts
+  # with removing this guard in a reviewed PR — the same shape the account
+  # already imposes (T-708).
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -352,9 +376,15 @@ resource "azurerm_cosmosdb_sql_database" "hcw" {
 # Full evidence, with file:line citations, in the manifest header.
 #
 # A partition key path is IMMUTABLE. Changing one on a container that already
-# holds data means destroying the container and re-importing. Every container
-# here is empty as of 2026-08-20 — the partition-key decision window is open
-# now and closes on the first import (Migration_Plan §5).
+# holds data means destroying the container and re-importing.
+#
+# THAT WINDOW IS CLOSED. This block used to read "every container here is empty
+# as of 2026-08-20 — the decision window is open now and closes on the first
+# import"; the import happened, and production holds roughly 70k documents
+# (measured 2026-08-24). A partition-key change in cosmos-containers.json is
+# now a data-destroying plan, which is why the resource carries
+# prevent_destroy (T-708): the guard has to come off deliberately, in its own
+# reviewed PR, before any such change can apply.
 # -----------------------------------------------------------------------------
 
 locals {
@@ -409,6 +439,16 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
       }
     }
   }
+
+  # Applies to every instance of the for_each. These containers are generated
+  # from cosmos-containers.json and partition keys are immutable, so a
+  # regenerated spec that renames a container or changes a key produces a
+  # destroy-and-create — on roughly 70k production documents. The guard turns
+  # that from a plan someone has to read carefully into a plan that fails
+  # (T-708). Dropping a container deliberately means removing this first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # The eleven `moved` blocks that used to follow — carrying the hand-declared
@@ -424,14 +464,35 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
 # Azure Storage Account (content and media)
 #
 # Hot tier for frequently accessed blog covers, cert badges, AI images.
-# LRS (locally redundant) — sufficient for a single-region deployment.
+#
+# RA-GRS since 2026-08-28 (T-706). It was LRS, and ADR 0018 accepted that
+# explicitly "while the Firebase source retains the authoritative copy", with
+# a revisit trigger of "when Firebase decommission removes the second copy".
+# ADR 0023 removed it: every blob written since the 2026-08-21 cutover — CMS
+# uploads, generated Listen & Learn audio, AI covers — existed in exactly one
+# copy in one region. Versioning and soft delete (below) protect against
+# overwrite and deletion, not against loss of the account or the region.
+#
+# RA-GRS rather than ZRS, for two reasons. The risk being closed is account and
+# regional loss, which zone redundancy does not cover — ZRS keeps three copies
+# inside one region. And LRS→ZRS is not expressible here at all: Azure requires
+# a customer-initiated *conversion* (`az storage account migration start`),
+# while LRS→GRS/RA-GRS is an ordinary settings update Terraform performs in
+# place. The RA prefix buys read access to the secondary without a failover,
+# which is what makes it useful for recovering one lost blob rather than only
+# for a disaster.
+#
+# Cost: geo-redundancy roughly doubles the per-GB rate and adds a one-time
+# egress charge for the initial sync. Against Cost-Analysis.md's figures —
+# where storage is a minor line next to telemetry — that is cheap insurance
+# for the only copy of every image the site serves.
 # =============================================================================
 resource "azurerm_storage_account" "hcw" {
   name                     = var.storage_account_name
   resource_group_name      = azurerm_resource_group.app["stor"].name
   location                 = azurerm_resource_group.app["stor"].location
   account_tier             = "Standard"
-  account_replication_type = "LRS"
+  account_replication_type = "RAGRS"
   account_kind             = "StorageV2"
   access_tier              = "Hot"
   min_tls_version          = "TLS1_2"
@@ -1893,6 +1954,16 @@ resource "azurerm_cosmosdb_sql_container" "leases" {
   indexing_policy {
     indexing_mode = "consistent"
     included_path { path = "/*" }
+  }
+
+  # Lower stakes than the data containers — these are continuation tokens, not
+  # documents, and resetting the feed by dropping them is a legitimate (if
+  # disruptive) operation: every change-feed function would reprocess from the
+  # start, which the rising-edge claims make mostly idempotent. The guard is
+  # here for the accidental case, not to declare the container permanent; it
+  # comes off in a reviewed PR when a reset is what you actually want (T-708).
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
