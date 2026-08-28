@@ -8,8 +8,20 @@ second document. What has not changed: nothing is resolved here that only a
 human holding tenant, Cloudflare or repository-admin access can resolve.
 Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
-## Status — 2026-08-26
+## Status — 2026-08-28
 
+> **T-517 closed: the apex serves the Azure site.** The owner verified serving
+> on 2026-08-28, after the zone export of 2026-08-27 showed the apex CNAME at
+> the Static Web App with no Firebase record left. The owner also **forwent
+> the DNS rollback**: Firebase is scheduled for deletion rather than held
+> through a soak. That decision creates the one new urgency on this list —
+> T-526, the Telegram webhook re-registration, which fails *silently* the
+> moment GCP is deleted. Entry in [CHANGELOG.md](CHANGELOG.md).
+>
+> **The T-519 probe path is merged (#234, ADR 0024)** — a Cloudflare Worker
+> cron probe and a success-counting alert, both inert until the owner deploys
+> the Worker and flips `availability_probe_alert_enabled`.
+>
 > **PR #218 is fully applied, and this note said otherwise for a day.** Its own
 > closing sentence — that a tracker which keeps saying "not applied" after it
 > applied is how a reviewer stops trusting the file — described this paragraph.
@@ -58,10 +70,9 @@ tracker line that only ever said "two numbers are missing". The analysis behind
 it is in the issue so it does not get redone.
 
 **All three that remain carry Gate: owner, and none of them is a repository
-setting any more.** What is left is a serving verification (the DNS record
-itself moved by 2026-08-27), a Worker deployment and a set of feature flags —
-every one needs tenant or edge access, and no amount of engineering here
-closes any of them.
+setting any more.** What is left is a webhook registration, a Worker
+deployment and a set of feature flags — every one needs tenant or edge
+access, and no amount of engineering here closes any of them.
 They are listed anyway, because a tracker that omits them is quietly shorter
 than the truth.
 
@@ -74,22 +85,29 @@ including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
 
 ## High
 
-### T-517 — The apex DNS is repointed; serving is not yet verified
+### T-526 — The Telegram webhook still points at GCP, and GCP is scheduled for deletion
 
-**Gate: owner** — [REVIEW.md](REVIEW.md), *Apex DNS cutover*. In flight as of
-2026-08-24; **DNS repointed by 2026-08-27**.
+**Gate: owner** — Cutover-Runbook §3d; the receiver itself was T-512, done.
 
-The owner-supplied Cloudflare zone export of 2026-08-27 23:47 shows the apex
-`CNAME` at `calm-ground-0d0e6a010.7.azurestaticapps.net` (DNS-only, matching
-`www`), and no Firebase record remains anywhere in the zone. That is the
-Cutover-Runbook §3c repoint, done. What this tracker has not seen is the
-acceptance criterion — **observed serving**: DNS state is desired state, and
-this file has already recorded one case (T-513) where the two disagreed.
-Remaining, all owner-side: confirm the apex answers with the Azure site (no
-Fastly headers, `/__/firebase/init.json` no longer 200), re-run the Telegram
-`setWebhook` script (Runbook §3d), and hold the Firebase deployment as the
-DNS rollback through the soak. Close this item on the observed 200, with the
-entry in [CHANGELOG.md](CHANGELOG.md).
+The bot's webhook URL and secret are registered with **Telegram**, not in
+code, so nothing that has shipped or merged moves it: the bot keeps POSTing
+at the old Cloud Functions URL until `setWebhook` is re-run. While Firebase
+existed as a rollback that was a dormancy; now that the owner has scheduled
+GCP for deletion (T-517 close-out), it is a countdown — the moment GCP is
+deleted the bot goes quiet **with no error anywhere in Azure**, which is
+exactly the failure the runbook warns about. The re-registration cannot run
+from this repository's tooling environment (it needs PowerShell 7, the bot
+token or a Key Vault firewall window, and network access to
+`api.telegram.org` — all owner-held). It is two commands:
+
+```powershell
+./scripts/cutover/04-telegram-webhook.ps1 -Mode Show   # what is registered now
+./scripts/cutover/04-telegram-webhook.ps1              # point it at Azure
+```
+
+**Verified when** `/help` in the chat answers with the command list. Run it
+*before* the GCP deletion, not after: a webhook pointed at a dead URL makes
+Telegram back off, so the bot stays broken for a while even after the fix.
 
 ### T-518 — Nothing is scheduled: all 18 timers are permanent no-ops
 
