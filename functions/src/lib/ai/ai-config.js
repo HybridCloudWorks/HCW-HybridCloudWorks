@@ -92,6 +92,11 @@ export const AI_FEATURES = Object.freeze({
     description: 'Suggests voice-profile additions from recent published posts.',
     route: 'The Calibrate button in Forge Studio. Suggestions only, never auto-applied.',
   }),
+  socialCaption: Object.freeze({
+    label: 'Social captions',
+    description: 'Writes a social-media caption for a published article.',
+    route: 'The Social Hub Generate button and the on-publish auto-queue to Publer.',
+  }),
 });
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));

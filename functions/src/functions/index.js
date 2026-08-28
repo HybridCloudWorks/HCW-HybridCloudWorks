@@ -36,6 +36,7 @@ import './publish-jobs.js';
 import './rss-jobs.js';
 import './public-submissions.js';
 import './schedulers.js';
+import './social-caption-http.js';
 import './telegram-http.js';
 
 const BUILD_TIME = new Date().toISOString();
