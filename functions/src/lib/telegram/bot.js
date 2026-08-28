@@ -272,14 +272,39 @@ export function createTelegramBot({
       const s = (await snapshot()).operationalSignals || {};
       const breaches = s.queueBreachCount ?? 0;
       const oldestStaged = s.oldestStagedHours ?? 0;
-      return [
+      const lines = [
         breaches > 0
           ? `${countNoun(breaches, 'item has', 'items have')} been waiting in the review queue for more than a day.`
           : 'The review queue is healthy — nothing has been waiting more than a day.',
         oldestStaged > 0
           ? `The oldest item staged for publishing has been sitting for about ${countNoun(oldestStaged, 'hour')}.`
           : 'Nothing is currently stuck in staging.',
-      ].join('\n');
+      ];
+      // The Phase 5 loop's worklist: what forge_ready is waiting on /approve,
+      // newest first, with the commands inline so approval is one reply (T-607).
+      try {
+        const staged = await store.queryDocs(
+          'content',
+          "SELECT TOP 5 c.id, c.Title, c.forgeGrade FROM c WHERE c.contentStatus = 'forge_ready' ORDER BY c._ts DESC",
+          []
+        );
+        if (staged?.length) {
+          lines.push('', 'Staged for approval:');
+          for (const item of staged) {
+            const grade =
+              typeof item.forgeGrade?.overall === 'number'
+                ? ` — grade ${item.forgeGrade.overall}`
+                : '';
+            lines.push(`• ${item.Title || item.id}${grade}`, `  /approve ${item.id}`);
+          }
+        } else {
+          lines.push('', 'Nothing is staged for approval right now.');
+        }
+      } catch (error) {
+        log.warn?.(`[telegram] staged listing failed: ${error?.message || error}`);
+        lines.push('', 'Could not read the staged-for-approval list just now.');
+      }
+      return lines.join('\n');
     },
     alerts: async () => formatAlerts((await snapshot()).alerts),
     digest: async () => formatDigest((await snapshot()).digest),

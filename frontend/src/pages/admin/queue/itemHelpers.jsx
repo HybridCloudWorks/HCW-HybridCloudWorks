@@ -126,7 +126,28 @@ export const SORT_OPTIONS = {
     compare: (a, b) =>
       String(a?.Title || a?.title || '').localeCompare(String(b?.Title || b?.title || '')),
   },
+  grade: {
+    label: 'Forge grade',
+    // Ungraded items take a -1 sentinel (grades are 0-100), so descending —
+    // the natural direction for "best staged first" — puts them last.
+    compare: (a, b) => getForgeGradeForSort(a) - getForgeGradeForSort(b),
+  },
 };
+
+export function getForgeGradeForSort(item) {
+  const overall = item?.forgeGrade?.overall;
+  return typeof overall === 'number' ? overall : -1;
+}
+
+/**
+ * Forged-so-far today from getForgeConfig's stats.today rolling day bucket
+ * (UTC date key, written by forge.js). A stale bucket — yesterday's date —
+ * reads as zero, matching the backend's own reset-on-rollover.
+ */
+export function forgedTodayFromStats(stats, nowDate = new Date()) {
+  const todayKey = nowDate.toISOString().slice(0, 10);
+  return stats?.today?.date === todayKey ? Number(stats.today.forged) || 0 : 0;
+}
 
 export function sortQueueItemsBy(items, sortKey, direction) {
   const opt = SORT_OPTIONS[sortKey] || SORT_OPTIONS.published;

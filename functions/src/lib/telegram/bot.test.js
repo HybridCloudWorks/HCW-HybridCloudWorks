@@ -218,6 +218,42 @@ describe('alert actions', () => {
   });
 });
 
+describe('/queue staged listing (T-607)', () => {
+  it('lists forge_ready items with grade and an inline /approve command', async () => {
+    const { bot, send } = makeBot({
+      store: {
+        queryDocs: vi.fn(async () => [
+          { id: 'doc-1', Title: 'Cut EBS cost', forgeGrade: { overall: 88 } },
+          { id: 'doc-2', Title: 'AKS deep dive' },
+        ]),
+      },
+    });
+    await bot.handleUpdate(message('/queue'));
+    const reply = send.mock.calls[0][0];
+    expect(reply).toContain('Staged for approval:');
+    expect(reply).toContain('• Cut EBS cost — grade 88');
+    expect(reply).toContain('/approve doc-1');
+    expect(reply).toContain('• AKS deep dive');
+    expect(reply).toContain('/approve doc-2');
+  });
+
+  it('says so when nothing is staged, and survives a read failure', async () => {
+    const { bot, send } = makeBot();
+    await bot.handleUpdate(message('/queue'));
+    expect(send.mock.calls[0][0]).toContain('Nothing is staged for approval');
+
+    const broken = makeBot({
+      store: {
+        queryDocs: vi.fn(async () => {
+          throw new Error('no index');
+        }),
+      },
+    });
+    await broken.bot.handleUpdate(message('/queue'));
+    expect(broken.send.mock.calls[0][0]).toContain('Could not read the staged-for-approval list');
+  });
+});
+
 describe('approval loop (T-606)', () => {
   it('/approve enqueues publish-content with the exact payload key the worker reads', async () => {
     const { bot, enqueueJob, send } = makeBot();

@@ -93,72 +93,28 @@ restored the lock behind itself.
 The ruleset half of T-523 is done — `20680114` now requires 12 contexts,
 including `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`.
 
-## The Blog Machine program
+## The Blog Machine program — closed 2026-08-28
 
-One initiative, seven phases, each sized to one PR. Full specifications,
-verified code anchors, the locked owner decisions (signed preview links;
-Telegram approve publishes live; AI covers with designed fallback heroes;
-sources internal-only) and the backlog live in
-[wiki/Blog-Machine.md](wiki/Blog-Machine.md) — these entries track only what
-remains open.
+All seven phases (**T-601…T-607**) are engineering-complete and merged —
+#236 (Phase 0 + plan), #237, #238, #239, #240, #241, #242 and the Phase 7
+close-out PR. The program entry is in [CHANGELOG.md](CHANGELOG.md); the
+program of record, per-phase as-built notes and the backlog stay in
+[wiki/Blog-Machine.md](wiki/Blog-Machine.md).
 
-### T-601 — Phase 0: the forge has no working entry point (High)
+What remains is **activation, all owner-gated**, tracked where each gate
+already lives rather than re-opened here:
 
-`/forge` in the Telegram bot — the only `forge-article` enqueue site in the
-repository — sends `{ contentId }` where `resolveForgeTargets` requires
-`sourceContentId`, so it has always failed; and the modular blog render path
-drops `markdownCodeComponents`, losing syntax highlighting inside modules.
-Two small fixes plus a strengthened bot test asserting the payload key.
-
-### T-602 — Phase 1: paste a URL, get a draft (High)
-
-Implement `generateArticleDraft` HTTP-direct over `scrapeArticle` +
-`createDrafter` (whose output already matches what `SubmitUrlsPage` and the
-editor expect), extract the twice-composed voice/format prompt block into one
-`voice.js` builder, and add the unattended `forge-from-url` job with a paste
-box on the queue. Contract move in `.azure/api-surface.json` same-change.
-
-### T-603 — Phase 2: checkbox posts, forge them (High)
-
-"Forge Selected (n)" on the review queue: the existing `selectedIds` Set
-(today wired only to bulk-reject) chunked ≤10 into
-`runJob('forge-article', { sourceContentIds })`, plus select-all and forge
-grade/provenance badges on queue cards.
-
-### T-604 — Phase 3: Forge Studio — the voice, editable (Medium)
-
-`getForgeConfig`/`updateForgeConfig` RPCs and an admin page for
-`forge_profile` (wordSoup, weighted interest areas) and `forge_prompts`
-(master prompt, banned phrases, style rules, publish threshold, autoForge).
-Plus voice calibration: suggestions extracted from published posts as
-accept/dismiss chips, never auto-merged. Retires the manual-Cosmos-seeding
-requirement (the T-409 remainder).
-
-### T-605 — Phase 4: five new modules; teach the forge to use them (Medium)
-
-`pull_quote`, `stat_board`, `comparison`, `timeline`, `callout` — built from
-existing components and theme tokens; serializers unified first; cap 10→14
-both sides; `MODULE_TAG_SYNTAX` + per-format module lists extended so the
-forge writes them; `PreviewPanel` adopts the production prose classes. The
-grammar table in wiki/Blog-Machine.md is the cross-package contract.
-
-### T-606 — Phase 5: staging links and approve-by-reply (High)
-
-Signed HMAC preview route (`/api/public/preview/{id}?t=…`, 72 h,
-indistinguishable 404, justified `PUBLIC_ROUTES` entry) + `/preview/:id`
-frontend; `forge_ready` rising-edge notification with title/grade/preview
-link; `/approve` → `publish-content` job via the injected
-`processPublishContent` (every gate applies), `/reject` →
-`transitionContentStatus`; designed default heroes as the ai-cover fallback.
-**Gate: owner for activation** — T-526 (webhook re-registration; inline
-buttons ride the same re-run) and `PREVIEW_SIGNING_SECRET` seeding.
-
-### T-607 — Phases 6–7: the machine runs itself (Low until T-606 lands)
-
-Arm `forgeScheduled`/`syncRssFeeds`/`publishScheduledContent`
-(**Gate: owner**, T-518), enforce `autoForge.dailyLimit`, rank candidates by
-interest-area weights, failure-only job notifications, queue polish, program
-close-out to CHANGELOG.
+- **T-526** — Telegram webhook re-registration (the entire approve-by-reply
+  loop is silent until the webhook points at Azure; run before the GCP
+  deletion). Inline approve/reject buttons (wiki §5b) ride the same re-run.
+- **T-518** — timer arming (`forgeScheduled`, `syncRssFeeds`,
+  `publishScheduledContent` are flag-off until the workspace variables and
+  four-gate procedure are run).
+- **Vault seeding** — `PREVIEW-SIGNING-SECRET` (staging links; the route
+  404s and notifications say "link unavailable" until then) and
+  `REPLICATE-API-KEY` (AI heroes; the designed default heroes cover its
+  absence once the ~8 covers are uploaded and `admin_config/default_heroes`
+  is seeded).
 
 ## High
 

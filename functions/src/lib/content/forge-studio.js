@@ -128,6 +128,9 @@ export function createForgeStudioHandlers({
       stats: {
         totals: statsRaw?.totals || {},
         formats: statsRaw?.formats || {},
+        // The rolling day bucket (forge.js bumpForgeStats) — the queue page's
+        // forged-today n/dailyLimit indicator reads it (T-607).
+        today: statsRaw?.today || null,
         updatedAt: statsRaw?.updatedAt || null,
       },
     });

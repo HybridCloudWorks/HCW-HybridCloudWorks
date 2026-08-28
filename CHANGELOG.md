@@ -17,6 +17,56 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The Blog Machine (T-601–T-607 closed, 2026-08-28; #236–#242 + the
+  close-out PR).** One initiative, seven phases, each one PR, turning the
+  admin portal into a content engine around the already-working forge
+  pipeline: check posts in the queue or paste a URL, and a professional,
+  visually rich post in the owner's voice comes out the other end —
+  announced on Telegram with a signed staging link, approved with one reply,
+  published live through the full gated pipeline. The program of record with
+  per-phase as-built notes is [wiki/Blog-Machine.md](wiki/Blog-Machine.md).
+
+  What landed, phase by phase: the forge's only entry point fixed (its
+  payload key had always been wrong — the test asserted the job type, not
+  the key; both are pinned now) and modular posts regained syntax
+  highlighting (**T-601**, #236). Paste-a-URL: `generateArticleDraft`
+  HTTP-direct plus the unattended `forge-from-url` job, with the
+  voice/format prompt extracted to one `voice.js` builder (**T-602**, #237).
+  "Forge Selected (n)" on the review queue with select-all and
+  grade/provenance badges (**T-603**, #238). Forge Studio — wordSoup,
+  weighted interest areas, master prompt, banned phrases, style rules,
+  publish threshold, autoForge — over new `getForgeConfig`/
+  `updateForgeConfig` RPCs, with voice calibration as accept/dismiss
+  suggestions never merged automatically; retired the manual-Cosmos-seeding
+  requirement (**T-604**, #239). Five rich module types (`pull_quote`,
+  `stat_board`, `comparison`, `timeline`, `callout`) across the shared
+  grammar, validation/repair, renderers, editor and forge prompt, fixing the
+  `design`-module round-trip data loss on the way; `MAX_MODULES` 10→14 with
+  list-contract tests on both sides (**T-605**, #240). The approval loop:
+  the HMAC-signed `/api/public/preview/{id}?t=…` route (72 h,
+  byte-identical 404 for every refusal) with the `/preview/:id` page, the
+  `forge_ready` rising-edge Telegram notification, `/approve` publishing
+  through the injected `processPublishContent` (every gate applies) and
+  `/reject` running the extracted state-machine core — plus curated default
+  heroes when AI cover generation fails (**T-606**, #241). And throughput:
+  one `forge_stats.today` ledger enforcing `autoForge.dailyLimit` across
+  scheduled and manual forging alike, interest-weighted candidate ranking,
+  failure-only job notifications via a new jobs `onComplete` hook, grade
+  sorting and a forged-today meter on the queue, and a staged-for-approval
+  list in the bot's `/queue` (**T-607**, #242 + close-out).
+
+  Two live bugs fixed in passing, both of the same shape — a call that
+  looked right and a test that asserted the wrong half: the bot's
+  `/ack`/`/resolve` had never persisted (alertId passed as `patchDoc`'s
+  updates argument), and `/forge` had never enqueued a runnable job.
+
+  **Activation is owner-gated and deliberate**: T-526 (webhook
+  re-registration — the loop is silent until then), T-518 (timer arming),
+  `PREVIEW-SIGNING-SECRET` and `REPLICATE-API-KEY` seeding, and the ~8
+  default-hero uploads. The code ships dark and arms itself as each gate
+  opens; nothing publishes without the owner's explicit `/approve` from the
+  verified chat.
+
 - **The alert fabric can now be verified against what is actually deployed.**
   `.github/workflows/verify-alert-state.yml` reads the three workload rules
   through ARM with the existing OIDC deployment identity and prints

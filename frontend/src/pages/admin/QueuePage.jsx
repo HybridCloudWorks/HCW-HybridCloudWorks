@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { postJSON } from '@/lib/api';
 import {
+  forgedTodayFromStats,
   formatPublishedDate,
   getConfirmModalCopy,
   getRootDomain,
@@ -27,6 +28,26 @@ function isValidHttpUrl(value = '') {
   } catch {
     return false;
   }
+}
+
+/**
+ * "Forged today n/limit" against the autoForge daily budget (T-607). Renders
+ * nothing until getForgeConfig has answered; the meter reads the same
+ * forge_stats day bucket the scheduler's limit enforcement uses, so what the
+ * page shows is exactly what the machine will honor.
+ */
+function ForgedTodayMeter({ meter }) {
+  if (!meter) return null;
+  const atLimit = meter.limit >= 1 && meter.forged >= meter.limit;
+  return (
+    <p className="text-xs mt-1">
+      <span className={atLimit ? 'text-amber-500 font-medium' : 'text-muted-foreground'}>
+        Forged today: {meter.forged}
+        {meter.limit >= 1 ? `/${meter.limit}` : ''}
+      </span>
+      {!meter.enabled && <span className="text-muted-foreground"> · auto-forge off</span>}
+    </p>
+  );
 }
 
 /**
@@ -137,6 +158,7 @@ export default function QueuePage() {
     return v === 'asc' ? 'asc' : 'desc';
   });
   const [loadError, setLoadError] = useState(null);
+  const [forgeMeter, setForgeMeter] = useState(null);
   const [pageSize, setPageSize] = useState(() => {
     const fromUrl = Number(searchParams.get('pageSize'));
     return [50, 100, 200].includes(fromUrl) ? fromUrl : 100;
@@ -249,6 +271,29 @@ export default function QueuePage() {
     setSearchParams(next, { replace: true });
   }, [statusFilter, contentTypeFilter, pageSize, sortKey, sortDirection, setSearchParams]);
 
+  // The forged-today meter (T-607). Best effort: a failed read leaves the
+  // header without a meter rather than without a queue.
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const config = await postJSON('getForgeConfig', {});
+        if (cancelled || !config?.ok) return;
+        setForgeMeter({
+          forged: forgedTodayFromStats(config.stats),
+          limit: Number(config.prompts?.autoForge?.dailyLimit) || 0,
+          enabled: Boolean(config.prompts?.autoForge?.enabled),
+        });
+      } catch {
+        // No meter; the queue itself is unaffected.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady]);
+
   return (
     <div className="space-y-6 max-w-5xl">
       <div className="flex items-center justify-between">
@@ -261,6 +306,7 @@ export default function QueuePage() {
           <p className="text-xs text-muted-foreground mt-1">
             Showing {items.length} of {totalCount} matching items.
           </p>
+          <ForgedTodayMeter meter={forgeMeter} />
         </div>
         <div className="flex flex-col items-end gap-2">
           <Button
