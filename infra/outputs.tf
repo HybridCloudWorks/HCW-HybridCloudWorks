@@ -3,8 +3,14 @@
 # Used by CI/CD workflows and application configuration.
 #
 # SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
-# omitted. All runtime access uses managed identity + RBAC; no static key
-# is passed to application code. See REVIEW.md Part 4 for the full secrets catalog.
+# omitted, with ONE recorded exception — `swa_token` below. All *runtime* access
+# uses managed identity + RBAC; no static key is passed to application code.
+# See REVIEW.md Part 4 for the full secrets catalog.
+#
+# The exception is stated here rather than left to be discovered, because this
+# sentence used to read as an unqualified "no key outputs exist" eleven lines
+# above one that does (T-722). A security note that a reader can falsify by
+# scrolling is worse than no note: it teaches them not to trust the next one.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -15,8 +21,26 @@ output "swa_hostname" {
   value       = azurerm_static_web_app.hcw.default_host_name
 }
 
+# THE RECORDED EXCEPTION to the header's rule (T-722).
+#
+# This is the estate's last long-lived credential; everything else a workflow
+# uses is federated OIDC. `sensitive` keeps it out of logs and plan output, but
+# it is still surfaced on the HCP Terraform Outputs tab to anyone with state
+# read, and it is consumed by GitHub Actions as exactly the kind of static
+# credential the IaC standard's Principle 2 prohibits.
+#
+# Kept because removing it does not remove the credential: the token exists in
+# state via `azurerm_static_web_app.hcw.api_key` whatever this block says, and
+# `deploy-azure-frontend.yml` has no other way to authenticate today. Deleting
+# the output alone would hide it rather than retire it.
+#
+# Retiring it means moving the SWA deploy to OIDC, which is owner-gated and
+# tracked as T-727. Until then it is an accepted exception recorded in
+# REVIEW.md's accepted-risks table, in the same terms as Key Vault purge
+# protection — and the deploy workflow now at least isolates it in a job that
+# installs nothing.
 output "swa_token" {
-  description = "Deployment token (API key) for Static Web App deployment (used in GitHub Actions)"
+  description = "Deployment token (API key) for Static Web App deployment (used in GitHub Actions). Accepted exception to the no-key-outputs rule — see REVIEW.md accepted risks and TODO.md T-727."
   value       = azurerm_static_web_app.hcw.api_key
   sensitive   = true
 }

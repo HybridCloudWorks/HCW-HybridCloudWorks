@@ -82,6 +82,46 @@ outputs**, and app settings the repository controls. Outputs count because
 they are operator-facing — someone reads them off the state backend's
 Outputs tab and pastes the value somewhere.
 
+### Posture switches are counted by parts, not by words (decided 2026-08-28)
+
+T-753 reported that a large share of `infra/variables.tf` runs to four or five
+words — `functions_storage_admin_ip_rules`, `cosmos_allow_azure_datacenter_ips`,
+`functions_scm_lock_enabled` — against a rule that caps names at two. It
+recorded that code and standard disagreed and **neither was marked as the
+loser**. The standard is the loser, and this is the amendment.
+
+A posture switch or a scoped setting is named `<subject>_<predicate>`, and each
+half is counted as one part even when it is itself compound:
+
+| Name | Subject | Predicate |
+| --- | --- | --- |
+| `functions_storage_admin_ip_rules` | `functions_storage` — a different account from `storage` | `admin_ip_rules` |
+| `cosmos_allow_azure_datacenter_ips` | `cosmos` | `allow_azure_datacenter_ips` |
+| `functions_scm_lock_enabled` | `functions_scm` | `lock_enabled` |
+
+**Why this way round.** The two-word rule exists so an operator reading a name
+off the Outputs tab knows what the value is. Compressing these to two literal
+words works against that: `storage_ip_rules` does not say *which* of the two
+storage accounts, and this estate has one account whose firewall protects
+content and another whose firewall gates deploys — confusing them during a
+firewall window is how a deploy silently fails on a network denial that does
+not announce itself as one. The rule's own escape hatch already anticipated
+this ("third word only to break a real collision"); what it lacked was
+permission for the subject to be two words when the resource genuinely is.
+
+**What does NOT change.** The prohibition on provider prefixes, the
+output-mirrors-variable rule, and the requirement that a rename of a *set*
+variable is a coordinated one-PR change. And this carve-out is for posture
+switches and scoped settings — not a general licence: a plain value still gets
+two words.
+
+**The alternative was rejected on cost, not on principle.** Renaming these
+would touch the HCP Terraform workspace, `scripts/set-github-variables.ps1`,
+every consuming workflow and the runbooks, to make already-clear names shorter.
+That is a coordinated change with an outage mode — a variable renamed in code
+but not in the workspace reverts to its default, and every one of these
+defaults to the *safe* value, so the estate would quietly disarm itself.
+
 Sweeps cover **every** file that declares a name, not a curated list:
 `output` blocks live in feature files (`oidc.tf`), not only
 `outputs.tf`. Each name sorts into exactly one bucket — **safe now**

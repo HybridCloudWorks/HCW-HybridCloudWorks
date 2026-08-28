@@ -1,4 +1,5 @@
 import { httpRoute, readConfigStamp } from '../lib/auth/http-route.js';
+import { unresolvedSecretCount } from '../lib/secrets-health.js';
 
 // Import all triggers so they are registered with the Azure Functions framework
 import './admin-crud-http.js';
@@ -82,6 +83,21 @@ httpRoute('healthCheck', {
         // secret, a version, or a name — and both are useless to an attacker
         // and load-bearing for an operator.
         ...readConfigStamp(),
+        // How many app settings arrived as the literal
+        // `@Microsoft.KeyVault(…)` string instead of a resolved secret
+        // (T-720). Unseeded, RBAC revoked, vault firewall denying, or rotated
+        // and broken all present identically — as a feature quietly turning
+        // itself off, in production, with no exception in Application Insights
+        // because the code path taken is a clean fallback.
+        //
+        // A COUNT, not the names: this endpoint is anonymous, and T-402
+        // stripped the runtime version, site name and a feature flag from it
+        // because an unauthenticated inventory is what host enumeration looks
+        // for. Which integrations exist and which are unconfigured is exactly
+        // such an inventory. The number is 0 in a healthy estate, so any other
+        // number is actionable without it. Names come from the authenticated
+        // ops-health surface.
+        unresolvedSecrets: unresolvedSecretCount(process.env),
       }),
     };
   },

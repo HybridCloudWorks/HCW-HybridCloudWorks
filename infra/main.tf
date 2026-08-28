@@ -1466,7 +1466,34 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # replaced by their `replace_triggered_by`: the settings read, the settings
     # strip, and the FTP basic-auth policy below them. (It was 2/2 until
     # 2026-08-24, when the FTP policy was added.) A plan reporting exactly that
-    # and nothing else means NO DRIFT. It is noise, it is permanent, and the
+    # and nothing else means NO DRIFT.
+    #
+    # DO NOT APPROVE THAT BY EYE (T-724). "And nothing else" is the entire
+    # content of the claim, and it is the part a human reading a summary line
+    # cannot check: three destroys look like three destroys whichever three
+    # they are, and since T-708 the Cosmos containers are exactly the kind of
+    # resource that could be among them. Run the assertion instead —
+    #
+    #     terraform show -json tfplan > plan.json
+    #     node scripts/assert-expected-plan.mjs plan.json
+    #
+    # — which compares the change set against the three azapi ADDRESSES and
+    # this one attribute, and fails on anything else, including a second
+    # setting changing on this same resource. It also fails when an expected
+    # change STOPS appearing, because a strip that is not running is how
+    # AzureWebJobsStorage comes back (T-511).
+    #
+    # It is not in CI: the plan runs in HCP Terraform and `iac-validate.yml`
+    # has no workspace token, so wiring it up needs a TFC API token as a
+    # repository secret — an owner action, tracked in TODO.md.
+    #
+    # ON EVERY azurerm MINOR UPGRADE, re-test issue #29149. If it has closed,
+    # delete the azapi pair, the azapi provider, T-511 and
+    # scripts/assert-expected-plan.mjs together, and confirm with the
+    # post-apply check in deploy-functions.yml — which is what fails if the
+    # strip stops working.
+    #
+    # It is noise, it is permanent, and the
     # only thing worse than the noise is silencing it wrongly.
     #
     # Do NOT "fix" it with ignore_changes on this key. That would make azurerm
@@ -1528,6 +1555,30 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 # confirm with the post-apply check in deploy-functions.yml, which is what fails
 # if this stops working.
 
+# SECRETS-IN-STATE: THIS EXPORT IS THE WHOLE LIVE SETTINGS MAP (T-723).
+#
+# `response_export_values = ["properties"]` is not a projection of what the HCL
+# above declares — it is everything ARM currently holds on the app, written into
+# Terraform state unredacted and from there into HCP Terraform's plan JSON. The
+# IaC standard says secret values never transit state.
+#
+# It is safe because of exactly one property, and the property is not local to
+# this resource: **every secret-shaped app setting is a
+# `@Microsoft.KeyVault(SecretUri=…)` reference**, so what lands in state is a
+# pointer rather than a credential. The first setting written with a literal
+# value — here, or out of band by a human on the live app — makes a credential
+# round-trip through state on every apply, with no plan diff worth noticing and
+# no error.
+#
+# `functions/src/functions/app-settings-secrets.test.js` asserts that invariant
+# by reading this file as text, so it fails in CI rather than being rediscovered
+# from a state file. It cannot see an out-of-band write; nothing here can, which
+# is why §4.5 of REVIEW.md says settings are Terraform-managed and editing one
+# by hand is how drift starts.
+#
+# The narrower export that would remove the problem does not exist: the strip
+# below has to rewrite the complete map, because ARM's appsettings PUT replaces
+# rather than merges — sending a subset would delete every setting not sent.
 resource "azapi_resource_action" "function_app_settings" {
   type        = "Microsoft.Web/sites@2024-04-01"
   resource_id = azurerm_function_app_flex_consumption.hcw.id
