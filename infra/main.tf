@@ -1797,16 +1797,22 @@ resource "azurerm_role_assignment" "func_kv_secrets" {
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
-# Key Vault Secrets Officer — Terraform executor (write during CI/CD secret seeding)
+# REMOVED (T-748): azurerm_role_assignment.terraform_kv_secrets, which granted
+# Key Vault Secrets Officer to the HCP Terraform workspace principal for
+# "CI/CD secret seeding".
 #
-# NOTE: on a CLI-driven HCP Terraform workspace this resolves to the WORKSPACE's
-# service principal, not to whoever typed `terraform apply`. That is correct, and
-# it is also why a human operator gets nothing from it — see admin_object_ids.
-resource "azurerm_role_assignment" "terraform_kv_secrets" {
-  scope                = azurerm_key_vault.hcw.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
+# It had no consumer. Terraform manages no secret VALUES in this configuration —
+# there is not one azurerm_key_vault_secret resource in infra/ — and TFC's
+# runners are neither in this VNet nor a trusted Azure service, so the grant
+# could not write from a run even if something wanted to. Its only live effect
+# was latent: whenever admin_ip_rules opens a seeding window, a shared remote
+# execution environment would gain write access to every production secret
+# alongside the named human operator.
+#
+# Seeding is covered by the admin_object_ids window below, which grants named
+# humans. The repository's own doctrine (oidc.tf: "deploys do not read secrets")
+# argues against handing that reach to an automation principal that never
+# needed it.
 
 # Key Vault Secrets Officer — named human operators, for the seeding windows the
 # cutover scripts need.
