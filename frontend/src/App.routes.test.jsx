@@ -204,8 +204,13 @@ describe('public route contract', () => {
   it('mounts the staging preview route instead of the provider fallback', async () => {
     // usePublicData is mocked to no data, so PreviewPage shows its own
     // unavailable view — proving /preview/:id routes there, not to /:provider.
+    // Unlike the provider routes above, PreviewPage is NOT mocked, so the
+    // lazy chunk loads for real — under CI load that can outrun findByText's
+    // default 1 s, so this lookup gets an explicit generous timeout.
     renderRoute('/preview/some-id?t=token');
 
-    expect(await screen.findByText(/Preview unavailable/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Preview unavailable/i, {}, { timeout: 10000 })
+    ).toBeInTheDocument();
   });
 });
