@@ -33,6 +33,7 @@ import {
   formatPublishedDate,
   getDecayBadge,
   getEditorPath,
+  getForgeBadge,
   getHeroCacheBust,
   getLiveBadge,
   getQueueItemCoverUrl,
@@ -56,6 +57,7 @@ export function QueueList({
   statusFilter,
   selectedIds,
   toggleSelected,
+  toggleSelectAll,
 }) {
   if (loading) {
     return (
@@ -75,8 +77,24 @@ export function QueueList({
     );
   }
 
+  const canSelect = statusFilter !== 'rejected' && statusFilter !== 'published_live';
+  const allSelected =
+    canSelect && items.length > 0 && items.every((item) => selectedIds?.has(item.id));
+
   return (
     <div className="space-y-4">
+      {canSelect && toggleSelectAll && (
+        <label className="flex items-center gap-2 px-1 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            aria-label="Select all visible items"
+            checked={allSelected}
+            onChange={() => toggleSelectAll(items.map((item) => item.id))}
+            className="h-4 w-4 cursor-pointer"
+          />
+          Select all {items.length} visible
+        </label>
+      )}
       {items.map((item) => (
         <QueueItemCard
           key={item.id}
@@ -347,6 +365,7 @@ function QueueItemBadges({ item }) {
         </Badge>
       )}
       {getLiveBadge(item)}
+      {getForgeBadge(item)}
       <Badge variant="outline" className="font-mono text-[10px]">
         {item.contentStatus || 'unknown'}
       </Badge>
@@ -407,10 +426,10 @@ export function QueueItemCard({
           <div className="flex items-start pt-1">
             <input
               type="checkbox"
-              aria-label="Select for bulk reject"
+              aria-label="Select item"
               checked={Boolean(isSelected)}
               onChange={() => toggleSelected?.(item.id)}
-              className="h-4 w-4 cursor-pointer accent-destructive"
+              className="h-4 w-4 cursor-pointer"
             />
           </div>
         )}

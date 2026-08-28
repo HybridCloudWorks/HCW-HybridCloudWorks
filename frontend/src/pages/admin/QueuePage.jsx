@@ -29,6 +29,94 @@ function isValidHttpUrl(value = '') {
   }
 }
 
+/**
+ * The unattended paste-a-URL entry point (Blog Machine T-602). Its own
+ * component so the enqueue state lives with the form rather than adding four
+ * more hooks to QueuePage. Fire-and-forget on purpose: the forge runs for
+ * minutes under the job budget, so this enqueues and lets the result land
+ * back in the queue as forge_ready or editing rather than holding the page.
+ */
+function ForgeFromUrlCard() {
+  const [forgeUrl, setForgeUrl] = useState('');
+  const [forgingUrl, setForgingUrl] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const url = forgeUrl.trim();
+    setNotice('');
+    if (!isValidHttpUrl(url)) {
+      setError('Enter a valid http(s) article URL.');
+      return;
+    }
+    setError('');
+    setForgingUrl(true);
+    try {
+      const accepted = await postJSON('enqueueJob', {
+        type: 'forge-from-url',
+        payload: { url },
+      });
+      if (!accepted?.ok || !accepted.jobId) {
+        throw new Error(accepted?.error || 'Job was not accepted');
+      }
+      setForgeUrl('');
+      setNotice(
+        `Forge queued (job ${accepted.jobId}). The scraped source and its forged draft land in this queue as forge_ready or editing — refresh in a few minutes.`
+      );
+    } catch (err) {
+      setError(err?.message || 'Failed to queue the forge.');
+    } finally {
+      setForgingUrl(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <form className="flex flex-col gap-2 sm:flex-row sm:items-center" onSubmit={handleSubmit}>
+          <Label htmlFor="forge-from-url" className="flex items-center gap-1 whitespace-nowrap">
+            <Flame className="h-4 w-4 text-primary" /> Forge from URL
+          </Label>
+          <Input
+            id="forge-from-url"
+            type="text"
+            inputMode="url"
+            placeholder="https://… paste an article to forge into a post"
+            value={forgeUrl}
+            onChange={(event) => setForgeUrl(event.target.value)}
+            disabled={forgingUrl}
+            className="flex-1"
+          />
+          <Button type="submit" size="sm" disabled={forgingUrl || !forgeUrl.trim()}>
+            {forgingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Forge'}
+          </Button>
+        </form>
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        {notice && <p className="mt-2 text-sm text-muted-foreground">{notice}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The Forge Selected result banners, out of QueuePage for complexity's sake. */
+function ForgeFeedback({ error, message }) {
+  return (
+    <>
+      {error && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+      {message && (
+        <div className="rounded-md border border-green-500/50 bg-green-50 px-4 py-3 text-sm text-green-700 dark:bg-green-950 dark:text-green-300">
+          {message}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function QueuePage() {
   const navigate = useNavigate();
   const { authReady } = useAuthReady();
@@ -49,10 +137,6 @@ export default function QueuePage() {
     return v === 'asc' ? 'asc' : 'desc';
   });
   const [loadError, setLoadError] = useState(null);
-  const [forgeUrl, setForgeUrl] = useState('');
-  const [forgingUrl, setForgingUrl] = useState(false);
-  const [forgeUrlNotice, setForgeUrlNotice] = useState('');
-  const [forgeUrlError, setForgeUrlError] = useState('');
   const [pageSize, setPageSize] = useState(() => {
     const fromUrl = Number(searchParams.get('pageSize'));
     return [50, 100, 200].includes(fromUrl) ? fromUrl : 100;
@@ -68,6 +152,11 @@ export default function QueuePage() {
     setConfirmTarget,
     selectedIds,
     toggleSelected,
+    toggleSelectAll,
+    forgingSelected,
+    forgeMessage,
+    forgeError,
+    handleForgeSelected,
     handleApprove,
     handleBulkReject,
     handleConfirm,
@@ -188,6 +277,24 @@ export default function QueuePage() {
             )}
             Delete Rejected Now
           </Button>
+          {selectedIds.size > 0 &&
+            statusFilter !== 'rejected' &&
+            statusFilter !== 'published_live' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleForgeSelected}
+                disabled={forgingSelected}
+                className="gap-1"
+              >
+                {forgingSelected ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Flame className="h-4 w-4 text-primary" />
+                )}
+                Forge Selected ({selectedIds.size})
+              </Button>
+            )}
           {selectedIds.size > 1 && (
             <Button
               variant="outline"
@@ -215,64 +322,7 @@ export default function QueuePage() {
         </div>
       </div>
 
-      {/* Forge from URL — the unattended paste-a-URL entry point (T-602).
-          Fire-and-forget on purpose: the forge runs for minutes under the job
-          budget, so this enqueues and lets the result land back in this queue
-          as forge_ready or editing rather than holding the page open. */}
-      <Card>
-        <CardContent className="pt-6">
-          <form
-            className="flex flex-col gap-2 sm:flex-row sm:items-center"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const url = forgeUrl.trim();
-              setForgeUrlNotice('');
-              if (!isValidHttpUrl(url)) {
-                setForgeUrlError('Enter a valid http(s) article URL.');
-                return;
-              }
-              setForgeUrlError('');
-              setForgingUrl(true);
-              try {
-                const accepted = await postJSON('enqueueJob', {
-                  type: 'forge-from-url',
-                  payload: { url },
-                });
-                if (!accepted?.ok || !accepted.jobId) {
-                  throw new Error(accepted?.error || 'Job was not accepted');
-                }
-                setForgeUrl('');
-                setForgeUrlNotice(
-                  `Forge queued (job ${accepted.jobId}). The scraped source and its forged draft land in this queue as forge_ready or editing — refresh in a few minutes.`
-                );
-              } catch (err) {
-                setForgeUrlError(err?.message || 'Failed to queue the forge.');
-              } finally {
-                setForgingUrl(false);
-              }
-            }}
-          >
-            <Label htmlFor="forge-from-url" className="flex items-center gap-1 whitespace-nowrap">
-              <Flame className="h-4 w-4 text-primary" /> Forge from URL
-            </Label>
-            <Input
-              id="forge-from-url"
-              type="text"
-              inputMode="url"
-              placeholder="https://… paste an article to forge into a post"
-              value={forgeUrl}
-              onChange={(event) => setForgeUrl(event.target.value)}
-              disabled={forgingUrl}
-              className="flex-1"
-            />
-            <Button type="submit" size="sm" disabled={forgingUrl || !forgeUrl.trim()}>
-              {forgingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Forge'}
-            </Button>
-          </form>
-          {forgeUrlError && <p className="mt-2 text-sm text-destructive">{forgeUrlError}</p>}
-          {forgeUrlNotice && <p className="mt-2 text-sm text-muted-foreground">{forgeUrlNotice}</p>}
-        </CardContent>
-      </Card>
+      <ForgeFromUrlCard />
 
       {/* Rejected decay-countdown explanation banner */}
       {statusFilter === 'rejected' && (
@@ -305,6 +355,9 @@ export default function QueuePage() {
           {bulkDeleteMessage}
         </div>
       )}
+
+      {/* Forge Selected feedback */}
+      <ForgeFeedback error={forgeError} message={forgeMessage} />
 
       <Card>
         <CardHeader>
@@ -399,6 +452,7 @@ export default function QueuePage() {
         statusFilter={statusFilter}
         selectedIds={selectedIds}
         toggleSelected={toggleSelected}
+        toggleSelectAll={toggleSelectAll}
       />
 
       <ConfirmModal
