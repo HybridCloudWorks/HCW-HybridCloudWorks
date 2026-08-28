@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mergeDigest, raiseAlert, writeSystemAudit, toMillis } from './workflow-records.js';
-import { createReviewerDigest } from './reviewer-digest.js';
+import { createReviewerDigest, createReviewerDigestManualHandler } from './reviewer-digest.js';
 import { createContentCleanup, getRejectionReferenceDate } from './content-cleanup.js';
 import { createPublishingWatchdog } from './publishing-watchdog.js';
 import { createLinkCheck, collectLiveLinkTargets, probeUrl } from './link-check.js';
@@ -128,6 +128,28 @@ describe('reviewer digest', () => {
       sourceUrl: 'https://a',
     });
     expect(digest.topItems[2]).toMatchObject({ title: 'Untitled', status: 'ingested' });
+    expect(digest.generatedBy).toBe('scheduler');
+  });
+
+  it('the manual RPC runs the same snapshot, editor-guarded, stamped generatedBy manual', async () => {
+    const store = memStore({}, () => []);
+    store.countDocs.mockResolvedValue(2);
+    const guard = {
+      requireRole: vi.fn(async () => ({ user: { oid: 'u1' }, role: 'editor', error: null })),
+    };
+    const handler = createReviewerDigestManualHandler({ guard, store, now });
+    const res = await handler({ headers: { get: () => null } }, { error: vi.fn() });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({ success: true, totalQueued: 8, recentRssCount: 0 });
+    expect(store.data.workflow_digests.get('2026-08-21').generatedBy).toBe('manual');
+
+    const denied = createReviewerDigestManualHandler({
+      guard: { requireRole: vi.fn(async () => ({ error: { status: 403, body: '{}' } })) },
+      store,
+      now,
+    });
+    expect((await denied({ headers: { get: () => null } }, { error: vi.fn() })).status).toBe(403);
   });
 });
 

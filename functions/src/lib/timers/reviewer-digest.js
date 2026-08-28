@@ -15,7 +15,7 @@ const RECENT_LIMIT = 30;
 const TOP_ITEMS = 10;
 
 export function createReviewerDigest({ store, now = () => new Date(), log = {} }) {
-  async function run() {
+  async function run({ generatedBy = 'scheduler' } = {}) {
     const digestDate = digestDateOf(now());
     const queueByStatus = {};
     let totalQueued = 0;
@@ -53,7 +53,7 @@ export function createReviewerDigest({ store, now = () => new Date(), log = {} }
     }
 
     await mergeDigest(store, digestDate, {
-      generatedBy: 'scheduler',
+      generatedBy,
       queueByStatus,
       totalQueued,
       recentRssCount: (recent || []).length,
@@ -73,4 +73,40 @@ export function createReviewerDigest({ store, now = () => new Date(), log = {} }
     };
   }
   return { run };
+}
+
+/**
+ * POST /api/generateReviewerDigestManual — the Ops Health "Run Now" tile
+ * (the last dead digest RPC; api-surface notImplemented since the import).
+ * The SAME snapshot the 07:00 timer writes, run on demand and merged into
+ * the same workflow_digests/{date} doc with generatedBy 'manual' — one
+ * digest implementation, whoever asks. Returns the run result directly
+ * ({ success, digestDate, totalQueued, recentRssCount, queueByStatus });
+ * the tile reads totalQueued and recentRssCount.
+ */
+export function createReviewerDigestManualHandler({ guard, store, now = () => new Date() }) {
+  return async function generateReviewerDigestManual(request, context) {
+    const auth = await guard.requireRole(request, 'editor');
+    if (auth.error) return auth.error;
+    try {
+      const result = await createReviewerDigest({ store, now, log: context }).run({
+        generatedBy: 'manual',
+      });
+      return {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      };
+    } catch (error) {
+      context.error('generateReviewerDigestManual failed:', error);
+      return {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: 'Failed to generate reviewer digest',
+          message: error?.message || 'Unknown error',
+        }),
+      };
+    }
+  };
 }
