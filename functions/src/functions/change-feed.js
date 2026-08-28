@@ -74,7 +74,21 @@ async function handlers(context) {
   });
 }
 
-function feed(name, containerName, pick) {
+/**
+ * Documents handed to one invocation (T-731).
+ *
+ * 50 is fine for the mirror feeds, whose per-document work is one conditional
+ * blob copy. It is not fine for `content`: one document there can require up
+ * to four Replicate generations, an inspection with model calls, a caption
+ * generation and a Publer call, so fifty of them cannot complete inside any
+ * plausible timeout. The handler carries a wall-clock budget as the real
+ * bound (`FEED_BUDGET_MS`); this is the cheap first line that keeps a batch
+ * from being absurd before the budget has to act.
+ */
+const DEFAULT_MAX_ITEMS = 50;
+const CONTENT_MAX_ITEMS = 8;
+
+function feed(name, containerName, pick, maxItemsPerInvocation = DEFAULT_MAX_ITEMS) {
   app.cosmosDB(name, {
     connection: COSMOS_CONNECTION,
     databaseName: databaseName(),
@@ -83,7 +97,7 @@ function feed(name, containerName, pick) {
     leaseContainerPrefix: `${name}-`,
     createLeaseContainerIfNotExists: false,
     startFromBeginning: false,
-    maxItemsPerInvocation: 50,
+    maxItemsPerInvocation,
     handler: async (documents, context) => {
       if (!Array.isArray(documents) || documents.length === 0) return;
       const results = await pick(await handlers(context))(documents, context);
@@ -97,6 +111,6 @@ function feed(name, containerName, pick) {
 feed('mirrorSpeakerEventImages', 'speakerevents', (h) => h.speakerevents);
 feed('mirrorCertificationImages', 'certifications', (h) => h.certifications);
 feed('processBlogChanges', 'blogs', (h) => h.blogs);
-feed('processContentChanges', 'content', (h) => h.content);
+feed('processContentChanges', 'content', (h) => h.content, CONTENT_MAX_ITEMS);
 feed('notifyWorkflowAlerts', 'workflow_alerts', (h) => h.workflowAlerts);
 feed('syncSocialPostsToPubler', 'social_posts', (h) => h.socialPosts);

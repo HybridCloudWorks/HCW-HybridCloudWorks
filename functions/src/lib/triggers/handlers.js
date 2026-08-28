@@ -45,10 +45,62 @@ export function buildPublerUpdateBody(socialPost = {}) {
 
 const eventIdOf = (doc) => doc?._etag || doc?._ts?.toString() || 'unknown';
 
-async function each(docs, context, label, fn) {
+/**
+ * Wall-clock budget for one change-feed invocation (T-731).
+ *
+ * A single `content` document can require up to four Replicate generations
+ * (each `Prefer: wait=60` plus polling), an inspection with model calls, a
+ * caption generation and a Publer call. An iteration count does not bound
+ * elapsed time when every iteration is mostly waiting on someone else, so a
+ * batch of documents all carrying `altCoverImageTrigger` could not finish
+ * inside any plausible function timeout.
+ *
+ * Ten minutes: comfortably inside the Flex Consumption non-HTTP default
+ * (30 min) and, more importantly, inside `DEFAULT_CLAIM_TIMEOUT_MS` (15 min).
+ * Overrunning the claim window is the failure that matters — a claim held past
+ * it becomes reclaimable as stale, so a redelivery would re-do work that is
+ * still in flight and pay for it twice.
+ */
+export const FEED_BUDGET_MS = 10 * 60 * 1000;
+
+/** Thrown to make the lease NOT advance. Identified by `code`, not by message. */
+export class FeedBudgetExhausted extends Error {
+  constructor(label, done, total) {
+    super(
+      `[${label}] work budget exhausted after ${done}/${total} document(s); batch will redeliver`
+    );
+    this.code = 'FEED_BUDGET_EXHAUSTED';
+    this.done = done;
+    this.total = total;
+  }
+}
+
+async function runEach(docs, context, label, fn, { budgetMs, monotonic }) {
   const results = [];
-  for (const doc of docs || []) {
-    if (!doc?.id) continue;
+  const deadline = monotonic() + budgetMs;
+  const list = (docs || []).filter((doc) => doc?.id);
+
+  for (const [index, doc] of list.entries()) {
+    // Checked BEFORE starting each document, and never before the first.
+    // Always doing at least one is what guarantees forward progress: a single
+    // document that alone exceeds the budget would otherwise be retried
+    // forever, which is worse than the overrun it avoids.
+    if (index > 0 && monotonic() >= deadline) {
+      // THROW, do not return. The Cosmos change-feed processor checkpoints the
+      // lease after the handler returns *successfully*, so returning early
+      // would advance the lease past the documents this loop never looked at
+      // and their triggers would never fire again — the feed only redelivers
+      // on a subsequent write. Throwing leaves the lease where it is and the
+      // whole batch redelivers.
+      //
+      // Redelivery is cheap for the documents already done: their rising-edge
+      // claims are released and their trigger flags cleared, so the second
+      // pass skips them without spending anything. That is the property this
+      // early exit depends on, and it is the same one that makes the feed safe
+      // against a killed invocation.
+      context.error?.(`[${label}] budget exhausted after ${index}/${list.length}`);
+      throw new FeedBudgetExhausted(label, index, list.length);
+    }
     try {
       results.push(await fn(doc));
     } catch (err) {
@@ -69,6 +121,8 @@ async function each(docs, context, label, fn) {
  * @param {{ notifyTelegram: Function }} deps.notifier
  * @param {{ configured: boolean, request: Function }} deps.publer
  * @param {() => Date} [deps.now]
+ * @param {number} [deps.feedBudgetMs] wall-clock budget per invocation (T-731)
+ * @param {() => number} [deps.monotonic] elapsed-time source, injectable for tests
  */
 export function createFeedHandlers({
   store,
@@ -81,7 +135,19 @@ export function createFeedHandlers({
   notifier,
   publer,
   now = () => new Date(),
+  feedBudgetMs = FEED_BUDGET_MS,
+  monotonic = Date.now,
 }) {
+  // `now` returns a Date and is the *content* clock (timestamps written into
+  // documents); `monotonic` measures elapsed time. They are separate so a test
+  // can freeze document timestamps — several below rely on that — without also
+  // freezing the budget, and vice versa.
+  //
+  // Bound here rather than threaded through six call sites: every handler
+  // shares one budget per invocation, which is the thing being bounded.
+  const each = (docs, context, label, fn) =>
+    runEach(docs, context, label, fn, { budgetMs: feedBudgetMs, monotonic });
+
   const speakerevents = (docs, context) =>
     each(docs, context, 'feed:speakerevents', (doc) => mirror.mirror('speakerevents', doc));
   const certifications = (docs, context) =>
