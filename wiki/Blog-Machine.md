@@ -303,7 +303,14 @@ forge_ready items with grade and an inline `/approve {id}` per row.
    rather than duplicating it. `triggerAiImageGeneration` stays
    fire-and-forget by arming the change-feed flag; the other three are
    synchronous and 503 cleanly while `REPLICATE-API-KEY` is unseeded.
-3. **Weekly digest send** (`generateReviewerDigestManual` over the existing `generate-weekly-digest` job).
+3. **Weekly digest send** — **LANDED** (post-program), with a correction:
+   `generateReviewerDigestManual`'s actual frontend contract (the Ops
+   Health "Run Now" tile) is the REVIEWER queue snapshot, the manual twin
+   of the 07:00 `generateReviewerDigest` timer — not the newsletter
+   `generate-weekly-digest` job this line originally guessed. It now runs
+   that same snapshot on demand (`generatedBy: 'manual'` into the same
+   `workflow_digests/{date}` doc). The newsletter job remains reachable
+   through `enqueueJob` as before.
 4. **Analytics-informed topic weighting** — engagement data feeding interest-area weight *suggestions* (accept/dismiss, like voice calibration).
 5. **Series detection + interlinking** — forge finds related published posts and proposes a sibling-links module; series metadata on content docs.
 6. **SEO lint in the grader** — meta-description length, slug/keyword alignment, heading hierarchy as advisory dimensions.
