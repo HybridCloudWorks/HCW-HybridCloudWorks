@@ -2,6 +2,7 @@
 
 - [Home](Home)
 - [Architecture decision records](Architecture-Decision-Records)
+- [Architecture review 2026-08](Architecture-Review-2026-08)
 - [Deployment runbook](Deployment-Runbook)
 - [Alerting and support](Alerting-And-Support)
 - [Availability probe](Availability-Probe)
