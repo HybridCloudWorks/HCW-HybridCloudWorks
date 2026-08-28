@@ -48,11 +48,11 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 
 | Priority | Open items |
 | --- | ---: |
-| Critical | 5 |
+| Critical | 0 (all five closed 2026-08-28) |
 | High | 14 |
 | Medium | 31 |
 | Low | 15 |
-| Total | 65 |
+| Total | 60 |
 
 **The count changed shape on 2026-08-28.** It previously read 10, of which
 seven were the Blog Machine program (T-601…T-607) — now closed and merged, so
@@ -152,52 +152,35 @@ Deliberately **not** re-reported, being owner gates rather than findings:
 T-518, T-519, T-526, the unseeded Key Vault secrets, the unseeded
 `admin_config` documents, and the absent analytics provider.
 
-### Critical — act before the next deploy or cutover
+### Critical — CLOSED 2026-08-28
 
-**T-701 — An editor can publish content live, bypassing the publisher gate.**
-`functions/src/lib/jobs.js:106,219-222`; `functions/src/functions/publish-jobs.js:39-50`;
-`functions/src/lib/cms/publish.js:467`. *Verified.*
-`publish-content` declares no `role`, inherits `registerJobType`'s `editor`
-default, and `enqueueJob` escalates only when the role differs from `editor` —
-so an editor-level token publishes live through a guard-free worker. **None of
-the eight job types declares a role.** Fix: make `role` mandatory in
-`registerJobType`, declare `publisher` on `publish-content`, and test that each
-type's role matches its HTTP twin.
+All five are fixed in code and verified by the suite; entries move to
+[CHANGELOG.md](CHANGELOG.md) on merge. One residual owner action remains and
+is listed under T-705.
 
-**T-702 — Both PowerShell confirmation gates self-approve without a TTY.**
-`scripts/lib/deploy-console.ps1:208-209`; all eight `[CmdletBinding]` lines.
-*Verified.* `Confirm-Plan` returns `$true` on redirected stdin, and no script
-sets `ConfirmImpact = 'High'`, so `ShouldProcess` does not prompt either.
-`bootstrap-terraform-oidc.ps1 -ElevateAccess < /dev/null` reaches tenant-root
-User Access Administrator unprompted. Fix: refuse rather than assent
-non-interactively, behind an explicit `-Yes`/`-Force`.
-
-**T-703 — The root-elevation removal reports success on its own failed
-read-back.** `scripts/bootstrap-terraform-oidc.ps1:445-470`;
-`scripts/lib/deploy-console.ps1:441,444-445`. *Verified.* `Invoke-Az
--AllowFailure` returns `$null` for both "no assignment" and "the call failed",
-so a throttled read prints "removed (verified…)" over a possibly-live
-tenant-wide grant — the false-green its own comment says it prevents. Fix:
-distinguish failure from empty; treat unreadable as the red path.
-
-**T-704 — The T-526 cutover script has no working dry run.**
-`scripts/cutover/04-telegram-webhook.ps1:68,146-153,150`. *Verified.* The Key
-Vault firewall open is not `ShouldProcess`-guarded (its twin in
-`03-keyvault-secrets.ps1:70` is), so `-WhatIf` mutates the production ACL and
-extracts the bot token; the verify block then always throws under `-WhatIf`;
-and the "custom secret: set" line is unconditionally true.
-**Land this before running T-526.**
-
-**T-705 — The production environment gates nothing and dispatch accepts any
-ref.** `.github/workflows/deploy-functions.yml:16,40`;
-`deploy-azure-frontend.yml:16,30`; `infra/oidc.tf:153-166`. *Verified, with one
-**verify** item.* The federated subject is environment-scoped, so it matches
-from any branch — the 14-check gate is bypassable by dispatching a deploy from
-an unreviewed ref. Both workflows' comments say the environment has no
-protection rules; `REVIEW.md:300` says it "Gates production deploys". The
-environments API was unreachable from the review session, so **which record is
-true still needs confirming**. Fix: required reviewers plus a `main`-only
-branch restriction, then reconcile REVIEW.md §4.4.
+- **T-701** — `registerJobType` now requires an explicit `role` (no default),
+  all nine registered types declare one, `publish-content` is `publisher`
+  matching its HTTP twin, and escalation compares hierarchy level rather than
+  string inequality. `jobs.roles.test.js` asserts both properties. The new
+  validation immediately caught a ninth registration — the built-in `noop` —
+  that the review had missed.
+- **T-702** — `Confirm-Plan` refuses in a non-interactive context instead of
+  assenting, naming `-Force` as the deliberate unattended path; the six
+  destructive scripts now declare `ConfirmImpact = 'High'` so `ShouldProcess`
+  prompts too.
+- **T-703** — `Invoke-Az` records whether the call failed, `Test-LastAzFailed`
+  exposes it, and the root-elevation read-back treats an unreadable result as
+  the red path with the manual removal command printed.
+- **T-704** — the Key Vault window is `ShouldProcess`-guarded, the verify block
+  is skipped under `-WhatIf` (printing what it would check), and the decorative
+  secret line is replaced by a behavioural test: a POST without the token must
+  answer 401 and one carrying it must answer 200, which also proves the vault
+  token matches the deployed one. **T-526 is now safe to run.**
+- **T-705** — both deploy workflows now fail a dispatch from any ref but `main`,
+  and REVIEW.md §4.4 no longer claims a gate that may not exist.
+  **Owner action, still open:** confirm required reviewers and a `main`-only
+  deployment-branch rule on the `production` environment, then set that row to
+  what you find. The guard step is a backstop, not the gate.
 
 ### High
 

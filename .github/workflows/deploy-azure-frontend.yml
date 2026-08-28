@@ -32,6 +32,24 @@ jobs:
       run:
         working-directory: frontend
     steps:
+      - name: Refuse a deploy from a ref that is not main
+        # The `production` environment records who deployed but does not gate
+        # whether they may: GitHub auto-creates a missing environment with no
+        # protection rules, and the federated credential's subject is
+        # environment-scoped, so it matches from ANY branch. Without this step
+        # a dispatch from an unreviewed ref ships to production past all 12
+        # required contexts (T-705). This is the repository-side half; the
+        # durable fix is required reviewers plus a main-only branch
+        # restriction on the environment itself, which only a repo admin can
+        # configure.
+        if: github.ref != 'refs/heads/main'
+        # Overrides the job's `working-directory: frontend`: this step runs
+        # before checkout, so that directory does not exist yet.
+        working-directory: .
+        run: |
+          echo "::error::Refusing to deploy from ${{ github.ref }}. Production deploys run from main only."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

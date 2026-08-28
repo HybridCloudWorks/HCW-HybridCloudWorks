@@ -32,7 +32,7 @@
     The token is passed to gh over stdin, never as an argument, so it does not
     land in the shell history or the process list.
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [string] $SwaName = 'stapp-site-prod-cus-01',
     [string] $ResourceGroup = 'rg-web-site-prod-cus',

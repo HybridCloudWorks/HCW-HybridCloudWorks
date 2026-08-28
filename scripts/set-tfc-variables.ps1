@@ -109,7 +109,7 @@
   # written.
   ./scripts/set-tfc-variables.ps1 -WhatIf
 #>
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
   # No defaults on purpose: infra/backend.tf supplies both, so there is exactly
   # one place naming the workspace. Pass them only to override the backend.

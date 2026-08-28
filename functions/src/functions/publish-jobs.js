@@ -37,6 +37,11 @@ export async function runPublishContent(payload, { job, publish }) {
 }
 
 registerJobType('publish-content', {
+  // MUST match POST /api/publishContent (cms/publish.js), which requires
+  // publisher. The worker calls processPublishContent with markLive: true and
+  // that function carries no guard of its own — this declaration is the only
+  // thing standing between an editor token and a live publish (T-701).
+  role: 'publisher',
   description:
     'Publish one content document live through the full processPublishContent pipeline (status, quality, image and metadata gates included). Enqueued by the Telegram /approve command.',
   maxPayloadBytes: 2048,

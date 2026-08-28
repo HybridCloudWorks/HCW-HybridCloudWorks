@@ -40,6 +40,7 @@
  * whole path can be exercised end to end before that.
  */
 import { randomUUID } from 'node:crypto';
+import { ROLE_NAMES, roleLevel } from './auth/roles.js';
 
 export const JOBS_CONTAINER = 'jobs';
 export const JOBS_QUEUE = 'platform-jobs';
@@ -81,7 +82,13 @@ const registry = new Map();
  * @param {string} [spec.description]
  * @param {number} [spec.maxPayloadBytes] - JSON bytes of `payload`; default 64 KiB
  * @param {number} [spec.timeoutMs] - worker budget; default 10 minutes
- * @param {string} [spec.role] - role required to enqueue; default 'editor'
+ * @param {string} spec.role - role required to enqueue. REQUIRED and explicit:
+ *   a job type is a second door onto whatever its worker does, and the worker
+ *   calls the underlying pipeline directly, below the HTTP route's guard. When
+ *   this defaulted to 'editor', `publish-content` silently inherited it and an
+ *   editor could publish live past the `publisher` gate on POST
+ *   /api/publishContent (T-701). Declare the role of the HTTP route that
+ *   performs the same action; `jobs.roles.test.js` asserts the pairing.
  * @param {(info: {job: object, status: string, result: any, error: string|null},
  *          ctx: {context: object, now: () => Date}) => Promise<void>} [spec.onComplete]
  *   Called after the terminal status is written (succeeded/failed/timeout).
@@ -96,14 +103,25 @@ export function registerJobType(type, spec) {
   if (!spec || typeof spec.worker !== 'function') {
     throw new Error(`job type ${type}: spec.worker must be a function`);
   }
+  // No default. An omitted role used to mean 'editor', which is the wrong
+  // answer for anything a publisher-gated route performs — and being the
+  // wrong answer silently is what made T-701 a privilege escalation rather
+  // than a bug someone noticed.
+  // Identity conflicts before spec validity: re-registering a name is about
+  // the registry, not about this spec's fields, and the clearer error wins.
   if (registry.has(type)) throw new Error(`job type ${type} is already registered`);
+  if (!ROLE_NAMES.includes(spec.role)) {
+    throw new Error(
+      `job type ${type}: spec.role must be one of ${ROLE_NAMES.join(', ')} — ` +
+        `declare the role of the HTTP route that performs the same action`
+    );
+  }
   registry.set(
     type,
     Object.freeze({
       description: '',
       maxPayloadBytes: DEFAULT_MAX_PAYLOAD_BYTES,
       timeoutMs: DEFAULT_TIMEOUT_MS,
-      role: 'editor',
       ...spec,
       type,
     })
@@ -136,6 +154,8 @@ function registerBuiltins() {
   // deployed app before any real worker lands. Echoes the payload; optional
   // `delayMs` (≤ 20 s) lets a poll loop be watched.
   registerJobType('noop', {
+    // Echoes a payload and touches nothing; editor is the enqueue floor.
+    role: 'editor',
     description: 'Smoke test — echoes the payload after an optional delayMs (max 20000).',
     maxPayloadBytes: 1024,
     timeoutMs: 30_000,
@@ -216,7 +236,13 @@ export function createJobHandlers({
           error: `Unknown job type. Allowed: ${[...types.keys()].join(', ')}`,
         });
       }
-      if (spec.role !== 'editor') {
+      // Escalate to the type's own role whenever it outranks the floor above.
+      // Compared by hierarchy level, not string inequality: the old
+      // `spec.role !== 'editor'` test skipped the check for every type that
+      // had silently defaulted to 'editor', which is precisely how
+      // publish-content reached processPublishContent without a publisher
+      // token (T-701).
+      if (roleLevel(spec.role) > roleLevel('editor')) {
         const stricter = await guard.requireRole(request, spec.role);
         if (stricter.error) return stricter.error;
       }

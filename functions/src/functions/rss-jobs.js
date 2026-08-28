@@ -25,6 +25,8 @@ export async function runRssIngest(context) {
 }
 
 registerJobType('fetch-rss-feeds', {
+  // Ingests feed items as draft content; editor, matching the RSS admin route.
+  role: 'editor',
   description:
     'Fetch every provider RSS feed, cache it, draft new content for review, rebuild the homepage feed.',
   maxPayloadBytes: 256,

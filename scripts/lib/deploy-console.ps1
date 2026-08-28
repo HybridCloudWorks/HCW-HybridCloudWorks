@@ -206,7 +206,19 @@ function Confirm-Plan {
   }
 
   if ($Force) { return $true }
-  if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { return $true }
+
+  # A gate that cannot ask must REFUSE, not assent (T-702). This used to
+  # return $true when stdin was redirected, which made every confirmation in
+  # this library decorative under `pwsh -File … < /dev/null`, in a CI step, or
+  # behind any wrapper that pipes input — including the one in front of
+  # tenant-root elevation. `-Force` is the deliberate way to proceed
+  # unattended, and it has to be typed on the command line.
+  if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) {
+    Write-Host ''
+    Write-Host '  Refusing to continue: no interactive console to confirm on.' -ForegroundColor Red
+    Write-Host '  Re-run in a terminal, or pass -Force to proceed unattended.' -ForegroundColor Red
+    return $false
+  }
 
   $answer = (Read-Host "`n  Proceed? [Y/n]").Trim()
   return ($answer -eq '' -or $answer -match '^[Yy]')
@@ -437,13 +449,27 @@ function Invoke-Az {
   $previous = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try { $output = & az @Arguments 2>&1 } finally { $ErrorActionPreference = $previous }
+  $script:LastAzFailed = $false
   if ($LASTEXITCODE -ne 0) {
+    # `$null` means BOTH "the call failed" and "the call returned nothing",
+    # which is fine for a caller that only wants a best-effort write — and
+    # wrong for one that reads a result back to prove something is gone.
+    # Callers that need the distinction test Test-LastAzFailed (T-703).
+    $script:LastAzFailed = $true
     if ($AllowFailure) { return $null }
     throw "az $($Arguments -join ' ') failed:`n$output"
   }
   $text = ($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
   if ([string]::IsNullOrWhiteSpace($text)) { return $null }
   try { return $text | ConvertFrom-Json } catch { return $text }
+}
+
+# True when the most recent Invoke-Az exited non-zero. Only meaningful
+# immediately after an -AllowFailure call, where the $null return is
+# ambiguous: a read-back that proves a privilege was removed must treat an
+# unreadable result as failure, never as "nothing found" (T-703).
+function Test-LastAzFailed {
+  return [bool] $script:LastAzFailed
 }
 
 function Test-AzInstalled {

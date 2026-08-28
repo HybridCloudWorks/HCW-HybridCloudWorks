@@ -45,7 +45,7 @@
 
     Requires: PowerShell 7. Key Vault access only when -BotToken is omitted.
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [ValidateSet('Set', 'Show', 'Delete')]
     [string] $Mode = 'Set',
@@ -63,12 +63,23 @@ try {
     if (-not $BotToken) {
         Write-Step 'Read the bot token from Key Vault'
         $myIp = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 15).ip
-        Write-Host "opening a firewall window for $myIp"
-        az keyvault network-rule add --name $VaultName --ip-address "$myIp/32" --output none
-        $ruleAdded = $true
-        Start-Sleep -Seconds 20
-        $BotToken = az keyvault secret show --vault-name $VaultName --name 'TELEGRAM-BOT-TOKEN' `
-            --query 'value' -o tsv
+        # Guarded, like its twin in 03-keyvault-secrets.ps1. Without this,
+        # -WhatIf still mutated the production vault's network ACL and pulled
+        # the bot token out of it — a dry run that writes is not a dry run
+        # (T-704).
+        if ($PSCmdlet.ShouldProcess($VaultName, "allow $myIp temporarily and read TELEGRAM-BOT-TOKEN")) {
+            Write-Host "opening a firewall window for $myIp"
+            az keyvault network-rule add --name $VaultName --ip-address "$myIp/32" --output none
+            $ruleAdded = $true
+            Start-Sleep -Seconds 20
+            $BotToken = az keyvault secret show --vault-name $VaultName --name 'TELEGRAM-BOT-TOKEN' `
+                --query 'value' -o tsv
+        }
+        else {
+            Write-Host 'skipped: no vault window opened and no token read.' -ForegroundColor Yellow
+            Write-Host 'Re-run without -WhatIf, or pass -BotToken to preview the rest.' -ForegroundColor Yellow
+            return
+        }
     }
     if ([string]::IsNullOrWhiteSpace($BotToken)) { throw 'No bot token available.' }
     Write-Host "bot token: $($BotToken.Length) characters (value not printed)"
@@ -143,13 +154,44 @@ try {
         Write-Host "registered: $target" -ForegroundColor Green
     }
 
+    # Nothing was registered under -WhatIf, so verifying the registration
+    # would assert against state the run deliberately did not create and
+    # always throw — a dry run that ends red teaches nothing (T-704).
+    if ($WhatIfPreference) {
+        Write-Step 'Verify (skipped under -WhatIf)'
+        Write-Host "would verify that getWebhookInfo reports url = $target"
+        Write-Host 'would verify that the secret gate rejects a POST carrying no token'
+        return
+    }
+
     Write-Step 'Verify'
     Start-Sleep -Seconds 3
     $after = (Invoke-RestMethod -Uri "$api/getWebhookInfo" -TimeoutSec 20).result
     Write-Host "url             : $($after.url)"
-    Write-Host "custom secret   : $(if ($after.has_custom_certificate -or $secret) { 'set' } else { 'NOT set' })"
     Write-Host "pending updates : $($after.pending_update_count)"
     if ($after.url -ne $target) { throw "Webhook URL is '$($after.url)', expected '$target'." }
+
+    # Telegram never returns secret_token from getWebhookInfo, so the old
+    # `has_custom_certificate -or $secret` line printed "set" unconditionally
+    # ($secret is always non-empty here) and verified nothing —
+    # has_custom_certificate is about self-signed certs, not the secret. The
+    # only real check is behavioural: the receiver must reject a POST that
+    # does not carry the token, and accept one that does.
+    Write-Step 'Verify the secret gate end to end'
+    $unauth = Invoke-WebRequest -Uri $target -Method POST -Body '{}' `
+        -ContentType 'application/json' -SkipHttpErrorCheck -TimeoutSec 20
+    if ($unauth.StatusCode -ne 401) {
+        throw "Receiver answered $($unauth.StatusCode) to a POST with no secret; expected 401."
+    }
+    Write-Host 'without secret  : 401 (rejected, as it must be)' -ForegroundColor Green
+
+    $authed = Invoke-WebRequest -Uri $target -Method POST -Body '{}' `
+        -ContentType 'application/json' -SkipHttpErrorCheck -TimeoutSec 20 `
+        -Headers @{ 'X-Telegram-Bot-Api-Secret-Token' = $secret }
+    if ($authed.StatusCode -ne 200) {
+        throw "Receiver answered $($authed.StatusCode) to a POST carrying the derived secret; expected 200. The deployed token and the vault token disagree."
+    }
+    Write-Host 'with secret     : 200 (accepted — vault token matches the deployed one)' -ForegroundColor Green
 
     Write-Host ''
     Write-Host 'Now send /help to the bot. If nothing comes back, check:' -ForegroundColor Yellow
