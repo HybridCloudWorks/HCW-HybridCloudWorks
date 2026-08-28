@@ -67,6 +67,19 @@ updates:
         update-types:
           - major
 
+  # The Cloudflare Worker (T-747). It has no dependencies today, so this adds
+  # nothing immediately — which is exactly why it is cheap to add now, rather
+  # than discovering later that a package entered an unwatched directory.
+  - package-ecosystem: npm
+    directory: /edge/availability-probe
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+
   - package-ecosystem: npm
     directory: /vps-agent
     schedule:

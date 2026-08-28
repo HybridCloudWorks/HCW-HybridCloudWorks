@@ -365,7 +365,19 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
   severity            = 1
 
   evaluation_frequency = "PT5M"
-  window_duration      = "PT15M"
+  # PT30M, not PT15M (T-745). The window had no headroom for ingestion lag:
+  # App Insights availability rows typically land 1-3 minutes after the probe
+  # runs and occasionally later, so at any evaluation the newest one or two
+  # results may not be queryable yet. Against a 15-minute window expecting 3
+  # results and firing below 2, that lag alone spent the "one dropped run is
+  # tolerated" budget the ADR claims — a single late ingestion plus one missed
+  # cron paged Sev 1 against a healthy site.
+  #
+  # 30 minutes expects 6 results and fires below 3, so it absorbs lag plus two
+  # dropped runs while still detecting a real outage inside ~15 minutes (three
+  # consecutive failures). Change this and you must change the threshold below
+  # and the cron cadence in edge/availability-probe/wrangler.toml together.
+  window_duration = "PT30M"
 
   # Stateful for the reason set out on alert-app-exceptions below: stateless is
   # the azurerm default and re-notifies every evaluation. Same frequency, same
@@ -880,7 +892,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
   resource_group_name = azurerm_resource_group.app["web"].name
   location            = azurerm_resource_group.app["web"].location
   scopes              = [azurerm_application_insights.hcw.id]
-  description         = "Fewer than 2 of the expected 3 edge-probe successes for GET /api/health in 15 minutes — the API is unreachable over the Cloudflare path, or the probe itself is down. Either way nobody outside can confirm the site is up."
+  description         = "Fewer than 3 of the expected 6 edge-probe successes for GET /api/health in 30 minutes — the API is unreachable over the Cloudflare path, or the probe itself is down. Either way nobody outside can confirm the site is up."
   severity            = 1
 
   evaluation_frequency = "PT5M"
@@ -897,7 +909,9 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
     query                   = "availabilityResults | where name == \"edge-api-health\" | where success == 1"
     time_aggregation_method = "Count"
     operator                = "LessThan"
-    threshold               = 2
+    # 6 expected in a 30-minute window at a 5-minute cadence; below 3 is an
+    # incident (T-745).
+    threshold = 3
 
     failing_periods {
       number_of_evaluation_periods             = 1
