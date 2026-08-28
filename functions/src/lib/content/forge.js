@@ -249,13 +249,19 @@ export function createForge({
   }
 
   // Best-effort counters in admin_config/forge_stats (read-modify-write; the
-  // same shape cms/publish.js bumps on publish).
+  // same shape cms/publish.js bumps on publish). `today` is a single rolling
+  // day bucket, reset on date change — the autoForge.dailyLimit enforcement
+  // (lib/timers/forge-scheduled.js) reads it, and keeping only the current
+  // day stops the document growing forever (T-607).
   async function bumpForgeStats(increments = {}) {
     try {
       const doc =
         (await store.readDoc('admin_config', 'forge_stats', ADMIN_CONFIG_PARTITION)) || {};
+      const todayKey = now().toISOString().slice(0, 10);
+      const today =
+        doc.today?.date === todayKey ? { ...doc.today } : { date: todayKey, forged: 0 };
       const next = applyIncrements(
-        { totals: { ...(doc.totals || {}) }, formats: structuredClone(doc.formats || {}) },
+        { totals: { ...(doc.totals || {}) }, formats: structuredClone(doc.formats || {}), today },
         increments
       );
       next.updatedAt = now().toISOString();
@@ -473,6 +479,7 @@ export function createForge({
     const statsFormatKey = format?.key || 'unknown';
     await bumpForgeStats({
       'totals.forged': 1,
+      'today.forged': 1,
       [`totals.${nextStatus === 'forge_ready' ? 'staged' : 'editing'}`]: 1,
       'totals.costUsd': usageTotals.costUsd,
       [`formats.${statsFormatKey}.forged`]: 1,

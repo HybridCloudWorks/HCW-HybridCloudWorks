@@ -82,6 +82,12 @@ const registry = new Map();
  * @param {number} [spec.maxPayloadBytes] - JSON bytes of `payload`; default 64 KiB
  * @param {number} [spec.timeoutMs] - worker budget; default 10 minutes
  * @param {string} [spec.role] - role required to enqueue; default 'editor'
+ * @param {(info: {job: object, status: string, result: any, error: string|null},
+ *          ctx: {context: object, now: () => Date}) => Promise<void>} [spec.onComplete]
+ *   Called after the terminal status is written (succeeded/failed/timeout).
+ *   Best effort: a throw is logged and never changes the job's outcome. Added
+ *   for failure-only Telegram notifications (T-607) — successes already ride
+ *   the forge_ready rising edge, so hooks should stay quiet on success.
  */
 export function registerJobType(type, spec) {
   if (typeof type !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(type)) {
@@ -369,6 +375,19 @@ export function createJobHandlers({
           spec.timeoutMs
         );
       });
+      // Best effort, after the terminal write: a hook failure is logged, never
+      // re-thrown — it must not turn a finished job into a poisoned message.
+      const invokeOnComplete = async (info) => {
+        if (typeof spec.onComplete !== 'function') return;
+        try {
+          await spec.onComplete(info, { context, now });
+        } catch (hookError) {
+          context.warn?.(
+            `runJob: onComplete for ${doc.type} failed: ${hookError?.message || hookError}`
+          );
+        }
+      };
+
       try {
         const result = await Promise.race([
           spec.worker(doc.payload, { context, job: claimed, now }),
@@ -381,18 +400,31 @@ export function createJobHandlers({
           error: null,
         });
         context.log?.(`runJob: job ${jobId} (${doc.type}) succeeded`);
+        await invokeOnComplete({
+          job: claimed,
+          status: 'succeeded',
+          result: result === undefined ? null : result,
+          error: null,
+        });
         return { jobId, outcome: 'succeeded' };
       } catch (error) {
         const timedOut = error?.code === 'JOB_TIMEOUT';
+        const errorText = truncate(error?.message || String(error));
         await store.patchDoc(JOBS_CONTAINER, jobId, {
           status: timedOut ? 'timeout' : 'failed',
           finishedAt: now().toISOString(),
-          error: truncate(error?.message || String(error)),
+          error: errorText,
         });
         context.error?.(
           `runJob: job ${jobId} (${doc.type}) ${timedOut ? 'timed out' : 'failed'}:`,
           error?.message
         );
+        await invokeOnComplete({
+          job: claimed,
+          status: timedOut ? 'timeout' : 'failed',
+          result: null,
+          error: errorText,
+        });
         return { jobId, outcome: timedOut ? 'timeout' : 'failed' };
       } finally {
         clearTimeout(timer);

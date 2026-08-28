@@ -203,6 +203,8 @@ describe('runForgePipeline', () => {
       configScope: ADMIN_CONFIG_PARTITION,
       totals: { forged: 1, staged: 1, costUsd: 0.0133 },
       formats: { comparison: { forged: 1, staged: 1, costUsd: 0.0133 } },
+      // The rolling day bucket the daily-limit enforcement reads (T-607).
+      today: { date: NOW.toISOString().slice(0, 10), forged: 1 },
     });
   });
 

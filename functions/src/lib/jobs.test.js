@@ -330,4 +330,49 @@ describe('runJob', () => {
     });
     expect(store.docs['job-1'].error).toContain('not registered');
   });
+
+  it('invokes onComplete after the terminal write, success and failure alike (T-607)', async () => {
+    const seen = [];
+    registerJobType('hooked-ok', {
+      worker: async () => ({ done: true }),
+      onComplete: async ({ status, result, error }) => seen.push({ status, result, error }),
+    });
+    registerJobType('hooked-bad', {
+      worker: async () => {
+        throw new Error('nope');
+      },
+      onComplete: async ({ status, error }) => seen.push({ status, error }),
+    });
+    const store = makeStore({
+      'job-1': { ...queued(), type: 'hooked-ok' },
+      'job-2': { ...queued(), id: 'job-2', type: 'hooked-bad' },
+    });
+    const h = createJobHandlers({ guard: guardAs('editor'), store, ...fixed });
+    await h.runJob({ jobId: 'job-1' }, context);
+    await h.runJob({ jobId: 'job-2' }, context);
+    expect(seen).toEqual([
+      { status: 'succeeded', result: { done: true }, error: null },
+      { status: 'failed', error: 'nope' },
+    ]);
+    // The terminal status was already persisted when each hook ran.
+    expect(store.docs['job-1'].status).toBe('succeeded');
+    expect(store.docs['job-2'].status).toBe('failed');
+  });
+
+  it('a throwing onComplete is logged and never changes the job outcome', async () => {
+    registerJobType('hook-explodes', {
+      worker: async () => 'fine',
+      onComplete: async () => {
+        throw new Error('hook boom');
+      },
+    });
+    const store = makeStore({ 'job-1': { ...queued(), type: 'hook-explodes' } });
+    const h = createJobHandlers({ guard: guardAs('editor'), store, ...fixed });
+    expect(await h.runJob({ jobId: 'job-1' }, context)).toEqual({
+      jobId: 'job-1',
+      outcome: 'succeeded',
+    });
+    expect(store.docs['job-1'].status).toBe('succeeded');
+    expect(context.warn).toHaveBeenCalledWith(expect.stringContaining('hook boom'));
+  });
 });
