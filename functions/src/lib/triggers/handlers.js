@@ -76,6 +76,7 @@ export function createFeedHandlers({
   inspector,
   aiCover,
   forgeReadyNotify,
+  socialCaption,
   dashboardStats,
   notifier,
   publer,
@@ -152,6 +153,10 @@ export function createFeedHandlers({
       if (doc.forgeReadyNotifyTrigger === true) {
         const r = await forgeReadyNotify.run(doc.id, eventIdOf(doc));
         out.forgeReadyNotify = r.reason;
+      }
+      if (doc.socialCaptionTrigger === true) {
+        const r = await socialCaption.run(doc.id, eventIdOf(doc));
+        out.socialCaption = r.reason;
       }
       // Counters last, from the document as delivered; a claim or completion
       // write above re-delivers this document and the marker then matches.

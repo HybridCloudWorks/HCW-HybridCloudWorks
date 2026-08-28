@@ -284,7 +284,17 @@ forge_ready items with grade and an inline `/approve {id}` per row.
 
 ## Backlog — unique and cool, deliberately unscheduled
 
-1. **Social captions auto-queued to Publer on publish** (`generateSocialCaption` + a publish rising-edge hook).
+1. **Social captions auto-queued to Publer on publish** — **LANDED**
+   (post-program). `generateSocialCaption` is implemented (the Social Hub
+   Generate button works; feature-gated as `socialCaption` in the AI
+   switches), and a live publish arms `socialCaptionTrigger` once per
+   document → the change feed generates a caption and bulk-schedules it in
+   Publer with a delay (default 60 min — the undo window), recording a
+   `social_posts` doc the existing reconcile timer adopts by `publerJobId`.
+   Publer unconfigured → the caption is kept as a Social Hub draft. Switched
+   by the owner-seeded `admin_config/social_autopost`
+   `{ enabled, accountIds: [{ id, provider }], scheduleDelayMinutes }` —
+   absent or disabled means no model call and no post.
 2. **The manual image RPC cluster** (`generatePreviewImages`, `generateCuratedArticleImage`, `generateReviewHeroImage`, `triggerAiImageGeneration`) — distinct from the automatic ai-cover, which exists.
 3. **Weekly digest send** (`generateReviewerDigestManual` over the existing `generate-weekly-digest` job).
 4. **Analytics-informed topic weighting** — engagement data feeding interest-area weight *suggestions* (accept/dismiss, like voice calibration).

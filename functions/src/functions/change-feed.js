@@ -24,6 +24,7 @@ import { createImageMirror } from '../lib/triggers/image-mirror.js';
 import { createDashboardStatsMaintainer } from '../lib/triggers/dashboard-stats.js';
 import { createAiCoverGenerator, createReplicateClient } from '../lib/triggers/ai-cover.js';
 import { createForgeReadyNotifier } from '../lib/triggers/forge-ready-notify.js';
+import { createSocialCaptionQueuer } from '../lib/triggers/social-caption-trigger.js';
 import { createNotifier } from '../lib/notify.js';
 import { createPublerClient } from '../lib/timers/publer-sync.js';
 
@@ -41,6 +42,7 @@ async function handlers(context) {
     import('../lib/ai/router.js'),
   ]);
   const notifier = createNotifier({ store, log: context });
+  const publer = createPublerClient();
   return createFeedHandlers({
     store,
     mirror: createImageMirror({ store, storage, log: context }),
@@ -59,9 +61,16 @@ async function handlers(context) {
       log: context,
     }),
     forgeReadyNotify: createForgeReadyNotifier({ store, notifier, log: context }),
+    socialCaption: createSocialCaptionQueuer({
+      store,
+      ai,
+      publer,
+      uuid: () => crypto.randomUUID(),
+      log: context,
+    }),
     dashboardStats: createDashboardStatsMaintainer({ store, log: context }),
     notifier,
-    publer: createPublerClient(),
+    publer,
   });
 }
 

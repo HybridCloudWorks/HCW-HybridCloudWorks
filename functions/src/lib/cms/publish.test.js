@@ -181,6 +181,26 @@ describe('concurrent publish protection (T-301)', () => {
     expect(result.error).toBeUndefined();
     expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].Live).toBe(true);
   });
+
+  it('arms the social-caption trigger only once, and only for a live publish', async () => {
+    // Not live: staging a publish must not queue a social post.
+    const staged = makeStore();
+    const h1 = createPublishHandlers({ guard: guardAs('publisher'), store: staged, ...fixed });
+    await h1.processPublishContent('c1', { markLive: false });
+    expect(
+      staged.patchDoc.mock.calls.find(([c]) => c === 'content')[2].socialCaptionTrigger
+    ).toBeUndefined();
+
+    // Republish of a document that already posted: never a second post.
+    const republished = makeStore(
+      readyDoc({ socialCaptionGeneratedAt: '2026-08-20T00:00:00Z' })
+    );
+    const h2 = createPublishHandlers({ guard: guardAs('publisher'), store: republished, ...fixed });
+    await h2.processPublishContent('c1', { markLive: true });
+    expect(
+      republished.patchDoc.mock.calls.find(([c]) => c === 'content')[2].socialCaptionTrigger
+    ).toBeUndefined();
+  });
 });
 
 describe('publishContent', () => {
@@ -195,6 +215,8 @@ describe('publishContent', () => {
     const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
     expect(patch.contentStatus).toBe('published');
     expect(patch.Live).toBe(true); // markLive defaults true
+    // A live publish arms the social-caption auto-queue trigger (backlog #1).
+    expect(patch.socialCaptionTrigger).toBe(true);
     expect(patch.slug).toBe('migration-readiness-framework');
     expect(patch.curatedSubpagePath).toBe('/azure/frameworks/migration-readiness-framework');
     expect(patch.publicUrl).toBe(

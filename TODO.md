@@ -115,6 +115,11 @@ already lives rather than re-opened here:
   `REPLICATE-API-KEY` (AI heroes; the designed default heroes cover its
   absence once the ~8 covers are uploaded and `admin_config/default_heroes`
   is seeded).
+- **Social autopost** (backlog #1, landed post-program) —
+  `admin_config/social_autopost` `{ enabled, accountIds: [{ id, provider }],
+  scheduleDelayMinutes }` seeded with the Publer account ids from the Social
+  Hub. Absent or disabled, publishes queue nothing; enabled, every first
+  live publish schedules a captioned post in Publer after the delay.
 
 ## High
 
