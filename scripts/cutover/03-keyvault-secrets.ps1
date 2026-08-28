@@ -39,6 +39,9 @@
 param(
     [Parameter(Mandatory)][string] $GcpServiceAccountJsonPath,
     [string] $VaultName = 'kv-site-prod-cus-01',
+    # See 04/06: name alone makes az search the subscription, and the search's
+    # failure message blames the vault rather than the lookup.
+    [string] $ResourceGroup = 'rg-sec-site-prod-cus',
     [string] $MyIp
 )
 
@@ -68,7 +71,7 @@ $ruleAdded = $false
 try {
     Write-Step 'Open a firewall window'
     if ($PSCmdlet.ShouldProcess($VaultName, "allow $MyIp temporarily")) {
-        az keyvault network-rule add --name $VaultName --ip-address "$MyIp/32" --output none
+        az keyvault network-rule add --resource-group $ResourceGroup --name $VaultName --ip-address "$MyIp/32" --output none
         $ruleAdded = $true
         Write-Host 'rule added; waiting 20s for it to take effect'
         Start-Sleep -Seconds 20
@@ -96,8 +99,8 @@ try {
 finally {
     if ($ruleAdded) {
         Write-Step 'Close the firewall window'
-        az keyvault network-rule remove --name $VaultName --ip-address "$MyIp/32" --output none
-        $remaining = az keyvault show -n $VaultName --query 'properties.networkAcls.ipRules' -o tsv
+        az keyvault network-rule remove --resource-group $ResourceGroup --name $VaultName --ip-address "$MyIp/32" --output none
+        $remaining = az keyvault show -g $ResourceGroup -n $VaultName --query 'properties.networkAcls.ipRules' -o tsv
         if ([string]::IsNullOrWhiteSpace($remaining)) {
             Write-Host 'rule removed; no IP rules remain' -ForegroundColor Green
         }

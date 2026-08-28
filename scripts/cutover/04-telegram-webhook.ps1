@@ -51,7 +51,15 @@ param(
     [string] $Mode = 'Set',
     [string] $BotToken,
     [string] $ApiBase = 'https://api-azure.hybridcloudworks.com/api',
-    [string] $VaultName = 'kv-site-prod-cus-01'
+    [string] $VaultName = 'kv-site-prod-cus-01',
+    # Addressing the vault by name ALONE makes az search the subscription, and
+    # that search reports "The Vault 'kv-site-prod-cus-01' not found within
+    # subscription" on failure — which reads as "the vault does not exist" and
+    # sends you looking for a deleted resource. Observed 2026-08-28 with the
+    # CLI on the correct subscription and `az keyvault list` finding the vault
+    # fine. Name plus resource group is an unambiguous ARM address with no
+    # search step.
+    [string] $ResourceGroup = 'rg-sec-site-prod-cus'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,7 +77,7 @@ try {
         # (T-704).
         if ($PSCmdlet.ShouldProcess($VaultName, "allow $myIp temporarily and read TELEGRAM-BOT-TOKEN")) {
             Write-Host "opening a firewall window for $myIp"
-            az keyvault network-rule add --name $VaultName --ip-address "$myIp/32" --output none
+            az keyvault network-rule add --resource-group $ResourceGroup --name $VaultName --ip-address "$myIp/32" --output none
             $ruleAdded = $true
             Start-Sleep -Seconds 20
             $BotToken = az keyvault secret show --vault-name $VaultName --name 'TELEGRAM-BOT-TOKEN' `
@@ -202,7 +210,7 @@ try {
 finally {
     if ($ruleAdded) {
         Write-Step 'Close the firewall window'
-        az keyvault network-rule remove --name $VaultName --ip-address "$myIp/32" --output none
+        az keyvault network-rule remove --resource-group $ResourceGroup --name $VaultName --ip-address "$myIp/32" --output none
         Write-Host 'rule removed' -ForegroundColor Green
     }
 }
