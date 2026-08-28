@@ -190,6 +190,62 @@ export function createReplicateClient({
 }
 
 /**
+ * Generate + persist the requested cover slots for one content document:
+ * Replicate per slot → blob in `covers/` → gallery record — and return the
+ * content-doc `update` (URLs, history, stamps) WITHOUT writing it, so each
+ * caller composes its own patch. Shared by the change-feed trigger (which
+ * adds its claim-release fields) and the manual generateReviewHeroImage RPC
+ * (lib/manual-images.js) — one generation path, not two (T-324 shape).
+ *
+ * @returns {Promise<{ generatedUrls: Record<string,string>, update: object, stamp: string }>}
+ */
+export async function generateCoversForContent(
+  { store, storage, replicate, fetchImage = defaultFetchImage, now = () => new Date(), uuid },
+  contentId,
+  data,
+  { targets, prompt }
+) {
+  const generatedUrls = {};
+  const stamp = now().toISOString();
+  for (const target of targets) {
+    const slotPrompt = `${prompt}\n\nImage slot: ${target}. Keep composition distinct while preserving style continuity.`;
+    const imageUrl = await replicate.generate(slotPrompt);
+    const { buffer, contentType } = await fetchImage(imageUrl);
+    const blobPath = `${contentId}-ai-${target}.png`;
+    await storage.uploadBlob('covers', blobPath, buffer, contentType || 'image/png', {
+      contentId,
+      slot: target,
+    });
+    const publicUrl = mediaUrlFor('covers', blobPath);
+    generatedUrls[target] = publicUrl;
+    await store.upsertDoc('generated_content_images', {
+      id: uuid(),
+      contentId,
+      articleId: contentId,
+      slot: target,
+      imageUrl: publicUrl,
+      title: data.Title || data.title || 'Untitled',
+      provider: data['Cloud Provider'] || data.cloudProvider || '',
+      contentType: data.type || data.contentType || 'blog',
+      sourceCollection: 'content',
+      createdAt: stamp,
+    });
+  }
+  const history = { ...(data.aiImageHistory || {}) };
+  for (const [target, url] of Object.entries(generatedUrls))
+    history[target] = [...new Set([...(history[target] || []), url])];
+  const update = {
+    altCoverImagePrompt: prompt,
+    altCoverImageGeneratedAt: stamp,
+    altCoverImageError: null,
+    aiImageUrls: { ...(data.aiImageUrls || {}), ...generatedUrls },
+    aiImageHistory: history,
+  };
+  if (generatedUrls.hero) update.altCoverImage = generatedUrls.hero;
+  return { generatedUrls, update, stamp };
+}
+
+/**
  * @param {object} deps
  * @param {{ readDoc: Function, patchDoc: Function, upsertDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {{ uploadBlob: Function }} deps.storage
@@ -228,46 +284,17 @@ export function createAiCoverGenerator({
         typeof data.altCoverImagePrompt === 'string' && data.altCoverImagePrompt.trim();
       const prompt = provided || buildImagePrompt(data);
       const targets = resolveAiCoverTargets(data);
-      const generatedUrls = {};
-      const stamp = now().toISOString();
-      for (const target of targets) {
-        const slotPrompt = `${prompt}\n\nImage slot: ${target}. Keep composition distinct while preserving style continuity.`;
-        const imageUrl = await replicate.generate(slotPrompt);
-        const { buffer, contentType } = await fetchImage(imageUrl);
-        const blobPath = `${contentId}-ai-${target}.png`;
-        await storage.uploadBlob('covers', blobPath, buffer, contentType || 'image/png', {
-          contentId,
-          slot: target,
-        });
-        const publicUrl = mediaUrlFor('covers', blobPath);
-        generatedUrls[target] = publicUrl;
-        await store.upsertDoc('generated_content_images', {
-          id: uuid(),
-          contentId,
-          articleId: contentId,
-          slot: target,
-          imageUrl: publicUrl,
-          title: data.Title || data.title || 'Untitled',
-          provider: data['Cloud Provider'] || data.cloudProvider || '',
-          contentType: data.type || data.contentType || 'blog',
-          sourceCollection: 'content',
-          createdAt: stamp,
-        });
-      }
-      const history = { ...(data.aiImageHistory || {}) };
-      for (const [target, url] of Object.entries(generatedUrls))
-        history[target] = [...new Set([...(history[target] || []), url])];
-      const update = {
+      const { update } = await generateCoversForContent(
+        { store, storage, replicate, fetchImage, now, uuid },
+        contentId,
+        data,
+        { targets, prompt }
+      );
+      await store.patchDoc('content', contentId, {
         ...releaseRisingEdgeClaim(AI_COVER_CLAIM_FIELDS),
         altCoverImageTrigger: false,
-        altCoverImagePrompt: prompt,
-        altCoverImageGeneratedAt: stamp,
-        altCoverImageError: null,
-        aiImageUrls: { ...(data.aiImageUrls || {}), ...generatedUrls },
-        aiImageHistory: history,
-      };
-      if (generatedUrls.hero) update.altCoverImage = generatedUrls.hero;
-      await store.patchDoc('content', contentId, update);
+        ...update,
+      });
       return { ran: true, reason: 'generated', targets };
     } catch (err) {
       log.error?.(

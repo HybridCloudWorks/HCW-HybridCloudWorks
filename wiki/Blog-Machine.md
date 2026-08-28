@@ -295,7 +295,14 @@ forge_ready items with grade and an inline `/approve {id}` per row.
    by the owner-seeded `admin_config/social_autopost`
    `{ enabled, accountIds: [{ id, provider }], scheduleDelayMinutes }` —
    absent or disabled means no model call and no post.
-2. **The manual image RPC cluster** (`generatePreviewImages`, `generateCuratedArticleImage`, `generateReviewHeroImage`, `triggerAiImageGeneration`) — distinct from the automatic ai-cover, which exists.
+2. **The manual image RPC cluster** — **LANDED** (post-program). All four
+   (`generatePreviewImages`, `generateCuratedArticleImage`,
+   `generateReviewHeroImage`, `triggerAiImageGeneration`) were live 404s
+   the admin UI called; they now exist in `lib/manual-images.js`, sharing
+   ai-cover's extracted generation core (`generateCoversForContent`)
+   rather than duplicating it. `triggerAiImageGeneration` stays
+   fire-and-forget by arming the change-feed flag; the other three are
+   synchronous and 503 cleanly while `REPLICATE-API-KEY` is unseeded.
 3. **Weekly digest send** (`generateReviewerDigestManual` over the existing `generate-weekly-digest` job).
 4. **Analytics-informed topic weighting** — engagement data feeding interest-area weight *suggestions* (accept/dismiss, like voice calibration).
 5. **Series detection + interlinking** — forge finds related published posts and proposes a sibling-links module; series metadata on content docs.
