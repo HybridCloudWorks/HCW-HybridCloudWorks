@@ -116,4 +116,52 @@ describe('QueuePage', () => {
       expect(screen.queryByText('Azure review item')).not.toBeInTheDocument();
     });
   });
+
+  it('queues a forge-from-url job from the paste box and reports the job id', async () => {
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getQueueSnapshot') return { success: true, totalCount: 0, items: [] };
+      if (endpoint === 'enqueueJob') return { ok: true, jobId: 'job-77' };
+      return {};
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/admin/queue']}>
+        <QueuePage />
+      </MemoryRouter>
+    );
+
+    const input = await screen.findByPlaceholderText(/paste an article to forge/i);
+    fireEvent.change(input, { target: { value: 'https://learn.microsoft.com/azure/aks' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Forge' }));
+
+    // The exact payload key matters: the job's worker reads payload.url.
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('enqueueJob', {
+        type: 'forge-from-url',
+        payload: { url: 'https://learn.microsoft.com/azure/aks' },
+      })
+    );
+    expect(await screen.findByText(/Forge queued \(job job-77\)/)).toBeInTheDocument();
+    expect(input.value).toBe('');
+  });
+
+  it('rejects a non-http paste without calling the backend', async () => {
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getQueueSnapshot') return { success: true, totalCount: 0, items: [] };
+      return {};
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/admin/queue']}>
+        <QueuePage />
+      </MemoryRouter>
+    );
+
+    const input = await screen.findByPlaceholderText(/paste an article to forge/i);
+    fireEvent.change(input, { target: { value: 'not-a-url' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Forge' }));
+
+    expect(await screen.findByText(/valid http\(s\) article URL/i)).toBeInTheDocument();
+    expect(postJSON).not.toHaveBeenCalledWith('enqueueJob', expect.anything());
+  });
 });

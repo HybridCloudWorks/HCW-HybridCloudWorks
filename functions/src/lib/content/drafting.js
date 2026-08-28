@@ -83,13 +83,23 @@ export function createDrafter({ store, ai, env = process.env }) {
     description,
     markdown,
     customInstructionPrompt = '',
+    // Callers that already composed a voice/format block (the forge, whose
+    // block carries the configured master prompt, banned phrases, style rules,
+    // modules and wordSoup) pass it here WITH the format it was built for.
+    // Before these existed, the forge's block arrived as
+    // customInstructionPrompt and this function still prepended its own
+    // unconfigured copy — the same voice section twice, with different
+    // settings, and two independent pickNextFormat calls that could disagree.
+    voiceBlock = null,
+    format: presetFormat = null,
     supportingDocuments = [],
     usageOut = null,
   }) {
     const documents = normalizeSupportingDocuments(supportingDocuments);
     const trimmedCustomPrompt = String(customInstructionPrompt || '').trim();
-    const format = await pickNextFormat(store, 'content', cloudProvider);
-    const instructionPrompt = `${DEFAULT_DRAFT_INSTRUCTION_PROMPT}\n\n${buildVoiceAndFormatBlock(cloudProvider, format)}${
+    const format = presetFormat || (await pickNextFormat(store, 'content', cloudProvider));
+    const composedVoiceBlock = voiceBlock || buildVoiceAndFormatBlock(cloudProvider, format);
+    const instructionPrompt = `${DEFAULT_DRAFT_INSTRUCTION_PROMPT}\n\n${composedVoiceBlock}${
       trimmedCustomPrompt
         ? `\n\nAdditional admin instructions for this draft. Follow these only when they do not conflict with the HCW voice, quality, module, source-grounding, and style requirements above:\n${trimmedCustomPrompt}`
         : ''
