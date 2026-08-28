@@ -50,9 +50,9 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 | --- | ---: |
 | Critical | 0 (all five closed 2026-08-28) |
 | High | 3 (T-714 + the two owner gates T-518/T-526) |
-| Medium | 31 |
-| Low | 15 |
-| Total | 49 |
+| Medium | 20 (2 of them owner-gated) |
+| Low | 9 |
+| Total | 32 |
 
 **The count changed shape on 2026-08-28.** It previously read 10, of which
 seven were the Blog Machine program (T-601…T-607) — now closed and merged, so
@@ -202,61 +202,65 @@ Full rationale for each:
 | T-716 | frontend | **Closed.** Request-layer dedupe keyed on path+query, plus one `PUBLIC_CORPUS_LIMIT` so the three hooks stop issuing three different urls for one intent. Deliberately NOT pushed server-side: client provider matching includes text inference the server does not perform, so that would silently drop posts (see T-738) |
 | T-717 | frontend | **Closed.** A failed fetch now clears `data` instead of leaving the previous route's article under the new route's canonical and og:url, and the wrapper hooks surface `error` instead of hardcoding null |
 
-### Medium
+### Medium — 11 of 30 closed
+
+Status and rationale per finding:
+[wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
+
+**Closed:** T-725 (version constraints), T-730 (Telegram retry storm), T-732
+(guard test probed one verb), T-733 (trigger isolation), T-734 (SSRF guard on
+scraped images, plus the size cap the shared fetcher was missing), T-735
+(stranded forge_ready notification), T-741 (harness closed empty workflows as
+completed), T-744 (concurrency guard raced by a slow claim), T-745 (alert window
+with no ingestion-lag headroom), T-746 (failed probe left no trace), T-747
+(Dependabot coverage — which exposed that Dependabot was not running at all).
+
+**Open, repository-side:**
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the narrower per-run window pattern already exists (T-503) | `main.tf:252-269` |
-| T-719 | azure | The 5xx and latency alerts are log rules, so they stop evaluating at the workspace cap; the margin was never measured | `observability.tf:329-341` |
-| T-720 | azure | Key Vault reference failures are silent and indistinguishable across four different causes | `main.tf:1174-1260` |
-| T-721 | azure | Telemetry costs ~5x the workload; SWA Standard is justified in-file by Free-tier features | `Cost-Analysis.md:74-84`, `main.tf:138-144` |
-| T-722 | tf | `swa_token` output contradicts its own file header and the credential-free principle | `outputs.tf:5-7` vs `18-22` |
-| T-723 | tf | Secrets in state: the azapi read-back captures the whole live settings map; `cloudflare_origin_secret` stores a real value | `main.tf:1454-1465,2029-2035` |
+| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the T-503 per-run window pattern already exists | `main.tf:252-269` |
+| T-720 | azure | Key Vault reference failures are silent and indistinguishable across four causes | `main.tf:1174-1260` |
+| T-722 | tf | `swa_token` output contradicts its own file header — see T-727, they resolve together | `outputs.tf:5-7` vs `18-22` |
+| T-723 | tf | Secrets in state: the azapi read-back captures the whole live settings map | `main.tf:1454-1465,2029-2035` |
 | T-724 | tf | The permanent plan diff is asserted only in a comment, so real drift can hide beside it | `main.tf:1379-1407` |
-| T-725 | tf | `cloudflare ~> 4.0` admits versions that fail validate; `required_version` has no ceiling | `providers.tf:6,23-27` |
-| T-726 | ci | A scheduled workflow pushes to main past the gate, and runs `npm ci` holding both write and `id-token` | `publish-content-manifest.yml:28-29,60` |
-| T-727 | ci | The SWA deployment token is the last long-lived credential, used in the job that just built npm dependencies | `deploy-azure-frontend.yml:152` |
-| T-728 | ci | One OIDC identity serves everything: read-only monitors run with deploy-grade rights | `oidc.tf:41-46,176-202` |
-| T-729 | ci | No concurrency group on the frontend deploy, and neither deploy has a rollback path | `deploy-azure-frontend.yml:15-30` |
-| T-730 | backend | A Telegram send failure escapes `handleUpdate`, returns 500, and turns one command into a job-duplicating retry storm | `bot.js:436-447` |
-| T-731 | backend | The change feed has no per-invocation work budget: 50 items against documents needing four Replicate calls each | `change-feed.js:86-93` |
-| T-732 | backend | The guard test probes only `methods[0]`, so merged verbs are unchecked (28/28 verified sound by hand) | `route-inventory.test.js:216` |
-| T-733 | backend | One trigger's failure cancels the remaining triggers and the stats update for that document | `triggers/handlers.js:128-166` |
-| T-734 | backend | Scraped external URLs are fetched with no SSRF guard, timeout or size cap, while the right primitive exists unused | `content/inspect.js:246` |
-| T-735 | backend | A `forge_ready` notification lost to a transient failure is lost permanently — nothing writes to the doc again | `forge-ready-notify.js:102-117` |
-| T-736 | frontend | MSAL (236 kB) is in the static import graph of the public news route despite a correct runtime gate | `useGenerateCuratedImages.js:4,80` |
-| T-737 | frontend | Eleven public routes are neither pre-rendered nor in the sitemap; four of five detail templates are never pre-rendered | `prerender-entry.jsx:61-72` |
-| T-738 | frontend | Provider normalization is reimplemented four times and has diverged — VMware/Ansible posts vanish from their own blog | `useBlogData.js:13-53` |
-| T-739 | frontend | N+1 fetch on the public news grid, repeated on every remount | `useGenerateCuratedImages.js:209-216` |
-| T-740 | frontend | Route changes never move focus and are never announced; `PageLoader` has no role; `Skeleton` has no dark token | `ScrollToTop.jsx:7-9` |
-| T-741 | ops | The harness closes a workflow where nothing ran as `completed`, and CI asserts that behaviour | `tooling/workflow.py:398` |
-| T-742 | ops | The harness CI check never exercises the handoff validator it exists to protect | `ci.yml:117-137` |
-| T-743 | ops | The `vps-agent` CI check runs no tests — on the surface that shells to `docker run` and holds a certificate | `ci.yml:49-50` |
-| T-744 | ops | `maxConcurrentJobs` is not enforced: the guard reads the counter before awaiting the claim | `vps-agent/index.js:157-167` |
-| T-745 | ops | The availability alert's 15-minute window has no headroom for ingestion lag, so a healthy site can page Sev 1 | `observability.tf:869-883` |
-| T-746 | ops | A failed probe leaves no trace: no Worker logging, so the three conflated alert causes have no tiebreaker | `worker.js:145-149` |
-| T-747 | ops | `edge/availability-probe` is absent from Dependabot (zero impact today — no dependencies) | `.github/dependabot.yml` |
+| T-726 | ci | A scheduled workflow pushes to main past the gate, holding both write and `id-token` | `publish-content-manifest.yml:28-29,60` |
+| T-727 | ci | The SWA deployment token is the last long-lived credential | `deploy-azure-frontend.yml:152` |
+| T-728 | ci | One OIDC identity serves everything: read-only monitors run with deploy rights | `oidc.tf:41-46,176-202` |
+| T-729 | ci | No concurrency group on the frontend deploy; neither deploy has a rollback path | `deploy-azure-frontend.yml:15-30` |
+| T-731 | backend | The change feed has no per-invocation work budget | `change-feed.js:86-93` |
+| T-736 | frontend | MSAL is in the static import graph of the public news route | `useGenerateCuratedImages.js:4,80` |
+| T-737 | frontend | Eleven public routes are neither pre-rendered nor in the sitemap | `prerender-entry.jsx:61-72` |
+| T-738 | frontend | Provider normalization reimplemented four times, already diverged (VMware/Ansible) | `useBlogData.js:13-53` |
+| T-739 | frontend | N+1 fetch on the public news grid | `useGenerateCuratedImages.js:209-216` |
+| T-740 | frontend | Route changes never move focus or announce; `Skeleton` has no dark token | `ScrollToTop.jsx:7-9` |
+| T-742 | ops | The harness CI check never exercises the handoff validator it protects | `ci.yml:117-137` |
+| T-743 | ops | The `vps-agent` CI check runs no tests, on the surface that shells to `docker run` | `ci.yml:49-50` |
 
-### Low
+**Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
+T-721 (telemetry vs SWA tier cost decision).
 
-| ID | Layer | Finding | Anchor |
-| --- | --- | --- | --- |
-| T-748 | azure | The Terraform principal holds Key Vault Secrets Officer it cannot use — until a seeding window opens and it can | `main.tf:1728-1732` |
-| T-749 | azure | SCM remains default-Allow; the flip waits on an observed deploy that has presumably happened (overlaps T-520) | `main.tf:1055-1077` |
-| T-750 | tf | CORS origins and the SWA hostname are hardcoded where the sibling block derives both | `main.tf:993-1000` |
-| T-751 | tf | The 18-timer catalogue is maintained twice by hand; a mismatch makes a timer impossible to arm | `main.tf:864-890` |
-| T-752 | tf | Tag contract values diverge from their source variables (`workload` vs the `site` name token) | `variables.tf:937-949` |
-| T-753 | tf | Several variable names exceed the standard's two-word rule; report only, since they are set in the workspace | `variables.tf:359,370,390` |
-| T-754 | tf | `main.tf` is a 2,037-line six-concern file; splitting is pure file moves and state-safe by construction | `infra/main.tf` |
-| T-755 | ci | The Trivy checksum manifest shares an origin with the binary it verifies | `iac-validate.yml:159-165` |
-| T-756 | ci | A dispatch input is interpolated inline into a `run:` command — the only such deviation | `heal-computed-properties.yml:94` |
-| T-757 | ci | Gate coverage: `vps-agent` is install-only and the frontend gate runs the admin subset only | `ci.yml:41,49-50` |
-| T-758 | ci | `dependency-review` requests `pull-requests: write` on a fork-facing trigger where it degrades silently | `dependency-review.yml:21-24` |
-| T-759 | ops | VPS job images are pinned by mutable tag on a root-equivalent socket; no install or rotation runbook exists | `vps-agent/lib/capabilities.js:19` |
-| T-760 | backend | Dead exports that are wrong if used: `batchRead` omits partition keys; `watchChangeFeed` logs where nothing reads | `cosmos-client.js:571-574` |
-| T-761 | backend | The daily forge budget has one enforcement point, a read-then-act race, and a ledger that swallows failures | `forge-scheduled.js:82-98` |
-| T-762 | frontend | Duplicate route declarations leave dead dispatcher branches and a second provider-derivation path | `App.jsx:317-333,510-535` |
+### Low — 5 of 15 closed, 1 will not fix
 
+**Closed:** T-748 (unusable Key Vault grant removed), T-751 (timer catalogue
+guarded and mutation-tested), T-752 (environment tag derived; workload
+deliberately left), T-755 (Trivy digest pinned and verified), T-756 (dispatch
+input through `env:`), T-758 (fork-degraded write scope removed), T-760 (dead
+exports deleted).
+
+**T-750 — WILL NOT FIX.** The finding is wrong. Deriving the function app's
+CORS origins from `var.domain` breaks `cors-platform-origins.test.js`, which
+reads that block as text and compares literal origins against `cors.js` so it
+can fail on a checkout with no Azure credentials. Acting on it broke CI; the
+literals are load-bearing and now say so in place.
+
+**Open:** T-749 (SCM lock flip — owner, overlaps T-520), T-753 (variable names
+exceed the two-word rule — report only, they are set in the workspace), T-754
+(`main.tf` is a 2,037-line six-concern file; splitting is state-safe file
+moves), T-757 (gate coverage: `vps-agent` install-only, frontend admin subset
+only), T-759 (VPS images pinned by mutable tag; no install/rotation runbook),
+T-761 (daily forge budget has one enforcement point and a read-then-act race),
+T-762 (duplicate route declarations leave dead dispatcher branches).
 
 ## High
 

@@ -87,6 +87,8 @@ four hooks reimplement it instead (T-738).
 
 ### T-706 — Media storage is a single LRS copy (High, verified)
 
+> **Status (2026-08-28):** **FIXED** — moved to **RA-GRS**, not ZRS. Two reasons: the risk is account and regional loss, which zone redundancy does not cover, and LRS→ZRS is not Terraform-expressible (Azure requires a customer-initiated conversion). The TFC plan succeeded with `prevent_destroy` in force, which proves it is an in-place update rather than a replacement.
+
 `infra/main.tf:434` · `wiki/0018-as-built-plan-v02.md:56-57,73-74` ·
 `wiki/0023-migration-estate-retirement.md:79-81`
 
@@ -109,6 +111,8 @@ rather than a drift.
 
 ### T-707 — Cosmos recovery is a 7-day window with no out-of-account copy (High, verified)
 
+> **Status (2026-08-28):** **PARTLY FIXED; remainder on [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231).** Backup tier 7 → 30 days. The out-of-account copy cannot be closed by any account setting, so it belongs with the recovery objectives; it is also gated behind T-518.
+
 `infra/main.tf:284-287,203-217` · `wiki/0023-migration-estate-retirement.md:79-81`
 
 The only restore path for all production website data is 7-day point-in-time
@@ -129,6 +133,8 @@ move to `Continuous30Days` and document the residual out-of-account gap
 explicitly.
 
 ### T-709 — One action group, one receiver, delivery never observed (High, verified)
+
+> **Status (2026-08-28):** **CODE HALF FIXED; owner action open.** An optional SMS receiver is available via a `dynamic` block, so an unset variable leaves the action group byte-identical. Delivery has still never been observed — `az monitor action-group test-notifications` remains owner-run.
 
 `infra/observability.tf:30-47,157-189`
 
@@ -225,6 +231,8 @@ features that actually require it, and downgrade if neither is load-bearing.
 
 ### T-748 — The Terraform principal holds unusable Key Vault Secrets Officer (Low, reported)
 
+> **Status (2026-08-28):** **FIXED** — removed. Verified `data.azurerm_client_config` is still used for the vault tenant_id, so nothing is orphaned.
+
 `infra/main.tf:1728-1732,1679-1687`
 
 HCP Terraform's runners are neither in the VNet nor a trusted Azure service,
@@ -258,6 +266,8 @@ through the window) that deploys have presumably satisfied several times since
 ## 2. Terraform IaC
 
 ### T-708 — The Cosmos database and containers carry no `prevent_destroy` (High, verified)
+
+> **Status (2026-08-28):** **FIXED** — `prevent_destroy` now covers the database, the container `for_each` and `leases`; the stale "containers are empty" comment is corrected to ~70k documents.
 
 `infra/main.tf:305,365-412,1886-1897` · guards present at `298,516,807,1710` ·
 `wiki/IaC-Repository-Standard.md` ("Stateful resources | `lifecycle { prevent_destroy = true }`")
@@ -340,6 +350,8 @@ minor upgrade.
 
 ### T-725 — Version constraints understate the real floor and lack a ceiling (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED** — `~> 1.5` and `~> 4.52`.
+
 `infra/providers.tf:6,23-27` · `.terraform.lock.hcl` (cloudflare 4.52.8)
 
 `cloudflare_record.content` exists only from provider 4.52, but the constraint
@@ -357,6 +369,8 @@ Track the v5 migration separately.
 
 ### T-750 — CORS origins hardcoded where the sibling block derives them (Low, reported)
 
+> **Status (2026-08-28):** **WILL NOT FIX — the finding is wrong, and acting on it broke CI.** `cors-platform-origins.test.js` reads that block AS TEXT and compares the literal origins against `lib/auth/cors.js`, deliberately reading text rather than Terraform state so it can fail on a checkout with no Azure credentials. Interpolations defeat it twice: `${var.domain}` is not a string it can compare, and a comment between `cors {` and `allowed_origins` breaks its block regex outright — the worse half, because the guard then passes while checking nothing. The drift it prevents is the 2026-08-23 outage where the portal authenticated and every API call failed with "Failed to fetch". The asymmetry with the storage account's block is therefore justified: only this list has a text-level guard. Reverted, with the two specific don'ts recorded in place.
+
 `infra/main.tf:993-1000` vs `483-487`
 
 The function app's platform `cors` block hardcodes both apex origins and a
@@ -372,6 +386,8 @@ proves it correct.
 
 ### T-751 — The timer catalogue is maintained twice by hand (Low, reported)
 
+> **Status (2026-08-28):** **FIXED** — guarded by a text-reading test in the same shape as the CORS guard, and mutation-tested: removing one name from the validation produces the intended failure naming that timer. Raising `required_version` to reference the local inside the validation was rejected as the alternative — it would exclude Terraform 1.5–1.8 for a lint.
+
 `infra/main.tf:864-890` vs `infra/variables.tf:1008-1023`
 
 The eighteen timer flag suffixes appear in both the catalogue local and the
@@ -386,6 +402,8 @@ the validation reference `local.timer_catalogue` directly, collapsing the
 pair. Until then, a CI check or a paired comment.
 
 ### T-752 — Tag contract values diverge from their source variables (Low, reported)
+
+> **Status (2026-08-28):** **PARTLY FIXED.** `environment` now derives from `var.environment`. `workload` is deliberately not reconciled: the live estate is tagged `hybridcloudworks` while names carry `site`, and changing it rewrites the tag on every resource — an owner-visible decision, not a side effect of a Low finding.
 
 `infra/variables.tf:937-949,158-162,188-192`
 
@@ -438,6 +456,8 @@ blocks; do it in a PR whose plan shows the T-724 trio and nothing else.
 
 ### T-701 — An editor can publish live, bypassing the publisher gate (Critical, verified)
 
+> **Status (2026-08-28):** **FIXED** — `registerJobType` now requires an explicit role; all nine types declare one; `publish-content` is `publisher`; escalation compares hierarchy level. `jobs.roles.test.js` pins both properties. The new validation immediately caught a ninth registration this review had missed (the built-in `noop`).
+
 `functions/src/lib/jobs.js:106,202,219-222` ·
 `functions/src/functions/publish-jobs.js:39-50` ·
 `functions/src/lib/cms/publish.js:467`
@@ -466,6 +486,8 @@ role is at least the role of the HTTP route that performs the same action.
 
 ### T-710 — Jobs stranded in `running` are never reaped (High, verified)
 
+> **Status (2026-08-28):** **FIXED** — the sweeper reaps jobs abandoned in `running` using each type's own `timeoutMs` plus a grace margin, and fires `onComplete`. It writes a terminal status rather than re-enqueuing: a dead worker may already have completed real side effects.
+
 `functions/src/lib/jobs.js:331-335,458-461` ·
 `functions/src/functions/jobs-sweeper.js:4-6,34-39`
 
@@ -489,6 +511,8 @@ currently racing the platform default.
 
 ### T-711 — `buildSnapshot` fans out up to 2,000 concurrent point reads (High, verified)
 
+> **Status (2026-08-28):** **FIXED** — deduplicated (one document carries up to four images) and batched with `ARRAY_CONTAINS`. The existing fixture proves the count is unchanged.
+
 `functions/src/lib/ops-health.js:154-157,190-198` ·
 `functions/src/lib/telegram/bot.js:270,400` ·
 `functions/src/functions/telegram-http.js:38-41`
@@ -511,6 +535,8 @@ currently re-derives it per message.
 
 ### T-712 — External calls in the change-feed path have no timeout (High, verified)
 
+> **Status (2026-08-28):** **FIXED** — one shared `fetchWithTimeout`, lifted out of `scrape.js`. The Replicate poll also gains a wall-clock deadline, since an iteration count does not bound elapsed time when each iteration both sleeps and requests.
+
 `functions/src/lib/triggers/ai-cover.js:151,171` ·
 `functions/src/lib/timers/publer-sync.js:124` ·
 `functions/src/lib/notify.js:80` · `functions/src/lib/telegram/bot.js:470`
@@ -532,6 +558,8 @@ per-integration budget, and give the Replicate poll a wall-clock deadline
 rather than only an iteration count.
 
 ### T-730 — A Telegram send failure becomes a job-duplicating retry storm (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED** — the send is inside the guard, and the route wraps `handleUpdate` as well, so nothing past the secret check can return non-200.
 
 `functions/src/lib/telegram/bot.js:436-447` ·
 `functions/src/functions/telegram-http.js:110-112`
@@ -573,6 +601,8 @@ redeliver next invocation, which the claims already make safe.
 
 ### T-732 — The guard test probes only the first verb of each registration (Medium, verified)
 
+> **Status (2026-08-28):** **FIXED** — the property now probes every non-OPTIONS verb. Nothing was actually unguarded, which the widened test confirms.
+
 `functions/src/functions/route-inventory.test.js:216` ·
 `functions/src/lib/auth/http-route.js:274-301`
 
@@ -592,6 +622,8 @@ all verbs and can be reused.
 
 ### T-733 — One trigger's failure cancels the rest, and the stats update (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED** — each trigger branch is isolated, and `applyTransition` with it.
+
 `functions/src/lib/triggers/handlers.js:128-166`
 
 The `inspectTrigger` branch is individually wrapped; `altCoverImageTrigger`,
@@ -610,6 +642,8 @@ is missing.
 
 ### T-734 — Scraped external URLs are fetched with no SSRF guard (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED** — `generateAltTexts` now uses the SSRF-validating fetcher, which also gained the missing size cap (Content-Length honoured before buffering, buffered length re-checked after) for every caller.
+
 `functions/src/lib/content/inspect.js:246,309-310`
 
 `generateAltTexts` fetches URLs taken from `scraped.images` — that is, from
@@ -626,6 +660,8 @@ Neither `inspect.js` nor `content/scrape.js` uses it. Editor-arming and the
 places, and add a byte ceiling before buffering.
 
 ### T-735 — A lost `forge_ready` notification is lost permanently (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED** — records a numeric attempt counter and two strings, never a boolean, so it cannot re-arm the rising edge. The file header claiming it "writes NOTHING" is corrected rather than left to mislead.
 
 `functions/src/lib/triggers/forge-ready-notify.js:102-117`
 
@@ -644,6 +680,8 @@ re-armed — and have a sweeper re-drive `forge_ready` documents whose trigger
 is still armed past a threshold.
 
 ### T-760 — Dead exports that are wrong if anyone uses them (Low, reported)
+
+> **Status (2026-08-28):** **FIXED** — both deleted.
 
 `functions/src/lib/cosmos-client.js:571-574,587-614`
 
@@ -684,6 +722,8 @@ submission quota.
 
 ### T-714 — Pre-rendered HTML is discarded at boot (High, verified)
 
+> **Status (2026-08-28):** **OPEN — needs an owner decision.** The seed mechanism exists but is deliberately never mounted in the browser; switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This needs real-browser verification, not a quiet edit.
+
 `frontend/src/main.jsx:16` · `frontend/scripts/prerender.mjs:219-220` ·
 `frontend/src/App.jsx:275`
 
@@ -707,6 +747,8 @@ hydration in `prerender.mjs`.
 
 ### T-715 — A 456 kB chart bundle is preloaded on every page (High, verified)
 
+> **Status (2026-08-28):** **PARTLY FIXED, MEASURED — and the prescribed fix does not work.** rolldown places jsx-runtime by its own rules: claiming react in an earlier chunk moved only `scheduler`, and removing the manual chart chunk made things worse (shared vendor grew to 651 kB). Splitting the libraries so only a small chunk rides with jsx-runtime does work: **868 kB → 571 kB preloaded**. recharts (237 kB) and d3 (60 kB) are now lazy-only; chart.js still rides along. Unused `d3` dependency removed.
+
 `frontend/vite.config.js:29-39,124-179` · `frontend/dist/index.html` ·
 `frontend/package.json:63,66,80`
 
@@ -729,6 +771,8 @@ assertion that fails if `dist/index.html` modulepreloads any chunk above about
 
 ### T-716 — Public list pages download the whole corpus, three times (High, reported)
 
+> **Status (2026-08-28):** **FIXED** — request-layer dedupe keyed on path+query, plus one `PUBLIC_CORPUS_LIMIT`. Deliberately NOT pushed server-side: client provider matching includes text inference the server does not perform, so filtering there would silently drop posts (see T-738).
+
 `frontend/src/hooks/useBlogData.js:216,231` ·
 `frontend/src/hooks/useProviderLandingContent.js:160,188` ·
 `frontend/src/hooks/useFrameworkData.js:190,199` ·
@@ -747,6 +791,8 @@ and give `usePublicData` a module-level promise cache keyed on the request URL
 so concurrent and repeat callers share one in-flight request.
 
 ### T-717 — A failed fetch renders the previous route's content (High, reported)
+
+> **Status (2026-08-28):** **FIXED** — a failed fetch clears `data` instead of leaving the previous route's article under the new route's canonical, and the wrapper hooks surface `error` instead of hardcoding null.
 
 `frontend/src/hooks/usePublicData.js:43-50,79-84` ·
 `frontend/src/components/templates/BlogDetailTemplate.jsx:63-68` ·
@@ -897,6 +943,8 @@ largely inline catalogue data, which belongs in `public/data/*.json`.
 
 ### T-705 — The production environment gates nothing, and dispatch accepts any ref (Critical, verified + one verify item)
 
+> **Status (2026-08-28):** **PARTLY FIXED; owner action open.** Both deploy workflows now refuse a dispatch from any ref but `main`, and REVIEW.md §4.4 no longer asserts a gate whose existence could not be confirmed. The environment protection rules themselves still need configuring.
+
 `.github/workflows/deploy-functions.yml:16,35-40` ·
 `.github/workflows/deploy-azure-frontend.yml:16,24-30` · `infra/oidc.tf:153-166`
 
@@ -923,6 +971,8 @@ a guard step failing when `github.ref != 'refs/heads/main'`. Then reconcile
 REVIEW.md §4.4 with the configuration that actually exists.
 
 ### T-713 — The storage firewall stays open if a deploy dies mid-window (High, reported)
+
+> **Status (2026-08-28):** **FIXED** — the hourly monitor now probes storage default action and leftover `ci-*` rules, so an orphaned deploy window pages within the hour.
 
 `.github/workflows/deploy-functions.yml:97-101,145,248-264,294-300`
 
@@ -1011,6 +1061,8 @@ smoke failure.
 
 ### T-755 — The Trivy checksum shares an origin with the binary (Low, reported)
 
+> **Status (2026-08-28):** **FIXED** — digest pinned in-repo and verified against the real artifact (`sha256sum -c` passed locally) before committing.
+
 `.github/workflows/iac-validate.yml:119-130,159-165`
 
 The sha256 manifest is downloaded from the same GitHub release as the tarball
@@ -1022,6 +1074,8 @@ The comment already recommends the fix.
 `TRIVY_VERSION`.
 
 ### T-756 — A dispatch input is interpolated into a shell command (Low, reported)
+
+> **Status (2026-08-28):** **FIXED** — passed through `env:`.
 
 `.github/workflows/heal-computed-properties.yml:94`
 
@@ -1049,6 +1103,8 @@ widen the frontend test script as the suite stabilises.
 
 ### T-758 — `dependency-review` requests write on a fork-facing trigger (Low, reported)
 
+> **Status (2026-08-28):** **FIXED** — both the write scope and the comment option removed.
+
 `.github/workflows/dependency-review.yml:21-24,36`
 
 On fork pull requests the token is silently downgraded to read, so
@@ -1064,6 +1120,8 @@ drop the comment option and `pull-requests: write` together.
 ## 6. Edge and operational surfaces
 
 ### T-702 — Both confirmation gates self-approve without a TTY (Critical, verified)
+
+> **Status (2026-08-28):** **FIXED** — `Confirm-Plan` refuses non-interactively instead of assenting, naming `-Force` as the deliberate unattended path; the six destructive scripts declare `ConfirmImpact = 'High'`.
 
 `scripts/lib/deploy-console.ps1:208-209` ·
 `scripts/bootstrap-terraform-oidc.ps1:110,352,420` ·
@@ -1090,6 +1148,8 @@ destructive script.
 
 ### T-703 — The root-elevation removal reports success on its own failure (Critical, verified)
 
+> **Status (2026-08-28):** **FIXED** — `Invoke-Az` records whether the call failed, `Test-LastAzFailed` exposes it, and an unreadable read-back is now the red path with the manual removal command printed.
+
 `scripts/bootstrap-terraform-oidc.ps1:445-470` ·
 `scripts/lib/deploy-console.ps1:435-447`
 
@@ -1109,6 +1169,8 @@ sentinel return, or check `$LASTEXITCODE` at the call site — and treat an
 *unreadable* result as the red path, never the green one.
 
 ### T-704 — The T-526 cutover script has no working dry run (Critical, verified)
+
+> **Status (2026-08-28):** **FIXED** — the Key Vault window is `ShouldProcess`-guarded, the verify block is skipped under `-WhatIf`, and the decorative secret line is replaced by a behavioural check (401 without the token, 200 with it) that also proves the vault token matches the deployed one. **T-526 is safe to run.**
 
 `scripts/cutover/04-telegram-webhook.ps1:63-72,133,146-153` ·
 contrast `scripts/cutover/03-keyvault-secrets.ps1:70`
@@ -1136,6 +1198,8 @@ re-POST to the target with the derived `secret_token` header and assert it is
 no longer 401. **Do this before running T-526**, not after.
 
 ### T-741 — The harness closes an empty workflow as `completed` (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED** — such a close is now `empty`, distinct from `abandoned`; the CI assertion says so. Both harness scenarios were reproduced locally before pushing.
 
 `tooling/workflow.py:341-344,398` · `.github/workflows/ci.yml:120-125`
 
@@ -1189,6 +1253,8 @@ wire `test: npm test` into the matrix row.
 
 ### T-744 — `maxConcurrentJobs` is not enforced (Medium, reported)
 
+> **Status (2026-08-28):** **FIXED** — a `pendingClaims` counter covers the window between deciding to claim and `executeJob` owning the slot.
+
 `vps-agent/index.js:123,157-167,177` · `vps-agent/lib/api.js:57`
 
 `poll()` checks `activeJobs >= config.maxConcurrentJobs` *before* awaiting
@@ -1203,6 +1269,8 @@ Terraform containers is a real resource-exhaustion path on a small VPS.
 counter in `poll()`, include it in the guard, release it in a `finally`.
 
 ### T-745 — The availability alert has no ingestion-lag headroom (Medium, verified)
+
+> **Status (2026-08-28):** **FIXED** — 30-minute window expecting 6 results, firing below 3; the Worker cadence comment moved with it, since the two must change together.
 
 `edge/availability-probe/wrangler.toml:23,31` ·
 `infra/observability.tf:869-883` · `edge/availability-probe/worker.js:80-98`
@@ -1224,6 +1292,8 @@ or keep `PT15M` and drop the threshold to 1.
 
 ### T-746 — A failed probe leaves no diagnosable trace (Medium, verified)
 
+> **Status (2026-08-28):** **FIXED** — Workers Logs enabled and the handler logs before rethrowing. Diagnosis, not recovery: the one-sided no-retry design is unchanged.
+
 `edge/availability-probe/worker.js:60-64,133-140,145-149` ·
 `edge/availability-probe/wrangler.toml`
 
@@ -1242,6 +1312,8 @@ and wrap the `scheduled` body in a try/catch that `console.error`s the reason
 before rethrowing, so the Worker's own tail distinguishes the three cases.
 
 ### T-747 — The Worker package is absent from Dependabot (Medium, reported)
+
+> **Status (2026-08-28):** **FIXED — and it exposed something larger.** Adding the entry made Dependabot re-validate the file, which failed: the `/infra` terraform entry carried `cooldown.semver-major-days`, unsupported for that ecosystem. An unsupported property invalidates the WHOLE file, so **no ecosystem had been getting updates at all**. Pre-existing and latent, because Dependabot only re-validates when the file changes. Fixed in the same PR. This is a finding the review did not make, surfaced by acting on its lowest-value item.
 
 `.github/dependabot.yml`
 
@@ -1345,6 +1417,50 @@ T-746) are operability, not correctness.
 authorization, certificate rather than shared secret, argv-array command
 construction, and a thorough container sandbox. Its findings are about test
 coverage and operations, not the security model.
+
+## Remediation, 2026-08-28
+
+35 of the 62 findings are fixed, one is recorded as **will not fix** with its
+reason, and the rest are listed in [TODO.md](../TODO.md). Each finding above
+carries its own status line; this section records what the remediation taught
+that the review itself did not know.
+
+**Two findings were wrong, and following them caused harm.**
+
+- **T-750** asked for the function app's CORS origins to be derived from
+  `var.domain`. Doing so broke `functions (azure)`: `cors-platform-origins.test.js`
+  reads that block as TEXT and compares literal origins against `cors.js`, so an
+  interpolation is not a string it can compare — and the comment placed inside
+  the block broke its regex outright, which is worse, because the guard then
+  passes while checking nothing. Reverted; the literals are load-bearing.
+- **T-715** correctly diagnosed a 456 kB chart bundle on every page, then
+  prescribed a fix that does not work. rolldown places React's jsx-runtime by
+  its own rules, so claiming react in an earlier chunk moved only `scheduler`,
+  and removing the manual chart chunk made the critical path worse. What worked
+  was splitting the libraries, measured on built output: 868 kB → 571 kB.
+
+**One finding was understated.** T-701 reported that `publish-content`
+inherited the wrong role. Verification found that **none of the eight job types
+declared a role at all**, which made the fix structural (require it in
+`registerJobType`) rather than a one-line patch — and the new validation
+immediately caught a ninth registration the review had missed.
+
+**One finding exposed something larger than itself.** T-747 was the lowest-value
+item in the review: add `/edge/availability-probe` to Dependabot, "zero impact
+today". Adding it made Dependabot re-validate the file, which failed — the
+`/infra` terraform entry carried a property unsupported for that ecosystem, and
+an unsupported property invalidates the whole file. **No ecosystem had been
+receiving dependency updates at all.** Latent because Dependabot re-validates
+only on change, and nothing had changed that file since the property was
+introduced.
+
+**What the remediation confirmed about method.** The Terraform plan succeeding
+with `prevent_destroy` in force is what proves T-706's replication change is an
+in-place update rather than a replacement — a green check that means something
+specific. Conversely, two CI failures came from changes verified by inspection
+rather than execution, so Terraform is now run locally before pushing, and the
+backend suite is re-run after infra changes: a test source-scans `main.tf`, so
+"infra-only" is not a category that exists here.
 
 ## Disposition
 
