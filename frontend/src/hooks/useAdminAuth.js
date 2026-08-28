@@ -15,7 +15,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { setCachedAdminStatus } from '@/config/admin-v2';
 import { authedFetch } from '@/lib/api';
-import { onAuthStateChanged } from '@/lib/entraAuth';
 
 // Cache admin status per-uid to prevent leaking one user's status to another
 // after a sign-out/sign-in within the same tab (OWASP A01 — broken access control).
@@ -105,9 +104,19 @@ export function useAdminAuth() {
   const [adminStatus, setAdminStatus] = useState(null);
   const [error, setError] = useState(null);
 
-  // Listen for Entra (MSAL) auth state changes
+  // Listen for Entra (MSAL) auth state changes.
+  //
+  // `onAuthStateChanged` is imported dynamically (T-736). A static import put
+  // `@azure/msal-browser` — 236 kB — into the chunk of every module that
+  // imports this hook, including `useGenerateCuratedImages`, which runs on the
+  // public `/:provider/news` route. The hook's role gate stopped it *calling*
+  // anything; it could not stop the bundler resolving the import, because that
+  // happens before any gate runs.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(async (entraUser) => {
+    let cancelled = false;
+    let unsubscribe = null;
+
+    const onUser = async (entraUser) => {
       setUser(entraUser);
       setError(null);
 
@@ -133,9 +142,31 @@ export function useAdminAuth() {
         setIsLoading(false);
         setAuthReady(true);
       }
-    });
+    };
 
-    return unsubscribe;
+    import('@/lib/entraAuth')
+      .then(({ onAuthStateChanged }) => {
+        // The effect may have been torn down while the chunk was in flight;
+        // subscribing then would leak a listener with no unsubscribe path.
+        if (cancelled) return;
+        unsubscribe = onAuthStateChanged(onUser);
+      })
+      .catch((err) => {
+        // Failing to load the auth module is not "signed out" — it is
+        // "unknown". But the UI has to stop waiting, and every gate reads
+        // `hasRole`, which is false until a status arrives, so settling here
+        // denies rather than grants.
+        console.error('Failed to load auth module:', err);
+        if (!cancelled) {
+          setError(err.message);
+          setAuthReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   // Helper functions

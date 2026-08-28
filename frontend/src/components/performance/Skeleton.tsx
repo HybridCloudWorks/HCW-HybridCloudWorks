@@ -51,7 +51,7 @@ export function Skeleton({ variant = 'text', className, animated = true }: Skele
     <div
       className={`
         ${animated ? 'animate-pulse' : ''}
-        bg-slate-200
+        bg-slate-200 dark:bg-slate-700
         ${variantClass}
         ${className || ''}
       `}

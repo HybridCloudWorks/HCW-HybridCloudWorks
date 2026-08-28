@@ -2,28 +2,14 @@ import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList, PUBLIC_CORPUS_LIMIT } from '@/lib/publicApi';
 import { formatPostDate, normalizePublicImageUrl } from '@/lib/blogUtils';
+// One canonicaliser for the whole app (T-738). This hook used to carry its own
+// copy, and that copy did not know `vmware`, `broadcom`, `ansible` or `redhat`
+// while useProviderLandingContent's did — so those documents appeared on the
+// landing page and vanished from their own provider's blog list.
+import { canonicalizeProvider, inferProviderFromText, squashProvider } from '@/lib/providers';
 
 // Canonical governance source is `content`.
 // `blogs` is retained as a legacy read fallback for older migrated content.
-
-const normalizeProvider = (value) =>
-  String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-
-const canonicalizeProvider = (value) => {
-  const normalized = normalizeProvider(value);
-  if (!normalized) return '';
-
-  if (normalized.includes('github')) return 'github';
-  if (normalized.includes('terraform')) return 'terraform';
-  if (normalized.includes('finops')) return 'finops';
-  if (normalized.includes('azure') || normalized.includes('microsoft')) return 'azure';
-  if (normalized.includes('gcp') || normalized.includes('googlecloud')) return 'gcp';
-  if (normalized.includes('aws') || normalized.includes('amazon')) return 'aws';
-
-  return normalized;
-};
 
 const EXCLUDED_TYPES = new Set(['architecture', 'framework']);
 
@@ -34,22 +20,6 @@ const firstPresent = (...values) => {
     }
   }
   return null;
-};
-
-const inferProviderFromText = (value) => {
-  const text = String(value || '').toLowerCase();
-  if (!text) return '';
-
-  if (text.includes('github')) return 'github';
-  if (text.includes('terraform')) return 'terraform';
-  if (text.includes('finops')) return 'finops';
-  if (text.includes('azure') || text.includes('microsoft')) return 'azure';
-  if (text.includes('gcp') || text.includes('google cloud') || text.includes('cloud.google'))
-    return 'gcp';
-  if (text.includes('aws') || text.includes('amazon web services') || text.includes('amazon'))
-    return 'aws';
-
-  return '';
 };
 
 const inferProviderFromUrlFields = (doc = {}) => {
@@ -209,7 +179,9 @@ const normalizePost = (doc) => {
 };
 
 export function useBlogData(provider) {
-  const providerKey = normalizeProvider(provider);
+  // The route segment, squashed only — it is already canonical, and running it
+  // through the alias table would be a no-op at best.
+  const providerKey = squashProvider(provider);
 
   // Canonical source — content collection (pipeline + admin published)
   const {

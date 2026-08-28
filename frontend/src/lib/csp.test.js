@@ -112,3 +112,37 @@ describe('Content-Security-Policy', () => {
     expect(script).not.toContain("'unsafe-eval'");
   });
 });
+
+describe('indexing headers', () => {
+  const headersFor = (route) => config.routes.find((entry) => entry.route === route)?.headers || {};
+
+  // T-737. robots.txt Disallow stops a crawler FETCHING a URL; it does not stop
+  // the URL being indexed when something links to it — Google will list a
+  // disallowed URL with no snippet. And the Helmet `noindex` these pages render
+  // is client-side, so a crawler that does not execute JavaScript never sees
+  // it, and `app-shell.html` — what an un-prerendered route falls back to —
+  // carries none at all. An HTTP header is the only one of the three that a
+  // crawler always sees.
+  it.each([['/admin/*'], ['/preview/*']])('serves %s with noindex, nofollow', (route) => {
+    expect(headersFor(route)['X-Robots-Tag']).toBe('noindex, nofollow');
+  });
+
+  it('puts the noindex routes before the catch-all HTML cache rule', () => {
+    // Static Web Apps applies the FIRST matching route rule. Behind `/*.html`
+    // these would never be evaluated.
+    const order = config.routes.map((entry) => entry.route);
+    const htmlRule = order.indexOf('/*.html');
+    expect(htmlRule).toBeGreaterThan(-1);
+    for (const route of ['/admin/*', '/preview/*']) {
+      expect(order.indexOf(route)).toBeLessThan(htmlRule);
+    }
+  });
+
+  it('does not mark any public route noindex', () => {
+    // The failure that would matter more than the one being fixed.
+    const noindexed = config.routes
+      .filter((entry) => entry.headers?.['X-Robots-Tag']?.includes('noindex'))
+      .map((entry) => entry.route);
+    expect(noindexed.sort()).toEqual(['/admin/*', '/preview/*']);
+  });
+});

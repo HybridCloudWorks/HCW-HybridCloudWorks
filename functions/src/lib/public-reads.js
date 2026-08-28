@@ -462,6 +462,16 @@ const CURATED_IMAGE_HIT_CACHE_SECONDS = 3600;
 const CURATED_IMAGE_MISS_CACHE_SECONDS = 60;
 
 /**
+ * Ids the batched curated-image read will answer for in one request (T-739).
+ *
+ * The news grid asks for twelve. 50 leaves room for a longer grid without
+ * making this an amplifier: an unbounded `ids` list on an anonymous endpoint
+ * means one request can cost as many reads as the caller names, which is the
+ * shape of the fan-out T-711 removed from the ops-health probe.
+ */
+export const CURATED_IMAGE_BATCH_MAX = 50;
+
+/**
  * How many same-slug documents the detail lookup considers.
  *
  * Slugs are meant to be unique, so this is normally 1 row. It is >1 because
@@ -677,6 +687,85 @@ export function createPublicReadHandlers({ store }) {
       } catch (error) {
         context.error('publicGetCuratedImage failed:', error);
         return json(500, { error: 'Failed to get curated image' });
+      }
+    },
+
+    /**
+     * GET /api/public/curated-images?ids=a,b,c — the same lookup as
+     * `getCuratedImage`, for a whole grid in one round trip (T-739).
+     *
+     * The news grid rendered twelve cards and issued twelve
+     * `public/curated-image/{id}` requests, on a route that had already
+     * fetched the feed. Twelve round trips before any cover appeared.
+     *
+     * **Every disclosure rule of the single-id route applies here unchanged**,
+     * and that is the property to protect if this is ever edited: only
+     * `imageUrl` is returned, never the document — a `curated_article_images`
+     * row also carries `storagePath` and the gallery's prompt metadata
+     * (`promptSet`, `promptName`, `promptTemplateVersion`, `theme`, `style`),
+     * which is editorial IP and internal layout. Archived images are withheld,
+     * and a whitespace-only value is treated as uncached rather than handed to
+     * a browser as an `<img src>` that resolves to the page itself.
+     * `public-reads.curated-images.test.js` asserts the two routes agree, so a
+     * change to one that is not made to the other fails.
+     *
+     * Absence is a null entry, not an omission and not a 404: the caller's
+     * question is "which of these have covers?", and "this one does not" is a
+     * successful answer that the client needs in order to stop asking.
+     *
+     * Bounded at `CURATED_IMAGE_BATCH_MAX`. An unbounded `ids` list on an
+     * anonymous endpoint is a point-read amplifier — one request costing as
+     * many reads as the caller cares to name — which is the shape of the
+     * fan-out T-711 removed from the ops-health probe.
+     */
+    async getCuratedImages(request, context) {
+      try {
+        const raw = String(request.query?.get?.('ids') ?? '').trim();
+        if (!raw) return json(400, { error: 'ids required' });
+
+        const ids = [
+          ...new Set(
+            raw
+              .split(',')
+              .map((value) => value.trim())
+              .filter(Boolean)
+          ),
+        ];
+        if (ids.length === 0) return json(400, { error: 'ids required' });
+        if (ids.length > CURATED_IMAGE_BATCH_MAX) {
+          return json(400, { error: `At most ${CURATED_IMAGE_BATCH_MAX} ids per request` });
+        }
+
+        // One query rather than N point reads — the same shape T-711 applied
+        // to the orphan probe. `images` is keyed by id so a caller can tell
+        // "no cover" from "not asked about".
+        const rows = await store.queryDocs(
+          'curated_article_images',
+          'SELECT c.id, c.imageUrl, c.archived FROM c WHERE ARRAY_CONTAINS(@ids, c.id)',
+          [{ name: '@ids', value: ids }]
+        );
+
+        const byId = new Map((rows || []).map((row) => [row.id, row]));
+        const images = {};
+        let anyHit = false;
+        for (const id of ids) {
+          const doc = byId.get(id);
+          const stored = typeof doc?.imageUrl === 'string' ? doc.imageUrl.trim() : '';
+          const imageUrl = doc && doc.archived !== true && stored ? stored : null;
+          images[id] = imageUrl;
+          if (imageUrl) anyHit = true;
+        }
+
+        // The shorter miss TTL when nothing was found, so a grid whose covers
+        // are still generating is not pinned to the long hit TTL.
+        return json(
+          200,
+          { success: true, images },
+          anyHit ? CURATED_IMAGE_HIT_CACHE_SECONDS : CURATED_IMAGE_MISS_CACHE_SECONDS
+        );
+      } catch (error) {
+        context.error('publicGetCuratedImages failed:', error);
+        return json(500, { error: 'Failed to get curated images' });
       }
     },
 

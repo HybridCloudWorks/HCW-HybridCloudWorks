@@ -58,6 +58,40 @@ const PROVIDER_SECTIONS = [
  * construction — nothing below enumerates it, and it must stay that way: a
  * prerendered preview would publish an unpublished draft.
  */
+/**
+ * Public routes that are NOT `/:provider/<section>` and so are not produced by
+ * the derivation below (T-737).
+ *
+ * Eleven indexable routes were declared in App.jsx and reached neither disk nor
+ * the sitemap: they fell through to `app-shell.html`, which carries a generic
+ * title and no canonical — so a crawler that found one saw the same untitled
+ * shell as for every other. `routes-are-complete.test.js` reads App.jsx and
+ * fails when a public absolute route is missing from here, which is the part
+ * that stops the list going stale again: a hand-maintained list is exactly how
+ * a route quietly stops being pre-rendered, and this file already says so.
+ *
+ * `/templates/*` are submission forms — real public pages with real content,
+ * and indexable whether or not anyone wants them to be.
+ */
+const STANDALONE_ROUTES = [
+  '/finops/tools',
+  '/finops/focus',
+  '/finops/architectures',
+  '/terraform/modules',
+  '/terraform/tools',
+  '/github/workflows',
+  '/github/tools',
+  '/tools/migration',
+  '/tools/comparison',
+  '/tools/resources',
+  '/tools/decisions',
+  '/templates/framework',
+  '/templates/architecture',
+  '/templates/blog',
+  '/templates/coder-corner',
+  '/templates/rosetta-stone',
+];
+
 export function routes(manifest = null) {
   return [
     '/',
@@ -67,6 +101,7 @@ export function routes(manifest = null) {
       `/${provider}`,
       ...PROVIDER_SECTIONS.map((section) => `/${provider}/${section}`),
     ]),
+    ...STANDALONE_ROUTES,
     ...(manifest?.routes || []),
   ];
 }

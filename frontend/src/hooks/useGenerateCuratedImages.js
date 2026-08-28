@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { getFunctionsBase } from '@/lib/functionsBase';
 import { useImagePrompts } from './useImagePrompts';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
-import { fetchPublicCuratedImage } from '@/lib/publicApi';
+import { fetchPublicCuratedImage, fetchPublicCuratedImages } from '@/lib/publicApi';
 import { postJSON } from '@/lib/api';
 
 const DEFAULT_PROMPT_BY_PROVIDER = {
@@ -100,7 +100,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
    * @returns {Promise<string|null>} Image URL or null if generation failed
    */
   const generateArticleImage = useCallback(
-    async (article, basePrompt) => {
+    async (article, basePrompt, { cachedUrl: knownCached } = {}) => {
       try {
         if (!article?.id) {
           console.warn(`[generateCuratedImages] Article missing ID, skipping generation`);
@@ -117,7 +117,14 @@ export function useGenerateCuratedImages(pagePath, provider) {
 
         // Check the server-side image cache first — anonymous, so this is the
         // part that works for a public visitor.
-        const cachedUrl = await getCachedImageUrl(article.id);
+        //
+        // `knownCached` is the batched answer from generateImagesForArticles,
+        // which asks once for the whole grid (T-739). It is honoured even when
+        // null, because "the batch said this one has no cover" is an answer;
+        // re-asking per id is exactly the N+1 that was removed. A lone caller
+        // that passes nothing still gets the single-id read.
+        const cachedUrl =
+          knownCached !== undefined ? knownCached : await getCachedImageUrl(article.id);
         if (cachedUrl) {
           setImageMap((prev) => ({ ...prev, [article.id]: cachedUrl }));
           return cachedUrl;
@@ -202,12 +209,35 @@ export function useGenerateCuratedImages(pagePath, provider) {
           }
         }
 
+        // One batched cache read for the whole grid, before anything else
+        // (T-739). This used to be one GET per card — twelve round trips for a
+        // twelve-card grid, on a route that had already fetched the feed, and
+        // repeated on every remount before the request-layer cache existed.
+        //
+        // Failure is non-fatal and yields an empty map: an editor then falls
+        // through to generation as before, and an anonymous visitor sees cards
+        // without covers, which is what they would have seen anyway.
+        let cachedUrls = {};
+        try {
+          cachedUrls = await fetchPublicCuratedImages(articles.map((a) => a?.id));
+        } catch (cacheErr) {
+          console.warn(
+            '[generateCuratedImages] Batched cache read failed; falling back per article:',
+            cacheErr.message
+          );
+        }
+
         // Generate images for all articles in parallel
         console.warn(
           `[generateCuratedImages] Generating images for ${articles.length} articles...`
         );
         const imagePromises = articles.map((article) =>
-          generateArticleImage(article, basePrompt).then((url) => ({
+          generateArticleImage(article, basePrompt, {
+            // `undefined` (not null) when the batch had no answer for this id,
+            // so generateArticleImage falls back to its single-id read rather
+            // than treating a failed batch as "definitely no cover".
+            cachedUrl: article?.id in cachedUrls ? cachedUrls[article.id] : undefined,
+          }).then((url) => ({
             id: article.id,
             url,
           }))

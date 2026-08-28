@@ -2,8 +2,31 @@
  * Shared authenticated API utility for CMS admin calls.
  * Injects an Entra ID access token (audience = the Functions API) into all
  * requests via MSAL — see lib/entraAuth.js.
+ *
+ * ===========================================================================
+ * WHY entraAuth IS IMPORTED DYNAMICALLY (T-736)
+ * ===========================================================================
+ * `import { acquireApiToken } from '@/lib/entraAuth'` was a static import, and
+ * entraAuth imports `@azure/msal-browser`. Any module that imports anything
+ * from this file therefore dragged 236 kB of MSAL into its chunk — including
+ * `useGenerateCuratedImages`, which is on the public `/:provider/news` route.
+ * So an anonymous visitor downloaded and executed MSAL to look at a news grid.
+ *
+ * That hook's own header claims its role gate "stops the hook dragging MSAL
+ * onto the critical path of a public page". The runtime gate does work; the
+ * module graph never followed it, because a static import is resolved before
+ * any gate runs.
+ *
+ * The import moves inside `authedFetch`, which is already `async` and already
+ * awaits the token — so no caller signature changes and no call site needs to
+ * know. MSAL now loads when the first authenticated request is made, which on
+ * a public route is never.
+ *
+ * Keep it dynamic. A static `import` of entraAuth anywhere in this file's
+ * graph silently undoes this, with no test failure and no visible symptom
+ * beyond a slower public page — which is exactly how it got here.
+ * `msal-not-on-public-routes.test.js` is what actually holds the line.
  */
-import { acquireApiToken } from '@/lib/entraAuth';
 import { requireFunctionsBase } from '@/lib/functionsBase';
 
 const DEFAULT_TIMEOUT_MS = 20000;
@@ -73,6 +96,7 @@ export async function authedFetch(fnName, options = {}) {
   // Throws 'Not authenticated. Please sign in.' with no active account —
   // same contract as the Firebase version. getCurrentAdminStatus keeps its
   // forced refresh so a just-granted role is visible immediately.
+  const { acquireApiToken } = await import('@/lib/entraAuth');
   const token = await acquireApiToken({ forceRefresh: fnName === 'getCurrentAdminStatus' });
   const url = getEndpoint(fnName);
 

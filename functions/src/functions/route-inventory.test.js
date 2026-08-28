@@ -119,6 +119,11 @@ const PUBLIC_ROUTES = new Set([
   // is here because the public news pages were calling the editor-gated
   // equivalent and rendering nothing (TODO.md T-210).
   'public/curated-image/{id}',
+  // Batched twin of the route above (T-739). Identical disclosure rules —
+  // imageUrl only, archived withheld, whitespace treated as uncached — and
+  // bounded at CURATED_IMAGE_BATCH_MAX so an anonymous caller cannot turn one
+  // request into an unbounded point-read fan-out.
+  'public/curated-images',
   // Staging preview for the Telegram approval loop (T-606). Anonymous, but the
   // HMAC token in ?t= is the authorization: signed over contentId + expiry
   // with PREVIEW_SIGNING_SECRET, 72 h TTL. Serves only forge_ready/editing/

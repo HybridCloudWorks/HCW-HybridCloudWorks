@@ -171,9 +171,14 @@ const AdminLabsPage = lazyPage(() => import('@/pages/admin/LabsPage'));
 const AdminListenAndLearnPage = lazyPage(() => import('@/pages/admin/ListenAndLearnPage'));
 
 // Placeholder loader
+// Shown on every lazy route. It was a bare spinning div: no role, no
+// accessible name, so the wait between routes was silent as well as
+// unfocused (T-740). `role="status"` is implicitly aria-live="polite", which
+// is what a loading indicator wants — it should not interrupt.
 const PageLoader = () => (
-  <div className="flex items-center justify-center min-h-[50vh]">
-    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-slate-blue"></div>
+  <div className="flex items-center justify-center min-h-[50vh]" role="status">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-slate-blue" />
+    <span className="sr-only">Loading page…</span>
   </div>
 );
 
@@ -270,6 +275,23 @@ function App() {
       {!isAdminRoute && <Header />}
 
       <ScrollToTop />
+      {/*
+        Route-change announcer (T-740). ScrollToTop writes the new document
+        title here after each navigation; `aria-live="polite"` makes a screen
+        reader read it without interrupting whatever it is saying. It must be
+        in the DOM from first render and stay mounted — a live region added at
+        the same moment its text changes is not reliably announced.
+
+        `sr-only` rather than `hidden` or `display: none`, which would remove
+        it from the accessibility tree and silence it.
+      */}
+      <div
+        id="route-announcer"
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      />
       <main id="main-content" tabIndex={-1} className="grow">
         <RouteErrorBoundary isAdminRoute={isAdminRoute}>
           <Suspense fallback={<PageLoader />}>
@@ -309,7 +331,27 @@ function App() {
                 {/* Fallback for provider sub-routes */}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
-              {/* --- Dedicated Section Routes (FinOps, Terraform, GitHub) --- */}
+              {/*
+                --- Dedicated Section Routes (FinOps, Terraform, GitHub) ---
+
+                These are provider paths that have no cross-provider dispatcher,
+                so they are declared statically.
+
+                Three of them used to be DUPLICATES of routes the `/:provider`
+                block above already served — `/finops/architecture-designs`,
+                `/terraform/code`, `/github/code` — and were removed (T-762).
+                Each rendered exactly the component its dispatcher renders, but
+                a static path outranks `/:provider`, so the static one won and
+                the dispatcher's matching branch was unreachable while its
+                `:slug` sibling still ran: one URL family served by two code
+                paths. Worse, the static declarations sit OUTSIDE
+                `ProviderLayout`, so `useProvider()` was null on them and
+                populated on the adjacent `/:provider` routes.
+
+                Before adding one here, check whether the `/:provider` block
+                already covers it. `App.routes.test.jsx` asserts no path is
+                declared twice.
+              */}
               {/* AWS Specifics */}
               {/* Azure Specifics */}
               {/* GCP Specifics */}
@@ -317,14 +359,11 @@ function App() {
               <Route path="/finops/tools" element={<FinOpsToolsPage />} />
               <Route path="/finops/focus" element={<FinOpsFocusPage />} />
               <Route path="/finops/architectures" element={<FinOpsArchitecturePage />} />
-              <Route path="/finops/architecture-designs" element={<FinOpsArchitecturePage />} />
               {/* Terraform Specifics */}
-              <Route path="/terraform/code" element={<TerraformCodePage />} />
               <Route path="/terraform/modules" element={<TerraformModulesPage />} />
               <Route path="/terraform/tools" element={<TerraformToolsPage />} />
               {/* GitHub Specifics */}
               <Route path="/github/workflows" element={<GitHubWorkflowsPage />} />
-              <Route path="/github/code" element={<GitHubCodePage />} />
               <Route path="/github/tools" element={<GitHubToolsPage />} />
               {/* --- Cloud Tools --- */}
               <Route path="/tools/migration" element={<ToolsMigrationPage />} />
@@ -460,10 +499,14 @@ function ProviderNewsDetailDispatcher() {
 }
 
 function ProviderArchitectureDispatcher() {
-  const { provider } = useParams();
-  const { pathname } = useLocation();
-  const segment = pathname.split('/').filter(Boolean).pop();
-  const isDetail = segment !== 'architecture-designs';
+  // `slug` comes from the route pattern (`architecture-designs/:slug`), which is the
+  // router's own answer to list-versus-detail. This used to sniff
+  // `pathname.split('/').pop()` and compare it to the literal 'architecture-designs' —
+  // a second, hand-rolled parse of information `useParams` already had, and
+  // one that answers "detail" for any path whose last segment happens to
+  // differ, including a trailing-slash variant (T-762).
+  const { provider, slug } = useParams();
+  const isDetail = Boolean(slug);
 
   if (provider === 'aws') {
     return isDetail ? <ArchitectureDetailTemplate provider="aws" /> : <AWSArchitecturePage />;
@@ -484,10 +527,14 @@ function ProviderArchitectureDispatcher() {
 }
 
 function ProviderFrameworksDispatcher() {
-  const { provider } = useParams();
-  const { pathname } = useLocation();
-  const segment = pathname.split('/').filter(Boolean).pop();
-  const isDetail = segment !== 'frameworks';
+  // `slug` comes from the route pattern (`frameworks/:slug`), which is the
+  // router's own answer to list-versus-detail. This used to sniff
+  // `pathname.split('/').pop()` and compare it to the literal 'frameworks' —
+  // a second, hand-rolled parse of information `useParams` already had, and
+  // one that answers "detail" for any path whose last segment happens to
+  // differ, including a trailing-slash variant (T-762).
+  const { provider, slug } = useParams();
+  const isDetail = Boolean(slug);
 
   if (provider === 'aws') {
     return isDetail ? <FrameworkDetailTemplate provider="aws" /> : <AWSFrameworksPage />;
@@ -508,10 +555,14 @@ function ProviderFrameworksDispatcher() {
 }
 
 function ProviderCodeDispatcher() {
-  const { provider } = useParams();
-  const { pathname } = useLocation();
-  const segment = pathname.split('/').filter(Boolean).pop();
-  const isDetail = segment !== 'code';
+  // `slug` comes from the route pattern (`code/:slug`), which is the
+  // router's own answer to list-versus-detail. This used to sniff
+  // `pathname.split('/').pop()` and compare it to the literal 'code' —
+  // a second, hand-rolled parse of information `useParams` already had, and
+  // one that answers "detail" for any path whose last segment happens to
+  // differ, including a trailing-slash variant (T-762).
+  const { provider, slug } = useParams();
+  const isDetail = Boolean(slug);
 
   if (provider === 'github') {
     return isDetail ? <BlogDetailTemplate provider="github" section="code" /> : <GitHubCodePage />;

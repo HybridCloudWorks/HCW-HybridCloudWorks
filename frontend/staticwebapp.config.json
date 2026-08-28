@@ -20,6 +20,18 @@
   },
   "routes": [
     {
+      "route": "/admin/*",
+      "headers": {
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/preview/*",
+      "headers": {
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
       "route": "/assets/*",
       "headers": {
         "Cache-Control": "max-age=31536000, immutable"
