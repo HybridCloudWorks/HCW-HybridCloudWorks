@@ -104,9 +104,16 @@ engineering work on them is done.
   environment secret on a *protected* `production` and set a rotation cadence.
   Recorded as an accepted exception in [TODO.md](TODO.md).
 - **A TFC API token for the plan assertion (from T-724).**
-  `scripts/assert-expected-plan.mjs` fails when a plan contains anything but
-  the known permanent diff, but the plan lives in HCP Terraform and
+  `scripts/assert-expected-plan.mjs` fails when a plan contains anything but the
+  known permanent diff, but the plan lives in HCP Terraform and
   `iac-validate.yml` has no workspace token, so it is run by hand today.
+  **`scripts/cutover/07-check-plan.ps1` is now that hand-run**, in one command:
+  it resolves the workspace's latest run, downloads the JSON plan, feeds the
+  checker and reports the verdict. It needs a HCP Terraform **user or team**
+  token with admin access to `hcw/hcw-azure` — an *organization* token cannot
+  read `json-output` and fails with 404, which reads like a missing plan rather
+  than a permissions problem. Wiring the same check into `iac-validate.yml`
+  needs that token as a repository secret and is still open.
 - **A scheduled-query alert on `unresolvedSecrets` (from T-720).**
   `/api/health` now reports how many app settings arrived as an unresolved
   `@Microsoft.KeyVault(…)` reference. It is 0 in a healthy estate; an alert on
@@ -261,26 +268,18 @@ covered; see [CHANGELOG.md](CHANGELOG.md).
 
 ## Owner-gated work, carried from REVIEW.md
 
-Everything from here to the end arrived from `REVIEW.md` on 2026-08-29,
-unchanged. These need tenant administration, production approval, a credential,
-external access, or a live confirmation — none of them can be closed from a
-checkout.
+Everything from here to the end arrived from `REVIEW.md` on 2026-08-29. These
+need tenant administration, production approval, a credential, external access,
+or a live confirmation — none of them can be closed from a checkout.
 
-## Immediate: restore admin access
-
-The current `403` from `POST /api/bootstrapCurrentUserAdmin` is an authorization
-configuration issue, not an MSAL cache issue. The API requires both gates:
-
-1. Assign the Microsoft Entra **Admin** app role for the API application to
-   `spatino@hybridcloudworks.com` or to the approved administrator group.
-2. Sign out and sign in again so MSAL obtains a token containing the new role.
-3. If the account is the first administrator, approve the bootstrap request and
-   confirm that the corresponding `admins/{Entra object id}` record exists in
-   Cosmos DB. The API deliberately refuses non-Admin tokens even when a registry
-   record exists.
-
-Only a tenant administrator or an owner with Cosmos data access can perform and
-verify these actions. Do not weaken the API guard or add a browser-side bypass.
+**One section was deleted rather than carried: "Immediate: restore admin
+access".** It described a live `403` from `POST /api/bootstrapCurrentUserAdmin`
+and asked for the Entra `Admin` app role to be assigned. The owner confirmed on
+2026-08-29 that the admin portal loads and signs in immediately, so the role is
+assigned and the 403 is gone. It had been sitting at the top of the document
+marked *Immediate* — the loudest item in the tracker, describing something that
+was already fixed. The `Admin` app role assignment survives as one clause of the
+Entra row below, which is where it belongs.
 
 ## Owner decisions and external access
 
