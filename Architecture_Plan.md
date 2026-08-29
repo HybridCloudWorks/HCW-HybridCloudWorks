@@ -351,13 +351,20 @@ like this goes quietly stale.
 
 ## 8. What good looks like at the end
 
-Four of the five are met. Struck through rather than deleted, so the one that is
-not stays visible next to the four that are.
+All five hold. Struck through rather than deleted, so the reasoning stays. The
+first is deliberately NOT struck: it stopped being a one-time check on
+2026-08-29 and became a requirement on every deployment, and striking it through
+would read as "done and behind us".
 
 - Monthly spend under USD 150 with headroom, dominated by consumption rather than idle capacity.
-  **Structurally true — the estate is consumption-billed throughout — but the
-  cost gate has never been run.** Migration_Plan §7 names it; measuring one full
-  week of actual spend is still owed.
+  **Structurally true — the estate is consumption-billed throughout.** Reworded
+  2026-08-29: this used to end "but the cost gate has never been run", pointing at
+  Migration_Plan §7. That gate was retired the same day by owner decision — Azure
+  is the permanent and only environment, so a one-off reading "before
+  decommissioning" measures against a moment that will not come. **Budget is a
+  standing requirement on every deployment instead**, which is a higher bar than
+  the single measurement this line used to ask for, not a lower one. Measuring
+  before T-518 would price an idle platform anyway.
 - ~~No connection strings or account keys anywhere; managed identity throughout.~~
   Cosmos key auth is disabled at the account, storage SAS is user-delegation
   signed, and every credential resolves from Key Vault by managed identity.
