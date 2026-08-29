@@ -67,12 +67,17 @@ in [CHANGELOG.md](CHANGELOG.md), and what remains needs access this repository
 does not have. They are not counted in the nine above, because the
 engineering work on them is done.
 
-- **`production` environment protection (from T-705).** Both deploy workflows
-  now refuse a dispatch from any ref but `main`, and [REVIEW.md](REVIEW.md)
-  §4.4 no longer claims a gate that may not exist. Open Settings →
-  Environments → `production`, confirm required reviewers and a `main`-only
-  deployment-branch rule, then set that row to what you find. The guard step is
-  a backstop, not the gate.
+- **`production` deployment-branch rule (from T-705).** Reduced to one setting
+  by an owner decision on 2026-08-29: **required reviewers are deliberately not
+  configured**, because this is a single-operator estate and a reviewer you
+  approve yourself is not a control — it is a click that produces an audit
+  trail implying oversight that did not happen. The half that still matters and
+  costs nothing: Settings → Environments → `production` → Deployment branches →
+  *Selected branches* → `main`. Without it the environment-scoped federated
+  credential matches from any branch, so `workflow_dispatch` can ship an
+  unreviewed ref past all 12 required contexts. The guard step in both
+  workflows stays as the backstop — nothing in a checkout can prove an
+  environment rule set outside the repository is still set.
 - **Action-group delivery test (from T-709).** An optional SMS receiver is
   wired as an independent second channel, via a `dynamic` block so an unset
   variable leaves the action group byte-identical. Run
