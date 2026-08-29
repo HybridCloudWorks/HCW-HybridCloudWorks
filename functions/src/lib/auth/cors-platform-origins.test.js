@@ -24,18 +24,20 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+
+import { terraformSource } from '../../../test/terraform-source.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const MAIN_TF = join(fileURLToPath(new URL('../../../..', import.meta.url)), 'infra', 'main.tf');
+const INFRA = join(fileURLToPath(new URL('../../../..', import.meta.url)), 'infra');
 
 /** The literal origins inside site_config's `cors { allowed_origins = ... }`. */
 function platformOrigins() {
-  const source = readFileSync(MAIN_TF, 'utf8');
+  const source = terraformSource(INFRA);
   const block = /cors\s*\{\s*allowed_origins\s*=\s*concat\(([\s\S]*?)\)\s*\n\s*support_credentials/.exec(
     source
   );
-  expect(block, 'no cors { allowed_origins = concat(...) } block found in infra/main.tf').not.toBeNull();
+  expect(block, 'no cors { allowed_origins = concat(...) } block found in infra/*.tf').not.toBeNull();
   return [...block[1].matchAll(/"(https?:\/\/[^"]+)"/g)].map((m) => m[1]);
 }
 
@@ -85,7 +87,7 @@ describe('platform CORS allowlist', () => {
   it('does not enable support_credentials', () => {
     // A bearer-token API, not a cookie API — and true widens what the platform
     // intercepts well beyond preflights.
-    const source = readFileSync(MAIN_TF, 'utf8');
+    const source = terraformSource(INFRA);
     expect(source).toMatch(/support_credentials\s*=\s*false/);
     expect(source).not.toMatch(/support_credentials\s*=\s*true/);
   });

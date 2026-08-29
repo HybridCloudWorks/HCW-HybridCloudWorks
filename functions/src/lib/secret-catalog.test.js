@@ -12,7 +12,7 @@
  * binary.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { terraformSource } from '../../test/terraform-source.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,7 +34,7 @@ const INFRA = join(fileURLToPath(new URL('../../..', import.meta.url)), 'infra')
  * lists is what makes a swapped or mistyped counterpart detectable.
  */
 function terraformPairs() {
-  const source = readFileSync(join(INFRA, 'main.tf'), 'utf8');
+  const source = terraformSource(INFRA);
   const pattern =
     /"([A-Z0-9_]+)"\s*=\s*"@Microsoft\.KeyVault\(SecretUri=\$\{azurerm_key_vault\.hcw\.vault_uri\}secrets\/([A-Z0-9-]+)\)"/g;
   return [...source.matchAll(pattern)].map((m) => ({ setting: m[1], secret: m[2] }));

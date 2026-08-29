@@ -15,12 +15,44 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkPlan, classify, EXPECTED } from './assert-expected-plan.mjs';
 
 const INFRA = join(fileURLToPath(new URL('..', import.meta.url)), 'infra');
+
+/**
+ * The whole Terraform root module as one string.
+ *
+ * This test used to read `main.tf` alone, which left a real hole: it matches
+ * `^resource "azapi_..."` to check that EXPECTED names every azapi resource,
+ * and an azapi resource declared in `observability.tf`, `oidc.tf` or `hub.tf`
+ * was simply invisible to it. The allowlist would look complete while missing
+ * an entry, and that resource's permanent replacement would then be reported as
+ * drift — training an operator to ignore the one tool that tells them the plan
+ * is wrong.
+ *
+ * Terraform reads every `.tf` in a directory as one module; so does this now.
+ *
+ * Deliberately duplicated from `functions/test/terraform-source.js` rather than
+ * imported: `scripts/` and `functions/` are independent npm packages with no
+ * workspace between them, and reaching across that boundary to share eight
+ * lines would couple two packages that are otherwise unrelated. Change both.
+ */
+const MIN_TF_FILES = 4;
+function terraformSource() {
+  const names = readdirSync(INFRA)
+    .filter((name) => name.endsWith('.tf'))
+    .sort();
+  if (names.length < MIN_TF_FILES) {
+    throw new Error(
+      `Expected at least ${MIN_TF_FILES} .tf files in ${INFRA}, found ${names.length}. ` +
+        'The path is wrong — reading on would compare empty lists and pass.'
+    );
+  }
+  return names.map((name) => readFileSync(join(INFRA, name), 'utf8')).join('\n');
+}
 
 /** A plan carrying exactly the known permanent diff. */
 const expectedPlan = () => ({
@@ -138,14 +170,18 @@ describe('checkPlan', () => {
 });
 
 describe('EXPECTED matches the configuration', () => {
-  const mainTf = readFileSync(join(INFRA, 'main.tf'), 'utf8');
+  const infraSource = terraformSource();
 
-  it('names every azapi resource declared in infra/main.tf, and only those', () => {
-    // Both directions. A resource added to main.tf but not here would have its
-    // permanent replacement reported as drift, training operators to ignore
-    // this tool; one removed from main.tf but left here would be reported
+  it('names every azapi resource declared in infra/*.tf, and only those', () => {
+    // Both directions. A resource added to the module but not here would have
+    // its permanent replacement reported as drift, training operators to ignore
+    // this tool; one removed from the module but left here would be reported
     // missing forever, with the same result.
-    const declared = [...mainTf.matchAll(/^resource "(azapi_[a-z_]+)" "([a-z0-9_]+)"/gm)].map(
+    //
+    // Reads the WHOLE module, not main.tf: until 2026-08-29 an azapi resource
+    // in any other .tf file was invisible here, so "and only those" was only
+    // ever true of one file.
+    const declared = [...infraSource.matchAll(/^resource "(azapi_[a-z_]+)" "([a-z0-9_]+)"/gm)].map(
       (m) => `${m[1]}.${m[2]}`
     );
     expect(declared.length).toBeGreaterThan(0);
@@ -155,7 +191,7 @@ describe('EXPECTED matches the configuration', () => {
   it('names a resource and an app setting that exist', () => {
     const { address, attribute } = EXPECTED.updated[0];
     const [type, name] = address.split('.');
-    expect(mainTf).toContain(`resource "${type}" "${name}"`);
-    expect(mainTf).toContain(`"${attribute}"`);
+    expect(infraSource).toContain(`resource "${type}" "${name}"`);
+    expect(infraSource).toContain(`"${attribute}"`);
   });
 });

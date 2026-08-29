@@ -26,6 +26,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+
+import { terraformSource } from '../../test/terraform-source.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,9 +35,9 @@ const INFRA = join(fileURLToPath(new URL('../../..', import.meta.url)), 'infra')
 
 /** Flag suffixes declared in `local.timer_catalogue` in main.tf. */
 function catalogueSuffixes() {
-  const source = readFileSync(join(INFRA, 'main.tf'), 'utf8');
+  const source = terraformSource(INFRA);
   const block = /timer_catalogue\s*=\s*\{([\s\S]*?)\n  \}/.exec(source);
-  expect(block, 'local.timer_catalogue not found in infra/main.tf').not.toBeNull();
+  expect(block, 'local.timer_catalogue not found in infra/*.tf').not.toBeNull();
   // Keys are bare identifiers at the start of a line inside the map.
   return [...block[1].matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*=/gm)].map((m) => m[1]);
 }

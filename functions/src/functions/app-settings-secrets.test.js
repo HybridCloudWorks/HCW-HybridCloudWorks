@@ -24,7 +24,7 @@
  * credentials and no Terraform binary.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { hclBlockAfter, terraformSource } from '../../test/terraform-source.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -56,18 +56,23 @@ const ALLOWED_LITERALS = new Map([
   ['KEY_VAULT_URI', 'the vault address, not a secret — the thing references RESOLVE against'],
 ]);
 
-/** `"NAME" = <value>` pairs inside the `app_settings = merge({ … })` block. */
+/**
+ * `"NAME" = <value>` pairs inside the `app_settings = merge({ … })` block.
+ *
+ * The block is bounded by the line that CLOSES it, `  })` at the resource's own
+ * indentation. It used to be bounded by
+ * `resource "azapi_resource_action" "function_app_settings"` — a different
+ * resource, seventy lines further down, that merely happened to follow. Two
+ * things were wrong with that. It silently over-read those seventy lines into
+ * the "settings" it was checking, and it broke the moment either resource moved
+ * — which is precisely what splitting `main.tf` does. Where a block ends is a
+ * property of the block.
+ */
 function appSettings() {
-  const source = readFileSync(join(INFRA, 'main.tf'), 'utf8');
-  const start = source.indexOf('app_settings = merge({');
-  expect(start, 'app_settings block not found in infra/main.tf').toBeGreaterThan(-1);
+  const source = terraformSource(INFRA);
+  const block = hclBlockAfter(source, 'app_settings = merge({', '  })');
+  expect(block, 'app_settings = merge({ … }) block not found in infra/*.tf').not.toBeNull();
 
-  // The block ends at the first line that closes it at the resource's
-  // indentation. Bounded by the azapi read-back, which must come after it.
-  const end = source.indexOf('resource "azapi_resource_action" "function_app_settings"', start);
-  expect(end, 'the azapi read-back should follow the settings block').toBeGreaterThan(start);
-
-  const block = source.slice(start, end);
   return [...block.matchAll(/^\s*"([A-Z][A-Z0-9_]*)"\s*=\s*(.+?)\s*$/gm)].map((m) => ({
     name: m[1],
     value: m[2],
