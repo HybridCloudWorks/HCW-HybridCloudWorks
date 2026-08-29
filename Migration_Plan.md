@@ -11,9 +11,10 @@
 > not deleted — the four porting tables in §4 and the partition-key reasoning in
 > §5.5 are the only record of what each upstream export and container became, so
 > removing them would lose the mapping. Completion is recorded in
-> [CHANGELOG.md](CHANGELOG.md); what is still open says so in bold. **Three
-> things in this plan are still open**, all owner-held: §6 step 6 (the Telegram
-> webhook, T-526), §6 step 7 (arming the timers, T-518), and §7's cost gate.
+> [CHANGELOG.md](CHANGELOG.md); what is still open says so in bold. **Two things
+> in this plan are still open**, both owner-held: §6 step 7 (arming the timers,
+> T-518) and §7's cost gate. §6 step 6, the Telegram webhook (T-526), closed on
+> 2026-08-28.
 > This differs from [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry
 > open work only and drop an item once its CHANGELOG entry exists.
 
@@ -744,7 +745,7 @@ dispatch-only.
    **Keep TTL low for at least 48 hours beforehand.** The API host `api-azure.` does not move — it
    has been on Azure since Phase 2.~~ Repointed by 2026-08-27 and owner-verified serving on
    2026-08-28 (T-517, [CHANGELOG.md](CHANGELOG.md)).
-6. **OPEN — T-526.** Re-point external webhooks — **Telegram is the one that will be forgotten, and it is two
+6. ~~Re-point external webhooks — **Telegram is the one that will be forgotten, and it is two
    changes, not one.** The receiver was missing until 2026-08-22 (this step assumed one existed);
    it is now `POST /api/telegram/webhook` (T-512, ported with the owner's decision to keep the
    bot). Deploying it changes nothing on its own: the URL and secret token are registered with
@@ -752,7 +753,11 @@ dispatch-only.
    Cloud Functions URL until GCP is decommissioned — at which point it goes quiet with no error
    anywhere in Azure. `scripts/cutover/04-telegram-webhook.ps1` does both halves and preflights
    the receiver first, because a webhook pointed at a 404 makes Telegram back off. The secret
-   derives from `sha256(TELEGRAM_BOT_TOKEN)`, which is already in Key Vault.
+   derives from `sha256(TELEGRAM_BOT_TOKEN)`, which is already in Key Vault.~~
+   **Done — T-526 closed 2026-08-28.** `getWebhookInfo` returns the Azure URL and `/help` answers
+   in the chat. The step's own warning was right about the failure mode and wrong about the state:
+   it had already been run, and both TODO.md and this line went on describing it as pending — this
+   step *is* "the one that will be forgotten", and what was forgotten was that it had happened.
 7. **OPEN — T-518.** Turn the timers on: `FEATURE_FLAG_SCHEDULERS` then the per-timer flags, one at
    a time, each observed firing once (§7).
 8. ~~Watch for 24–48 hours before touching GCP.~~
@@ -851,7 +856,7 @@ entries vanish cannot show that a risk was managed rather than never real.
 
 | Risk                                               | Severity | Mitigation                                                          |
 | -------------------------------------------------- | -------- | ------------------------------------------------------------------- |
-| **Telegram/webhook re-registration forgotten** | **High — now a deadline** | §6 step 6 / T-526. The receiver exists (T-512) and `-WhatIf` on the cutover script is safe since T-704; `setWebhook` still has to be re-run, and the forgone DNS rollback means it must happen **before** the GCP deletion |
+| ~~Telegram/webhook re-registration forgotten~~ | Closed 2026-08-28 | §6 step 6 / T-526. `getWebhookInfo` returns the Azure URL and `/help` answers in the chat. The risk was real and the mitigation worked; what this row got wrong at the end was the *state* — it read "now a deadline" for a step already taken |
 | **Cron syntax differences silently disable a job, or time zone shifts it** | **Medium — unproven** | §4.2 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7's scheduled-job proof is the check and it has never run, because nothing is armed (T-518) |
 | **Cost overrun from hourly resources** | **Medium — unmeasured** | Architecture_Plan §3 removed the hourly resources by design; the §7 cost gate that would confirm it has never been run |
 | ~~Authorisation rules not faithfully re-implemented~~ | Closed | The server-side guard suite replaced `firestore.rules`; `route-inventory.test.js` fails on a route that reaches the database without a guard |
@@ -882,5 +887,6 @@ entries vanish cannot show that a risk was managed rather than never real.
 > 230 s cap — because every one of them is on the Phase 3 critical path and none of them is a
 > mechanical port.~~ Closed; §4.1.
 >
-> **What to do first now** is not a migration question. It is [TODO.md](TODO.md): T-526 before the
-> GCP deletion, then T-518.
+> **What to do first now** is not a migration question. It is [TODO.md](TODO.md), and since T-526
+> closed on 2026-08-28 nothing on it is time-bound: T-518 (arming the timers) and §7's cost gate
+> are the last two unmet exit criteria of this plan.

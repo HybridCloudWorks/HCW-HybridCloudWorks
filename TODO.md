@@ -19,11 +19,17 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 > Nothing about that work is repeated below; this file carries only what is
 > still open.
 >
-> **The one deadline on this list is T-526.** The owner verified the apex
-> serving Azure on 2026-08-28 and **forwent the DNS rollback** — Firebase is
-> scheduled for deletion rather than held through a soak. The Telegram webhook
-> is still registered against GCP and fails *silently* the moment GCP is
-> deleted, so the re-registration is now a countdown rather than a dormancy.
+> **T-526 is closed, and this file was wrong about it.** The Telegram webhook
+> was already registered against Azure — `getWebhookInfo` on 2026-08-28 returned
+> `https://api-azure.hybridcloudworks.com/api/telegram/webhook`, and `/help`
+> answered in the chat, which is the acceptance criterion this file itself
+> specified. It had been carried here as "the one deadline on this list" and a
+> countdown against the GCP deletion, for work that was already done. Nobody
+> re-ran anything to close it; running `-Mode Show` to *start* the work is what
+> revealed it. Entry in [CHANGELOG.md](CHANGELOG.md).
+>
+> **There is no deadline on this list any more.** The GCP deletion no longer
+> silences anything, which was the only time-bound consequence here.
 >
 > The `hcw-azure` workspace is **VCS-connected** (2026-08-26), working
 > directory `infra`, auto-apply off. Merged infra code reaches HCP Terraform on
@@ -33,18 +39,18 @@ Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
 | Priority | Open items |
 | --- | ---: |
 | Critical | 0 |
-| High | 3 |
+| High | 2 |
 | Medium | 5 |
 | Low | 2 |
-| Total | 10 |
+| Total | 9 |
 
-Seven of the ten are architecture-review findings still to be worked
+Seven of the nine are architecture-review findings still to be worked
 (`T-714`, four Medium — two of them owner-gated — and two Low). The other
-three are the pre-program platform gates: **T-526** and **T-518** (High) and **T-519** (Medium). Every
-one of those three carries **Gate: owner** and has no repository-side half —
-what is left of them is a webhook registration, a Worker deployment and a set
-of feature flags, each needing tenant or edge access. They are listed anyway,
-because a tracker that omits them is quietly shorter than the truth.
+two are the pre-program platform gates: **T-518** (High) and **T-519**
+(Medium). Both carry **Gate: owner** and have no repository-side half — what is
+left of them is a Worker deployment and a set of feature flags, each needing
+tenant or edge access. They are listed anyway, because a tracker that omits
+them is quietly shorter than the truth.
 
 **T-522 moved to [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)**
 on 2026-08-26 — the recovery objectives and the Cosmos export that would
@@ -58,7 +64,7 @@ ever said "two numbers are missing".
 
 These are the residue of remediated findings: the code half is merged and
 in [CHANGELOG.md](CHANGELOG.md), and what remains needs access this repository
-does not have. They are not counted in the ten above, because the
+does not have. They are not counted in the nine above, because the
 engineering work on them is done.
 
 - **`production` environment protection (from T-705).** Both deploy workflows
@@ -126,7 +132,7 @@ re-derived it), and **verify** (could not be settled from the repository —
 exactly one finding, T-705).
 
 Deliberately **not** re-reported, being owner gates rather than findings:
-T-518, T-519, T-526, the unseeded Key Vault secrets, the unseeded
+T-518, T-519, the unseeded Key Vault secrets, the unseeded
 `admin_config` documents, and the absent analytics provider.
 
 ### High — 1 of 12 open
@@ -153,40 +159,6 @@ T-721 (telemetry vs SWA tier cost decision).
 | T-754 | tf | `main.tf` is a 2,037-line six-concern file; splitting is state-safe file moves | `main.tf` |
 
 ## High
-
-### T-526 — The Telegram webhook still points at GCP, and GCP is scheduled for deletion
-
-**Gate: owner** — Cutover-Runbook §3d; the receiver itself was T-512, done.
-
-The bot's webhook URL and secret are registered with **Telegram**, not in
-code, so nothing that has shipped or merged moves it: the bot keeps POSTing
-at the old Cloud Functions URL until `setWebhook` is re-run. While Firebase
-existed as a rollback that was a dormancy; now that the owner has scheduled
-GCP for deletion (T-517 close-out), it is a countdown — the moment GCP is
-deleted the bot goes quiet **with no error anywhere in Azure**, which is
-exactly the failure the runbook warns about. The re-registration cannot run
-from this repository's tooling environment (it needs PowerShell 7, the bot
-token or a Key Vault firewall window, and network access to
-`api.telegram.org` — all owner-held). It is two commands:
-
-```powershell
-./scripts/cutover/04-telegram-webhook.ps1 -Mode Show   # what is registered now
-./scripts/cutover/04-telegram-webhook.ps1              # point it at Azure
-```
-
-**Verified when** `/help` in the chat answers with the command list. Run it
-*before* the GCP deletion, not after: a webhook pointed at a dead URL makes
-Telegram back off, so the bot stays broken for a while even after the fix.
-
-T-704 closed the safety question that used to sit in front of this: the
-cutover script's `-WhatIf` mutated the production Key Vault rather than
-simulating it, and its "custom secret: set" line was unconditionally true.
-Both are fixed, so **T-526 is now safe to run.**
-
-It also gates the Blog Machine's Telegram loop: the whole approve-by-reply
-path (and the inline approve/reject buttons in
-[wiki/Blog-Machine.md](wiki/Blog-Machine.md) §5b) is silent until the webhook
-points at Azure.
 
 ### T-518 — Nothing is scheduled: all 18 timers are permanent no-ops
 

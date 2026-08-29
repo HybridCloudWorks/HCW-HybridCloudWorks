@@ -276,7 +276,7 @@ forge_ready items with grade and an inline `/approve {id}` per row.
 
 | What | Why it gates | Tracker |
 | --- | --- | --- |
-| Telegram webhook re-registration | The entire Phase 5 loop is dead while the webhook points at GCP — and silently dead after the GCP deletion | **T-526** |
+| ~~Telegram webhook re-registration~~ | ~~The entire Phase 5 loop is dead while the webhook points at GCP~~ — **closed 2026-08-28**: `getWebhookInfo` returns the Azure URL and `/help` answers in the chat. **The Phase 5 approve-by-reply loop is live**, and the inline approve/reject buttons in §5b are unblocked | ~~T-526~~ |
 | Timer arming (workspace variables + four gates) | Phase 6's scheduled forge/publish/RSS are permanent no-ops until armed | **T-518** |
 | `PREVIEW_SIGNING_SECRET` seeding | Signed preview links | vault procedure |
 | `REPLICATE-API-KEY` seeding | Auto hero generation (fallback heroes cover its absence) | vault procedure |
