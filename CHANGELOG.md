@@ -17,6 +17,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Migration_Plan disagreed with itself in four places about how much of it was
+  left (2026-08-29).** Asked what remained, the document gave five different
+  answers: the header said "two things", §6's heading said steps 6 *and* 7,
+  §7 said one of eight, §9 said "the last two", and the risk register said
+  "three of fifteen" above a table with two live rows.
+
+  Two of those I caused an hour earlier by retiring the cost gate without
+  following it through the document. The other two had been wrong since
+  2026-08-28, when T-526 closed §6 step 6 and the Telegram risk row with it.
+  Architecture_Plan §7 already names this failure — "an accurate-when-written
+  count that nobody updated when the list moved past it, which is the most
+  common way a document like this goes quietly stale" — and it happened in the
+  risk register one section below a note saying so.
+
+  All five now agree: **one thing is left**, §6 step 7 / §7's scheduled-job
+  proof (T-518). The two live risk rows are updated rather than closed — the
+  cron/time-zone row because its check no longer needs anything armed, and the
+  cost row because its gate was retired while the risk itself was not.
+
 - **The timer verification script could not succeed, and said so reassuringly
   (2026-08-29).** `scripts/cutover/05-verify-timer.ps1` is the tool for
   Migration_Plan §7's last open gate. It queried `requests` through

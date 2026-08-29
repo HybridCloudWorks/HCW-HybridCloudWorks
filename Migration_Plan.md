@@ -11,9 +11,16 @@
 > not deleted — the four porting tables in §4 and the partition-key reasoning in
 > §5.5 are the only record of what each upstream export and container became, so
 > removing them would lose the mapping. Completion is recorded in
-> [CHANGELOG.md](CHANGELOG.md); what is still open says so in bold. **Two things
-> in this plan are still open**, both owner-held: §6 step 7 (arming the timers,
-> T-518) and §7's cost gate. §6 step 6, the Telegram webhook (T-526), closed on
+> [CHANGELOG.md](CHANGELOG.md); what is still open says so in bold. **One thing
+> in this plan is still open**: §6 step 7 / §7's scheduled-job proof — arming the
+> timers, T-518. Its clock half needs nothing armed and can be read from traces
+> that already exist; its handler half is owner-held, one timer at a time.
+>
+> This line said "two things" until 2026-08-29, naming §7's cost gate as the
+> second. That gate was retired the same day by owner decision — Azure is the
+> permanent and only environment, so "before decommissioning" names a moment
+> that will not come, and budget became a standing requirement on every
+> deployment instead. §6 step 6, the Telegram webhook (T-526), closed on
 > 2026-08-28.
 > This differs from [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry
 > open work only and drop an item once its CHANGELOG entry exists.
@@ -721,7 +728,7 @@ per-timer flags; the Telegram webhook (§6 step 6); `lab_agents` / `vps-agent`; 
 
 ---
 
-## 6. Phase 5 — cutover — **steps 1–5 and 8 done; 6 and 7 are the two open gates**
+## 6. Phase 5 — cutover — **all steps but 7 are done; step 7 is the last open gate**
 
 ~~**Where this starts from.** The Static Web App serves Azure's placeholder page until the first
 frontend deploy — `deploy-azure-frontend.yml` is still `if: false`, waiting on the SWA token (REVIEW
@@ -885,15 +892,21 @@ Add for the migration:
 
 ## 8. Risk register
 
-**Three of fifteen are still live**, and all three are owner-held. The closed
-rows are struck through rather than deleted: a risk register whose retired
-entries vanish cannot show that a risk was managed rather than never real.
+**Two of fifteen are still live**, and both are owner-held. The closed rows are
+struck through rather than deleted: a risk register whose retired entries vanish
+cannot show that a risk was managed rather than never real.
+
+This read "three of fifteen" from 2026-08-28, when the Telegram row closed,
+until 2026-08-29 — an accurate-when-written count that nobody updated when the
+list moved past it. Architecture_Plan §7 names that as the most common way a
+document like this goes quietly stale, and it happened here, one section below
+the note that says so.
 
 | Risk                                               | Severity | Mitigation                                                          |
 | -------------------------------------------------- | -------- | ------------------------------------------------------------------- |
 | ~~Telegram/webhook re-registration forgotten~~ | Closed 2026-08-28 | §6 step 6 / T-526. `getWebhookInfo` returns the Azure URL and `/help` answers in the chat. The risk was real and the mitigation worked; what this row got wrong at the end was the *state* — it read "now a deadline" for a step already taken |
-| **Cron syntax differences silently disable a job, or time zone shifts it** | **Medium — unproven** | §4.2 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7's scheduled-job proof is the check and it has never run, because nothing is armed (T-518) |
-| **Cost overrun from hourly resources** | **Medium — unmeasured** | Architecture_Plan §3 removed the hourly resources by design; the §7 cost gate that would confirm it has never been run |
+| **Cron syntax differences silently disable a job, or time zone shifts it** | **Medium — unproven** | §4.2 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7's scheduled-job proof is the check. It has never been run — but as of 2026-08-29 it no longer *needs* anything armed: the timers have been firing since deploy and the host stamps `ScheduleStatus` with local-time offsets on every invocation, so this exact risk is now settleable from history with `scripts/cutover/05-verify-timer.ps1` (T-518) |
+| **Cost overrun from hourly resources** | **Medium — unmeasured** | Architecture_Plan §3 removed the hourly resources by design. The risk is still live but its check changed on 2026-08-29: the §7 cost gate was retired, and budget is now a standing requirement on every deployment rather than one reading. Still unmeasured — and a measurement taken before T-518 would price an idle platform, since nothing is scheduled |
 | ~~Authorisation rules not faithfully re-implemented~~ | Closed | The server-side guard suite replaced `firestore.rules`; `route-inventory.test.js` fails on a route that reaches the database without a guard |
 | ~~AI handlers default to Vertex / ADC, which has no Azure equivalent~~ | Closed | §4.4 — `ai/router.js` resolves Anthropic → OpenAI → Gemini by key presence; Vertex is a disabled provider id, not a default |
 | ~~Collections missed by the migration inventory~~ | Closed | §5 — one manifest drove migrator, verifier and Terraform; the inventory gate passed before both imports |
@@ -923,5 +936,6 @@ entries vanish cannot show that a risk was managed rather than never real.
 > mechanical port.~~ Closed; §4.1.
 >
 > **What to do first now** is not a migration question. It is [TODO.md](TODO.md), and since T-526
-> closed on 2026-08-28 nothing on it is time-bound: T-518 (arming the timers) and §7's cost gate
-> are the last two unmet exit criteria of this plan.
+> closed on 2026-08-28 nothing on it is time-bound. **T-518 is the single unmet exit criterion of
+> this plan** — §7's cost gate was the other until it was retired on 2026-08-29, and this line said
+> "the last two" until then.
