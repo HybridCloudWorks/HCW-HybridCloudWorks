@@ -17,6 +17,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Follow-up to the `main.tf` split: the counts it left wrong (2026-08-29).**
+  Removing T-754's row from TODO.md left the summary table reading `Low | 2 /
+  Total | 9` over a list of eight, and the prose still said "seven of the nine".
+  That is the same accurate-when-written count nobody updated that this session
+  had already corrected twice — in Architecture_Plan §7 and in Migration-Plan's
+  five self-counts — committed by me about an hour after fixing the second one.
+  Corrected to 8, with T-718's and T-749's anchors repointed from `main.tf` to
+  `cosmos.tf` and `functionapp.tf`.
+
+  `wiki/Architecture-Review-2026-08.md`'s ~30 `main.tf:NNN` anchors are
+  deliberately **not** repointed. They are evidence of what a reader saw at
+  commit `31f9613`; rewriting them to today's lines would make the record claim
+  something it never checked. A note at the top says they are pinned, unmaintained,
+  and that resources kept their addresses through the split — which is how to
+  find them now.
+
 - **`main.tf` split by concern: 2,286 lines → 97 (2026-08-29, T-754).** Seven new
   files — `functionapp.tf`, `storage.tf`, `cosmos.tf`, `frontend.tf`,
   `keyvault.tf`, `budget.tf`, `network.tf` — alongside the `observability.tf`,
