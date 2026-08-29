@@ -32,7 +32,7 @@ terraform {
     # cloudflare_dns_record — an upgrade ADR, tracked separately.)
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "~> 4.52"
+      version = "~> 5.24"
     }
   }
 }
