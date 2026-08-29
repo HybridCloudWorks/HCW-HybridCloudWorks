@@ -53,7 +53,7 @@ and `Gate: owner` still marks the rest.
 | Total | 7 |
 
 Five of the seven are architecture-review findings still to be worked
-(`T-714`, three Medium — two of them owner-gated — and one Low). The other
+(`T-714`, three Medium — all three now owner-gated — and one Low). The other
 two are the pre-program platform gates: **T-518** (High) and **T-519**
 (Medium). Both carry **Gate: owner** and have no repository-side half — what is
 left of them is a Worker deployment and a set of feature flags, each needing
@@ -181,12 +181,14 @@ T-518, T-519, the unseeded Key Vault secrets, the unseeded
 
 ### Medium — 3 of 30 open
 
-| ID | Layer | Finding | Anchor |
-| --- | --- | --- | --- |
-| T-718 | azure | Cosmos firewall admits every Azure datacenter IP. **The review's recommendation is wrong on two points, established 2026-08-29.** (1) It says to put the window in `heal-computed-properties`; that workflow's automatic path is an ARM control-plane PUT, which the firewall does not gate — only its dispatch-only `--inspect` mode touches the data plane. The real daily data-plane consumer is `publish-content-manifest.yml`, which the review does not mention, and `variables.tf`'s description is wrong about the same thing. (2) Closing the sentinel needs `Microsoft.DocumentDB/databaseAccounts/write` on a CI identity — there is no narrower action for the firewall, and it carries the power to reopen the firewall permanently or re-enable local auth. T-728 is now done, so that grant has a read-only identity to avoid and a narrow home to go to. Also note Cosmos firewall changes take **up to 15 minutes** to propagate with documented inconsistent behaviour meanwhile, and `ipRules` has no add/remove verb — `az cosmosdb update --ip-range-filter` replaces the whole list Terraform owns | `cosmos.tf` (was `main.tf:252-269` before the T-754 split) |
-
-**Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
-T-721 (telemetry vs SWA tier cost decision).
+**Open, owner-gated:** T-718 (Cosmos datacenter-IP sentinel — **needs an owner
+decision, not engineering**. The review's recommended fix was scoped and found
+wrong on two points, and every alternative hands a CI identity
+`databaseAccounts/write` in the same job that reads the data. Recommendation and
+the full analysis: [ADR 0025](wiki/0025-cosmos-firewall-datacenter-sentinel.md).
+Accept, or fund one of the two alternatives it costs out), T-719 (measure
+workspace volume on an uncapped day), T-721 (telemetry vs SWA tier cost
+decision).
 
 ### Low — 1 of 15 open
 
