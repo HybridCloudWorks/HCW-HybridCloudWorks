@@ -229,11 +229,13 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # identity with the healer. Splitting the identity without splitting that job
 # would leave the finding half closed.
 #
-# Both workflows on this identity declare no `environment:`, so both present the
-# ref-form subject and both forms are trusted, for the reasons above the
-# immutable block. scripts/oidc-subjects.test.mjs checks per identity now, not
-# against one pool of subjects: a reader workflow needs a credential on THIS
-# identity, and a pooled check would have passed on the deploy identity's.
+# All three workflows on this identity declare no `environment:`, so each
+# presents the ref-form subject, and both the name and immutable-ID forms of it
+# are trusted, for the reasons above the immutable block.
+#
+# scripts/oidc-subjects.test.mjs checks per identity now, not against one pool
+# of subjects: a reader workflow needs a credential on THIS identity, and a
+# pooled check would have passed on the deploy identity's.
 resource "azurerm_user_assigned_identity" "github_reader" {
   name                = "id-${var.workload_name}-github-reader-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
