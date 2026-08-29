@@ -17,6 +17,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Five guards asserted things about a file when they meant the module
+  (2026-08-29).** `cors-platform-origins`, `secret-catalog`,
+  `app-settings-secrets`, `timer-catalogue-sync` and
+  `scripts/assert-expected-plan` all read `infra/main.tf` by name. Terraform
+  does not work that way — every `.tf` in a directory is one module, one
+  namespace, one state — so each was checking one file and reporting on the
+  configuration.
+
+  **One of those gaps was already live.** `assert-expected-plan.test.mjs`
+  matches `^resource "azapi_..."` to prove its permanent-diff allowlist names
+  every azapi resource. An azapi resource in `observability.tf`, `oidc.tf` or
+  `hub.tf` was invisible to it: the allowlist would look complete while missing
+  an entry, and that resource's permanent replacement would be reported as
+  drift — training an operator to ignore the one tool that says the plan is
+  wrong. `cors-platform-origins`'s `expect(source).not.toMatch(/support_credentials
+  \s*=\s*true/)` had the same shape, and would have passed **vacuously** if the
+  Function App ever moved.
+
+  All five now read every `.tf` in the root module, through
+  `functions/test/terraform-source.js` (and a deliberate eight-line duplicate in
+  the `scripts` package, which is a separate npm package with no workspace
+  between them). The helper refuses to run on fewer than four files, because a
+  wrong path yields `''`, and every "these two lists agree" assertion passes by
+  comparing two empty lists.
+
+  **`app-settings-secrets` also stopped bounding a block with someone else's
+  resource.** It read from `app_settings = merge({` to
+  `resource "azapi_resource_action" "function_app_settings"` — a different
+  resource seventy lines further down that merely happened to follow. It now
+  ends at `  })`, the line that actually closes the block, so where the block
+  ends is a property of the block. As a side effect it stops over-reading those
+  seventy lines into the settings it checks.
+
+  Verified by simulating the split these guards have to survive: moving the
+  azapi read-back into a new `.tf` file leaves all five green, and breaks two of
+  the five old ones — `expected -1 to be greater than 58686` for the settings
+  parser, and a straight miss for the plan checker.
+
 - **REVIEW.md retired; one open-work document from here (2026-08-29).** It held
   the owner-gated half of the open work — and every item in it was already
   mirrored in TODO.md under **Gate: owner**, because TODO's own header said it
