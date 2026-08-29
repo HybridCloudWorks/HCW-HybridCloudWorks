@@ -585,3 +585,105 @@ describe('failover — "order of preference" has to mean preference', () => {
     expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/gemini could not serve/i));
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('reporting a credential verdict to the API-keys page', () => {
+  const rejected = (status) => ({
+    ok: false,
+    status,
+    text: async () => 'nope',
+    json: async () => ({ error: { message: 'nope' } }),
+  });
+
+  it('reports a success once, under the SETTING name, not the provider name', async () => {
+    // The recorder maps a setting to a vault secret through the catalogue. A
+    // provider name ('gemini') would map to nothing and record silently against
+    // no secret at all.
+    const onKeyVerdict = vi.fn();
+    const r = createAiRouter({
+      env: { GEMINI_API_KEY: 'g' },
+      fetch: vi.fn(async () => geminiReply('{"a":1}')),
+      sleep: noSleep,
+      log: quiet,
+      onKeyVerdict,
+    });
+
+    await r.generateJsonResponse({ prompt: 'p' });
+    expect(onKeyVerdict).toHaveBeenCalledWith('GEMINI_API_KEY', { ok: true });
+  });
+
+  it('reports a success only once per worker, however many calls follow', async () => {
+    // The hundredth success says what the first did. A Cosmos write per AI call
+    // would put this feature's bookkeeping on the hot path of every generation.
+    const onKeyVerdict = vi.fn();
+    const r = createAiRouter({
+      env: { GEMINI_API_KEY: 'g' },
+      fetch: vi.fn(async () => geminiReply('{"a":1}')),
+      sleep: noSleep,
+      log: quiet,
+      onKeyVerdict,
+    });
+
+    await r.generateJsonResponse({ prompt: 'p' });
+    await r.generateJsonResponse({ prompt: 'p' });
+    await r.generateJsonResponse({ prompt: 'p' });
+    expect(onKeyVerdict).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a rejected key on 401 and 403', async () => {
+    for (const status of [401, 403]) {
+      const onKeyVerdict = vi.fn();
+      const r = createAiRouter({
+        env: { GEMINI_API_KEY: 'g' },
+        fetch: vi.fn(async () => rejected(status)),
+        sleep: noSleep,
+        log: quiet,
+        onKeyVerdict,
+      });
+      await expect(r.generateJsonResponse({ prompt: 'p' })).rejects.toThrow();
+      expect(onKeyVerdict).toHaveBeenCalledWith('GEMINI_API_KEY', { ok: false, status });
+    }
+  });
+
+  it('does NOT report a 404 or a 429 — neither says the credential is bad', async () => {
+    // A 404 is a wrong model id and a 429 is a busy account. Turning the light
+    // red for those would send the operator rotating a key that is fine.
+    for (const status of [404, 429]) {
+      const onKeyVerdict = vi.fn();
+      const r = createAiRouter({
+        env: { GEMINI_API_KEY: 'g' },
+        fetch: vi.fn(async () => rejected(status)),
+        sleep: noSleep,
+        log: quiet,
+        onKeyVerdict,
+      });
+      await expect(r.generateJsonResponse({ prompt: 'p' })).rejects.toThrow();
+      expect(onKeyVerdict, `status ${status}`).not.toHaveBeenCalled();
+    }
+  });
+
+  it('never fails the AI call because the recorder threw', async () => {
+    const onKeyVerdict = vi.fn(async () => {
+      throw new Error('Cosmos is having a day');
+    });
+    const r = createAiRouter({
+      env: { GEMINI_API_KEY: 'g' },
+      fetch: vi.fn(async () => geminiReply('{"a":1}')),
+      sleep: noSleep,
+      log: quiet,
+      onKeyVerdict,
+    });
+    expect(await r.generateJsonResponse({ prompt: 'p' })).toEqual({ a: 1 });
+  });
+
+  it('works with no reporter at all, which is how every unit test constructs it', async () => {
+    const r = createAiRouter({
+      env: { GEMINI_API_KEY: 'g' },
+      fetch: vi.fn(async () => geminiReply('{"a":1}')),
+      sleep: noSleep,
+      log: quiet,
+    });
+    expect(await r.generateJsonResponse({ prompt: 'p' })).toEqual({ a: 1 });
+  });
+});

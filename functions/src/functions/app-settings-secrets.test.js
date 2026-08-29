@@ -42,14 +42,19 @@ const SECRET_SHAPED = /(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|CONNECTION_S
  * Secret-shaped names that legitimately hold a non-secret, each with the
  * reason. Adding to this list is a deliberate act, which is the point.
  *
- * It is empty, and that is the stronger state: EVERY secret-shaped setting is
- * a Key Vault reference, with no exceptions to remember. Its one entry was
- * `KEY_VAULT_URI` — the vault address, which existed so a runtime SDK client
- * could fetch GCP's service-account JSON. That caller is gone and so is the
- * setting. Prefer keeping this empty: an exception here is a name a reader
- * has to check by hand forever.
+ * One entry, and it has been in and out of this list in a single day, which is
+ * the list working rather than the list failing. `KEY_VAULT_URI` left when GCP
+ * pricing stopped needing a runtime vault client to READ a secret; it came back
+ * for the API-keys page, which WRITES one through a role that cannot read. The
+ * "keeps the allowlist honest" case below is what forces the round trip to be
+ * deliberate in both directions.
+ *
+ * Keep this as short as it is. An exception here is a name a reader has to
+ * check by hand forever.
  */
-const ALLOWED_LITERALS = new Map();
+const ALLOWED_LITERALS = new Map([
+  ['KEY_VAULT_URI', 'the vault address, not a secret — the thing references RESOLVE against'],
+]);
 
 /** `"NAME" = <value>` pairs inside the `app_settings = merge({ … })` block. */
 function appSettings() {

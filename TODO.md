@@ -112,13 +112,20 @@ engineering work on them is done.
   `admin_config/social_autopost` `{ enabled, accountIds: [{ id, provider }],
   scheduleDelayMinutes }` with the Publer account ids from the Social Hub.
   Absent or disabled, every one of these paths no-ops rather than failing.
-  All of them seed through `scripts/cutover/06-seed-secret.ps1`.
 - **`GCP-BILLING-API-KEY`, if the GCP column in the public pricing tool is
   wanted.** GCP console: enable the Cloud Billing API, create an API key,
-  restrict it to that API, then `06-seed-secret.ps1 -Name GCP-BILLING-API-KEY`.
-  It reads a public price list for the site's comparison tools — this estate
-  bills on Azure and nothing here touches that. Unseeded, the GCP column is
-  absent and the AWS and Azure columns still render.
+  restrict it to that API. It reads a public price list for the site's
+  comparison tools — this estate bills on Azure and nothing here touches that.
+  Unseeded, the GCP column is absent and the AWS and Azure columns still render.
+
+**These are now portal work, not desktop work.** Every secret above is seeded at
+**Admin → Platform → API Keys**, which writes straight to Key Vault through a
+role that can create a secret version and cannot read one. No firewall window,
+no `admin_ip_rules` apply, no Azure CLI. `scripts/cutover/06-seed-secret.ps1`
+stays as the break-glass path for the case the page cannot serve — the app being
+down is exactly when you might need to fix a credential. Two things still need
+a Terraform apply first, because they are new: the page's own role assignments,
+and the `FUNCTION_APP_RESOURCE_ID` setting that the refresh call reads.
 
 ## The architecture review — open findings
 

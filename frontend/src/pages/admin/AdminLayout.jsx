@@ -24,6 +24,7 @@ import {
   Award,
   Link2,
   Mail,
+  KeyRound,
   Plug,
   FlaskConical,
   Flame,
@@ -86,6 +87,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/admin/ops-health', icon: Activity, label: 'Ops Health' },
       { to: '/admin/connections', icon: Plug, label: 'Connections' },
+      { to: '/admin/api-keys', icon: KeyRound, label: 'API Keys' },
       { to: '/admin/labs', icon: FlaskConical, label: 'Labs', pill: 'VPS' },
     ],
   },
