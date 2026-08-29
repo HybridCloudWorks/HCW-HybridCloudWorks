@@ -17,6 +17,53 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The timer verification script could not succeed, and said so reassuringly
+  (2026-08-29).** `scripts/cutover/05-verify-timer.ps1` is the tool for
+  Migration_Plan §7's last open gate. It queried `requests` through
+  `az monitor app-insights query --app <id>` — both of which the Cutover-Runbook
+  warns against in its own words: *"AppRequests is empty and is not the oracle.
+  Zero rows for this app's entire history"* (T-514), and *"Query the workspace,
+  never `az monitor app-insights query --app <appId>` … that proxy returns zero
+  rows for every query rather than erroring"*. An empty table, read through an
+  endpoint that cannot return rows.
+
+  Its answer to that was `no invocations recorded`, followed by *"That is the
+  expected result while the flag is false."* A reassuring sentence for a query
+  that was never capable of returning anything — the T-514 failure re-enacted
+  inside the tool built to catch it.
+
+  Rewritten to read `AppTraces` from the workspace, and to separate **"no
+  evidence"** from **"evidence of absence"**: a failed query now says the query
+  failed, an over-cap workspace throws before any result is read as evidence,
+  and a cold app with no traces is reported as inconclusive rather than as a
+  timer that did not fire. Three defects found by inspection before it shipped —
+  a duplicated segment in the workspace name, a category filter that missed the
+  `Function.<name>.User` rows where `disabled — skipping` actually lands, and
+  three `az` calls outside `try`/`catch` that would throw past their own error
+  handling on PowerShell 7.4+.
+
+- **Migration_Plan's last two exit criteria are now one, and it was wrong about
+  the other (2026-08-29).** §7's scheduled-job gate read *"nothing is armed, so
+  nothing has been observed"*, which conflated two different things. Nothing has
+  **run** — true, no handler has done work. But every timer has been **firing**
+  on schedule since deploy: `app.timer()` registers unconditionally and the flag
+  is checked inside the handler. Since the clock question is entirely about
+  firing, and the host stamps `ScheduleStatus` with `WEBSITE_TIME_ZONE` offsets
+  on every invocation, that half is answerable now, from history, with nothing
+  armed and no risk. Only the handler half needs arming. Recorded with the note
+  that a 5-minute timer cannot prove a clock at all — it fires at :00, :05, :10
+  in every zone — so the check needs a fixed-hour timer, and midnight's
+  `CLEANUP_TEMP_STORAGE` is both the largest Chicago/UTC gap and dry-run by
+  default.
+
+  **The cost gate is retired as an exit criterion** (owner decision). It required
+  a measurement *"before decommissioning"*; GCP is dead and Azure is the
+  permanent and only environment, so that moment will not come and the gate can
+  be neither met nor failed. Staying inside budget became a standing requirement
+  on every deployment instead — a higher bar than one reading, not a lower one.
+  Architecture_Plan §8 carries the same correction, and its criterion is
+  deliberately left unstruck: striking it would read as "done and behind us".
+
 - **An API-keys page in the admin portal: paste a credential, never read one
   back (2026-08-29).** Rotating a key meant opening the production Key Vault's
   firewall to a human IP, running `06-seed-secret.ps1` from a desktop with the

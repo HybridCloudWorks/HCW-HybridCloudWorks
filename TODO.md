@@ -198,7 +198,19 @@ digest.
 It gates two other things, which is why it outranks its own blast radius:
 the Blog Machine's scheduled throughput (`forgeScheduled`,
 `publishScheduledContent`), and the Cosmos backup-tier change from T-707,
-which only pays for itself once scheduled work is generating documents.
+which only pays for itself once scheduled work is generating documents. It also
+gates any meaningful cost measurement — a bill taken while nothing is scheduled
+prices an idle platform (Migration_Plan §7).
+
+**Its first half needs nothing armed (2026-08-29).** `app.timer()` registers on
+the real schedule unconditionally and the flag is checked *inside* the handler,
+so all 18 have been firing since deploy, logging `disabled — skipping`. The host
+writes `ScheduleStatus` with `WEBSITE_TIME_ZONE` offsets on every one, which is
+exactly the "at the right local time" evidence §7 asks for — available now, from
+history, at zero risk. `scripts/cutover/05-verify-timer.ps1` reads it; run it
+against a fixed-hour timer, because a 5-minute schedule fires at :00 :05 :10 in
+every zone and can never prove a clock. Only after that does arming begin, and
+arming proves the *handlers*.
 
 ## Medium
 

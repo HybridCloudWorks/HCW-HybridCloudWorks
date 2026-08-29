@@ -776,13 +776,17 @@ dispatch-only.
 
 ---
 
-## 7. Verification gates — **two of eight still open**
+## 7. Verification gates — **one of eight still open**
 
-> The migration-specific gates below are struck through as they were met. **Two
-> were never run and are the only unmet exit criteria of the whole plan:** the
-> scheduled-job proof (blocked on T-518 — nothing is armed, so nothing has been
-> observed firing) and the cost gate (never measured against the USD 150
-> ceiling). Both are owner-held.
+> The migration-specific gates below are struck through as they were met. **One
+> is left:** the scheduled-job proof (T-518). The cost gate was retired as an exit
+> criterion on 2026-08-29 by owner decision — Azure is the permanent and only
+> environment, so "before decommissioning" names a moment that will not come, and
+> budget became a standing requirement on every deployment instead.
+>
+> The remaining gate is owner-held **in part**, which this note used to get wrong.
+> Its clock half needs nothing armed and reads from traces that already exist; its
+> handler half needs timers armed one at a time. Both are on the gate below.
 >
 > The repository baseline that follows has moved on and is not restated here;
 > `.github/workflows/ci.yml` is the current gate and runs on every pull request.
@@ -839,12 +843,43 @@ Add for the migration:
   build time, which CI cannot reach (issue #175).
 - **Scheduled-job proof — OPEN (T-518).** Each of the 18 timers observed firing at least once in
   Azure — **at the right local time**. `WEBSITE_TIME_ZONE = America/Chicago` is set on the app; a
-  timer that fires five hours early passed the "fired once" test and failed the real one. Nothing is
-  armed, so nothing has been observed.
-- **Cost gate — OPEN.** Actual spend measured against USD 150 after one full week, before
-  decommissioning. Never run. GCP is now scheduled for deletion without it, which removes the
-  "before decommissioning" framing but not the measurement: the estate is consumption-billed by
-  design and that design has never been checked against a bill.
+  timer that fires five hours early passed the "fired once" test and failed the real one.
+
+  **This gate has two halves, and only one of them needs anything armed.** This
+  entry ended "nothing is armed, so nothing has been observed" until 2026-08-29,
+  which conflated two different things. Nothing has **run** — no handler has done
+  work, which is true. But every timer has been **firing** on schedule since the
+  day it deployed: `app.timer()` registers with the real schedule unconditionally
+  and the flag is checked *inside* the handler (`schedulers.js`), so each one
+  wakes, logs `disabled — skipping`, and returns.
+
+  The clock question is entirely about firing, so it is answerable **now, from
+  history, with nothing armed and no risk**: the host writes `Trigger Details:
+  ScheduleStatus: {"Last":…,"Next":…}` on every invocation, and those offsets are
+  already `WEBSITE_TIME_ZONE`. `scripts/cutover/05-verify-timer.ps1` reads them.
+  A frequent timer cannot settle it either way — a 5-minute schedule fires at
+  :00, :05, :10 in *every* zone — so the clock half needs a fixed-hour timer, and
+  `CLEANUP_TEMP_STORAGE` at midnight is the cheapest: the largest possible gap
+  between Chicago and UTC, and dry-run unless `TEMP_STORAGE_CLEANUP_DELETE`
+  (T-302).
+
+  What arming proves is the *handler*, which is a different question and still
+  owner-held, still one timer at a time.
+- **Cost gate — RETIRED as an exit criterion, 2026-08-29 (owner decision); replaced by a standing
+  requirement.** It read "actual spend measured against USD 150 after one full week, before
+  decommissioning". There is nothing left to decommission: GCP is dead and Azure is the production
+  and only environment, permanently. An exit criterion measured against a moment that will not come
+  can be neither met nor failed, so it is not a gate any more.
+
+  What replaces it is not weaker. **Staying inside budget is a standing business
+  requirement on every deployment**, not a one-time reading — which is the right
+  shape for an estate with one environment and no migration left to finish.
+  Architecture_Plan §8 carries the same correction.
+
+  One caveat is worth keeping from the old wording: measuring today would price
+  an **idle** platform. Nothing is scheduled, so no feed sync, no forge run and
+  no digest is billed. A number taken before T-518 would be real and misleading
+  at once, which is why these two were always sequenced this way.
 
 ---
 
