@@ -348,6 +348,7 @@ export function createAiRouter({
   log = console,
   store = null,
   configTtlMs = 60_000,
+  onKeyVerdict = null,
 } = {}) {
   // With no store the loader reports "no configuration", and every path below
   // falls back to exactly the environment-only behaviour this router had before
@@ -356,6 +357,35 @@ export function createAiRouter({
   const config = createAiConfigLoader({ store, ttlMs: configTtlMs, log });
 
   const availableProviders = () => PROVIDERS.filter((p) => readKey(env, KEY_ENV[p]));
+
+  /**
+   * Tell the API-keys page whether a provider accepted its credential.
+   *
+   * This is the ONLY source of the red light: a key that resolved but is not
+   * working. `secrets-health.js` cannot see that state by design — "only the
+   * upstream service can say it is wrong" — and this is the upstream service
+   * saying so.
+   *
+   * Two rules keep it off the hot path. Failures are always reported, because
+   * they are rare and they are the whole point. Successes are reported once per
+   * worker per provider, because the hundredth successful call says exactly
+   * what the first one did and a Cosmos write per AI call would not be free.
+   */
+  const successReported = new Set();
+  async function reportKeyVerdict(provider, verdict) {
+    if (!onKeyVerdict) return;
+    if (verdict.ok) {
+      if (successReported.has(provider)) return;
+      successReported.add(provider);
+    }
+    try {
+      await onKeyVerdict(KEY_ENV[provider], verdict);
+    } catch (error) {
+      // A status page that cannot record a verdict must never fail the AI call
+      // it was observing.
+      log.warn?.(`[ai-router] could not record a key verdict: ${error?.message ?? error}`);
+    }
+  }
 
   const pinnedProvider = () =>
     String(env.CONTENTFORGE_AI_PROVIDER || '')
@@ -472,7 +502,7 @@ export function createAiRouter({
 
     for (const { provider, model: configuredModel } of chain) {
       try {
-        return await withRetry(() =>
+        const result = await withRetry(() =>
           callWith(provider, {
             ...args,
             // An explicit model from the call site wins; then the
@@ -480,8 +510,15 @@ export function createAiRouter({
             model: explicitModel || configuredModel,
           })
         );
+        await reportKeyVerdict(provider, { ok: true });
+        return result;
       } catch (error) {
         attempts.push({ provider, error });
+        const status = Number(error?.status);
+        // 401/403 ONLY. A 404 means the model id is wrong and a 429 means the
+        // account is busy — neither says the credential is bad, and reporting
+        // them would turn the light red for something no rotation can fix.
+        if ([401, 403].includes(status)) await reportKeyVerdict(provider, { ok: false, status });
         const last = chain[chain.length - 1].provider === provider;
         if (last || !isProviderUnusable(error)) throw error;
         log.warn?.(
@@ -751,6 +788,19 @@ const defaultRouter = createAiRouter({
   store: {
     queryDocs: async (...args) => (await import('../cosmos-client.js')).queryDocs(...args),
     readDoc: async (...args) => (await import('../cosmos-client.js')).readDoc(...args),
+  },
+  // Lazily imported for the same reason the store is: nothing on the cold-start
+  // path of the six modules that import only `readKey` from here.
+  onKeyVerdict: async (settingName, verdict) => {
+    const [{ recordSecretVerdict, settingToSecret }, cosmos] = await Promise.all([
+      import('../admin-secrets.js'),
+      import('../cosmos-client.js'),
+    ]);
+    await recordSecretVerdict(
+      { readDoc: cosmos.readDoc, upsertDoc: cosmos.upsertDoc },
+      settingToSecret(settingName),
+      verdict
+    );
   },
 });
 

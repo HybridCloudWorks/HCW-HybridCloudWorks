@@ -17,6 +17,69 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **An API-keys page in the admin portal: paste a credential, never read one
+  back (2026-08-29).** Rotating a key meant opening the production Key Vault's
+  firewall to a human IP, running `06-seed-secret.ps1` from a desktop with the
+  Azure CLI signed in, and closing the window again — three steps, one of which
+  leaves production open to the internet if the operator is interrupted. This
+  repository has already made that mistake once. The app never had that problem:
+  it is inside the vault's integration subnet, which `network_acls` already
+  admits. It was missing permission, not a network path.
+
+  **Write-only, enforced below the code.** The Function App's identity gets a
+  custom role holding exactly one data action —
+  `Microsoft.KeyVault/vaults/secrets/setSecret/action` — and not `getSecret`,
+  `delete` or `purge`. `Key Vault Secrets Officer` would have been one line of
+  Terraform and would have granted all of them. A promise the platform does not
+  enforce is one refactor away from being false, so a future change that tries
+  to read a value back gets a 403 rather than a secret. The honest limit, stated
+  in the code: a secret that has resolved into an app setting is in
+  `process.env` by definition, so this hides other secrets, other versions, and
+  anything with no reference — not the values the app is actively using.
+
+  **Terraform stays the source of truth, for what it was already the source of
+  truth for.** It declares which credentials exist and how the app finds them —
+  21 `@Microsoft.KeyVault(SecretUri=…)` references. It must not hold values:
+  the `azapi_resource_action` that reads the settings back exports the entire
+  live map into state and plan JSON unredacted, which is what
+  `app-settings-secrets.test.js` exists to prevent. `secret-catalog.js` is
+  checked against `main.tf` in CI, pair by pair, so the page can never offer a
+  secret the application cannot read, and the `UPPER_SNAKE` ↔ `UPPER-KEBAB`
+  translation that REVIEW.md §4.5 warns about cannot drift.
+
+  **Four lights, where three were asked for.** Gray (never seeded), green
+  (live), red (resolved but the upstream service rejects it) — and amber,
+  because App Service caches Key Vault references and *"refetches them every 24
+  hours"*. For a while after a paste the vault has the new value and the running
+  worker does not. Green there would claim a rotation had taken effect when it
+  had not; gray would say "never inserted" one second after inserting it. Amber
+  is computed from a fact rather than a guess: environment variables are
+  materialised at process start, so a write later than that cannot be reflected
+  yet. A `Microsoft.Web/sites/config/write` grant, scoped to the one site and
+  deliberately excluding `config/list/action` (the action that reads settings
+  back), lets the app force the platform to re-resolve, so new workers pick a
+  key up immediately instead of within a day. That call is best-effort: if it
+  is refused, the secret is already written and the only cost is the slower
+  cycle.
+
+  **Red is real, not decorative.** `secrets-health.js` says in its own header
+  that it cannot see "a setting whose reference resolves to the WRONG secret …
+  only the upstream service can say it is wrong". The AI router now says it: it
+  already separated a rejected key (401/403) from a bad request, and reports
+  that verdict. 404 and 429 are deliberately not reported — a wrong model id and
+  a busy account are not a bad credential, and would send an operator rotating a
+  key that is fine. Successes are recorded once per worker per provider, so the
+  bookkeeping stays off the hot path of every generation. Only the three router
+  providers may claim a liveness check, and a test binds the two lists: the page
+  prints "no liveness check for this one" beside every green light that has
+  none, rather than implying a check it does not run.
+
+  Ten mutants confirm the guards fail closed, including two that survived a
+  first pass and exposed real gaps: reading the environment before the write
+  timestamp (which made a *first* paste show gray — the exact "looks broken"
+  failure amber prevents), and spreading the state record into the response
+  instead of naming its fields.
+
 - **GCP pricing moves from a service-account JSON to the API key Google
   documents, and takes three dependencies out with it (2026-08-29).** The Cloud
   Billing Catalog API serves the *public* price list. Google's own guide says

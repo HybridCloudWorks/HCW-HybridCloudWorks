@@ -178,7 +178,16 @@ missed them. That is no longer true of either:
 
 If the GCP column in the pricing tool is wanted, get the key from the GCP
 console (enable the Cloud Billing API, create an API key, restrict it to that
-API) and seed it with `06`. That is a console visit, not cutover work.
+API) and paste it into Admin → Platform → API Keys. That is a console visit, not
+cutover work.
+
+**Seeding moved into the portal on 2026-08-29.** Every secret in this runbook is
+now pasted at Admin → Platform → API Keys, which writes to the vault from inside
+the integration subnet — no firewall window, no `admin_ip_rules` apply, no Azure
+CLI. `06-seed-secret.ps1` is kept deliberately: the page runs *in* the Function
+App, and a credential is exactly the kind of thing you may need to fix when the
+Function App is not serving. Use the script when the app is down or before it is
+first deployed; use the page every other time.
 
 `ANTHROPIC-API-KEY` is already set. The inspector, forge, digest, AI cover and
 alerts all no-op cleanly without their keys, so nothing here blocks the rest.

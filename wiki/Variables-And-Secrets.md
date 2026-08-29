@@ -268,8 +268,17 @@ is the correct steady state.
 
 The division of labour is therefore fixed: **Terraform owns the vault, the RBAC,
 the network rules, and the `@Microsoft.KeyVault(…)` references. A human owns the
-values.** Rotation is then an `az keyvault secret set` and does not require a
-Terraform run at all.
+values.** Rotation does not require a Terraform run at all.
+
+**Since 2026-08-29 a human owns them through the admin portal.** Admin →
+Platform → API Keys lists every declared secret in sections, with a light each,
+and writes a pasted value straight to the vault. The app is inside the
+integration subnet the vault already admits, so nothing has to open a firewall.
+It holds a custom role with one data action — `setSecret` — so it can create a
+new version and cannot read, delete or purge; the page has no read path to
+render a value through even if someone added one. `az keyvault secret set` from
+a desktop, through `scripts/cutover/06-seed-secret.ps1`, remains the break-glass
+route for when the app itself is the thing that is broken.
 
 ### Multi-line and oversized secrets
 
@@ -463,7 +472,12 @@ unusable as a seeding checklist:
   fails at *first invocation in production*, not at deploy — the failure mode
   the vault seeding runbook exists to prevent. `/api/health` now reports
   `unresolvedSecrets` as a count, which turns that class of failure into one
-  number, but nothing alerts on it yet.
+  number, but nothing alerts on it yet. **The inventory gap itself closed on
+  2026-08-29**: `functions/src/lib/secret-catalog.js` lists all 21 with a
+  section, a label and a description, CI asserts it against `main.tf` pair by
+  pair, and the portal's API Keys page renders it with a live status per
+  secret — so the inventory this section calls missing now exists, in code,
+  where it cannot go stale without failing a build.
 - **There is no longer a second way in.** This entry used to record that
   `functions/src/lib/key-vault.js` had exactly one call site — `gcp.js`, for the
   service-account JSON — and that its failure mode was different from every

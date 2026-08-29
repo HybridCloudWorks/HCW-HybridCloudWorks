@@ -1227,14 +1227,21 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "STORAGE_BLOB_ENDPOINT"  = azurerm_storage_account.hcw.primary_blob_endpoint
     "STORAGE_QUEUE_ENDPOINT" = azurerm_storage_account.hcw.primary_queue_endpoint
 
-    # KEY_VAULT_URI is deliberately absent. It existed for exactly one caller —
-    # a runtime SecretClient that fetched GCP's service-account JSON — and that
-    # caller is gone (GCP pricing now uses an API key delivered as an ordinary
-    # Key Vault reference, below). Every other secret in this app arrives as a
-    # reference the platform resolves before the process starts, so nothing in
-    # the runtime needs the vault's address. Re-adding it means re-adding a
-    # data-plane RBAC grant and an SDK client; do not do that for a value that
-    # could be a reference instead.
+    # KEY_VAULT_URI was removed earlier on 2026-08-29, when GCP pricing stopped
+    # needing a runtime vault client, and is back for a different caller with a
+    # different direction of travel: the API-keys page WRITES secrets, through a
+    # set-only role that cannot read them. The rule that removed it stands —
+    # nothing reads a secret through this address, and a value that could be a
+    # Key Vault reference must be one.
+    #
+    # Not a secret. It is the address references RESOLVE against, and it is in
+    # the repository, in this file, on the line below.
+    "KEY_VAULT_URI" = azurerm_key_vault.hcw.vault_uri
+
+    # The app's own ARM id, for the config-references refresh call. Composed
+    # from parts rather than read off the resource, because a resource cannot
+    # reference its own attributes from inside its own arguments.
+    "FUNCTION_APP_RESOURCE_ID" = "/subscriptions/${var.subscription_app}/resourceGroups/${azurerm_resource_group.app["web"].name}/providers/Microsoft.Web/sites/${var.function_app_name}"
 
     "ENTRA_TENANT_ID" = var.entra_tenant_id
     # The API's OWN audience, not the SPA's client id. verify-token.js refuses to
@@ -1865,6 +1872,85 @@ resource "azurerm_role_assignment" "func_kv_secrets" {
   scope                = azurerm_key_vault.hcw.id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
+# =============================================================================
+# The API-keys page: write-only vault access, and a config refresh
+# =============================================================================
+# Seeding a credential used to mean opening this vault's firewall to a human's
+# IP, running scripts/cutover/06-seed-secret.ps1 from a desktop, and closing it
+# again — three steps, one of which leaves production open to the internet if
+# the operator is interrupted. This repository has already made that mistake
+# once. The app never had that problem: it is in the integration subnet, which
+# network_acls already admits. It was missing permission, not a network path.
+#
+# WHY A CUSTOM ROLE AND NOT "Key Vault Secrets Officer". Officer grants every
+# secret operation — get, list, set, delete, recover, purge. The page promises
+# that a pasted credential cannot be read back out, and a promise the platform
+# does not enforce is a promise one refactor away from being false. This role
+# can create a new secret VERSION and do nothing else: it cannot read, it
+# cannot delete, and it cannot purge, so a compromised app can neither harvest
+# the vault nor destroy it.
+#
+# The honest limit: a secret that resolves into an app setting is in the app's
+# environment by definition, so this does not hide the values the app actively
+# uses. It stops it reading OTHER secrets, OLD versions, and anything it has no
+# reference for.
+resource "azurerm_role_definition" "kv_secret_writer" {
+  name        = "${var.workload_name}-keyvault-secret-writer"
+  scope       = azurerm_key_vault.hcw.id
+  description = "Create new secret versions. No read, no delete, no purge."
+
+  permissions {
+    actions          = []
+    not_actions      = []
+    data_actions     = ["Microsoft.KeyVault/vaults/secrets/setSecret/action"]
+    not_data_actions = []
+  }
+
+  assignable_scopes = [azurerm_key_vault.hcw.id]
+}
+
+resource "azurerm_role_assignment" "func_kv_secret_writer" {
+  scope              = azurerm_key_vault.hcw.id
+  role_definition_id = azurerm_role_definition.kv_secret_writer.role_definition_resource_id
+  principal_id       = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
+}
+
+# App Service caches Key Vault references and refetches them every 24 hours, so
+# without this a pasted key sits in the vault, correct and unused, for up to a
+# day — and the page looks broken. The documented remedy is a POST to the site's
+# config/configreferences/appsettings/refresh endpoint, which needs a
+# management-plane right on the app itself.
+#
+# WHAT IS DELIBERATELY NOT HERE: Microsoft.Web/sites/config/list/action. That is
+# the action that READS app settings back, secret values included, and granting
+# it would hand the app a way around the set-only vault role above. Write
+# without list is the whole point.
+#
+# Scoped to this one site, not the resource group. And the refresh call is
+# best-effort in code (lib/secret-vault.js): if this assignment is missing or
+# ARM refuses, the secret is already safely written and the only cost is that it
+# goes live on the 24-hour cycle instead of now.
+resource "azurerm_role_definition" "func_config_refresh" {
+  name        = "${var.workload_name}-function-config-refresh"
+  scope       = azurerm_function_app_flex_consumption.hcw.id
+  description = "Refresh this site's Key Vault references. Cannot list settings back."
+
+  permissions {
+    actions          = ["Microsoft.Web/sites/config/Write"]
+    not_actions      = ["Microsoft.Web/sites/config/list/action"]
+    data_actions     = []
+    not_data_actions = []
+  }
+
+  assignable_scopes = [azurerm_function_app_flex_consumption.hcw.id]
+}
+
+resource "azurerm_role_assignment" "func_config_refresh" {
+  scope              = azurerm_function_app_flex_consumption.hcw.id
+  role_definition_id = azurerm_role_definition.func_config_refresh.role_definition_resource_id
+  principal_id       = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
 # REMOVED (T-748): azurerm_role_assignment.terraform_kv_secrets, which granted

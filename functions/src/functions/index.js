@@ -5,6 +5,7 @@ import { unresolvedSecretCount } from '../lib/secrets-health.js';
 import './admin-crud-http.js';
 import './admin-identity-http.js';
 import './admin-integrations-http.js';
+import './admin-secrets-http.js';
 import './ai-proxy-http.js';
 import './mcp-http.js';
 import './integrations-http.js';
