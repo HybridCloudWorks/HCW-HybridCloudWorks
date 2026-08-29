@@ -17,6 +17,36 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`main.tf` split by concern: 2,286 lines → 97 (2026-08-29, T-754).** Seven new
+  files — `functionapp.tf`, `storage.tf`, `cosmos.tf`, `frontend.tf`,
+  `keyvault.tf`, `budget.tf`, `network.tf` — alongside the `observability.tf`,
+  `oidc.tf` and `hub.tf` that were already carved out. `main.tf` keeps what
+  everything else references: the locals, `azurerm_client_config`, the resource
+  groups, and the two telemetry sinks the diagnostics point at.
+
+  **Done block by block, never by line range.** The concerns were interleaved —
+  Cosmos containers at 404 and again at 2125, storage role assignments at 1745
+  sitting between the azapi resources and the Key Vault — so ranges would have
+  meant hand-arithmetic over 2,286 lines where one off-by-one silently moves half
+  a resource. A parser took top-level blocks with their attached comments,
+  assigned each by address, and then proved the result: **the multiset of
+  non-blank lines is identical before and after**, 2,107 of them, with zero lines
+  lost and zero non-comment lines added.
+
+  That proof earned its keep on the first run. The parser's original "a block
+  ends at the next line that is `}`" swallowed
+  `data "azurerm_client_config" "current" {}` — a single-line block — together
+  with the section header and the entire `locals` block after it, silently. The
+  count assertion caught it and it was rewritten to track brace depth, ignoring
+  braces inside strings and after a `#`, because a comment mentioning
+  `admins/{oid}` is otherwise an unbalanced brace.
+
+  **Nothing moved between states and no resource address changed.** Terraform
+  reads every `.tf` in a directory as one module, so this is invisible to state,
+  and an empty plan is the proof. The guards that read the configuration as text
+  did not need to care, because #268 had already pointed them at the whole module
+  rather than at `main.tf` — which is the entire reason that PR came first.
+
 - **Five guards asserted things about a file when they meant the module
   (2026-08-29).** `cors-platform-origins`, `secret-catalog`,
   `app-settings-secrets`, `timer-catalogue-sync` and
