@@ -64,9 +64,9 @@ and `GCP_SERVICE_ACCOUNT` (the email), set through
   same name.
 - A read token for Site-Main: an org GitHub App with `contents: read` on Site-Main only
   (`SITE_MAIN_APP_ID` variable + `SITE_MAIN_APP_PRIVATE_KEY` environment secret), or as a fallback a
-  fine-grained PAT as `SITE_MAIN_READ_TOKEN` with its 90-day expiry recorded in REVIEW §4.3.
+  fine-grained PAT as `SITE_MAIN_READ_TOKEN` with its 90-day expiry recorded in Required-Inputs §4.3.
 
-Evidence: `gh variable list` and `gh secret list --env data-migration` match REVIEW §4.2–4.4.
+Evidence: `gh variable list` and `gh secret list --env data-migration` match Required-Inputs §4.2–4.4.
 
 ### 4. [OP, HCP Terraform] Create the scratch estate
 

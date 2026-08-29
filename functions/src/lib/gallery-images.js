@@ -15,7 +15,7 @@
  * anything else returns null — the record delete still proceeds and
  * storageDeleted reports false, mirroring the source's ignore-failures
  * posture (and matching reality: pre-migration blobs live in Firebase
- * Storage, with operational secrets and external access tracked in REVIEW.md.
+ * Storage, with operational secrets and external access tracked in TODO.md.
  *
  * The slot-guard subtlety the source fixed is preserved: `slot` has NO
  * default in validation, so a rename/archive that doesn't mention slot can't

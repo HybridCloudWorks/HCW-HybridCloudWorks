@@ -44,7 +44,7 @@ which describes the implemented environment. Deviations are dispositioned exactl
 
 | Gap | Tracker |
 | --- | --- |
-| Cosmos: no network firewall, key auth enabled, periodic backup | TODO **T-504** (+ REVIEW §0.2 rotation decision) |
+| Cosmos: no network firewall, key auth enabled, periodic backup | TODO **T-504** (+ TODO.md rotation decision) |
 | Functions host storage publicly reachable | TODO **T-503** |
 | Observability layer: action group, alert rules, diagnostic settings, budget thresholds 50/75/90/100 + forecast alert, Log Analytics daily cap | TODO **T-505** |
 | Azure OpenAI keyed access + key exported as a Terraform output | TODO **T-506** |
@@ -80,4 +80,4 @@ which describes the implemented environment. Deviations are dispositioned exactl
 
 - Supersedes plan v0.1; amends [ADR 0011](0011-single-region-recovery), [ADR 0013](0013-ai-provider-strategy), [ADR 0014](0014-storage-and-media)
 - [ADR 0019](0019-single-function-app) · [ADR 0020](0020-native-terraform-root-module)
-- [Resource-Validation-Report](Resource-Validation-Report) · REVIEW.md §8.2 · [Deployment Runbook](Deployment-Runbook)
+- [Resource-Validation-Report](Resource-Validation-Report) · TODO.md · [Deployment Runbook](Deployment-Runbook)

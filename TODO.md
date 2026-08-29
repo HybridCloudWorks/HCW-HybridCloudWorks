@@ -1,12 +1,20 @@
 # TODO
 
-Actionable engineering work for the HybridCloudWorks website. Owner decisions,
-production approvals, credentials, external access and live-environment
-operations are *made* in [REVIEW.md](REVIEW.md); they are listed here as well,
-marked **Gate: owner**, so this file answers "what is still open" without a
-second document. What has not changed: nothing is resolved here that only a
-human holding tenant, Cloudflare or repository-admin access can resolve.
-Verified completion belongs in [CHANGELOG.md](CHANGELOG.md).
+**The one open-work document for the HybridCloudWorks website.** Engineering
+work, owner decisions, production approvals, credentials, external access and
+live-environment operations all live here. Verified completion belongs in
+[CHANGELOG.md](CHANGELOG.md); the required-inputs inventory is
+[Required-Inputs](wiki/Required-Inputs.md) in the Wiki.
+
+`REVIEW.md` held the owner-gated half until 2026-08-29, and every item in it was
+already mirrored here under **Gate: owner** so that this file could answer "what
+is still open" on its own. Two files, one restating the other, is one file too
+many. Its work sections are below, unabridged.
+
+**Nothing changed about what those items require.** Nothing here is resolved by
+an engineer working from a checkout if it needs tenant, Cloudflare or
+repository-admin access — the carried-over sections say so in their own words,
+and `Gate: owner` still marks the rest.
 
 ## Status — 2026-08-28
 
@@ -94,7 +102,7 @@ engineering work on them is done.
   long-lived credential and is now isolated in a job that installs nothing.
   Retiring it means OIDC-based SWA deployment; short of that, make it an
   environment secret on a *protected* `production` and set a rotation cadence.
-  Recorded as an accepted exception in [REVIEW.md](REVIEW.md).
+  Recorded as an accepted exception in [TODO.md](TODO.md).
 - **A TFC API token for the plan assertion (from T-724).**
   `scripts/assert-expected-plan.mjs` fails when a plan contains anything but
   the known permanent diff, but the plan lives in HCP Terraform and
@@ -181,7 +189,7 @@ T-721 (telemetry vs SWA tier cost decision).
 
 ### T-518 — Nothing is scheduled: all 18 timers are permanent no-ops
 
-**Gate: owner** — [REVIEW.md](REVIEW.md), *Timers and the availability test*.
+**Gate: owner** — [TODO.md](TODO.md), *Timers and the availability test*.
 
 `functions/src/functions/schedulers.js` checks `FEATURE_FLAG_SCHEDULERS` first
 and skips the handler *before* reading the per-timer flag, so while the master
@@ -217,7 +225,7 @@ arming proves the *handlers*.
 ### T-519 — Reachability is the one signal with no alert behind it
 
 **Gate: owner (Worker deploy)** — [ADR 0024](wiki/0024-edge-availability-probe.md);
-[REVIEW.md](REVIEW.md), *Timers and the availability test*.
+[TODO.md](TODO.md), *Timers and the availability test*.
 
 `availability_test_enabled` defaults to `false` and both the standard web test
 and its alert are gated on it, for a measured reason: Cloudflare's Bot Fight
@@ -247,10 +255,94 @@ One boundary case is left, and it is not resolvable from the repository:
 
 - The deployed no-op Labs job path, after a human supplies the Entra access
   needed for an authenticated live check (the live prerequisite remains in
-  [REVIEW.md](REVIEW.md)).
+  [TODO.md](TODO.md)).
 
 The API base, public content limit, and partial configuration cases are
 covered; see [CHANGELOG.md](CHANGELOG.md).
+
+## Owner-gated work, carried from REVIEW.md
+
+Everything from here to the end arrived from `REVIEW.md` on 2026-08-29,
+unchanged. These need tenant administration, production approval, a credential,
+external access, or a live confirmation — none of them can be closed from a
+checkout.
+
+## Immediate: restore admin access
+
+The current `403` from `POST /api/bootstrapCurrentUserAdmin` is an authorization
+configuration issue, not an MSAL cache issue. The API requires both gates:
+
+1. Assign the Microsoft Entra **Admin** app role for the API application to
+   `spatino@hybridcloudworks.com` or to the approved administrator group.
+2. Sign out and sign in again so MSAL obtains a token containing the new role.
+3. If the account is the first administrator, approve the bootstrap request and
+   confirm that the corresponding `admins/{Entra object id}` record exists in
+   Cosmos DB. The API deliberately refuses non-Admin tokens even when a registry
+   record exists.
+
+Only a tenant administrator or an owner with Cosmos data access can perform and
+verify these actions. Do not weaken the API guard or add a browser-side bypass.
+
+## Owner decisions and external access
+
+| Item | Human action required | Safe repository-side state |
+| --- | --- | --- |
+| Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
+| Frontend release | Approve whether releases remain manual or become push-triggered; provide/rotate the Static Web App deployment credential through the approved Azure/GitHub path | `deploy-azure-frontend.yml` stays dispatch-only |
+| Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
+| Timers and the availability test | Decide whether to arm the 18 schedulers (`schedulers_master_enabled`, then `enabled_timers` one name at a time) and the `/api/health` availability test (`availability_test_enabled`). All three are workspace edits in `hcw-azure` | Every one defaults to the safe value, so the repository state is "nothing armed" and stays that way without a decision. Arming the availability test needs a Cloudflare change first: Bot Fight Mode answers Azure's availability agents with a 403, and a WAF skip rule against it was built, applied and confirmed inert |
+| Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6). Tracked as **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** since 2026-08-26, with the design, cost model and acceptance criteria | Cosmos carries continuous backup on the free 7-day tier and both storage accounts carry versioning and soft delete — but both are `LRS`, and every mechanism sits inside the subscription it protects, so none of it survives account loss. None of it is justified against a stated objective, and nothing here has ever been recovery-tested |
+| Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
+| Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |
+| GCP pricing integration | Seed `GCP-BILLING-API-KEY` if the GCP column in the public pricing tool is wanted, or leave it unseeded and that column stays absent. Get it from the GCP console: enable the Cloud Billing API, create an API key, restrict it to that API. **This is not a billing credential** — the Cloud Billing Catalog API serves the public price list, and it is read for the site's comparison tools, not for anything this estate is charged for | No GCP credential is stored in the repository. The service-account JSON this row used to ask for is retired (2026-08-29): the API key is what Google documents for this API, and it removed a vault SDK client, an OAuth library and a bespoke seeding script |
+| AI providers | Decide which external providers should be enabled and provide their keys through Key Vault | The AI router only enables a provider when its server-side key is present |
+| Third-party integrations | Provide owner-controlled Publer, Klaviyo, YouTube, Telegram, Hostinger, or other credentials and approve webhook changes before activation | Integration secrets are server-side and optional paths remain gated |
+| Listen & Learn speech | Nothing to provide: it synthesises with Gemini TTS on the existing `GEMINI-API-KEY`. Audio is billed against that key at roughly $0.17 an episode / $0.87 a certification on the default model; every run is logged to the AI Engine usage tab under "Breakdown by Feature", so the spend is checkable there rather than estimated. Azure AI Speech is a written, tested fallback for the day the preview Gemini TTS models are retired; using it means creating a Cognitive Services resource, which is a spend decision and is not assumed | Provider is chosen by key presence, Gemini first. With no key at all the feature still publishes each episode's transcript, takeaways and videos and records `audioError` instead of failing |
+| Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
+| VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
+
+## Live confirmation still requiring an authorized operator
+
+- Verify the Entra role claim and API audience in a newly issued access token.
+- Verify the admin registry record and the resulting `getCurrentAdminStatus`
+  response in the deployed environment.
+- Confirm the public API and Static Web App custom domain after any DNS or edge
+  change.
+- **Observe an alert actually being delivered.** `az monitor action-group
+  test-notifications` against `ag-ops-prod-cus`, then set `ops_sms_receiver` so
+  there is a second channel independent of email. The optional SMS receiver is
+  merged and inert until the variable is set; delivery through *either* channel
+  has never been observed, which means the alerting fabric is unproven end to
+  end no matter how many rules are enabled ([TODO.md](TODO.md), from T-709).
+- Confirm any third-party webhook or scheduled integration after its owner has
+  approved a real external mutation test.
+- Apply the Terraform change that creates the `listenandlearn` blob container.
+  Until it runs, Listen & Learn generation saves episodes and their transcripts
+  but the audio upload has nowhere to land. The same apply declares the fallback
+  `AZURE_SPEECH_*` settings, which stay unresolved and inert.
+
+## Accepted risks
+
+A decision to live with a finding rather than fix it. An accepted risk with no
+record is indistinguishable from an unfixed one: the next reviewer re-raises it,
+or someone "fixes" it without knowing it was a choice.
+
+| Risk | Accepted | Reasoning, and what compensates |
+| --- | --- | --- |
+| **Key Vault purge protection is off** on `kv-site-prod-cus-01`, which holds 18 live secrets. Raised as Go-Live blocker B2 on 2026-08-24 | Owner, 2026-08-24 | Enabling it is a **one-way** switch: once on it cannot be turned off, a deleted vault can no longer be purged, and its name stays reserved for the retention period — which removes the teardown-and-recreate path a single-environment estate depends on. The secrets are seeded and resolving, so the exposure is not "unprotected during setup". Compensating control: soft delete at 90 days, which still makes an accidental delete recoverable. What is given up is protection against a *deliberate* purge by someone already holding the rights to perform one. Recorded in the same terms in `infra/variables.tf` and `infra/README.md` |
+| **The Static Web Apps deployment token is a Terraform output** (`swa_token`), which `outputs.tf`'s own header otherwise says does not exist. Raised as T-722, 2026-08-28 | Recorded 2026-08-28; owner decision outstanding on retiring it (T-727) | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
+| **`cloudflare_origin_secret` is a real shared-secret value in Terraform state.** Raised as T-723, 2026-08-28 | Recorded 2026-08-28 | Unavoidable rather than chosen: Terraform configures the Cloudflare end of the origin handshake, so the value has to pass through it. It was simply never written down, which is the part that is fixed here. **Rotation consequence, which is the reason this needs a record:** the value must change in three places in one window — the HCP Terraform workspace variable, Key Vault `CF-ORIGIN-SECRET`, and the Cloudflare transform rule Terraform writes — and a mismatch throws on *every anonymous request*, so a partial rotation is a full outage of the public API rather than a degradation. The companion exposure — the azapi read-back exporting the whole live app-settings map into state — is not accepted but *bounded*: it is safe only while every secret-shaped setting is a Key Vault reference, and `functions/src/functions/app-settings-secrets.test.js` now fails CI if one is not |
+
+## Handling rules
+
+- Never paste secret values, private keys, access tokens, or personal data into
+  this file, issues, logs, or the Wiki.
+- A missing credential is not an engineering task. Record its name, owner, and
+  approved storage location only.
+- Historical migration pages and the two archived plans are evidence, not
+  current instructions for restoring Firebase services.
+
+---
 
 Completed items are removed from this file after the corresponding regular
 entry is present in `CHANGELOG.md`; item numbers are not reused.

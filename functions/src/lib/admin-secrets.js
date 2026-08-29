@@ -73,7 +73,7 @@ export const MIN_SECRET_LENGTH = 12;
 /**
  * Values that are obviously not credentials.
  *
- * REVIEW.md's rule is "do not seed a placeholder to quiet a linter" — a
+ * TODO.md's rule is "do not seed a placeholder to quiet a linter" — a
  * placeholder turns a gray light green while the feature stays just as broken,
  * which is strictly worse than absent because nobody looks at it again.
  */

@@ -19,7 +19,7 @@
 # which matches the permissions this deployment is expected to run under.
 #
 # The one thing that still needs Entra rights is the API app registration
-# behind var.entra_api_audience — see REVIEW.md. That is a one-time manual
+# behind var.entra_api_audience — see TODO.md. That is a one-time manual
 # step and is deliberately not automated here.
 # =============================================================================
 

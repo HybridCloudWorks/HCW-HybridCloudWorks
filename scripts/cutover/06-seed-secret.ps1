@@ -20,11 +20,11 @@
        UPPER-KEBAB-CASE, because Key Vault forbids underscores. Get it wrong and
        the reference resolves to nothing: the app deploys clean, and a missing
        credential presents as missing *data*, days later, in a feature nobody
-       was looking at (REVIEW.md §4.5). So the name is checked against the
+       was looking at (Required-Inputs §4.5). So the name is checked against the
        secrets `infra/main.tf` actually references — read from the file, not a
        list in here that could go stale.
 
-    2. **PLACEHOLDERS.** REVIEW.md §4.6 states the rule and the reason: an unset
+    2. **PLACEHOLDERS.** Required-Inputs §4.6 states the rule and the reason: an unset
        input fails with a clear "not supplied"; a stubbed one fails as an
        authentication or resolution error that reads like a permissions or
        networking problem, and the two cost very different amounts to diagnose.
@@ -173,7 +173,7 @@ Write-Host "vault     : found in the current subscription"
 
 # --- Confirm a DATA-PLANE role before prompting or opening anything ----------
 # Management-plane rights and data-plane rights are separate, and this estate
-# deliberately grants the operator only the first: REVIEW.md §4.6 records
+# deliberately grants the operator only the first: Required-Inputs §4.6 records
 # `az keyvault secret list` answering ForbiddenByRbac and calls that "the
 # correct posture". So you can change the vault's firewall and still not be
 # able to write a secret.
@@ -240,7 +240,7 @@ else {
 }
 
 # --- Refuse placeholders ----------------------------------------------------
-# REVIEW.md §4.6: do not seed a placeholder to quiet a linter.
+# Required-Inputs §4.6: do not seed a placeholder to quiet a linter.
 $trimmed = $plain.Trim()
 if ($trimmed.Length -eq 0) { throw 'Empty value. Nothing seeded.' }
 if ($trimmed -ne $plain) {
@@ -250,7 +250,7 @@ $stubs = @('changeme', 'change-me', 'todo', 'tbd', 'placeholder', 'xxx', 'test',
 if ($stubs -contains $trimmed.ToLowerInvariant()) {
     $msg = "'$trimmed' is a placeholder. An unset input fails with a clear 'not supplied'; " +
         'a stubbed one fails as an authentication error that reads like a permissions or ' +
-        'networking problem (REVIEW.md §4.6).'
+        'networking problem (Required-Inputs §4.6).'
     throw $msg
 }
 if ($trimmed.Length -lt 12) {

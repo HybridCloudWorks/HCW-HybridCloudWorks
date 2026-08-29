@@ -3,7 +3,7 @@
  * module scope (the singleton lives in entraAuth.js so importing this file
  * stays safe in tests and SSR-ish tooling).
  *
- * Env (see REVIEW.md):
+ * Env (see TODO.md):
  *   VITE_ENTRA_CLIENT_ID  — the SPA app registration's client id
  *   VITE_ENTRA_TENANT_ID  — directory (tenant) id
  *   VITE_ENTRA_API_SCOPE  — the API scope to request for backend calls,

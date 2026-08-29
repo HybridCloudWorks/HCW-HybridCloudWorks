@@ -31,7 +31,7 @@ assignees: ""
 - Cost impact versus the USD 150/month ceiling:
 - Performance, availability, backup, monitoring, or support impact:
 - New required inputs, approvals, or secrets:
-- New required inputs for `REVIEW.md` Part 4:
+- New required inputs for Required-Inputs:
 
 ## Validation plan
 

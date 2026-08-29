@@ -35,7 +35,7 @@ $allowedDirectories = @('.azure', '.github', '.vscode', 'edge', 'frontend', 'fun
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
 #
-# CHANGELOG.md, REVIEW.md and TODO.md are the working documents mandated by the
+# CHANGELOG.md and TODO.md are the working documents mandated by the
 # Code Review SOP (CODE_REVIEW_PROMPT.md v1.0, Phase 10). They are the
 # machine-readable handoff surface an orchestrating agent reads between sessions
 # — TODO.md in particular must exist even when empty, so that "no outstanding
@@ -43,38 +43,47 @@ $allowedDirectories = @('.azure', '.github', '.vscode', 'edge', 'frontend', 'fun
 # exempt from the Wiki policy below: the Wiki holds human-facing narrative
 # documentation, these hold review state.
 #
-# The former CHECKLIST.md and Variables.md were merged into REVIEW.md on
-# 2026-08-20 and deleted. They had drifted into three documents describing one thing — the
-# required-input inventory, the variable catalogue, and the blockers that depend
-# on both — with the same facts recorded in each and disagreeing between them.
-# REVIEW.md Part 4 is now the single inventory. Do not recreate either file;
-# the split is what allowed a variable to be `Missing` in one and `Set` in
-# another.
+# This consolidation has now happened twice, for the same reason both times.
 #
-# REVIEW.md is upper-case per the SOP. It was `Review.md` until the SOP was
-# adopted; the rename is intentional and the lower-case spelling must not come
-# back.
+# CHECKLIST.md and Variables.md were merged into REVIEW.md on 2026-08-20 and
+# deleted: three documents described one thing — the required-input inventory,
+# the variable catalogue, and the blockers that depend on both — with the same
+# facts in each and disagreeing between them, which is what let a variable read
+# `Missing` in one and `Set` in another.
+#
+# REVIEW.md itself was retired on 2026-08-29 for the same failure one level up:
+# it restated TODO.md's owner-gated items. Its work sections are now in TODO.md,
+# and its Part 4 inventory is wiki/Required-Inputs.md, which keeps the §4.x
+# numbering that roughly sixteen code comments cite.
+#
+# Do not recreate any of the three.
 $allowedRootFiles = @(
   '.gitignore',
   '.gitattributes',
   '.editorconfig',
   'README.md',
-  # Architecture-Plan.md and Migration-Plan.md were here until 2026-08-29. Both
-  # were archived records rather than live documents, and both moved to
-  # wiki/ (Architecture-Plan.md, Migration-Plan.md) so they publish as wiki
-  # pages and stop reading as current work sitting beside TODO.md and REVIEW.md.
-  # The four root documents left are the ones that are actually maintained.
+  # Three files left the root on 2026-08-29. Architecture_Plan.md and
+  # Migration_Plan.md were archived records rather than live documents and moved
+  # to wiki/, so they publish as Wiki pages instead of reading as current work.
+  # REVIEW.md held the owner-gated half of the open work, every item of which was
+  # already mirrored in TODO.md under "Gate: owner" — a second document restating
+  # the first; its work sections are now in TODO.md and its Part 4 inventory is
+  # wiki/Required-Inputs.md.
+  #
+  # Each is REJECTED here rather than permitted, so none can quietly return.
+  # The three left are the ones that are actually maintained.
   'CHANGELOG.md',
-  'REVIEW.md',
   'TODO.md'
 )
 
 # Guard the casing explicitly: on a case-insensitive filesystem (Windows,
-# default macOS) `Review.md` and `REVIEW.md` collide, so a careless checkout or
-# editor save can silently reintroduce the old name. The allowlist above is
+# default macOS) `Todo.md` and `TODO.md` collide, so a careless checkout or
+# editor save can silently reintroduce a lower-case variant. (Written for
+# `Review.md` vs `REVIEW.md`, the collision that actually happened; REVIEW.md is
+# gone but the hazard is identical for the files left.) The allowlist above is
 # compared case-sensitively by -in on Linux CI but not on Windows, so this
 # check is what actually holds the line for local runs.
-$casingSensitiveNames = @('REVIEW.md', 'TODO.md', 'CHANGELOG.md')
+$casingSensitiveNames = @('TODO.md', 'CHANGELOG.md')
 
 # Directory names never walked by the Markdown scan, at any depth.
 #
@@ -100,7 +109,7 @@ foreach ($file in $actualRootFiles) {
   if ($file -notin $allowedRootFiles) {
     $errors.Add("Unexpected root file: $file")
   }
-  # Reject a case variant of a SOP document (e.g. Review.md vs REVIEW.md).
+  # Reject a case variant of a SOP document (e.g. Todo.md vs TODO.md).
   $casingMatch = $casingSensitiveNames |
     Where-Object { $_ -ieq $file -and $_ -cne $file }
   if ($casingMatch) {
@@ -111,7 +120,7 @@ foreach ($file in $actualRootFiles) {
 # The SOP documents must exist. TODO.md is the one an orchestrating agent reads
 # to decide whether there is outstanding work, so its absence is indistinguishable
 # from "the file was never written" — require it even when it holds no items.
-foreach ($requiredFile in @('README.md', 'CHANGELOG.md', 'REVIEW.md', 'TODO.md')) {
+foreach ($requiredFile in @('README.md', 'CHANGELOG.md', 'TODO.md')) {
   if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $requiredFile))) {
     $errors.Add("Missing required SOP document: $requiredFile")
   }

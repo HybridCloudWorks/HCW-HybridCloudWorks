@@ -4,7 +4,7 @@
  *
  * Everything below the Critical line in the review was authored in an
  * environment that can reach neither a deployed Function App nor a Cosmos
- * account (REVIEW.md §1.1), so every fix is authored-but-unverified until this
+ * account (TODO.md), so every fix is authored-but-unverified until this
  * runs against the real thing. The checks are the specific assumptions the
  * session's fixes rest on, in priority order — not a generic ping.
  *

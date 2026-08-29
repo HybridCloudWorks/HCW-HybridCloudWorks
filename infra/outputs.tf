@@ -5,7 +5,7 @@
 # SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
 # omitted, with ONE recorded exception — `swa_token` below. All *runtime* access
 # uses managed identity + RBAC; no static key is passed to application code.
-# See REVIEW.md Part 4 for the full secrets catalog.
+# See Required-Inputs for the full secrets catalog.
 #
 # The exception is stated here rather than left to be discovered, because this
 # sentence used to read as an unqualified "no key outputs exist" eleven lines
@@ -36,11 +36,11 @@ output "swa_hostname" {
 #
 # Retiring it means moving the SWA deploy to OIDC, which is owner-gated and
 # tracked as T-727. Until then it is an accepted exception recorded in
-# REVIEW.md's accepted-risks table, in the same terms as Key Vault purge
+# TODO.md's accepted-risks table, in the same terms as Key Vault purge
 # protection — and the deploy workflow now at least isolates it in a job that
 # installs nothing.
 output "swa_token" {
-  description = "Deployment token (API key) for Static Web App deployment (used in GitHub Actions). Accepted exception to the no-key-outputs rule — see REVIEW.md accepted risks and TODO.md T-727."
+  description = "Deployment token (API key) for Static Web App deployment (used in GitHub Actions). Accepted exception to the no-key-outputs rule — see TODO.md accepted risks and TODO.md T-727."
   value       = azurerm_static_web_app.hcw.api_key
   sensitive   = true
 }

@@ -149,7 +149,7 @@ jobs:
           VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}
           # Without this the SPA requests a token the backend rejects on
-          # audience: sign-in succeeds and every API call 401s (REVIEW §2.2).
+          # audience: sign-in succeeds and every API call 401s (TODO.md).
           # msalConfig.js defaults it to '' — the build does not fail.
           VITE_ENTRA_API_SCOPE: ${{ vars.VITE_ENTRA_API_SCOPE }}
           # Social URLs — public, non-sensitive

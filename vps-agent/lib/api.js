@@ -5,7 +5,7 @@
  * third-party VPS, which puts it outside the trust boundary in exactly the way
  * the browser is — so it gets the same answer the browser got during the
  * migration: an authenticated API, not a data-plane credential
- * (REVIEW.md §0.4, TODO.md T-401).
+ * (TODO.md T-401).
  *
  * What it holds instead is an Entra **certificate** credential for a
  * confidential-client app registration carrying the `LabAgent` App Role. A

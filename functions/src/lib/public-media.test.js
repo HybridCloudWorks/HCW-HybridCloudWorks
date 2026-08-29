@@ -198,7 +198,7 @@ describe('missing and failing blobs', () => {
 describe('mediaUrlFor', () => {
   it('produces a site-relative URL, not one carrying the API hostname', () => {
     // Stored into Cosmos as imageUrl. An absolute URL here means a topology
-    // change (REVIEW.md §0.1) breaks every image already in the database.
+    // change (TODO.md) breaks every image already in the database.
     const url = mediaUrlFor('covers', 'post-1/cover.png');
     expect(url).toBe('/api/public/media/covers/post-1/cover.png');
     expect(url.startsWith('/')).toBe(true);

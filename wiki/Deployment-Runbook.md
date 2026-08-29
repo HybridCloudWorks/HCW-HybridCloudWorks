@@ -17,7 +17,7 @@ roles table.
 | --- | --- |
 | Terraform source | `infra/` on `main` in HCW-HybridCloudWorks |
 | State and variables | HCP Terraform Cloud — org `hcw`, project `Site`, workspace `hcw-azure` |
-| Required inputs (names, formats, consumers — never values) | `REVIEW.md` Part 4 at the repository root |
+| Required inputs (names, formats, consumers — never values) | [Required-Inputs](Required-Inputs) in this Wiki (was `REVIEW.md` Part 4 at the root until 2026-08-29) |
 | Terraform's own identity | `id-plat-terraform-prod-cus-01`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
 | Working rules for the directory | `infra/README.md` |
@@ -143,7 +143,7 @@ variables (the script prints these with the values filled in):
 These four names come from HashiCorp and Microsoft and are exempt from the
 [2-word variable rule](IaC-Repository-Standard#variable-naming) as contractual
 names. Terraform *variables* for the same workspace are listed in
-`REVIEW.md` §4.2.
+Required-Inputs §4.2.
 
 Both seeding halves are scripted — prefer the scripts over the UI forms, and
 both take no arguments for the reasons given in section 0:
@@ -201,7 +201,7 @@ Bootstrap is done when a plan authenticates. Continue from section 1.
    Repository Policy, CI, CodeQL.
 4. PR uses the infrastructure section of the template: plan linked, no
    unexpected destroy/create pairs, no address renames without `moved`
-   blocks, tags on every new resource, `REVIEW.md` Part 4 updated for any new
+   blocks, tags on every new resource, Required-Inputs updated for any new
    required input.
 5. If the change alters an accepted ADR, write the superseding ADR first
    ([register](Architecture-Decision-Records)).
@@ -296,7 +296,7 @@ problem means production is already degraded rather than merely unchanged.
 6. Application Insights: no new exception cluster in the 30 minutes after
    apply; both budgets' configuration intact after any change that touches
    them.
-7. Update `REVIEW.md` Part 4 status (`SET` → `VERIFIED`) for
+7. Update Required-Inputs status (`SET` → `VERIFIED`) for
    any input exercised for the first time.
 
 ## 5. Rollback
@@ -316,7 +316,7 @@ Deliberate rollback is **roll-forward to the previous definition**:
 3. `prevent_destroy` resources cannot be rolled back by replacement. If a
    bad change landed *inside* one (e.g. an indexing policy), the revert
    updates it in place. If the resource itself must go, that is a human
-   decision recorded in REVIEW.md — remove the guard in a dedicated PR that
+   decision recorded in TODO.md — remove the guard in a dedicated PR that
    says so in its title.
 4. State surgery (`terraform state mv/rm`, imports) is a last resort:
    snapshot the state first (TFC keeps versions), record the commands run
@@ -330,9 +330,9 @@ Deliberate rollback is **roll-forward to the previous definition**:
 | Alerting | Five metric and log rules routed through `ag-plat-prod-cus-01` — **declared, not yet applied**; the live estate has none. What each one means, what to check first, and what nothing watches | [Alerting and support](Alerting-And-Support), `infra/observability.tf` |
 | Drift | Periodic TFC plan (enable a scheduled speculative plan); investigate non-empty plans — portal edits are defects | TFC workspace settings |
 | Computed properties | `heal-computed-properties.yml` re-applies `cp_sortDate` on relevant pushes and every 6 h | `.github/workflows/` |
-| Secrets | Values live only in Key Vault, seeded manually during an `admin_ip_rules` window, then window closed. References in `REVIEW.md` §4.6 | `infra/variables.tf` (`admin_ip_rules`), Key Vault |
+| Secrets | Values live only in Key Vault. Seeded from **Admin → Platform → API Keys**, which writes from inside the integration subnet through a set-only role — no firewall window. `scripts/cutover/06-seed-secret.ps1` and an `admin_ip_rules` window remain the break-glass path for when the app itself is down. References in Required-Inputs §4.6 | `infra/variables.tf` (`admin_ip_rules`), Key Vault |
 | Storage access | Account keys are disabled on both production accounts **by `fix/go-live-remediation` — declared, not yet applied**. From that apply on, `az storage` data-plane commands and the portal Storage Browser default to key auth and answer 403: use `--auth-mode login` plus a data-plane role, and note the content account has no operator network path at all | [Alerting and support](Alerting-And-Support#break-glass-storage-after-shared-key-authentication-is-disabled) |
-| Purge protection | `purge_protection_enabled` stays **`false`** by an owner decision of 2026-08-24 — it is a one-way switch that removes the teardown-and-recreate path a single-environment estate depends on. Soft delete at 90 days is the compensating control | `REVIEW.md` *Accepted risks*, [ADR 0021](0021-key-vault-purge-protection) |
+| Purge protection | `purge_protection_enabled` stays **`false`** by an owner decision of 2026-08-24 — it is a one-way switch that removes the teardown-and-recreate path a single-environment estate depends on. Soft delete at 90 days is the compensating control | `TODO.md` *Accepted risks*, [ADR 0021](0021-key-vault-purge-protection) |
 | Dependency and action updates | Dependabot (npm + github-actions) with CI as the gate | `.github/dependabot.yml` |
 
 ## 7. ALZ absorption

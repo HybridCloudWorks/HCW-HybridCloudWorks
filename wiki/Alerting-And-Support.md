@@ -12,7 +12,7 @@ not of the live tenant.
 
 **Authority:** this page does not authorize anything. Tuning a threshold is a
 normal pull request; arming the availability test or the timers is an owner
-decision recorded in `REVIEW.md`.
+decision recorded in `TODO.md`.
 
 ## Read this before the rules
 

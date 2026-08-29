@@ -453,7 +453,7 @@ export function createAiRouter({
       throw new AiNotConfiguredError(
         disabled.length > 0
           ? `Every configured AI provider is disabled in the admin portal (${disabled.join(', ')}). Re-enable one under AI Engine → AI Services.`
-          : 'No AI provider is configured. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY in Key Vault (REVIEW §4.6) and the matching provider turns on.'
+          : 'No AI provider is configured. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY in Key Vault (Required-Inputs §4.6) and the matching provider turns on.'
       );
     }
 

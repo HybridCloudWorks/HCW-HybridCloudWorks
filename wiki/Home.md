@@ -6,7 +6,7 @@ security controls, and historical implementation notes.
 
 The current product is an Azure-hosted website. The root [README](../README.md)
 is the entry point for product features and local development. `TODO.md`,
-`REVIEW.md`, and `CHANGELOG.md` remain the repository's concise execution and
+`TODO.md`, and `CHANGELOG.md` remain the repository's concise execution and
 release records; this Wiki holds the longer narrative.
 
 ## Current platform
