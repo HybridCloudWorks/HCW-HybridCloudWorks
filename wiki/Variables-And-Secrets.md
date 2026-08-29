@@ -15,7 +15,7 @@ Two questions, in this order:
    Terraform, GitHub or an app setting cannot be changed without a coordinated
    change across every consumer.
 
-`REVIEW.md` Part 4 is the *inventory* — what exists, who consumes it, whether it is
+Required-Inputs is the *inventory* — what exists, who consumes it, whether it is
 provisioned. This page is the *rule* that decides where the next entry goes and
 what it is called. The two are meant to be read together: CHECKLIST records the
 fact, this page justifies it.
@@ -618,7 +618,7 @@ Every name sorts into exactly one:
   limits that override them
 - [Deployment Runbook](Deployment-Runbook) — §0 bootstrap, where the store 2
   environment variables are first entered
-- `REVIEW.md` Part 4 — the inventory: what exists, who consumes it, whether it is
+- Required-Inputs — the inventory: what exists, who consumes it, whether it is
   provisioned
 - `infra/variables.tf` — the store 2 Terraform variables and their validations
 - `infra/main.tf` — the Key Vault, its network ACLs and RBAC, and the app

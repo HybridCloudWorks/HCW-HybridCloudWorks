@@ -10,7 +10,7 @@
  * ===========================================================================
  * The file that was here held a Cosmos DB **account primary key** — read/write
  * over all 71 containers — in an environment variable on a third-party VPS
- * (REVIEW.md §0.4, TODO.md T-401). It also never worked: `pollJobs` was a TODO,
+ * (TODO.md T-401). It also never worked: `pollJobs` was a TODO,
  * there was no heartbeat interval, no job execution, and the module used ESM
  * syntax in a package with no `"type": "module"`.
  *

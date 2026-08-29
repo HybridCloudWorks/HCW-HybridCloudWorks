@@ -20,7 +20,7 @@ decides whether the divergence is a defect to fix or a decision to ratify.
 - Cost ceiling (ADR 0015): three plans and three storage accounts carry fixed overheads.
 - The original isolation motive — the semi-trusted labs boundary — was solved differently and better:
   VPS agents hold no database credential at all, authenticate with per-host Entra certificates, and
-  can reach exactly three endpoints, each constrained server-side per caller (REVIEW §0.4, TODO T-401).
+  can reach exactly three endpoints, each constrained server-side per caller (TODO.md, TODO T-401).
 
 ## Decision
 
@@ -58,4 +58,4 @@ process separation. Supersedes ADR 0004.
 
 - Supersedes [ADR 0004](0004-functions-boundaries)
 - [ADR 0012](0012-asynchronous-workflows) (queue fabric still pending), [ADR 0018](0018-as-built-plan-v02)
-- REVIEW §0.4 (labs credential model)
+- TODO.md (labs credential model)

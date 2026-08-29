@@ -269,7 +269,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
   ))
 
   # T-504: keys off. The app is managed-identity-only (AAD data plane), the
-  # operational tooling uses DefaultAzureCredential, and REVIEW.md's concern is
+  # operational tooling uses DefaultAzureCredential, and TODO.md's concern is
   # a key that may once have existed — disabling local auth is the durable
   # answer to it. Set the variable false only if plan review surfaces a key
   # consumer nobody remembered.
@@ -1282,7 +1282,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # underscored name so `process.env.X` reads port unchanged, and the Key Vault
     # secret uses hyphens because Key Vault names cannot contain underscores.
     #
-    # These resolve to empty until the vault is seeded (REVIEW.md). Optional
+    # These resolve to empty until the vault is seeded (TODO.md). Optional
     # integrations remain disabled until their owner-approved credentials exist.
     # -------------------------------------------------------------------------
 
@@ -1328,7 +1328,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # @Microsoft.KeyVault(...) string, which readSetting() treats as no key at
     # all — so the provider simply is not offered, and declaring it here
     # switches nothing on and provisions nothing. Using it means creating a
-    # Cognitive Services resource, which is a spend decision (REVIEW.md).
+    # Cognitive Services resource, which is a spend decision (TODO.md).
     "AZURE_SPEECH_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AZURE-SPEECH-KEY)"
     "AZURE_SPEECH_REGION" = var.speech_region
 
@@ -1451,7 +1451,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # NOT timestamp(): that would change on every plan, propose a diff forever
     # and restart the host each apply. The generation must be an immutable
     # identifier supplied by whatever performed the deployment.
-    # Guard gate 2 — the admins/{oid} registry (REVIEW §2.2, lib/admin-identity.js).
+    # Guard gate 2 — the admins/{oid} registry (TODO.md, lib/admin-identity.js).
     # Gate 1 is the Entra `Admin` App Role; a token carrying it and no registry
     # record is still a 403, which is the point: directory membership alone does
     # not grant access to this application.
@@ -1591,7 +1591,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 # `functions/src/functions/app-settings-secrets.test.js` asserts that invariant
 # by reading this file as text, so it fails in CI rather than being rediscovered
 # from a state file. It cannot see an out-of-band write; nothing here can, which
-# is why §4.5 of REVIEW.md says settings are Terraform-managed and editing one
+# is why §4.5 of TODO.md says settings are Terraform-managed and editing one
 # by hand is how drift starts.
 #
 # The narrower export that would remove the problem does not exist: the strip
@@ -1830,7 +1830,7 @@ resource "azurerm_key_vault" "hcw" {
   # vault is unreachable by anyone except the app, which is the correct steady
   # state — populate it only for the seeding window. Secret VALUES are
   # deliberately not managed by Terraform, so they never enter state or TFC.
-  # See REVIEW.md for the runbook.
+  # See TODO.md for the runbook.
   network_acls {
     default_action             = "Deny"
     bypass                     = "AzureServices"

@@ -3,7 +3,7 @@
     Cutover step 1 — finish the Entra registration so an admin can sign in.
 
 .DESCRIPTION
-    Migration-Plan §6 / REVIEW.md §2.2. Most of §2.2 was already done before
+    Migration-Plan §6 / TODO.md. Most of §2.2 was already done before
     this script existed — verified 2026-08-22 against the live tenant:
 
         app registration  HCWSite API  ac696e96-e203-47be-ade8-c35ece8a6c4a
@@ -15,7 +15,7 @@
 
     So this adds the SPA redirect URIs and assigns the Admin app role. It uses
     a SPA platform on the EXISTING registration rather than a second
-    registration — REVIEW §2.2 allows either, and one registration means the
+    registration — TODO.md allows either, and one registration means the
     SPA requests a scope on its own app, which consents automatically and
     removes the single highest-risk mismatch in the system (a SPA client id and
     an API audience that disagree).

@@ -42,7 +42,7 @@ engineering session (no Azure control plane, no HCP Terraform token):
 
 - **DNS:** apex `hybridcloudworks.com` resolves (Cloudflare-proxied).
   `www.` and `api-azure.` do **NXDOMAIN** — consistent with the same-origin
-  topology (REVIEW §0.1) and with `infra/main.tf` owning only the apex TXT
+  topology (TODO.md) and with `infra/main.tf` owning only the apex TXT
   and an `api-azure` CNAME that is evidently not applied or not resolving;
   the plan's `www` record exists nowhere.
 - **TLS:** valid — `CN=hybridcloudworks.com`, issuer Google Trust Services
@@ -61,7 +61,7 @@ Cloudflare 403 is indistinguishable from an app-level refusal — treat it as
 unproven, not verified. The operator's 2026-08-14 smoke run from a
 residential IP remains the only end-to-end origin evidence.
 
-**Follow-up (human):** REVIEW §8.1 — decide whether to add a Cloudflare WAF
+**Follow-up (human):** TODO.md — decide whether to add a Cloudflare WAF
 skip rule (secret header → bypass challenge) so `validate-deployed.yml` can
 reach the origin; without it, synthetic validation ends at the edge.
 
@@ -96,7 +96,7 @@ findings:
 | Deviation | Plan | Implemented |
 | --- | --- | --- |
 | Cosmos network firewall | Deny public, allow Functions subnet | **No network rules at all — Cosmos answers the public internet**; this is the control ADR-0008/ADR-001 traded Private Link away *for* |
-| Cosmos local (key) auth | Disabled | Enabled (ties to REVIEW §0.2's rotation question) |
+| Cosmos local (key) auth | Disabled | Enabled (ties to TODO.md's rotation question) |
 | Cosmos backup | Continuous | Periodic default |
 | Storage redundancy | ZRS (both accounts) | LRS (both) |
 | Storage shared-key auth | Disabled | Enabled (provider default) |
@@ -121,7 +121,7 @@ serverless/container-per-collection rationale, the subnet service-endpoint
 fix the plan got wrong), and nobody re-versioned the plan. Continuing to
 call `validate-repository-structure.ps1`'s "plan must remain approved"
 check satisfied while the artifact no longer describes the system is the
-kind of drift that reads as an audit finding at ALZ absorption. REVIEW §8.2
+kind of drift that reads as an audit finding at ALZ absorption. TODO.md
 asks for the human decision: reconcile code toward plan, or supersede the
 plan with an as-built v0.2 + ADRs. Engineering-tractable security deltas
 are filed as TODO **T-504** (Cosmos hardening) and **T-505** (observability
@@ -137,7 +137,7 @@ control layer) regardless of that decision.
    need `az login` / a bearer token, per the script header.
 3. **Purge protection:** set the TFC variable `purge_protection_enabled =
    true` and apply before any production secret is seeded.
-4. **REVIEW §8 decisions** (Cloudflare synthetic access; plan
+4. **TODO.md decisions** (Cloudflare synthetic access; plan
    reconciliation) and the outstanding §0.2 (was a Cosmos key ever
    deployed?) — §0.2 gains urgency from Cosmos being network-open with key
    auth enabled (T-504).
@@ -156,7 +156,7 @@ ran a cold-start check. Verification state per control:
 | T-504 Cosmos firewall — GitHub-runner path (`0.0.0.0` sentinel) | **Unverifiable yet**: `heal-computed-properties` fails at Azure login because the `CLIENT_ID` / `TENANT_ID` / `SUBSCRIPTION_ID` repository variables were never set — run history shows this failure on every run predating the hardening (pre-existing provisioning gap, now CHECKLIST §7). One green heal run after setting them is the closing evidence | Applied; pending repo variables |
 | T-505 observability layer | Applied with the same TFC run; alert ladder + forecast + diagnostics live per plan | Applied |
 | T-506 keyless OpenAI | Account replaced with subdomain endpoint, keys off, RBAC grant live (TFC apply evidence); no runtime consumer to probe | Applied |
-| External surface regression | Post-apply `validate-deployed` run [#32090414219](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32090414219): byte-identical to the pre-apply baseline — TLS/DNS green, same Cloudflare-challenge 403s (REVIEW §8.1 unchanged) | **No regression** |
+| External surface regression | Post-apply `validate-deployed` run [#32090414219](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/32090414219): byte-identical to the pre-apply baseline — TLS/DNS green, same Cloudflare-challenge 403s (TODO.md unchanged) | **No regression** |
 | Everything else on `main` | Repository Policy, IaC Validation, CI, CodeQL all green on the latest merges | **Healthy** |
 
 **Remaining to close the loop:** set the three OIDC repository variables (`CLIENT_ID`, `TENANT_ID`,

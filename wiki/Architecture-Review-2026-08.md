@@ -294,7 +294,7 @@ account already imposes. Refresh the stale comment in the same change.
 
 ### T-722 — The `swa_token` output contradicts its own file header (Medium, verified)
 
-> **Status (2026-08-28):** **RESOLVED as a recorded exception.** The header no longer contradicts itself. The output is kept because the token is in state via the resource attribute regardless, so deleting it would hide rather than retire it; it is now in REVIEW.md accepted risks, and `deploy-azure-frontend.yml` isolates it in a job that installs nothing. Retiring it is T-727, owner-gated.
+> **Status (2026-08-28):** **RESOLVED as a recorded exception.** The header no longer contradicts itself. The output is kept because the token is in state via the resource attribute regardless, so deleting it would hide rather than retire it; it is now in TODO.md accepted risks, and `deploy-azure-frontend.yml` isolates it in a job that installs nothing. Retiring it is T-727, owner-gated.
 
 `infra/outputs.tf:5-7` vs `18-22`
 
@@ -331,7 +331,7 @@ is an unrecorded exception.
 
 **Recommendation.** Mark the azapi output sensitive where surfaced and comment
 the "Key-Vault-references-only" invariant it depends on. Record the
-origin-secret exposure, with its rotation consequence, in REVIEW.md's accepted
+origin-secret exposure, with its rotation consequence, in TODO.md's accepted
 risks.
 
 ### T-724 — The permanent plan diff is asserted only in a comment (Medium, verified)
@@ -970,7 +970,7 @@ largely inline catalogue data, which belongs in `public/data/*.json`.
 
 ### T-705 — The production environment gates nothing, and dispatch accepts any ref (Critical, verified + one verify item)
 
-> **Status (2026-08-28):** **PARTLY FIXED; owner action open.** Both deploy workflows now refuse a dispatch from any ref but `main`, and REVIEW.md §4.4 no longer asserts a gate whose existence could not be confirmed. The environment protection rules themselves still need configuring.
+> **Status (2026-08-28):** **PARTLY FIXED; owner action open.** Both deploy workflows now refuse a dispatch from any ref but `main`, and Required-Inputs §4.4 no longer asserts a gate whose existence could not be confirmed. The environment protection rules themselves still need configuring.
 
 `.github/workflows/deploy-functions.yml:16,35-40` ·
 `.github/workflows/deploy-azure-frontend.yml:16,24-30` · `infra/oidc.tf:153-166`
@@ -986,7 +986,7 @@ token available to any-ref dispatch.
 
 Both workflow files' own comments state that GitHub auto-creates a missing
 environment with no protection rules, so binding to it "records who deployed
-without gating whether they may." **`REVIEW.md:300` contradicts this**,
+without gating whether they may." **`TODO.md:300` contradicts this**,
 recording the environment as VERIFIED and "Gates production deploys". The
 GitHub environments API is not reachable through the review session's proxy,
 so which is true is a **verify** item — but the two records cannot both be
@@ -995,7 +995,7 @@ right, and that alone needs resolving.
 **Recommendation.** Configure required reviewers and a `main`-only
 deployment-branch restriction on the `production` environment; optionally add
 a guard step failing when `github.ref != 'refs/heads/main'`. Then reconcile
-REVIEW.md §4.4 with the configuration that actually exists.
+Required-Inputs §4.4 with the configuration that actually exists.
 
 ### T-713 — The storage firewall stays open if a deploy dies mid-window (High, reported)
 

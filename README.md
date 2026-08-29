@@ -46,9 +46,8 @@ and retained only in the archived plans and historical Wiki pages.
 | `infra/` | Terraform root module for Azure and Cloudflare resources |
 | `scripts/` | Container-spec generation, content-manifest tooling, smoke checks, and operator utilities |
 | `.github/workflows/` | CI, validation, Wiki sync, scheduled maintenance, and manual release workflows |
-| `wiki/` | Wiki-as-code source for reviewed runbooks and engineering records, including the two archived planning documents (`Architecture-Plan.md`, `Migration-Plan.md`) |
-| `TODO.md` | Current engineering work that does not require owner-only access |
-| `REVIEW.md` | Human-only decisions, approvals, credentials, and external access |
+| `wiki/` | Wiki-as-code source for reviewed runbooks and engineering records, including the archived planning documents (`Architecture-Plan.md`, `Migration-Plan.md`) and the required-inputs inventory (`Required-Inputs.md`) |
+| `TODO.md` | **All open work** — engineering, plus owner decisions, approvals, credentials and external access |
 | `CHANGELOG.md` | Verified completed work |
 
 ## Local development
@@ -99,8 +98,9 @@ contains runbooks, ADRs, naming, cost, and operational guidance. The reviewed
 Wiki source is under [`wiki/`](wiki/). Read [CONTRIBUTING](.github/CONTRIBUTING.md)
 before changing repository structure, deployment, or documentation.
 
-Current work and human-only dependencies are intentionally separated:
+Open work and completed work are kept apart; open work is one file:
 
-- [TODO.md](TODO.md) — engineer-resolvable pending work.
-- [REVIEW.md](REVIEW.md) — owner decisions, approvals, access, and credentials.
+- [TODO.md](TODO.md) — all open work, engineer-resolvable and owner-gated alike.
+  `REVIEW.md` held the owner-gated half until 2026-08-29 and restated what this
+  file already listed; its sections are now at the end of TODO.md.
 - [CHANGELOG.md](CHANGELOG.md) — verified completed work.

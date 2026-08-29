@@ -24,7 +24,7 @@
  *                   report non-ISO values. cp_sortDate sorts ISO-8601 strings
  *                   lexicographically = chronologically; a container holding
  *                   non-ISO date strings would mis-sort, and only the live
- *                   data can say whether any exist (REVIEW.md §0.3).
+ *                   data can say whether any exist (TODO.md).
  *   2. `--apply`    Add cp_sortDate to both containers (idempotent).
  *   3. Flip `PUBLIC_LIST_SQL_ORDER=1` on the Function App. listContent then
  *      adds ORDER BY cp_sortDate DESC; without the flag nothing changes, so

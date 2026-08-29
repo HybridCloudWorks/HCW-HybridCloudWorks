@@ -23,7 +23,7 @@
  *    as an opaque network error, which is how an authorization message becomes
  *    an unexplained failure in the UI.
  *
- * Topology-independent, on purpose. The [REVIEW.md](REVIEW.md) §0.1 decision —
+ * Topology-independent, on purpose. The [TODO.md](TODO.md) §0.1 decision —
  * same-origin behind a Static Web App, or a separate API hostname — changes
  * configuration here, not code. Same-origin requests either carry no `Origin`
  * (allowed) or carry the site's own, which is already in the production

@@ -2,7 +2,7 @@
  * The Labs agent API — the three operations the VPS agent is allowed to
  * perform, and nothing else.
  *
- * This replaces the agent's direct Cosmos access (REVIEW.md §0.4,
+ * This replaces the agent's direct Cosmos access (TODO.md,
  * TODO.md T-401). The reasoning for the credential model is in
  * `auth/require-agent.js`; this file is what that model buys. The blast radius
  * of a credential stolen off the VPS is these three handlers, under the

@@ -17,6 +17,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **REVIEW.md retired; one open-work document from here (2026-08-29).** It held
+  the owner-gated half of the open work — and every item in it was already
+  mirrored in TODO.md under **Gate: owner**, because TODO's own header said it
+  should answer "what is still open" without a second document. Two files, one
+  restating the other.
+
+  **Split by what the content actually was**, rather than moved wholesale. The
+  four work sections and the handling rules (~75 lines) are appended to TODO.md
+  unabridged. PART 4 — the 228-line required-inputs inventory — became
+  `wiki/Required-Inputs.md`, keeping its §4.1…§4.10 numbering because about
+  sixteen code comments cite those numbers. Putting a reference inventory inside
+  a task tracker would have recreated the problem one level down.
+
+  REVIEW.md's header argued PART 4 sat there because the two procedures that
+  write to it are access-gated. That stopped holding when the file went away,
+  and it was always weaker than it looked: `wiki/` is reviewed through pull
+  requests exactly as the root is.
+
+  **The blanket rename was the wrong tool and I used it first.** A
+  `REVIEW.md` → `TODO.md` sweep produced `'TODO.md', 'TODO.md'` in the
+  validator's allowlist, a casing guard reading *"`Review.md` and `TODO.md`
+  collide"*, and — the one that would have failed CI — a `$requiredFile` list
+  that still **required a file being deleted**. Reverted and redone with ordered
+  rules: §4.x citations to the new page first, then `Part 4` prose, then the
+  `§0.x/§2.x/§8.x` citations, then links, then the bare filename. `\bREVIEW\.md\b`
+  throughout, so `PREVIEW-SIGNING-SECRET` and `REVIEWER` survive.
+
+  Found on the way: **citations to `REVIEW §0.1`, `§0.2`, `§0.4`, `§2.2`, `§2.4`,
+  `§8.1` and `§8.2` were already dangling** — that numbering has not existed in
+  REVIEW.md for a long time. Those now name TODO.md without a section number,
+  because a number resolving nowhere is worse than no number.
+
+  `validate-repository-structure.ps1` drops REVIEW.md from the allowlist, the
+  casing guard and the required-file list, so it is now **rejected** at the root
+  rather than permitted. Its comments record that this consolidation has happened
+  twice — CHECKLIST.md and Variables.md merged into REVIEW.md in 2026-08, for the
+  same "several documents describing one thing, disagreeing with each other"
+  reason.
+
+  The root is three files: README, TODO, CHANGELOG.
+
 - **The two planning documents are closed and moved to the Wiki (2026-08-29).**
   Both had been marked ARCHIVED since 2026-08-24 while sitting at the repository
   root beside TODO.md and REVIEW.md, which is where current work lives — so a

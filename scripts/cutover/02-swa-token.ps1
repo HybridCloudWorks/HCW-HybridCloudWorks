@@ -3,7 +3,7 @@
     Cutover step 2 — put the Static Web App deploy token into GitHub.
 
 .DESCRIPTION
-    The frontend release workflow / REVIEW.md. `deploy-azure-frontend.yml` needs
+    The frontend release workflow / TODO.md. `deploy-azure-frontend.yml` needs
     the repository secret AZURE_STATIC_WEB_APPS_API_TOKEN. The repository
     currently holds NO secrets at all, so this is genuinely missing rather than
     stale — and any value recorded before the centralus rebuild is dead,

@@ -4,7 +4,7 @@
 # Org: hcw | Project: Site | Workspace: hcw-azure
 #
 # Variable names here MUST match TF Cloud workspace variable keys exactly.
-# See REVIEW.md Part 4 at the repository root for the full variables/secrets catalog.
+# See Required-Inputs at the repository root for the full variables/secrets catalog.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -104,7 +104,7 @@ variable "azure_location" {
 # TTS by default, on the GEMINI_API_KEY the text models already use, and that
 # path needs no variable at all. No Speech resource is declared in this
 # configuration — provisioning a Cognitive Services account is a spend decision
-# (REVIEW.md) — so this merely names the region whose endpoint would be called
+# (TODO.md) — so this merely names the region whose endpoint would be called
 # if one is ever created, keeping the setting correct in advance. If the
 # resource is created elsewhere, set this to that region or set
 # AZURE_SPEECH_ENDPOINT to its full custom-subdomain URL.
@@ -307,7 +307,7 @@ variable "cosmos_db_account_name" {
 }
 
 variable "cosmos_local_auth_disabled" {
-  description = "Disable Cosmos key (local) authentication — AAD/managed-identity only. The durable answer to REVIEW §0.2. Set false only if plan review surfaces a key consumer."
+  description = "Disable Cosmos key (local) authentication — AAD/managed-identity only. The durable answer to TODO.md. Set false only if plan review surfaces a key consumer."
   type        = bool
   default     = true
 }
@@ -340,7 +340,7 @@ variable "cosmos_allow_azure_datacenter_ips" {
 variable "cosmos_admin_ip_rules" {
   description = <<-EOT
     Operator IPv4 addresses/CIDRs allowed through the Cosmos firewall, for
-    smoke tier 2 or live-data inspection (REVIEW §0.3). Same pattern as
+    smoke tier 2 or live-data inspection (TODO.md). Same pattern as
     admin_ip_rules on Key Vault: populate for the window, apply, work, empty
     it, apply again. Empty is the correct steady state.
   EOT

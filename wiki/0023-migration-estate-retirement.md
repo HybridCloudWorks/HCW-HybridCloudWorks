@@ -63,11 +63,11 @@ headed RETIRED with the cost stated rather than deleted, and
 retired here.** No workflow references that environment, and with the grants
 gone such a token inherits the same reduced role set as a branch token — so it
 is a tidy-up, not an incident. Retiring a trust relationship is an identity
-change, and it was escalated as an owner decision (`REVIEW.md`) rather than
+change, and it was escalated as an owner decision (`TODO.md`) rather than
 folded into a Terraform cleanup. Tracked as TODO **T-524**.
 
 The owner's authorisation, the live confirmation, and the itemised inventory are
-in `REVIEW.md` under *Authorised: the migration-era teardown (2026-08-24)*. They
+in `TODO.md` under *Authorised: the migration-era teardown (2026-08-24)*. They
 are not restated here; this record is the reasoning, that one is the
 authorisation.
 
@@ -90,7 +90,7 @@ authorisation.
   assignments — they are separate assignments, and the database scope was a
   superset sitting alongside them rather than their parent.
 - **The 77,763 versus 69,979 document gap is unexplained** and is recorded as
-  unexplained. `REVIEW.md` declines to treat it as a reason to keep the copy,
+  unexplained. `TODO.md` declines to treat it as a reason to keep the copy,
   because both imports reconciled at 8,023/8,023 with zero field mismatches. An
   accepted unknown with the reasoning written down is not the same as a resolved
   one, and this record does not claim otherwise.
@@ -136,7 +136,7 @@ authorisation.
 
 - Closes the decommission gate of [ADR 0016](0016-reversible-migration); that
   ADR's reversibility guarantee does not extend past this apply
-- `REVIEW.md` — *Authorised: the migration-era teardown (2026-08-24)*
+- `TODO.md` — *Authorised: the migration-era teardown (2026-08-24)*
 - [Cutover Runbook](Cutover-Runbook) step 4 ·
   [Phase-4-Data-Migration](Phase-4-Data-Migration) P6 ·
   [Migration Runbook](Migration-Runbook) (archived)

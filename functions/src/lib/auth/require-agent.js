@@ -5,12 +5,12 @@
  * WHY THE AGENT DOES NOT GET A COSMOS CLIENT
  * ===========================================================================
  * `vps-agent/index.js` held a Cosmos **account primary key** — read/write over
- * all 71 containers — deployed to a third-party VPS (REVIEW.md §0.4,
+ * all 71 containers — deployed to a third-party VPS (TODO.md,
  * TODO.md T-401). The VPS is outside the trust boundary in exactly the way the
  * browser is, so it gets the same answer the browser got: no data-plane client,
  * no key, an API instead.
  *
- * REVIEW.md §0.4 offered a Cosmos **resource token** brokered by a Functions
+ * TODO.md offered a Cosmos **resource token** brokered by a Functions
  * endpoint as the narrower alternative. It is not viable here. Resource tokens
  * are minted from the SQL API's users/permissions model, which requires the
  * master key to create, and `disableLocalAuth` permits "only MSI and AAD" —

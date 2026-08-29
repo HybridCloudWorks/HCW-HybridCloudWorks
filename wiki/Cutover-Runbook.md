@@ -19,7 +19,7 @@ file is the mechanics.
 >
 > | What | Why | Last deployed |
 > | --- | --- | --- |
-> | `terraform apply` | Adds `GEMINI_API_KEY`. **The 2 add / 1 change / 2 destroy expectation recorded here is superseded** — the next apply also carries the Go-Live remediation (PR #218), whose shape is **17 add / 5 change / 92 destroy**, 87 of those destroys being the migration rehearsal estate. Approve it against the resource *addresses* and the authorisation record in `REVIEW.md`, not against a count on this page. The steady-state signature afterwards is 3 add / 1 change / 3 destroy. | — |
+> | `terraform apply` | Adds `GEMINI_API_KEY`. **The 2 add / 1 change / 2 destroy expectation recorded here is superseded** — the next apply also carries the Go-Live remediation (PR #218), whose shape is **17 add / 5 change / 92 destroy**, 87 of those destroys being the migration rehearsal estate. Approve it against the resource *addresses* and the authorisation record in `TODO.md`, not against a count on this page. The steady-state signature afterwards is 3 add / 1 change / 3 destroy. | — |
 > | `deploy-functions` | Adds the `cms/ai-features` route (T-516). Expect **98 functions**, verified by counting registrations on `main`. | 2026-08-22 17:00, commit `a93029d` — predates T-516 |
 > | `deploy-azure-frontend` | The deployed site is still the **bare SPA shell**; pre-rendering (T-515) landed after it. Expect the payload check to report **82 HTML documents**. | 2026-08-23 02:17, commit `ca596dc` — predates T-515 |
 >
@@ -61,7 +61,7 @@ set in the repository:
 Adds the SPA redirect URIs and assigns the `Admin` app role. It uses a SPA
 platform on the existing registration rather than a second one, so the SPA
 requests a scope on its own app — that consents automatically and removes the
-client-id/audience mismatch REVIEW §2.2 calls the highest-risk in the system.
+client-id/audience mismatch TODO.md calls the highest-risk in the system.
 
 **Then, gate 2.** The role is only half the guard. `admins/{oid}` must also hold
 a row. Set `CMS_BOOTSTRAP_ALLOWED_EMAILS` on the Function App, sign in, and call
@@ -86,7 +86,7 @@ The repository currently holds **no secrets at all**, and any token recorded
 before the centralus rebuild is dead — the rebuild reissued it.
 
 **Then enable the workflow.** `deploy-azure-frontend.yml` is gated with
-`if: ${{ false }}`. Enabling it is a deliberate, reviewed change — REVIEW §2.4.
+`if: ${{ false }}`. Enabling it is a deliberate, reviewed change — TODO.md.
 Two edits:
 
 ```diff

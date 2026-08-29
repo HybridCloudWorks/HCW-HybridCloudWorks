@@ -29,7 +29,7 @@ the agent drift, this page wins — update the agent.
 | Item | Requirement |
 | --- | --- |
 | `README.md` | Status, documentation authority, layout table, delivery guardrails; updated with every structural or status change (CI-enforced) |
-| `TODO.md` / `REVIEW.md` / `CHANGELOG.md` | Code Review SOP documents, exact casing, CI-enforced. REVIEW Part 4 holds input references and formats, never values |
+| `TODO.md` / `CHANGELOG.md` | Code Review SOP documents, exact casing, CI-enforced. Required-Inputs holds input references and formats, never values |
 | `.gitignore` | `*.tfstate*`, `*.tfplan`, `.terraform/`, real `*.tfvars`, `.env*`, build output |
 | `.editorconfig` | LF, UTF-8, consistent indentation |
 | Structure validator | Script + CI workflow enforcing the root allowlist and Markdown policy |

@@ -6,7 +6,7 @@
  * Bot Fight Mode answers datacenter clients asking for
  * https://api-azure.<domain>/api/health with a 403 interstitial. A WAF skip
  * rule against it was built, applied and confirmed inert, because Bot Fight
- * Mode does not run on the Ruleset Engine (REVIEW.md, *Timers and the
+ * Mode does not run on the Ruleset Engine (TODO.md, *Timers and the
  * availability test*). So the standard web test in infra/observability.tf
  * cannot be armed, and the one signal that survives the app being completely
  * down — reachability — has no alert behind it.

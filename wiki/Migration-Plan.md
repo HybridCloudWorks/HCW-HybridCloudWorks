@@ -9,10 +9,10 @@
 > the timers is still real work — it simply stopped being *migration* work.
 >
 > Nothing in this file is maintained any more. Where it disagrees with
-> [TODO.md](TODO.md), [REVIEW.md](REVIEW.md) or [CHANGELOG.md](CHANGELOG.md),
-> those are right and this is a record of what was believed at the time. Current website work is in [README.md](README.md), [TODO.md](TODO.md),
-> and [REVIEW.md](REVIEW.md); current completion entries are in
-> [CHANGELOG.md](CHANGELOG.md). The migration workflow and one-shot import
+> [TODO.md](TODO.md) or [CHANGELOG.md](CHANGELOG.md), those are right and this is
+> a record of what was believed at the time. Current website work is in
+> [README.md](README.md) and [TODO.md](TODO.md); current completion entries are
+> in [CHANGELOG.md](CHANGELOG.md). The migration workflow and one-shot import
 > tooling described below have been retired.
 >
 > **Reading convention.** A ~~struck-through~~ heading, step or row is **done**,
@@ -29,8 +29,8 @@
 > standing requirement on every deployment. The last two risk rows closed the
 > same day, neither of them by being fixed; each row states why. What remains of
 > §6 step 7 is T-518, tracked in [TODO.md](TODO.md).
-> This differs from [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry
-> open work only and drop an item once its CHANGELOG entry exists.
+> This differs from [TODO.md](TODO.md), which carries open work only and drops
+> an item once its CHANGELOG entry exists.
 
 **Audience:** engineers reviewing the completed migration. **Status:** archived;
 the phase table below is the historical completion summary.
@@ -191,8 +191,8 @@ deployed to Azure.
 | ~~2~~ | ~~Stand up Azure infrastructure~~ | This repo | **~~DONE 2026-08-19~~** — historical apply and validation evidence is retained below |
 | ~~3~~ | ~~Port the API and workers~~ | This repo | **~~DONE 2026-08-21~~** — current handlers and workers live under `functions/` |
 | ~~4~~ | ~~Migrate data~~ | Historical tooling | **~~DONE on production 2026-08-21~~** — the one-shot workflow and import tooling are retired |
-| ~~5~~ | ~~Cutover~~                              | ~~DNS~~       | **~~Completed in the historical record~~** — owner-only live checks remain in `REVIEW.md` |
-| ~~6~~ | ~~Decommission and archive~~             | ~~Both~~      | **~~Archived~~** — remaining resource retirement requires owner approval in `REVIEW.md` |
+| ~~5~~ | ~~Cutover~~                              | ~~DNS~~       | **~~Completed in the historical record~~** — owner-only live checks remain in `TODO.md` |
+| ~~6~~ | ~~Decommission and archive~~             | ~~Both~~      | **~~Archived~~** — remaining resource retirement requires owner approval in `TODO.md` |
 
 Phases 3 and 4 are independent and should run in parallel: the rehearsal needs none of Phase 3's
 handlers, and Phase 3 needs no data to register routes.
@@ -243,7 +243,7 @@ sites** — they are already funnelled through hooks, which is the natural seam.
 
 ### ~~3.2 Isolate auth behind a provider interface — DONE~~
 
-> Here: MSAL behind `frontend/src/lib/auth/`; the Entra SPA registration (REVIEW §2.2) is the
+> Here: MSAL behind `frontend/src/lib/auth/`; the Entra SPA registration (TODO.md) is the
 > remaining owner gate before admin sign-in works. Site-Main: `lib/auth/` (4 files).
 
 5 files import `firebase/auth` (measured; earlier estimate of 8 was overstated). Wrap sign-in,
@@ -738,8 +738,7 @@ per-timer flags; the Telegram webhook (§6 step 6); `lab_agents` / `vps-agent`; 
 ## 6. Phase 5 — cutover — **all steps but 7 are done; step 7 is the last open gate**
 
 ~~**Where this starts from.** The Static Web App serves Azure's placeholder page until the first
-frontend deploy — `deploy-azure-frontend.yml` is still `if: false`, waiting on the SWA token (REVIEW
-§4.3) and the Entra SPA registration (REVIEW §2.2). The API is live. The data is not there. All
+frontend deploy — `deploy-azure-frontend.yml` is still `if: false`, waiting on the SWA token (Required-Inputs §4.3) and the Entra SPA registration (TODO.md). The API is live. The data is not there. All
 three have to be true before step 1.~~ All three became true; the frontend deploy is live and
 dispatch-only.
 
@@ -922,7 +921,7 @@ nobody is updating is worse than an archived one nobody expects to be current.
 | ~~Six HTTP handlers exceed the 230 s Flex Consumption cap~~ | Closed | §4.1 / T-322 — four became platform jobs, one was demoted, one became Listen & Learn (T-411) |
 | ~~Change-feed semantics lose delete-driven behaviour~~ | Closed | §3.5 done upstream; the three delete endpoints in the §4.3 table were written |
 | ~~`speakerevents/` storage rule is open in Firebase~~ | Closed | Not carried forward: `speakerevents` is a private container here, served through the API like every other |
-| ~~Labs runner contract drift~~ | Closed | `vps-agent` holds no database credential and takes its capabilities from the server-side registry; provisioning the host is an owner action in [REVIEW.md](REVIEW.md), not a contract risk |
+| ~~Labs runner contract drift~~ | Closed | `vps-agent` holds no database credential and takes its capabilities from the server-side registry; provisioning the host is an owner action in [TODO.md](TODO.md), not a contract risk |
 | ~~Repo divergence during the overlap~~ | Closed | §0 — resolved by pinning the baseline and porting by hand; was "reconcile weekly" |
 | ~~Production data published through a public-repository artifact~~ | Closed | §5.2 — summaries only, export never left the runner, samples refused in CI. The tooling has since been deleted entirely |
 | ~~47 browser-direct reads discovered late~~ | Closed | §3.1 done on both sides |

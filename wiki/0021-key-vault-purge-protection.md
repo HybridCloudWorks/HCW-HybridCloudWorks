@@ -48,7 +48,7 @@ without purge protection.
 This **supersedes** ADR 0018's remediation-debt row for purge protection, and
 retires the "must be `true` before production secrets are written" instruction
 in the Deployment Runbook §6 and `infra/README.md`. The owner's authorisation
-and the compensating control are recorded in `REVIEW.md` under *Accepted risks*;
+and the compensating control are recorded in `TODO.md` under *Accepted risks*;
 `infra/variables.tf` and `infra/README.md` state it in the same terms beside the
 code.
 
@@ -100,6 +100,6 @@ code.
 
 - Supersedes the purge-protection row of [ADR 0018](0018-as-built-plan-v02)'s
   remediation-debt table
-- `REVIEW.md` — *Accepted risks*, where the owner authorisation lives
+- `TODO.md` — *Accepted risks*, where the owner authorisation lives
 - [Deployment Runbook](Deployment-Runbook) §6 · `infra/variables.tf` ·
   `infra/README.md`

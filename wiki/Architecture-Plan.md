@@ -4,7 +4,7 @@
 > the architecture decisions and cost reasoning that shaped the current website
 > platform. It is retained for traceability, not as an implementation checklist,
 > and it is not maintained: where it disagrees with [TODO.md](TODO.md),
-> [REVIEW.md](REVIEW.md) or [CHANGELOG.md](CHANGELOG.md), those are right and
+> [TODO.md](TODO.md) or [CHANGELOG.md](CHANGELOG.md), those are right and
 > this is a record of what was believed at the time.
 >
 > Its §8 criterion on monthly spend is the one line still worth acting on, and
@@ -17,8 +17,8 @@
 > whose completed entries disappear cannot show which decisions were taken
 > deliberately. Completion itself is recorded in [CHANGELOG.md](CHANGELOG.md);
 > anything still open here says so in bold. This differs from
-> [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry open work only and
-> drop an item once its CHANGELOG entry exists.
+> [TODO.md](TODO.md), which carries open work only and drops an item once its
+> CHANGELOG entry exists.
 
 **Audience:** engineers implementing the Azure platform in
 [HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks). **Status:**
@@ -63,7 +63,7 @@ choosing which properties to keep.
 >
 > ~~**What is NOT built:** the application. The Function App holds zero deployed functions, all 73
 > Cosmos containers are empty, and no data has been migrated. §5's three hard problems are all
-> still ahead.~~ **Historical snapshot only.** The current application and Azure backend are implemented in this repository; live deployment and owner-only configuration checks are tracked in `REVIEW.md`.
+> still ahead.~~ **Historical snapshot only.** The current application and Azure backend are implemented in this repository; live deployment and owner-only configuration checks are tracked in `TODO.md`.
 
 ---
 
@@ -270,7 +270,7 @@ the most dangerous failure mode in this migration.
 > holds the control point, with SWA route rules as defence in depth exactly as
 > recommended below. `firebase/auth` is gone from the admin surface. What is
 > left is not code: the Entra `Admin` app-role assignment is an owner action in
-> [REVIEW.md](REVIEW.md).
+> [TODO.md](TODO.md).
 
 Firebase Auth is client-side with ID tokens verified in functions via `requireAdminClaims`. Entra ID
 is the approved replacement. Two viable models:
@@ -344,7 +344,7 @@ like this goes quietly stale.
    endpoints and VNet rules carry the posture at zero monthly cost. Revisit if the workload ever
    holds regulated data.
 3. ~~**Auth model — MSAL or SWA built-in?**~~ **DECIDED — MSAL.** Implemented; `firebase/auth` is
-   gone from the admin surface. The remaining work is Entra registration, not code — REVIEW.md §2.2.
+   gone from the admin surface. The remaining work is Entra registration, not code — TODO.md.
 4. ~~**AI provider — Vertex or Azure OpenAI?**~~ **DECIDED — neither.** External provider APIs,
    keyed from Key Vault. The decision was forced by quota rather than chosen: zero gpt-4o TPM in
    every SKU, no DALL-E in region. The provider-abstracted model router is what kept the cost of

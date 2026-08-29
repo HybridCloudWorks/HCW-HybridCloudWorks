@@ -6,7 +6,7 @@
  * That script runs on an operator's desktop with the repository checked out.
  * The Function App does not have `infra/main.tf` at run time, so the catalogue
  * has to travel in the bundle. A list in code can drift from Terraform, and
- * drift here is the specific failure REVIEW.md §4.5 describes: app settings are
+ * drift here is the specific failure Required-Inputs §4.5 describes: app settings are
  * `UPPER_SNAKE_CASE`, vault secrets are `UPPER-KEBAB-CASE` because Key Vault
  * forbids underscores, and a mismatch resolves to nothing. The app deploys
  * clean and a missing credential presents as missing *data*, days later, in a

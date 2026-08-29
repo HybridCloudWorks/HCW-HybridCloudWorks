@@ -22,7 +22,7 @@
  * and leaves a CDN free to be layered in front of the site origin later without
  * touching application code — cache headers here are written so that it can be.
  * The first option remains open and is a spend decision, not an engineering
- * one; it is recorded in REVIEW.md §0.
+ * one; it is recorded in TODO.md §0.
  *
  * Cost note: this puts image bytes through Function invocations. `immutable`
  * cache headers plus conditional-request support keep repeat views off the
