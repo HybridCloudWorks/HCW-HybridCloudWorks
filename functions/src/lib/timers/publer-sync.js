@@ -11,7 +11,7 @@
  *
  * This is D12's live writer: on Site-Main it runs every five minutes, so the
  * cutover delta import happens with it paused there and this flag still off
- * here (Migration_Plan §6). The API key and workspace id come from app
+ * here (Migration-Plan §6). The API key and workspace id come from app
  * settings (Key Vault references); a missing key skips the run.
  */
 import { readKey } from '../ai/router.js';

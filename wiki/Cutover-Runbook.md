@@ -1,9 +1,9 @@
-# Cutover runbook — Migration_Plan §6
+# Cutover runbook — Migration-Plan §6
 
 Ordered. Each step says **who** runs it and **how you know it worked**. Nothing
 here is reversible by itself except step 3c (DNS), which is the rollback.
 
-Read [Migration_Plan.md §6](../../Migration_Plan.md) for the reasoning; this
+Read [Migration-Plan §6](Migration-Plan) for the reasoning; this
 file is the mechanics.
 
 > **State — updated 2026-08-23.** Production data imported (8,023 documents /

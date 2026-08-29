@@ -3,7 +3,7 @@
  *
  * Site-Main `functions/lib/telegram-bot.js` + the `telegramWebhook` handler in
  * `functions/index.js` (5643–5850). Ported deliberately rather than retired:
- * Migration_Plan §6 step 6 assumed a receiver existed here and there was none,
+ * Migration-Plan §6 step 6 assumed a receiver existed here and there was none,
  * so the plan's "re-point the webhook" step had nothing to point at.
  *
  * TWO THINGS CHANGED IN THE PORT, both forced by the platform.

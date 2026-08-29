@@ -9,7 +9,7 @@
  * is read from the repository root of `frontend/` by `src/lib/csp.test.js`,
  * which asserts the CSP `connect-src` names the same host as
  * `VITE_AZURE_FUNCTIONS_URL`, and it is referenced by that path in
- * Migration_Plan §3.4, REVIEW §0.1 and Architecture_Plan. Moving it would make
+ * Migration-Plan §3.4, REVIEW §0.1 and Architecture-Plan. Moving it would make
  * five references wrong to save one copy.
  *
  * WHAT BREAKS WITHOUT IT, and why it would not be obvious: §3.4 exists because

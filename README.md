@@ -46,9 +46,7 @@ and retained only in the archived plans and historical Wiki pages.
 | `infra/` | Terraform root module for Azure and Cloudflare resources |
 | `scripts/` | Container-spec generation, content-manifest tooling, smoke checks, and operator utilities |
 | `.github/workflows/` | CI, validation, Wiki sync, scheduled maintenance, and manual release workflows |
-| `wiki/` | Wiki-as-code source for reviewed runbooks and engineering records |
-| `Architecture_Plan.md` | Archived architecture planning record |
-| `Migration_Plan.md` | Archived migration planning record |
+| `wiki/` | Wiki-as-code source for reviewed runbooks and engineering records, including the two archived planning documents (`Architecture-Plan.md`, `Migration-Plan.md`) |
 | `TODO.md` | Current engineering work that does not require owner-only access |
 | `REVIEW.md` | Human-only decisions, approvals, credentials, and external access |
 | `CHANGELOG.md` | Verified completed work |

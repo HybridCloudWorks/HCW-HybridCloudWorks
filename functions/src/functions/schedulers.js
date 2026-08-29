@@ -1,6 +1,6 @@
 /**
  * schedulers.js — the timer triggers replacing Firebase Cloud Scheduler
- * (Migration_Plan §4.2, TODO T-323).
+ * (Migration-Plan §4.2, TODO T-323).
  *
  * **Each timer has its own flag.** A timer runs when the master switch
  * `FEATURE_FLAG_SCHEDULERS` is not explicitly "false" AND its own

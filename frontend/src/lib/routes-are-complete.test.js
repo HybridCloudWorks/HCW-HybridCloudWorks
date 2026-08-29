@@ -81,7 +81,7 @@ describe('pre-render coverage', () => {
   it('pre-renders no route that does not exist', () => {
     // The other direction. A stale entry renders a page that no longer has a
     // route, which pre-renders as the NotFound view and publishes a 200-status
-    // "not found" page — a soft 404, the exact defect Migration_Plan §3.4 was
+    // "not found" page — a soft 404, the exact defect Migration-Plan §3.4 was
     // about.
     const declared = new Set(declaredAbsolutePaths());
     // Relative children of the `/:provider` block: `blog`, `code`, `news`…

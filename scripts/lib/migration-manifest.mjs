@@ -225,7 +225,7 @@ export const COLLECTIONS = [
   {
     name: 'blogs',
     disposition: 'migrate',
-    note: 'Legacy, ~242 docs, reached only via a fallback path. Migration_Plan §3.6 decides whether this ships at all — until that decision lands, migrate it.',
+    note: 'Legacy, ~242 docs, reached only via a fallback path. Migration-Plan §3.6 decides whether this ships at all — until that decision lands, migrate it.',
   },
   { name: 'content_templates', disposition: 'migrate' },
   {

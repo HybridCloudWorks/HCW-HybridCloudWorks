@@ -872,7 +872,7 @@ resource "azurerm_storage_account" "functions" {
   #
   # Lifted for the centralus rebuild on 2026-08-19 and restored the same day.
   # The cost of replacement was a redeploy rather than an outage only because
-  # Migration_Plan §6 cutover had not run.
+  # Migration-Plan §6 cutover had not run.
   lifecycle {
     prevent_destroy = true
   }
@@ -1360,7 +1360,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # told otherwise; 7 of Site-Main's 16 schedules are declared in
     # America/Chicago (the Friday 09:00 digest, the overnight publishers).
     # Porting the expressions verbatim without this would shift every one of
-    # them by five or six hours depending on DST. Migration_Plan §4 carries the
+    # them by five or six hours depending on DST. Migration-Plan §4 carries the
     # per-timer table; the ported NCRONTAB expressions assume this setting.
     "WEBSITE_TIME_ZONE" = "America/Chicago"
 
@@ -1400,7 +1400,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # changed is that the decision is now reachable.
     "FEATURE_FLAG_SCHEDULERS" = var.schedulers_master_enabled ? "true" : "false"
 
-    # One flag per timer (functions/src/functions/schedulers.js, Migration_Plan
+    # One flag per timer (functions/src/functions/schedulers.js, Migration-Plan
     # §4.2). All implemented; each is turned on ONE AT A TIME at cutover after
     # being observed firing at the intended local time (§6 step 7).
     #

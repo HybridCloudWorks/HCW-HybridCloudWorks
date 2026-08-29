@@ -41,7 +41,7 @@
 const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridcloudworks.com'];
 
 /**
- * The Static Web App's own hostname — TEMPORARY, for Migration_Plan §6 step 2.
+ * The Static Web App's own hostname — TEMPORARY, for Migration-Plan §6 step 2.
  *
  * REMOVE IT when DNS moves (§6 step 5) and the preview host stops serving
  * anyone. It is a real origin that can reach the API, so leaving it behind is

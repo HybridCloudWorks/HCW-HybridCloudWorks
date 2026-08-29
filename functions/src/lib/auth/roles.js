@@ -21,7 +21,7 @@
  * expiry (60–90 min) and Continuous Access Evaluation does not cover us. Using
  * App Roles alone would therefore port the model MINUS the mitigation its
  * author deliberately added — which is precisely the silent authorization loss
- * Migration_Plan §8 warns about.
+ * Migration-Plan §8 warns about.
  *
  * So, per request:
  *   1. Verify the JWT.

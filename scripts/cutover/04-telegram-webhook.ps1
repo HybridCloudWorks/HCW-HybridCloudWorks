@@ -3,7 +3,7 @@
     Cutover step 3d — point the Telegram bot at Azure (TODO.md T-512).
 
 .DESCRIPTION
-    Migration_Plan §6 step 6. The URL and its secret token are registered with
+    Migration-Plan §6 step 6. The URL and its secret token are registered with
     TELEGRAM, not in code, so deploying the receiver changes nothing on its own
     — the bot keeps POSTing at the Cloud Functions URL until `setWebhook` is
     re-run. That is the half of this step that gets forgotten, and nothing

@@ -6,7 +6,7 @@ produces, and what the evidence has to show before the next step starts.
 
 Decisions behind the steps — partition keys, dispositions, the public-repository rule, why the
 rehearsal uses a keyless account — live on [Phase-4-Data-Migration](Phase-4-Data-Migration).
-The phase-level picture is [Migration_Plan.md](../../Migration_Plan.md) §5.
+The phase-level picture is [Migration-Plan](Migration-Plan) §5.
 
 **Who:** **[CI]** a `Migrate data` workflow run · **[OP]** the operator at a terminal · **[OWN]** the
 owner, deciding.

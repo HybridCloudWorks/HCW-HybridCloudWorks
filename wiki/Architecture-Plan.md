@@ -1,8 +1,15 @@
 # Architecture Plan — HCW on Azure
 
-> **ARCHIVED 2026-08-24.** This document records the architecture decisions
-> and cost reasoning that shaped the current website platform. It is retained
-> for traceability, not as an implementation checklist. Use [README.md](README.md)
+> **ARCHIVED 2026-08-24; MOVED TO THE WIKI 2026-08-29.** This document records
+> the architecture decisions and cost reasoning that shaped the current website
+> platform. It is retained for traceability, not as an implementation checklist,
+> and it is not maintained: where it disagrees with [TODO.md](TODO.md),
+> [REVIEW.md](REVIEW.md) or [CHANGELOG.md](CHANGELOG.md), those are right and
+> this is a record of what was believed at the time.
+>
+> Its §8 criterion on monthly spend is the one line still worth acting on, and
+> it is not a task: **staying inside budget is a standing requirement on every
+> deployment**, not a check that completes. Use [README.md](README.md)
 > for the current website and [TODO.md](TODO.md) for pending engineering work.
 >
 > **Reading convention.** A ~~struck-through~~ heading or bullet is **done**, not
@@ -17,7 +24,7 @@
 [HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks). **Status:**
 recommendation, **now largely built** — see the box below. Written 2026-07-30 against the approved
 `.azure/infrastructure-plan.json` and the measured state of this repository; status box added
-2026-08-20. **Companion:** [Migration_Plan.md](Migration_Plan.md) — sequencing and execution.
+2026-08-20. **Companion:** [Migration-Plan](Migration-Plan) — sequencing and execution.
 
 This document exists to do one thing the approved plan does not: reconcile it with the **USD 150 per
 month design ceiling**. The plan is architecturally sound and enterprise-shaped. The problem is that
@@ -233,7 +240,7 @@ Everything else is porting. These are re-architecture, and they should drive the
 > deleted: the reasoning is what makes the next re-architecture cheaper, and 5.1
 > in particular named the failure mode (*losing `firestore.rules` silently*) that
 > the server-side guard suite was then built to prevent. Entries in
-> [CHANGELOG.md](CHANGELOG.md); the per-item evidence is Migration_Plan §3.1–3.5.
+> [CHANGELOG.md](CHANGELOG.md); the per-item evidence is Migration-Plan §3.1–3.5.
 
 ### ~~5.1 Browser-direct database access has no Azure equivalent~~ — SOLVED
 
@@ -284,7 +291,7 @@ group-to-role mapping.
 > The audit was done and all 11 were ported: eight as change-feed functions
 > unchanged, and the three that depended on a delete the feed never delivers as
 > explicit delete endpoints. The per-trigger disposition is the table in
-> Migration_Plan §4.3.
+> Migration-Plan §4.3.
 
 11 `onDocumentWritten` triggers assume before/after document images and fire on delete. The Cosmos
 change feed (standard mode) delivers current-state documents and **does not surface deletes**. Any
@@ -359,7 +366,7 @@ would read as "done and behind us".
 - Monthly spend under USD 150 with headroom, dominated by consumption rather than idle capacity.
   **Structurally true — the estate is consumption-billed throughout.** Reworded
   2026-08-29: this used to end "but the cost gate has never been run", pointing at
-  Migration_Plan §7. That gate was retired the same day by owner decision — Azure
+  Migration-Plan §7. That gate was retired the same day by owner decision — Azure
   is the permanent and only environment, so a one-off reading "before
   decommissioning" measures against a moment that will not come. **Budget is a
   standing requirement on every deployment instead**, which is a higher bar than
@@ -373,5 +380,5 @@ would read as "done and behind us".
 - ~~Public site pre-rendered and served statically, indistinguishable from today to a visitor.~~
   T-515; the deploy workflow asserts the document count independently, because a
   shell deploys perfectly well and is visible only to a crawler.
-- ~~A real 404 for unknown URLs (see Migration_Plan §3.4 — currently a soft 404 returning HTTP 200).~~
-  Migration_Plan §3.4 — `responseOverrides.404` now returns `statusCode: 404`.
+- ~~A real 404 for unknown URLs (see Migration-Plan §3.4 — currently a soft 404 returning HTTP 200).~~
+  Migration-Plan §3.4 — `responseOverrides.404` now returns `statusCode: 404`.

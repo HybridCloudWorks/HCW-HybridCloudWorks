@@ -3,7 +3,7 @@
     Cutover step 5 — prove a timer fires, at the right LOCAL time.
 
 .DESCRIPTION
-    Migration_Plan §6 step 7 and §7's scheduled-job gate. Timers are armed one
+    Migration-Plan §6 step 7 and §7's scheduled-job gate. Timers are armed one
     at a time, and each must be observed firing once before the next is added.
 
     The gate is not "did it run". It is "did it run at the intended Chicago

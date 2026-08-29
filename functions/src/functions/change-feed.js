@@ -1,6 +1,6 @@
 /**
  * change-feed.js — the Cosmos change-feed functions replacing Site-Main's
- * eleven Firestore triggers (Migration_Plan §4.3, TODO T-324).
+ * eleven Firestore triggers (Migration-Plan §4.3, TODO T-324).
  *
  * One function per watched container, six in all, on the IDENTITY-BASED
  * binding (`COSMOS_CONNECTION__accountEndpoint` + `__credential =

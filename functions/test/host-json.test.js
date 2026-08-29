@@ -60,7 +60,7 @@ describe('host.json', () => {
   it('keeps Host.Results at Information, or AppRequests is empty', () => {
     // Request telemetry is emitted at Information. Setting this category above
     // it does not quieten the table — it empties it, permanently and silently.
-    // That is the table Migration_Plan §7's scheduled-job gate reads to answer
+    // That is the table Migration-Plan §7's scheduled-job gate reads to answer
     // "did the timer fire", so raising this makes the gate unobservable
     // (TODO.md T-514).
     expect(config.logging?.logLevel?.['Host.Results']).toBe('Information');

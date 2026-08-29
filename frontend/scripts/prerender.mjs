@@ -7,7 +7,7 @@
  * pre-rendered HTML. Measured on the same path during the §6 parallel run:
  * `/about` was 24,902 bytes on Firebase and 2,808 bytes on Azure, with 2,717
  * characters of visible text against 967, and the correct `<title>` against a
- * generic one. Migration_Plan §7 states a gate of "90 HTML documents
+ * generic one. Migration-Plan §7 states a gate of "90 HTML documents
  * pre-rendered"; this build produced three.
  *
  * That matters here more than it usually would. This is a content platform
