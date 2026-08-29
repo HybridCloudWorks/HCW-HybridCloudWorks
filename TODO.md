@@ -49,11 +49,11 @@ and `Gate: owner` still marks the rest.
 | Critical | 0 |
 | High | 2 |
 | Medium | 5 |
-| Low | 2 |
-| Total | 9 |
+| Low | 1 |
+| Total | 8 |
 
-Seven of the nine are architecture-review findings still to be worked
-(`T-714`, four Medium — two of them owner-gated — and two Low). The other
+Six of the eight are architecture-review findings still to be worked
+(`T-714`, four Medium — two of them owner-gated — and one Low). The other
 two are the pre-program platform gates: **T-518** (High) and **T-519**
 (Medium). Both carry **Gate: owner** and have no repository-side half — what is
 left of them is a Worker deployment and a set of feature flags, each needing
@@ -172,17 +172,17 @@ T-518, T-519, the unseeded Key Vault secrets, the unseeded
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the T-503 per-run window pattern already exists | `main.tf:252-269` |
+| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the T-503 per-run window pattern already exists | `cosmos.tf` (was `main.tf:252-269` before the T-754 split) |
 | T-728 | ci | One OIDC identity serves everything: read-only monitors run with deploy rights | `oidc.tf:41-46,176-202` |
 
 **Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
 T-721 (telemetry vs SWA tier cost decision).
 
-### Low — 2 of 15 open
+### Low — 1 of 15 open
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-749 | ci | SCM lock flip — **Gate: owner**, overlaps T-520 | `main.tf`, workspace variable |
+| T-749 | ci | SCM lock flip — **Gate: owner**, overlaps T-520 | `functionapp.tf`, workspace variable |
 
 ## High
 

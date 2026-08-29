@@ -9,6 +9,20 @@ working in rather than by severity.
 Findings keep the `T-7NN` identifiers TODO.md assigns. Nothing here is fixed;
 recording and fixing in one change would make the record unreviewable.
 
+> **The `file:line` anchors below are pinned to merged main at `31f9613`, the
+> commit this review ran against, and are not maintained.** They were already
+> drifting — `main.tf` alone grew from 2,037 to 2,286 lines while these findings
+> were being worked — and on 2026-08-29 T-754 split that file into
+> `functionapp.tf`, `storage.tf`, `cosmos.tf`, `frontend.tf`, `keyvault.tf`,
+> `budget.tf`, `network.tf` and a 97-line `main.tf`, so an `infra/main.tf:1174`
+> now resolves to nothing at all.
+>
+> They are left exactly as written. An anchor is evidence of what a reader saw
+> at a stated commit; rewriting it to today's line numbers would make the record
+> claim something it never checked. Search for the resource by address instead —
+> every one of them kept its address through the split, which is what made the
+> split safe.
+
 ## Method
 
 Six specialist reviews were run in parallel against merged `main` at
