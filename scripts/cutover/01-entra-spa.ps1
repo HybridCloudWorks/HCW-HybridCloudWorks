@@ -3,7 +3,7 @@
     Cutover step 1 — finish the Entra registration so an admin can sign in.
 
 .DESCRIPTION
-    Migration_Plan §6 / REVIEW.md §2.2. Most of §2.2 was already done before
+    Migration-Plan §6 / REVIEW.md §2.2. Most of §2.2 was already done before
     this script existed — verified 2026-08-22 against the live tenant:
 
         app registration  HCWSite API  ac696e96-e203-47be-ade8-c35ece8a6c4a

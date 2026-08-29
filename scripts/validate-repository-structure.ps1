@@ -59,8 +59,11 @@ $allowedRootFiles = @(
   '.gitattributes',
   '.editorconfig',
   'README.md',
-  'Architecture_Plan.md',
-  'Migration_Plan.md',
+  # Architecture-Plan.md and Migration-Plan.md were here until 2026-08-29. Both
+  # were archived records rather than live documents, and both moved to
+  # wiki/ (Architecture-Plan.md, Migration-Plan.md) so they publish as wiki
+  # pages and stop reading as current work sitting beside TODO.md and REVIEW.md.
+  # The four root documents left are the ones that are actually maintained.
   'CHANGELOG.md',
   'REVIEW.md',
   'TODO.md'

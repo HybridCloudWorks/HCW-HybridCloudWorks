@@ -15,7 +15,9 @@
 
 ### Historical
 
-- [Architecture plan](0018-as-built-plan-v02)
+- [Architecture plan](Architecture-Plan)
+- [Migration plan](Migration-Plan)
+- [As-built plan v02 (ADR 0018)](0018-as-built-plan-v02)
 - [Migration runbook](Migration-Runbook)
 - [Cutover runbook](Cutover-Runbook)
 - [Phase 4 data migration](Phase-4-Data-Migration)

@@ -17,7 +17,39 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
-- **Migration_Plan disagreed with itself in four places about how much of it was
+- **The two planning documents are closed and moved to the Wiki (2026-08-29).**
+  Both had been marked ARCHIVED since 2026-08-24 while sitting at the repository
+  root beside TODO.md and REVIEW.md, which is where current work lives — so a
+  reader met four documents in the same place, two of which were history.
+
+  **Both last open risks closed by owner decision, and neither by being fixed** —
+  each row says so, because a risk register that records only the risks that got
+  solved is a worse record than one that admits when a risk was accepted or
+  became irrelevant. *Cron syntax / time zone*: the configuration is as correct
+  as it can be made without arming, and settling the clock from history is now a
+  single script run; closed as a **migration** risk, while arming the timers
+  continues as T-518 in TODO.md and is unaffected. *Cost overrun*: a migration
+  risk exists to inform a go/no-go, and Azure is the permanent and only
+  environment — an overrun changes what gets built, not where it runs. Budget
+  continues as a standing requirement on every deployment.
+
+  With those closed, **Migration-Plan has no open items of its own.** Its last
+  exit criterion (§6 step 7) was already tracked as T-518.
+
+  Moved to `wiki/Architecture-Plan.md` and `wiki/Migration-Plan.md`, which is
+  what `validate-repository-structure.ps1` already said should happen: *"Narrative
+  documentation still belongs in the Wiki … [wiki/] is the one sanctioned in-repo
+  home for narrative documentation."* Both names were hyphenated to match every
+  other Wiki page, and the root allowlist now **rejects** them at the root rather
+  than permitting them, so the move cannot quietly reverse. 29 files of citations
+  were updated with them, and three Wiki pages that linked out with
+  `../../Migration_Plan.md` now use the sibling page form — those links would have
+  404'd on the published Wiki, which is where those pages are actually read.
+
+  The four documents left at the root are exactly the four that are maintained:
+  README, TODO, REVIEW, CHANGELOG.
+
+- **Migration-Plan disagreed with itself in four places about how much of it was
   left (2026-08-29).** Asked what remained, the document gave five different
   answers: the header said "two things", §6's heading said steps 6 *and* 7,
   §7 said one of eight, §9 said "the last two", and the risk register said
@@ -26,7 +58,7 @@ This project has not cut a tagged release; entries are grouped under
   Two of those I caused an hour earlier by retiring the cost gate without
   following it through the document. The other two had been wrong since
   2026-08-28, when T-526 closed §6 step 6 and the Telegram risk row with it.
-  Architecture_Plan §7 already names this failure — "an accurate-when-written
+  Architecture-Plan §7 already names this failure — "an accurate-when-written
   count that nobody updated when the list moved past it, which is the most
   common way a document like this goes quietly stale" — and it happened in the
   risk register one section below a note saying so.
@@ -38,7 +70,7 @@ This project has not cut a tagged release; entries are grouped under
 
 - **The timer verification script could not succeed, and said so reassuringly
   (2026-08-29).** `scripts/cutover/05-verify-timer.ps1` is the tool for
-  Migration_Plan §7's last open gate. It queried `requests` through
+  Migration-Plan §7's last open gate. It queried `requests` through
   `az monitor app-insights query --app <id>` — both of which the Cutover-Runbook
   warns against in its own words: *"AppRequests is empty and is not the oracle.
   Zero rows for this app's entire history"* (T-514), and *"Query the workspace,
@@ -61,7 +93,7 @@ This project has not cut a tagged release; entries are grouped under
   three `az` calls outside `try`/`catch` that would throw past their own error
   handling on PowerShell 7.4+.
 
-- **Migration_Plan's last two exit criteria are now one, and it was wrong about
+- **Migration-Plan's last two exit criteria are now one, and it was wrong about
   the other (2026-08-29).** §7's scheduled-job gate read *"nothing is armed, so
   nothing has been observed"*, which conflated two different things. Nothing has
   **run** — true, no handler has done work. But every timer has been **firing**
@@ -80,7 +112,7 @@ This project has not cut a tagged release; entries are grouped under
   permanent and only environment, so that moment will not come and the gate can
   be neither met nor failed. Staying inside budget became a standing requirement
   on every deployment instead — a higher bar than one reading, not a lower one.
-  Architecture_Plan §8 carries the same correction, and its criterion is
+  Architecture-Plan §8 carries the same correction, and its criterion is
   deliberately left unstruck: striking it would read as "done and behind us".
 
 - **An API-keys page in the admin portal: paste a credential, never read one
@@ -610,7 +642,7 @@ This project has not cut a tagged release; entries are grouped under
   **Nothing was re-run to close this.** It had already been done, and three
   documents went on describing it as pending: `TODO.md` called it "the one
   deadline on this list" and a countdown against the GCP deletion,
-  `Migration_Plan.md` §6 step 6 marked it OPEN, and its risk register read "High
+  `Migration-Plan.md` §6 step 6 marked it OPEN, and its risk register read "High
   — now a deadline". It surfaced only because `04-telegram-webhook.ps1 -Mode
   Show` was run to *start* the work.
 
@@ -644,7 +676,7 @@ This project has not cut a tagged release; entries are grouped under
   so a reader could no longer tell what was outstanding without reading past a
   page of finished work. REVIEW.md shed the executed migration-era teardown, the
   two closed live-confirmation bullets and the completed apex-DNS row for the
-  same reason. **Architecture_Plan.md and Migration_Plan.md keep every entry and
+  same reason. **Architecture-Plan.md and Migration-Plan.md keep every entry and
   strike it through** — they are archived records whose value is the reasoning,
   so deleting a decision would delete why it was made.
 
@@ -657,7 +689,7 @@ This project has not cut a tagged release; entries are grouped under
   place. Both entries are above. The open-item counts in TODO.md were also
   wrong — Low read
   "5 of 15 closed" against a list of seven, and the total was 32 against a real
-  30. Migration_Plan §6's
+  30. Migration-Plan §6's
   rollback paragraph still promised "rollback is DNS for as long as Firebase
   remains deployed", which the owner's decision to delete GCP rather than soak
   had already reversed; it now records the inversion, because that decision is
@@ -1292,7 +1324,7 @@ This project has not cut a tagged release; entries are grouped under
   Separately, `Host.Results` was set to `Error`. Request telemetry is emitted at
   Information, so that one line emptied the `AppRequests` table permanently —
   it had **zero rows, ever**. That is the table that answers *"did the timer
-  fire"*, so Migration_Plan §7's scheduled-job gate was unobservable by
+  fire"*, so Migration-Plan §7's scheduled-job gate was unobservable by
   construction. Restored to `Information`. `Host.Aggregator` was left on
   `Trace`, the most verbose level available, for a diagnosis nobody recorded;
   now `Warning`.
@@ -1309,7 +1341,7 @@ This project has not cut a tagged release; entries are grouped under
   erroring. Query the workspace and the `AppTraces` / `AppRequests` tables
   directly.
 
-- **The inbound Telegram bot is ported (T-512), not retired.** Migration_Plan §6
+- **The inbound Telegram bot is ported (T-512), not retired.** Migration-Plan §6
   step 6 said to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`;
   there was nothing to point a webhook at, because no receiver had been ported
   — `notify.js` only *sends*, and no route accepted a Telegram update (checked
@@ -1728,7 +1760,7 @@ This project has not cut a tagged release; entries are grouped under
   manifest is re-baselined at Site-Main `088f458` with `azure_architectures`
   and `azure_frameworks` added as `probe` — not provisioned, so the generated
   container spec is unchanged.
-- **`Migration_Plan.md` rebaselined against Site-Main @ `088f458`.** §0 is now
+- **`Migration-Plan.md` rebaselined against Site-Main @ `088f458`.** §0 is now
   donor/recipient with a pinned baseline instead of "reconcile weekly" (the
   two repositories finished Phase 1 in incompatible directions); §2 carries
   real status; §4 carries the measured inventories — the six HTTP handlers

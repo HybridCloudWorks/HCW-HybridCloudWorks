@@ -1,8 +1,16 @@
 # Migration Plan — Personal-Site_HCW → HCW-HybridCloudWorks (Azure)
 
-> **ARCHIVED 2026-08-24.** This is the historical migration record, retained
-> for decisions, evidence, and traceability. It is not an active migration
-> checklist. Current website work is in [README.md](README.md), [TODO.md](TODO.md),
+> **ARCHIVED 2026-08-24; MOVED TO THE WIKI 2026-08-29 AND CLOSED.** This is the
+> historical migration record, retained for decisions, evidence and
+> traceability. It is not an active migration checklist, and as of 2026-08-29 it
+> has no open items of its own: the last two risk-register rows were closed by
+> owner decision, and the last exit criterion (§6 step 7 / §7's scheduled-job
+> proof) continues as **T-518 in [TODO.md](TODO.md)** rather than here. Arming
+> the timers is still real work — it simply stopped being *migration* work.
+>
+> Nothing in this file is maintained any more. Where it disagrees with
+> [TODO.md](TODO.md), [REVIEW.md](REVIEW.md) or [CHANGELOG.md](CHANGELOG.md),
+> those are right and this is a record of what was believed at the time. Current website work is in [README.md](README.md), [TODO.md](TODO.md),
 > and [REVIEW.md](REVIEW.md); current completion entries are in
 > [CHANGELOG.md](CHANGELOG.md). The migration workflow and one-shot import
 > tooling described below have been retired.
@@ -11,17 +19,16 @@
 > not deleted — the four porting tables in §4 and the partition-key reasoning in
 > §5.5 are the only record of what each upstream export and container became, so
 > removing them would lose the mapping. Completion is recorded in
-> [CHANGELOG.md](CHANGELOG.md); what is still open says so in bold. **One thing
-> in this plan is still open**: §6 step 7 / §7's scheduled-job proof — arming the
-> timers, T-518. Its clock half needs nothing armed and can be read from traces
-> that already exist; its handler half is owner-held, one timer at a time.
+> [CHANGELOG.md](CHANGELOG.md); items still open when this was archived say so
+> in bold, and those bold markers are now historical rather than a live list.
 >
-> This line said "two things" until 2026-08-29, naming §7's cost gate as the
-> second. That gate was retired the same day by owner decision — Azure is the
-> permanent and only environment, so "before decommissioning" names a moment
-> that will not come, and budget became a standing requirement on every
-> deployment instead. §6 step 6, the Telegram webhook (T-526), closed on
-> 2026-08-28.
+> **The closing sequence, for the record.** §6 step 6 (the Telegram webhook,
+> T-526) closed 2026-08-28. §7's cost gate was retired 2026-08-29 by owner
+> decision — Azure is the permanent and only environment, so "before
+> decommissioning" names a moment that will not come, and budget continues as a
+> standing requirement on every deployment. The last two risk rows closed the
+> same day, neither of them by being fixed; each row states why. What remains of
+> §6 step 7 is T-518, tracked in [TODO.md](TODO.md).
 > This differs from [TODO.md](TODO.md) and [REVIEW.md](REVIEW.md), which carry
 > open work only and drop an item once its CHANGELOG entry exists.
 
@@ -29,14 +36,14 @@
 the phase table below is the historical completion summary.
 **Written** 2026-07-30; deployment note added 2026-08-19; rebaselined against Site-Main and the
 migration tooling 2026-08-20.
-**Companion:** [Architecture_Plan.md](Architecture_Plan.md) — the target and why.
+**Companion:** [Architecture-Plan](Architecture-Plan) — the target and why.
 
 > ## Historical deployment snapshot — 2026-08-20
 >
 > **Everything below this box is the plan as written on 2026-07-30. It describes what was designed
 > to be deployed. It is not a description of the running estate.**
 >
-> **Migration_Plan §2 Phase 2 has since been executed.** The Azure infrastructure is live: **129
+> **Migration-Plan §2 Phase 2 has since been executed.** The Azure infrastructure is live: **129
 > resources**, applied from `infra/` through HCP Terraform (org `hcw`, project `Site`, workspace
 > `hcw-azure`). As of 2026-08-20 `terraform fmt`, `terraform validate` and `terraform plan` are all
 > clean — _"No changes. Your infrastructure matches the configuration."_
@@ -194,7 +201,7 @@ handlers, and Phase 3 needs no data to register routes.
 > TODO](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Implementation-TODO) numbers
 > _delivery_ phases 0–8; this table numbers _migration_ phases 0–6. Only Phase 4 means roughly the
 > same thing in both. Phase 3 is the worst collision — it is "Port the API and workers" here and
-> "Empty platform and observability" there. Cite this document's phases as **"Migration_Plan §N"**
+> "Empty platform and observability" there. Cite this document's phases as **"Migration-Plan §N"**
 > and the Wiki's as **"Phase N"**. The Implementation TODO carries the full mapping table.
 
 ---
@@ -218,7 +225,7 @@ happens**, which is what makes them safe to do now.
 
 **34 frontend files import `firebase/firestore` directly** (measured 2026-07-30; the earlier estimate
 of 47 was overstated). There is no Cosmos equivalent for browser-direct, rule-enforced database
-access (Architecture_Plan §5.1), so all of them must become API calls eventually.
+access (Architecture-Plan §5.1), so all of them must become API calls eventually.
 
 Do it in two moves, both in this repo:
 
@@ -295,7 +302,7 @@ This is a one-line change, do it now.
 ### ~~3.5 Audit the 11 Firestore triggers for change-feed compatibility — DONE upstream~~
 
 Cosmos's change feed delivers current state and **does not surface deletes**. Any trigger relying on
-the before-image or on deletion needs redesign (Architecture_Plan §5.3). Do the audit now — it is
+the before-image or on deletion needs redesign (Architecture-Plan §5.3). Do the audit now — it is
 reading, not writing, and it de-risks the Phase 3 estimate.
 
 > Site-Main did this: none of its 11 triggers reads `event.data.before` any more. The per-trigger
@@ -834,7 +841,7 @@ Add for the migration:
   `.azure/api-surface.json` as the contract and `route-inventory.test.js` as the check — the
   Firebase side is gone, so parity against it is no longer measurable and no longer the question.
 - ~~**Authorisation parity.** `firestore.rules` has emulator-backed tests today; its replacement must
-  be tested to at least that coverage. Architecture_Plan §5.1 — this is the most dangerous silent
+  be tested to at least that coverage. Architecture-Plan §5.1 — this is the most dangerous silent
   loss in the migration.~~ Met by the server-side guard suite; `route-inventory.test.js` fails on a
   route that reaches the database without consulting a guard, which is the property `firestore.rules`
   used to hold.
@@ -881,7 +888,7 @@ Add for the migration:
   What replaces it is not weaker. **Staying inside budget is a standing business
   requirement on every deployment**, not a one-time reading — which is the right
   shape for an estate with one environment and no migration left to finish.
-  Architecture_Plan §8 carries the same correction.
+  Architecture-Plan §8 carries the same correction.
 
   One caveat is worth keeping from the old wording: measuring today would price
   an **idle** platform. Nothing is scheduled, so no feed sync, no forge run and
@@ -892,21 +899,22 @@ Add for the migration:
 
 ## 8. Risk register
 
-**Two of fifteen are still live**, and both are owner-held. The closed rows are
-struck through rather than deleted: a risk register whose retired entries vanish
-cannot show that a risk was managed rather than never real.
+**All fifteen are closed** as of 2026-08-29. The closed rows are struck through
+rather than deleted: a risk register whose retired entries vanish cannot show
+that a risk was managed rather than never real.
 
-This read "three of fifteen" from 2026-08-28, when the Telegram row closed,
-until 2026-08-29 — an accurate-when-written count that nobody updated when the
-list moved past it. Architecture_Plan §7 names that as the most common way a
-document like this goes quietly stale, and it happened here, one section below
-the note that says so.
+The last two were closed by owner decision on the day this document was
+archived, and neither was closed by being *fixed* — which is the honest reason
+and is recorded as such on each row. The count line above has been wrong twice
+in two days (it read "three of fifteen" while two rows were live, then "two"
+until this edit), which is itself the argument for archiving: a live document
+nobody is updating is worse than an archived one nobody expects to be current.
 
 | Risk                                               | Severity | Mitigation                                                          |
 | -------------------------------------------------- | -------- | ------------------------------------------------------------------- |
 | ~~Telegram/webhook re-registration forgotten~~ | Closed 2026-08-28 | §6 step 6 / T-526. `getWebhookInfo` returns the Azure URL and `/help` answers in the chat. The risk was real and the mitigation worked; what this row got wrong at the end was the *state* — it read "now a deadline" for a step already taken |
-| **Cron syntax differences silently disable a job, or time zone shifts it** | **Medium — unproven** | §4.2 timer table (NCRONTAB + `WEBSITE_TIME_ZONE`); §7's scheduled-job proof is the check. It has never been run — but as of 2026-08-29 it no longer *needs* anything armed: the timers have been firing since deploy and the host stamps `ScheduleStatus` with local-time offsets on every invocation, so this exact risk is now settleable from history with `scripts/cutover/05-verify-timer.ps1` (T-518) |
-| **Cost overrun from hourly resources** | **Medium — unmeasured** | Architecture_Plan §3 removed the hourly resources by design. The risk is still live but its check changed on 2026-08-29: the §7 cost gate was retired, and budget is now a standing requirement on every deployment rather than one reading. Still unmeasured — and a measurement taken before T-518 would price an idle platform, since nothing is scheduled |
+| ~~Cron syntax differences silently disable a job, or time zone shifts it~~ | Closed 2026-08-29 | **Owner decision: the configuration is as correct as it can be made without arming.** §4.2's timer table is ported, `WEBSITE_TIME_ZONE = America/Chicago` is set, and `scripts/cutover/05-verify-timer.ps1` can settle the clock from history whenever anyone wants it. Closed as a MIGRATION risk, not as engineering work: arming the timers is T-518 in [TODO.md](TODO.md) and is unaffected by this row |
+| ~~Cost overrun from hourly resources~~ | Closed 2026-08-29 | **Owner decision: there is no longer a decision this risk feeds.** A migration risk exists to inform a go/no-go, and Azure is the permanent and only environment — an overrun changes what gets built, not where it runs. Architecture-Plan §3 removed the hourly resources by design. Staying inside budget continues as a standing requirement on every deployment; it is simply not a *migration* risk any more |
 | ~~Authorisation rules not faithfully re-implemented~~ | Closed | The server-side guard suite replaced `firestore.rules`; `route-inventory.test.js` fails on a route that reaches the database without a guard |
 | ~~AI handlers default to Vertex / ADC, which has no Azure equivalent~~ | Closed | §4.4 — `ai/router.js` resolves Anthropic → OpenAI → Gemini by key presence; Vertex is a disabled provider id, not a default |
 | ~~Collections missed by the migration inventory~~ | Closed | §5 — one manifest drove migrator, verifier and Terraform; the inventory gate passed before both imports |
@@ -918,7 +926,7 @@ the note that says so.
 | ~~Repo divergence during the overlap~~ | Closed | §0 — resolved by pinning the baseline and porting by hand; was "reconcile weekly" |
 | ~~Production data published through a public-repository artifact~~ | Closed | §5.2 — summaries only, export never left the runner, samples refused in CI. The tooling has since been deleted entirely |
 | ~~47 browser-direct reads discovered late~~ | Closed | §3.1 done on both sides |
-| ~~AI provider egress cost after cutover~~ | Closed | Architecture_Plan §7.4 — decided; a provider is on when its key is present, and usage is logged per feature in the AI Engine tab rather than estimated |
+| ~~AI provider egress cost after cutover~~ | Closed | Architecture-Plan §7.4 — decided; a provider is on when its key is present, and usage is logged per feature in the AI Engine tab rather than estimated |
 
 ---
 

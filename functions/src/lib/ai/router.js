@@ -27,7 +27,7 @@
  *   - Vertex. It authenticates with Application Default Credentials — a GCP
  *     identity the Function App cannot hold. Gemini is reached through the
  *     public Gemini API with an API key instead (same model names).
- *   - Azure OpenAI. Retired with the account (Migration_Plan note).
+ *   - Azure OpenAI. Retired with the account (Migration-Plan note).
  *   - axios. `fetch` is global on Node 22; one less dependency.
  *
  * What is kept: the purpose → model table (env-overridable per provider), JSON

@@ -10,8 +10,8 @@ belong in [TODO.md](TODO.md). Verified completion belongs in
 **This file carries open work only.** An item is removed once the corresponding
 entry is in `CHANGELOG.md` — the same rule `TODO.md` states in its own footer,
 and the reason neither file accumulates a history of finished work. The two
-archived plans ([Architecture_Plan.md](Architecture_Plan.md),
-[Migration_Plan.md](Migration_Plan.md)) do the opposite on purpose: they keep
+archived plans ([Architecture-Plan](wiki/Architecture-Plan.md),
+[Migration-Plan](wiki/Migration-Plan.md)) do the opposite on purpose: they keep
 every entry and strike the completed ones through, because their value is the
 reasoning behind each decision rather than the state of a queue.
 

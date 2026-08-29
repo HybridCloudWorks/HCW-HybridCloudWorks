@@ -3,7 +3,7 @@
 The decision log for moving Firestore and Firebase Storage onto Cosmos DB and Blob Storage. The
 operator sequence is the [Migration-Runbook](Migration-Runbook); this page records *why* each thing
 is the way it is, so a decision is never re-litigated from a log line. Plan-level context:
-[Migration_Plan.md](../../Migration_Plan.md) §5.
+[Migration-Plan](Migration-Plan) §5.
 
 Baseline: **Site-Main @ `088f458`** (2026-08-18, v1.7.0) — 68 Firestore collections, one GCS bucket.
 Target: 74 Cosmos containers (73 generated from the manifest + `leases`, declared separately in
@@ -156,7 +156,7 @@ Azure documents it ([Storage firewall limitations](https://learn.microsoft.com/a
 
 ### D12. Two collections are rewritten by machines every few minutes — the cutover delta run must follow their pause
 
-The post-import verify (P4) found `social_posts` and `lab_agents` drifted within twenty minutes of the import while every other container still matched. Both have non-human writers in Site-Main: `reconcilePublerCalendar`, run by `syncSocialCalendarScheduled` every 5 minutes, writes `lastSyncedAt` (and `publerStatus` / `syncStatus` when Publer changes) on every social post; the VPS agent re-`set()`s its own `lab_agents` document on heartbeat. A write-freeze on the admin UI does not stop either. So the cutover sequence (Migration_Plan §6) must **disable the Publer sync timer and stop the VPS agent before the delta import**, then run `rehearse target=production` once more and `verify` — only then is `failed: 0` on all 62 achievable. `lab_agents` is arguably `transient` (the re-pointed agent re-registers itself on Azure); decide at cutover. Until then the production copy is complete for everything a visitor or an editor sees.
+The post-import verify (P4) found `social_posts` and `lab_agents` drifted within twenty minutes of the import while every other container still matched. Both have non-human writers in Site-Main: `reconcilePublerCalendar`, run by `syncSocialCalendarScheduled` every 5 minutes, writes `lastSyncedAt` (and `publerStatus` / `syncStatus` when Publer changes) on every social post; the VPS agent re-`set()`s its own `lab_agents` document on heartbeat. A write-freeze on the admin UI does not stop either. So the cutover sequence (Migration-Plan §6) must **disable the Publer sync timer and stop the VPS agent before the delta import**, then run `rehearse target=production` once more and `verify` — only then is `failed: 0` on all 62 achievable. `lab_agents` is arguably `transient` (the re-pointed agent re-registers itself on Azure); decide at cutover. Until then the production copy is complete for everything a visitor or an editor sees.
 
 ## Open questions (owner)
 

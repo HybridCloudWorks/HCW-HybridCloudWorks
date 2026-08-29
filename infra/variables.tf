@@ -1019,7 +1019,7 @@ variable "schedulers_master_enabled" {
     is the point: the master switch is what an operator flips to stop
     everything during an incident without editing eighteen entries.
 
-    Migration_Plan §6 step 7 arms timers ONE AT A TIME. Set this true first,
+    Migration-Plan §6 step 7 arms timers ONE AT A TIME. Set this true first,
     then add timers to enabled_timers one per apply, each observed firing at
     its intended Chicago local time before the next.
   EOT
@@ -1034,7 +1034,7 @@ variable "enabled_timers" {
     local.timer_catalogue that is not listed here is set to "false"
     explicitly, so a timer is never merely absent.
 
-    Migration_Plan §6 step 7 turns these on ONE AT A TIME, each observed firing
+    Migration-Plan §6 step 7 turns these on ONE AT A TIME, each observed firing
     once at the intended Chicago local time before the next is added. Set this
     in the HCP Terraform workspace so a cutover flip is a variable edit and an
     apply, not a pull request.
@@ -1069,7 +1069,7 @@ variable "cors_extra_origins" {
     Browser origins allowed to call the API on top of the production allowlist
     compiled into functions/src/lib/auth/cors.js (hybridcloudworks.com and www).
 
-    Needed for Migration_Plan §6 step 2, where the site runs on the Static Web
+    Needed for Migration-Plan §6 step 2, where the site runs on the Static Web
     App's own *.azurestaticapps.net hostname before DNS moves. That origin is
     not in the compiled list, so without it every API call from the
     parallel-running site fails CORS — which presents as a broken API, not as a

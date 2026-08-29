@@ -200,7 +200,7 @@ the Blog Machine's scheduled throughput (`forgeScheduled`,
 `publishScheduledContent`), and the Cosmos backup-tier change from T-707,
 which only pays for itself once scheduled work is generating documents. It also
 gates any meaningful cost measurement — a bill taken while nothing is scheduled
-prices an idle platform (Migration_Plan §7).
+prices an idle platform (Migration-Plan §7).
 
 **Its first half needs nothing armed (2026-08-29).** `app.timer()` registers on
 the real schedule unconditionally and the flag is checked *inside* the handler,

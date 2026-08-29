@@ -5,7 +5,7 @@
  *
  * Ported from Site-Main index.js (088f458). Upstream ran at 09:00 UTC; the
  * app clock here is America/Chicago, so the schedule is expressed in local
- * time and drifts an hour across DST (Migration_Plan §4.2) — a weekly
+ * time and drifts an hour across DST (Migration-Plan §4.2) — a weekly
  * digest-style scrape does not care.
  */
 
