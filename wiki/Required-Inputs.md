@@ -215,6 +215,44 @@ problem. The two cost very different amounts to diagnose.
 | `TELEGRAM-BOT-TOKEN` | Notifications | |
 | `TELEGRAM-CHAT-ID` | Notifications | |
 
+## 4.6b Custom role definitions — owner-created, once
+
+Three custom roles are referenced by `infra/` and **not created by it**.
+`azurerm_role_definition` needs `Microsoft.Authorization/roleDefinitions/write`,
+and the HCP Terraform run identity is Contributor + Role Based Access Control
+Administrator. Neither carries it: Contributor excludes
+`Microsoft.Authorization/*/Write` outright, and RBAC Administrator grants
+`roleAssignments/write` plus `*/read` and nothing more. The identity may assign
+roles; it may not invent them, and that split is deliberate.
+
+So Terraform reads each definition back with `data "azurerm_role_definition"`.
+Until the owner has created it, the **plan** fails with "role definition not
+found" — which reads like a permissions problem and is actually a missing step
+here. Run these once, from an account with Owner or User Access Administrator on
+the subscription:
+
+```
+az role definition create --role-definition @infra/roles/cosmos-container-writer.json
+az role definition create --role-definition @infra/roles/keyvault-secret-writer.json
+az role definition create --role-definition @infra/roles/function-config-refresh.json
+```
+
+| Role | Grants | Consumer |
+| --- | --- | --- |
+| `HCW Cosmos Container Definition Writer` | Container definition read + write on the Cosmos account. No keys, no data plane, no account settings | `heal-computed-properties.yml` re-applying `cp_sortDate` |
+| `HCW Key Vault Secret Writer` | `setSecret` and nothing else — no get, no list, no delete, no purge | The API Keys page, so a pasted credential cannot be read back out |
+| `HCW Function Config Refresh` | `Microsoft.Web/sites/config/Write`, with `config/list/action` excluded | The API Keys page, so a seeded secret goes live in seconds rather than on App Service's 24-hour cache cycle |
+
+The first was created on 2026-08-21. The second and third are **new and
+unapplied** — they were declared as Terraform `resource` blocks when the API
+Keys page landed, which would have failed the very apply that turns the page on.
+`scripts/terraform-role-definitions.test.mjs` now fails CI on the `resource`
+form, and on a `data` lookup naming a role no JSON here registers.
+
+Editing a role's permissions later is `az role definition update` against the
+same JSON; nothing in `infra/` moves. A **rename** is the one change that needs
+both sides.
+
 ## 4.7 VPS agent (Hostinger) — `.env`, never committed
 
 Names from `vps-agent/.env.example`. The agent holds no database credential; it

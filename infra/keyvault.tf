@@ -101,24 +101,40 @@ resource "azurerm_role_assignment" "func_kv_secrets" {
 # environment by definition, so this does not hide the values the app actively
 # uses. It stops it reading OTHER secrets, OLD versions, and anything it has no
 # reference for.
-resource "azurerm_role_definition" "kv_secret_writer" {
-  name        = "${var.workload_name}-keyvault-secret-writer"
-  scope       = azurerm_key_vault.hcw.id
-  description = "Create new secret versions. No read, no delete, no purge."
-
-  permissions {
-    actions          = []
-    not_actions      = []
-    data_actions     = ["Microsoft.KeyVault/vaults/secrets/setSecret/action"]
-    not_data_actions = []
-  }
-
-  assignable_scopes = [azurerm_key_vault.hcw.id]
+# THE DEFINITION IS NOT MANAGED HERE, and this is the second time the estate
+# has learned it. `azurerm_role_definition` needs
+# Microsoft.Authorization/roleDefinitions/write, and the Terraform run identity
+# is Contributor + Role Based Access Control Administrator. Neither carries it:
+# Contributor excludes Microsoft.Authorization/*/Write outright, and RBAC
+# Administrator holds roleAssignments/write plus */read and nothing more. So the
+# identity may ASSIGN roles and not INVENT them — the split infra/oidc.tf records
+# after a 403 on 2026-08-21 proved it there.
+#
+# This block and func_config_refresh below were declared as `resource` when the
+# API Keys page landed, which would have failed the very apply that turns the
+# page on, with an authorization error naming Microsoft.Authorization rather
+# than anything about Key Vault. Corrected before that apply ran, so no state
+# holds either definition.
+#
+# The owner creates it once from the reviewed JSON; Terraform reads it by name
+# and does the assignment:
+#
+#   az role definition create --role-definition @infra/roles/keyvault-secret-writer.json
+#
+# ASSIGNABLE AT THE RESOURCE GROUP, assigned at the vault. Microsoft documents
+# custom roles as assignable at management group, subscription and resource
+# group scopes; a resource-scoped assignableScopes entry is outside that set.
+# rg-sec holds the vault and nothing else, so the group is not a widening here —
+# it is the narrowest documented scope. The assignment below is still made at
+# the vault itself, which is at or below the assignable scope.
+data "azurerm_role_definition" "kv_secret_writer" {
+  name  = "HCW Key Vault Secret Writer"
+  scope = azurerm_resource_group.app["sec"].id
 }
 
 resource "azurerm_role_assignment" "func_kv_secret_writer" {
   scope              = azurerm_key_vault.hcw.id
-  role_definition_id = azurerm_role_definition.kv_secret_writer.role_definition_resource_id
+  role_definition_id = data.azurerm_role_definition.kv_secret_writer.id
   principal_id       = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
@@ -137,24 +153,23 @@ resource "azurerm_role_assignment" "func_kv_secret_writer" {
 # best-effort in code (lib/secret-vault.js): if this assignment is missing or
 # ARM refuses, the secret is already safely written and the only cost is that it
 # goes live on the 24-hour cycle instead of now.
-resource "azurerm_role_definition" "func_config_refresh" {
-  name        = "${var.workload_name}-function-config-refresh"
-  scope       = azurerm_function_app_flex_consumption.hcw.id
-  description = "Refresh this site's Key Vault references. Cannot list settings back."
-
-  permissions {
-    actions          = ["Microsoft.Web/sites/config/Write"]
-    not_actions      = ["Microsoft.Web/sites/config/list/action"]
-    data_actions     = []
-    not_data_actions = []
-  }
-
-  assignable_scopes = [azurerm_function_app_flex_consumption.hcw.id]
+# Owner-created for the same reason as kv_secret_writer above:
+#
+#   az role definition create --role-definition @infra/roles/function-config-refresh.json
+#
+# rg-web holds the Static Web App, the Function App, its plan, Application
+# Insights and the host storage account. Microsoft.Web/sites/config/Write
+# reaches only `sites`, and the Static Web App is Microsoft.Web/staticSites — a
+# different resource type — so the group scope grants nothing the resource scope
+# would not have.
+data "azurerm_role_definition" "func_config_refresh" {
+  name  = "HCW Function Config Refresh"
+  scope = azurerm_resource_group.app["web"].id
 }
 
 resource "azurerm_role_assignment" "func_config_refresh" {
   scope              = azurerm_function_app_flex_consumption.hcw.id
-  role_definition_id = azurerm_role_definition.func_config_refresh.role_definition_resource_id
+  role_definition_id = data.azurerm_role_definition.func_config_refresh.id
   principal_id       = azurerm_function_app_flex_consumption.hcw.identity[0].principal_id
 }
 
