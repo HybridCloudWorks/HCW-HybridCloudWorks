@@ -24,9 +24,14 @@
 # applied yet — and the run that surfaced it could not distinguish them. The
 # stderr is now captured and classified.
 #
-# READ-ONLY, and structurally so: the identity's grant for this resource group
-# is Monitoring Reader (infra/oidc.tf), whose actions are `*/read` plus alert
-# state. There is no verb here that can change anything.
+# READ-ONLY, and structurally so, twice over since T-728. The identity is
+# github_reader, which holds nothing that writes anywhere in the estate, and its
+# grant on this resource group is Reader — `*/read`, with no verb that can
+# change anything. It was Monitoring Reader on the DEPLOY identity until
+# 2026-08-29; the swap narrowed the grant in both directions at once, because
+# Monitoring Reader is `*/read` PLUS a workspace search action and
+# Microsoft.Support/*, a superset of Reader rather than the subset the old
+# comment claimed.
 #
 # NO `environment:` KEY, deliberately. Declaring one changes the OIDC subject
 # GitHub presents from repo:<org>/<repo>:ref:<ref> to
@@ -55,13 +60,16 @@ jobs:
     # Same self-arming gate as heal-computed-properties.yml: before the first
     # apply there is no identity to log in as, and a red run would read as a
     # permissions bug while actually meaning "not deployed yet".
-    if: ${{ vars.CLIENT_ID != '' }}
+    if: ${{ vars.READER_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     steps:
+      # READER_CLIENT_ID, not CLIENT_ID (T-728). This workflow reads and
+      # changes nothing, so it runs as the read-only identity rather than the
+      # one that can deploy code, write blobs and rewrite storage firewalls.
       - name: Azure login (OIDC)
         uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
         with:
-          client-id: ${{ vars.CLIENT_ID }}
+          client-id: ${{ vars.READER_CLIENT_ID }}
           tenant-id: ${{ vars.TENANT_ID }}
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
 
@@ -141,7 +149,7 @@ jobs:
             if [ "$stateless" -eq 0 ]; then
               echo "**All three rules are stateful.** Each fires once per condition and sends a single Resolved mail — ADR 0022 decision 6 is live."
             elif [ "$denied" -eq 1 ]; then
-              echo "**This identity may not read the alert rules, so their state is unknown.** The \`Monitoring Reader\` grant in \`infra/oidc.tf\` comes from the same apply that carries \`auto_mitigation_enabled\`, so the most likely explanation is that the apply has not landed. Confirm the run in the \`hcw-azure\` workspace, then re-run this workflow."
+              echo "**This identity may not read the alert rules, so their state is unknown.** The \`Reader\` grant on \`github_reader\` in \`infra/oidc.tf\` comes from the same apply that carries \`auto_mitigation_enabled\`, so the most likely explanation is that the apply has not landed — check also that \`READER_CLIENT_ID\` is set, since this job authenticates as that identity now. Confirm the run in the \`hcw-azure\` workspace, then re-run this workflow."
             else
               echo "**At least one rule is still stateless, or could not be read.** A stateless rule re-notifies on every evaluation whose condition is met — at PT5M that is a fresh mail every five to ten minutes."
             fi

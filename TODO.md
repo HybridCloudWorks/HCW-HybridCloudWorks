@@ -48,12 +48,12 @@ and `Gate: owner` still marks the rest.
 | --- | ---: |
 | Critical | 0 |
 | High | 2 |
-| Medium | 5 |
+| Medium | 4 |
 | Low | 1 |
-| Total | 8 |
+| Total | 7 |
 
-Six of the eight are architecture-review findings still to be worked
-(`T-714`, four Medium — two of them owner-gated — and one Low). The other
+Five of the seven are architecture-review findings still to be worked
+(`T-714`, three Medium — two of them owner-gated — and one Low). The other
 two are the pre-program platform gates: **T-518** (High) and **T-519**
 (Medium). Both carry **Gate: owner** and have no repository-side half — what is
 left of them is a Worker deployment and a set of feature flags, each needing
@@ -179,12 +179,11 @@ T-518, T-519, the unseeded Key Vault secrets, the unseeded
 | --- | --- | --- | --- |
 | T-714 | frontend | **Needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix | `main.jsx`, `hooks/prerenderData.js` |
 
-### Medium — 4 of 30 open
+### Medium — 3 of 30 open
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-718 | azure | Cosmos firewall admits every Azure datacenter IP; the T-503 per-run window pattern already exists | `cosmos.tf` (was `main.tf:252-269` before the T-754 split) |
-| T-728 | ci | One OIDC identity serves everything: read-only monitors run with deploy rights | `oidc.tf:41-46,176-202` |
+| T-718 | azure | Cosmos firewall admits every Azure datacenter IP. **The review's recommendation is wrong on two points, established 2026-08-29.** (1) It says to put the window in `heal-computed-properties`; that workflow's automatic path is an ARM control-plane PUT, which the firewall does not gate — only its dispatch-only `--inspect` mode touches the data plane. The real daily data-plane consumer is `publish-content-manifest.yml`, which the review does not mention, and `variables.tf`'s description is wrong about the same thing. (2) Closing the sentinel needs `Microsoft.DocumentDB/databaseAccounts/write` on a CI identity — there is no narrower action for the firewall, and it carries the power to reopen the firewall permanently or re-enable local auth. T-728 is now done, so that grant has a read-only identity to avoid and a narrow home to go to. Also note Cosmos firewall changes take **up to 15 minutes** to propagate with documented inconsistent behaviour meanwhile, and `ipRules` has no add/remove verb — `az cosmosdb update --ip-range-filter` replaces the whole list Terraform owns | `cosmos.tf` (was `main.tf:252-269` before the T-754 split) |
 
 **Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
 T-721 (telemetry vs SWA tier cost decision).

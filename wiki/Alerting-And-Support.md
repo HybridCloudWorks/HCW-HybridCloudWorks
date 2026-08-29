@@ -140,9 +140,10 @@ the job summary, which is legible from a phone. This exists because a green TFC
 run proves ARM *accepted* an apply, not that a rule now behaves differently, and
 because `autoMitigate` is invisible from the repository, from CI and from the
 run list — the one attribute that decides whether a firing rule mails once or
-every five minutes. The job is read-only by construction: the identity's grant
-on this group is Monitoring Reader (`infra/oidc.tf`), which carries no verb that
-can change anything, and notably not `listKeys` on the workspace. A red run
+every five minutes. The job is read-only by construction: since T-728 it runs as
+`github_reader`, an identity that writes nowhere in the estate, whose grant on
+this group is Reader (`infra/oidc.tf`) — no verb that can change anything, and
+notably not `listKeys` on the workspace. A red run
 means at least one rule is stateless or missing, and the summary says which.
 
 **The capacity alert is muted for 6 hours after it fires**, deliberately.

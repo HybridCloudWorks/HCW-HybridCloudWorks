@@ -106,15 +106,17 @@ changes behaviour without a workspace edit first:
 
 ## 4.2 GitHub repository variables
 
-Enumerated live 2026-08-25. Twenty present, and twenty is the whole list — the
-three scratch variables that used to sit here were deleted the same day (T-525),
-so a reader comparing this table against `gh variable list` should find no
-difference. Seeded from Terraform outputs by `scripts/set-github-variables.ps1`
-— never written by hand.
+Enumerated live 2026-08-25. Twenty were present then, and twenty was the whole
+list — the three scratch variables that used to sit here were deleted the same
+day (T-525). `READER_CLIENT_ID` was added to the table on 2026-08-29 (T-728) and
+is **not yet set**, so a reader comparing this against `gh variable list` should
+find exactly that one difference until the split is applied. Seeded from
+Terraform outputs by `scripts/set-github-variables.ps1` — never written by hand.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| `CLIENT_ID` | **VERIFIED** | OIDC login in every deploy workflow. Also arms `heal-computed-properties.yml`, which skips while it is unset |
+| `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml` and `heal-computed-properties.yml`. Also arms the healer, which skips while it is unset |
+| `READER_CLIENT_ID` | **NOT SET** | OIDC login for the workflows that only read — `monitor-functions-registered.yml`, `verify-alert-state.yml`, `publish-content-manifest.yml` (T-728). All three are gated on it and **skip silently while it is unset**, so seed it in the same pass as the apply: an unset value looks like three workflows not running, not like a failure |
 | `TENANT_ID` | **VERIFIED** | OIDC login |
 | `SUBSCRIPTION_ID` | **VERIFIED** | OIDC login, `az rest` calls |
 | `RESOURCE_GROUP` | **VERIFIED** | Function App deploy and firewall windows |
@@ -217,7 +219,7 @@ problem. The two cost very different amounts to diagnose.
 
 ## 4.6b Custom role definitions — owner-created, once
 
-Three custom roles are referenced by `infra/` and **not created by it**.
+Four custom roles are referenced by `infra/` and **not created by it**.
 `azurerm_role_definition` needs `Microsoft.Authorization/roleDefinitions/write`,
 and the HCP Terraform run identity is Contributor + Role Based Access Control
 Administrator. Neither carries it: Contributor excludes
@@ -235,6 +237,7 @@ the subscription:
 az role definition create --role-definition @infra/roles/cosmos-container-writer.json
 az role definition create --role-definition @infra/roles/keyvault-secret-writer.json
 az role definition create --role-definition @infra/roles/function-config-refresh.json
+az role definition create --role-definition @infra/roles/function-settings-reader.json
 ```
 
 | Role | Grants | Consumer |
@@ -242,10 +245,14 @@ az role definition create --role-definition @infra/roles/function-config-refresh
 | `HCW Cosmos Container Definition Writer` | Container definition read + write on the Cosmos account. No keys, no data plane, no account settings | `heal-computed-properties.yml` re-applying `cp_sortDate` |
 | `HCW Key Vault Secret Writer` | `setSecret` and nothing else — no get, no list, no delete, no purge | The API Keys page, so a pasted credential cannot be read back out |
 | `HCW Function Config Refresh` | `Microsoft.Web/sites/config/Write`, with `config/list/action` excluded | The API Keys page, so a seeded secret goes live in seconds rather than on App Service's 24-hour cache cycle |
+| `HCW Function Settings Reader` | `Microsoft.Web/sites/config/list/action` and nothing else | `monitor-functions-registered.yml`, the one thing the `Reader` role cannot express — listing app settings is an action, not a read |
 
-The first was created on 2026-08-21. The second and third are **new and
-unapplied** — they were declared as Terraform `resource` blocks when the API
-Keys page landed, which would have failed the very apply that turns the page on.
+The first was created on 2026-08-21. The second and third were declared as
+Terraform `resource` blocks when the API Keys page landed, which would have
+failed the very apply that turns the page on. The fourth arrived with the
+identity split (T-728). **The last three are all new and unapplied**, and the
+Terraform plan errors with "role definition not found" until each exists —
+which reads like a permissions problem and is actually this step.
 `scripts/terraform-role-definitions.test.mjs` now fails CI on the `resource`
 form, and on a `data` lookup naming a role no JSON here registers.
 
