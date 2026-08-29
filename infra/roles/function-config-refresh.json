@@ -1,0 +1,16 @@
+{
+  "Name": "HCW Function Config Refresh",
+  "IsCustom": true,
+  "Description": "Refresh Key Vault references on func-site-prod-cus-01 so a freshly seeded secret goes live in seconds instead of on App Service's 24-hour cache cycle. NotActions excludes Microsoft.Web/sites/config/list/action — the action that reads app settings back with their resolved secret values — so this cannot be used to route around the set-only vault role. Consumed by infra/keyvault.tf; created once by the owner because the Terraform identity deliberately lacks Microsoft.Authorization/roleDefinitions/write.",
+  "Actions": [
+    "Microsoft.Web/sites/config/Write"
+  ],
+  "NotActions": [
+    "Microsoft.Web/sites/config/list/action"
+  ],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/b9e02281-ebb6-49e9-bd7b-f275b1350726/resourceGroups/rg-web-site-prod-cus"
+  ]
+}

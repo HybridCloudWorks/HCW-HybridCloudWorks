@@ -15,44 +15,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { checkPlan, classify, EXPECTED } from './assert-expected-plan.mjs';
-
-const INFRA = join(fileURLToPath(new URL('..', import.meta.url)), 'infra');
-
-/**
- * The whole Terraform root module as one string.
- *
- * This test used to read `main.tf` alone, which left a real hole: it matches
- * `^resource "azapi_..."` to check that EXPECTED names every azapi resource,
- * and an azapi resource declared in `observability.tf`, `oidc.tf` or `hub.tf`
- * was simply invisible to it. The allowlist would look complete while missing
- * an entry, and that resource's permanent replacement would then be reported as
- * drift — training an operator to ignore the one tool that tells them the plan
- * is wrong.
- *
- * Terraform reads every `.tf` in a directory as one module; so does this now.
- *
- * Deliberately duplicated from `functions/test/terraform-source.js` rather than
- * imported: `scripts/` and `functions/` are independent npm packages with no
- * workspace between them, and reaching across that boundary to share eight
- * lines would couple two packages that are otherwise unrelated. Change both.
- */
-const MIN_TF_FILES = 4;
-function terraformSource() {
-  const names = readdirSync(INFRA)
-    .filter((name) => name.endsWith('.tf'))
-    .sort();
-  if (names.length < MIN_TF_FILES) {
-    throw new Error(
-      `Expected at least ${MIN_TF_FILES} .tf files in ${INFRA}, found ${names.length}. ` +
-        'The path is wrong — reading on would compare empty lists and pass.'
-    );
-  }
-  return names.map((name) => readFileSync(join(INFRA, name), 'utf8')).join('\n');
-}
+// The module-reading helper moved to its own file when a second check needed
+// it (terraform-role-definitions.test.mjs). Same eight lines, one copy.
+import { terraformSource } from './terraform-source.mjs';
 
 /** A plan carrying exactly the known permanent diff. */
 const expectedPlan = () => ({
