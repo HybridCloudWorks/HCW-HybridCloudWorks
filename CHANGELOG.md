@@ -17,6 +17,41 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **"Immediate: restore admin access" deleted; it had been fixed for some time
+  (2026-08-29).** The section described a live `403` from
+  `POST /api/bootstrapCurrentUserAdmin` and asked for the Entra `Admin` app role
+  to be assigned. The owner confirmed the portal loads and signs in immediately,
+  so the role is assigned and the 403 is gone. It had been sitting at the very
+  top of the tracker marked **Immediate** — the loudest item in the document,
+  describing something already done. Same shape as T-526, where three files
+  insisted on work that was finished. The `Admin` app role assignment survives
+  as one clause of the Entra row, which is where a standing requirement belongs.
+
+- **`scripts/cutover/07-check-plan.ps1`: the plan assertion in one command
+  (2026-08-29, toward T-724).** `assert-expected-plan.mjs` has existed since
+  T-724 and compares a plan against the known permanent diff **by resource
+  address**; what nobody had automated was getting a plan into a file to feed
+  it, so it was run by hand or not at all. This resolves the workspace's latest
+  run, downloads the JSON plan, runs the checker and reports the verdict.
+
+  Why the summary line cannot be the check, stated in the script: the azapi
+  read-then-strip pair working around `azurerm#29149` means every plan reports a
+  diff, and the steady state is 3 add / 1 change / 3 destroy. Three *different*
+  replacements produce the same three numbers.
+
+  Two failure modes are called out because both mislead. The `json-output`
+  endpoint answers **404 for a token without workspace admin** — including any
+  organization token — which reads like a missing plan rather than a permissions
+  problem. And the checker **exits 1 by design** to mean "unexpected plan", which
+  PowerShell 7.4+ turns into a thrown native-command error under
+  `$ErrorActionPreference = 'Stop'`; unsuppressed, the one outcome the script
+  exists to report clearly would have surfaced as a raw stack trace. Caught by
+  inspection, being the same trap already fixed in `05-verify-timer.ps1`.
+
+  The downloaded plan carries sensitive variable values and copies of state, so
+  it goes straight to a temp file, never into a shell variable, and is deleted in
+  `finally` including on Ctrl-C.
+
 - **Follow-up to the `main.tf` split: the counts it left wrong (2026-08-29).**
   Removing T-754's row from TODO.md left the summary table reading `Low | 2 /
   Total | 9` over a list of eight, and the prose still said "seven of the nine".
