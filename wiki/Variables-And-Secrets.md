@@ -62,7 +62,7 @@ record of that decision is the artefact.
 
 | Outcome | Meaning | Examples in this repository |
 | --- | --- | --- |
-| **Derived** | Terraform computes it from a resource it already manages, or a workflow fetches it after OIDC login. Nobody types it anywhere | `COSMOS_ENDPOINT`, `KEY_VAULT_URI`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_ACCOUNT_NAME`, `AZURE_OPENAI_ENDPOINT` — all set from resource attributes in `infra/main.tf` |
+| **Derived** | Terraform computes it from a resource it already manages, or a workflow fetches it after OIDC login. Nobody types it anywhere | `COSMOS_ENDPOINT`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_ACCOUNT_NAME`, `AZURE_OPENAI_ENDPOINT` — all set from resource attributes in `infra/main.tf` |
 | **Deliberately absent** | The value must *not* exist. Provisioning it changes behaviour for the worse | `COSMOS_KEY`, `AZURE_OPENAI_KEY`, `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` |
 | **Generated in place** | The value is created on the host that consumes it and never moves | `LABS_AGENT_CERT_PATH` — the agent's private key is generated on the VPS, root-owned, `0600`, and only the public certificate is uploaded |
 
@@ -273,14 +273,28 @@ Terraform run at all.
 
 ### Multi-line and oversized secrets
 
-Two values are deliberately *not* app settings even though they are Key Vault
-secrets: the GCP service-account JSON (~2.3 KB, multi-line) and
-`GITHUB-APP-PRIVATE-KEY` (an RSA PEM). App settings are visible in the portal
-and in `az webapp config appsettings list`, and multi-line values survive that
-round trip badly. Both are read at run time through
-`functions/src/lib/key-vault.js` instead. The rule generalises: **single-line
-secret → app setting holding a vault reference; multi-line or large secret →
-`getSecret()` at run time.**
+**There are none left, and the run-time read path was deleted with them
+(2026-08-29).** This section used to describe two: the GCP service-account JSON
+(~2.3 KB, multi-line) and `GITHUB-APP-PRIVATE-KEY` (an RSA PEM). App settings
+are visible in the portal and in `az webapp config appsettings list`, and
+multi-line values survive that round trip badly, so both were read at run time
+through `functions/src/lib/key-vault.js` — a vault SDK client, a `KEY_VAULT_URI`
+setting and a data-plane RBAC grant, serving two callers.
+
+Then one of them stopped being multi-line and the other turned out to have no
+caller at all. GCP pricing reads the Cloud Billing Catalog API, which Google
+documents as API-key authenticated: a single string, now the app setting
+`GCP_BILLING_API_KEY` holding an ordinary vault reference. `GITHUB-APP-PRIVATE-KEY`
+is read by nothing in the ported code. `key-vault.js` had zero call sites after
+the first change, so it is gone, and with it `@azure/keyvault-secrets`,
+`google-auth-library` and `KEY_VAULT_URI`.
+
+The rule that remains is simpler than the one it replaces: **every secret is an
+app setting holding a `@Microsoft.KeyVault(SecretUri=…)` reference, resolved by
+the host before the process starts.** No exceptions, which is what makes
+`app-settings-secrets.test.js`'s allowlist empty. A value too large or too
+multi-line for an app setting is a reason to reconsider the value — as it was
+here, twice — before it is a reason to reintroduce a run-time vault client.
 
 ---
 
@@ -302,10 +316,10 @@ Seeded by hand; referenced from `infra/main.tf` app settings as
 | `PUBLER-API-KEY`, `PUBLER-WORKSPACE-ID`, `KLAVIYO-PRIVATE-KEY`, `KLAVIYO-LIST-ID` | not inventoried | The two `*-ID` values are identifiers rather than credentials, but they travel with their key and splitting them across stores buys nothing |
 | `TELEGRAM-BOT-TOKEN`, `TELEGRAM-CHAT-ID` | not inventoried | As above |
 | `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
-| `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM — read via `getSecret()`, never an app setting |
-| GCP service-account JSON | not inventoried | Multi-line, ~2.3 KB — read via `getSecret()` |
+| `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
+| `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by `main.tf` and read by nothing** — it has no app setting and no seeding path, deliberately |
 
-`infra/main.tf` declares **20** `@Microsoft.KeyVault` references plus two
+`infra/main.tf` declares **21** `@Microsoft.KeyVault` references and no
 run-time reads. CHECKLIST §1–§8 inventories a handful of them. That gap is
 recorded below rather than papered over.
 
@@ -382,7 +396,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 
 | Value | CHECKLIST | Outcome |
 | --- | --- | --- |
-| `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `KEY_VAULT_URI`, `AZURE_OPENAI_ENDPOINT` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/main.tf` |
+| `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `AZURE_OPENAI_ENDPOINT` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/main.tf` |
 | `NODE_ENV`, `REGION_NAME`, `WEBSITE_SITE_NAME` | §5 | Host-provided, or a literal in `main.tf` |
 | `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the eighteen per-timer flags via `local.timer_flags`. Both still resolve to `"false"` today. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
 | `ENTRA_TENANT_ID`, `ENTRA_API_AUDIENCE` (app settings) | §1 | Derived from store 2 Terraform variables |
@@ -443,20 +457,22 @@ credential the architecture removed.
 Two record-keeping gaps, which are not misplacements but do make the inventory
 unusable as a seeding checklist:
 
-- **The Key Vault contents are under-inventoried.** `main.tf` declares 20
-  `@Microsoft.KeyVault` references plus `GITHUB-APP-PRIVATE-KEY` and the GCP
-  service-account JSON read at run time; CHECKLIST §1–§8 lists only a few of
-  them. Every one of those resolves to empty until seeded, and an unseeded
-  reference fails at *first invocation in production*, not at deploy — the
-  failure mode the vault seeding runbook exists to prevent.
-- **`functions/src/lib/key-vault.js` has exactly one call site**, and it is
-  narrow: `functions/src/lib/cloud-tools/pricing/gcp.js` imports `getSecret`
-  for the GCP service-account JSON. Every other secret reaches the app through
-  an `@Microsoft.KeyVault(...)` app setting resolved by the host, not through
-  this module. That matters for the seeding runbook: an app-setting reference
-  fails the whole app at startup, whereas this one path fails only GCP pricing
-  and only when that tool is invoked — so a missing value here is invisible
-  until a specific feature is used.
+- **The Key Vault contents are under-inventoried.** `main.tf` declares 21
+  `@Microsoft.KeyVault` references; CHECKLIST §1–§8 lists only a few of them.
+  Every one of those resolves to empty until seeded, and an unseeded reference
+  fails at *first invocation in production*, not at deploy — the failure mode
+  the vault seeding runbook exists to prevent. `/api/health` now reports
+  `unresolvedSecrets` as a count, which turns that class of failure into one
+  number, but nothing alerts on it yet.
+- **There is no longer a second way in.** This entry used to record that
+  `functions/src/lib/key-vault.js` had exactly one call site — `gcp.js`, for the
+  service-account JSON — and that its failure mode was different from every
+  other secret's: an app-setting reference fails the whole app at startup,
+  whereas that one path failed only GCP pricing, and only when that tool was
+  invoked, so a missing value was invisible until a specific feature was used.
+  That asymmetry is gone. The module was deleted on 2026-08-29 when its one
+  caller moved to an API key, so every secret now has the same, louder failure
+  mode.
 
 Nothing in this section renames a value that is currently set. `CLIENT_ID`,
 `TENANT_ID`, `SUBSCRIPTION_ID`, `APP_HOSTNAME` and `RESOURCE_GROUP` are set and

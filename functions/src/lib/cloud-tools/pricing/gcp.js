@@ -8,21 +8,31 @@
  * Two things are deliberately different.
  *
  * ===========================================================================
- * 1. CREDENTIALS — Key Vault, not Application Default Credentials
+ * 1. CREDENTIALS — AN API KEY, WHICH IS WHAT GOOGLE DOCUMENTS
  * ===========================================================================
- * The source used `new GoogleAuth({scopes})`, i.e. ADC, which resolves from a
- * GCE metadata server or a well-known file. Neither exists on Azure. A
- * service-account JSON is loaded from Key Vault instead and passed explicitly.
+ * The Cloud Billing Catalog API serves the PUBLIC price list. Google's own
+ * guide says so plainly: "Before you can use the Cloud Billing Catalog API,
+ * you'll need to enable the Cloud Billing API and get an API key." It is not
+ * user data, and it needs no user identity.
  *
- * The runtime Key Vault lookup is used rather than an app-setting Key Vault
- * reference, unlike the AWS keys: a service-account JSON is a ~2.3 KB
- * multi-line blob, and app settings are visible in the portal and in
- * `az webapp config appsettings list`.
+ * Two earlier designs got this wrong in different directions. The source used
+ * Application Default Credentials, which resolve from a GCE metadata server or
+ * a well-known file — neither of which exists on Azure. The port replaced that
+ * with a service-account JSON pulled from Key Vault at runtime, which worked
+ * but dragged in an OAuth library, a Key Vault SDK client, a `KEY_VAULT_URI`
+ * app setting, a 2.3 KB multi-line secret and a bespoke seeding script — a
+ * signed-JWT token exchange, to read a public price list, on a page that shows
+ * visitors comparative pricing.
  *
- * `getSecret` swallows errors and returns null (`key-vault.js:37-40`). That is
- * wrong for a credential — a misconfigured vault would look like "GCP has no
- * price for this service" and produce a silent baseline row. This module
- * THROWS when the secret is absent, so it is logged as the fault it is.
+ * An API key is a single string. It arrives the same way every other provider
+ * credential in this codebase does: an app setting that is a Key Vault
+ * reference, read through `readKey`, which already treats an unresolved
+ * reference as absent. No SDK, no token exchange, no special case.
+ *
+ * ABSENCE STILL THROWS, and that has not changed. A null here would be
+ * indistinguishable from "GCP has no price for this service" and would
+ * silently become a baseline row — a comparison table quietly showing stale
+ * numbers is worse than one that errors.
  *
  * ===========================================================================
  * 2. FILTER BEFORE ACCUMULATING
@@ -37,9 +47,7 @@
  * fraction of the retained objects. The 30-page cap is kept.
  */
 
-import { GoogleAuth } from 'google-auth-library';
-
-import { getSecret } from '../../key-vault.js';
+import { readKey } from '../../ai/router.js';
 import {
   GCP_MESSAGING_BENCHMARK_BYTES,
   MESSAGING_BENCHMARK_SKU,
@@ -53,8 +61,13 @@ import {
   resolveProviderRegion,
 } from './shared.js';
 
-/** Key Vault secret holding the GCP service-account JSON. No underscores allowed. */
-const GCP_CREDENTIAL_SECRET = 'GCP-SERVICE-ACCOUNT-JSON';
+/**
+ * App setting holding the Cloud Billing API key.
+ *
+ * UPPER_SNAKE here, UPPER-KEBAB in the vault (`GCP-BILLING-API-KEY`) — Key
+ * Vault forbids underscores, which is the whole reason for the two spellings.
+ */
+export const GCP_API_KEY_SETTING = 'GCP_BILLING_API_KEY';
 
 const BILLING_API = 'https://cloudbilling.googleapis.com/v1';
 const MAX_SKU_PAGES = 30;
@@ -75,59 +88,35 @@ export const GCP_SERVICE_NAMES = {
 // Credentials
 // ---------------------------------------------------------------------------
 
-let cachedAuth = null;
-
 /**
- * Build a GoogleAuth client from the Key Vault service-account JSON.
- * Memoised — the source constructed a client per call.
+ * The Cloud Billing API key.
+ *
+ * `readKey` returns '' for an unresolved `@Microsoft.KeyVault(...)` reference
+ * as well as for an absent setting, so an unseeded secret and a broken vault
+ * grant reach this the same way — and both are faults, not "no price".
  */
-export async function getGoogleAuth(deps = {}) {
-  if (cachedAuth) return cachedAuth;
-
-  const fetchSecret = deps.getSecret ?? getSecret;
-  const raw = await fetchSecret(GCP_CREDENTIAL_SECRET);
-
-  if (!raw) {
-    // Deliberately a throw, not a null. A missing credential is a fault, and a
-    // null here would be indistinguishable from "this service has no GCP
-    // price" and would silently become a baseline row.
+export function getGcpApiKey(deps = {}) {
+  const env = deps.env ?? process.env;
+  const key = deps.apiKey ?? readKey(env, GCP_API_KEY_SETTING);
+  if (!key) {
     throw new Error(
-      `GCP pricing credential unavailable: Key Vault secret ${GCP_CREDENTIAL_SECRET} is missing or unreadable`
+      `GCP pricing credential unavailable: app setting ${GCP_API_KEY_SETTING} is unset or its ` +
+        'Key Vault reference did not resolve'
     );
   }
-
-  let credentials;
-  try {
-    credentials = JSON.parse(raw);
-  } catch {
-    throw new Error(`GCP pricing credential malformed: ${GCP_CREDENTIAL_SECRET} is not valid JSON`);
-  }
-
-  cachedAuth = new GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-  });
-  return cachedAuth;
-}
-
-async function getGoogleAccessToken(deps = {}) {
-  if (deps.accessToken) return deps.accessToken;
-
-  const auth = await getGoogleAuth(deps);
-  const client = await auth.getClient();
-  const token = await client.getAccessToken();
-  return typeof token === 'string' ? token : token?.token || null;
+  return key;
 }
 
 let cachedGoogleServices = null;
 
-async function getGoogleServices(accessToken, deps = {}) {
+async function getGoogleServices(apiKey, deps = {}) {
   if (cachedGoogleServices) return cachedGoogleServices;
 
   const doFetch = deps.fetch ?? globalThis.fetch;
-  const response = await doFetch(`${BILLING_API}/services?pageSize=5000`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const url = new URL(`${BILLING_API}/services`);
+  url.searchParams.set('pageSize', '5000');
+  url.searchParams.set('key', apiKey);
+  const response = await doFetch(url);
   if (!response.ok) throw new Error(`Google services list returned ${response.status}`);
 
   const json = await response.json();
@@ -138,7 +127,6 @@ async function getGoogleServices(accessToken, deps = {}) {
 /** Drop memoised GCP state. Called by clearPricingCaches, and by tests. */
 export function resetGoogleCaches() {
   cachedGoogleServices = null;
-  cachedAuth = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,8 +289,8 @@ export async function fetchGcpPrice(serviceId, requestedRegion, deps = {}) {
   const providerRegion = resolveProviderRegion(requestedRegion, 'gcp');
   const doFetch = deps.fetch ?? globalThis.fetch;
 
-  const accessToken = await getGoogleAccessToken(deps);
-  const services = await getGoogleServices(accessToken, deps);
+  const apiKey = getGcpApiKey(deps);
+  const services = await getGoogleServices(apiKey, deps);
   const service = services.find((item) => item.displayName === serviceName);
   if (!service?.name) return null;
 
@@ -316,8 +304,9 @@ export async function fetchGcpPrice(serviceId, requestedRegion, deps = {}) {
     const url = new URL(`${BILLING_API}/${service.name}/skus`);
     url.searchParams.set('pageSize', '5000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
+    url.searchParams.set('key', apiKey);
 
-    const response = await doFetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const response = await doFetch(url);
     if (!response.ok) throw new Error(`Google SKUs returned ${response.status}`);
 
     const json = await response.json();
