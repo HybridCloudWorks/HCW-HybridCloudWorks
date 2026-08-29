@@ -1,0 +1,14 @@
+{
+  "Name": "HCW Function Settings Reader",
+  "IsCustom": true,
+  "Description": "List app settings on sites in rg-web-site-prod-cus. The one thing the read-only monitor needs that the Reader role cannot express: listing app settings is Microsoft.Web/sites/config/list/action, an action rather than a read, so */read does not cover it. Consumed by infra/oidc.tf for monitor-functions-registered.yml; created once by the owner because the Terraform identity deliberately lacks Microsoft.Authorization/roleDefinitions/write.",
+  "Actions": [
+    "Microsoft.Web/sites/config/list/action"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/b9e02281-ebb6-49e9-bd7b-f275b1350726/resourceGroups/rg-web-site-prod-cus"
+  ]
+}

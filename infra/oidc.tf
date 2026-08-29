@@ -203,40 +203,144 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
   principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
-# Read the workload alert rules, so their LIVE state can be verified after an
-# apply (.github/workflows/verify-alert-state.yml).
+# ---------------------------------------------------------------------------
+# THE READ-ONLY IDENTITY (T-728)
+# ---------------------------------------------------------------------------
 #
-# THE GAP THIS CLOSES. Applies run in TFC on a human's confirmation, and a
-# green run proves ARM accepted the change — not that the deployed rule now
-# behaves differently. For the alert fabric those come apart precisely where it
-# matters: `autoMitigate` decides whether a firing rule mails once or every
-# five minutes (ADR 0022 decision 6), and nothing in the repository, in CI, or
-# in the TFC run list can show its value. This grant is what lets a workflow
-# read it back.
+# Until 2026-08-29 one identity served every workflow. The hourly registration
+# monitor and the alert-state verifier — which read and change nothing — ran as
+# the identity that also holds Website Contributor on the API, Storage Account
+# Contributor and Storage Blob Data Contributor on the host storage account, and
+# the Cosmos container-definition role. A postinstall script anywhere in a
+# scheduled workflow's dependency tree inherited the full deploy blast radius,
+# for jobs whose entire job is to look.
 #
-# MONITORING READER, not Reader. Both satisfy the requirement — the operation
-# is a control-plane GET on Microsoft.Insights/scheduledQueryRules, which
-# `*/read` covers — and the two differ in what ELSE they carry at this scope.
-# Reader grants read over every resource in the group: the Function App's
-# configuration, the storage account, the Application Insights component. This
-# identity already deploys to that Function App, so the marginal risk is small,
-# but "small" is not "none" and the narrower role names the actual job. Note
-# what Monitoring Reader deliberately does NOT carry, which is the point:
-# `listKeys` on the workspace, so this identity cannot read the ingestion keys
-# and so cannot forge or drown the telemetry the rules evaluate — the same
-# reasoning that chose Log Analytics Reader for the alert identities themselves
-# (ADR 0022 decision 4).
+# So there are two identities now, and the division is what the job DOES, not
+# which team owns it:
 #
-# SCOPE IS THE RESOURCE GROUP, not the individual rules. Three rules live here
-# and a fourth would be a fourth role assignment; more importantly a per-rule
-# grant would have to be re-declared every time a rule is renamed, which is
-# exactly the coupling that leaves a verification path quietly broken. The
-# group is the smallest scope that survives the rules changing.
-resource "azurerm_role_assignment" "github_deploy_alert_reader" {
-  scope                = azurerm_resource_group.app["web"].id
-  role_definition_name = "Monitoring Reader"
-  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
+#   github_deploy   writes something      deploy-functions, heal-computed-properties
+#   github_reader   writes nothing        monitor-functions-registered,
+#                                         verify-alert-state, publish-content-manifest
+#
+# publish-content-manifest is on the reader side deliberately, though the
+# finding's recommendation named only the first two. Its build job queries
+# Cosmos and writes a JSON file into the repository — it has never needed a
+# data-plane write, and it held Cosmos Data Contributor because it shared an
+# identity with the healer. Splitting the identity without splitting that job
+# would leave the finding half closed.
+#
+# Both workflows on this identity declare no `environment:`, so both present the
+# ref-form subject and both forms are trusted, for the reasons above the
+# immutable block. scripts/oidc-subjects.test.mjs checks per identity now, not
+# against one pool of subjects: a reader workflow needs a credential on THIS
+# identity, and a pooled check would have passed on the deploy identity's.
+resource "azurerm_user_assigned_identity" "github_reader" {
+  name                = "id-${var.workload_name}-github-reader-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
+  tags                = local.tags
 }
+
+resource "azurerm_federated_identity_credential" "github_reader_branch" {
+  name                      = "github-${var.github_repo}-reader-branch"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_reader.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_org}/${var.github_repo}:ref:${var.github_deploy_ref}"
+}
+
+resource "azurerm_federated_identity_credential" "github_reader_branch_immutable" {
+  name                      = "github-${var.github_repo}-reader-branch-immutable"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_reader.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_immutable_prefix}:ref:${var.github_deploy_ref}"
+}
+
+# READER, not Monitoring Reader — and this reverses what the deploy identity
+# carried, on a claim that was simply wrong.
+#
+# The removed block chose Monitoring Reader over Reader and argued it was the
+# narrower of the two: "Reader grants read over every resource in the group ...
+# the narrower role names the actual job." Monitoring Reader is not narrower.
+# Checked against Microsoft's published definition rather than from memory, it
+# is `*/read` PLUS Microsoft.OperationalInsights/workspaces/search/action and
+# Microsoft.Support/* — a strict superset of Reader, which is `*/read` alone.
+# Choosing it widened the grant while the comment claimed it narrowed it.
+#
+# The rest of that reasoning survives and applies here: neither role carries
+# listKeys on the workspace, so this identity cannot read the ingestion keys and
+# so cannot forge or drown the telemetry the alert rules evaluate.
+#
+# SCOPE IS THE RESOURCE GROUP. It holds the Function App, its plan, the Static
+# Web App, Application Insights and the Functions host storage account, and the
+# monitor reads across the first and the last of those. A per-resource grant
+# would have to be re-declared every time a rule or resource is renamed, which
+# is the coupling that leaves a verification path quietly broken.
+resource "azurerm_role_assignment" "github_reader_web" {
+  scope                = azurerm_resource_group.app["web"].id
+  role_definition_name = "Reader"
+  principal_id         = azurerm_user_assigned_identity.github_reader.principal_id
+}
+
+# The one thing Reader cannot express. monitor-functions-registered reads two
+# app settings — AzureWebJobsStorage's presence and RUNTIME_CONFIG_WRITER's
+# value, both symptoms of the azapi strip regressing — and listing app settings
+# is Microsoft.Web/sites/config/list/action. An action, not a read, so `*/read`
+# does not reach it.
+#
+# WHAT THIS CAN AND CANNOT SEE, because it looks alarming next to
+# func_config_refresh, which excludes this exact action. The two are different
+# principals with opposite jobs: the Function App may refresh its settings and
+# must not read them back, and this identity may read them and can change
+# nothing. And what it reads is bounded — every credential in this estate is a
+# @Microsoft.KeyVault(SecretUri=...) reference, so the list returns the
+# reference string, not the resolved secret. That is not a convention anyone has
+# to remember: functions/src/functions/app-settings-secrets.test.js fails CI on a
+# literal secret value in app_settings, with a short allowlist of non-secrets.
+data "azurerm_role_definition" "function_settings_reader" {
+  name  = "HCW Function Settings Reader"
+  scope = azurerm_resource_group.app["web"].id
+}
+
+resource "azurerm_role_assignment" "github_reader_function_settings" {
+  scope              = azurerm_resource_group.app["web"].id
+  role_definition_id = data.azurerm_role_definition.function_settings_reader.id
+  principal_id       = azurerm_user_assigned_identity.github_reader.principal_id
+}
+
+# publish-content-manifest queries published articles and writes a file. READER,
+# where the shared identity gave it Data Contributor: 00000000-...-0001 is the
+# built-in Data Reader, 0002 the Data Contributor the deploy identity keeps.
+#
+# `name` omitted for the same reason as every other data-plane assignment here:
+# the provider generates a stable GUID, and a duplicated hardcoded name silently
+# REPLACES another identity's assignment instead of erroring.
+resource "azurerm_cosmosdb_sql_role_assignment" "github_reader_cosmos_content" {
+  resource_group_name = azurerm_resource_group.app["db"].name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000001"
+  principal_id        = azurerm_user_assigned_identity.github_reader.principal_id
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["content"].name}"
+}
+
+resource "azurerm_cosmosdb_sql_role_assignment" "github_reader_cosmos_blogs" {
+  resource_group_name = azurerm_resource_group.app["db"].name
+  account_name        = azurerm_cosmosdb_account.hcw.name
+  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000001"
+  principal_id        = azurerm_user_assigned_identity.github_reader.principal_id
+  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["blogs"].name}"
+}
+
+# REMOVED 2026-08-29 (T-728): azurerm_role_assignment.github_deploy_alert_reader,
+# Monitoring Reader on rg-web for the deploy identity.
+#
+# It existed so verify-alert-state.yml could read the live rules back. That
+# workflow is on github_reader now, and the deploy identity needs nothing from
+# it: deploy-functions.yml reads the Function App through Website Contributor
+# (Microsoft.Web/sites/*, which covers the function list, the access
+# restrictions and the app-settings list) and the host storage account through
+# Storage Account Contributor. Nothing it does touches Microsoft.Insights.
 
 # Deliberately NOT granted to the active deployment path:
 #   - Key Vault access. Deploys do not read secrets; the Function App's own
@@ -396,22 +500,35 @@ output "client_id" {
   value       = azurerm_user_assigned_identity.github_deploy.client_id
 }
 
+output "reader_client_id" {
+  description = "READER_CLIENT_ID for azure/login in the read-only workflows — a repository variable, not a secret"
+  value       = azurerm_user_assigned_identity.github_reader.client_id
+}
+
 output "deploy_principal_id" {
   description = "Principal ID of the GitHub deployment identity — for granting further roles"
   value       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
-# Four entries since 2026-08-26, down from six: the data-migration pair was
-# retired (T-524). Keeping this list in step with the resources above is not
+# Six entries since 2026-08-29, up from four: the reader identity's ref pair was
+# added (T-728). Keeping this list in step with the resources above is not
 # cosmetic — it is what an operator diffs a failing token's subject against, so
 # it has to name exactly what Entra trusts. Deleting the credentials without
-# deleting these two entries is what broke `terraform validate` on PR #230.
+# deleting the entries is what broke `terraform validate` on PR #230.
+#
+# NOTE for anyone debugging AADSTS700213 against this list: the two identities
+# trust the SAME ref subject, deliberately. A ref-form token is valid for either,
+# and which one a job gets is decided by the client-id it presents, not by the
+# subject. So a subject appearing here does not tell you the workflow reached the
+# identity you expected — check whether it sent CLIENT_ID or READER_CLIENT_ID.
 output "federated_subjects" {
-  description = "Exact OIDC subject claims trusted by this identity — compare against a failing token"
+  description = "Exact OIDC subject claims trusted by these identities — compare against a failing token"
   value = [
     azurerm_federated_identity_credential.github_branch.subject,
     azurerm_federated_identity_credential.github_production.subject,
     azurerm_federated_identity_credential.github_branch_immutable.subject,
     azurerm_federated_identity_credential.github_production_immutable.subject,
+    azurerm_federated_identity_credential.github_reader_branch.subject,
+    azurerm_federated_identity_credential.github_reader_branch_immutable.subject,
   ]
 }

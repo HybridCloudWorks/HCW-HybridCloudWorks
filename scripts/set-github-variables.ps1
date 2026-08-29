@@ -13,6 +13,7 @@
     Wave 2 - everything that is a Terraform output, read from the workspace's
              applied state via the HCP Terraform API (the same token
              set-tfc-variables.ps1 resolves): CLIENT_ID (client_id),
+             READER_CLIENT_ID (reader_client_id),
              APP_HOSTNAME (function_hostname), FUNCTIONS_URL (api_base_url),
              FUNCTION_APP_NAME, RESOURCE_GROUP (web_resource_group),
              FUNCTIONS_STORAGE_ACCOUNT, STORAGE_ACCOUNT,
@@ -298,6 +299,12 @@ if (-not $script:tfcToken) {
 if ($outputs) {
   $waveTwo = @(
     @{ output = 'client_id'; kind = 'variable'; name = 'CLIENT_ID'; transform = { param($v) $v } }
+    # T-728: the read-only identity. monitor-functions-registered,
+    # verify-alert-state and publish-content-manifest are gated on this
+    # variable being non-empty and SKIP until it is set, so a missing
+    # READER_CLIENT_ID presents as three workflows quietly not running
+    # rather than as a failure. Seed it in the same pass as CLIENT_ID.
+    @{ output = 'reader_client_id'; kind = 'variable'; name = 'READER_CLIENT_ID'; transform = { param($v) $v } }
     @{ output = 'function_hostname'; kind = 'variable'; name = 'APP_HOSTNAME'; transform = { param($v) $v } }
     # api_base_url, NOT function_hostname. This was built from the
     # azurewebsites.net origin until 2026-08-20, which stopped working the

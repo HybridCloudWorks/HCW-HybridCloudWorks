@@ -60,6 +60,18 @@ concurrency:
 jobs:
   build:
     name: Read Cosmos and build the manifest
+    # READER_CLIENT_ID, not CLIENT_ID (T-728). This job queries published
+    # articles and writes a JSON file into the repository — it has never needed a
+    # data-plane write, and it held Cosmos Data Contributor only because it
+    # shared an identity with the healer. It now runs as the read-only identity
+    # with Cosmos Data READER.
+    #
+    # The self-arming gate matches monitor-functions-registered and
+    # verify-alert-state: until the apply lands and the variable is seeded, this
+    # skips rather than failing at azure/login on an empty client-id. `commit`
+    # needs this job, so it skips with it and the manifest simply stays at its
+    # last committed version.
+    if: ${{ vars.READER_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read # checkout only — this job must never be able to push
@@ -78,7 +90,7 @@ jobs:
       - name: Azure login
         uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
         with:
-          client-id: ${{ vars.CLIENT_ID }}
+          client-id: ${{ vars.READER_CLIENT_ID }}
           tenant-id: ${{ vars.TENANT_ID }}
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
 
