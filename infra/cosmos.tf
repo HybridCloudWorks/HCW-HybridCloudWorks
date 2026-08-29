@@ -84,10 +84,23 @@ resource "azurerm_cosmosdb_account" "hcw" {
   #   - the Functions integration subnet (the app's runtime path — requires
   #     the Microsoft.AzureCosmosDB service endpoint on that subnet);
   #   - Azure datacenter IPs when cosmos_allow_azure_datacenter_ips is true —
-  #     the documented "0.0.0.0" sentinel. This is what keeps the
-  #     heal-computed-properties workflow working from GitHub-hosted runners
-  #     (which run in Azure). Drop it once that job runs from an in-VNet
-  #     runner; it narrows exposure to Azure tenants, not the open internet;
+  #     the documented "0.0.0.0" sentinel, which narrows exposure to Azure
+  #     tenants rather than the open internet. It is held open by
+  #     publish-content-manifest.yml, which queries published articles from a
+  #     GitHub-hosted runner daily.
+  #
+  #     NOT by heal-computed-properties, which this comment said until
+  #     2026-08-29: that workflow's automatic path sets computedProperties
+  #     through ARM, which this firewall does not gate at all. Only its
+  #     dispatch-only --inspect mode reads documents.
+  #
+  #     Keeping it is a recorded decision (T-718,
+  #     wiki/0025-cosmos-firewall-datacenter-sentinel.md): every way of closing
+  #     it hands a CI identity databaseAccounts/write — the power to reopen this
+  #     firewall permanently or re-enable key auth — in the same job that reads
+  #     the data, because separate jobs get separate runner IPs. While it stands,
+  #     local_authentication_enabled = false below is the control, not a second
+  #     layer;
   #   - any operator IPs in cosmos_admin_ip_rules (smoke tier 2), empty in
   #     steady state.
   # Management-plane (ARM) operations — Terraform itself — are not gated by
