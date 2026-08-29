@@ -107,13 +107,17 @@ engineering work on them is done.
   `scripts/assert-expected-plan.mjs` fails when a plan contains anything but the
   known permanent diff, but the plan lives in HCP Terraform and
   `iac-validate.yml` has no workspace token, so it is run by hand today.
-  **`scripts/cutover/07-check-plan.ps1` is now that hand-run**, in one command:
-  it resolves the workspace's latest run, downloads the JSON plan, feeds the
-  checker and reports the verdict. It needs a HCP Terraform **user or team**
-  token with admin access to `hcw/hcw-azure` — an *organization* token cannot
-  read `json-output` and fails with 404, which reads like a missing plan rather
-  than a permissions problem. Wiring the same check into `iac-validate.yml`
-  needs that token as a repository secret and is still open.
+  **`scripts/check-tfc-plan.mjs` is now that hand-run**, in one command:
+
+      TFC_TOKEN=... node scripts/check-tfc-plan.mjs
+
+  It resolves the workspace's latest run, fetches the JSON plan, calls
+  `checkPlan` directly and reports the verdict. Needs a HCP Terraform **user or
+  team** token with admin access to `hcw/hcw-azure` — an *organization* token
+  cannot read `json-output` and fails with 404, which reads like a missing plan
+  rather than a permissions problem. Wiring the same check into
+  `iac-validate.yml` needs that token as a repository secret and is still open;
+  the script is already Node so it runs on `ubuntu-latest` unchanged.
 - **A scheduled-query alert on `unresolvedSecrets` (from T-720).**
   `/api/health` now reports how many app settings arrived as an unresolved
   `@Microsoft.KeyVault(…)` reference. It is 0 in a healthy estate; an alert on

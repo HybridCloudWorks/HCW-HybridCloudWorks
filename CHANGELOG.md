@@ -17,6 +17,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The plan-check tool was PowerShell for an hour, and that was the wrong
+  language (2026-08-29).** `07-check-plan.ps1` shipped in #271 and was replaced
+  by `scripts/check-tfc-plan.mjs` before it was ever successfully run. Two
+  reasons, both mine to have seen first. The other cutover scripts are
+  PowerShell because they drive the Azure CLI from a Windows desktop; this one
+  only feeds a Node script. And T-724's remaining half is running this inside
+  `iac-validate.yml` — on `ubuntu-latest`, where a `.ps1` is the wrong artefact.
+  It also failed the simpler test of being runnable at the bash prompt the owner
+  was actually sitting at: `bash: ./scripts/cutover/07-check-plan.ps1: No such
+  file or directory`.
+
+  Calling `checkPlan` directly instead of shelling out removed three problems
+  the PowerShell version needed code to handle: **no temp file**, so the plan's
+  sensitive variable values and copies of state never touch disk; no deletion
+  path to get wrong; and no native exit-code trap, since the checker exits 1 to
+  mean "unexpected plan" and PowerShell 7.4+ turns that into a thrown error.
+
+  **Running it found something the inspection pass could not.** An invalid token
+  is refused with **403**, not the 401 the PowerShell version special-cased —
+  so that branch was close to dead code and the common failure fell through to a
+  bare status line. The header now separates what was observed (403, reproduced
+  against a junk token) from what is documented but unreproduced here (404 for
+  an organization token, from HashiCorp's `/plans` reference), rather than
+  asserting both with equal confidence.
+
 - **"Immediate: restore admin access" deleted; it had been fixed for some time
   (2026-08-29).** The section described a live `403` from
   `POST /api/bootstrapCurrentUserAdmin` and asked for the Entra `Admin` app role
@@ -27,7 +52,7 @@ This project has not cut a tagged release; entries are grouped under
   insisted on work that was finished. The `Admin` app role assignment survives
   as one clause of the Entra row, which is where a standing requirement belongs.
 
-- **`scripts/cutover/07-check-plan.ps1`: the plan assertion in one command
+- **`scripts/check-tfc-plan.mjs`: the plan assertion in one command
   (2026-08-29, toward T-724).** `assert-expected-plan.mjs` has existed since
   T-724 and compares a plan against the known permanent diff **by resource
   address**; what nobody had automated was getting a plan into a file to feed
