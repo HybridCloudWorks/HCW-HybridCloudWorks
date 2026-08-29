@@ -183,7 +183,6 @@ T-721 (telemetry vs SWA tier cost decision).
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
 | T-749 | ci | SCM lock flip — **Gate: owner**, overlaps T-520 | `main.tf`, workspace variable |
-| T-754 | tf | `main.tf` is a 2,037-line six-concern file; splitting is state-safe file moves | `main.tf` |
 
 ## High
 
