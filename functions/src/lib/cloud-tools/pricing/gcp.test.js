@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  GCP_API_KEY_SETTING,
   GCP_SERVICE_NAMES,
   fetchGcpPrice,
+  getGcpApiKey,
   findGoogleSkuMatch,
   getGoogleTieredRatePrice,
   inRegion,
@@ -161,23 +163,59 @@ function stubBilling(skuPages) {
       }),
     };
   });
-  return { fetch, accessToken: 'stub-token' };
+  return { fetch, apiKey: 'stub-key' };
 }
 
 describe('credentials', () => {
-  it('throws when the Key Vault secret is missing — never a silent baseline row', async () => {
-    // getSecret swallows errors and returns null. For a credential that is
-    // wrong: it would look like "GCP has no price for this service".
-    const deps = { getSecret: async () => null, fetch: vi.fn() };
+  it('throws when the app setting is unset — never a silent baseline row', async () => {
+    // Returning null here would be indistinguishable from "GCP has no price
+    // for this service", and the caller would quietly fall back to a baseline
+    // row. A comparison table showing stale numbers is worse than one that
+    // errors.
+    const deps = { env: {}, fetch: vi.fn() };
     await expect(fetchGcpPrice('compute-vm', 'us-central1', deps)).rejects.toThrow(
       /credential unavailable/
     );
     expect(deps.fetch).not.toHaveBeenCalled();
   });
 
-  it('throws when the secret is not valid JSON', async () => {
-    const deps = { getSecret: async () => 'not json', fetch: vi.fn() };
-    await expect(fetchGcpPrice('compute-vm', 'us-central1', deps)).rejects.toThrow(/malformed/);
+  it('treats an unresolved Key Vault reference as absent, not as a key', async () => {
+    // The failure this catches: the app setting exists, the vault reference
+    // did not resolve, and the literal '@Microsoft.KeyVault(...)' string goes
+    // out as ?key= — a 400 from Google instead of a named fault here.
+    const deps = {
+      env: { [GCP_API_KEY_SETTING]: '@Microsoft.KeyVault(SecretUri=https://v/secrets/GCP-BILLING-API-KEY)' },
+      fetch: vi.fn(),
+    };
+    await expect(fetchGcpPrice('compute-vm', 'us-central1', deps)).rejects.toThrow(
+      /credential unavailable/
+    );
+    expect(deps.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reads the key from the app setting when no override is supplied', async () => {
+    expect(getGcpApiKey({ env: { [GCP_API_KEY_SETTING]: '  ak-from-setting  ' } })).toBe(
+      'ak-from-setting'
+    );
+  });
+
+  it('sends the key as a query parameter on every call, never as a header', async () => {
+    // The Catalog API is key-authenticated; an Authorization header here would
+    // mean the OAuth path came back. Both the services list and the SKU pages
+    // must carry it — the SKU URL is rebuilt per page.
+    const deps = stubBilling([
+      [
+        skuOf('E2 Instance Core running in Iowa', { nanos: 21000000 }),
+        skuOf('E2 Instance Ram running in Iowa', { nanos: 2800000 }),
+      ],
+    ]);
+    await fetchGcpPrice('compute-vm', 'us-central1', deps);
+
+    expect(deps.fetch).toHaveBeenCalledTimes(2);
+    for (const [url, init] of deps.fetch.mock.calls) {
+      expect(new URL(String(url)).searchParams.get('key')).toBe('stub-key');
+      expect(init).toBeUndefined();
+    }
   });
 });
 
@@ -235,7 +273,7 @@ describe('SKU paging', () => {
 
   it('throws on a non-2xx SKU response', async () => {
     const deps = {
-      accessToken: 'stub-token',
+      apiKey: 'stub-key',
       fetch: vi.fn(async (url) =>
         String(url).includes('/services?')
           ? { ok: true, json: async () => ({ services: [{ name: 's/1', displayName: 'Compute Engine' }] }) }
@@ -249,7 +287,7 @@ describe('SKU paging', () => {
 
   it('returns null when the billing catalog has no such service', async () => {
     const deps = {
-      accessToken: 'stub-token',
+      apiKey: 'stub-key',
       fetch: vi.fn(async () => ({ ok: true, json: async () => ({ services: [] }) })),
     };
     expect(await fetchGcpPrice('compute-vm', 'us-central1', deps)).toBeNull();

@@ -71,7 +71,7 @@ try {
     if (-not $BotToken) {
         Write-Step 'Read the bot token from Key Vault'
         $myIp = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 15).ip
-        # Guarded, like its twin in 03-keyvault-secrets.ps1. Without this,
+        # Guarded, like the window in 06-seed-secret.ps1. Without this,
         # -WhatIf still mutated the production vault's network ACL and pulled
         # the bot token out of it — a dry run that writes is not a dry run
         # (T-704).

@@ -1226,7 +1226,15 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.hcw.name
     "STORAGE_BLOB_ENDPOINT"  = azurerm_storage_account.hcw.primary_blob_endpoint
     "STORAGE_QUEUE_ENDPOINT" = azurerm_storage_account.hcw.primary_queue_endpoint
-    "KEY_VAULT_URI"          = azurerm_key_vault.hcw.vault_uri
+
+    # KEY_VAULT_URI is deliberately absent. It existed for exactly one caller —
+    # a runtime SecretClient that fetched GCP's service-account JSON — and that
+    # caller is gone (GCP pricing now uses an API key delivered as an ordinary
+    # Key Vault reference, below). Every other secret in this app arrives as a
+    # reference the platform resolves before the process starts, so nothing in
+    # the runtime needs the vault's address. Re-adding it means re-adding a
+    # data-plane RBAC grant and an SDK client; do not do that for a value that
+    # could be a reference instead.
 
     "ENTRA_TENANT_ID" = var.entra_tenant_id
     # The API's OWN audience, not the SPA's client id. verify-token.js refuses to
@@ -1240,10 +1248,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "AWS_ACCESS_KEY_ID"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AWS-ACCESS-KEY-ID)"
     "AWS_SECRET_ACCESS_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AWS-SECRET-ACCESS-KEY)"
 
-    # GCP's service-account JSON is deliberately NOT here — it is a ~2.3 KB
-    # multi-line blob and app settings are visible in the portal and in
-    # `az webapp config appsettings list`. gcp.js reads it from Key Vault at
-    # runtime via src/lib/key-vault.js.
+    # GCP pricing. The Cloud Billing Catalog API serves the public price list
+    # and Google documents it as API-key authenticated, so this is a single
+    # string like every other credential here. It replaced a service-account
+    # JSON — a ~2.3 KB multi-line blob that could not be an app setting and so
+    # needed a runtime vault client, an OAuth library and a signed-JWT exchange,
+    # all to read prices that are public.
+    "GCP_BILLING_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GCP-BILLING-API-KEY)"
 
     # DECISION 6 — proves a request arrived through Cloudflare rather than
     # directly at the origin. Without it client-identity.js refuses to derive a
@@ -1841,7 +1852,15 @@ resource "azurerm_key_vault" "hcw" {
   tags = local.tags
 }
 
-# Key Vault Secrets User — Function App managed identity (read-only at runtime)
+# Key Vault Secrets User — Function App managed identity.
+#
+# The PLATFORM uses this to resolve every "@Microsoft.KeyVault(SecretUri=...)"
+# app setting before the process starts. No application code holds a vault
+# client any more (src/lib/key-vault.js was deleted 2026-08-29 with its last
+# caller), so this grant is not "the app reading secrets" — it is the host
+# reading them on the app's behalf. Removing it does not break a code path; it
+# leaves every referenced setting unresolved, which /api/health reports as
+# unresolvedSecrets > 0.
 resource "azurerm_role_assignment" "func_kv_secrets" {
   scope                = azurerm_key_vault.hcw.id
   role_definition_name = "Key Vault Secrets User"

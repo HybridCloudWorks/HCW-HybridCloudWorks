@@ -150,35 +150,35 @@ console shows no CORS failures.
 ### 3a. Key Vault (TODO.md T-321) — OPTIONAL, not a cutover blocker
 
 Traced 2026-08-23, because this step sent someone looking for two files they
-did not have:
+did not have. **Rewritten 2026-08-29: neither file exists any more.**
 
 | Secret | Read by | Missing means |
 | --- | --- | --- |
-| `GCP-SERVICE-ACCOUNT-JSON` | `lib/cloud-tools/pricing/gcp.js`, nothing else | GCP prices absent from the pricing comparison. AWS and Azure still render — each provider is isolated in its own try/catch, which that module calls "the single most important behaviour" it carries |
+| `GCP-BILLING-API-KEY` | `lib/cloud-tools/pricing/gcp.js`, nothing else | GCP prices absent from the pricing comparison. AWS and Azure still render — each provider is isolated in its own try/catch, which that module calls "the single most important behaviour" it carries |
 | `GITHUB-APP-PRIVATE-KEY` | **nothing in the ported code** | nothing |
 
 Neither is on any path a visitor or the admin portal touches. **Skip this step
-at cutover** and seed them later if the GCP column in the pricing tool is
-wanted; that is a GCP console export, not cutover work.
+at cutover.**
 
-**You run:**
+`03-keyvault-secrets.ps1` is gone with them. It existed because both of those
+secrets were multi-line files that had to be seeded with `az keyvault secret
+set --file` and read at run time through a vault SDK client, rather than as an
+app-setting reference — which is why the diff that checked the other nineteen
+missed them. That is no longer true of either:
 
-```powershell
-./scripts/cutover/03-keyvault-secrets.ps1 `
-    -GcpServiceAccountJsonPath .\gcp-sa.json `
-    -GitHubAppPrivateKeyPath   .\github-app.pem
-```
+- **GCP** is now an API key, which is what Google documents for the Cloud
+  Billing Catalog API. It is a single string, it arrives as the app setting
+  `GCP_BILLING_API_KEY` → `@Microsoft.KeyVault(…secrets/GCP-BILLING-API-KEY)`,
+  and it is seeded like every other secret:
+  `./scripts/cutover/06-seed-secret.ps1 -Name GCP-BILLING-API-KEY`.
+- **The GitHub App private key** is read by nothing. It has no app setting and
+  no seeding path, because seeding a credential nothing reads is how an
+  unowned credential ends up in a vault. Whoever needs it can add the setting
+  and the reference in the same change that adds the caller.
 
-Nineteen of twenty-one secrets are seeded; these two are not. Both are
-multi-line and both are read by `getSecret()` at runtime rather than through an
-app-setting reference, which is why the diff that checked the other nineteen
-missed them.
-
-The script seeds with `--file` (never `--value`, which folds newlines and stores
-something that parses as neither JSON nor PEM), opens a Key Vault firewall
-window for your IP, and always closes it — including on Ctrl-C. It reads both
-secrets back and re-parses them, because a mangled secret that stored
-successfully looks done and fails much later.
+If the GCP column in the pricing tool is wanted, get the key from the GCP
+console (enable the Cloud Billing API, create an API key, restrict it to that
+API) and seed it with `06`. That is a console visit, not cutover work.
 
 `ANTHROPIC-API-KEY` is already set. The inspector, forge, digest, AI cover and
 alerts all no-op cleanly without their keys, so nothing here blocks the rest.

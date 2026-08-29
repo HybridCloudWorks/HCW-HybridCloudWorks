@@ -17,6 +17,53 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **GCP pricing moves from a service-account JSON to the API key Google
+  documents, and takes three dependencies out with it (2026-08-29).** The Cloud
+  Billing Catalog API serves the *public* price list. Google's own guide says
+  what it wants: "Before you can use the Cloud Billing Catalog API, you'll need
+  to enable the Cloud Billing API and get an API key." This estate was doing a
+  signed-JWT token exchange instead.
+
+  **What that cost.** The credential was a ~2.3 KB multi-line service-account
+  JSON, which cannot be an app setting, so it needed a run-time vault client to
+  fetch it — and that client needed `@azure/keyvault-secrets`, a `KEY_VAULT_URI`
+  app setting, a data-plane RBAC grant on the production vault, and
+  `functions/src/lib/key-vault.js`. The token exchange needed
+  `google-auth-library`. The `--file` seeding requirement needed
+  `scripts/cutover/03-keyvault-secrets.ps1`, a whole script for one secret. Six
+  moving parts, one caller, to read prices anyone can read.
+
+  **What replaced it.** `GCP_BILLING_API_KEY`, an app setting holding
+  `@Microsoft.KeyVault(…secrets/GCP-BILLING-API-KEY)` like every other
+  credential here, read through `readKey` — which already treats an unresolved
+  reference as absent. The key travels as a `key` query parameter on both the
+  services list and every SKU page; there is no `Authorization` header left in
+  the module. Absence still **throws**, unchanged and deliberately: returning
+  null would be indistinguishable from "GCP has no price for this service" and
+  would quietly become a baseline row, and a comparison table showing stale
+  numbers is worse than one that errors.
+
+  **What is gone.** `functions/src/lib/key-vault.js` and its test (zero call
+  sites once `gcp.js` stopped importing `getSecret`), `@azure/keyvault-secrets`,
+  `google-auth-library`, the `KEY_VAULT_URI` app setting, and
+  `scripts/cutover/03-keyvault-secrets.ps1` — superseded by `06-seed-secret.ps1`,
+  which seeds any secret and now has no exception to carry. Every secret in the
+  estate reaches the app the same way, which is why
+  `app-settings-secrets.test.js`'s allowlist of secret-shaped settings that are
+  *not* vault references is now empty. `main.tf` declares 21 references and no
+  run-time reads.
+
+  **This module is an information tool, not a billing integration.** It is read
+  by the public pricing comparison so a visitor can see three clouds side by
+  side; this estate runs on Azure and is not charged through anything here. The
+  earlier design treated a public catalog lookup as if it were account access,
+  and the grant, the SDK and the script all followed from that one mistake.
+
+  Four mutants confirm the new guards fail closed: bypassing `readKey` so an
+  unresolved `@Microsoft.KeyVault(…)` string goes out as `?key=`, removing the
+  throw on absence, dropping the key from the SKU page URL, and putting it back
+  in a bearer header. Each is caught.
+
 - **The architecture review's remaining Medium and Low findings, 20 more
   closed (2026-08-28; #257, #258 and this change).** The review's own tally
   goes 35 → 55 of 62. What is left is seven: T-714 (an owner decision on

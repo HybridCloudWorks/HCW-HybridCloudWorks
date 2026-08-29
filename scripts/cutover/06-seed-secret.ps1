@@ -3,12 +3,16 @@
     Seed one Key Vault secret through a measured firewall window.
 
 .DESCRIPTION
-    `03-keyvault-secrets.ps1` does this for exactly one secret — the multi-line
-    GCP service-account JSON — because that one has a `--file` requirement all
-    of its own. Every OTHER secret the estate needs (PREVIEW-SIGNING-SECRET,
-    REPLICATE-API-KEY, YOUTUBE-API-KEY, an AI provider key) had no script, so
-    seeding one meant hand-rolling the firewall window. A hand-rolled window is
-    the one that gets left open.
+    This is the only secret-seeding script, and it seeds any of them. Until
+    2026-08-29 there was also `03-keyvault-secrets.ps1`, which handled exactly
+    one secret — the multi-line GCP service-account JSON, which had a `--file`
+    requirement all of its own. Every OTHER secret the estate needs
+    (PREVIEW-SIGNING-SECRET, REPLICATE-API-KEY, YOUTUBE-API-KEY,
+    GCP-BILLING-API-KEY, an AI provider key) had no script, so seeding one
+    meant hand-rolling the firewall window. A hand-rolled window is the one
+    that gets left open. GCP pricing now uses an API key — a single string,
+    seeded here like everything else — so `03` was deleted rather than kept
+    for one caller that no longer exists.
 
     Three things this refuses to let you get wrong:
 

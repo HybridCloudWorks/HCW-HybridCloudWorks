@@ -43,7 +43,7 @@ describe('isUnresolvedReference', () => {
   });
 
   it('does not fire on a value that merely mentions Key Vault', () => {
-    // A URI is not a reference. KEY_VAULT_URI is a real setting holding one.
+    // A URI is not a reference; a sentence mentioning the prefix is not one either.
     expect(isUnresolvedReference('https://kv-site-prod-cus-01.vault.azure.net/')).toBe(false);
     expect(isUnresolvedReference('see @Microsoft.KeyVault( in the docs')).toBe(false);
   });
@@ -84,7 +84,7 @@ describe('unresolvedSecretNames', () => {
       PUBLER_API_KEY: REFERENCE,
       ANTHROPIC_API_KEY: 'sk-ant-real',
       CF_ORIGIN_SECRET: REFERENCE,
-      KEY_VAULT_URI: 'https://kv.vault.azure.net/',
+      STORAGE_BLOB_ENDPOINT: 'https://st.blob.core.windows.net/',
       NODE_ENV: 'production',
     };
     expect(unresolvedSecretNames(env)).toEqual(['CF_ORIGIN_SECRET', 'PUBLER_API_KEY']);
