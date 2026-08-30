@@ -5,9 +5,10 @@
 When telling the owner what to do next, give **commands they can paste**, not a
 description of the goal. Specifically:
 
-- **PowerShell by default.** The owner works at a `PS C:\Users\saulp\...` prompt.
-  Write PowerShell: `$x = ...` assignment, no `$(...)` command substitution, no
-  backtick line continuations pasted into anything but PowerShell.
+- **PowerShell by default.** The owner works at a `PS C:\Users\<you>\...`
+  prompt. Write PowerShell: `$x = ...` assignment, no `$(...)` command
+  substitution, no backtick line continuations pasted into anything but
+  PowerShell.
 - **If a command must be bash, say so on the line above it.** The owner also has
   Git Bash (`MINGW64`) open and switches between them. Two commands were lost on
   2026-08-30 to bash syntax pasted at a PowerShell prompt and to PowerShell

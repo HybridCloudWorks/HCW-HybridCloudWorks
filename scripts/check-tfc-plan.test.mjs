@@ -110,6 +110,24 @@ describe('normaliseRunId', () => {
     }
   });
 
+  it.each(['   ', '\t', '\n', ' \t\n '])('treats whitespace-only %j as blank too', (blank) => {
+    // A live path, not a hypothetical: the workflow gates on
+    // `[ -n "$RUN_ID" ]`, which a whitespace-only input passes, so "   " does
+    // reach here. Throwing at someone who plainly meant "the latest" is the
+    // wrong answer.
+    expect(normaliseRunId(blank)).toBeNull();
+  });
+
+  it.each(['run-a', 'run-abc', 'a', 'abc1234'])(
+    'refuses %s — too short to be an id, in either form',
+    (input) => {
+      // The minimum used to be eight for a bare id and one for a prefixed one,
+      // so `run-a` passed and 404d anyway — reproducing the
+      // identifier-versus-token confusion this function exists to end.
+      expect(() => normaliseRunId(input)).toThrow(/not a run id/);
+    }
+  );
+
   it.each([
     ['run-KqAcgG BXrFkcYP76', 'an embedded space'],
     ['https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs/run-Kq', 'a whole URL'],
