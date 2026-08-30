@@ -34,6 +34,15 @@
     This version reads AppTraces from the WORKSPACE, and separates "no
     evidence" from "evidence of absence", which is the whole T-514 lesson.
 
+    AMENDED 2026-08-30. It used to fetch every matching trace row and classify
+    them here, one printed line per row. At the T-518 arming gate it printed
+    57,581 lines for a query that returns 2 rows — and the query was then run
+    by hand and did return 2, so the fault lay somewhere between the fetch and
+    the render. That was never root-caused. Rather than patch a path nobody
+    understood, the aggregation moved into KQL: the workspace now returns one
+    summarized row per timer, and every number printed is its own. See the long
+    note above the query for what that does and does not buy.
+
     ==========================================================================
     IT WORKS WITH NOTHING ARMED, WHICH IS THE POINT
     ==========================================================================
@@ -118,6 +127,46 @@ function Write-Good { param($Text) Write-Host $Text -ForegroundColor Green }
 function Write-Bad { param($Text) Write-Host $Text -ForegroundColor Red }
 
 $chicago = [System.TimeZoneInfo]::FindSystemTimeZoneById('America/Chicago')
+
+<#
+    Render a workspace timestamp as Chicago local time.
+
+    The zone suffix is computed per-timestamp rather than once, because a
+    window can straddle a DST boundary and printing every row as CDT through a
+    November re-run would be the same class of error this script exists to
+    catch. Returns '(none)' for a null, which is what an empty aggregate gives.
+
+    THE PARSE IS EXPLICIT ABOUT BOTH CULTURE AND KIND, deliberately. The
+    obvious `[datetime]::Parse($s).ToUniversalTime()` — which this script used
+    until 2026-08-30 — reads the string in the OPERATOR'S culture and, when it
+    carries no offset or Z, yields Kind=Unspecified. ToUniversalTime() then
+    treats that as local and shifts it by the operator's own offset: five hours
+    in Chicago, silently, inside the one tool whose entire job is catching
+    five-hour errors. AssumeUniversal says what the workspace actually returns;
+    AdjustToUniversal makes the result Kind=Utc rather than re-converted. A
+    value that arrives already typed as [datetime] skips parsing and has its
+    Kind normalised the same way, since stringifying it first would put the
+    operator's culture back into the path we just removed.
+#>
+function Format-Chicago {
+    param([object] $Value)
+    if ($null -eq $Value -or ($Value -is [string] -and -not $Value)) { return '(none)' }
+
+    if ($Value -is [datetime]) {
+        if ($Value.Kind -eq [System.DateTimeKind]::Utc) { $utc = $Value }
+        elseif ($Value.Kind -eq [System.DateTimeKind]::Local) { $utc = $Value.ToUniversalTime() }
+        else { $utc = [datetime]::SpecifyKind($Value, [System.DateTimeKind]::Utc) }
+    }
+    else {
+        $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal
+        try { $utc = [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture, $styles) }
+        catch { return "(unparseable: $Value)" }
+    }
+
+    $local = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $chicago)
+    $zone = if ($chicago.IsDaylightSavingTime($local)) { 'CDT' } else { 'CST' }
+    return ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f $local, $zone)
+}
 
 <#
     Run one KQL query against the WORKSPACE.
@@ -255,19 +304,56 @@ Write-Step "Invocations in the last $Hours h"
 # 'Function.<name>.User'. Splitting on '.' and taking element 1 catches BOTH,
 # which matters because "disabled — skipping" only ever appears on the .User row.
 $nameList = ($timers.Name | ForEach-Object { "'$_'" }) -join ','
-$rows = Invoke-WorkspaceQuery @"
+
+# ---------------------------------------------------------------------------
+# REWRITTEN 2026-08-30. THE AGGREGATION HAPPENS IN KQL, NOT HERE.
+# ---------------------------------------------------------------------------
+# The previous version fetched every matching trace row and classified them in
+# PowerShell, printing one line per row. During the T-518 arming gate on
+# 2026-08-30 it printed 57,581 lines for a query that returns 2 rows. The query
+# was then run by hand against the same workspace and returned 2, so the fault
+# was in the client-side path between the fetch and the render. It was NOT
+# root-caused, and nothing below assumes it has been.
+#
+# Instead the workspace now returns ONE ROW PER TIMER, already summarized, and
+# every number printed is the workspace's own. A client-side bug can no longer
+# inflate a count, because there is no client-side counting left to get wrong,
+# and there is no per-row listing to bury the answer in. The number of rows
+# fetched is printed next to the table, so any future disagreement between what
+# was fetched and what was rendered is visible in one line instead of a wall.
+#
+# An invocation is identified by OperationId, which the host row and the
+# handler's own .User row of a single invocation share. It counts as SKIPPED if
+# any of its rows carries the master-flag skip, RAN otherwise. Rows with an
+# empty OperationId collapse into one pseudo-invocation; that has not been
+# observed, and the raw row count beside the table is what would expose it.
+#
+# THE SKIP MATCH IS ANCHORED, AND HAS TO BE. The master-flag line is
+# `[<name>] disabled — skipping` (schedulers.js), but it is not the only timer
+# log carrying the word: forge-scheduled.js:77 writes
+# `[forgeScheduled] auto-forge disabled, skipping run.` from a handler that RAN
+# and found its own feature switched off. A bare `has 'disabled'` files that as
+# a skip — reporting an armed timer as unarmed, on one of the sixteen still to
+# be armed. The regex requires `disabled` to follow the bracketed name
+# directly, which the master line does and the forge line does not. It is
+# written as a KQL verbatim literal (@'...') so the backslashes reach RE2
+# instead of being eaten as KQL escapes, and it avoids matching the em dash
+# so nothing depends on that character surviving the trip through az.
+$summary = Invoke-WorkspaceQuery @"
 AppTraces
 | where TimeGenerated > ago(${Hours}h)
 | extend cat = tostring(Properties.Category)
 | where cat startswith 'Function.'
 | extend timerName = tostring(split(cat, '.')[1])
 | where timerName in ($nameList)
-| where Message has 'Trigger Details' or Message has 'disabled' or Message has 'Executed'
-| project TimeGenerated, timerName, Message, OperationId
-| order by TimeGenerated asc
+| extend isSkip = Message matches regex @'^\[[^\]]+\] disabled'
+| where isSkip or Message has 'Executed'
+| summarize skips = countif(isSkip), started = min(TimeGenerated) by timerName, OperationId
+| summarize invocations = count(), ran = countif(skips == 0), skipped = countif(skips > 0), firstSeen = min(started), lastSeen = max(started) by timerName
+| order by timerName asc
 "@
 
-if ($null -eq $rows) {
+if ($null -eq $summary) {
     Write-Bad 'The workspace query did not run.'
     $msg = 'This is NOT "the timer did not fire" — the query itself failed, so there is no ' +
     'observation either way. Check az login, the subscription, and Log Analytics Reader on ' +
@@ -275,8 +361,8 @@ if ($null -eq $rows) {
     throw $msg
 }
 
-if ($rows.Count -eq 0) {
-    Write-Warn "No trace rows for these timers in the last $Hours h."
+if ($summary.Count -eq 0) {
+    Write-Warn "No invocation rows for these timers in the last $Hours h."
     Write-Host ''
     Write-Host 'Read this carefully — it has two very different causes:'
     Write-Host '  1. The timer genuinely is not firing.            <- a real failure'
@@ -285,68 +371,67 @@ if ($rows.Count -eq 0) {
     Write-Host 'The preflight above distinguishes them. If it reported worker traces, cause 1'
     Write-Host 'is the live hypothesis. If it warned about a cold app, send sustained traffic'
     Write-Host 'and re-run before concluding anything. Widen with -Hours for a weekly timer.'
-    return
+}
+else {
+    foreach ($s in $summary) {
+        $first = Format-Chicago $s.firstSeen
+        $last = Format-Chicago $s.lastSeen
+        $colour = if ([int]$s.ran -gt 0) { 'Green' } else { 'Gray' }
+        $line = "  {0,-28} {1,5} invocations  {2,5} ran  {3,5} skipped   first {4}   last {5}"
+        Write-Host ($line -f $s.timerName, $s.invocations, $s.ran, $s.skipped, $first, $last) -ForegroundColor $colour
+    }
+    Write-Host ''
+    Write-Host ("  ({0} summary row(s) returned by the workspace)" -f $summary.Count)
 }
 
-# The host writes `Executed 'Functions.<name>' (Succeeded...)` on EVERY
-# invocation, including one the handler skipped, and that row carries no hint
-# of which it was. Labelling it "ran" reported every skip twice — once
-# honestly as "skipped", once as a "ran" that had not run. The two rows of one
-# invocation share an OperationId, so the skips are collected first and the
-# host's completion row for them is suppressed below.
-#
-# Sampling could in principle drop the .User row and leave the host row
-# looking like a run. Pair a "ran" with the timer's own durable side effect
-# before believing it — which is what "two independent witnesses" means.
-$skippedOps = @{}
-foreach ($r in $rows) {
-    if ($r.Message -match 'disabled' -and $r.OperationId) { $skippedOps[[string]$r.OperationId] = $true }
+# ---------------------------------------------------------------------------
+# The clock
+# ---------------------------------------------------------------------------
+# `Trigger Details: ScheduleStatus: {"Last":"...-05:00","Next":"...-05:00"}` is
+# written by the HOST on every invocation, armed or not, and its offsets are
+# already WEBSITE_TIME_ZONE. That is the comparison §7 asks for, delivered by
+# the platform rather than computed here — so a bug in this script's own
+# arithmetic cannot manufacture a pass. Bounded to the ten most recent, because
+# the whole point is to read them, and ten is more than enough to see an offset.
+Write-Step 'Schedule status, as the host itself reported it'
+$schedule = Invoke-WorkspaceQuery @"
+AppTraces
+| where TimeGenerated > ago(${Hours}h)
+| extend cat = tostring(Properties.Category)
+| where cat startswith 'Function.'
+| extend timerName = tostring(split(cat, '.')[1])
+| where timerName in ($nameList)
+| where Message has 'Trigger Details'
+| project TimeGenerated, timerName, Message
+| order by TimeGenerated desc
+| take 10
+"@
+
+if ($null -eq $schedule) {
+    throw 'The ScheduleStatus query did not run. Check az login and Log Analytics Reader.'
 }
 
-# ScheduleStatus carries the platform's own local-time view. Anything else is
-# the handler talking, which tells us armed-vs-skipped rather than clock.
 $sawSchedule = $false
-$ranCount = 0
-$skippedCount = 0
-foreach ($r in $rows) {
-    $utc = ([datetime]::Parse($r.TimeGenerated)).ToUniversalTime()
-    $local = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $chicago)
-    $zone = if ($chicago.IsDaylightSavingTime($local)) { 'CDT' } else { 'CST' }
-    $timerName = $r.timerName
-
+foreach ($r in $schedule) {
     $status = @([regex]::Matches($r.Message, '"Last"\s*:\s*"([^"]+)"'))
-    if ($status.Count -gt 0) {
-        $sawSchedule = $true
-        $last = $status[0].Groups[1].Value
-        $nextMatch = @([regex]::Matches($r.Message, '"Next"\s*:\s*"([^"]+)"'))
-        $next = if ($nextMatch.Count -gt 0) { $nextMatch[0].Groups[1].Value } else { '(none)' }
-        Write-Host ("  SCHEDULE  {0,-28} Last {1}   Next {2}" -f $timerName, $last, $next) -ForegroundColor Green
-    }
-    elseif ($r.Message -match 'disabled') {
-        $skippedCount++
-        Write-Host ("  skipped   {0,-28} Chicago {1:yyyy-MM-dd HH:mm:ss} {2}" -f $timerName, $local, $zone)
-    }
-    elseif ($r.OperationId -and $skippedOps.ContainsKey([string]$r.OperationId)) {
-        # The host's completion row for an invocation already reported as skipped.
-    }
-    else {
-        $ranCount++
-        Write-Host ("  ran       {0,-28} Chicago {1:yyyy-MM-dd HH:mm:ss} {2}" -f $timerName, $local, $zone) -ForegroundColor Green
-    }
+    if ($status.Count -eq 0) { continue }
+    $sawSchedule = $true
+    $last = $status[0].Groups[1].Value
+    $nextMatch = @([regex]::Matches($r.Message, '"Next"\s*:\s*"([^"]+)"'))
+    $next = if ($nextMatch.Count -gt 0) { $nextMatch[0].Groups[1].Value } else { '(none)' }
+    Write-Host ("  {0,-28} Last {1}   Next {2}" -f $r.timerName, $last, $next) -ForegroundColor Green
 }
-
-Write-Host ''
-Write-Host ("  {0} ran, {1} skipped." -f $ranCount, $skippedCount)
+if (-not $sawSchedule) { Write-Warn '  (none in this window)' }
 
 Write-Step 'How to read this'
 Write-Host 'NCRONTAB is {second} {minute} {hour} {day} {month} {day-of-week}, and the hour is'
 Write-Host 'interpreted in WEBSITE_TIME_ZONE (America/Chicago).'
 Write-Host ''
 if ($sawSchedule) {
-    Write-Host 'The SCHEDULE rows are the host''s own words, and their offsets are already local.'
+    Write-Host 'The Last/Next offsets above are the host''s own words, and they are already local.'
     Write-Host 'A daily 04:00 job whose Last reads 04:00:00-05:00 is CORRECT. One reading'
-    Write-Host '04:00:00+00:00, or a Chicago column of 22:00/23:00, means WEBSITE_TIME_ZONE is'
-    Write-Host 'NOT being applied and every ported expression is off by five or six hours.'
+    Write-Host '04:00:00+00:00 means WEBSITE_TIME_ZONE is NOT being applied and every ported'
+    Write-Host 'expression is off by five or six hours.'
 }
 else {
     Write-Warn 'No ScheduleStatus row was seen, so the CLOCK is still unproven.'
@@ -355,13 +440,12 @@ else {
     Write-Host 'zone, so it can never prove the clock however many times you watch it.'
 }
 Write-Host ''
-Write-Host '"skipped" lines prove the trigger fires and the flag gate works. They are the'
-Write-Host 'expected state before arming, and they are sufficient for the clock half of the'
-Write-Host 'gate. A "ran" line means the host completed an invocation that logged no skip —'
-Write-Host 'which is weaker than it sounds, so pair it with the timer''s own durable side'
-Write-Host 'effect (Cutover-Runbook, "Gate 4 needs two independent witnesses").'
+Write-Host 'A SKIPPED invocation proves the trigger fires and the flag gate works. That is the'
+Write-Host 'expected state before arming, and it is sufficient for the clock half of the gate.'
+Write-Host 'A RAN invocation is one whose traces carry no skip line — which is weaker than it'
+Write-Host 'sounds, since a dropped .User trace would look the same. Pair it with the timer''s'
+Write-Host 'own durable side effect (Cutover-Runbook, "Gate 4 needs two independent witnesses").'
 Write-Host ''
-Write-Host 'The Chicago column on "ran"/"skipped" lines is TimeGenerated, which is when the'
-Write-Host 'trace was recorded, not necessarily when the timer fired: a worker that buffers'
-Write-Host 'and flushes late can land a batch of rows on one identical timestamp. Only the'
-Write-Host 'SCHEDULE row carries the platform''s own firing time, and only it decides the clock.'
+Write-Host 'first/last are the Chicago local times of the earliest and latest invocation seen.'
+Write-Host 'For a 5-minute timer they should straddle most of the window with no long gap.'
+

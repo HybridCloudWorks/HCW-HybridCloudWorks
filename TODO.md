@@ -192,21 +192,24 @@ T-721 (telemetry vs SWA tier cost decision).
 
 ## High
 
-### T-518 — Nothing is scheduled: all 18 timers are permanent no-ops
+### T-518 — 16 of 18 timers are still no-ops; the mechanism is proven
 
 **Gate: owner** — [TODO.md](TODO.md), *Timers and the availability test*.
 
 `functions/src/functions/schedulers.js` checks `FEATURE_FLAG_SCHEDULERS` first
-and skips the handler *before* reading the per-timer flag, so while the master
-switch is `"false"` all 18 timers log "disabled — skipping" and do nothing. Until
-2026-08-24 that setting was a hardcoded literal in `main.tf`, which meant
-`enabled_timers` could not arm anything at all and no document said so; it is now
-`var.schedulers_master_enabled`, default `false`. Arming needs **both** it and a
-name in `enabled_timers`, one timer at a time, through the four gates in
+and skips the handler *before* reading the per-timer flag. Until 2026-08-24 that
+setting was a hardcoded literal in `main.tf`, which meant `enabled_timers` could
+not arm anything at all and no document said so; it is now
+`var.schedulers_master_enabled`. Arming needs **both** it and a name in
+`enabled_timers`, through the four gates in
 [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5 — where the acceptance
-criterion is the observed invocation, not the applied setting. Until then the
-platform runs no scheduled work of any kind: no feed sync, no cleanup, no
-digest.
+criterion is the observed invocation, not the applied setting.
+
+**The master switch went `true` on 2026-08-30**, with `CHECK_AGENT_HEALTH` and
+`CLEANUP_TEMP_STORAGE` in `enabled_timers`. The remaining sixteen are still
+no-ops, so the platform still runs almost no scheduled work — but "nothing is
+scheduled" is no longer true, and the arming mechanism is no longer an
+assumption.
 
 It gates two other things, which is why it outranks its own blast radius:
 the Blog Machine's scheduled throughput (`forgeScheduled`,
@@ -215,15 +218,34 @@ which only pays for itself once scheduled work is generating documents. It also
 gates any meaningful cost measurement — a bill taken while nothing is scheduled
 prices an idle platform (Migration-Plan §7).
 
-**Its first half needs nothing armed (2026-08-29).** `app.timer()` registers on
-the real schedule unconditionally and the flag is checked *inside* the handler,
-so all 18 have been firing since deploy, logging `disabled — skipping`. The host
-writes `ScheduleStatus` with `WEBSITE_TIME_ZONE` offsets on every one, which is
-exactly the "at the right local time" evidence §7 asks for — available now, from
-history, at zero risk. `scripts/cutover/05-verify-timer.ps1` reads it; run it
-against a fixed-hour timer, because a 5-minute schedule fires at :00 :05 :10 in
-every zone and can never prove a clock. Only after that does arming begin, and
-arming proves the *handlers*.
+**Both halves of the gate passed on 2026-08-30.** The clock half needed nothing
+armed: `app.timer()` registers on the real schedule unconditionally and the flag
+is checked *inside* the handler, so every timer had been firing since deploy and
+logging `disabled — skipping`, with the host writing `ScheduleStatus` carrying
+`WEBSITE_TIME_ZONE` offsets each time. `cleanupTempStorage` reported
+`"Last":"2026-08-29T00:00:00.005764-05:00"`, `"Next":"2026-08-30T00:00:00-05:00"`
+— local midnight, offset applied, which is the §7 comparison delivered by the
+platform rather than computed by a script.
+
+The handler half came from `checkAgentHealth` after arming: twelve invocations
+between `04:55:00Z` and `05:50:00Z`, exactly five minutes apart with no gaps, no
+`disabled — skipping` anywhere in the window, and the handler's own
+`[checkAgentHealth] 0 agent(s) marked offline` on each one. Host row and `.User`
+row are separate emitters, which is what "two independent witnesses" means; the
+zero is a correct no-op, not a missing witness.
+
+Two departures from the runbook are worth recording. Both timers were armed in a
+single apply rather than one at a time — safe here only because
+`TEMP_STORAGE_CLEANUP_DELETE` pins `cleanupTempStorage` to dry-run
+(`functionapp.tf`), so the second timer could not touch data. And the evidence
+above was read with direct KQL, not through
+`scripts/cutover/05-verify-timer.ps1`: that script reported a tally of tens of
+thousands of invocations for a query returning two rows, and was rewritten the
+same day to aggregate in the workspace instead. Its miscount was never
+root-caused — see the note above its query.
+
+The sixteen that remain go one at a time, each observed firing before the next
+is added.
 
 ## Medium
 
