@@ -204,7 +204,7 @@ Under workload identity federation these are identifiers, not credentials.
 Possession of a client ID grants nothing. The trust decision is made by the
 federated identity credential, which pins **issuer + subject + audience** —
 `https://token.actions.githubusercontent.com`, `repo:<org>/<repo>:ref:…` or
-`repo:<org>/<repo>:environment:data-migration`, and
+`repo:<org>/<repo>:environment:production`, and
 `api://AzureADTokenExchange`. A token that does not match all three is refused
 with AADSTS70021 no matter who is holding the client ID.
 
@@ -226,7 +226,7 @@ Both cloud handshakes in this estate are federated, and neither has a secret:
 | Handshake | Identity | Trust anchor | Created by |
 | --- | --- | --- | --- |
 | HCP Terraform → Azure | `id-plat-terraform-prod-cus-01` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
-| GitHub Actions → Azure | the `github_deploy` user-assigned identity | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref and to the `data-migration` environment | `infra/oidc.tf` |
+| GitHub Actions → Azure | the `github_deploy` and `github_reader` user-assigned identities | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref and to the `production` environment, in both the name and immutable-ID forms | `infra/oidc.tf` |
 
 Neither mints anything longer-lived than a per-run token. So the **correct count
 of Azure credentials in GitHub Actions secrets is zero**, and that is a
@@ -414,7 +414,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | `AZURE_OPENAI_KEY` | §4 | Deliberately absent — see below |
 | `LABS_AGENT_CERT_PATH` | §2b | Generated in place on the VPS |
 | `LABS_AGENT_*` (the rest), the `LabAgent` app role, `lab_agents/{agentId}` | §2b | Host-local configuration and Entra/Cosmos objects, outside all four stores. The agent holds no database credential by design |
-| `production-infra`, `data-migration` | §7b | GitHub Environments — protection gates, not values. `data-migration` is additionally the OIDC subject in `infra/oidc.tf` and cannot be renamed without breaking login with AADSTS70021 |
+| `production-infra` | §7b | A GitHub Environment — a protection gate, not a value. `data-migration` was listed here too, described as an OIDC subject that could not be renamed without breaking login with AADSTS70021. That stopped being true on 2026-08-26 (T-524), when its two federated credentials were removed after `migrate-data.yml` was deleted in `59e471b`; the environment itself was deleted on 2026-08-30. Nothing in Azure trusts the subject and nothing in the repository declares the environment |
 
 ---
 
@@ -525,7 +525,7 @@ got there, and stops being true the moment the plumbing changes.
 | GitHub Actions variable | `UPPER_SNAKE_CASE` | `_` | `APP_HOSTNAME` | Alphanumerics and `_` only; must not start with a number; must not start with `GITHUB_`; names are case-insensitive |
 | GitHub Actions secret | `UPPER_SNAKE_CASE` | `_` | `TF_API_TOKEN` | Same restrictions as variables, and a secret and a variable must not share a name |
 | Container Apps job secret | `lower-kebab-case` | `-` | `gh-app-private-key` | Lowercase alphanumerics and `-`; must start and end alphanumeric |
-| GitHub Environment | `lower-kebab-case` | `-` | `data-migration` | Not a value, but load-bearing: it appears in the OIDC subject in `infra/oidc.tf` and is immutable in practice |
+| GitHub Environment | `lower-kebab-case` | `-` | `production` | Not a value, but load-bearing WHILE a federated credential pins it: the environment name appears verbatim in the OIDC subject, so renaming one that is pinned breaks login with AADSTS70021. `production` is pinned today (`infra/oidc.tf`). `data-migration` was the example here until 2026-08-30, by which point nothing pinned it and it had been deleted — an environment is immutable only for as long as a credential names it |
 
 ### The Key Vault ↔ app setting transform
 
