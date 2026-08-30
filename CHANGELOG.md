@@ -1415,8 +1415,7 @@ This project has not cut a tagged release; entries are grouped under
   `fetchContentList`, is built from Firestore `where()` clauses. That is the
   whole-branch shape T-410 was written to refuse, and `EditorListPage` already
   filters admin content by type, `architecture` included. Which candidate is
-  actually built is a product decision and now sits in
-  [REVIEW.md](REVIEW.md).
+  actually built is a product decision and now sits in [TODO.md](TODO.md).
 - **The ESLint 10 upgrade is still blocked, and by fewer plugins (D-001).**
   Re-checked against the registry on 2026-08-24: `eslint-plugin-react-hooks`
   7.1.1 and `@typescript-eslint/eslint-plugin` 8.67.0 now declare
@@ -2707,8 +2706,8 @@ This project has not cut a tagged release; entries are grouped under
   media containers declared `private`, matching the account-level override that
   already made them so.
 
-Authored but **never applied** — no Terraform `validate`, `plan`, or `apply` has
-run from any session (see [REVIEW.md](REVIEW.md) §1.1).
+Authored but **never applied** — no Terraform `validate`, `plan`, or `apply` had
+run from any session (recorded at the time in `REVIEW.md` §1.1, since retired).
 
 - Cosmos DB serverless container specification (71 containers).
 - Flex Consumption plan and pricing work. (#38, #41, #42)
