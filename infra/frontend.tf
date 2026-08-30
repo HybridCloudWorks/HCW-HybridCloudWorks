@@ -124,14 +124,39 @@ resource "azurerm_static_web_app" "hcw" {
 # validates a root domain with a generated token instead.
 
 # Azure Functions subdomain for the API origin.
-resource "cloudflare_record" "azure_functions" {
+#
+# `name` IS THE FULL RECORD NAME under provider v5, where v4 took the relative
+# label "api-azure". The v5 schema documents it as "DNS record name (or @ for
+# the zone apex)" and its own example passes a whole hostname. Leaving the bare
+# label here would have Cloudflare read it as a name to append the zone to.
+#
+# `ttl = 1` still means automatic, which is the only value a proxied record
+# accepts. v5 makes ttl Required rather than Optional; it was already set here.
+resource "cloudflare_dns_record" "azure_functions" {
   zone_id = var.cloudflare_zone_id
-  name    = "api-azure"
+  name    = "api-azure.${var.domain}"
   content = "${var.function_app_name}.azurewebsites.net"
   type    = "CNAME"
   proxied = true
   ttl     = 1
   comment = "Azure Functions API endpoint"
+}
+
+# The rename is a change of resource ADDRESS, so without these Terraform would
+# destroy and recreate both records — and these two are the API's hostname and
+# the ownership proof Azure reads at bind time. A destroy/create on them is a
+# production DNS outage, not a refactor.
+#
+# The provider ships MoveState handlers for dns_record, so state transforms
+# during the move rather than needing `terraform state mv` by hand.
+moved {
+  from = cloudflare_record.azure_functions
+  to   = cloudflare_dns_record.azure_functions
+}
+
+moved {
+  from = cloudflare_record.azure_functions_domain_verification
+  to   = cloudflare_dns_record.azure_functions_domain_verification
 }
 
 # =============================================================================
@@ -181,9 +206,10 @@ resource "cloudflare_record" "azure_functions" {
 # Verification is the asuid TXT record below rather than a CNAME check, because
 # a CNAME check follows DNS to Cloudflare and fails for the same reason.
 # =============================================================================
-resource "cloudflare_record" "azure_functions_domain_verification" {
+# Full name under v5, same as the CNAME above.
+resource "cloudflare_dns_record" "azure_functions_domain_verification" {
   zone_id = var.cloudflare_zone_id
-  name    = "asuid.api-azure"
+  name    = "asuid.api-azure.${var.domain}"
   content = azurerm_function_app_flex_consumption.hcw.custom_domain_verification_id
   type    = "TXT"
   ttl     = 300
@@ -197,7 +223,7 @@ resource "azurerm_app_service_custom_hostname_binding" "api" {
 
   # Azure reads the TXT record at bind time, so it has to exist first. The
   # dependency is not inferable from the arguments above.
-  depends_on = [cloudflare_record.azure_functions_domain_verification]
+  depends_on = [cloudflare_dns_record.azure_functions_domain_verification]
 }
 
 resource "cloudflare_ruleset" "origin_secret" {
@@ -208,21 +234,28 @@ resource "cloudflare_ruleset" "origin_secret" {
   kind    = "zone"
   phase   = "http_request_late_transform"
 
-  rules {
-    action      = "rewrite"
-    description = "Stamp x-hcw-origin-secret on requests proxied to the Functions origin"
-    enabled     = true
-    # Scoped to the Functions hostname rather than the whole zone: the Static
-    # Web App shares this zone and has no use for the header, and a secret is
-    # safest where it is not sent to things that do not need it.
-    expression = "(http.host eq \"api-azure.${var.domain}\")"
+  # v5 SHAPE, and all three levels changed. `rules` is a list ATTRIBUTE rather
+  # than repeated blocks; `action_parameters` is an attribute; and `headers` is
+  # a MAP KEYED BY HEADER NAME, so the v4 `name = "x-hcw-origin-secret"` field
+  # becomes the map key and disappears from the object.
+  rules = [
+    {
+      action      = "rewrite"
+      description = "Stamp x-hcw-origin-secret on requests proxied to the Functions origin"
+      enabled     = true
+      # Scoped to the Functions hostname rather than the whole zone: the Static
+      # Web App shares this zone and has no use for the header, and a secret is
+      # safest where it is not sent to things that do not need it.
+      expression = "(http.host eq \"api-azure.${var.domain}\")"
 
-    action_parameters {
-      headers {
-        name      = "x-hcw-origin-secret"
-        operation = "set"
-        value     = var.cloudflare_origin_secret
+      action_parameters = {
+        headers = {
+          "x-hcw-origin-secret" = {
+            operation = "set"
+            value     = var.cloudflare_origin_secret
+          }
+        }
       }
     }
-  }
+  ]
 }

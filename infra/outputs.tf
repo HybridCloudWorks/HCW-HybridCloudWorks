@@ -152,9 +152,16 @@ output "function_url" {
 # GitHub variable, deploy-functions.yml's smoke test, and the connect-src
 # entry in frontend/staticwebapp.config.json — which must name this host, since
 # CSP is enforced against the URL the browser actually calls.
+# NO `.${var.domain}` SUFFIX, and this is the v5 change most able to break
+# quietly. Under v4 `name` was the relative label "api-azure", so this appended
+# the zone to build the host. Under v5 `name` is already the full record name,
+# and appending would produce api-azure.hybridcloudworks.com.hybridcloudworks.com
+# — a valid Terraform expression that `validate` accepts and that would then
+# flow into FUNCTIONS_URL, VITE_AZURE_FUNCTIONS_URL, the deploy smoke test and
+# the connect-src entry in staticwebapp.config.json.
 output "api_base_url" {
   description = "Public API base URL through Cloudflare — the only address clients can reach while the origin lock is on"
-  value       = "https://${cloudflare_record.azure_functions.name}.${var.domain}/api"
+  value       = "https://${cloudflare_dns_record.azure_functions.name}/api"
 }
 
 output "app_principal_id" {

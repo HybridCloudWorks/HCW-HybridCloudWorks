@@ -876,7 +876,7 @@ variable "cloudflare_zone_id" {
 #
 # THE API TOKEN NEEDS MORE THAN DNS. cloudflare_ruleset requires Zone →
 # Transform Rules:Edit and Account → Rulesets:Read on top of the Zone:Read and
-# DNS:Edit the records need. A DNS-only token applies every cloudflare_record
+# DNS:Edit the records need. A DNS-only token applies every cloudflare_dns_record
 # cleanly and fails on the ruleset alone with "Authentication error (10000)",
 # which names neither the token nor the permission.
 variable "cloudflare_origin_secret" {
