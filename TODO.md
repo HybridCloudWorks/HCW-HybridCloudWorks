@@ -101,11 +101,19 @@ engineering work on them is done.
   `required_review_thread_resolution` is `false`. Decide whether to enable each.
   The zero required approvals remains the deliberate single-operator decision
   recorded under T-705; this row does not reopen it.
-- **Action-group delivery test (from T-709).** An optional SMS receiver is
-  wired as an independent second channel, via a `dynamic` block so an unset
-  variable leaves the action group byte-identical. Run
-  `az monitor action-group test-notifications` and set `ops_sms_receiver`;
-  delivery has still never been observed.
+- **Second alert channel (from T-709).** **Email delivery was observed on
+  2026-08-30** — a sample budget alert from `ag-plat-prod-cus-01` reached the
+  `ops-email` receiver's inbox, fired 21:36 UTC, receiver `Enabled`, with the
+  CLI reporting `"Status": "Succeeded"`. That was the first time any alert on
+  this estate had been seen to arrive rather than merely be accepted by ARM,
+  and it closes the email half. The portal's test button reported `Unknown` and
+  delivered nothing on two prior attempts; the procedure is under *Live
+  confirmation* below.
+
+  What remains is the second channel: an optional SMS receiver is wired via a
+  `dynamic` block so an unset variable leaves the action group byte-identical.
+  Set `ops_sms_receiver` and it arms. Until then every alert has exactly one
+  delivery path — proven now, but still one.
 - **Ruleset bypass for the manifest push (from T-726).** The workflow is now
   two jobs, so nothing holding `contents: write` also holds the Azure identity
   or runs `npm ci`. What remains: for that push to land on a main protected by
@@ -342,17 +350,38 @@ Entra row below, which is where it belongs.
   response in the deployed environment.
 - Confirm the public API and Static Web App custom domain after any DNS or edge
   change.
-- **Observe an alert actually being delivered.** `az monitor action-group
-  test-notifications` against `ag-plat-prod-cus-01` — the name this file called
-  `ag-ops-prod-cus` until 2026-08-30, which is no resource: `observability.tf:36`
-  builds it as `ag-plat-${environment}-${region_abbreviation}-${instance}`, and
-  `hcw-ops` is only its short name. It lives in `rg-mgmt-plat-prod-cus`, in the
-  **Management** subscription, because the action group follows its resource
-  group there. Then set `ops_sms_receiver` so
-  there is a second channel independent of email. The optional SMS receiver is
-  merged and inert until the variable is set; delivery through *either* channel
-  has never been observed, which means the alerting fabric is unproven end to
-  end no matter how many rules are enabled ([TODO.md](TODO.md), from T-709).
+- ~~**Observe an alert actually being delivered.**~~ **Done 2026-08-30.** A
+  sample budget alert from `ag-plat-prod-cus-01` arrived in the `ops-email`
+  receiver's inbox (fired 21:36 UTC; receiver status `Enabled`). The email path
+  is proven end to end, across the subscription boundary, for the first time.
+
+  **Use the CLI, not the portal button.** The portal's **Test action group**
+  reported *"There was a problem completing this test"* with status **Unknown**
+  on two attempts and delivered nothing. The same operation through the CLI
+  returned `"Status": "Succeeded"` / `"state": "Complete"` and the email arrived
+  a minute later:
+
+      az monitor action-group test-notifications create \
+        --action-group ag-plat-prod-cus-01 \
+        --resource-group rg-mgmt-plat-prod-cus \
+        --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e \
+        --alert-type budget -a email ops-email <address> usecommonalertschema
+
+  The API response and the inbox are two independent witnesses, which is the
+  standard the Cutover-Runbook asks for and what the portal alone could never
+  supply — its `Unknown` was a verdict on nothing. Note also the argument shape:
+  it is `-a email <name> <address> <schema>`, not a `--email-receiver` flag, and
+  the whole thing is one line — a backtick continuation pasted into Git Bash
+  gets read as a command name.
+
+  Second, this file named the group `ag-ops-prod-cus` until the same day, which
+  is no resource: `observability.tf:36` builds
+  `ag-plat-${environment}-${region_abbreviation}-${instance}`, `hcw-ops` is only
+  the short name, and it lives in `rg-mgmt-plat-prod-cus` in the **Management**
+  subscription because the action group follows its resource group there.
+
+  Still open, and now the narrower claim: there is exactly ONE delivery path.
+  Set `ops_sms_receiver` for a second channel independent of email (T-709).
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
 - Apply the Terraform change that creates the `listenandlearn` blob container.

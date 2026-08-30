@@ -1,0 +1,134 @@
+# Machine verdict on an HCP Terraform plan, readable from a phone.
+#
+# WHAT IT CHECKS. `scripts/check-tfc-plan.mjs` resolves a run in the `hcw-azure`
+# workspace, fetches its JSON plan, and asserts it carries ONLY the known
+# permanent diff (`scripts/assert-expected-plan.mjs`). Exit 0 expected, 1
+# unexpected, 2 could not be read — and those last two are kept apart in the
+# summary below, because "the plan is wrong" and "I could not see the plan" are
+# opposite conclusions that a single red X would merge.
+#
+# WHY IT IS DISPATCH-ONLY, AND NOT A STEP IN iac-validate.yml.
+#
+# The obvious wiring — run this on every infra pull request — would produce a
+# check that is green for reasons unrelated to the pull request. The `hcw-azure`
+# workspace is CLI-driven with NO VCS connection: opening a pull request queues
+# no run, so there is no plan for that pull request to check. The script would
+# fetch whatever run happened last — possibly hours old, possibly someone else's
+# — and report on that, under a context name implying it had reviewed the diff
+# in front of you. A green check that means nothing is worse than no check,
+# which is the lesson this repository keeps relearning (T-514, and
+# 05-verify-timer.ps1 on 2026-08-30).
+#
+# So this is dispatched deliberately, at the one moment the question is real:
+# a plan is sitting in HCP Terraform waiting to be confirmed, and the reviewer
+# wants to know whether it is boring before approving it. The verdict goes to
+# the job summary — legible on a phone, which is the whole point, since the
+# alternative is reading a Terraform diff on a 6-inch screen at midnight.
+#
+# WHAT IT DOES NOT DO: make auto-apply safe. HCP Terraform does not consult
+# GitHub between plan and apply, so nothing here can block an apply. The
+# mechanism that can is a TFC Run Task — an endpoint HashiCorp calls mid-run
+# that may fail the run. That is a real build (an authenticated endpoint, HMAC
+# verification, a callback) and it is not this. Anyone reaching for auto-apply
+# should read that sentence twice.
+#
+# TWO TOKEN FAILURES, kept apart because they read very differently: an invalid
+# or revoked token answers 403, but an ORGANIZATION token gets 404 on
+# `json-output` — which looks like a missing plan rather than a permissions
+# problem. TFC_TOKEN must be a USER or TEAM token with admin access to the
+# workspace. See the script's header.
+
+name: TFC Plan Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'HCP Terraform run to check, e.g. run-AbCdEf1234567890. Leave blank for the workspace latest.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tfc-plan-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Plan carries only the known permanent diff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Self-arming, like the reader workflows: before TFC_TOKEN is seeded this
+      # reports honestly that it did not run, rather than failing and training
+      # everyone to ignore a red X. `secrets` is not available to a job-level
+      # `if`, so the test happens in a step.
+      - name: Is the token seeded?
+        id: token
+        env:
+          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${TFC_TOKEN}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "TFC_TOKEN is not set — skipping. Seed it at Settings -> Secrets and variables -> Actions." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Setup Node
+        if: steps.token.outputs.armed == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      # No `npm ci`: check-tfc-plan.mjs imports only assert-expected-plan.mjs
+      # and uses global fetch. Installing the package's Cosmos and Identity
+      # dependencies to run it would pull a dependency tree this job never
+      # touches, into a job holding a workspace-admin token.
+      - name: Check the plan
+        if: steps.token.outputs.armed == 'true'
+        id: check
+        env:
+          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set +e
+          if [ -n "${RUN_ID}" ]; then
+            node scripts/check-tfc-plan.mjs --run "${RUN_ID}" 2>&1 | tee /tmp/verdict.txt
+          else
+            node scripts/check-tfc-plan.mjs 2>&1 | tee /tmp/verdict.txt
+          fi
+          code=${PIPESTATUS[0]}
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # The three outcomes get three different sentences. Collapsing 1 and 2
+      # into "failed" is the exact mistake that put two wrong conclusions in
+      # this repository's record on 2026-08-22.
+      - name: Report
+        if: steps.token.outputs.armed == 'true'
+        env:
+          CODE: ${{ steps.check.outputs.code }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## TFC plan check"
+            echo ""
+            case "${CODE}" in
+              0) echo "**Expected.** The plan carries only the known permanent diff. Safe to confirm." ;;
+              1) echo "**UNEXPECTED.** The plan contains changes beyond the known permanent diff. Read it before confirming." ;;
+              2) echo "**Could not read the plan.** This is NOT a verdict on the plan — the run, the token or the API was the problem. Nothing was asserted either way." ;;
+              *) echo "**Unrecognised exit code ${CODE}.** Treat as unread." ;;
+            esac
+            echo ""
+            echo '```'
+            cat /tmp/verdict.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/verdict.txt
+          [ "${CODE}" = "0" ]
