@@ -263,7 +263,7 @@ AppTraces
 | extend timerName = tostring(split(cat, '.')[1])
 | where timerName in ($nameList)
 | where Message has 'Trigger Details' or Message has 'disabled' or Message has 'Executed'
-| project TimeGenerated, timerName, Message
+| project TimeGenerated, timerName, Message, OperationId
 | order by TimeGenerated asc
 "@
 
@@ -288,9 +288,26 @@ if ($rows.Count -eq 0) {
     return
 }
 
+# The host writes `Executed 'Functions.<name>' (Succeeded...)` on EVERY
+# invocation, including one the handler skipped, and that row carries no hint
+# of which it was. Labelling it "ran" reported every skip twice — once
+# honestly as "skipped", once as a "ran" that had not run. The two rows of one
+# invocation share an OperationId, so the skips are collected first and the
+# host's completion row for them is suppressed below.
+#
+# Sampling could in principle drop the .User row and leave the host row
+# looking like a run. Pair a "ran" with the timer's own durable side effect
+# before believing it — which is what "two independent witnesses" means.
+$skippedOps = @{}
+foreach ($r in $rows) {
+    if ($r.Message -match 'disabled' -and $r.OperationId) { $skippedOps[[string]$r.OperationId] = $true }
+}
+
 # ScheduleStatus carries the platform's own local-time view. Anything else is
 # the handler talking, which tells us armed-vs-skipped rather than clock.
 $sawSchedule = $false
+$ranCount = 0
+$skippedCount = 0
 foreach ($r in $rows) {
     $utc = ([datetime]::Parse($r.TimeGenerated)).ToUniversalTime()
     $local = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $chicago)
@@ -306,12 +323,20 @@ foreach ($r in $rows) {
         Write-Host ("  SCHEDULE  {0,-28} Last {1}   Next {2}" -f $timerName, $last, $next) -ForegroundColor Green
     }
     elseif ($r.Message -match 'disabled') {
+        $skippedCount++
         Write-Host ("  skipped   {0,-28} Chicago {1:yyyy-MM-dd HH:mm:ss} {2}" -f $timerName, $local, $zone)
     }
+    elseif ($r.OperationId -and $skippedOps.ContainsKey([string]$r.OperationId)) {
+        # The host's completion row for an invocation already reported as skipped.
+    }
     else {
+        $ranCount++
         Write-Host ("  ran       {0,-28} Chicago {1:yyyy-MM-dd HH:mm:ss} {2}" -f $timerName, $local, $zone) -ForegroundColor Green
     }
 }
+
+Write-Host ''
+Write-Host ("  {0} ran, {1} skipped." -f $ranCount, $skippedCount)
 
 Write-Step 'How to read this'
 Write-Host 'NCRONTAB is {second} {minute} {hour} {day} {month} {day-of-week}, and the hour is'
@@ -332,5 +357,11 @@ else {
 Write-Host ''
 Write-Host '"skipped" lines prove the trigger fires and the flag gate works. They are the'
 Write-Host 'expected state before arming, and they are sufficient for the clock half of the'
-Write-Host 'gate. "ran" lines mean the handler executed — pair those with the timer''s own'
-Write-Host 'durable side effect (Cutover-Runbook, "Gate 4 needs two independent witnesses").'
+Write-Host 'gate. A "ran" line means the host completed an invocation that logged no skip —'
+Write-Host 'which is weaker than it sounds, so pair it with the timer''s own durable side'
+Write-Host 'effect (Cutover-Runbook, "Gate 4 needs two independent witnesses").'
+Write-Host ''
+Write-Host 'The Chicago column on "ran"/"skipped" lines is TimeGenerated, which is when the'
+Write-Host 'trace was recorded, not necessarily when the timer fired: a worker that buffers'
+Write-Host 'and flushes late can land a batch of rows on one identical timestamp. Only the'
+Write-Host 'SCHEDULE row carries the platform''s own firing time, and only it decides the clock.'
