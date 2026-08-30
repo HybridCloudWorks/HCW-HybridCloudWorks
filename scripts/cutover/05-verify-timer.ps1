@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Cutover step 5 — prove a timer fires, at the right LOCAL time.
 
