@@ -226,7 +226,8 @@ Both cloud handshakes in this estate are federated, and neither has a secret:
 | Handshake | Identity | Trust anchor | Created by |
 | --- | --- | --- | --- |
 | HCP Terraform → Azure | `id-plat-terraform-prod-cus-01` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
-| GitHub Actions → Azure | the `github_deploy` and `github_reader` user-assigned identities | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref and to the `production` environment, in both the name and immutable-ID forms | `infra/oidc.tf` |
+| GitHub Actions → Azure | the `github_deploy` user-assigned identity | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref AND to the `production` environment, each in both the name and immutable-ID forms — four credentials | `infra/oidc.tf` |
+| GitHub Actions → Azure (read-only) | the `github_reader` user-assigned identity | The same issuer, but pinned to the deploy **ref only**, in both forms — two credentials, no environment subject. That asymmetry is load-bearing: a reader workflow that declares `environment:` presents `…:environment:<name>` instead of `…:ref:<ref>` and is refused with AADSTS700213, which is why `verify-alert-state.yml` and `monitor-functions-registered.yml` each carry a header saying not to add one | `infra/oidc.tf` |
 
 Neither mints anything longer-lived than a per-run token. So the **correct count
 of Azure credentials in GitHub Actions secrets is zero**, and that is a
