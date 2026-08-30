@@ -108,6 +108,17 @@ const PUBLIC_ROUTES = new Set([
   'telegram/webhook',
   'health', // liveness probe; returns no data
   'public/content', // published documents only — lib/public-reads.js
+  // The pre-render manifest's source (T-718). Published documents only,
+  // asserted in the query, projected to the ARTICLE_FIELDS allowlist — every
+  // field of which `public/content` above already serves. It is a bulk
+  // endpoint rather than a new disclosure.
+  //
+  // It also does NOT rate-limit, which is load-bearing rather than an
+  // oversight: anonymousKey() throws in production for a request that did not
+  // arrive through Cloudflare, so a rate-limited route is unreachable from the
+  // per-run origin window publish-content-manifest.yml opens. Same posture as
+  // /api/health, which deploy-functions.yml already probes that way.
+  'public/content-manifest',
   'public/content/{slugOrId}',
   'public/snapshots/{id}', // allowlisted to certifications + speakerevents
   'public/podcasts',

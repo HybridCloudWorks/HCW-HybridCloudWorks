@@ -315,21 +315,27 @@ variable "cosmos_local_auth_disabled" {
 variable "cosmos_allow_azure_datacenter_ips" {
   description = <<-EOT
     Include the '0.0.0.0' sentinel in the Cosmos firewall, allowing Azure
-    datacenter IPs. Held open by publish-content-manifest.yml, which queries
-    published articles from a GitHub-hosted runner daily.
+    datacenter IPs.
 
-    NOT by heal-computed-properties, which this said until 2026-08-29: that
-    workflow's automatic path sets computedProperties through ARM, a
-    control-plane operation this firewall does not gate. Only its
-    dispatch-only --inspect mode reads documents.
+    FALSE SINCE 2026-08-30 (T-718). It was held open by exactly one workload —
+    publish-content-manifest.yml querying Cosmos from a GitHub-hosted runner —
+    and that query now runs inside the Function App, which reaches Cosmos over
+    the integration subnet the firewall admits by virtual_network_rule. Nothing
+    in CI holds a Cosmos data-plane role any more.
 
-    Keeping this true is an accepted risk, not an unfixed finding — see
-    wiki/0025-cosmos-firewall-datacenter-sentinel.md for why every available
-    fix is worse, and what would justify revisiting it. cosmos_local_auth_disabled
-    is load-bearing while this is true.
+    NOT heal-computed-properties, which this said until 2026-08-29: its
+    automatic path sets computedProperties through ARM, a control-plane
+    operation this firewall never gated. Its dispatch-only --inspect mode reads
+    documents and now needs an operator window through cosmos_admin_ip_rules,
+    the same populate/apply/work/empty procedure every other live-data
+    inspection uses.
+
+    Turning this back on re-admits every Azure tenant at the network layer.
+    wiki/0025-cosmos-firewall-datacenter-sentinel.md is the record of why that
+    was worth removing and what it cost.
   EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 # -----------------------------------------------------------------------------

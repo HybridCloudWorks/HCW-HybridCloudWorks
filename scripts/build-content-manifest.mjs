@@ -29,8 +29,8 @@
  * would put it on a public URL at HTTP 200 and in the sitemap.
  *
  * Env:
- *   COSMOS_ENDPOINT   required
- *   COSMOS_DATABASE   optional, defaults to 'hcw'
+ *   FUNCTION_ORIGIN   required — the Function App's own hostname, reached
+ *                     through a per-run IP window. NOT the Cloudflare host.
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -55,13 +55,51 @@ const PROVIDERS = [
   'ansible',
 ];
 
-async function database() {
-  const endpoint = process.env.COSMOS_ENDPOINT;
-  if (!endpoint) throw new Error('COSMOS_ENDPOINT is not set');
-  const { CosmosClient } = await import('@azure/cosmos');
-  const { DefaultAzureCredential } = await import('@azure/identity');
-  const client = new CosmosClient({ endpoint, aadCredentials: new DefaultAzureCredential() });
-  return client.database(process.env.COSMOS_DATABASE || 'hcw');
+/**
+ * Fetch the published corpus from the Function App's origin (T-718).
+ *
+ * THIS USED TO QUERY COSMOS DIRECTLY, and that one workload is what held the
+ * `0.0.0.0` sentinel open on the Cosmos firewall — the switch admitting any
+ * workload in any Azure tenant at the network layer. Moving the query into the
+ * app, which runs inside the subnet the firewall already admits, is what let
+ * that close. See wiki/0025-cosmos-firewall-datacenter-sentinel.md.
+ *
+ * THE ORIGIN HOSTNAME, NOT THE CLOUDFLARE ONE. A GitHub runner asking the
+ * public host is served Cloudflare's Bot Fight Mode interstitial and a 403
+ * (#175, and the reason ADR 0024 exists). The workflow opens a per-run App
+ * Service IP allow rule for its own address instead and asks the origin
+ * directly — the same window deploy-functions.yml already uses to probe
+ * /api/health.
+ *
+ * No credential of any kind: the route is anonymous, and reaching it is the
+ * authorization. That is why the window closes in an always() step.
+ */
+async function fetchPublished() {
+  const origin = process.env.FUNCTION_ORIGIN;
+  if (!origin) {
+    throw new Error(
+      'FUNCTION_ORIGIN is not set. Expected the Function App origin hostname, e.g. ' +
+        'https://func-site-prod-cus-01.azurewebsites.net — NOT the Cloudflare host, which ' +
+        'answers datacenter clients with a bot interstitial.'
+    );
+  }
+
+  const url = `${origin.replace(/\/+$/, '')}/api/public/content-manifest`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    // 403 here is the shape to recognise: it means the origin window is shut,
+    // so the runner's address is not on the app's allow list.
+    throw new Error(
+      `${url} answered ${response.status}. A 403 usually means the per-run origin window ` +
+        'is closed or has not propagated; anything else is the app itself.'
+    );
+  }
+
+  const body = await response.json();
+  if (!body?.success || !Array.isArray(body.items)) {
+    throw new Error(`${url} returned an unexpected body: ${JSON.stringify(body).slice(0, 200)}`);
+  }
+  return body.items;
 }
 
 /** The provider segment an article's URL lives under. */
@@ -184,17 +222,11 @@ export function buildManifest(items) {
 }
 
 async function main() {
-  const db = await database();
-  const container = db.container('content');
-
-  // Published only, and asserted in the query rather than filtered after, so an
-  // unpublished article cannot reach a public URL through an oversight here.
-  const { resources } = await container.items
-    .query({
-      query:
-        "SELECT * FROM c WHERE c.contentStatus = 'published' OR c.Status = 'Published' OR c.status = 'published'",
-    })
-    .fetchAll();
+  // Published only, and still asserted in the QUERY rather than filtered after
+  // — the query just lives in the app now
+  // (functions/src/lib/public-content-manifest.js), where it is pinned by an
+  // exact-match test for that reason.
+  const resources = await fetchPublished();
 
   const manifest = buildManifest(resources);
   manifest.generatedAt = new Date().toISOString();

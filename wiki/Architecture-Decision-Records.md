@@ -69,7 +69,7 @@ Every ADR includes:
 | [0022](0022-alerting-fabric) | The alerting fabric, and the signal it does not cover | Accepted | Make failure visible without competing with the telemetry that explains it |
 | [0023](0023-migration-estate-retirement) | Retire the migration-era estate, grants and reverse path | Accepted | Close the decommission gate deliberately rather than by neglect |
 | [0024](0024-edge-availability-probe) | Reachability probing from a Cloudflare Worker | Proposed | Give T-519's signal a path that runs on the current Cloudflare plan |
-| [0025](0025-cosmos-firewall-datacenter-sentinel) | Keeping the Cosmos datacenter-IP sentinel | Proposed | Record why closing T-718 costs more than it buys, and what would change that |
+| [0025](0025-cosmos-firewall-datacenter-sentinel) | The Cosmos datacenter-IP sentinel | Accepted; recommendation reversed by its own addendum | Weigh closing T-718 against its cost — then remove the sentinel once a cheaper route appeared |
 
 ## Template
 
