@@ -119,3 +119,12 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 Write-Output 'validate-powershell.ps1 tests passed.'
+
+# Explicit, because the last fixture above is SUPPOSED to exit 1 and that value
+# survives in $LASTEXITCODE. GitHub's `shell: pwsh` appends
+# `if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }`
+# to the script it runs, so without this the job failed on a leftover 1 from a
+# passing test — every assertion green, "tests passed." printed, exit code 1.
+# `pwsh -File` does not append that line, which is why it passed locally and
+# failed only in CI.
+exit 0
