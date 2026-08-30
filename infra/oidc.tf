@@ -311,27 +311,34 @@ resource "azurerm_role_assignment" "github_reader_function_settings" {
   principal_id       = azurerm_user_assigned_identity.github_reader.principal_id
 }
 
-# publish-content-manifest queries published articles and writes a file. READER,
-# where the shared identity gave it Data Contributor: 00000000-...-0001 is the
-# built-in Data Reader, 0002 the Data Contributor the deploy identity keeps.
+# Open and close the per-run origin window (T-718).
 #
-# `name` omitted for the same reason as every other data-plane assignment here:
-# the provider generates a stable GUID, and a duplicated hardcoded name silently
-# REPLACES another identity's assignment instead of erroring.
-resource "azurerm_cosmosdb_sql_role_assignment" "github_reader_cosmos_content" {
-  resource_group_name = azurerm_resource_group.app["db"].name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000001"
-  principal_id        = azurerm_user_assigned_identity.github_reader.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["content"].name}"
-}
-
-resource "azurerm_cosmosdb_sql_role_assignment" "github_reader_cosmos_blogs" {
-  resource_group_name = azurerm_resource_group.app["db"].name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000001"
-  principal_id        = azurerm_user_assigned_identity.github_reader.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["blogs"].name}"
+# publish-content-manifest USED to hold Cosmos Data Reader on two containers and
+# query the database from a GitHub-hosted runner. That one workload is what held
+# the 0.0.0.0 sentinel open on the Cosmos firewall, so the query moved into the
+# Function App — which runs inside the subnet that firewall already admits — and
+# the workflow now fetches public/content-manifest over HTTP instead.
+#
+# Reaching the app means getting past the origin lock, so the workflow adds an IP
+# allow rule for its own runner and removes it in an always() step. That is a
+# write to the site's config, and this is the narrowest role in the estate that
+# permits it: Microsoft.Web/sites/config/Write with config/list/action excluded.
+#
+# THE SAME ROLE DEFINITION THE FUNCTION APP USES, for a different job. Its name
+# says "config refresh" because that was its first consumer; the actions are
+# exactly what an access-restriction add/remove needs, and inventing a second
+# definition with an identical permission set would be a rename, not a control.
+# What matters is what it withholds — it cannot read app settings back, and it
+# carries nothing else on the site.
+#
+# REMOVED with the Cosmos query: github_reader_cosmos_content and
+# github_reader_cosmos_blogs, Data Reader on those two containers. Nothing in CI
+# reaches the Cosmos data plane now, which is the precondition
+# cosmos_allow_azure_datacenter_ips = false depends on.
+resource "azurerm_role_assignment" "github_reader_origin_window" {
+  scope              = azurerm_function_app_flex_consumption.hcw.id
+  role_definition_id = data.azurerm_role_definition.func_config_refresh.id
+  principal_id       = azurerm_user_assigned_identity.github_reader.principal_id
 }
 
 # REMOVED 2026-08-29 (T-728): azurerm_role_assignment.github_deploy_alert_reader,

@@ -101,14 +101,71 @@ jobs:
         working-directory: scripts
         run: npm ci --ignore-scripts
 
-      # DefaultAzureCredential resolves through the CLI session azure/login
-      # leaves behind. COSMOS_ENDPOINT is a repository variable, not a secret —
-      # the endpoint is public and access is RBAC, not a connection string.
+      # T-718: this job no longer touches Cosmos. The query moved into the
+      # Function App, which runs inside the subnet the Cosmos firewall already
+      # admits, and this fetches the result over HTTP — which is what let
+      # cosmos_allow_azure_datacenter_ips go false.
+      #
+      # THE ORIGIN, NOT CLOUDFLARE. A runner asking the public host is served a
+      # Bot Fight Mode interstitial and a 403 (#175). So the runner is admitted
+      # to the origin the same way deploy-functions.yml admits itself for
+      # /api/health: add its IP, fetch, remove it in an always() step.
+      #
+      # NO DEFAULT-ACTION FLIP, unlike the storage window in deploy-functions.yml.
+      # The storage firewall ignores IP rules for requests from the account's own
+      # region, which forces Allow for the duration; App Service honours IP rules
+      # normally, so an allow rule for this runner is sufficient and the standing
+      # posture is never widened. That difference is why this route is an HTTP
+      # one rather than a blob.
+      #
+      # Authorized by the reader identity's HCW Function Config Refresh role —
+      # Microsoft.Web/sites/config/Write with config/list/action excluded, so it
+      # can open and close this window and cannot read app settings back.
+      - name: Open origin window for this runner
+        id: appfw
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+        run: |
+          set -euo pipefail
+          RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
+          RULE="ci-manifest-${{ github.run_id }}"
+          az functionapp config access-restriction add \
+            --resource-group "$RG" --name "$APP" \
+            --rule-name "$RULE" --action Allow \
+            --ip-address "${RUNNER_IP}/32" --priority 300 \
+            --output none
+          echo "rule_name=${RULE}" >> "$GITHUB_OUTPUT"
+          sleep 20
+
       - name: Build the manifest
         working-directory: scripts
         env:
-          COSMOS_ENDPOINT: ${{ vars.COSMOS_ENDPOINT }}
+          FUNCTION_ORIGIN: https://${{ vars.APP_HOSTNAME }}
         run: node build-content-manifest.mjs
+
+      # The assertion is the point of this step, not the removal. A window that
+      # silently failed to close leaves the origin admitting a dead runner's
+      # address, and the job stays green while it does.
+      - name: Close origin window
+        if: ${{ always() && steps.appfw.outputs.rule_name != '' }}
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          RULE: ${{ steps.appfw.outputs.rule_name }}
+        run: |
+          set -euo pipefail
+          az functionapp config access-restriction remove \
+            --resource-group "$RG" --name "$APP" \
+            --rule-name "$RULE" --output none
+
+          left=$(az functionapp config access-restriction show -n "$APP" -g "$RG" \
+            --query "length(ipSecurityRestrictions[?starts_with(name, 'ci-manifest-')])" -o tsv)
+          if [ "$left" != "0" ]; then
+            echo "::error::${left} ci-manifest-* rule(s) still on the origin after the window closed"
+            exit 1
+          fi
+          echo "origin window closed — no temporary rules left"
 
       - name: Upload the manifest
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0

@@ -48,12 +48,12 @@ and `Gate: owner` still marks the rest.
 | --- | ---: |
 | Critical | 0 |
 | High | 2 |
-| Medium | 4 |
+| Medium | 3 |
 | Low | 1 |
-| Total | 7 |
+| Total | 6 |
 
-Five of the seven are architecture-review findings still to be worked
-(`T-714`, three Medium — all three now owner-gated — and one Low). The other
+Four of the six are architecture-review findings still to be worked
+(`T-714`, two Medium — both owner-gated — and one Low). The other
 two are the pre-program platform gates: **T-518** (High) and **T-519**
 (Medium). Both carry **Gate: owner** and have no repository-side half — what is
 left of them is a Worker deployment and a set of feature flags, each needing
@@ -179,16 +179,10 @@ T-518, T-519, the unseeded Key Vault secrets, the unseeded
 | --- | --- | --- | --- |
 | T-714 | frontend | **Needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix | `main.jsx`, `hooks/prerenderData.js` |
 
-### Medium — 3 of 30 open
+### Medium — 2 of 30 open
 
-**Open, owner-gated:** T-718 (Cosmos datacenter-IP sentinel — **needs an owner
-decision, not engineering**. The review's recommended fix was scoped and found
-wrong on two points, and every alternative hands a CI identity
-`databaseAccounts/write` in the same job that reads the data. Recommendation and
-the full analysis: [ADR 0025](wiki/0025-cosmos-firewall-datacenter-sentinel.md).
-Accept, or fund one of the two alternatives it costs out), T-719 (measure
-workspace volume on an uncapped day), T-721 (telemetry vs SWA tier cost
-decision).
+**Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
+T-721 (telemetry vs SWA tier cost decision).
 
 ### Low — 1 of 15 open
 

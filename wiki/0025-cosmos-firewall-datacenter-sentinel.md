@@ -1,6 +1,6 @@
 # ADR 0025: Keeping the Cosmos datacenter-IP sentinel
 
-**Status:** Proposed
+**Status:** Accepted — decision REVERSED before ratification, see Addendum
 **Decision date:** 2026-08-29
 **Owners:** Workload owner
 
@@ -139,3 +139,59 @@ Three things change with this decision, none of which touch the firewall:
 - **This ADR does not license widening anything.** `cosmos_admin_ip_rules`
   remains empty in steady state, and the populate/apply/work/empty/apply
   procedure is unchanged.
+
+## Addendum, 2026-08-30 — the decision changed, and why
+
+This ADR recommended accepting the sentinel. The owner asked for Alternative A
+instead, and scoping it produced a third option better than either, so the
+sentinel is now **removed** and `cosmos_allow_azure_datacenter_ips` defaults to
+`false`. The analysis above is left standing rather than rewritten — it is the
+record of what was believed at the time, and two of its claims turned out to be
+incomplete.
+
+**What the options section got wrong about Alternative A.** It priced the blob
+route as "Storage Account Contributor on an account where CI deliberately holds
+no data-plane access". That was true and insufficient: the storage firewall
+*ignores IP rules for requests from the account's own region*, which is why
+`deploy-functions.yml` flips `default_action` to `Allow` for the length of its
+upload. Alternative A therefore meant a **daily automated Allow-all window on
+the content storage account** — time-boxed and on a lesser resource than the
+database, but structurally the same kind of exposure this ADR set out to remove.
+That cost was missing from the table when the choice was made.
+
+**What neither option considered.** App Service honours IP rules normally, and
+`deploy-functions.yml` already relies on that to probe `/api/health` from a
+runner without widening any standing posture. So the manifest did not need to
+become a blob at all: it became an HTTP route
+(`GET /api/public/content-manifest`), and the workflow opens a per-run App
+Service allow rule for its own address instead of touching storage or Cosmos.
+
+**The shape that shipped.**
+
+- The published-corpus query moved into the Function App, which reaches Cosmos
+  over the integration subnet the firewall admits by `virtual_network_rule`.
+- The route serves published documents only, asserted in the query, projected to
+  the `ARTICLE_FIELDS` allowlist — every field of which `public/content` already
+  serves. It deliberately does **not** rate-limit, because `anonymousKey()`
+  throws for a request that did not arrive through Cloudflare and a rate-limited
+  route would be unreachable from the origin window.
+- CI holds no Cosmos data-plane role. The window is authorized by the reader
+  identity's `HCW Function Config Refresh` role — `Microsoft.Web/sites/config/Write`
+  with `config/list/action` excluded, so it can open and close the window and
+  cannot read app settings back.
+
+**What this costs, stated as plainly as the acceptance was.** The estate gains a
+bulk public endpoint returning the whole published corpus in one request. That
+is a convenience difference rather than a confidentiality one — every field is
+already published through `public/content` — but it is a real change and the
+reason the workflow reaches it through the origin rather than over Cloudflare.
+And `heal-computed-properties --inspect`, a dispatch-only diagnostic, now needs
+an operator window through `cosmos_admin_ip_rules` like every other live-data
+inspection.
+
+**What is still true from the original analysis.** Everything in *Purpose and
+decision drivers* about the Cosmos firewall itself stands: there is still no
+narrower control-plane action than `databaseAccounts/*/write`, a per-run Cosmos
+window still cannot be isolated from the read, and propagation there is still up
+to 15 minutes. Those are the reasons Option 1 was rejected and remain reasons
+not to revisit it.
