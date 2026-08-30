@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ARTICLE_FIELDS,
+  PUBLISHED_PREDICATE,
   PUBLISHED_QUERY,
   createPublicContentManifestHandlers,
   projectArticle,
@@ -75,33 +76,39 @@ describe('getManifest', () => {
     // is one refactor away from being dropped, and the failure mode is an
     // unpublished article on a public URL.
     //
-    // SUBSTRING CHECKS ALONE ARE NOT ENOUGH, and this test learned that the
-    // hard way. Commenting the clause out — `SELECT * FROM c -- WHERE
-    // c.contentStatus = 'published' ...` — leaves every substring in place
-    // while returning the entire container, and the first version of this
-    // assertion passed on exactly that. So: no SQL comment may appear, and
-    // WHERE must come before the conditions rather than merely be present.
-    // Pinned EXACTLY, which is unusual and deliberate. Shape assertions caught
-    // the commented-out clause but not `... OR true`, and no structural check
-    // short of executing the query catches every permissive predicate. This is
-    // the string that decides whether an unpublished document reaches a public
-    // URL, so it is worth the brittleness: a legitimate change to it should be
-    // a conscious edit here too.
+    // COMPARED WHOLE, against a string rebuilt from ARTICLE_FIELDS. Shape
+    // assertions are not enough and this test learned it twice: substring
+    // checks passed a query with the clause commented out (`-- WHERE ...`),
+    // and the hardened version still passed `... OR true`. Nothing short of
+    // comparing the entire string catches every permissive predicate, and this
+    // is the string that decides whether an unpublished document reaches a
+    // public URL.
+    //
+    // Rebuilding the expectation rather than pasting it keeps the field list
+    // as the single source — a field added to ARTICLE_FIELDS updates both
+    // sides — while still failing on any edit to the predicate or the shape.
+    const projection = ARTICLE_FIELDS.map((f) => `c["${f}"]`).join(', ');
     expect(PUBLISHED_QUERY).toBe(
-      "SELECT * FROM c WHERE c.contentStatus = 'published' OR c.Status = 'Published' OR c.status = 'published'"
+      `SELECT ${projection} FROM c WHERE ${PUBLISHED_PREDICATE}`
+    );
+    expect(PUBLISHED_PREDICATE).toBe(
+      "c.contentStatus = 'published' OR c.Status = 'Published' OR c.status = 'published'"
     );
     expect(PUBLISHED_QUERY).not.toMatch(/--/);
     expect(PUBLISHED_QUERY).not.toMatch(/\/\*/);
-    const where = PUBLISHED_QUERY.indexOf('WHERE');
-    expect(where).toBeGreaterThan(-1);
-    for (const clause of [
-      "c.contentStatus = 'published'",
-      "c.Status = 'Published'",
-      "c.status = 'published'",
-    ]) {
-      const at = PUBLISHED_QUERY.indexOf(clause);
-      expect(at, `${clause} missing`).toBeGreaterThan(-1);
-      expect(at, `${clause} is not inside the WHERE`).toBeGreaterThan(where);
+  });
+
+  it('projects in SQL so unlisted fields never leave Cosmos', () => {
+    // The JS projection is defence in depth; this is the part that stops whole
+    // documents — article bodies and internal fields alike — crossing the wire
+    // for a daily bulk read.
+    expect(PUBLISHED_QUERY).not.toMatch(/SELECT \*/);
+    for (const field of ARTICLE_FIELDS) {
+      expect(PUBLISHED_QUERY, `${field} missing from the projection`).toContain(`c["${field}"]`);
+    }
+    // Bracket quoting is what makes the spaced and cased names legal SQL.
+    for (const spaced of ['Published At', 'Cloud Provider', 'Source URL', 'CD Url']) {
+      expect(PUBLISHED_QUERY).toContain(`c["${spaced}"]`);
     }
   });
 
