@@ -129,19 +129,41 @@ function Write-Bad { param($Text) Write-Host $Text -ForegroundColor Red }
 $chicago = [System.TimeZoneInfo]::FindSystemTimeZoneById('America/Chicago')
 
 <#
-    Render a UTC timestamp from the workspace as Chicago local time.
+    Render a workspace timestamp as Chicago local time.
 
     The zone suffix is computed per-timestamp rather than once, because a
     window can straddle a DST boundary and printing every row as CDT through a
     November re-run would be the same class of error this script exists to
     catch. Returns '(none)' for a null, which is what an empty aggregate gives.
+
+    THE PARSE IS EXPLICIT ABOUT BOTH CULTURE AND KIND, deliberately. The
+    obvious `[datetime]::Parse($s).ToUniversalTime()` — which this script used
+    until 2026-08-30 — reads the string in the OPERATOR'S culture and, when it
+    carries no offset or Z, yields Kind=Unspecified. ToUniversalTime() then
+    treats that as local and shifts it by the operator's own offset: five hours
+    in Chicago, silently, inside the one tool whose entire job is catching
+    five-hour errors. AssumeUniversal says what the workspace actually returns;
+    AdjustToUniversal makes the result Kind=Utc rather than re-converted. A
+    value that arrives already typed as [datetime] skips parsing and has its
+    Kind normalised the same way, since stringifying it first would put the
+    operator's culture back into the path we just removed.
 #>
 function Format-Chicago {
-    param([string] $Utc)
-    if (-not $Utc) { return '(none)' }
-    try { $parsed = ([datetime]::Parse($Utc)).ToUniversalTime() }
-    catch { return "(unparseable: $Utc)" }
-    $local = [System.TimeZoneInfo]::ConvertTimeFromUtc($parsed, $chicago)
+    param([object] $Value)
+    if ($null -eq $Value -or ($Value -is [string] -and -not $Value)) { return '(none)' }
+
+    if ($Value -is [datetime]) {
+        if ($Value.Kind -eq [System.DateTimeKind]::Utc) { $utc = $Value }
+        elseif ($Value.Kind -eq [System.DateTimeKind]::Local) { $utc = $Value.ToUniversalTime() }
+        else { $utc = [datetime]::SpecifyKind($Value, [System.DateTimeKind]::Utc) }
+    }
+    else {
+        $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal
+        try { $utc = [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture, $styles) }
+        catch { return "(unparseable: $Value)" }
+    }
+
+    $local = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $chicago)
     $zone = if ($chicago.IsDaylightSavingTime($local)) { 'CDT' } else { 'CST' }
     return ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f $local, $zone)
 }
@@ -302,10 +324,21 @@ $nameList = ($timers.Name | ForEach-Object { "'$_'" }) -join ','
 #
 # An invocation is identified by OperationId, which the host row and the
 # handler's own .User row of a single invocation share. It counts as SKIPPED if
-# any of its rows carries "disabled — skipping", RAN otherwise — the same rule
-# as before, applied where it cannot be miscounted. Rows with an empty
-# OperationId collapse into one pseudo-invocation; that has not been observed,
-# and the raw row count beside the table is what would expose it.
+# any of its rows carries the master-flag skip, RAN otherwise. Rows with an
+# empty OperationId collapse into one pseudo-invocation; that has not been
+# observed, and the raw row count beside the table is what would expose it.
+#
+# THE SKIP MATCH IS ANCHORED, AND HAS TO BE. The master-flag line is
+# `[<name>] disabled — skipping` (schedulers.js), but it is not the only timer
+# log carrying the word: forge-scheduled.js:77 writes
+# `[forgeScheduled] auto-forge disabled, skipping run.` from a handler that RAN
+# and found its own feature switched off. A bare `has 'disabled'` files that as
+# a skip — reporting an armed timer as unarmed, on one of the sixteen still to
+# be armed. The regex requires `disabled` to follow the bracketed name
+# directly, which the master line does and the forge line does not. It is
+# written as a KQL verbatim literal (@'...') so the backslashes reach RE2
+# instead of being eaten as KQL escapes, and it avoids matching the em dash
+# so nothing depends on that character surviving the trip through az.
 $summary = Invoke-WorkspaceQuery @"
 AppTraces
 | where TimeGenerated > ago(${Hours}h)
@@ -313,8 +346,9 @@ AppTraces
 | where cat startswith 'Function.'
 | extend timerName = tostring(split(cat, '.')[1])
 | where timerName in ($nameList)
-| where Message has 'disabled' or Message has 'Executed'
-| summarize skips = countif(Message has 'disabled'), started = min(TimeGenerated) by timerName, OperationId
+| extend isSkip = Message matches regex @'^\[[^\]]+\] disabled'
+| where isSkip or Message has 'Executed'
+| summarize skips = countif(isSkip), started = min(TimeGenerated) by timerName, OperationId
 | summarize invocations = count(), ran = countif(skips == 0), skipped = countif(skips > 0), firstSeen = min(started), lastSeen = max(started) by timerName
 | order by timerName asc
 "@
