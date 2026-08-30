@@ -16,8 +16,22 @@ description of the goal. Specifically:
   stated.
 - **Prefer one line.** A multi-line command is a continuation-character bug
   waiting to happen across two shells. Where a value must carry between
-  commands, compute it rather than asking the owner to retype it — a
-  hand-substituted placeholder produced `EmailAddressIsNotValid` on 2026-08-30.
+  commands, compute it rather than asking the owner to retype it.
+- **Never emit a placeholder token.** Not `THEACCOUNTNAME`, not `<your-id>`,
+  not `THE_ADDRESS`. Resource names in this estate are all discoverable —
+  `infra/variables.tf` carries the defaults (`stsiteprodcus01`,
+  `func-site-prod-cus-01`, `kv-site-prod-cus-01`), and the resource-group
+  pattern is `rg-<tier>-site-prod-cus`. Look the value up and write it into the
+  command. Twice on 2026-08-30 a placeholder shipped and was pasted verbatim:
+  `THE_ADDRESS` produced `EmailAddressIsNotValid`, and `THEACCOUNTNAME`
+  produced a DNS failure on `theaccountname.blob.core.windows.net`. Both cost a
+  round trip and neither was a real failure of the thing being tested.
+- **Prefer the control-plane `az` verb when one exists.** `az storage
+  container-rm show --storage-account … -g …` reads through ARM and needs only
+  Reader; `az storage container show --account-name … --auth-mode login` is
+  data-plane, needs a Storage Blob Data role, and resolves
+  `<account>.blob.core.windows.net` — so a wrong account name surfaces as
+  `getaddrinfo failed` rather than as anything about the container.
 - **Avoid `az --query` with brackets.** `[0]` and `[?...]` get re-parsed and
   fail with `] was unexpected at this time`. Use `-o json | ConvertFrom-Json`
   and filter in PowerShell.
