@@ -19,3 +19,22 @@ jobs:
       - name: Validate repository structure
         shell: pwsh
         run: ./scripts/validate-repository-structure.ps1
+
+      # Parses every .ps1/.psm1 and checks its bytes. Four defects were found in
+      # cutover/05-verify-timer.ps1 in one evening on 2026-08-30 — one of them a
+      # BOM — and none by a check, because nothing in CI had ever loaded a
+      # PowerShell file other than the validator above. A syntax error in a
+      # cutover script surfaces when an operator runs it, which is the worst
+      # possible time to find one.
+      - name: Validate PowerShell syntax and encoding
+        shell: pwsh
+        run: ./scripts/validate-powershell.ps1
+
+      # The gate above shipped with a defect its own mutation testing missed:
+      # under $ErrorActionPreference = 'Stop' it printed one finding and stopped,
+      # while still exiting 1 — so CI looked identical with the bug and without
+      # it. These run it against fixtures of deliberately broken files and assert
+      # on its OUTPUT, which is the only way that class of bug is visible.
+      - name: Test the PowerShell validator
+        shell: pwsh
+        run: ./scripts/validate-powershell.tests.ps1
