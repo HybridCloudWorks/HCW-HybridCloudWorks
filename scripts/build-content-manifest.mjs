@@ -85,7 +85,26 @@ async function fetchPublished() {
   }
 
   const url = `${origin.replace(/\/+$/, '')}/api/public/content-manifest`;
-  const response = await fetch(url);
+
+  // TIMED OUT, and the reason is the firewall rather than politeness. The
+  // workflow opens a per-run origin allow rule and closes it in an always()
+  // step — but always() runs when the STEP ends, and a fetch with no timeout
+  // does not end. A DNS or TLS stall would hold this open until the job's own
+  // timeout, leaving a dead runner's address admitted to the origin for as long
+  // as it took. A bounded failure closes the window on schedule.
+  //
+  // Two minutes because the response is the whole published corpus — hundreds
+  // of kilobytes of article bodies — not a health check.
+  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) }).catch((error) => {
+    if (error?.name === 'TimeoutError') {
+      throw new Error(
+        `${url} did not respond within 120s. The origin window is closed by the always() step ` +
+          'regardless; re-run rather than widening the timeout unless the corpus has genuinely ' +
+          'outgrown it.'
+      );
+    }
+    throw error;
+  });
   if (!response.ok) {
     // 403 here is the shape to recognise: it means the origin window is shut,
     // so the runner's address is not on the app's allow list.

@@ -1,4 +1,9 @@
-# ADR 0025: Keeping the Cosmos datacenter-IP sentinel
+# ADR 0025: The Cosmos datacenter-IP sentinel — kept, then removed
+
+> The title said "Keeping" until 2026-08-30. The decision below recommended
+> exactly that, and was then reversed by the Addendum at the end of this
+> document. A reader who stopped at the heading would have taken the opposite
+> conclusion, which is why the heading changed rather than the analysis.
 
 **Status:** Accepted — decision REVERSED before ratification, see Addendum
 **Decision date:** 2026-08-29

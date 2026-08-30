@@ -129,15 +129,39 @@ export function projectArticle(item) {
 }
 
 /**
- * The same predicate `build-content-manifest.mjs` used, unchanged.
- *
- * Three spellings because the corpus carries all three — the Firestore-era
- * `Status`, the current `contentStatus`, and a lowercase variant. Asserted in
- * the query rather than filtered after, so an unpublished article cannot reach
- * a public URL through an oversight here.
+ * The published-only predicate. Three spellings because the corpus carries all
+ * three — the Firestore-era `Status`, the current `contentStatus`, and a
+ * lowercase variant. Asserted in the QUERY rather than filtered after, so an
+ * unpublished article cannot reach a public URL through an oversight here.
  */
-export const PUBLISHED_QUERY =
-  "SELECT * FROM c WHERE c.contentStatus = 'published' OR c.Status = 'Published' OR c.status = 'published'";
+export const PUBLISHED_PREDICATE =
+  "c.contentStatus = 'published' OR c.Status = 'Published' OR c.status = 'published'";
+
+/**
+ * PROJECTED IN SQL, not just in JavaScript.
+ *
+ * The first version selected `*` and relied on `projectArticle` to drop the
+ * rest. That was correct and wasteful: Cosmos returned whole documents —
+ * article bodies and every internal field — across the wire for a daily bulk
+ * read, and the allowlist was enforced only after they had already arrived in
+ * the app's memory. Projecting here means the fields never leave the database.
+ *
+ * `c["Published At"]`-style bracket quoting is what handles the spaced and
+ * cased names in the list (`Published At`, `Cloud Provider`, `Source URL`,
+ * `CD Url`); `public-reads.js` builds LIST_PROJECTION the same way, which is
+ * the proven form in this repository rather than one invented here.
+ *
+ * Built FROM `ARTICLE_FIELDS` rather than written out, so the projection and
+ * the allowlist cannot disagree — a field added to one is in the other by
+ * construction.
+ *
+ * `projectArticle` still runs on the result and is not redundant: it is what
+ * holds if this query is ever edited back to `*`, and it costs one pass over
+ * an object whose keys are already correct.
+ */
+const ARTICLE_PROJECTION = ARTICLE_FIELDS.map((field) => `c["${field}"]`).join(', ');
+
+export const PUBLISHED_QUERY = `SELECT ${ARTICLE_PROJECTION} FROM c WHERE ${PUBLISHED_PREDICATE}`;
 
 export function createPublicContentManifestHandlers({ store }) {
   return {

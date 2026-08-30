@@ -9,11 +9,19 @@ name: Publish Content Manifest
 # permanent bot-protection exception on the API host, which that issue rejected.
 #
 # So the data comes from the other side: this workflow holds Azure federated
-# credentials, reads Cosmos directly with data-plane RBAC, and commits a plain
-# JSON file. deploy-azure-frontend.yml keeps `contents: read` and a Static Web
-# Apps token — no Azure identity at all — and reads a file from the checkout.
-# That separation is the point, not an implementation detail: the build that
-# runs on every push should not hold database credentials.
+# credentials, fetches the published corpus from the Function App, and commits a
+# plain JSON file. deploy-azure-frontend.yml keeps `contents: read` and a Static
+# Web Apps token — no Azure identity at all — and reads a file from the
+# checkout. That separation is the point, not an implementation detail: the
+# build that runs on every push should not hold database credentials.
+#
+# IT USED TO READ COSMOS DIRECTLY with data-plane RBAC, and that is what held
+# the 0.0.0.0 sentinel open on the Cosmos firewall — the switch admitting every
+# Azure tenant at the network layer (T-718). The query moved into the Function
+# App, which reaches Cosmos over the integration subnet the firewall admits, and
+# this job now fetches the result over HTTP through a per-run origin window. It
+# holds no Cosmos role of any kind. See
+# wiki/0025-cosmos-firewall-datacenter-sentinel.md.
 #
 # Committed rather than passed as an artifact so a build is reproducible from a
 # checkout alone, and so a diff shows what changed about the published set.
@@ -59,7 +67,7 @@ concurrency:
 # the bypass.
 jobs:
   build:
-    name: Read Cosmos and build the manifest
+    name: Fetch the published corpus and build the manifest
     # READER_CLIENT_ID, not CLIENT_ID (T-728). This job queries published
     # articles and writes a JSON file into the repository — it has never needed a
     # data-plane write, and it held Cosmos Data Contributor only because it
