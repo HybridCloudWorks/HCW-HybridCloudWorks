@@ -52,8 +52,11 @@ $files = @(
 if ($files.Count -eq 0) {
     # An empty sweep is indistinguishable from a passing one, and this file
     # would then report success forever after a directory move.
-    Write-Error 'No PowerShell files found. This gate scans nothing, which is not a pass.'
-    exit 1
+    # `throw` rather than Write-Error + exit: this is a fatal precondition, not
+    # one of the collected findings, and under $ErrorActionPreference = 'Stop'
+    # a Write-Error here would terminate anyway — leaving the `exit 1` beneath
+    # it unreachable and the intent unclear.
+    throw 'No PowerShell files found. This gate scans nothing, which is not a pass.'
 }
 
 foreach ($file in $files) {
