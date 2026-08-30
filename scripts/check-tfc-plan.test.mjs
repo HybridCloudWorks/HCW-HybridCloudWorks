@@ -19,7 +19,7 @@
  * pending states may be added freely; a finished one may not.
  */
 import { describe, it, expect } from 'vitest';
-import { AWAITING_DECISION, FINISHED } from './check-tfc-plan.mjs';
+import { AWAITING_DECISION, FINISHED, normaliseRunId } from './check-tfc-plan.mjs';
 
 /**
  * Run states in which HashiCorp considers the run over. From
@@ -84,5 +84,40 @@ describe('FINISHED', () => {
       FINISHED.has(state),
       `"${state}" is a run in flight. Calling it finished tells the operator the change is over when it is not.`
     ).toBe(false);
+  });
+});
+
+describe('normaliseRunId', () => {
+  it('passes a well-formed id through unchanged', () => {
+    expect(normaliseRunId('run-KqAcgGBXrFkcYP76')).toBe('run-KqAcgGBXrFkcYP76');
+  });
+
+  it('adds the prefix an operator dropped', () => {
+    // The real case, 2026-08-30: pasted bare out of the URL bar. It 404d, and
+    // the 404 handler said the token lacked admin access — sending the reader
+    // to regenerate a token that was fine.
+    expect(normaliseRunId('wWhoCWUJiTsjC6p8')).toBe('run-wWhoCWUJiTsjC6p8');
+  });
+
+  it('trims surrounding whitespace, which a paste brings along', () => {
+    expect(normaliseRunId('  run-KqAcgGBXrFkcYP76 ')).toBe('run-KqAcgGBXrFkcYP76');
+    expect(normaliseRunId(' wWhoCWUJiTsjC6p8\n')).toBe('run-wWhoCWUJiTsjC6p8');
+  });
+
+  it('treats blank as "use the workspace latest"', () => {
+    for (const blank of [null, undefined, '']) {
+      expect(normaliseRunId(blank)).toBeNull();
+    }
+  });
+
+  it.each([
+    ['run-KqAcgG BXrFkcYP76', 'an embedded space'],
+    ['https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs/run-Kq', 'a whole URL'],
+    ['ws-KqAcgGBXrFkcYP76', 'a workspace id'],
+    ['short', 'too short to be an id'],
+  ])('refuses %s (%s) rather than 404ing on it', (input) => {
+    // Refused HERE, with the expected shape, instead of reaching the API and
+    // coming back as a 404 that reads like a permissions problem.
+    expect(() => normaliseRunId(input)).toThrow(/not a run id/);
   });
 });

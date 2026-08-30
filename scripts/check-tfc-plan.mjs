@@ -94,6 +94,33 @@ export const FINISHED = new Set([
   'planned_and_finished',
 ]);
 
+/**
+ * Accept a run id with or without its `run-` prefix.
+ *
+ * HCP Terraform prints run ids prefixed, but the bare suffix is what you get
+ * from a hasty copy out of the URL bar or off the run header, and that is what
+ * an operator pasted into the workflow's input on 2026-08-30. The bare form
+ * 404s, and the 404 handler blamed the token.
+ *
+ * Prefixing is announced rather than silent: the caller should learn the shape
+ * for next time. Anything that is not recognisably an id is refused here, with
+ * the expected shape, rather than being sent to the API to come back as a 404
+ * that reads like a permissions problem.
+ */
+export function normaliseRunId(raw) {
+  if (!raw) return null;
+  const value = raw.trim();
+  if (/^run-[A-Za-z0-9]+$/.test(value)) return value;
+  if (/^[A-Za-z0-9]{8,}$/.test(value)) {
+    console.log(`(read "${value}" as "run-${value}" — run ids carry a run- prefix)`);
+    return `run-${value}`;
+  }
+  throw new Error(
+    `"${raw}" is not a run id. Expected run-XXXXXXXXXXXXXXXX, as shown on the run page in ` +
+      'HCP Terraform. Leave it blank to check the workspace latest.'
+  );
+}
+
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i === -1 ? null : process.argv[i + 1];
@@ -119,11 +146,20 @@ async function tfc(token, path, { raw = false } = {}) {
     );
   }
   if (response.status === 404) {
+    // Two causes, and the message used to assert only the second. On
+    // 2026-08-30 an operator passed a run id without its `run-` prefix and was
+    // told the TOKEN lacked admin access — which would have sent them
+    // regenerating a token that was fine. The permissions cause is real and
+    // subtle enough to be worth explaining, but it is not the FIRST thing to
+    // suspect when the caller supplied an identifier.
     throw new Error(
-      `404 on ${path}. Either the path is wrong, or the token lacks ADMIN access to ` +
-        `${ORGANIZATION}/${WORKSPACE}. This endpoint answers 404 rather than 403 for an ` +
-        'under-privileged token, and an organization token always lands here — use a user or ' +
-        'team token from https://app.terraform.io/app/settings/tokens'
+      `404 on ${path}.\n\n` +
+        'Most likely the identifier is wrong — check it character for character against the ' +
+        'HCP Terraform URL, including its `run-` prefix.\n\n' +
+        `Failing that, the token may lack ADMIN access to ${ORGANIZATION}/${WORKSPACE}: this ` +
+        'endpoint answers 404 rather than 403 for an under-privileged token, and an ' +
+        'organization token always lands here. Use a user or team token from ' +
+        'https://app.terraform.io/app/settings/tokens'
     );
   }
   if (!response.ok) {
@@ -144,7 +180,7 @@ async function main() {
   }
 
   let run;
-  const runId = arg('run');
+  const runId = normaliseRunId(arg('run'));
   if (runId) {
     run = await tfc(token, `/runs/${runId}`);
   } else {
