@@ -44,6 +44,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const VERIFY_TIMER = join(ROOT, 'scripts/cutover/05-verify-timer.ps1');
 const SCHEDULERS = join(ROOT, 'functions/src/functions/schedulers.js');
 const FORGE_SCHEDULED = join(ROOT, 'functions/src/lib/timers/forge-scheduled.js');
+const JOBS_SWEEPER = join(ROOT, 'functions/src/functions/jobs-sweeper.js');
 
 function read(path) {
   const text = readFileSync(path, 'utf8');
@@ -79,6 +80,22 @@ function masterSkipMessage(timerName) {
   return match[1].replace('${name}', timerName);
 }
 
+/**
+ * platformJobSweeper's skip, which is shaped differently from every other one.
+ *
+ * jobs-sweeper.js registers with `app.timer()` directly rather than through
+ * schedulers.js's `timer()` helper, so it logs `name: disabled (FLAG)` with no
+ * brackets. A pattern requiring the bracketed form counted this genuine skip as
+ * a RUN — telling an operator the handler did its work when it did not, on a
+ * timer they had just armed and were watching.
+ */
+function sweeperSkipMessage() {
+  const source = read(JOBS_SWEEPER);
+  const match = source.match(/context\.log\('(platformJobSweeper: disabled[^']*)'\)/);
+  if (!match) throw new Error(`No platformJobSweeper skip log found in ${JOBS_SWEEPER}.`);
+  return match[1];
+}
+
 /** The forge handler's own "my feature is off" line — emitted by a run, not a skip. */
 function forgeDisabledMessage() {
   const source = read(FORGE_SCHEDULED);
@@ -93,6 +110,7 @@ describe('timer verifier skip matcher', () => {
     // otherwise be testing nothing.
     expect(skipPattern().length).toBeGreaterThan(5);
     expect(masterSkipMessage('checkAgentHealth')).toContain('disabled');
+    expect(sweeperSkipMessage()).toContain('disabled');
     expect(forgeDisabledMessage()).toContain('disabled');
   });
 
@@ -103,6 +121,18 @@ describe('timer verifier skip matcher', () => {
     for (const name of registered) {
       expect(pattern.test(masterSkipMessage(name)), `master skip for ${name}`).toBe(true);
     }
+  });
+
+  it("matches platformJobSweeper's differently-shaped skip", () => {
+    // Not the bracketed form: jobs-sweeper.js bypasses the timer() helper.
+    // Missing it counts a real skip as a run, which is the worse of the two
+    // errors available here.
+    const pattern = new RegExp(skipPattern());
+    const message = sweeperSkipMessage();
+    expect(
+      pattern.test(message),
+      `"${message}" is a genuine skip. Missing it reports an unarmed timer as running.`
+    ).toBe(true);
   });
 
   it('does NOT match a handler that ran and found its own feature off', () => {
