@@ -38,9 +38,27 @@
     tell apart.
 #>
 
+<#
+.PARAMETER Root
+    Directory to sweep. Defaults to the repository root, which is what CI runs.
+    It exists so `validate-powershell.tests.ps1` can point this at a fixture of
+    deliberately broken files and check that each one is actually reported — a
+    guard whose failure path is never exercised is a guard nobody has tested,
+    which is how the $ErrorActionPreference defect below survived its first
+    review and four rounds of mutation testing.
+#>
+param(
+    [string] $Root
+)
+
 $ErrorActionPreference = 'Stop'
 
-$repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$repositoryRoot = if ($Root) {
+    (Resolve-Path -LiteralPath $Root).Path
+}
+else {
+    (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+}
 $errors = [System.Collections.Generic.List[string]]::new()
 
 $files = @(

@@ -29,3 +29,12 @@ jobs:
       - name: Validate PowerShell syntax and encoding
         shell: pwsh
         run: ./scripts/validate-powershell.ps1
+
+      # The gate above shipped with a defect its own mutation testing missed:
+      # under $ErrorActionPreference = 'Stop' it printed one finding and stopped,
+      # while still exiting 1 — so CI looked identical with the bug and without
+      # it. These run it against fixtures of deliberately broken files and assert
+      # on its OUTPUT, which is the only way that class of bug is visible.
+      - name: Test the PowerShell validator
+        shell: pwsh
+        run: ./scripts/validate-powershell.tests.ps1
