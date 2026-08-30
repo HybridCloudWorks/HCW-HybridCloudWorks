@@ -61,8 +61,7 @@ const WORKSPACE = 'hcw-azure';
 
 /**
  * Run states where a human decision is still outstanding — the case this tool
- * exists for. Anything else (applied, discarded, errored, canceled, planned and
- * finished) has already resolved, and a verdict on it is a verdict on history.
+ * exists for.
  *
  * HashiCorp's run states are documented at
  * developer.hashicorp.com/terraform/cloud-docs/run/states; this is the subset
@@ -71,6 +70,29 @@ const WORKSPACE = 'hcw-azure';
  * printing the caveat rather than silently omitting it.
  */
 export const AWAITING_DECISION = new Set(['planned', 'cost_estimated', 'policy_checked', 'policy_override']);
+
+/**
+ * Run states that are over.
+ *
+ * Kept SEPARATE from the complement of AWAITING_DECISION, because those are not
+ * the same thing and the first draft of this treated them as though they were.
+ * `planning`, `applying`, `cost_estimating` and `apply_queued` are neither
+ * awaiting a decision nor finished — they are running. Saying "already
+ * finished" of a run that is applying right now is false in the direction that
+ * matters, since the operator would read it as settled while ARM is mid-change.
+ * Caught in review on 2026-08-30.
+ *
+ * A state in neither set is in progress as far as the caveat is concerned,
+ * which is the safe reading: it claims less.
+ */
+export const FINISHED = new Set([
+  'applied',
+  'discarded',
+  'errored',
+  'canceled',
+  'force_canceled',
+  'planned_and_finished',
+]);
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -144,17 +166,20 @@ async function main() {
   // in the same voice it would use for a plan awaiting a decision.
   //
   // The status line above was already printed and was already easy to miss, so
-  // the distinction is stated rather than left to be inferred: a verdict on a
-  // finished run is a verdict on the past. It is deliberately NOT an error —
-  // reading an applied run is a legitimate thing to do, and refusing would
-  // remove the only way to ask "what did we actually apply?".
-  if (!AWAITING_DECISION.has(run.attributes.status)) {
+  // the distinction is stated rather than left to be inferred. It is
+  // deliberately NOT an error — reading an applied run is a legitimate thing to
+  // do, and refusing would remove the only way to ask "what did we actually
+  // apply?".
+  const status = run.attributes.status;
+  if (!AWAITING_DECISION.has(status)) {
     console.log('');
+    console.log(`NOTE: this run is ${status} — not a plan awaiting your decision.`);
     console.log(
-      `NOTE: this run is ${run.attributes.status}, not awaiting a decision. The verdict below ` +
-        'describes a run that already finished, not a plan you are about to confirm. Pass --run ' +
-        '<id> to check a specific one.'
+      FINISHED.has(status)
+        ? '      It already finished, so the verdict below describes history.'
+        : '      It is still running, so the verdict below is not final.'
     );
+    console.log('      Pass --run <id> to check a specific run.');
   }
 
   const planId = run.relationships?.plan?.data?.id;
