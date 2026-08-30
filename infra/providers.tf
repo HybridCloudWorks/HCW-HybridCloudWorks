@@ -23,16 +23,20 @@ terraform {
       source  = "Azure/azapi"
       version = "~> 2.0"
     }
-    # Cloudflare remains for DNS management
-    # 4.52 is the real floor, not 4.0 (T-725): cloudflare_record.content uses an
-    # attribute that only exists from 4.52, so the older versions the previous
-    # constraint admitted fail `validate`. Only the lock file was keeping it
-    # honest, so a workspace or CI re-resolve without the lock would have broken
-    # confusingly. (Provider v5 renames cloudflare_record to
-    # cloudflare_dns_record — an upgrade ADR, tracked separately.)
+    # Cloudflare remains for DNS management.
+    #
+    # v5 since 2026-08-29. The v4 note this replaces said the rename of
+    # cloudflare_record to cloudflare_dns_record was "an upgrade ADR, tracked
+    # separately"; the upgrade is done and the moved blocks in frontend.tf are
+    # what carry state across it.
+    #
+    # Provider v5 is generated from the Cloudflare API schema rather than
+    # hand-written, which is why the change is not a rename alone — see the
+    # three v4/v5 differences recorded above each resource in frontend.tf and
+    # the api_base_url note in outputs.tf.
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "~> 4.52"
+      version = "~> 5.24"
     }
   }
 }
