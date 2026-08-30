@@ -224,7 +224,16 @@ async function main() {
   // do, and refusing would remove the only way to ask "what did we actually
   // apply?".
   const status = run.attributes.status;
-  if (!AWAITING_DECISION.has(status)) {
+  const awaiting = AWAITING_DECISION.has(status);
+
+  // A stable, machine-readable line for the workflow, which decides whether an
+  // UNEXPECTED verdict should turn the job red. It should not, on a run nobody
+  // is being asked to confirm: this tool exists to gate a decision, and when
+  // there is no decision to gate, red is a claim it has not earned. A red that
+  // means nothing is how a check stops being read.
+  console.log(`awaiting-decision: ${awaiting ? 'yes' : 'no'}`);
+
+  if (!awaiting) {
     console.log('');
     console.log(`NOTE: this run is ${status} — not a plan awaiting your decision.`);
     console.log(
