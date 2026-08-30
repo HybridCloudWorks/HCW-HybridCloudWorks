@@ -16,8 +16,43 @@ description of the goal. Specifically:
   stated.
 - **Prefer one line.** A multi-line command is a continuation-character bug
   waiting to happen across two shells. Where a value must carry between
-  commands, compute it rather than asking the owner to retype it — a
-  hand-substituted placeholder produced `EmailAddressIsNotValid` on 2026-08-30.
+  commands, compute it rather than asking the owner to retype it.
+- **Never leave a placeholder in a line meant to be pasted.** Not
+  `THEACCOUNTNAME`, not `<your-id>`, not `THE_ADDRESS`. The rule is about
+  commands, not about prose: naming a shape in a sentence — the
+  `PS C:\Users\<you>\...` prompt above, or the `rg-<tier>-site-prod-cus`
+  resource-group convention — describes the estate and is fine. A command is
+  different, because it gets pasted exactly as written.
+
+  Every name a command needs here is already known. `infra/variables.tf`
+  carries the defaults — `stsiteprodcus01`, `func-site-prod-cus-01`,
+  `kv-site-prod-cus-01` — and the resource groups in use are
+  `rg-stor-site-prod-cus` (storage), `rg-web-site-prod-cus` (function app),
+  `rg-sec-site-prod-cus` (Key Vault) and `rg-mgmt-plat-prod-cus` (Log
+  Analytics and the action group, in the Management subscription). Look the
+  value up and write it in.
+
+  Twice on 2026-08-30 a placeholder shipped and was pasted verbatim:
+  `THE_ADDRESS` produced `EmailAddressIsNotValid`, and `THEACCOUNTNAME`
+  produced a DNS failure on `theaccountname.blob.core.windows.net`. Both cost
+  a round trip, and in neither case did the error describe the thing being
+  tested.
+- **Prefer the control-plane `az` verb when one exists.** These two read the
+  same container, and only the first works on Reader alone:
+
+  ```powershell
+  az storage container-rm show --storage-account stsiteprodcus01 -g rg-stor-site-prod-cus -n listenandlearn -o json | ConvertFrom-Json | Select-Object name, publicAccess
+  ```
+
+  ```powershell
+  az storage container show --name listenandlearn --account-name stsiteprodcus01 --auth-mode login -o json | ConvertFrom-Json | Select-Object name
+  ```
+
+  The second is data-plane. It needs a Storage Blob Data role, and it resolves
+  `stsiteprodcus01.blob.core.windows.net` — so a wrong account name fails at
+  name resolution with `getaddrinfo failed`, before auth or the container is
+  ever reached. That is how the `THEACCOUNTNAME` paste above disguised itself
+  as a broken container.
 - **Avoid `az --query` with brackets.** `[0]` and `[?...]` get re-parsed and
   fail with `] was unexpected at this time`. Use `-o json | ConvertFrom-Json`
   and filter in PowerShell.
