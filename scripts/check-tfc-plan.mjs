@@ -51,11 +51,48 @@
  * 2 could not be read.
  */
 
+import { pathToFileURL } from 'node:url';
+
 import { EXPECTED, checkPlan } from './assert-expected-plan.mjs';
 
 const API = 'https://app.terraform.io/api/v2';
 const ORGANIZATION = 'hcw';
 const WORKSPACE = 'hcw-azure';
+
+/**
+ * Run states where a human decision is still outstanding — the case this tool
+ * exists for.
+ *
+ * HashiCorp's run states are documented at
+ * developer.hashicorp.com/terraform/cloud-docs/run/states; this is the subset
+ * where the run is parked waiting on someone, not a claim to enumerate them all.
+ * An unrecognised state therefore reads as "not awaiting", which errs toward
+ * printing the caveat rather than silently omitting it.
+ */
+export const AWAITING_DECISION = new Set(['planned', 'cost_estimated', 'policy_checked', 'policy_override']);
+
+/**
+ * Run states that are over.
+ *
+ * Kept SEPARATE from the complement of AWAITING_DECISION, because those are not
+ * the same thing and the first draft of this treated them as though they were.
+ * `planning`, `applying`, `cost_estimating` and `apply_queued` are neither
+ * awaiting a decision nor finished — they are running. Saying "already
+ * finished" of a run that is applying right now is false in the direction that
+ * matters, since the operator would read it as settled while ARM is mid-change.
+ * Caught in review on 2026-08-30.
+ *
+ * A state in neither set is in progress as far as the caveat is concerned,
+ * which is the safe reading: it claims less.
+ */
+export const FINISHED = new Set([
+  'applied',
+  'discarded',
+  'errored',
+  'canceled',
+  'force_canceled',
+  'planned_and_finished',
+]);
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -122,6 +159,29 @@ async function main() {
   console.log(`message : ${run.attributes.message ?? ''}`);
   console.log(`created : ${run.attributes['created-at']}`);
 
+  // The question this tool is dispatched to answer is "is the plan I am about
+  // to confirm boring?". Without --run it resolves the workspace's LATEST run,
+  // which is whatever ran last — and on 2026-08-30 that was an apply from
+  // seventeen hours earlier. It reported UNEXPECTED, correctly, about history,
+  // in the same voice it would use for a plan awaiting a decision.
+  //
+  // The status line above was already printed and was already easy to miss, so
+  // the distinction is stated rather than left to be inferred. It is
+  // deliberately NOT an error — reading an applied run is a legitimate thing to
+  // do, and refusing would remove the only way to ask "what did we actually
+  // apply?".
+  const status = run.attributes.status;
+  if (!AWAITING_DECISION.has(status)) {
+    console.log('');
+    console.log(`NOTE: this run is ${status} — not a plan awaiting your decision.`);
+    console.log(
+      FINISHED.has(status)
+        ? '      It already finished, so the verdict below describes history.'
+        : '      It is still running, so the verdict below is not final.'
+    );
+    console.log('      Pass --run <id> to check a specific run.');
+  }
+
   const planId = run.relationships?.plan?.data?.id;
   if (!planId) {
     console.error(`\nRun ${run.id} has no plan yet (status ${run.attributes.status}).`);
@@ -171,9 +231,16 @@ async function main() {
   return 1;
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((error) => {
-    console.error(`\n${error.message}`);
-    process.exit(2);
-  });
+// Guarded so the module can be IMPORTED without running. Unguarded, importing
+// it to read an export fired main(), which reached for the network and then
+// called process.exit — inside a test runner that traps process.exit and
+// reports an unhandled rejection. Surfaced by check-tfc-plan.test.mjs on
+// 2026-08-30, the first time anything imported this file.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .then((code) => process.exit(code))
+    .catch((error) => {
+      console.error(`\n${error.message}`);
+      process.exit(2);
+    });
+}
