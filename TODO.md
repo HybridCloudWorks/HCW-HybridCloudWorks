@@ -16,7 +16,7 @@ an engineer working from a checkout if it needs tenant, Cloudflare or
 repository-admin access — the carried-over sections say so in their own words,
 and `Gate: owner` still marks the rest.
 
-## Status — 2026-08-28
+## Status — 2026-08-30
 
 > **The Blog Machine program and four remediation passes are closed.** All
 > seven Blog Machine phases (T-601…T-607) and 55 of the architecture review's
@@ -72,7 +72,7 @@ ever said "two numbers are missing".
 
 These are the residue of remediated findings: the code half is merged and
 in [CHANGELOG.md](CHANGELOG.md), and what remains needs access this repository
-does not have. They are not counted in the nine above, because the
+does not have. They are not counted in the six above, because the
 engineering work on them is done.
 
 - **`production` deployment-branch rule (from T-705).** Reduced to one setting
@@ -86,6 +86,15 @@ engineering work on them is done.
   unreviewed ref past all 12 required contexts. The guard step in both
   workflows stays as the backstop — nothing in a checkout can prove an
   environment rule set outside the repository is still set.
+- **Default-branch ruleset hardening (verified 2026-08-30).** Ruleset `Default`
+  is active on `~DEFAULT_BRANCH`: pull requests are required; deletion and
+  non-fast-forward updates are blocked; all 12 documented status contexts are
+  required; and there are no bypass actors. Two settings remain choices rather
+  than hidden defaults: `strict_required_status_checks_policy` is `false`, so a
+  head need not be brought up to date with `main` before merge, and
+  `required_review_thread_resolution` is `false`. Decide whether to enable each.
+  The zero required approvals remains the deliberate single-operator decision
+  recorded under T-705; this row does not reopen it.
 - **Action-group delivery test (from T-709).** An optional SMS receiver is
   wired as an independent second channel, via a `dynamic` block so an unset
   variable leaves the action group byte-identical. Run
@@ -309,8 +318,8 @@ Entra row below, which is where it belongs.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered; provide/rotate the Static Web App deployment credential through the approved Azure/GitHub path | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | Decide whether to arm the 18 schedulers (`schedulers_master_enabled`, then `enabled_timers` one name at a time) and the `/api/health` availability test (`availability_test_enabled`). All three are workspace edits in `hcw-azure` | Every one defaults to the safe value, so the repository state is "nothing armed" and stays that way without a decision. Arming the availability test needs a Cloudflare change first: Bot Fight Mode answers Azure's availability agents with a 403, and a WAF skip rule against it was built, applied and confirmed inert |
-| Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6). Tracked as **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** since 2026-08-26, with the design, cost model and acceptance criteria | Cosmos carries continuous backup on the free 7-day tier and both storage accounts carry versioning and soft delete — but both are `LRS`, and every mechanism sits inside the subscription it protects, so none of it survives account loss. None of it is justified against a stated objective, and nothing here has ever been recovery-tested |
+| Timers and the availability test | Decide whether to arm the remaining 16 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH` and `CLEANUP_TEMP_STORAGE` are armed and proven. Separately deploy the edge probe before enabling its Terraform alert | The two proven timers remain armed; the other 16 remain no-ops. The Azure availability test remains disabled because Bot Fight Mode challenges Azure agents; T-519's Cloudflare Worker is the approved path around it and still needs an owner deployment |
+| Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6). Tracked as **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** since 2026-08-26, with the design, cost model and acceptance criteria | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |
 | GCP pricing integration | Seed `GCP-BILLING-API-KEY` if the GCP column in the public pricing tool is wanted, or leave it unseeded and that column stays absent. Get it from the GCP console: enable the Cloud Billing API, create an API key, restrict it to that API. **This is not a billing credential** — the Cloud Billing Catalog API serves the public price list, and it is read for the site's comparison tools, not for anything this estate is charged for | No GCP credential is stored in the repository. The service-account JSON this row used to ask for is retired (2026-08-29): the API key is what Google documents for this API, and it removed a vault SDK client, an OAuth library and a bespoke seeding script |
