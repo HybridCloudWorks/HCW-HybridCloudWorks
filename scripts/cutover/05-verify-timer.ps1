@@ -328,17 +328,30 @@ $nameList = ($timers.Name | ForEach-Object { "'$_'" }) -join ','
 # empty OperationId collapse into one pseudo-invocation; that has not been
 # observed, and the raw row count beside the table is what would expose it.
 #
-# THE SKIP MATCH IS ANCHORED, AND HAS TO BE. The master-flag line is
-# `[<name>] disabled — skipping` (schedulers.js), but it is not the only timer
-# log carrying the word: forge-scheduled.js:77 writes
-# `[forgeScheduled] auto-forge disabled, skipping run.` from a handler that RAN
-# and found its own feature switched off. A bare `has 'disabled'` files that as
-# a skip — reporting an armed timer as unarmed, on one of the sixteen still to
-# be armed. The regex requires `disabled` to follow the bracketed name
-# directly, which the master line does and the forge line does not. It is
-# written as a KQL verbatim literal (@'...') so the backslashes reach RE2
-# instead of being eaten as KQL escapes, and it avoids matching the em dash
-# so nothing depends on that character surviving the trip through az.
+# THE SKIP MATCH IS ANCHORED, AND MATCHES TWO SHAPES.
+#
+# Most timers go through schedulers.js's `timer()` helper and skip with
+# `[<name>] disabled — skipping`. `platformJobSweeper` does not: jobs-sweeper.js
+# registers it with `app.timer()` directly and logs
+# `platformJobSweeper: disabled (FEATURE_FLAG_PLATFORM_JOB_SWEEPER)` — no
+# brackets. A pattern requiring the bracketed form counted that genuine skip as
+# a RUN, which is the worse direction of the two errors available here: it tells
+# an operator the handler did its work when it did not, on a timer they have
+# just armed and are watching. Found 2026-08-30 while checking why the
+# enabled_timers catalogue lists eighteen names and schedulers.js registers
+# seventeen — it registers seventeen because the eighteenth lives elsewhere.
+#
+# Anchoring still matters, because `disabled` is not exclusive to a skip:
+# forge-scheduled.js:77 writes `[forgeScheduled] auto-forge disabled, skipping
+# run.` from a handler that RAN and found its own feature switched off. A bare
+# `has 'disabled'` files that as a skip — the opposite error, reporting an armed
+# timer as unarmed. So the pattern requires `disabled` to follow either a
+# bracketed name or a bare `name:`, which both skip lines do and the forge line
+# does not.
+#
+# Written as a KQL verbatim literal (@'...') so the backslashes reach RE2
+# instead of being eaten as KQL escapes, and it stops short of the em dash so
+# nothing depends on that character surviving the trip through az.
 $summary = Invoke-WorkspaceQuery @"
 AppTraces
 | where TimeGenerated > ago(${Hours}h)
@@ -346,7 +359,7 @@ AppTraces
 | where cat startswith 'Function.'
 | extend timerName = tostring(split(cat, '.')[1])
 | where timerName in ($nameList)
-| extend isSkip = Message matches regex @'^\[[^\]]+\] disabled'
+| extend isSkip = Message matches regex @'^(\[[^\]]+\]|[A-Za-z][A-Za-z0-9]*:) disabled'
 | where isSkip or Message has 'Executed'
 | summarize skips = countif(isSkip), started = min(TimeGenerated) by timerName, OperationId
 | summarize invocations = count(), ran = countif(skips == 0), skipped = countif(skips > 0), firstSeen = min(started), lastSeen = max(started) by timerName
