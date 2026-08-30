@@ -101,19 +101,25 @@ engineering work on them is done.
   `required_review_thread_resolution` is `false`. Decide whether to enable each.
   The zero required approvals remains the deliberate single-operator decision
   recorded under T-705; this row does not reopen it.
-- **Second alert channel (from T-709).** **Email delivery was observed on
-  2026-08-30** — a sample budget alert from `ag-plat-prod-cus-01` reached the
-  `ops-email` receiver's inbox, fired 21:36 UTC, receiver `Enabled`, with the
-  CLI reporting `"Status": "Succeeded"`. That was the first time any alert on
-  this estate had been seen to arrive rather than merely be accepted by ARM,
-  and it closes the email half. The portal's test button reported `Unknown` and
-  delivered nothing on two prior attempts; the procedure is under *Live
-  confirmation* below.
+- ~~**Second alert channel (from T-709).**~~ **Closed 2026-08-30. Two delivery
+  paths, both observed arriving.**
 
-  What remains is the second channel: an optional SMS receiver is wired via a
-  `dynamic` block so an unset variable leaves the action group byte-identical.
-  Set `ops_sms_receiver` and it arms. Until then every alert has exactly one
-  delivery path — proven now, but still one.
+  **Email** — a sample budget alert from `ag-plat-prod-cus-01` reached the
+  `ops-email` receiver's inbox, fired 21:36 UTC, receiver `Enabled`, CLI
+  reporting `"Status": "Succeeded"`. The first time any alert on this estate had
+  been seen to arrive rather than merely be accepted by ARM.
+
+  **SMS** — `ops_sms_receiver` was set the same evening, the `dynamic` block
+  armed on apply, and the test message arrived. The carrier enrolled the number
+  first (*"You're in hcw-ops group"* — the action group's `short_name`,
+  `observability.tf:38`), which is worth noting because it confirms the message
+  came from THIS action group rather than merely that some SMS reached the
+  handset.
+
+  The estate went from zero proven delivery paths to two in one evening. Before
+  that, every alert rule in `observability.tf` rested on a hop only ever proven
+  to be ACCEPTED by ARM. The procedure that worked, and the portal button that
+  does not, are under *Live confirmation* below.
 - **Ruleset bypass for the manifest push (from T-726).** The workflow is now
   two jobs, so nothing holding `contents: write` also holds the Azure identity
   or runs `npm ci`. What remains: for that push to land on a main protected by
@@ -380,8 +386,11 @@ Entra row below, which is where it belongs.
   the short name, and it lives in `rg-mgmt-plat-prod-cus` in the **Management**
   subscription because the action group follows its resource group there.
 
-  Still open, and now the narrower claim: there is exactly ONE delivery path.
-  Set `ops_sms_receiver` for a second channel independent of email (T-709).
+  **The SMS channel was proven the same evening** and T-709 is closed. Same
+  command shape, `-a sms <name> <countryCode> <phoneNumber>` in place of
+  `-a email …`; read the values off the action group rather than retyping them.
+  Both channels have now been observed delivering, which is the first time this
+  estate has had a second path to fall back on.
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
 - Apply the Terraform change that creates the `listenandlearn` blob container.
