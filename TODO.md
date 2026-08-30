@@ -39,10 +39,16 @@ and `Gate: owner` still marks the rest.
 > **There is no deadline on this list any more.** The GCP deletion no longer
 > silences anything, which was the only time-bound consequence here.
 >
-> The `hcw-azure` workspace is **VCS-connected** (2026-08-26), working
-> directory `infra`, auto-apply off. Merged infra code reaches HCP Terraform on
-> its own; before that it only arrived when someone ran `terraform` from a
-> checkout, which is why several merged changes sat unapplied.
+> **The `hcw-azure` workspace is CLI-driven, with no VCS connection.** This
+> file claimed the opposite from 2026-08-26 until 2026-08-30 — "merged infra
+> code reaches HCP Terraform on its own" — and it does not. Merging infra code
+> queues nothing. A run exists only when someone starts one, and auto-apply is
+> off, so an apply additionally needs a confirmation. The corrected claim was
+> read off the workspace configuration on 2026-08-30, after the earlier one was
+> used to explain the run list and explained it wrongly. Anyone reading the old
+> sentence would assume an apply was coming after a merge; several merged
+> changes sitting unapplied is what that assumption looks like from the
+> outside.
 
 | Priority | Open items |
 | --- | ---: |
@@ -328,7 +334,12 @@ Entra row below, which is where it belongs.
 - Confirm the public API and Static Web App custom domain after any DNS or edge
   change.
 - **Observe an alert actually being delivered.** `az monitor action-group
-  test-notifications` against `ag-ops-prod-cus`, then set `ops_sms_receiver` so
+  test-notifications` against `ag-plat-prod-cus-01` — the name this file called
+  `ag-ops-prod-cus` until 2026-08-30, which is no resource: `observability.tf:36`
+  builds it as `ag-plat-${environment}-${region_abbreviation}-${instance}`, and
+  `hcw-ops` is only its short name. It lives in `rg-mgmt-plat-prod-cus`, in the
+  **Management** subscription, because the action group follows its resource
+  group there. Then set `ops_sms_receiver` so
   there is a second channel independent of email. The optional SMS receiver is
   merged and inert until the variable is set; delivery through *either* channel
   has never been observed, which means the alerting fabric is unproven end to
