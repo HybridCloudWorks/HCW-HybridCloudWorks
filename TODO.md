@@ -103,9 +103,12 @@ engineering work on them is done.
   recorded under T-705; this row does not reopen it.
 - **Second alert channel (from T-709).** **Email delivery was observed on
   2026-08-30** — a sample budget alert from `ag-plat-prod-cus-01` reached the
-  `ops-email` receiver's inbox, fired 21:36 UTC, receiver `Enabled`. That was
-  the first time any alert on this estate had been seen to arrive rather than
-  merely be accepted by ARM, and it closes the email half.
+  `ops-email` receiver's inbox, fired 21:36 UTC, receiver `Enabled`, with the
+  CLI reporting `"Status": "Succeeded"`. That was the first time any alert on
+  this estate had been seen to arrive rather than merely be accepted by ARM,
+  and it closes the email half. The portal's test button reported `Unknown` and
+  delivered nothing on two prior attempts; the procedure is under *Live
+  confirmation* below.
 
   What remains is the second channel: an optional SMS receiver is wired via a
   `dynamic` block so an unset variable leaves the action group byte-identical.
@@ -352,13 +355,27 @@ Entra row below, which is where it belongs.
   receiver's inbox (fired 21:36 UTC; receiver status `Enabled`). The email path
   is proven end to end, across the subscription boundary, for the first time.
 
-  Two things are worth keeping from how it was proven. The portal's **Test
-  action group** reported *"There was a problem completing this test"* with
-  status **Unknown** on two attempts, and that was the test-status API failing
-  to report — not delivery failing. A failed test is not evidence of a broken
-  fabric, and reading it as one would have sent someone rebuilding a working
-  action group. Second, this file named the group `ag-ops-prod-cus` until the
-  same day, which is no resource: `observability.tf:36` builds
+  **Use the CLI, not the portal button.** The portal's **Test action group**
+  reported *"There was a problem completing this test"* with status **Unknown**
+  on two attempts and delivered nothing. The same operation through the CLI
+  returned `"Status": "Succeeded"` / `"state": "Complete"` and the email arrived
+  a minute later:
+
+      az monitor action-group test-notifications create \
+        --action-group ag-plat-prod-cus-01 \
+        --resource-group rg-mgmt-plat-prod-cus \
+        --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e \
+        --alert-type budget -a email ops-email <address> usecommonalertschema
+
+  The API response and the inbox are two independent witnesses, which is the
+  standard the Cutover-Runbook asks for and what the portal alone could never
+  supply — its `Unknown` was a verdict on nothing. Note also the argument shape:
+  it is `-a email <name> <address> <schema>`, not a `--email-receiver` flag, and
+  the whole thing is one line — a backtick continuation pasted into Git Bash
+  gets read as a command name.
+
+  Second, this file named the group `ag-ops-prod-cus` until the same day, which
+  is no resource: `observability.tf:36` builds
   `ag-plat-${environment}-${region_abbreviation}-${instance}`, `hcw-ops` is only
   the short name, and it lives in `rg-mgmt-plat-prod-cus` in the **Management**
   subscription because the action group follows its resource group there.
