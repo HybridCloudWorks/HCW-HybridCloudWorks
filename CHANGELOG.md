@@ -3,9 +3,10 @@
 Completed features, fixes, enhancements, security fixes, and released changes.
 
 **Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
-file records **completed work only**. Outstanding engineering work belongs in
-[TODO.md](TODO.md); human-resolvable blockers in [REVIEW.md](REVIEW.md);
-required inputs in [REVIEW.md](REVIEW.md).
+file records **completed work only**. All outstanding work, including
+owner-gated work, belongs in [TODO.md](TODO.md); required-input references and
+formats belong in [Required-Inputs](wiki/Required-Inputs.md). `REVIEW.md` was
+retired on 2026-08-29 and must not be recreated.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project has not cut a tagged release; entries are grouped under
@@ -813,6 +814,26 @@ This project has not cut a tagged release; entries are grouped under
   admin preview now resolves through the same code as the public page.
 
 ### Changed
+
+- **Repository trackers reconciled against merged main (2026-08-30).** The
+  `TODO.md` status date and self-count now agree with its August 30 evidence;
+  its owner-action table records the two proven timers rather than saying
+  nothing is armed; and its recovery baseline now names the implemented
+  `Continuous30Days` Cosmos backup, RA-GRS content storage, and remaining LRS
+  Functions host storage. GitHub issues #127, #180 and #231 were re-read against
+  current Terraform and `.azure/api-surface.json`: their unfinished decisions
+  remain open, but superseded file anchors, endpoint counts and recovery
+  baselines no longer describe old code as current state.
+
+  The live `Default` branch ruleset was also read through GitHub on 2026-08-30,
+  rather than inferred from workflow files: it targets `~DEFAULT_BRANCH`,
+  blocks deletion and non-fast-forward updates, requires pull requests and all
+  12 documented status contexts, and has no bypass actors. Its two remaining
+  hardening choices — strict/up-to-date status checks and required review-thread
+  resolution — are both currently off and are recorded in `TODO.md` for an
+  owner decision. The `production` environment's branch restriction could not
+  be read through the integration, so that existing owner verification remains
+  open instead of being reported as proven.
 
 - **The Telegram webhook is registered against Azure, and the tracker was wrong
   about it (T-526 closed, 2026-08-28).** `getWebhookInfo` returns
