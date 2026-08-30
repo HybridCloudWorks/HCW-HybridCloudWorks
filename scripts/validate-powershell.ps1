@@ -80,7 +80,15 @@ foreach ($file in $files) {
 }
 
 if ($errors.Count -gt 0) {
-    $errors | ForEach-Object { Write-Error $_ }
+    # -ErrorAction Continue, because $ErrorActionPreference is 'Stop' at the top
+    # of this file and Write-Error is therefore TERMINATING: without it the
+    # first finding stops the script, the rest are never printed and `exit 1`
+    # is never reached. The job still fails — the terminating error exits
+    # non-zero on its own — so the bug is invisible from CI's red/green and
+    # shows up only as an operator fixing one problem, re-running, and finding
+    # another. Measured on pwsh 7.4.6: 1 of 3 findings printed before, 3 of 3
+    # after, exit code 1 either way.
+    $errors | ForEach-Object { Write-Error $_ -ErrorAction Continue }
     exit 1
 }
 
