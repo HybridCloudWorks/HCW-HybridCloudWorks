@@ -94,6 +94,50 @@ export const FINISHED = new Set([
   'planned_and_finished',
 ]);
 
+/**
+ * Accept a run id with or without its `run-` prefix.
+ *
+ * HCP Terraform prints run ids prefixed, but the bare suffix is what you get
+ * from a hasty copy out of the URL bar or off the run header, and that is what
+ * an operator pasted into the workflow's input on 2026-08-30. The bare form
+ * 404s, and the 404 handler blamed the token.
+ *
+ * Prefixing is announced rather than silent: the caller should learn the shape
+ * for next time. Anything that is not recognisably an id is refused here, with
+ * the expected shape, rather than being sent to the API to come back as a 404
+ * that reads like a permissions problem.
+ *
+ * BLANK IS DECIDED AFTER TRIMMING. The workflow tests its input with
+ * `[ -n "$RUN_ID" ]`, and a whitespace-only value passes that — so "   " used
+ * to arrive here and throw, when the operator plainly meant "use the latest".
+ *
+ * The SAME minimum length applies to both forms. It used to be eight for a
+ * bare id and one for a prefixed one, so `run-a` passed validation and 404d
+ * anyway, reproducing the identifier-versus-token confusion this function
+ * exists to end. The bound is deliberately a minimum rather than the sixteen
+ * characters HCP Terraform issues today: refusing a valid id because HashiCorp
+ * changed its id length would break the tool outright, which is worse than one
+ * confusing 404.
+ */
+const RUN_ID_BODY = /^[A-Za-z0-9]{8,}$/;
+
+export function normaliseRunId(raw) {
+  const value = (raw ?? '').trim();
+  if (!value) return null;
+  if (value.startsWith('run-')) {
+    const body = value.slice(4);
+    if (RUN_ID_BODY.test(body)) return value;
+  } else if (RUN_ID_BODY.test(value)) {
+    console.log(`(read "${value}" as "run-${value}" — run ids carry a run- prefix)`);
+    return `run-${value}`;
+  }
+  throw new Error(
+    `"${raw}" is not a run id. Expected the identifier shown on the run page in HCP Terraform, ` +
+      'such as run-KqAcgGBXrFkcYP76 — the run- prefix is optional here. Leave it blank to check ' +
+      'the workspace latest.'
+  );
+}
+
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i === -1 ? null : process.argv[i + 1];
@@ -119,11 +163,20 @@ async function tfc(token, path, { raw = false } = {}) {
     );
   }
   if (response.status === 404) {
+    // Two causes, and the message used to assert only the second. On
+    // 2026-08-30 an operator passed a run id without its `run-` prefix and was
+    // told the TOKEN lacked admin access — which would have sent them
+    // regenerating a token that was fine. The permissions cause is real and
+    // subtle enough to be worth explaining, but it is not the FIRST thing to
+    // suspect when the caller supplied an identifier.
     throw new Error(
-      `404 on ${path}. Either the path is wrong, or the token lacks ADMIN access to ` +
-        `${ORGANIZATION}/${WORKSPACE}. This endpoint answers 404 rather than 403 for an ` +
-        'under-privileged token, and an organization token always lands here — use a user or ' +
-        'team token from https://app.terraform.io/app/settings/tokens'
+      `404 on ${path}.\n\n` +
+        'Most likely the identifier is wrong — check it character for character against the ' +
+        'HCP Terraform URL, including its `run-` prefix.\n\n' +
+        `Failing that, the token may lack ADMIN access to ${ORGANIZATION}/${WORKSPACE}: this ` +
+        'endpoint answers 404 rather than 403 for an under-privileged token, and an ' +
+        'organization token always lands here. Use a user or team token from ' +
+        'https://app.terraform.io/app/settings/tokens'
     );
   }
   if (!response.ok) {
@@ -144,7 +197,7 @@ async function main() {
   }
 
   let run;
-  const runId = arg('run');
+  const runId = normaliseRunId(arg('run'));
   if (runId) {
     run = await tfc(token, `/runs/${runId}`);
   } else {
