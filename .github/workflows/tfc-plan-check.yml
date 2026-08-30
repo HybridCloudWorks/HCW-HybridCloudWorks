@@ -105,6 +105,12 @@ jobs:
           fi
           code=${PIPESTATUS[0]}
           echo "code=${code}" >> "$GITHUB_OUTPUT"
+          # The script prints `awaiting-decision: yes|no`. Default to yes when
+          # the line is absent — an unread marker should fail closed, so a
+          # future change that stops printing it cannot silently turn every
+          # UNEXPECTED verdict green.
+          awaiting=$(sed -n 's/^awaiting-decision: //p' /tmp/verdict.txt | head -1)
+          echo "awaiting=${awaiting:-yes}" >> "$GITHUB_OUTPUT"
           exit 0
 
       # The three outcomes get three different sentences. Collapsing 1 and 2
@@ -114,6 +120,7 @@ jobs:
         if: steps.token.outputs.armed == 'true'
         env:
           CODE: ${{ steps.check.outputs.code }}
+          AWAITING: ${{ steps.check.outputs.awaiting }}
         run: |
           set -euo pipefail
           {
@@ -121,7 +128,13 @@ jobs:
             echo ""
             case "${CODE}" in
               0) echo "**Expected.** The plan carries only the known permanent diff. Safe to confirm." ;;
-              1) echo "**UNEXPECTED.** The plan contains changes beyond the known permanent diff. Read it before confirming." ;;
+              1)
+                if [ "${AWAITING}" = "yes" ]; then
+                  echo "**UNEXPECTED.** The plan contains changes beyond the known permanent diff. Read it before confirming."
+                else
+                  echo "**Unexpected content, on a run nobody is being asked to confirm.** Reported, not failed — see the note in the output for what state the run is in."
+                fi
+                ;;
               2) echo "**Could not read the plan.** This is NOT a verdict on the plan — the run, the token or the API was the problem. Nothing was asserted either way." ;;
               *) echo "**Unrecognised exit code ${CODE}.** Treat as unread." ;;
             esac
@@ -131,4 +144,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/verdict.txt
-          [ "${CODE}" = "0" ]
+
+          # The job goes red only when there is a decision to gate. An
+          # UNEXPECTED verdict on an applied or still-running run is true and
+          # worth printing, but failing on it makes the check red for something
+          # nobody can act on — and a red that means nothing is how a check
+          # stops being read. Exit 2 always fails: not being able to read a plan
+          # is a problem whatever state the run is in.
+          if [ "${CODE}" = "0" ]; then exit 0; fi
+          if [ "${CODE}" = "1" ] && [ "${AWAITING}" != "yes" ]; then exit 0; fi
+          exit 1
