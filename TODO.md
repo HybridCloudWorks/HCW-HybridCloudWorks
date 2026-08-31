@@ -223,7 +223,7 @@ T-721 (telemetry vs SWA tier cost decision).
 
 ## High
 
-### T-518 — 16 of 18 timers are still no-ops; the mechanism is proven
+### T-518 — 15 of 18 timers are still no-ops; the mechanism is proven
 
 **Gate: owner** — [TODO.md](TODO.md), *Timers and the availability test*.
 
@@ -237,10 +237,10 @@ not arm anything at all and no document said so; it is now
 criterion is the observed invocation, not the applied setting.
 
 **The master switch went `true` on 2026-08-30**, with `CHECK_AGENT_HEALTH` and
-`CLEANUP_TEMP_STORAGE` in `enabled_timers`. The remaining sixteen are still
-no-ops, so the platform still runs almost no scheduled work — but "nothing is
-scheduled" is no longer true, and the arming mechanism is no longer an
-assumption.
+`CLEANUP_TEMP_STORAGE` in `enabled_timers`. That left sixteen no-ops **at that
+moment** — see the paragraph below for where the count stands now — so the
+platform still ran almost no scheduled work, but "nothing is scheduled" was no
+longer true and the arming mechanism was no longer an assumption.
 
 `PUBLISH_SCHEDULED_CONTENT` was added to `enabled_timers` later the same
 evening and the app settings confirm `FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT =
@@ -248,8 +248,9 @@ true`. **That is the setting, not the gate.** The acceptance criterion in
 Cutover-Runbook step 5 is the observed invocation, and it has not been
 collected: the verification run was made with a stale working copy of
 `scripts/cutover/05-verify-timer.ps1` that predates the KQL aggregation, so its
-output is not evidence either way. Fifteen of eighteen remain no-ops; the
-sixteenth is armed and unobserved.
+output is not evidence either way. So of the eighteen: fifteen remain no-ops,
+`PUBLISH_SCHEDULED_CONTENT` is armed and unobserved, and `CHECK_AGENT_HEALTH`
+and `CLEANUP_TEMP_STORAGE` are armed and observed.
 
 It gates two other things, which is why it outranks its own blast radius:
 the Blog Machine's scheduled throughput (`forgeScheduled`,
@@ -284,8 +285,9 @@ thousands of invocations for a query returning two rows, and was rewritten the
 same day to aggregate in the workspace instead. Its miscount was never
 root-caused — see the note above its query.
 
-The sixteen that remain go one at a time, each observed firing before the next
-is added.
+The fifteen that remain go one at a time, each observed firing before the next
+is added — as does `PUBLISH_SCHEDULED_CONTENT`, which is armed but has not yet
+been observed.
 
 ## Medium
 
