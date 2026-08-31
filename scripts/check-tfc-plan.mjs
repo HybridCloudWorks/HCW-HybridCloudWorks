@@ -142,11 +142,19 @@ export function normaliseRunId(raw) {
  * Find the run HCP Terraform planned for one commit.
  *
  * WHY THIS EXISTS. Without it this tool resolves the workspace's LATEST run,
- * which is whatever ran last and is usually not the pull request in front of
- * you — `tfc-plan-check.yml` refuses to run on every pull request for exactly
- * that reason, because a check that is green about someone else's run is worse
- * than no check. Selecting by commit is what makes the check mean what its
- * name says.
+ * which is whatever ran last and is usually not the commit in front of you — a
+ * check that is green about someone else's run is worse than no check.
+ *
+ * WHAT IT IS NOT YET KNOWN TO DO, corrected after the first live exercise on
+ * 2026-08-31: select the speculative plan for a PULL REQUEST. Asked for a
+ * pull-request head that HCP Terraform had posted a green status on, it found
+ * nothing, twice, ten minutes apart — while the newest run in the listing was
+ * an apply from sixteen hours earlier. So either speculative runs are absent
+ * from `/workspaces/:id/runs`, or that status comes from somewhere other than
+ * this workspace. Selecting a MERGE commit, whose run is a real queued plan, is
+ * the use this is known to serve. `describeRunWindow` below exists so the next
+ * person hits a message that distinguishes the two rather than repeating the
+ * investigation.
  *
  * SHAPE. `/workspaces/:id/runs?include=configuration_version.ingress_attributes`
  * answers JSON:API: the run carries a `configuration-version` relationship, the
@@ -247,6 +255,48 @@ export function selectRunForCommit(payload, sha) {
   return matches[0];
 }
 
+/**
+ * What the run window actually contained, for the case where nothing matched.
+ *
+ * WHY THIS EXISTS. The first live exercise of `--commit` (2026-08-31) reported
+ * "no run for this commit" for a commit HCP Terraform had posted a green status
+ * on. Two explanations fit that — the speculative plan had not been created
+ * yet, or speculative runs are not in the listing this tool reads — and the
+ * message could not tell them apart, so the operator learned nothing they could
+ * act on. "No match" and "no match, and the newest thing here is sixteen hours
+ * old" are different findings.
+ *
+ * Counts runs that carry a resolvable commit separately from runs in total: a
+ * window full of runs where none carries a commit sha is the signature of the
+ * second explanation.
+ */
+export function describeRunWindow(payload) {
+  const runs = Array.isArray(payload?.data) ? payload.data : [];
+  const included = Array.isArray(payload?.included) ? payload.included : [];
+
+  const byId = new Map();
+  for (const resource of included) {
+    if (resource?.id) byId.set(`${resource.type}:${resource.id}`, resource);
+  }
+
+  let withCommit = 0;
+  let newest = null;
+  for (const run of runs) {
+    const createdAt = run?.attributes?.['created-at'];
+    if (typeof createdAt === 'string' && (!newest || createdAt > newest)) newest = createdAt;
+
+    const cvRef = run?.relationships?.['configuration-version']?.data;
+    if (!cvRef?.id) continue;
+    const cv = byId.get(`${cvRef.type ?? 'configuration-versions'}:${cvRef.id}`);
+    const iaRef = cv?.relationships?.['ingress-attributes']?.data;
+    if (!iaRef?.id) continue;
+    const ia = byId.get(`${iaRef.type ?? 'ingress-attributes'}:${iaRef.id}`);
+    if (typeof ia?.attributes?.['commit-sha'] === 'string') withCommit += 1;
+  }
+
+  return { count: runs.length, withCommit, newest };
+}
+
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i === -1 ? null : process.argv[i + 1];
@@ -330,11 +380,17 @@ async function main() {
       // NOT 0. "I found no run for this commit" is not "the plan is boring",
       // and answering the second question when asked the first is how a check
       // goes green without checking anything.
+      const seen = describeRunWindow(payload);
+      console.error(`\nNo run for commit ${commit}.`);
       console.error(
-        `\nNo run in the last 50 for commit ${commit}.\n\n` +
-          'Either HCP Terraform has not planned it yet — a speculative plan lags the push by a ' +
-          'minute or two — or the commit never reached the workspace. Re-run once the run ' +
-          `appears at https://app.terraform.io/app/${ORGANIZATION}/workspaces/${WORKSPACE}/runs`
+        `\nThe window held ${seen.count} run(s), ${seen.withCommit} of them carrying a commit ` +
+          `sha; newest created ${seen.newest ?? 'unknown'}.`
+      );
+      console.error(
+        '\nIf the newest run predates the commit, HCP Terraform has not planned it yet — a ' +
+          'speculative plan lags the push. If runs are recent but few or none carry a commit ' +
+          'sha, the plan for this commit is not in the listing this tool reads and selecting ' +
+          `by commit cannot work here. Check https://app.terraform.io/app/${ORGANIZATION}/workspaces/${WORKSPACE}/runs`
       );
       return 2;
     }

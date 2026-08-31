@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AWAITING_DECISION,
   FINISHED,
+  describeRunWindow,
   normaliseRunId,
   selectRunForCommit,
 } from './check-tfc-plan.mjs';
@@ -313,5 +314,77 @@ describe('selectRunForCommit', () => {
 
   it('refuses a blank sha rather than matching the first run it sees', () => {
     expect(() => selectRunForCommit(payload({ runs: [], included: [] }), '  ')).toThrow(/needs a commit sha/);
+  });
+});
+
+/**
+ * What the window held, when nothing matched.
+ *
+ * ## The failure this catches
+ *
+ * The first live `--commit` run reported "no run for this commit" for a commit
+ * HCP Terraform had posted a green status on. Two explanations fit — the plan
+ * had not been created yet, or speculative runs are absent from the listing —
+ * and the message could not tell them apart, so the operator learned nothing
+ * actionable and the investigation had to be repeated by hand.
+ *
+ * The two signatures are different and both are in this payload: a stale
+ * `newest` means not-planned-yet; recent runs where none carries a commit sha
+ * means selecting by commit cannot work against this listing at all. A
+ * describer that collapsed them would be worse than none, because it would
+ * look like an answer.
+ */
+describe('describeRunWindow', () => {
+  it('reports an empty window rather than throwing', () => {
+    expect(describeRunWindow({ data: [], included: [] })).toEqual({
+      count: 0,
+      withCommit: 0,
+      newest: null,
+    });
+  });
+
+  it('tolerates a payload it cannot read, because it runs on the failure path', () => {
+    expect(describeRunWindow(null)).toEqual({ count: 0, withCommit: 0, newest: null });
+    expect(describeRunWindow({})).toEqual({ count: 0, withCommit: 0, newest: null });
+  });
+
+  // NOT-PLANNED-YET: runs carry commits, but the newest one is old.
+  it('reports the newest created-at so a stale window is visible', () => {
+    const seen = describeRunWindow({
+      data: [
+        {
+          id: 'run-a',
+          attributes: { 'created-at': '2026-08-31T04:04:26Z' },
+          relationships: { 'configuration-version': { data: { id: 'cv-1' } } },
+        },
+        {
+          id: 'run-b',
+          attributes: { 'created-at': '2026-08-30T01:00:00Z' },
+          relationships: { 'configuration-version': { data: { id: 'cv-1' } } },
+        },
+      ],
+      included: [
+        {
+          id: 'cv-1',
+          type: 'configuration-versions',
+          relationships: { 'ingress-attributes': { data: { id: 'ia-1' } } },
+        },
+        { id: 'ia-1', type: 'ingress-attributes', attributes: { 'commit-sha': 'abc' } },
+      ],
+    });
+    expect(seen).toEqual({ count: 2, withCommit: 2, newest: '2026-08-31T04:04:26Z' });
+  });
+
+  // NOT-IN-THIS-LISTING: runs are present but none can be matched by commit.
+  it('separates runs that carry a commit sha from runs in total', () => {
+    const seen = describeRunWindow({
+      data: [
+        { id: 'run-cli', attributes: { 'created-at': '2026-08-31T19:00:00Z' }, relationships: {} },
+        { id: 'run-cli2', attributes: { 'created-at': '2026-08-31T18:00:00Z' }, relationships: {} },
+      ],
+      included: [],
+    });
+    expect(seen.count).toBe(2);
+    expect(seen.withCommit).toBe(0);
   });
 });

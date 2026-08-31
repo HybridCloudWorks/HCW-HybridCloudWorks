@@ -18,7 +18,7 @@ and `Gate: owner` still marks the rest.
 
 ## Status — 2026-08-31
 
-> **Seven items are open. None is critical, none has a deadline, and none can be
+> **Five items are open. None is critical, none has a deadline, and none can be
 > closed from a checkout.** Each carries what to run or click, and what a
 > successful result looks like, so a real failure can be told apart from a
 > reporting failure.
@@ -55,135 +55,104 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
-| 1 | Seed `TFC_TOKEN` | — | Two links, about two minutes |
-| 2 | `T-726` — the ruleset bypass | — | A decision between three options |
-| 3 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 4 | `T-519` — deploy the edge availability probe | Medium | A Worker deployment |
-| 5 | `T-719` — measure the workspace volume | Medium | A measurement on an uncapped day |
-| 6 | `T-721` — telemetry cost | Medium | Two separable decisions |
-| 7 | `T-749` — flip the SCM lock | Low | Confirm one deploy, flip one variable |
+| 1 | `T-726` — the ruleset bypass | — | A GitHub App (chosen 2026-08-31); owner creates it, the workflow rework follows |
+| 2 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
+| 3 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 2 |
+| 4 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
+| 5 | `T-519` — arm the reachability alert | Medium | One query, then one variable |
 
-Items 1 and 2 carry no severity because they are not review findings: they are
-owner actions left behind by findings that are closed. Two of the seven need
-nothing but a decision (2 and 6); two need a measurement or a deployment (4 and
-5); one is a repeated procedure (3); two are a few minutes of clicking (1 and
-7).
+Item 1 carries no severity because it is not a review finding: it is an owner
+action left behind by a finding that is closed. Item 2 is a measurement, 3 a
+cost decision waiting on it, 4 a repeated procedure, and 5 one query followed by
+one variable.
+
+**Closed on 2026-08-31 and removed from this list:** seeding `TFC_TOKEN` (done),
+and `T-749`, the SCM lock — Terraform owns
+`scm_ip_restriction_default_action`, a live read shows `Deny all`, so the
+variable is already `true` and the last Deploy Functions run succeeded on
+2026-08-30 at 01:21 UTC. The tracker had it open against a reality where it was
+applied.
 
 ## What is open, and exactly what closes it
 
-### 1. Seed `TFC_TOKEN` so the plan check can run — 2 minutes
-
-Without it `TFC Plan Check` self-arms off and reports that it did not run.
-
-Mint a **user or team** token (an *organization* token cannot read
-`json-output` and fails with 404, which reads like a missing plan):
-https://app.terraform.io/app/settings/tokens
-
-Store it as `TFC_TOKEN`:
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions
-
-Then dispatch the workflow against a commit, from **Actions → TFC Plan Check →
-Run workflow**, filling the `commit` field with the merge commit whose run is
-waiting:
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/tfc-plan-check.yml
-
-**Success:** the job summary says the plan carries the known permanent diff and
-nothing else. `UNEXPECTED` lines name the addresses that do not belong — read
-those rather than the summary counts, which cannot tell three different
-replacements from the three expected ones.
-
-### 2. Decide T-726 — the ruleset bypass — a decision, not code
+### 1. T-726 — the ruleset bypass — the decision is made, the work is not
 
 `publish-content-manifest.yml` commits to `main` nightly. For that push to land
 on a branch with twelve required contexts, the ruleset lists the Actions token
 as a bypass actor — and a bypass belongs to the **token**, not to a workflow, so
 every workflow holding `contents: write` can push past every check.
-`scripts/workflow-write-permissions.test.mjs` pins that set to a reviewed two;
-that bounds it and does not close it.
+`scripts/workflow-write-permissions.test.mjs` pins that set to a reviewed two,
+which bounds it without closing it.
 
-Three ways to close it, and each costs something:
+**A GitHub App was chosen on 2026-08-31, over a deploy key and over accepting the
+risk.** The reasoning that decided it: the App's private key grants **push a
+branch and open a pull request**, and with the bypass removed even the App
+cannot merge past checks — so the credential it costs is strictly *less*
+powerful than the bypass it retires. A deploy key does not achieve that; it
+narrows who can use a bypass that still exists. Two costs, stated because they
+are real: one stored non-expiring key, and twelve checks running nightly on a
+data-file pull request that previously ran none.
 
-| Option | Cost |
-| --- | --- |
-| Accept the bounded bypass as a recorded risk | Nothing to build. The guard keeps the set from growing silently. Add a row to *Accepted risks* below |
-| A deploy key as the bypass actor | A stored, non-expiring credential — the thing T-727 removed — and deploy keys are repository-wide, so it cannot be scoped to the one file |
-| A GitHub App to open an auto-merging pull request | Removes the bypass entirely. A pull request opened with `GITHUB_TOKEN` does not trigger workflows by design, so its required checks never start and auto-merge never fires; an App or PAT is what makes it work |
+**Owner:** create the App in the organisation scoped to this repository, with
+`contents: write` and `pull_requests: write`; generate a private key; install
+it; store the App ID as a variable and the key as a secret.
 
-**Recording the decision.** Choosing the first option means adding a row to
-*Accepted risks* at the foot of this file, in the same terms as the rows already
-there: the risk, who accepted it and when, and what compensates. Choosing either
-of the others means the work is a normal change — a ruleset edit plus the
-credential or App it depends on — and this entry is then replaced by a
-CHANGELOG entry rather than edited. Until one is chosen the guard holds the set
-at two, so nothing degrades by waiting.
+**Then:** the `commit` job mints an installation token, pushes a branch, opens a
+pull request and enables auto-merge — the checks run precisely because the pull
+request is not opened with `GITHUB_TOKEN`. After that, remove the Actions-token
+bypass from the ruleset, and the guard above drops to one entry.
 
-### 3. T-518 — arm the remaining 15 timers — repeated procedure
+### 2. T-719 — the cap is binding, measured 2026-08-31
 
-Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
-`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
-is already `true`.
+**This is no longer a margin question.** Billable ingestion, aligned to the
+08:00 UTC cap reset:
 
-For each remaining timer, one at a time: add its name to `enabled_timers` in the
-workspace variable, merge, approve the run, then observe it firing before adding
-the next. The evidence standard is the observed invocation, not the applied
-setting — `wiki/Cutover-Runbook.md` step 5 has the four gates.
+| Cap-day | GB | | Cap-day | GB |
+| --- | ---: | --- | --- | ---: |
+| 08-30 | 0.2710 | | 08-24 | 0.2692 |
+| 08-29 | 0.2591 | | 08-23 | 0.2691 |
+| 08-28 | 0.2345 | | 08-22 | 0.2691 |
+| 08-27 | 0.2292 | | 08-21 | 0.2625 |
+| 08-26 | 0.2140 | | 08-20 | 0.0657 |
+| 08-25 | 0.2690 | | 08-19 | 0.0013 |
 
-Verify with (PowerShell, from the repository root):
+Seven days pinned inside 0.009 GB of each other, just above a 0.25 cap. Natural
+demand does not land on the same number six times; that is the ceiling. So
+`function_http_5xx` and `function_response_time` — **log** rules, because Flex
+Consumption publishes no HTTP metrics — have been going dark for part of most
+days, along with the telemetry itself. That is the silent-under-cap failure the
+alerting fabric was built to eliminate, happening.
 
-```powershell
-pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
-```
+The commands that produced this, and how to read `dataIngestionStatus`, are
+below under *Reading the ingestion volume*.
 
-**Success:** a single summary row with a plausible invocation count and a
-`ScheduleStatus` section filtered to that timer. If the count barely changes
-between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
-truncation fixed on 2026-08-31, and it means the window is not being applied.
+**What closes it:** raise `logs_daily_quota_gb` in the workspace
+(https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
+platform cannot reach in a day, approve the run, leave it one full cap period,
+read the volume, put it back. That measures **demand** rather than the ceiling,
+which is the number item 3 needs to size its lever. Record it here with the date.
 
-The full record, including the 2026-08-30 observation that straddles the apply
-boundary, is under **T-518** below.
+**Do not set it to -1.** Azure accepts that for "unlimited", but the
+`logs_daily_cap` alert threshold is this value times 0.8, so an unlimited
+workspace gives that rule a negative threshold and it fires forever about a cap
+that does not exist. The variable refuses it.
 
-### 4. T-519 — deploy the edge availability probe — the only signal that survives the app being down
+Anchors: `infra/observability.tf:329-341,78-99`, `infra/main.tf:80-88`,
+`infra/variables.tf` (`logs_daily_quota_gb`).
 
-Every other alert needs the app healthy enough to emit telemetry. The Azure
-availability test stays disabled because Cloudflare's Bot Fight Mode challenges
-Azure's agents, and a WAF skip rule against it was built, applied and confirmed
-inert — Bot Fight Mode does not run on the Ruleset Engine.
+#### Reading the ingestion volume
 
-The approved way around it is `edge/availability-probe`, a Cloudflare Worker
-whose same-zone subrequest is not challenged.
-[wiki/Availability-Probe.md](wiki/Availability-Probe.md) is the procedure:
-deploy with wrangler, seed the connection-string secret, observe a `success == 1`
-row in Application Insights, then set `availability_probe_alert_enabled = true`.
-
-**Success:** a `success == 1` row appears within one 5-minute cron period, and
-the alert rule shows as enabled after the apply.
-
-### 5. T-719 — measure the workspace volume on an uncapped day — Medium
-
-Flex Consumption publishes no HTTP metrics, so `function_http_5xx` and
-`function_response_time` are **log** rules — which re-creates, for the two most
-important workload signals, the silent-under-cap failure the alerting fabric was
-built to eliminate. The workspace was at its cap before pruning and the
-post-prune volume was never confirmed, so today's margin is an estimate and the
-whole chain rests on `logs_daily_cap` firing at 80% and a human acting in hours.
-
-**The cap is 0.25 GB/day and it resets at 08:00 UTC**, not midnight — Azure
-assigns the hour and it cannot be configured, so a day summed from midnight
-under-counts for eight hours after every reset.
-
-**First, is today even measurable?** A day sitting at the cap is truncation, not
-demand, and reading it as demand is the mistake worth avoiding:
+Is today measurable at all — a day at the cap is truncation, not demand:
 
 ```powershell
 az monitor log-analytics workspace show --resource-group rg-mgmt-plat-prod-cus --workspace-name log-plat-prod-cus-01 --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e -o json | ConvertFrom-Json | Select-Object -ExpandProperty workspaceCapping
 ```
 
 **Success:** `dailyQuotaGb`, a `quotaNextResetTime` near 08:00 UTC, and
-`dataIngestionStatus`. `RespectQuota` means collection is running;
-**`OverQuota` means the number below is a floor, not the demand.**
+`dataIngestionStatus`. `RespectQuota` means collection is running; `OverQuota`
+means any volume number is a floor.
 
-**Then the daily volume**, aligned to the reset and using the same `/ 1000.0` the
-`logs_daily_cap` alert uses, so the two agree:
+Then the daily volume, using the same `/ 1000.0` the alert uses so the two agree:
 
 ```powershell
 az monitor log-analytics query --workspace cf80dc24-2499-49a0-8c66-9522bcc294ed --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e --analytics-query "Usage | where IsBillable | where StartTime > ago(14d) | summarize IngestedGb = round(sum(Quantity) / 1000.0, 4) by CapDay = bin(StartTime - 8h, 1d) + 8h | order by CapDay desc" -o json | ConvertFrom-Json | Format-Table CapDay, IngestedGb -AutoSize
@@ -194,57 +163,69 @@ Windows `az` is a batch file that cannot receive an argument containing a
 newline — a multi-line query arrives truncated at the first break and the call
 still exits 0.
 
-**To take a real measurement**, raise `logs_daily_quota_gb` in the workspace
-(https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
-platform cannot reach in a day, approve the run, leave it one full cap period,
-read the volume, then put it back to `0.25`. It is a variable rather than a code
-literal precisely so this costs no pull request. **Do not set it to -1**: Azure
-accepts that for "unlimited", but the alert threshold is this value times 0.8, so
-an unlimited workspace gives that rule a negative threshold and it fires forever
-about a cap that does not exist. The variable refuses it.
+### 3. T-721 — telemetry costs five times the workload it observes — after item 2
 
-Record the measured GB/day here with the date. **If headroom is under roughly
-2×**, pull a documented lever rather than waiting for the 80% alert to become
-routine: drop the `host.json` log level, or move `AppTraces` (about 38% of the
-cap) to the Basic table plan.
+Telemetry runs about USD 17–21 a month against an application-subscription
+workload of roughly USD 4 — together roughly 80% of predictable Azure spend on a
+platform that documents cost to the cent.
 
-Anchors: `infra/observability.tf:329-341,78-99`, `infra/main.tf:80-88`,
-`infra/variables.tf` (`logs_daily_quota_gb`).
+**Raising the cap is not the answer on its own.** At roughly USD 2.76/GB,
+doubling it roughly doubles the larger of those two numbers. The levers are:
+drop the `host.json` log level, or move `AppTraces` — about 38% of the cap — to
+the Basic table plan at roughly USD 0.65/GB. Item 2's measurement is what says
+which is enough.
 
-### 6. T-721 — telemetry costs five times the workload it observes — Medium, decision
-
-Neither line is over budget, but together they are roughly 80% of predictable
-Azure spend on a platform that documents cost to the cent: telemetry runs about
-USD 17–21 a month against an application-subscription workload of roughly USD 4.
-
-Two separable decisions:
-
-1. **After T-719's measurement**, drop the host trace level or move `AppTraces`
-   to the Basic table plan.
-2. **Re-justify the Static Web App Standard tier** (about USD 9/month). The
-   in-file rationale cites custom domain plus SSL, SPA routing and 100 GB
-   bandwidth — all of which the Free tier also provides. The genuinely
-   Standard-only features are the SLA and pull-request staging environments,
-   which the rationale does not mention. Downgrade if neither is load-bearing.
+**Separately, re-justify the Static Web App Standard tier** (about USD 9/month).
+The in-file rationale cites custom domain plus SSL, SPA routing and 100 GB
+bandwidth — all of which the Free tier also provides. The genuinely
+Standard-only features are the SLA and pull-request staging environments, which
+the rationale does not mention. Downgrade if neither is load-bearing.
 
 Anchors: `wiki/Cost-Analysis.md:74-84`, `infra/main.tf:138-144,128-133`.
 
-### 7. T-749 — flip the SCM lock — Low
+### 4. T-518 — arm the remaining 15 timers — repeated procedure
 
-The credential half is already closed: basic auth is off on both SCM and FTP, so
-exposure is Entra-token-gated, and the per-run window in `deploy-functions.yml`
-exists to make `Deny` survivable. The design work is done. The finding is only
-that the flip has a stated precondition.
+Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
+`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
+is already `true` and `enabled_timers` is the HCL-typed workspace variable
+holding those three.
 
-Confirm one deploy has succeeded **through the per-run window** since
-2026-08-24, then set `functions_scm_lock_enabled = true` as a workspace
-variable and merge an infra change so the run queues.
+For each remaining timer, one at a time: add its name at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables, approve the run,
+then observe it firing before adding the next. The evidence standard is the
+observed invocation, not the applied setting — `wiki/Cutover-Runbook.md` step 5
+has the four gates.
 
-**Success:** the apply completes and a subsequent `deploy-functions.yml` run
-still succeeds. If a deploy fails after the flip, the window is not working and
-the variable should go back to `false` in the same way.
+```powershell
+pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
+```
 
-Anchors: `infra/main.tf:1055-1077`, `infra/variables.tf:886-889`. Overlaps T-520.
+**Success:** a single summary row with a plausible invocation count and a
+`ScheduleStatus` section filtered to that timer. If the count barely changes
+between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
+truncation fixed on 2026-08-31, and it means the window is not being applied.
+
+**Note the interaction with item 2:** arming timers adds `AppTraces` volume
+against a cap that is already binding. Take that measurement first, or arm and
+watch the volume with it.
+
+### 5. T-519 — the probe is deployed; arm the alert once a row lands
+
+The Cloudflare Worker was deployed on 2026-08-31 and runs on `*/5 * * * *`.
+Every other alert needs the app healthy enough to emit telemetry; this is the
+only signal that survives the app being down.
+
+Confirm a result landed — ingestion lags a few minutes:
+
+```kusto
+availabilityResults | where name == "edge-api-health" | order by timestamp desc | take 5
+```
+
+**Only after rows with `success == 1` are visible**, set
+`availability_probe_alert_enabled = true` in the workspace and approve the run.
+The alert fires on ABSENT successes rather than present failures, so arming it
+before the first observed success creates a rule that fires immediately and
+permanently on the missing data it watches for.
 
 ## Optional, and only if you want the feature
 

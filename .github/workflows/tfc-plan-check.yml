@@ -26,14 +26,21 @@
 # (2026-08-31), and HCP Terraform posts a commit status on every pull-request
 # head. So a pull request DOES have a speculative plan of its own.
 #
-# `--commit` now selects THAT run, which was the missing piece. This stays
-# dispatch-only anyway, and the reason has changed rather than gone away: the
-# decision this tool gates happens AFTER the merge, when the owner is looking
-# at a run in HCP Terraform deciding whether to confirm it. A speculative plan
-# on a pull request gates nothing — nobody approves it — so a check there would
-# be decoration on the busiest surface in the repository. Dispatch it with the
-# merge commit when the run is waiting, which is the moment the question is
-# real.
+# `--commit` selects a run by commit. It has NOT been shown to find the
+# speculative plan for a pull request: asked for a pull-request head that HCP
+# Terraform had posted a green status on, it found nothing, twice, ten minutes
+# apart, while the newest run in the listing was an apply from sixteen hours
+# earlier (2026-08-31). Either speculative runs are absent from
+# `/workspaces/:id/runs`, or that status comes from somewhere other than this
+# workspace; settling it needs the run list in the HCP Terraform UI.
+#
+# That does not change the conclusion, and it is worth saying why rather than
+# treating it as a lucky escape. The decision this tool gates happens AFTER the
+# merge, when someone is looking at a queued run deciding whether to confirm it.
+# A speculative plan on a pull request gates nothing — nobody approves it — so
+# a check there would be decoration on the busiest surface in the repository.
+# Dispatch it with the MERGE commit when the run is waiting, which is both the
+# moment the question is real and the case `--commit` is known to serve.
 #
 # Wiring it to `push: main` automatically was considered and not built: the
 # speculative plan lags the push, so the job would have to poll, and a polling
