@@ -82,10 +82,11 @@ and `Gate: owner` still marks the rest.
 > that sentence. A description contradicting its own workspace is worse than an
 > empty one, because it reads exactly like a setting.
 >
-> **Owner action, one field:** correct the description at
-> https://app.terraform.io/app/hcw/workspaces/hcw-azure/settings/general so the
-> next reader is not told the same thing — e.g. "VCS-connected to
-> HybridCloudWorks/HCW-HybridCloudWorks (infra/). Manual apply."
+> **Corrected in the workspace on 2026-08-31**, so the description no longer
+> contradicts the connection. The account of how it misled two sessions stays
+> here, because the lesson is not about one stale sentence: a free-text field
+> beside real settings reads like a setting, and this file twice reported one
+> as though it had been read off the configuration.
 
 | Priority | Open items |
 | --- | ---: |
@@ -191,8 +192,10 @@ engineering work on them is done.
      waits for approval, because auto-apply is off (see the status note at the
      top of this file).
 
-  Then the GitHub secret can be deleted; nothing reads it. Until step 1 runs,
-  the deploy fails at the minting step with an error naming the missing role.
+  **Both ran on 2026-08-31 and the loop is closed.** The role exists, the
+  assignment applied through the VCS-driven run, and the owner deleted
+  `AZURE_STATIC_WEB_APPS_API_TOKEN` from repository settings. No stored,
+  non-expiring credential remains in this repository's secrets.
 
   **What this does not claim.** The token still exists in Terraform state as an
   attribute of `azurerm_static_web_app.hcw`, which no output block could ever
