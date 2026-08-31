@@ -53,6 +53,13 @@ description of the goal. Specifically:
   name resolution with `getaddrinfo failed`, before auth or the container is
   ever reached. That is how the `THEACCOUNTNAME` paste above disguised itself
   as a broken container.
+- **Single-quote an `az` `@file` argument.** `@` starts PowerShell's splatting
+  operator, so a bare `--role-definition @infra/roles/x.json` is read as a
+  variable to expand rather than a literal, and `az` receives something that is
+  not a path. It fails with `Failed to parse string as JSON` naming the file —
+  an error about JSON for a problem that is entirely about quoting, which is
+  why it costs a round trip. Write it as
+  `--role-definition '@infra/roles/x.json'`. Cost one on 2026-08-30.
 - **Avoid `az --query` with brackets.** `[0]` and `[?...]` get re-parsed and
   fail with `] was unexpected at this time`. Use `-o json | ConvertFrom-Json`
   and filter in PowerShell.
