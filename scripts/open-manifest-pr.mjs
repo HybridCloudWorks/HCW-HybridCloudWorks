@@ -1,14 +1,20 @@
 /**
  * Open the manifest pull request and ask for auto-merge (T-726).
  *
- * The nightly refresh used to push straight to `main`, which needed the ruleset
- * to bypass the Actions token — and a bypass belongs to the TOKEN, so every
- * workflow holding `contents: write` inherited the ability to push past twelve
- * required checks. Opening a pull request instead removes the bypass. The
- * checks run because the pull request is opened with a GitHub App installation
- * token rather than `GITHUB_TOKEN`: GitHub deliberately does not trigger
- * workflows for events its own token creates, which is exactly why the obvious
- * version of this idea does not work.
+ * The nightly refresh used to push straight to `main`. The ruleset refuses
+ * that: `pull_request` is one of its rules and it lists no bypass actors
+ * (verified 2026-08-31). So the push had been failing since 2026-08-25, and
+ * nothing said so, because the published set did not move in that window and
+ * the push path was never reached.
+ *
+ * Opening a pull request is how the refresh reaches `main` at all. The checks
+ * run because it is opened with a GitHub App installation token rather than
+ * `GITHUB_TOKEN`: GitHub deliberately does not trigger workflows for events its
+ * own token creates, which is exactly why the obvious version of this idea does
+ * not work.
+ *
+ * An earlier version of this header said this removed a ruleset bypass. There
+ * was no bypass to remove.
  *
  * AUTO-MERGE IS REQUESTED, NOT REQUIRED. `allow_auto_merge` was false on this
  * repository when this was written, so the request fails until an owner enables

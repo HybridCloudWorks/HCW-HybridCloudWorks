@@ -1,23 +1,34 @@
 /**
  * Which workflows may hold `contents: write`.
  *
- * ## The exposure this bounds
+ * ## What this bounds, corrected 2026-08-31
  *
- * A ruleset bypass is granted to the TOKEN, not to a workflow. So while the
- * ruleset lists the Actions token as a bypass actor, **every** workflow holding
- * `contents: write` can push to `main` past every required check.
+ * THIS FILE USED TO CLAIM a ruleset bypass: that the Actions token was listed
+ * as a bypass actor, that a bypass is granted to the TOKEN rather than to a
+ * workflow, and that therefore every workflow holding `contents: write` could
+ * push to `main` past every required check. That was the stated reason the list
+ * existed, and it was wrong.
  *
- * THE BYPASS IS NO LONGER NEEDED, as of 2026-08-31.
- * `publish-content-manifest.yml` was the only thing that required it, and its
- * `commit` job now opens a pull request with a GitHub App installation token
- * instead of pushing — so the checks run rather than being skipped. Removing
- * the bypass actor from the ruleset is an owner action, and until it happens
- * this file is still the thing bounding the blast radius.
+ * Reading /repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114
+ * returns `enforcement: active`, NO `bypass_actors`, and the rules `deletion`,
+ * `non_fast_forward`, `pull_request`, `required_status_checks`. Nothing is
+ * exempt from the `pull_request` rule. A workflow holding `contents: write`
+ * cannot push to `main` today, whatever it does with the grant.
  *
- * Either way the list earns its keep: pinned here, adding a `contents: write`
- * grant becomes a reviewed change with a justification, instead of a line in an
- * unrelated pull request that nobody reads as a security decision — which is
- * exactly how this kind of grant spreads.
+ * So the list is bounding something smaller than it said, and it is worth being
+ * exact about what: `contents: write` still lets a workflow push any OTHER
+ * branch, force-push one, create tags and releases, and write repository
+ * contents through the API. It is also what would become dangerous the moment a
+ * bypass actor is added — the state the header wrongly assumed. This is a
+ * tripwire kept armed for a configuration that does not currently exist, which
+ * is a legitimate reason to keep it and a bad reason to describe it as a live
+ * exposure.
+ *
+ * Its steady value is unchanged and does not depend on any of the above: pinned
+ * here, adding a `contents: write` grant becomes a reviewed change with a
+ * justification, instead of a line in an unrelated pull request that nobody
+ * reads as a security decision — which is exactly how this kind of grant
+ * spreads.
  *
  * ## Why a text scan and not a YAML parse
  *
@@ -58,10 +69,15 @@ const ALLOWED = new Map([
  * `publish-content-manifest.yml` left this list on 2026-08-31 and should not
  * come back to it. Its `commit` job now holds `contents: read` and does its
  * writing with a GitHub App installation token, which opens a pull request that
- * the required checks run on. Re-adding the grant there would restore the thing
- * T-726 removed — the ability to push to main past every check — so if a future
- * change makes this test fail on that file, the question to ask is why the App
- * path stopped working, not whether to widen the list.
+ * the required checks run on.
+ *
+ * Re-adding the grant there would NOT restore an ability to push past every
+ * check — the ruleset never granted one (see the header). It would restore a
+ * push to `main` that the `pull_request` rule refuses, which is what the job
+ * was actually doing, unnoticed, from 2026-08-25. So if a future change makes
+ * this test fail on that file, the question to ask is why the App path stopped
+ * working, not whether to widen the list: widening it puts the job back on a
+ * path that cannot succeed.
  */
 
 /** Tolerant on purpose — see the header. */
@@ -117,9 +133,11 @@ describe('workflows holding contents: write', () => {
     expect(files.length).toBeGreaterThan(5);
   });
 
-  // THE ASSERTION. A workflow that gains this grant gains the ability to push
-  // to main past every required check, because the ruleset bypass belongs to
-  // the token rather than to a workflow.
+  // THE ASSERTION. A workflow that gains this grant gains the ability to write
+  // this repository's contents outside review — any branch but `main`, tags,
+  // releases — and would gain `main` itself the day a bypass actor is added to
+  // the ruleset. See the header for why that last clause is conditional rather
+  // than current.
   it('is exactly the reviewed set', () => {
     const found = files
       .filter((f) => grantsContentsWrite(readFileSync(join(WORKFLOWS, f), 'utf8')))

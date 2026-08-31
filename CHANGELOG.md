@@ -98,6 +98,60 @@ This project has not cut a tagged release; entries are grouped under
   Corrected in the workspace and in `TODO.md`, `wiki/Cutover-Runbook.md` and
   `.github/workflows/tfc-plan-check.yml`.
 
+### Fixed
+
+- **The nightly manifest job opens a pull request instead of pushing to `main`
+  (T-726, #304) — and the reason it needed to was not the one given.** The
+  entry that landed it said the ruleset listed the Actions token as a **bypass
+  actor**, that a bypass belongs to the token rather than to a workflow, and
+  that every workflow holding `contents: write` therefore inherited the ability
+  to push past twelve required checks.
+
+  **There is no bypass actor and there was none.** Reading
+  `/repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114` returns
+  `enforcement: active`, no `bypass_actors`, and the rules `deletion`,
+  `non_fast_forward`, `pull_request`, `required_status_checks`. The push was not
+  privileged, it was **refused** — and had been since the ruleset was last
+  updated on 2026-08-25. The bot's only successful manifest push is `4b8c36d`,
+  dated 2026-08-23; every scheduled run from 08-24 to 08-29 went green because
+  the published set had not moved and the push was never attempted.
+
+  A workflow can be broken for five days and report success every night, when
+  the only thing that would exercise the broken part is a change that did not
+  happen. That is the durable lesson, and it is why the correction is recorded
+  rather than quietly edited: the wrong version is what justified adding a
+  stored App private key, and the honest justification is narrower — the refresh
+  has to reach `main`, every route to `main` is a pull request, and a pull
+  request opened with `GITHUB_TOKEN` runs no checks.
+
+  Corrected in `.github/workflows/publish-content-manifest.yml`,
+  `scripts/github-app-token.mjs`, `scripts/open-manifest-pr.mjs`,
+  `scripts/workflow-write-permissions.test.mjs` and `TODO.md`. The third owner
+  action — "remove the bypass actor" — is deleted; there is nothing to remove.
+
+- **A 404 from the manifest route no longer reads as "the app itself"
+  (T-763).** `scripts/build-content-manifest.mjs` said "a 403 usually means the
+  per-run origin window is closed or has not propagated; anything else is the
+  app itself." The nightly job failed with a 404 on 2026-08-30 and 2026-08-31,
+  and that sentence sent the investigation at a Function App reporting 121
+  registered functions and every health row green.
+
+  The app was fine. `public/content-manifest` arrived with #277 at 2026-08-30
+  02:45 UTC; the last Deploy Functions run was 01:21 UTC on `7fd9f2a`, and
+  `git cat-file -e 7fd9f2a:functions/src/functions/public-content-manifest.js`
+  reports the path absent from that commit. The route has never been deployed.
+  `deploy-functions.yml` is dispatch-only by a recorded decision, so merging a
+  route does not deploy it, and #277 shipped a caller for a route it did not
+  ship.
+
+  `describeFetchFailure(status, url)` is now exported and asserted: 403 names
+  the origin window, 404 says the **host answered** and points at Deploy
+  Functions, anything else is the app. Four tests, mutation-verified. The
+  deploy itself is an owner dispatch, tracked as item 1 in `TODO.md` — along
+  with the gap it exposed, that nothing detects a route present in `main` and
+  absent from the deployed revision, because `Monitor Functions Registered`
+  counts functions and a count cannot see a missing one.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up
