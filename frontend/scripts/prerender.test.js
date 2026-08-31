@@ -319,8 +319,18 @@ describe('seedScript', () => {
     const evil = { 'article:x': { body: '</script><img src=x onerror=alert(1)>' } };
     const out = seedScript(evil);
     expect(out).not.toContain('</script><img');
-    const json = out.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, '');
-    expect(JSON.parse(json)).toEqual(evil);
+
+    // Sliced, not regex-stripped. CodeQL flags a `<script[^>]*>` strip as bad
+    // HTML filtering because it misses `<SCRIPT>` — irrelevant to output this
+    // test just generated, but the index form has no case question at all and
+    // says what it means: take what lies between the tags.
+    const body = out.slice(out.indexOf('>') + 1, out.lastIndexOf('<'));
+
+    // lastIndexOf('<') is only correct because the escaping worked: every `<`
+    // inside the payload became \u003c, so the last one in the string is the
+    // closing tag's. Asserting that is asserting the property under test.
+    expect(body).not.toContain('<');
+    expect(JSON.parse(body)).toEqual(evil);
   });
 
   // THE CONTRACT WITH main.jsx. The id is agreed in two files; changing one
