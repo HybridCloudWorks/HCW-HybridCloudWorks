@@ -18,6 +18,126 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The pre-rendered DOM is hydrated instead of discarded (T-714, #296).**
+  `main.jsx` used `createRoot`, so 120 pre-rendered documents were built,
+  shipped and thrown away at boot. It now calls `hydrateRoot` when the mount
+  point's `data-prerendered-route` stamp matches the live path, seeded from
+  `data-prerendered-seed` on that same element, and client-renders exactly as
+  before when it does not.
+
+  **The stamp is the load-bearing half, not defensive programming.**
+  `staticwebapp.config.json`'s `navigationFallback` serves `/index.html` — the
+  home page's markup — for any path without a file of its own, at HTTP 200.
+  Every `/admin` route arrives that way. Hydrating on "the mount point has
+  children" would have mismatched on the busiest pages in the app.
+
+  Five Playwright tests drive a real browser, including a node-identity probe
+  that proves the server DOM is reused rather than coincidentally identical,
+  and both guards are mutation-tested. `onRecoverableError` reports a mismatch,
+  which was silent in a production build — the failure mode that would have let
+  this regress to wasting every document with nobody noticing.
+
+- **`check-tfc-plan.mjs --commit <sha>` (T-724, #298).** The tool resolved the
+  workspace's LATEST run, which is why `tfc-plan-check.yml` refused to run
+  per-pull-request: the check would have been green, or red, about a run nobody
+  asked about. `--commit` resolves the run HCP Terraform planned for a given
+  commit, through the configuration version's ingress attributes, and the
+  workflow takes a matching `commit` dispatch input.
+
+  "No run for this commit" returns 2, not 0 — it is not "the plan is boring".
+  An absent relationship is skipped (CLI-driven runs carry no configuration
+  version); a **dangling** one throws, so an ignored `include=` cannot
+  masquerade as "no run for this commit". That distinction was found in review:
+  the first draft documented throwing on unreadable shapes and then skipped
+  exactly those cases.
+
+- **`scripts/workflow-write-permissions.test.mjs` (T-726, #298).** A ruleset
+  bypass is granted to the Actions **token**, not to a workflow, so every
+  workflow holding `contents: write` can push to `main` past all twelve
+  required contexts. This pins that set to a reviewed two, each with a written
+  justification. It bounds the exposure; it does not close it. Mutation-tested:
+  granting the permission to `iac-validate.yml` fails the guard.
+
+### Changed
+
+- **The Static Web Apps deployment token is minted per run instead of stored
+  (T-727, #296).** The decision was "move the SWA deploy to OIDC", which cannot
+  mean what it sounds like: `Azure/static-web-apps-deploy` cannot authenticate
+  with a federated credential at all
+  ([azure/static-web-apps#1304](https://github.com/azure/static-web-apps/issues/1304)
+  is an open request for exactly that). So the token stays and the **storage**
+  goes. The deploy job asks ARM for it under the federated identity the
+  repository already uses, masks it, and it lives for one run.
+
+  Retired: the `swa_token` Terraform output, visible on the HCP Terraform
+  Outputs tab to anyone with state read, and the long-lived
+  `AZURE_STATIC_WEB_APPS_API_TOKEN` GitHub secret, deleted by the owner on
+  2026-08-31. **No stored, non-expiring credential remains in this
+  repository's secrets.** Not retired, and the header says so where the output
+  used to be: the token still exists in Terraform state as an attribute of
+  `azurerm_static_web_app.hcw`, which no output block could ever have changed.
+
+  It cost no new federated credential. The deploy job already declares
+  `environment: production` and `github_deploy` already held the matching
+  subject. `Microsoft.Web/staticSites/listSecrets/action` is an action rather
+  than a read, so `Reader` cannot express it and the built-ins that carry it
+  also grant write over the site; the custom `HCW Static Web App Deployer` role
+  grants the single action, assigned to the one site.
+
+- **Three documents said the `hcw-azure` workspace was CLI-driven with no VCS
+  connection (#297).** `terraform -chdir=infra apply`, which this repository
+  instructed the owner to run, answers *"Apply not allowed for workspaces with
+  a VCS connection"*. `TODO.md` had been wrong about this twice in opposite
+  directions.
+
+  The root cause is worth more than the correction. HCP Terraform's workspace
+  **Description** is free text sitting beside the real settings, validated by
+  nothing, and it read "CLI-driven; no VCS connection". That sentence is what
+  was read — while the entry claimed it had been read off the configuration. A
+  description that contradicts its own workspace reads exactly like a setting.
+  Corrected in the workspace and in `TODO.md`, `wiki/Cutover-Runbook.md` and
+  `.github/workflows/tfc-plan-check.yml`.
+
+### Security
+
+- **Author-written HTML can no longer claim ids the application looks up
+  (#298).** DOMPurify's default configuration strips an injected
+  `<script id="…">` but keeps an injected `<div id="…">`, and
+  `getElementById` returns the first element with that id of **any** tag.
+  Article bodies render inside the app's own markup, so an author could answer
+  a lookup the application makes — reproduced against this repository's own
+  DOMPurify rather than argued.
+
+  `src/lib/sanitizeHtml.js` enables `SANITIZE_NAMED_PROPS`, which prefixes
+  author `id` and `name` with `user-content-`, and an `afterSanitizeAttributes`
+  hook rewrites same-document fragment links so in-page anchors keep working.
+  That is what made it safe to ship without a content decision: nothing
+  disappears. The three call sites — `RichTextBody` and `BlogDetailTemplate`'s
+  two branches — now share one function, because three bare `DOMPurify.sanitize`
+  calls are three configurations that can drift invisibly.
+
+- **The hydration seed moved off an id-addressed island (#296).** The seed was
+  a `<script type="application/json" id="__PRERENDER_DATA__">` found with
+  `getElementById`. By the clobbering path above, an injected `<div>` carrying
+  that id sits inside `#root`, comes first in document order, and would have
+  supplied the seed for its own page — an author-controlled object flowing into
+  every `href` and `src` on it. It now rides on the mount point, which the
+  template writes ahead of everything the pre-render puts inside it, so nothing
+  an author writes can precede it. This is what cleared CodeQL's 27
+  `js/xss-through-dom` alerts; `safeUrl` did not, and its header says so.
+
+- **`safeUrl` guards every `href` and `src` fed from content data (#296).**
+  Allows http, https, mailto and relative references; refuses `javascript:`,
+  `data:` and everything else. The alerts were new and the weakness was not —
+  the same values previously arrived from `fetch()` and reached the same
+  attributes unchecked.
+
+- **A pre-existing HTML injection in the canonical link (#296).** `socialTags`
+  interpolated the route **unescaped** into `href` while every tag beside it
+  went through `escapeAttr`, so a content slug could put a live element in
+  `<head>`. Found by an escaping test written for something else.
+
+
 - **The plan-check tool was PowerShell for an hour, and that was the wrong
   language (2026-08-29).** `07-check-plan.ps1` shipped in #271 and was replaced
   by `scripts/check-tfc-plan.mjs` before it was ever successfully run. Two
