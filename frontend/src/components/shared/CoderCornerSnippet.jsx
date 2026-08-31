@@ -20,6 +20,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownCodeComponents } from '@/components/shared/CodeBlock';
+import { safeUrl } from '@/lib/safeUrl';
 
 /**
  * The body already showing a fenced block is the signal that the snippet is in
@@ -62,7 +63,7 @@ export default function CoderCornerSnippet({ codeSnippet, language, repoUrl, bod
 
       {showRepo && (
         <a
-          href={repoUrl}
+          href={safeUrl(repoUrl)}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-card/80 bg-card/50 text-sm font-semibold text-slate-800 dark:text-slate-200 hover:border-primary/50 hover:text-primary transition-colors"

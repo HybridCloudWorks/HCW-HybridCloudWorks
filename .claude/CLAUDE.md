@@ -53,6 +53,26 @@ description of the goal. Specifically:
   name resolution with `getaddrinfo failed`, before auth or the container is
   ever reached. That is how the `THEACCOUNTNAME` paste above disguised itself
   as a broken container.
+- **If a command reads a repository file, say which branch it is on.** A
+  command like `az role definition create --role-definition
+  '@infra/roles/x.json'` works only if that file exists in the owner's working
+  tree. When the file was added on an unmerged branch and the owner is on
+  `main`, it does not — and `az` reports **`Failed to parse string as JSON`**
+  naming the path, because a value that is neither valid JSON nor an existing
+  file falls through to the JSON parser. The error describes the wrong subject
+  entirely, which is the expensive kind.
+
+  So pair any such command with the checkout that makes it runnable, or with a
+  one-line existence check the owner can read before believing the error:
+
+  ```powershell
+  Test-Path infra/roles/static-web-app-deployer.json
+  ```
+
+  Cost two round trips on 2026-08-30. The first correction blamed PowerShell's
+  splatting operator and prescribed single quotes; quoting was not the problem
+  and the quoted form failed identically. Recorded that way because a
+  confidently wrong rule in this file is worse than no rule.
 - **Avoid `az --query` with brackets.** `[0]` and `[?...]` get re-parsed and
   fail with `] was unexpected at this time`. Use `-o json | ConvertFrom-Json`
   and filter in PowerShell.

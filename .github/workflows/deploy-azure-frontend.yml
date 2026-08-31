@@ -69,18 +69,32 @@ concurrency:
 # ============================================================================
 # WHY THIS IS TWO JOBS (T-727)
 # ============================================================================
-# `AZURE_STATIC_WEB_APPS_API_TOKEN` is the last long-lived, non-expiring
-# credential in this pipeline — everything else is federated OIDC. It used to
-# live in the same job that had just run `npm ci` and executed the whole
-# frontend dependency tree, so a compromised build dependency had it in reach,
-# and exfiltrating it grants standing ability to publish arbitrary content to
-# the public site until a human notices and rotates it.
+# The deployment token used to be `AZURE_STATIC_WEB_APPS_API_TOKEN`, a stored
+# non-expiring GitHub secret, and it lived in the same job that had just run
+# `npm ci` and executed the whole frontend dependency tree. A compromised build
+# dependency had it in reach, and exfiltrating it granted standing ability to
+# publish arbitrary content to the public site until a human noticed and
+# rotated it.
 #
-# `build` now installs, builds and verifies, and holds NO secret. `deploy`
-# holds the token and installs nothing — it downloads the verified output and
+# Two changes, in that order, and the split still matters after the second.
+#
+# The split came first: `build` installs, builds and verifies and holds NO
+# secret; `deploy` installs nothing and only downloads the verified output and
 # uploads it. A compromised build dependency can still poison this deploy's
-# content (it produced it), but it cannot take the credential and publish again
-# tomorrow, which is the harm the finding names.
+# content — it produced it — but it cannot take the credential and publish
+# again tomorrow, which is the harm the finding names.
+#
+# THE STORED SECRET IS NOW GONE (T-727, 2026-08-30). `deploy` mints the token
+# from ARM under federated identity and it lives for one run. That does not
+# make the split redundant: a token in a job that installs nothing is reachable
+# only by this workflow's own steps, while the same token in the build job
+# would be reachable by every transitive dependency for the length of the
+# install. Ephemeral and unreachable are different properties, and this keeps
+# both.
+#
+# What did NOT change: the token still exists in Terraform state as an
+# attribute of azurerm_static_web_app.hcw. infra/outputs.tf says so where the
+# output used to be.
 #
 # The `production` environment binding moves to `deploy`, which is the job that
 # actually touches production — and it is where an approval gate belongs, since
@@ -256,6 +270,15 @@ jobs:
     # environment this records who deployed without gating whether they may
     # (T-705).
     environment: production
+    # id-token for the federated login that mints the deployment token (T-727).
+    # `environment: production` above is load-bearing for it: the OIDC subject
+    # becomes repo:<org>/<repo>:environment:production, and github_deploy holds
+    # exactly that credential plus its immutable form (infra/oidc.tf:153-167).
+    # Removing the environment key would break authentication with AADSTS700213,
+    # not merely lose the deployment record.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       # The SWA action reads `app_location` from the workspace, so the
       # repository still has to be present — but nothing here installs or runs
@@ -282,10 +305,71 @@ jobs:
           [ "$html" -ge 60 ] || { echo "::error::only $html HTML documents survived the artifact round trip"; exit 1; }
           echo "artifact intact: $html HTML documents"
 
+      # THE DEPLOYMENT TOKEN IS MINTED HERE, NOT STORED (T-727).
+      #
+      # Azure/static-web-apps-deploy cannot authenticate with a federated
+      # credential — azure/static-web-apps#1304 is an open request for exactly
+      # that. So the token is still what the action takes; what changed is that
+      # it no longer lives as a long-lived GitHub secret and a Terraform output.
+      # It is read from ARM under the same federated identity this repository
+      # already uses everywhere else, and it lives for one run.
+      - name: Azure login (OIDC)
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Mint the deployment token
+        id: swa
+        env:
+          APP: ${{ vars.STATIC_WEB_APP_NAME || 'stapp-site-prod-cus-01' }}
+          RG: ${{ vars.STATIC_WEB_APP_RESOURCE_GROUP || 'rg-web-site-prod-cus' }}
+        run: |
+          set -uo pipefail
+
+          err=$(mktemp)
+          # --query with -o tsv, as deploy-functions.yml already does. The
+          # working agreement against `az --query` is about BRACKETS at a
+          # PowerShell prompt, where [0] and [?...] get re-parsed; this is bash
+          # and a plain property path. It matters here for a second reason: the
+          # value must arrive alone, not inside a JSON blob that could be echoed
+          # whole before the mask is registered.
+          if ! token=$(az staticwebapp secrets list --name "${APP}" --resource-group "${RG}" \
+                --query 'properties.apiKey' -o tsv --only-show-errors 2>"${err}"); then
+            reason=$(tr -d '\r' < "${err}" | tr '\n' ' ' | cut -c1-300)
+            case "${reason}" in
+              *AuthorizationFailed*|*does\ not\ have\ authorization*|*Forbidden*)
+                echo "::error::Not authorized to list the deployment token. github_deploy needs"
+                echo "::error::the 'HCW Static Web App Deployer' role on ${APP}; the definition is"
+                echo "::error::in infra/roles/static-web-app-deployer.json and must be created by"
+                echo "::error::the owner before the Terraform assignment can be applied." ;;
+              *)
+                echo "::error::Could not read the deployment token from ARM." ;;
+            esac
+            echo "Reason: ${reason}"
+            exit 1
+          fi
+
+          # An empty token is an AUTHORIZED call that returned nothing, which
+          # the action would accept and then fail on obscurely. Catch it here,
+          # where the cause is still legible.
+          if [ -z "${token}" ]; then
+            echo "::error::ARM returned an empty deployment token for ${APP}. The call succeeded,"
+            echo "::error::so this is not a permissions problem — check the app name."
+            exit 1
+          fi
+
+          # Registered as a mask BEFORE it is written anywhere, so a later
+          # accidental echo of it is redacted rather than published.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "${GITHUB_OUTPUT}"
+          echo "minted a deployment token for ${APP}"
+
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
           # The BUILT OUTPUT, not the app source. `output_location` is an Oryx

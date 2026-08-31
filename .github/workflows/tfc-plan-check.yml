@@ -10,14 +10,23 @@
 # WHY IT IS DISPATCH-ONLY, AND NOT A STEP IN iac-validate.yml.
 #
 # The obvious wiring — run this on every infra pull request — would produce a
-# check that is green for reasons unrelated to the pull request. The `hcw-azure`
-# workspace is CLI-driven with NO VCS connection: opening a pull request queues
-# no run, so there is no plan for that pull request to check. The script would
-# fetch whatever run happened last — possibly hours old, possibly someone else's
-# — and report on that, under a context name implying it had reviewed the diff
-# in front of you. A green check that means nothing is worse than no check,
-# which is the lesson this repository keeps relearning (T-514, and
-# 05-verify-timer.ps1 on 2026-08-30).
+# check that is green for reasons unrelated to the pull request. The script
+# fetches the workspace's LATEST run, which is not necessarily this pull
+# request's: it could be hours old, or someone else's, and it would be reported
+# under a context name implying it had reviewed the diff in front of you. A
+# green check that means nothing is worse than no check, which is the lesson
+# this repository keeps relearning (T-514, and 05-verify-timer.ps1 on
+# 2026-08-30).
+#
+# THIS PARAGRAPH USED TO REST ON A FALSE PREMISE, and the correction is left
+# visible because the conclusion survived it while the reasoning did not. It
+# said the workspace was "CLI-driven with NO VCS connection: opening a pull
+# request queues no run". It is VCS-connected — `terraform apply` from a
+# desktop answers "Apply not allowed for workspaces with a VCS connection"
+# (2026-08-31), and HCP Terraform posts a commit status on every pull-request
+# head. So a pull request DOES have a speculative plan of its own. What has not
+# been built is the part that would make wiring this in safe: selecting THAT
+# run rather than the latest one. Until it is, dispatch-only stands.
 #
 # So this is dispatched deliberately, at the one moment the question is real:
 # a plan is sitting in HCP Terraform waiting to be confirmed, and the reviewer

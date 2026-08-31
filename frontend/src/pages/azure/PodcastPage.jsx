@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import usePodcastData from '@/hooks/usePodcastData';
 import { useProviderConfig } from '@/context/ProviderContext';
+import { safeUrl } from '@/lib/safeUrl';
 
 const PLATFORM_LOGOS = {
   spotify: '/icons/logos/spotify.png',
@@ -39,7 +40,7 @@ function EpisodeImage({ image, title, size = 'md' }) {
   if (image) {
     return (
       <img
-        src={image}
+        src={safeUrl(image)}
         alt={title}
         className={`${sizeClass} rounded-lg object-cover flex-shrink-0`}
       />
@@ -227,7 +228,7 @@ export default function PodcastPage() {
                       </span>
                     </button>
                     <a
-                      href={featured.mediaUrl || '#'}
+                      href={safeUrl(featured.mediaUrl, '#')}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
@@ -236,7 +237,7 @@ export default function PodcastPage() {
                       Download
                     </a>
                     <a
-                      href={featured.link || '#'}
+                      href={safeUrl(featured.link, '#')}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"

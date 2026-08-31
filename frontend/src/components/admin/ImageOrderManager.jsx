@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { GripVertical, Trash2, ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { safeUrl } from '@/lib/safeUrl';
 
 function moveItem(items, fromIndex, toIndex) {
   if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return items;
@@ -77,7 +78,7 @@ export function ImageOrderManager({
                   <span className="text-xs w-4 text-center">{index + 1}</span>
                 </div>
                 <img
-                  src={image.url}
+                  src={safeUrl(image.url)}
                   alt={image.label || `Image ${index + 1}`}
                   className="h-14 w-20 rounded object-cover shrink-0"
                 />
@@ -96,7 +97,12 @@ export function ImageOrderManager({
                 </div>
                 <div className="flex items-center gap-1">
                   <Button asChild size="icon" variant="ghost" className="h-8 w-8">
-                    <a href={image.url} target="_blank" rel="noreferrer" aria-label="Open image">
+                    <a
+                      href={safeUrl(image.url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open image"
+                    >
                       <ExternalLink className="h-4 w-4" />
                     </a>
                   </Button>

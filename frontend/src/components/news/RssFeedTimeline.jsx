@@ -1,5 +1,6 @@
 import React from 'react';
 import { ScrollTrigger } from '@/components/animations';
+import { safeUrl } from '@/lib/safeUrl';
 
 const FEED_ICONS = {
   'Azure Updates': 'cloud',
@@ -103,7 +104,7 @@ const FeedTimelineItem = React.memo(({ item, index }) => {
   return (
     <ScrollTrigger animation="slideLeft" duration={0.4} delay={index * 0.05}>
       <a
-        href={link}
+        href={safeUrl(link)}
         target="_blank"
         rel="noopener noreferrer"
         className="group block p-4 rounded-xl border transition-all duration-300

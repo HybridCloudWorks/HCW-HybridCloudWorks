@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Calendar, ChevronLeft, ChevronRight, Clock, Share2, X } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
 import { resolveMediaUrl } from '../../lib/functionsBase';
+import { safeUrl } from '@/lib/safeUrl';
 
 // Helper to format date for calendar display
 const formatDate = (date) => {
@@ -663,7 +664,7 @@ export default function CalendarPage() {
                           >
                             {coverUrl && (
                               <img
-                                src={coverUrl}
+                                src={safeUrl(coverUrl)}
                                 alt=""
                                 className="w-full h-32 object-cover rounded-lg mb-3"
                               />
@@ -697,7 +698,9 @@ export default function CalendarPage() {
                     <div className="flex items-start gap-4">
                       {getCoverImageUrl(selectedContentForScheduling) && (
                         <img
-                          src={resolveMediaUrl(getCoverImageUrl(selectedContentForScheduling))}
+                          src={safeUrl(
+                            resolveMediaUrl(getCoverImageUrl(selectedContentForScheduling))
+                          )}
                           alt=""
                           className="w-24 h-24 object-cover rounded-lg shrink-0"
                         />

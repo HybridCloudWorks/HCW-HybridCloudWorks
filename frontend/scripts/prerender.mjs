@@ -134,7 +134,12 @@ export function socialTags(head, route, title) {
   const ogDescription = metaContent(head, 'property', 'og:description') || description;
   const ogImage = metaContent(head, 'property', 'og:image') || DEFAULT_SOCIAL_IMAGE;
 
-  const tags = [`<link rel="canonical" href="${canonical}" />`];
+  // escapeAttr, like every other tag below. This one was raw until 2026-08-30,
+  // when a T-714 escaping test on the route stamp failed by matching the
+  // canonical instead — a route of `/a"><script>x` closed the href and emitted
+  // a live element into <head>. Routes are not all hardcoded: `manifest.routes`
+  // is built from content slugs, so the value does reach here from data.
+  const tags = [`<link rel="canonical" href="${escapeAttr(canonical)}" />`];
   const add = (attr, name, content) => {
     if (!content) return;
     if (metaContent(head, attr, name)) return; // the page said it; leave it alone
@@ -186,7 +191,54 @@ export function splitHead(rendered) {
  * in one document is not a tie a crawler resolves the way you would hope, and
  * the template's is the generic one.
  */
-export function injectIntoTemplate(template, { head, body }, route = '/') {
+/**
+ * The attribute `main.jsx` reads the seed from. Agreed in two files; changing
+ * it in one and not the other turns hydration back into a full client
+ * re-render, silently — the page still works, it just throws away the
+ * pre-rendered DOM again, which is precisely the bug T-714 was opened for.
+ * `prerender.test.js` pins the pair.
+ */
+export const SEED_ATTRIBUTE = 'data-prerendered-seed';
+
+/**
+ * Serialize the seed into an attribute on the mount point.
+ *
+ * WHY THIS EXISTS AT ALL. Hydration requires the client's first render to
+ * produce the same tree the pre-render produced. `usePublicData` fetches in an
+ * effect, so without the data in hand at mount the client renders a skeleton,
+ * React sees a mismatch against the article markup, and discards the whole
+ * pre-rendered DOM — the 120 documents would be built, shipped, and thrown away
+ * exactly as they were before T-714, only more expensively.
+ *
+ * WHY AN ATTRIBUTE AND NOT A `<script type="application/json" id="...">`
+ * ISLAND, which is the usual shape for this (it is what Next.js does with
+ * `__NEXT_DATA__`). An island is found with `document.getElementById`, and
+ * `getElementById` returns the FIRST element with that id in document order —
+ * any element, not just a script. Article bodies are author-written HTML
+ * rendered through `DOMPurify.sanitize`, and DOMPurify's default configuration
+ * keeps `id` attributes on ordinary elements: it strips an injected
+ * `<script id="__PRERENDER_DATA__">` but passes an injected
+ * `<div id="__PRERENDER_DATA__">` through untouched. That div sits inside
+ * `#root`, so it comes first, and it would have become the seed for its own
+ * page — an author-controlled object flowing into every `href` and `src` on it.
+ * That is not theoretical: it was reproduced against this repo's DOMPurify
+ * before this attribute replaced the island.
+ *
+ * The mount point cannot be shadowed the same way. `<div id="root">` is written
+ * by the template, ahead of everything the pre-render puts inside it, so an
+ * injected `id="root"` is always later in document order and always loses. The
+ * seed therefore stops depending on a sanitizer's configuration staying right.
+ *
+ * `escapeAttr` handles the quoting, and it escapes `<` as well as `&` and `"`,
+ * so a literal `</script>` or `<img onerror=...>` inside article text is inert
+ * markup-wise — it is attribute text that only ever reaches `JSON.parse`.
+ */
+export function seedAttribute(seededData) {
+  if (!seededData) return '';
+  return ` ${SEED_ATTRIBUTE}="${escapeAttr(JSON.stringify(seededData))}"`;
+}
+
+export function injectIntoTemplate(template, { head, body }, route = '/', seededData = null) {
   let html = template;
 
   if (/<title\b/i.test(head)) {
@@ -231,7 +283,30 @@ export function injectIntoTemplate(template, { head, body }, route = '/') {
     }
     throw new Error('dist/index.html has no <div id="root"></div> to render into');
   }
-  return html.replace(rootDiv, `<div id="root">${body}</div>`);
+  // The seed rides on the mount point itself. Vite's entry is a module script
+  // and therefore deferred, so it runs after parsing and the attribute is
+  // always present by the time main.jsx reads it — there is no ordering race
+  // to reason about.
+  const seed = seedAttribute(seededData);
+
+  // THE ROUTE IS STAMPED ON THE MOUNT POINT, and main.jsx refuses to hydrate
+  // unless it matches the URL being displayed. This is not belt-and-braces; it
+  // is the difference between hydration working and hydration corrupting every
+  // page that was never pre-rendered.
+  //
+  // staticwebapp.config.json's navigationFallback serves /index.html for any
+  // path without a file of its own. Pre-rendered routes have their own
+  // index.html and are fine. Everything else — every /admin route, /preview,
+  // any URL added to the router but not to the pre-render list — receives the
+  // HOME PAGE's markup with a 200. Hydrating that against the admin tree is a
+  // guaranteed mismatch on the busiest pages in the app.
+  //
+  // Comparing the stamp to location.pathname turns that from something a future
+  // route addition can silently trip into a decision made per page load.
+  return html.replace(
+    rootDiv,
+    `<div id="root" data-prerendered-route="${escapeAttr(route)}"${seed}>${body}</div>`
+  );
 }
 
 /** `/azure/blog` -> `dist/azure/blog/index.html`; `/` -> `dist/index.html`. */
@@ -392,11 +467,17 @@ async function main() {
   let bytes = 0;
 
   for (const route of targets) {
+    // Computed once and used twice: the same value must reach the server render
+    // and the browser, or hydration compares two different trees. Calling
+    // seedFor() again at injection time would work today and rot the moment it
+    // stops being pure.
+    const seed = seedFor(manifest, route);
+
     let rendered;
     try {
       // Only detail routes carry a seed; everything else renders from nothing,
       // exactly as it did before the manifest existed.
-      rendered = await render(route, seedFor(manifest, route));
+      rendered = await render(route, seed);
     } catch (error) {
       failures.push(`${route}: threw — ${error?.message || error}`);
       continue;
@@ -432,7 +513,7 @@ async function main() {
       continue;
     }
 
-    const html = injectIntoTemplate(template, splitHead(rendered.html), route);
+    const html = injectIntoTemplate(template, splitHead(rendered.html), route, seed);
     const outPath = outputPathFor(dist, route);
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, html);

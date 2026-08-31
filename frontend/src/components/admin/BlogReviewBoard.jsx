@@ -40,6 +40,7 @@ import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { getOrderedContentImages } from '@/lib/contentImages';
 import { resolveMediaUrl } from '../../lib/functionsBase';
+import { safeUrl } from '@/lib/safeUrl';
 
 const getStatusLabel = (status, isLive = false) => {
   if (!status) return 'reviewed';
@@ -578,7 +579,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
         <div className="lg:col-span-2 space-y-6">
           {coverUrl && (
             <img
-              src={coverUrl}
+              src={safeUrl(coverUrl)}
               alt=""
               className="w-full rounded-lg max-h-80 object-cover shadow-sm"
             />
@@ -589,7 +590,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
               <p className="text-xs font-medium text-muted-foreground mb-2">Source URL</p>
               {sourceUrl ? (
                 <a
-                  href={sourceUrl}
+                  href={safeUrl(sourceUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1 break-all"
@@ -677,7 +678,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                       >
                         {imageUrl ? (
                           <img
-                            src={resolveMediaUrl(imageUrl)}
+                            src={safeUrl(resolveMediaUrl(imageUrl))}
                             alt={`${slot.label} thumbnail`}
                             className="h-full w-full object-cover"
                           />
@@ -838,7 +839,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                 Published URL:{' '}
                 {displayUrl ? (
                   <a
-                    href={displayUrl}
+                    href={safeUrl(displayUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1 break-all"
@@ -1097,7 +1098,11 @@ export default function BlogReviewBoard({ blog, blogId }) {
           onClick={() => setExpandedImage('')}
           aria-hidden="true"
         >
-          <img src={expandedImage} alt="" className="max-h-[90vh] max-w-[90vw] rounded-lg" />
+          <img
+            src={safeUrl(expandedImage)}
+            alt=""
+            className="max-h-[90vh] max-w-[90vw] rounded-lg"
+          />
         </div>
       )}
     </div>

@@ -77,28 +77,84 @@ lists four URIs, and an admin sign-in reaches the UI without a 401 on every call
 
 **You run:**
 
+**RETIRED 2026-08-30 (T-727). Skip this step.** It read the SWA deploy token
+and stored it as `AZURE_STATIC_WEB_APPS_API_TOKEN`:
+
 ```powershell
 ./scripts/cutover/02-swa-token.ps1
 ```
 
-Reads the SWA deploy token and stores it as `AZURE_STATIC_WEB_APPS_API_TOKEN`.
-The repository currently holds **no secrets at all**, and any token recorded
-before the centralus rebuild is dead — the rebuild reissued it.
+`deploy-azure-frontend.yml` now mints the token from ARM under federated
+identity at deploy time, so there is no value to store and none to rotate. The
+step is kept here rather than deleted because a runbook that silently loses a
+step reads as an incomplete procedure to the next person following it.
 
-**Then enable the workflow.** `deploy-azure-frontend.yml` is gated with
-`if: ${{ false }}`. Enabling it is a deliberate, reviewed change — TODO.md.
-Two edits:
+What the step needs instead is a one-time prerequisite, recorded under
+*Frontend release*: the owner creates the `HCW Static Web App Deployer` role
+definition and applies the assignment. Without it the deploy fails at the
+minting step with an authorization error that names the role.
 
-```diff
--name: DISABLED - Prototype Frontend Deployment
-+name: Deploy Frontend
+**The workflow is already enabled.** This step used to describe a
+`name: DISABLED - Prototype Frontend Deployment` header and an
+`if: ${{ false }}` gate to delete; neither exists. The workflow is called
+`Deploy Frontend`, has no gate, and is `workflow_dispatch`-only — which is the
+deliberate control now, rather than a disabling condition someone has to
+remember to remove.
 
-   build-and-deploy:
--    if: ${{ false }}
-     name: Build and Deploy to Azure Static Web Apps
+Two prerequisites replace the edits, and both are owner actions (T-727).
+
+**The role definition is a repository file, so check it is in the working tree
+first.** It arrived on `claude/status-check-2vqe7d` and is on `main` only once
+that branch merges. Run this from the repository root:
+
+```powershell
+Test-Path infra/roles/static-web-app-deployer.json
 ```
 
-Then `gh workflow run "Deploy Frontend" --ref main`.
+`True` means go on. `False` means fetch it before anything else:
+
+```powershell
+git fetch origin claude/status-check-2vqe7d; git checkout origin/claude/status-check-2vqe7d -- infra/roles/static-web-app-deployer.json
+```
+
+This check is here because skipping it does not fail in a way that says so.
+`az` treats a `@`-prefixed value that is neither valid JSON nor an existing
+file as JSON, so a missing file reports **`Failed to parse string as JSON`**
+naming the path — an error about the wrong subject entirely. It cost two round
+trips on 2026-08-30, the first spent on quoting, which was never the problem.
+
+```powershell
+az role definition create --role-definition '@infra/roles/static-web-app-deployer.json'
+```
+
+Success echoes the definition back with `"roleName": "HCW Static Web App
+Deployer"` and an `"id"` ending in a GUID.
+
+**The assignment reaches Azure by merging, not by `terraform apply`.** The
+`hcw-azure` workspace is VCS-connected and refuses a CLI apply outright:
+
+> Error: Apply not allowed for workspaces with a VCS connection
+
+So step 2 is to merge the pull request carrying `infra/oidc.tf`, then watch the
+run in HCP Terraform:
+
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs
+
+Whether that run applies on its own or waits for a confirmation depends on the
+workspace's **Apply Method**, which is read here:
+
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/settings/general
+
+Read it before merging rather than after. Every run in this workspace carries
+the permanent diff, which replaces three `azapi` resources and restarts the
+function app — so on `Auto apply`, a merge restarts production without asking.
+
+The deploy mints its token from ARM under federated identity, so it needs that
+role assigned before its first run. Without it the job fails at the minting
+step with an error naming the missing role.
+
+Then dispatch it from **Actions → Deploy Frontend → Run workflow**, on `main`.
+The workflow refuses any other ref (T-705).
 
 **This is safe while Firebase is live.** The first run publishes to
 `calm-ground-0d0e6a010.7.azurestaticapps.net` — the §6 step 2 preview host. DNS

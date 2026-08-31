@@ -11,10 +11,27 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { splitHead, injectIntoTemplate, canonicalFor, socialTags } from './prerender.mjs';
+import {
+  splitHead,
+  injectIntoTemplate,
+  canonicalFor,
+  socialTags,
+  seedAttribute,
+  SEED_ATTRIBUTE,
+} from './prerender.mjs';
 // Imported rather than read from a path: under Vitest `import.meta.url` is a
 // Vite module id, not a file: URL, so fileURLToPath on it throws.
 import swaConfig from '../staticwebapp.config.json';
+
+/**
+ * The browser's side of `escapeAttr`, so a round-trip assertion tests the
+ * escaping rather than restating it. Deliberately not a DOM parse: these tests
+ * run in node, and a hand-written inverse fails loudly if `escapeAttr` ever
+ * grows an escape this does not know about.
+ */
+function unescapeAttr(value) {
+  return value.replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+}
 
 const TEMPLATE = [
   '<!DOCTYPE html>',
@@ -67,8 +84,60 @@ describe('splitHead', () => {
 
 describe('injectIntoTemplate', () => {
   it('renders the body into the mount point, keeping the id for hydration', () => {
-    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>hello</p>' });
-    expect(html).toContain('<div id="root"><p>hello</p></div>');
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>hello</p>' }, '/about');
+    expect(html).toContain('<p>hello</p></div>');
+    expect(html).toContain('id="root"');
+  });
+
+  // THE STAMP IS WHAT MAKES HYDRATION SAFE (T-714). navigationFallback serves
+  // /index.html — the home page's markup — for any path without a file of its
+  // own, at HTTP 200. Without a stamp to compare against, main.jsx would
+  // hydrate the admin tree against the home page DOM on every /admin route.
+  it('stamps the mount point with the route it rendered', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/aws/blog/thing');
+    expect(html).toContain('data-prerendered-route="/aws/blog/thing"');
+  });
+
+  // This assertion failed when it was written, and NOT on the stamp: it matched
+  // the canonical link, which interpolated the route raw while every other tag
+  // beside it went through escapeAttr. A route of `/a"><script>x` closed the
+  // href and put a live element in <head>. Kept as one test because it is one
+  // property — no route reaches the document unescaped, by any path.
+  it('lets no route break out of an attribute, in the stamp or the canonical', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a"><script>x');
+    expect(html).not.toContain('"><script>x');
+    expect(html).toContain('&quot;');
+
+    const [, stamp] = /data-prerendered-route="([^"]*)"/.exec(html) || [];
+    expect(stamp).toBeTruthy();
+    expect(stamp).not.toContain('<');
+
+    const [, canonical] = /rel="canonical" href="([^"]*)"/.exec(html) || [];
+    expect(canonical).toBeTruthy();
+    expect(canonical).not.toContain('<');
+  });
+
+  it('emits no seed attribute for a route that was given no data', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/about', null);
+    expect(html).not.toContain(SEED_ATTRIBUTE);
+  });
+
+  it('emits the seed attribute for a route that was given data', () => {
+    const seed = { 'article:x': { title: 'T' } };
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a/blog/x', seed);
+    expect(html).toContain(SEED_ATTRIBUTE);
+    const [, encoded] = new RegExp(`${SEED_ATTRIBUTE}="([^"]*)"`).exec(html);
+    expect(JSON.parse(unescapeAttr(encoded))).toEqual(seed);
+  });
+
+  // The seed has to be INSIDE the opening tag of the mount point, not trailing
+  // after it. Getting this wrong emits `<div id="root">...</div> data-...="{}"`,
+  // which is visible text on the page and an absent seed — and the page still
+  // renders, so only an assertion catches it.
+  it('puts the seed on the mount point rather than after it', () => {
+    const seed = { 'article:x': { title: 'T' } };
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a/blog/x', seed);
+    expect(html).toMatch(new RegExp(`<div id="root"[^>]*\\s${SEED_ATTRIBUTE}="[^"]*"[^>]*>`));
   });
 
   it('REPLACES the template title rather than adding a second one', () => {
@@ -255,5 +324,57 @@ describe('article detail routes', () => {
     const head = '<meta property="og:image" content="https://cdn.example/hero.png" />';
     const tags = socialTags(head, '/aws/blog/my-post', 'A | HCW');
     expect(tags).not.toContain('og:image');
+  });
+});
+
+describe('seedAttribute', () => {
+  it('is empty for no seed, so nothing is emitted', () => {
+    expect(seedAttribute(null)).toBe('');
+  });
+
+  // Article bodies are author-written HTML, so a literal `"` or `</script>`
+  // inside one is not a hypothetical. In an attribute the quote is the escape
+  // that matters: an unescaped one ends the value and everything after it is
+  // parsed as further attributes on the mount point.
+  it('escapes the characters that would end the attribute or open a tag', () => {
+    const evil = { 'article:x': { body: '"></div><img src=x onerror=alert(1)>' } };
+    const out = seedAttribute(evil);
+
+    expect(out).not.toContain('"></div>');
+    expect(out).not.toContain('<img');
+
+    const [, encoded] = new RegExp(`${SEED_ATTRIBUTE}="([^"]*)"`).exec(out);
+    expect(JSON.parse(unescapeAttr(encoded))).toEqual(evil);
+  });
+
+  // THE CLOBBERING CASE THIS SHAPE EXISTS FOR. DOMPurify strips an injected
+  // <script> but keeps <div id="...">, and getElementById returns the first
+  // element with an id regardless of tag — so an id-addressed island inside
+  // #root could be supplied by the article it belongs to. An attribute on the
+  // mount point cannot: the template writes <div id="root"> ahead of anything
+  // the pre-render puts inside it.
+  it('carries no id for article markup to shadow', () => {
+    const out = seedAttribute({ 'article:x': { title: 'T' } });
+    expect(out).not.toContain('id=');
+    expect(out).not.toContain('<');
+  });
+
+  // THE CONTRACT WITH main.jsx. The attribute is agreed in two files; changing
+  // one without the other does not break the page, it silently stops hydration
+  // and goes back to discarding the pre-rendered DOM — the exact bug T-714
+  // exists for, reintroduced invisibly.
+  it('uses the attribute main.jsx reads', () => {
+    const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    // dataset.prerenderedSeed is the DOM spelling of data-prerendered-seed.
+    expect(SEED_ATTRIBUTE).toBe('data-prerendered-seed');
+    expect(mainJsx).toContain('dataset.prerenderedSeed');
+  });
+
+  it('agrees with main.jsx on the stamp attribute name', () => {
+    const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    // dataset.prerenderedRoute is the DOM spelling of data-prerendered-route.
+    expect(mainJsx).toContain('dataset.prerenderedRoute');
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/');
+    expect(html).toContain('data-prerendered-route=');
   });
 });

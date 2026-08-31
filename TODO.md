@@ -39,37 +39,65 @@ and `Gate: owner` still marks the rest.
 > **There is no deadline on this list any more.** The GCP deletion no longer
 > silences anything, which was the only time-bound consequence here.
 >
-> **The `hcw-azure` workspace is CLI-driven, with no VCS connection.** This
-> file claimed the opposite from 2026-08-26 until 2026-08-30 — "merged infra
-> code reaches HCP Terraform on its own" — and it does not. Merging infra code
-> queues nothing. A run exists only when someone starts one, and auto-apply is
-> off, so an apply additionally needs a confirmation. **That is now a decision
-> rather than a default (owner, 2026-08-30): applies stay manual.** Every run in
-> this workspace carries the permanent diff, which replaces three `azapi`
-> resources and restarts the function app, so auto-apply would restart
-> production on every merge — including documentation-only merges. A
-> single-operator estate gains little from removing the one deliberate pause,
-> and the 2026-08-30 session turned on reading a plan before it ran.
+> **The `hcw-azure` workspace HAS a VCS connection, and there is no CLI apply.**
+> Terraform said so itself on 2026-08-31, when the owner ran
+> `terraform -chdir=infra apply` at this file's instruction:
 >
-> The corrected claim was
-> read off the workspace configuration on 2026-08-30, after the earlier one was
-> used to explain the run list and explained it wrongly. Anyone reading the old
-> sentence would assume an apply was coming after a merge; several merged
-> changes sitting unapplied is what that assumption looks like from the
-> outside.
+> > Error: Apply not allowed for workspaces with a VCS connection
+> >
+> > A workspace that is connected to a VCS requires the VCS-driven workflow to
+> > ensure that the VCS remains the single source of truth.
+>
+> **This file has now been wrong about this twice, in opposite directions.** It
+> said "merged infra code reaches HCP Terraform on its own" from 2026-08-26 to
+> 2026-08-30; that was replaced on 2026-08-30 with "CLI-driven, with no VCS
+> connection", described as read off the workspace configuration. The
+> replacement was the wrong one, and the instruction that came with it — run
+> `terraform apply` from a desktop — cannot work at all.
+>
+> A second observable agrees: HCP Terraform posts a commit status
+> (`Terraform Cloud/hcw/repo-id-2153Zj6FyEd7RRFW`) on **every** pull-request
+> head — `success` on `main` at `d80f428`, `failure` on the T-727 branch from
+> the commit that added a role lookup. A workspace with no VCS connection does
+> not do that.
+>
+> **Auto-apply is OFF, read off the settings page on 2026-08-31.** Both
+> checkboxes — *Auto-apply API, UI, & VCS runs* and *Auto-apply run triggers* —
+> are unchecked, so "runs require operator approval". Execution mode is
+> `Remote`; working directory `infra`. Merging infra code queues a plan and
+> waits. That is worth stating precisely rather than loosely, because every run
+> here carries the permanent diff, which replaces three `azapi` resources and
+> restarts the function app: under auto-apply a merge would restart production
+> without asking.
+>
+> **HOW THIS FILE GOT IT WRONG TWICE, which is the part worth keeping.** The
+> workspace's **Description** field reads, verbatim:
+>
+> > Azure platform for HCWSite, from HybridCloudWorks/HCW-HybridCloudWorks
+> > (infra/). CLI-driven; no VCS connection.
+>
+> That is free text somebody typed into a box. It is not configuration, nothing
+> validates it against the connection, and it is stale. The 2026-08-30 entry
+> said its claim was "read off the workspace configuration"; it was read off
+> that sentence. A description contradicting its own workspace is worse than an
+> empty one, because it reads exactly like a setting.
+>
+> **Owner action, one field:** correct the description at
+> https://app.terraform.io/app/hcw/workspaces/hcw-azure/settings/general so the
+> next reader is not told the same thing — e.g. "VCS-connected to
+> HybridCloudWorks/HCW-HybridCloudWorks (infra/). Manual apply."
 
 | Priority | Open items |
 | --- | ---: |
 | Critical | 0 |
-| High | 2 |
+| High | 1 |
 | Medium | 3 |
 | Low | 1 |
-| Total | 6 |
+| Total | 5 |
 
-Four of the six are architecture-review findings still to be worked
-(`T-714`, two Medium — both owner-gated — and one Low). The other
-two are the pre-program platform gates: **T-518** (High) and **T-519**
-(Medium). Both carry **Gate: owner** and have no repository-side half — what is
+Three of the five are architecture-review findings still to be worked (two
+Medium — both owner-gated — and one Low). The other two are the pre-program
+platform gates: **T-518** (High) and **T-519** (Medium). Both carry **Gate: owner** and have no repository-side half — what is
 left of them is a Worker deployment and a set of feature flags, each needing
 tenant or edge access. They are listed anyway, because a tracker that omits
 them is quietly shorter than the truth.
@@ -135,15 +163,41 @@ engineering work on them is done.
   every workflow with `contents: write` can push past all checks. Narrow the
   bypass to a deploy key scoped to `frontend/data/content-manifest.json`, or
   replace the push with an auto-merging pull request.
-- **Retire the SWA token (T-727) — decided 2026-08-30: move the deploy to
-  OIDC.** It is the estate's last long-lived credential; everything else a
-  workflow uses is federated. The isolation job that installs nothing was a
-  fence, not a fix, and the environment-secret alternative was rejected because
-  it keeps the credential *and* depends on the `production` deployment-branch
-  rule that is still unset — two owner actions instead of one, for a weaker
-  result. OIDC is the only option that lets the `outputs.tf` exception be
-  deleted rather than documented. The owner action is one federated
-  credential.
+- **Retire the SWA token (T-727) — decided and BUILT 2026-08-30.** The
+  repository half is done: `deploy-azure-frontend.yml` mints the deployment
+  token from ARM under federated identity at deploy time, the `swa_token`
+  Terraform output is deleted, and `AZURE_STATIC_WEB_APPS_API_TOKEN` is no
+  longer read by anything.
+
+  **No new federated credential was needed.** The deploy job already declares
+  `environment: production`, and `github_deploy` already holds
+  `repo:<org>/<repo>:environment:production` plus its immutable form
+  (`infra/oidc.tf:153-167`). The estimate of "one federated credential" was
+  wrong in the owner's favour.
+
+  **Two owner actions, in this order:**
+
+  1. `az role definition create --role-definition '@infra/roles/static-web-app-deployer.json'`
+     — the Terraform identity deliberately lacks
+     `Microsoft.Authorization/roleDefinitions/write`, so a definition it
+     consumes has to exist first or the apply fails on Microsoft.Authorization
+     rather than on the feature. **Run `Test-Path` on that file first**; it is
+     on this branch only until the merge, and `az` reports a missing file as
+     `Failed to parse string as JSON` rather than as a missing file.
+     `wiki/Cutover-Runbook.md` carries the fetch command.
+  2. Merge the pull request. The assignment to `github_deploy`, scoped to the
+     one Static Web App, reaches Azure through the VCS-driven run — **not**
+     through `terraform apply`, which this workspace refuses. The run then
+     waits for approval, because auto-apply is off (see the status note at the
+     top of this file).
+
+  Then the GitHub secret can be deleted; nothing reads it. Until step 1 runs,
+  the deploy fails at the minting step with an error naming the missing role.
+
+  **What this does not claim.** The token still exists in Terraform state as an
+  attribute of `azurerm_static_web_app.hcw`, which no output block could ever
+  have changed. What is retired is its exposure on the HCP Terraform Outputs
+  tab and its life as a stored, non-expiring GitHub secret.
 - **A TFC API token for the plan assertion (from T-724).**
   `scripts/assert-expected-plan.mjs` fails when a plan contains anything but the
   known permanent diff, but the plan lives in HCP Terraform and
@@ -230,11 +284,11 @@ Deliberately **not** re-reported, being owner gates rather than findings:
 T-518, T-519, the unseeded Key Vault secrets, the unseeded
 `admin_config` documents, and the absent analytics provider.
 
-### High — 1 of 12 open
+### High — 0 of 12 open
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-714 | frontend | **Decided 2026-08-30: wire `hydrateRoot` and verify in a real browser.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`); the seed mechanism exists but is deliberately never mounted. What made this undecidable was that the hydration-mismatch risk could only be argued about — it is testable now, because Chromium and Playwright can drive the real pages and diff hydrated output against the prerendered HTML. Ships behind that verification or not at all. Removing the prerender path instead was rejected: it gives up first paint and crawler content to avoid a risk that can be measured | `main.jsx`, `hooks/prerenderData.js` |
+| T-714 | frontend | **DONE 2026-08-30 — wired and verified in Chromium.** `main.jsx` hydrates when the mount point's `data-prerendered-route` stamp matches the live path, seeded from `data-prerendered-seed` on that same element; otherwise it client-renders exactly as before. The seed started as a `<script type="application/json" id="__PRERENDER_DATA__">` island and moved onto the mount point because the island was clobberable: `getElementById` returns the first element with an id of any kind, and DOMPurify's default configuration — which every article body passes through — strips an injected `<script id="…">` but keeps an injected `<div id="…">`, which sits inside `#root` and would therefore have won. `<div id="root">` comes from the template, ahead of anything the pre-render puts inside it. Every `href`/`src` fed from content data also goes through `safeUrl` now, which is worth having on its own but is not what cleared CodeQL's 27 `js/xss-through-dom` alerts — the source change was. The stamp is what makes it safe: `navigationFallback` serves the home page's markup for every unprerendered path at HTTP 200, so hydrating on "the mount point has children" would have mismatched on every `/admin` route. Five Playwright tests drive a real browser, including a node-identity probe proving the server DOM is reused rather than coincidentally identical, and both guards are mutation-tested. `onRecoverableError` now reports a mismatch, which was silent in a production build. **Found on the way:** the canonical `<link>` interpolated the route unescaped while every tag beside it went through `escapeAttr`, so a slug could put a live element in `<head>`; routes come from content slugs via `manifest.routes`. Fixed in the same change. Original finding: **decided 2026-08-30** The 120 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`); the seed mechanism exists but is deliberately never mounted. What made this undecidable was that the hydration-mismatch risk could only be argued about — it is testable now, because Chromium and Playwright can drive the real pages and diff hydrated output against the prerendered HTML. Ships behind that verification or not at all. Removing the prerender path instead was rejected: it gives up first paint and crawler content to avoid a risk that can be measured | `main.jsx`, `hooks/prerenderData.js` |
 
 ### Medium — 2 of 30 open
 
@@ -495,7 +549,7 @@ or someone "fixes" it without knowing it was a choice.
 | Risk | Accepted | Reasoning, and what compensates |
 | --- | --- | --- |
 | **Key Vault purge protection is off** on `kv-site-prod-cus-01`, which holds 18 live secrets. Raised as Go-Live blocker B2 on 2026-08-24 | Owner, 2026-08-24 | Enabling it is a **one-way** switch: once on it cannot be turned off, a deleted vault can no longer be purged, and its name stays reserved for the retention period — which removes the teardown-and-recreate path a single-environment estate depends on. The secrets are seeded and resolving, so the exposure is not "unprotected during setup". Compensating control: soft delete at 90 days, which still makes an accidental delete recoverable. What is given up is protection against a *deliberate* purge by someone already holding the rights to perform one. Recorded in the same terms in `infra/variables.tf` and `infra/README.md` |
-| **The Static Web Apps deployment token is a Terraform output** (`swa_token`), which `outputs.tf`'s own header otherwise says does not exist. Raised as T-722, 2026-08-28 | **Resolved by decision 2026-08-30: retire it via OIDC (T-727).** No longer an accepted risk — an accepted risk is one nobody intends to fix, and this one now has a chosen fix and a named owner action | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
+| ~~**The Static Web Apps deployment token is a Terraform output** (`swa_token`)~~ Raised as T-722, 2026-08-28 | **CLOSED 2026-08-30 (T-727).** The output is deleted and the stored GitHub secret is unused; the deploy mints the token under federated identity. Not an accepted risk any more, and kept in this table only so the row does not appear to have been quietly dropped | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
 | **`cloudflare_origin_secret` is a real shared-secret value in Terraform state.** Raised as T-723, 2026-08-28 | Recorded 2026-08-28 | Unavoidable rather than chosen: Terraform configures the Cloudflare end of the origin handshake, so the value has to pass through it. It was simply never written down, which is the part that is fixed here. **Rotation consequence, which is the reason this needs a record:** the value must change in three places in one window — the HCP Terraform workspace variable, Key Vault `CF-ORIGIN-SECRET`, and the Cloudflare transform rule Terraform writes — and a mismatch throws on *every anonymous request*, so a partial rotation is a full outage of the public API rather than a degradation. The companion exposure — the azapi read-back exporting the whole live app-settings map into state — is not accepted but *bounded*: it is safe only while every secret-shaped setting is a Key Vault reference, and `functions/src/functions/app-settings-secrets.test.js` now fails CI if one is not |
 
 ## Handling rules
