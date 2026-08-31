@@ -138,6 +138,86 @@ export function normaliseRunId(raw) {
   );
 }
 
+/**
+ * Find the run HCP Terraform planned for one commit.
+ *
+ * WHY THIS EXISTS. Without it this tool resolves the workspace's LATEST run,
+ * which is whatever ran last and is usually not the pull request in front of
+ * you — `tfc-plan-check.yml` refuses to run on every pull request for exactly
+ * that reason, because a check that is green about someone else's run is worse
+ * than no check. Selecting by commit is what makes the check mean what its
+ * name says.
+ *
+ * SHAPE. `/workspaces/:id/runs?include=configuration_version.ingress_attributes`
+ * answers JSON:API: the run carries a `configuration-version` relationship, the
+ * configuration version carries an `ingress-attributes` relationship, and the
+ * ingress attributes carry `commit-sha`. Both hops are resolved through
+ * `included`, which is why the caller must fetch this raw rather than through
+ * the `.data` unwrapping the other calls use.
+ *
+ * UNRECOGNISED SHAPES THROW rather than returning null, following
+ * `check-unresolved-secrets.mjs`: "no run for this commit" and "I could not
+ * read the answer" are different facts, and reporting the second as the first
+ * is how a check reports health it cannot vouch for. A run with no
+ * configuration version is not an unrecognised shape — CLI-driven runs have
+ * none — so those are skipped rather than thrown on.
+ *
+ * Returns the newest matching run, or null when the payload was readable and
+ * nothing matched.
+ */
+export function selectRunForCommit(payload, sha) {
+  const wanted = String(sha ?? '').trim().toLowerCase();
+  if (!wanted) throw new Error('selectRunForCommit needs a commit sha');
+
+  if (!payload || !Array.isArray(payload.data)) {
+    throw new Error(
+      'HCP Terraform returned a runs payload with no `data` array. Expected JSON:API from ' +
+        '/workspaces/:id/runs — this tool cannot tell whether a run exists for the commit.'
+    );
+  }
+  if (!Array.isArray(payload.included)) {
+    throw new Error(
+      'HCP Terraform returned no `included` section, so configuration versions and their ' +
+        'commit shas could not be resolved. The request must carry ' +
+        'include=configuration_version.ingress_attributes.'
+    );
+  }
+
+  const byId = new Map();
+  for (const resource of payload.included) {
+    if (resource?.id) byId.set(`${resource.type}:${resource.id}`, resource);
+  }
+
+  const matches = [];
+  for (const run of payload.data) {
+    const cvRef = run?.relationships?.['configuration-version']?.data;
+    // CLI-driven runs carry no configuration version. Not a shape problem.
+    if (!cvRef?.id) continue;
+
+    const cv = byId.get(`${cvRef.type ?? 'configuration-versions'}:${cvRef.id}`);
+    if (!cv) continue;
+
+    const iaRef = cv.relationships?.['ingress-attributes']?.data;
+    if (!iaRef?.id) continue;
+
+    const ia = byId.get(`${iaRef.type ?? 'ingress-attributes'}:${iaRef.id}`);
+    const commit = ia?.attributes?.['commit-sha'];
+    if (typeof commit !== 'string') continue;
+
+    if (commit.toLowerCase() === wanted) matches.push(run);
+  }
+
+  if (matches.length === 0) return null;
+
+  // Newest first. A pull request head is usually planned once, but a re-run or
+  // a retried plan gives the same commit two runs and the later one is the one
+  // a reviewer is looking at.
+  matches.sort((a, b) =>
+    String(b.attributes?.['created-at'] ?? '').localeCompare(String(a.attributes?.['created-at'] ?? ''))
+  );
+  return matches[0];
+}
+
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i === -1 ? null : process.argv[i + 1];
@@ -198,8 +278,37 @@ async function main() {
 
   let run;
   const runId = normaliseRunId(arg('run'));
+  const commit = (arg('commit') ?? '').trim();
+
+  if (runId && commit) {
+    console.error('Pass --run or --commit, not both: they select the same thing two ways.');
+    return 2;
+  }
+
   if (runId) {
     run = await tfc(token, `/runs/${runId}`);
+  } else if (commit) {
+    const workspace = await tfc(token, `/organizations/${ORGANIZATION}/workspaces/${WORKSPACE}`);
+    // 50 rather than 1: the commit's run is not necessarily the newest, and
+    // this window has to span whatever else ran alongside it.
+    const payload = await tfc(
+      token,
+      `/workspaces/${workspace.id}/runs?page%5Bsize%5D=50&include=configuration_version.ingress_attributes`,
+      { raw: true }
+    );
+    run = selectRunForCommit(payload, commit);
+    if (!run) {
+      // NOT 0. "I found no run for this commit" is not "the plan is boring",
+      // and answering the second question when asked the first is how a check
+      // goes green without checking anything.
+      console.error(
+        `\nNo run in the last 50 for commit ${commit}.\n\n` +
+          'Either HCP Terraform has not planned it yet — a speculative plan lags the push by a ' +
+          'minute or two — or the commit never reached the workspace. Re-run once the run ' +
+          `appears at https://app.terraform.io/app/${ORGANIZATION}/workspaces/${WORKSPACE}/runs`
+      );
+      return 2;
+    }
   } else {
     const workspace = await tfc(token, `/organizations/${ORGANIZATION}/workspaces/${WORKSPACE}`);
     const runs = await tfc(token, `/workspaces/${workspace.id}/runs?page%5Bsize%5D=1`);

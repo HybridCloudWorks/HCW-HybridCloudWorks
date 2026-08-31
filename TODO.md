@@ -209,13 +209,31 @@ engineering work on them is done.
 
       TFC_TOKEN=... node scripts/check-tfc-plan.mjs
 
-  It resolves the workspace's latest run, fetches the JSON plan, calls
-  `checkPlan` directly and reports the verdict. Needs a HCP Terraform **user or
-  team** token with admin access to `hcw/hcw-azure` — an *organization* token
-  cannot read `json-output` and fails with 404, which reads like a missing plan
-  rather than a permissions problem. Wiring the same check into
-  `iac-validate.yml` needs that token as a repository secret and is still open;
-  the script is already Node so it runs on `ubuntu-latest` unchanged.
+  It fetches the JSON plan, calls `checkPlan` directly and reports the verdict.
+  Needs a HCP Terraform **user or team** token with admin access to
+  `hcw/hcw-azure` — an *organization* token cannot read `json-output` and fails
+  with 404, which reads like a missing plan rather than a permissions problem.
+
+  **`--commit <sha>` was added on 2026-08-31**, so the tool can select the run
+  HCP Terraform planned for one commit rather than the workspace's latest. That
+  was the missing piece behind "wire this into CI", and `TFC Plan Check` now
+  takes a `commit` dispatch input. **One owner action remains: seed `TFC_TOKEN`**
+  (Settings → Secrets and variables → Actions). The workflow is self-arming —
+  without the secret it reports that it did not run rather than failing.
+
+  **What deliberately was NOT built, so the next reader does not assume it was
+  forgotten.** Wiring it to run automatically on every infra pull request would
+  put a check on a speculative plan nobody approves; the decision it gates
+  happens after the merge, in HCP Terraform, when someone is about to confirm a
+  run. Wiring it to `push: main` instead would need a polling loop, because the
+  run lags the push — and a polling loop that cannot be exercised from a
+  checkout is a worse thing to own than a dispatch run at the moment the
+  question is real. `tfc-plan-check.yml`'s header carries the same reasoning.
+
+  The `--commit` traversal is unit-tested against synthetic JSON:API payloads
+  rather than the live API, which this environment cannot reach. It throws on a
+  payload shape it cannot read rather than reporting "no run for this commit" —
+  the distinction `check-unresolved-secrets.mjs` draws, for the same reason.
 - ~~A scheduled-query alert on `unresolvedSecrets` (from T-720).~~ **Built
   2026-08-30 as `monitor-unresolved-secrets.yml`, not as an alert rule — the
   alert this line asked for could not exist.** It said "needs an apply" for
