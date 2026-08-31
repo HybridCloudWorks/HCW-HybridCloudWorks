@@ -38,3 +38,16 @@ jobs:
       - name: Test the PowerShell validator
         shell: pwsh
         run: ./scripts/validate-powershell.tests.ps1
+
+      # 05-verify-timer.ps1 hands a multi-line KQL query to `az`, which on a
+      # Windows operator's machine is a batch file that cannot receive an
+      # argument containing a newline — so the query arrived truncated at the
+      # first line break and the call still exited 0. Azure answered a
+      # different question with tens of thousands of unfiltered rows, four
+      # times, over a week, and the wrong number was reported as a count each
+      # time. Nothing caught it because the script's internals could not run
+      # without an Azure login. These cover the flatten and the row-shape
+      # assertion off-line, which is the only reason either is testable.
+      - name: Test the workspace query helpers
+        shell: pwsh
+        run: ./scripts/cutover/workspace-query.tests.ps1

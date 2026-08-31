@@ -282,8 +282,23 @@ single apply rather than one at a time — safe here only because
 above was read with direct KQL, not through
 `scripts/cutover/05-verify-timer.ps1`: that script reported a tally of tens of
 thousands of invocations for a query returning two rows, and was rewritten the
-same day to aggregate in the workspace instead. Its miscount was never
-root-caused — see the note above its query.
+same day to aggregate in the workspace instead.
+
+**That rewrite treated a symptom, and the miscount was root-caused on
+2026-08-31 instead.** `az` on Windows is a batch file, which cannot receive an
+argument containing a newline, so a multi-line query handed to
+`--analytics-query` arrived truncated at the first line break: `AppTraces`
+survived and the whole pipeline after it was discarded. The call still exited
+0. Azure ran the truncated query and returned every unfiltered row in the
+table, so the script rendered tens of thousands of rows with every projected
+column blank — and its preflight, truncated the same way, read a missing
+column as zero and reported "no worker traces" in the same run. The tell was
+in the record for a week: the count barely moved between `-Hours 1` and
+`-Hours 24`, and a window that changes 24-fold cannot return the same total
+unless the window is not being applied. Fixed by flattening every query before
+it leaves PowerShell, and by asserting that returned rows carry the columns the
+caller asked for — a truncated query answers a different question rather than
+failing, which is why nothing in the error handling ever fired.
 
 The fifteen that remain go one at a time, each observed firing before the next
 is added — as does `PUBLISH_SCHEDULED_CONTENT`, which is armed but has not yet

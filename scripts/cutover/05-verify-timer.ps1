@@ -100,6 +100,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'workspace-query.psm1') -Force
+
 function Write-Step { param($Text) Write-Host "`n=== $Text ===" -ForegroundColor Cyan }
 
 <#
@@ -177,13 +179,23 @@ function Format-Chicago {
     the record on 2026-08-22.
 #>
 function Invoke-WorkspaceQuery {
-    param([string] $Kql)
+    param(
+        [string] $Kql,
+        [string[]] $ExpectColumns = @(),
+        [string] $What = 'the workspace query'
+    )
+
+    # Flattened before it leaves PowerShell. On Windows `az` is a batch file and
+    # cannot receive an argument containing a newline, so a multi-line query
+    # arrives truncated at the first line break — and the call still exits 0.
+    # workspace-query.psm1 carries the full account.
+    $oneLine = ConvertTo-SingleLineKql $Kql
 
     try {
         $json = az monitor log-analytics query `
             --workspace $WorkspaceId `
             --subscription $WorkspaceSubscription `
-            --analytics-query $Kql `
+            --analytics-query $oneLine `
             -o json 2>$null
     }
     catch {
@@ -191,8 +203,15 @@ function Invoke-WorkspaceQuery {
     }
     if ($LASTEXITCODE -ne 0 -or -not $json) { return $null }
 
-    try { return @($json | ConvertFrom-Json) }
+    try { $rows = @($json | ConvertFrom-Json) }
     catch { return $null }
+
+    # Deliberately a throw, not a $null return. $null means "the call failed and
+    # you have no observation"; this means "the call succeeded and answered a
+    # different question", which is worse, because every number below it looks
+    # like data.
+    Assert-WorkspaceRowShape -Rows $rows -ExpectColumns $ExpectColumns -What $What
+    return $rows
 }
 
 # ---------------------------------------------------------------------------
@@ -229,7 +248,7 @@ if (-not $SkipPreflight) {
         throw $msg
     }
 
-    $alive = Invoke-WorkspaceQuery @"
+    $alive = Invoke-WorkspaceQuery -ExpectColumns 'n' -What 'the preflight liveness query' -Kql @"
 AppTraces
 | where TimeGenerated > ago(2h)
 | extend cat = tostring(Properties.Category)
@@ -312,8 +331,14 @@ $nameList = ($timers.Name | ForEach-Object { "'$_'" }) -join ','
 # PowerShell, printing one line per row. During the T-518 arming gate on
 # 2026-08-30 it printed 57,581 lines for a query that returns 2 rows. The query
 # was then run by hand against the same workspace and returned 2, so the fault
-# was in the client-side path between the fetch and the render. It was NOT
-# root-caused, and nothing below assumes it has been.
+# was assumed to be in the client-side path between the fetch and the render.
+#
+# THAT ASSUMPTION WAS WRONG, and this aggregation did not fix the miscount —
+# it survived into 2026-08-31, when the real cause was found one layer lower:
+# the query was being TRUNCATED before Azure ever saw it. See
+# workspace-query.psm1. Moving the counting into KQL was still worth doing, but
+# it is not what makes the numbers below trustworthy; the flatten and the
+# row-shape assertion in Invoke-WorkspaceQuery are.
 #
 # Instead the workspace now returns ONE ROW PER TIMER, already summarized, and
 # every number printed is the workspace's own. A client-side bug can no longer
@@ -352,7 +377,7 @@ $nameList = ($timers.Name | ForEach-Object { "'$_'" }) -join ','
 # Written as a KQL verbatim literal (@'...') so the backslashes reach RE2
 # instead of being eaten as KQL escapes, and it stops short of the em dash so
 # nothing depends on that character surviving the trip through az.
-$summary = Invoke-WorkspaceQuery @"
+$summary = Invoke-WorkspaceQuery -ExpectColumns 'timerName', 'invocations', 'ran', 'skipped' -What 'the invocation summary query' -Kql @"
 AppTraces
 | where TimeGenerated > ago(${Hours}h)
 | extend cat = tostring(Properties.Category)
@@ -407,7 +432,7 @@ else {
 # arithmetic cannot manufacture a pass. Bounded to the ten most recent, because
 # the whole point is to read them, and ten is more than enough to see an offset.
 Write-Step 'Schedule status, as the host itself reported it'
-$schedule = Invoke-WorkspaceQuery @"
+$schedule = Invoke-WorkspaceQuery -ExpectColumns 'timerName', 'Message' -What 'the ScheduleStatus query' -Kql @"
 AppTraces
 | where TimeGenerated > ago(${Hours}h)
 | extend cat = tostring(Properties.Category)
