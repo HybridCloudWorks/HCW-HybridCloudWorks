@@ -242,15 +242,35 @@ moment** — see the paragraph below for where the count stands now — so the
 platform still ran almost no scheduled work, but "nothing is scheduled" was no
 longer true and the arming mechanism was no longer an assumption.
 
-`PUBLISH_SCHEDULED_CONTENT` was added to `enabled_timers` later the same
-evening and the app settings confirm `FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT =
-true`. **That is the setting, not the gate.** The acceptance criterion in
-Cutover-Runbook step 5 is the observed invocation, and it has not been
-collected: the verification run was made with a stale working copy of
-`scripts/cutover/05-verify-timer.ps1` that predates the KQL aggregation, so its
-output is not evidence either way. So of the eighteen: fifteen remain no-ops,
-`PUBLISH_SCHEDULED_CONTENT` is armed and unobserved, and `CHECK_AGENT_HEALTH`
-and `CLEANUP_TEMP_STORAGE` are armed and observed.
+**`PUBLISH_SCHEDULED_CONTENT` was armed and then observed on 2026-08-31**, and
+the observation is unusually clean, because it straddles the apply:
+
+```
+publishScheduledContent  8 invocations  4 ran  4 skipped
+                         first 2026-08-30 18:30:00 CDT  last 2026-08-30 20:15:00 CDT
+```
+
+Eight invocations at exactly fifteen-minute spacing with no gap. The four at
+18:30, 18:45, 19:00 and 19:15 skipped; the four at 19:30, 19:45, 20:00 and
+20:15 ran. The apply that set the flag landed at 00:30 UTC — 19:30 CDT — so the
+split falls on the boundary rather than near it. That is the same timer,
+observed skipping and then running, with the flag change as the only variable:
+a stronger reading than a bare "it fired", because it also proves the gate the
+flag controls.
+
+The clock came from the host in the same run: eight `ScheduleStatus` rows, all
+`-05:00`, firing on :00 :15 :30 :45 **Chicago local**. So both halves hold for
+this timer independently.
+
+One honest limit, which the script prints itself: a RAN invocation is one whose
+traces carry no skip line, and a dropped `.User` trace would look identical.
+The durable side effect — content actually transitioning to published — is the
+second witness Cutover-Runbook Gate 4 asks for, and it only appears when
+something was genuinely due. Nothing was, so the no-op is correct and
+unwitnessed by that second path.
+
+So of the eighteen: fifteen remain no-ops, and `CHECK_AGENT_HEALTH`,
+`CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and observed.
 
 It gates two other things, which is why it outranks its own blast radius:
 the Blog Machine's scheduled throughput (`forgeScheduled`,
@@ -300,9 +320,15 @@ it leaves PowerShell, and by asserting that returned rows carry the columns the
 caller asked for — a truncated query answers a different question rather than
 failing, which is why nothing in the error handling ever fired.
 
+**Confirmed end-to-end on 2026-08-31**, on the Windows host where it failed:
+the same command that had returned 58,265 blank rows returned one correct
+summary row, the `ScheduleStatus` section came back filtered to the requested
+timer and ordered, and the preflight reported 431 worker traces where it had
+been reporting none. That last number is the one worth remembering — the
+"telemetry gap" this script reported three times never existed.
+
 The fifteen that remain go one at a time, each observed firing before the next
-is added — as does `PUBLISH_SCHEDULED_CONTENT`, which is armed but has not yet
-been observed.
+is added.
 
 ## Medium
 
