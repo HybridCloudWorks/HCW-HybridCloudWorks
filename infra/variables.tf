@@ -655,6 +655,41 @@ variable "availability_test_geo_locations" {
   }
 }
 
+variable "logs_daily_quota_gb" {
+  description = <<-EOT
+    Daily billable-ingestion cap on the Log Analytics workspace, in GB.
+
+    A variable rather than the literal it was until 2026-08-31, because T-719
+    needs a measurement this cap makes impossible to take. The two most
+    important workload signals — function_http_5xx and function_response_time —
+    are LOG rules, because Flex Consumption publishes no HTTP metrics, and log
+    rules stop evaluating once the cap trips. The post-prune daily volume was
+    never confirmed against a day with headroom, so the margin protecting them
+    is an estimate.
+
+    HOW TO TAKE THE MEASUREMENT. Raise this in the workspace to a number the
+    platform cannot plausibly reach in a day, leave it for one full cap period
+    (the reset is 08:00 UTC, not midnight — Azure assigns the hour and it
+    cannot be configured), read the ingestion, then put it back. A day that
+    sits exactly at the cap is truncation, not demand, and reading it as demand
+    is the specific mistake this variable exists to make avoidable.
+
+    -1 IS DELIBERATELY REFUSED, though Azure accepts it for "unlimited". The
+    logs_daily_cap alert derives its threshold from this value times 0.8
+    (observability.tf), so an unlimited workspace would give that rule a
+    NEGATIVE threshold and it would fire on every evaluation, forever, about a
+    cap that does not exist. Raising the number keeps the alert meaningful at
+    the new level; removing the cap silently turns a guard into a mail rule.
+  EOT
+  type        = number
+  default     = 0.25
+
+  validation {
+    condition     = var.logs_daily_quota_gb > 0
+    error_message = "logs_daily_quota_gb must be greater than 0. Azure accepts -1 for an unlimited workspace, but the logs_daily_cap alert threshold is this value * 0.8, so a negative cap gives that rule a negative threshold and it fires on every evaluation. Raise the cap to measure; do not remove it."
+  }
+}
+
 variable "availability_probe_alert_enabled" {
   description = <<-EOT
     Arm the alert on the Cloudflare Worker reachability probe (ADR 0024).

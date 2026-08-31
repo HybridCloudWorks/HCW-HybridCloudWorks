@@ -14,6 +14,16 @@ name = "hcw-availability-probe"
 main = "worker.js"
 compatibility_date = "2026-08-01"
 
+# Both default to TRUE when absent, and the first deploy (2026-08-31) said so in
+# two warnings. This Worker exports only `scheduled` — there is no `fetch`
+# handler — so the workers.dev hostname could not invoke the probe even while it
+# existed; it answered errors. It was still a public hostname on the account for
+# a Worker nothing should reach from outside, plus a preview URL per version. A
+# cron job wants neither, so both are stated rather than left to a default that
+# decides what is exposed.
+workers_dev = false
+preview_urls = false
+
 # Every 5 minutes. The Terraform alert (infra/observability.tf,
 # edge_probe_availability) counts successful results over a 30-minute window
 # and fires below 3, so this cadence gives it 6 expected data points per

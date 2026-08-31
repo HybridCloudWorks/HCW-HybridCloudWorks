@@ -661,7 +661,11 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
 # quotaNextResetTime` and correct it here.
 #
 # The threshold is DERIVED from the workspace's own cap so the two cannot
-# drift: change daily_quota_gb in main.tf and this moves with it.
+# drift. It reads the RESOURCE attribute, not the variable behind it, so
+# raising logs_daily_quota_gb in the workspace moves this with it and no edit
+# here is needed — which is what makes the T-719 measurement a variable change
+# rather than a code change. It is also why that variable refuses -1: an
+# unlimited workspace would put a negative number on the line below.
 #
 # mute_actions_after_alert_duration rather than auto-mitigation, and the two
 # are mutually exclusive on this resource. Ingestion only goes up between
