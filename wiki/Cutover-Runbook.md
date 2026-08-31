@@ -94,20 +94,29 @@ What the step needs instead is a one-time prerequisite, recorded under
 definition and applies the assignment. Without it the deploy fails at the
 minting step with an authorization error that names the role.
 
-**Then enable the workflow.** `deploy-azure-frontend.yml` is gated with
-`if: ${{ false }}`. Enabling it is a deliberate, reviewed change — TODO.md.
-Two edits:
+**The workflow is already enabled.** This step used to describe a
+`name: DISABLED - Prototype Frontend Deployment` header and an
+`if: ${{ false }}` gate to delete; neither exists. The workflow is called
+`Deploy Frontend`, has no gate, and is `workflow_dispatch`-only — which is the
+deliberate control now, rather than a disabling condition someone has to
+remember to remove.
 
-```diff
--name: DISABLED - Prototype Frontend Deployment
-+name: Deploy Frontend
+Two prerequisites replace the edits, and both are owner actions (T-727):
 
-   build-and-deploy:
--    if: ${{ false }}
-     name: Build and Deploy to Azure Static Web Apps
+```powershell
+az role definition create --role-definition @infra/roles/static-web-app-deployer.json
 ```
 
-Then `gh workflow run "Deploy Frontend" --ref main`.
+```powershell
+terraform -chdir=infra apply
+```
+
+The deploy mints its token from ARM under federated identity, so it needs that
+role assigned before its first run. Without it the job fails at the minting
+step with an error naming the missing role.
+
+Then dispatch it from **Actions → Deploy Frontend → Run workflow**, on `main`.
+The workflow refuses any other ref (T-705).
 
 **This is safe while Firebase is live.** The first run publishes to
 `calm-ground-0d0e6a010.7.azurestaticapps.net` — the §6 step 2 preview host. DNS

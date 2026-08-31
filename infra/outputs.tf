@@ -3,9 +3,17 @@
 # Used by CI/CD workflows and application configuration.
 #
 # SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
-# omitted, and as of 2026-08-30 there are NO exceptions. All *runtime* access
-# uses managed identity + RBAC; no static key is passed to application code.
-# See Required-Inputs for the full secrets catalog.
+# omitted, with ONE remaining exception — `insights_connection` below, an
+# Application Insights connection string kept for local development. All
+# *runtime* access uses managed identity + RBAC; no static key is passed to
+# application code. See Required-Inputs for the full secrets catalog.
+#
+# WHY THAT ONE IS DIFFERENT from the one retired below it. An Application
+# Insights connection string is a telemetry INGESTION key: it grants the
+# ability to write telemetry into the workspace, and nothing else. It cannot
+# read data back, reach any other resource, or publish anything a user sees.
+# The SWA deployment token granted standing ability to replace the entire
+# public site. Both were `sensitive`; only one was worth the machinery.
 #
 # There was one, and the history is worth keeping because the note is only
 # trustworthy if its corrections are visible. `swa_token` exported the Static
@@ -171,8 +179,12 @@ output "vault_name" {
 # -----------------------------------------------------------------------------
 # Observability
 # -----------------------------------------------------------------------------
+# THE REMAINING EXCEPTION named in the header, stated here too so the two
+# cannot drift apart. Ingestion-only: it writes telemetry and can do nothing
+# else. Retiring it would mean local development could not emit telemetry at
+# all, for no reduction in what an attacker could reach.
 output "insights_connection" {
-  description = "Application Insights connection string (used for local development only — wired via Terraform in production)"
+  description = "Application Insights connection string, ingestion-only (local development; production is wired via Terraform). The one recorded exception to the no-key-outputs rule — see the header"
   value       = azurerm_application_insights.hcw.connection_string
   sensitive   = true
 }
