@@ -43,7 +43,15 @@ and `Gate: owner` still marks the rest.
 > file claimed the opposite from 2026-08-26 until 2026-08-30 — "merged infra
 > code reaches HCP Terraform on its own" — and it does not. Merging infra code
 > queues nothing. A run exists only when someone starts one, and auto-apply is
-> off, so an apply additionally needs a confirmation. The corrected claim was
+> off, so an apply additionally needs a confirmation. **That is now a decision
+> rather than a default (owner, 2026-08-30): applies stay manual.** Every run in
+> this workspace carries the permanent diff, which replaces three `azapi`
+> resources and restarts the function app, so auto-apply would restart
+> production on every merge — including documentation-only merges. A
+> single-operator estate gains little from removing the one deliberate pause,
+> and the 2026-08-30 session turned on reading a plan before it ran.
+>
+> The corrected claim was
 > read off the workspace configuration on 2026-08-30, after the earlier one was
 > used to explain the run list and explained it wrongly. Anyone reading the old
 > sentence would assume an apply was coming after a merge; several merged
@@ -127,11 +135,15 @@ engineering work on them is done.
   every workflow with `contents: write` can push past all checks. Narrow the
   bypass to a deploy key scoped to `frontend/data/content-manifest.json`, or
   replace the push with an auto-merging pull request.
-- **Retire or gate the SWA token (from T-727).** It is the estate's last
-  long-lived credential and is now isolated in a job that installs nothing.
-  Retiring it means OIDC-based SWA deployment; short of that, make it an
-  environment secret on a *protected* `production` and set a rotation cadence.
-  Recorded as an accepted exception in [TODO.md](TODO.md).
+- **Retire the SWA token (T-727) — decided 2026-08-30: move the deploy to
+  OIDC.** It is the estate's last long-lived credential; everything else a
+  workflow uses is federated. The isolation job that installs nothing was a
+  fence, not a fix, and the environment-secret alternative was rejected because
+  it keeps the credential *and* depends on the `production` deployment-branch
+  rule that is still unset — two owner actions instead of one, for a weaker
+  result. OIDC is the only option that lets the `outputs.tf` exception be
+  deleted rather than documented. The owner action is one federated
+  credential.
 - **A TFC API token for the plan assertion (from T-724).**
   `scripts/assert-expected-plan.mjs` fails when a plan contains anything but the
   known permanent diff, but the plan lives in HCP Terraform and
@@ -147,11 +159,25 @@ engineering work on them is done.
   rather than a permissions problem. Wiring the same check into
   `iac-validate.yml` needs that token as a repository secret and is still open;
   the script is already Node so it runs on `ubuntu-latest` unchanged.
-- **A scheduled-query alert on `unresolvedSecrets` (from T-720).**
-  `/api/health` now reports how many app settings arrived as an unresolved
-  `@Microsoft.KeyVault(…)` reference. It is 0 in a healthy estate; an alert on
-  "greater than 0 for 15 minutes" turns four silent failure classes into one
-  page. Needs an apply.
+- ~~A scheduled-query alert on `unresolvedSecrets` (from T-720).~~ **Built
+  2026-08-30 as `monitor-unresolved-secrets.yml`, not as an alert rule — the
+  alert this line asked for could not exist.** It said "needs an apply" for
+  weeks; there was nothing to apply. `unresolvedSecrets` is a field in the
+  `/api/health` **response body** and nothing writes it to Log Analytics, so a
+  KQL rule would have queried a table that never receives it and returned zero
+  rows forever — reading as healthy precisely because it could never fire.
+  Curling `/api/health` from a runner fails too: Bot Fight Mode answers with a
+  403 through Cloudflare, and the origin lock answers with a 403 direct, which
+  `validate-deployed.yml` already documents. The workflow reads the condition
+  through ARM instead — the same argument `monitor-functions-registered.yml`
+  makes, and it wins on the same axes: it survives the Log Analytics daily cap,
+  does not traverse Cloudflare, needs no metric that does not exist, and names
+  *which* setting is broken rather than a count. **One owner action remains:**
+  dispatch it once from the Actions tab. The ARM payload shape could not be
+  verified from a container with no `az` and no tenant, so the parser accepts
+  the two documented shapes and **throws on anything else** rather than
+  reporting health it cannot vouch for — a first run either passes or says
+  exactly what it did not understand.
 - **Vault seeding and seeded documents (from the Blog Machine program).**
   ~~`PREVIEW-SIGNING-SECRET`~~ **seeded 2026-08-30** — the admin secrets page
   reports it green, which per `admin-secrets.js` means resolved through the
@@ -208,7 +234,7 @@ T-518, T-519, the unseeded Key Vault secrets, the unseeded
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-714 | frontend | **Needs an owner decision.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`). The seed mechanism exists but is deliberately never mounted in the browser, and switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This is an architectural change needing real-browser verification, not a quiet fix | `main.jsx`, `hooks/prerenderData.js` |
+| T-714 | frontend | **Decided 2026-08-30: wire `hydrateRoot` and verify in a real browser.** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`); the seed mechanism exists but is deliberately never mounted. What made this undecidable was that the hydration-mismatch risk could only be argued about — it is testable now, because Chromium and Playwright can drive the real pages and diff hydrated output against the prerendered HTML. Ships behind that verification or not at all. Removing the prerender path instead was rejected: it gives up first paint and crawler content to avoid a risk that can be measured | `main.jsx`, `hooks/prerenderData.js` |
 
 ### Medium — 2 of 30 open
 
@@ -398,8 +424,8 @@ Entra row below, which is where it belongs.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered; provide/rotate the Static Web App deployment credential through the approved Azure/GitHub path | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | Decide whether to arm the remaining 16 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH` and `CLEANUP_TEMP_STORAGE` are armed and proven. Separately deploy the edge probe before enabling its Terraform alert | The two proven timers remain armed; the other 16 remain no-ops. The Azure availability test remains disabled because Bot Fight Mode challenges Azure agents; T-519's Cloudflare Worker is the approved path around it and still needs an owner deployment |
-| Recovery objectives | State the RTO and RPO the platform is held to, so backup and recovery settings are measured against a number instead of chosen (S6). Tracked as **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** since 2026-08-26, with the design, cost model and acceptance criteria | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
+| Timers and the availability test | Decide whether to arm the remaining 15 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and proven. Separately deploy the edge probe before enabling its Terraform alert | The three proven timers remain armed; the other 15 remain no-ops. The Azure availability test remains disabled because Bot Fight Mode challenges Azure agents; T-519's Cloudflare Worker is the approved path around it and still needs an owner deployment |
+| Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |
 | GCP pricing integration | Seed `GCP-BILLING-API-KEY` if the GCP column in the public pricing tool is wanted, or leave it unseeded and that column stays absent. Get it from the GCP console: enable the Cloud Billing API, create an API key, restrict it to that API. **This is not a billing credential** — the Cloud Billing Catalog API serves the public price list, and it is read for the site's comparison tools, not for anything this estate is charged for | No GCP credential is stored in the repository. The service-account JSON this row used to ask for is retired (2026-08-29): the API key is what Google documents for this API, and it removed a vault SDK client, an OAuth library and a bespoke seeding script |
@@ -469,7 +495,7 @@ or someone "fixes" it without knowing it was a choice.
 | Risk | Accepted | Reasoning, and what compensates |
 | --- | --- | --- |
 | **Key Vault purge protection is off** on `kv-site-prod-cus-01`, which holds 18 live secrets. Raised as Go-Live blocker B2 on 2026-08-24 | Owner, 2026-08-24 | Enabling it is a **one-way** switch: once on it cannot be turned off, a deleted vault can no longer be purged, and its name stays reserved for the retention period — which removes the teardown-and-recreate path a single-environment estate depends on. The secrets are seeded and resolving, so the exposure is not "unprotected during setup". Compensating control: soft delete at 90 days, which still makes an accidental delete recoverable. What is given up is protection against a *deliberate* purge by someone already holding the rights to perform one. Recorded in the same terms in `infra/variables.tf` and `infra/README.md` |
-| **The Static Web Apps deployment token is a Terraform output** (`swa_token`), which `outputs.tf`'s own header otherwise says does not exist. Raised as T-722, 2026-08-28 | Recorded 2026-08-28; owner decision outstanding on retiring it (T-727) | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
+| **The Static Web Apps deployment token is a Terraform output** (`swa_token`), which `outputs.tf`'s own header otherwise says does not exist. Raised as T-722, 2026-08-28 | **Resolved by decision 2026-08-30: retire it via OIDC (T-727).** No longer an accepted risk — an accepted risk is one nobody intends to fix, and this one now has a chosen fix and a named owner action | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
 | **`cloudflare_origin_secret` is a real shared-secret value in Terraform state.** Raised as T-723, 2026-08-28 | Recorded 2026-08-28 | Unavoidable rather than chosen: Terraform configures the Cloudflare end of the origin handshake, so the value has to pass through it. It was simply never written down, which is the part that is fixed here. **Rotation consequence, which is the reason this needs a record:** the value must change in three places in one window — the HCP Terraform workspace variable, Key Vault `CF-ORIGIN-SECRET`, and the Cloudflare transform rule Terraform writes — and a mismatch throws on *every anonymous request*, so a partial rotation is a full outage of the public API rather than a degradation. The companion exposure — the azapi read-back exporting the whole live app-settings map into state — is not accepted but *bounded*: it is safe only while every secret-shaped setting is a Key Vault reference, and `functions/src/functions/app-settings-secrets.test.js` now fails CI if one is not |
 
 ## Handling rules
