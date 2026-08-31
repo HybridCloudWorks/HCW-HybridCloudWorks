@@ -158,9 +158,16 @@ export function normaliseRunId(raw) {
  * UNRECOGNISED SHAPES THROW rather than returning null, following
  * `check-unresolved-secrets.mjs`: "no run for this commit" and "I could not
  * read the answer" are different facts, and reporting the second as the first
- * is how a check reports health it cannot vouch for. A run with no
- * configuration version is not an unrecognised shape — CLI-driven runs have
- * none — so those are skipped rather than thrown on.
+ * is how a check reports health it cannot vouch for.
+ *
+ * The line is ABSENT versus DANGLING. A relationship that is not there is a
+ * fact about the run — CLI-driven runs have no configuration version, and an
+ * API-uploaded configuration version has no ingress attributes — so those runs
+ * are skipped. A relationship that IS there but whose target is missing from
+ * `included` means the response did not carry what was asked for; skipping it
+ * would report "no run for this commit" for a commit that has one, so it
+ * throws. Checking only that `included` EXISTS is not enough: an empty array
+ * passes that and then every run is silently skipped.
  *
  * Returns the newest matching run, or null when the payload was readable and
  * nothing matched.
@@ -188,21 +195,43 @@ export function selectRunForCommit(payload, sha) {
     if (resource?.id) byId.set(`${resource.type}:${resource.id}`, resource);
   }
 
+  // ABSENT versus DANGLING, which is the whole distinction this function is
+  // built around and the first draft got wrong. A relationship that is not
+  // there is a fact about the run — CLI-driven runs have no configuration
+  // version, and an API-uploaded configuration version has no ingress
+  // attributes — so those are skipped. A relationship that IS there but whose
+  // target is missing from `included` means the payload did not carry what was
+  // asked for, and skipping it would report "no run for this commit" for a
+  // commit that has one. That is the failure this function exists to prevent,
+  // so it throws.
+  const dangling = (ref, kind) =>
+    new Error(
+      `HCP Terraform referenced ${kind} ${ref} but did not include it. The runs request must ` +
+        'carry include=configuration_version.ingress_attributes, and this tool cannot tell ' +
+        'whether a run exists for the commit without it.'
+    );
+
   const matches = [];
   for (const run of payload.data) {
     const cvRef = run?.relationships?.['configuration-version']?.data;
-    // CLI-driven runs carry no configuration version. Not a shape problem.
     if (!cvRef?.id) continue;
 
     const cv = byId.get(`${cvRef.type ?? 'configuration-versions'}:${cvRef.id}`);
-    if (!cv) continue;
+    if (!cv) throw dangling(cvRef.id, 'configuration version');
 
     const iaRef = cv.relationships?.['ingress-attributes']?.data;
     if (!iaRef?.id) continue;
 
     const ia = byId.get(`${iaRef.type ?? 'ingress-attributes'}:${iaRef.id}`);
-    const commit = ia?.attributes?.['commit-sha'];
-    if (typeof commit !== 'string') continue;
+    if (!ia) throw dangling(iaRef.id, 'ingress attributes');
+
+    const commit = ia.attributes?.['commit-sha'];
+    if (typeof commit !== 'string') {
+      throw new Error(
+        `Ingress attributes ${iaRef.id} carry no string commit-sha, so the run it belongs to ` +
+          'cannot be matched against a commit.'
+      );
+    }
 
     if (commit.toLowerCase() === wanted) matches.push(run);
   }

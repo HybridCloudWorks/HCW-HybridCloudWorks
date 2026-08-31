@@ -249,6 +249,57 @@ describe('selectRunForCommit', () => {
     expect(found.id).toBe('run-mine');
   });
 
+  // A configuration version with no ingress attributes was uploaded through the
+  // API rather than ingressed from VCS. Also a fact about the run.
+  it('skips a configuration version with no ingress attributes', () => {
+    const found = selectRunForCommit(
+      payload({
+        runs: [runFor('run-api', 'cv-api'), runFor('run-mine', 'cv-1')],
+        included: [
+          { id: 'cv-api', type: 'configuration-versions', relationships: {} },
+          cvFor('cv-1', 'ia-1'),
+          iaFor('ia-1', SHA),
+        ],
+      }),
+      SHA
+    );
+    expect(found.id).toBe('run-mine');
+  });
+
+  // FOUND IN REVIEW (Copilot, 2026-08-31). The first draft skipped a reference
+  // whose target was missing from `included`, which meant an ignored or changed
+  // `include=` parameter produced "No run in the last 50" for a commit that has
+  // one — the exact confusion this function was written to prevent, in the
+  // function that documents preventing it. Checking that `included` merely
+  // EXISTS does not catch it: an empty array passes that and then every run is
+  // silently skipped.
+  it('throws when a configuration version is referenced but not included', () => {
+    expect(() =>
+      selectRunForCommit(payload({ runs: [runFor('run-mine', 'cv-1')], included: [] }), SHA)
+    ).toThrow(/did not include it/);
+  });
+
+  it('throws when ingress attributes are referenced but not included', () => {
+    expect(() =>
+      selectRunForCommit(
+        payload({ runs: [runFor('run-mine', 'cv-1')], included: [cvFor('cv-1', 'ia-1')] }),
+        SHA
+      )
+    ).toThrow(/did not include it/);
+  });
+
+  it('throws when ingress attributes carry no commit sha', () => {
+    expect(() =>
+      selectRunForCommit(
+        payload({
+          runs: [runFor('run-mine', 'cv-1')],
+          included: [cvFor('cv-1', 'ia-1'), { id: 'ia-1', type: 'ingress-attributes', attributes: {} }],
+        }),
+        SHA
+      )
+    ).toThrow(/no string commit-sha/);
+  });
+
   // The distinction that matters: an unreadable payload must not be reported
   // as "no run for this commit", which would let the decision proceed
   // unchecked while looking like the check had run.
