@@ -34,14 +34,56 @@ import { pathToFileURL } from 'node:url';
 export const HEALTHY_STATUS = 'resolved';
 
 /**
+ * References that are SUPPOSED to be unresolved, and why.
+ *
+ * Added after the first live run, which was correct and still useless as a
+ * page: it went red on AZURE_SPEECH_KEY, which infra/functionapp.tf:444 says in
+ * as many words is "the fallback and is expected to stay unresolved". Azure AI
+ * Speech is a written, tested second path for the day the preview Gemini TTS
+ * models are retired; using it means creating a Cognitive Services resource,
+ * which is a spend decision nobody has made. An unseeded reference arrives as
+ * the literal @Microsoft.KeyVault(...) string, readSetting() treats that as no
+ * key at all, and the provider is simply not offered.
+ *
+ * A monitor that is red every six hours for a condition its own repository
+ * documents as intended is not a monitor. It is a thing people mute, and then
+ * the real finding arrives into a channel nobody reads. That failure mode is
+ * named in this workflow's own header, which makes shipping it here worse than
+ * careless.
+ *
+ * THIS IS NOT A MUTE. An entry here is reported every run, just not as a
+ * failure — and if one ever starts resolving, that is reported too, because it
+ * means this list and the comment in functionapp.tf have gone stale.
+ */
+export const EXPECTED_UNRESOLVED = new Map([
+  [
+    'AZURE_SPEECH_KEY',
+    'fallback TTS provider, deliberately unprovisioned — infra/functionapp.tf:444',
+  ],
+]);
+
+/**
+ * Strip the APPSETTING_ prefix the platform adds to its own duplicate.
+ *
+ * Azure surfaces every app setting twice, plain and prefixed, so one broken
+ * secret arrives as two findings. The first live run reported AZURE_SPEECH_KEY
+ * and APPSETTING_AZURE_SPEECH_KEY as "2 of 42" when the true count of broken
+ * secrets was one. Doubling a count is how a small problem gets read as a
+ * bigger one, and this file's entire job is not misreporting scale.
+ */
+export function canonicalName(name) {
+  return String(name).replace(/^APPSETTING_/, '');
+}
+
+/**
  * Pull {name, status, details} out of an ARM KeyVaultReferenceCollection.
  *
- * TWO SHAPES ARE ACCEPTED because the payload could not be verified against a
- * live tenant from the environment this was written in, and shipping a guess
- * that silently reports "healthy" is the exact failure this whole file exists
- * to avoid. Anything that matches NEITHER shape throws — see the note on
- * assertKnownShape. If a future run proves only one shape real, delete the
- * other; do not relax the throw.
+ * SHAPE A IS CONFIRMED. The first live run on 2026-08-30 returned
+ * properties.keyToReferenceStatuses and parsed 42 references, so the guess this
+ * was written against was right. Shape B stays because one tenant on one
+ * api-version is not every tenant on every api-version, and the cost of keeping
+ * it is a branch that never executes. Anything matching NEITHER still throws —
+ * see assertKnownShape. Do not relax the throw.
  */
 export function parseReferenceStatuses(payload) {
   if (!payload || typeof payload !== 'object') {
@@ -107,8 +149,30 @@ export function formatReport(unresolved) {
 
 export function evaluate(payload) {
   const statuses = assertKnownShape(parseReferenceStatuses(payload), payload);
-  const unresolved = unresolvedFrom(statuses);
-  return { checked: statuses.length, unresolved };
+
+  const byName = new Map();
+  for (const s of unresolvedFrom(statuses)) {
+    const name = canonicalName(s.name);
+    if (!byName.has(name)) byName.set(name, { ...s, name });
+  }
+
+  const unexpected = [];
+  const expected = [];
+  for (const s of byName.values()) {
+    (EXPECTED_UNRESOLVED.has(s.name) ? expected : unexpected).push(s);
+  }
+
+  // An allowlisted reference that RESOLVES means this list has outlived the
+  // decision behind it. Not a failure — but saying nothing would let the list
+  // quietly become a place where real findings go to be ignored.
+  const resolvedNames = new Set(
+    statuses
+      .filter((s) => String(s.status).toLowerCase() === HEALTHY_STATUS)
+      .map((s) => canonicalName(s.name)),
+  );
+  const staleAllowlist = [...EXPECTED_UNRESOLVED.keys()].filter((n) => resolvedNames.has(n));
+
+  return { checked: statuses.length, unexpected, expected, staleAllowlist };
 }
 
 async function readStdin() {
@@ -140,15 +204,38 @@ async function main() {
     process.exit(2);
   }
 
-  if (result.unresolved.length === 0) {
-    console.log(`All ${result.checked} Key Vault reference(s) are resolving.`);
+  // Reported every run, never as a failure. Silence here would make the
+  // allowlist a mute, which is the thing it is written not to be.
+  if (result.expected.length > 0) {
+    console.log(
+      `${result.expected.length} reference(s) are unresolved as intended, and are not a finding:`,
+    );
+    for (const s of result.expected) {
+      console.log(`  ${s.name}: ${s.status} — ${EXPECTED_UNRESOLVED.get(s.name)}`);
+    }
+    console.log('');
+  }
+
+  if (result.staleAllowlist.length > 0) {
+    console.log(
+      'These are on the expected-unresolved list but are RESOLVING, so the list and ' +
+        `the comment behind it have gone stale: ${result.staleAllowlist.join(', ')}`,
+    );
+    console.log('');
+  }
+
+  if (result.unexpected.length === 0) {
+    console.log(
+      `All ${result.checked} Key Vault reference(s) are resolving, or unresolved as intended.`,
+    );
     process.exit(0);
   }
 
   console.error(
-    `${result.unresolved.length} of ${result.checked} Key Vault reference(s) are NOT resolving:`,
+    `${result.unexpected.length} Key Vault reference(s) are NOT resolving and were not ` +
+      `expected to be, out of ${result.checked} checked:`,
   );
-  console.error(formatReport(result.unresolved));
+  console.error(formatReport(result.unexpected));
   console.error('');
   console.error(
     'Each one is a feature that has quietly turned itself off in production: the code ' +
