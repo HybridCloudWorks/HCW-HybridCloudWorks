@@ -224,6 +224,10 @@ export const SEED_ATTRIBUTE = 'data-prerendered-seed';
  * That is not theoretical: it was reproduced against this repo's DOMPurify
  * before this attribute replaced the island.
  *
+ * `src/lib/sanitizeHtml.js` now prefixes author-written ids as well, so the
+ * clobber is closed at the sanitizer too. This attribute stays regardless: it
+ * does not depend on that configuration staying right, which was the point.
+ *
  * The mount point cannot be shadowed the same way. `<div id="root">` is written
  * by the template, ahead of everything the pre-render puts inside it, so an
  * injected `id="root"` is always later in document order and always loses. The
