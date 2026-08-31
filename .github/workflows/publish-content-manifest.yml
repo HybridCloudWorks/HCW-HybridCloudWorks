@@ -51,40 +51,50 @@ concurrency:
 # a token that could push arbitrary commits to a protected branch and an Azure
 # federated credential in the same environment.
 #
-# Now `build` holds the Azure identity and NEVER `contents: write`, and `commit`
-# holds `contents: write` and NEVER an Azure identity. Neither is enough on its
-# own, and the artifact between them is a plain JSON file. `build` also installs
-# with `--ignore-scripts`, so lifecycle scripts do not execute at all — verified
-# that the install and the manifest build both succeed without them.
+# Now `build` holds the Azure identity and never any write to this repository,
+# and `commit` holds neither: since 2026-08-31 its own permission is
+# `contents: read`, and the writing is done by a GitHub App installation token
+# it mints for the length of two API calls. Neither job is enough on its own,
+# and the artifact between them is a plain JSON file. `build` also installs with
+# `--ignore-scripts`, so lifecycle scripts do not execute at all — verified that
+# the install and the manifest build both succeed without them.
 #
-# STILL OPEN: for the push in `commit` to land on a main protected by twelve
-# required contexts, the ruleset must bypass the Actions token — and a bypass
-# is granted to the TOKEN, not to a workflow, so every workflow holding
-# `contents: write` can push past all checks. The split above shrinks what can
-# reach that push; it does not remove the bypass.
+# The concentration this split broke up is therefore smaller again than it was:
+# the credential `commit` holds cannot merge past a check, so a postinstall
+# script that reached it could open a pull request and nothing more.
 #
-# BOUNDED ON 2026-08-31 by `scripts/workflow-write-permissions.test.mjs`, which
-# pins the set of workflows holding the grant to a reviewed two. Adding a third
-# is now a failing test with a justification to write, rather than a line in an
-# unrelated pull request that nobody reads as a security decision. That is a
-# bound, not a fix.
+# THE BYPASS IS NO LONGER NEEDED, as of 2026-08-31 (T-726). It used to be:
+# for the push in `commit` to land on a main protected by twelve required
+# contexts, the ruleset had to list the Actions token as a bypass actor — and a
+# bypass belongs to the TOKEN, not to a workflow, so every workflow holding
+# `contents: write` could push past every check.
 #
-# THE TWO EXITS BOTH COST SOMETHING, which is why neither was taken unasked:
+# `commit` no longer pushes. It mints a GitHub App installation token, pushes a
+# BRANCH, and opens a pull request that the required checks run on. They run
+# precisely because the pull request is not opened with GITHUB_TOKEN: GitHub
+# does not trigger workflows for events its own token creates, which is why the
+# obvious version of this idea silently never merges.
 #
-#   - A deploy key as the bypass actor narrows the grant to workflows that
-#     mount the key. It is also a stored, non-expiring credential — the exact
-#     thing T-727 removed from this repository on the same day, and it cannot
-#     be scoped to one path: deploy keys are repository-wide.
-#   - An auto-merging pull request removes the bypass entirely, but a pull
-#     request opened with GITHUB_TOKEN does not trigger workflows, by design,
-#     to prevent recursion. Its required checks would never start, so auto-merge
-#     would never fire and the manifest would stop refreshing. Making it work
-#     needs a GitHub App or a PAT to open the pull request — another credential.
+# What that costs, stated because it is real: one stored non-expiring App
+# private key. It grants push-a-branch and open-a-pull-request on this
+# repository and cannot merge past a check — strictly less than the bypass it
+# retires, which is the whole argument.
+#
+# TWO OWNER ACTIONS REMAIN, and until both are done this degrades rather than
+# breaks:
+#   1. Remove the Actions token as a bypass actor from the ruleset. Nothing
+#      needs it now. scripts/workflow-write-permissions.test.mjs bounds the
+#      blast radius until then.
+#   2. Enable auto-merge (Settings -> General -> Pull Requests). It was OFF
+#      when this was written, so the pull request opens and waits for a human
+#      instead of merging itself. scripts/open-manifest-pr.mjs reports that as
+#      a notice naming the setting rather than failing the night.
 #
 # Generating the manifest during the frontend build instead was considered and
 # rejected on the strongest ground available: it would put Cosmos access back
-# into the deploy job, which is precisely what T-718 and the split above exist
-# to prevent.
+# into the deploy job, which is precisely what T-718 and the job split below
+# exist to prevent.
+
 jobs:
   build:
     name: Fetch the published corpus and build the manifest
@@ -204,11 +214,19 @@ jobs:
           if-no-files-found: error
 
   commit:
-    name: Commit the manifest if it changed
+    name: Open a pull request if the manifest changed
     needs: build
     runs-on: ubuntu-latest
+    # `contents: read` for the checkout, and NOTHING ELSE. The writing is done
+    # by a GitHub App installation token, which is the entire point of T-726:
+    # a ruleset bypass belongs to the TOKEN, so while this job held
+    # `contents: write` every workflow that held it could push to main past all
+    # twelve required contexts. The App opens a pull request instead, and the
+    # checks run on it — precisely because a pull request opened with
+    # GITHUB_TOKEN does not trigger workflows, and one opened with an App token
+    # does.
     permissions:
-      contents: write # commits the manifest — and holds no Azure identity
+      contents: read # checkout only — this job can no longer push anywhere
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -219,21 +237,88 @@ jobs:
           name: content-manifest
           path: frontend/data
 
-      # No `npm ci` in this job, deliberately: it holds the token that can push
-      # to main, so it installs nothing and runs only git and node's built-ins.
-      - name: Commit if the published set changed
+      # The script already suppresses timestamp-only rewrites, so a diff here
+      # means the article set or its content actually moved. Decided before the
+      # token is minted, so an unchanged night never asks for a credential.
+      - name: Did the published set change?
+        id: changed
         run: |
           set -euo pipefail
           if git diff --quiet -- frontend/data/content-manifest.json; then
             echo "No change to the published set."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # The script already suppresses timestamp-only rewrites, so reaching
-          # here means the article set or its content actually moved.
           routes=$(node -e "console.log(require('./frontend/data/content-manifest.json').routes.length)")
-          git config user.name  'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "routes=${routes}" >> "$GITHUB_OUTPUT"
+
+      # Self-arming, like the reader workflows: before the App exists this
+      # reports honestly that it did not run rather than failing every night
+      # and training everyone to ignore a red X. `secrets` is not available to
+      # a job-level `if`, so the test happens in a step.
+      - name: Is the App configured?
+        id: app
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          MANIFEST_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          MANIFEST_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANIFEST_APP_PRIVATE_KEY}" ] && [ -n "${MANIFEST_APP_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::The manifest changed but the App is not configured, so no pull request was opened. Set the MANIFEST_APP_ID variable and the MANIFEST_APP_PRIVATE_KEY secret (T-726)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url and uses
+      # global fetch. This job holds the most powerful credential in the
+      # pipeline for the length of two API calls, so it installs nothing.
+      - name: Mint an App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # `git add <path>` and never `-A` or `.`: the branch this pushes is the
+      # one thing the App's write permission can reach, so what goes on it is
+      # the boundary. scripts/manifest-workflow.test.mjs asserts the absence of
+      # the wildcard forms.
+      - name: Push the branch
+        if: steps.app.outputs.armed == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+          ROUTES: ${{ steps.changed.outputs.routes }}
+        run: |
+          set -euo pipefail
+          # RUN_ATTEMPT, not RUN_ID alone: a re-run of the same run keeps the
+          # id, so the branch would already exist on the remote and the push
+          # would fail — or worse, succeed against a stale branch with a pull
+          # request already open, which answers 422 on create. Found in review.
+          branch="chore/content-manifest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "branch=${branch}" >> "$GITHUB_ENV"
+          git config user.name  'hcw-manifest[bot]'
+          git config user.email 'hcw-manifest[bot]@users.noreply.github.com'
+          git checkout -b "${branch}"
           git add frontend/data/content-manifest.json
-          git commit -m "chore: refresh content manifest ($routes article routes)"
-          git push
-          echo "::notice::Manifest updated to $routes article routes. Deploy the frontend to publish them."
+          git commit -m "chore: refresh content manifest (${ROUTES} article routes)"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "${branch}"
+
+      - name: Open the pull request
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MANIFEST_BRANCH: ${{ env.branch }}
+          MANIFEST_ROUTES: ${{ steps.changed.outputs.routes }}
+        run: node scripts/open-manifest-pr.mjs
