@@ -160,10 +160,34 @@ engineering work on them is done.
 - **Ruleset bypass for the manifest push (from T-726).** The workflow is now
   two jobs, so nothing holding `contents: write` also holds the Azure identity
   or runs `npm ci`. What remains: for that push to land on a main protected by
-  twelve required contexts, the ruleset must bypass the Actions token — so
-  every workflow with `contents: write` can push past all checks. Narrow the
-  bypass to a deploy key scoped to `frontend/data/content-manifest.json`, or
-  replace the push with an auto-merging pull request.
+  twelve required contexts, the ruleset must bypass the Actions token — and a
+  bypass is granted to the TOKEN, not to a workflow, so every workflow holding
+  `contents: write` can push past all checks.
+
+  **Bounded, not closed, on 2026-08-31.**
+  `scripts/workflow-write-permissions.test.mjs` pins the set of workflows
+  holding the grant to a reviewed two — `publish-content-manifest.yml` and
+  `sync-wiki.yml` — each with a written justification. A third becomes a
+  failing test rather than a line in an unrelated pull request that nobody
+  reads as a security decision, which is how this kind of grant spreads. The
+  guard is mutation-tested: granting `contents: write` to `iac-validate.yml`
+  fails it.
+
+  **Both named exits cost something, which is why neither was taken.** A deploy
+  key as the bypass actor is a stored, non-expiring credential — the thing
+  T-727 removed the same day — and cannot be scoped to one path, because deploy
+  keys are repository-wide. An auto-merging pull request removes the bypass
+  entirely, but a pull request opened with `GITHUB_TOKEN` does not trigger
+  workflows (by design, to prevent recursion), so its required checks would
+  never start, auto-merge would never fire, and the manifest would stop
+  refreshing; making it work needs a GitHub App or a PAT to open the pull
+  request, which is another credential. Generating the manifest during the
+  frontend build was rejected on stronger ground: it would put Cosmos access
+  back into the deploy job, which is what T-718 exists to prevent.
+
+  **The decision that would actually close this is the owner's:** accept a
+  deploy key, stand up a GitHub App, or accept the bounded bypass as a recorded
+  risk. It is not a code change.
 - **Retire the SWA token (T-727) — decided and BUILT 2026-08-30.** The
   repository half is done: `deploy-azure-frontend.yml` mints the deployment
   token from ARM under federated identity at deploy time, the `swa_token`
