@@ -80,7 +80,12 @@ resource "azurerm_log_analytics_workspace" "hcw" {
   # T-505: the plan's telemetry cost ceiling. When the cap trips, ingestion
   # stops until the daily reset — Cosmos DataPlaneRequests (observability.tf)
   # is the likeliest culprit; prune that category before raising the cap.
-  daily_quota_gb = 0.25
+  #
+  # A workspace variable since 2026-08-31 (T-719): the measurement that would
+  # tell anyone whether the margin is safe cannot be taken while the cap is
+  # truncating the number. variables.tf carries the procedure and the reason
+  # -1 is refused.
+  daily_quota_gb = var.logs_daily_quota_gb
   tags           = local.tags
 }
 

@@ -167,13 +167,49 @@ built to eliminate. The workspace was at its cap before pruning and the
 post-prune volume was never confirmed, so today's margin is an estimate and the
 whole chain rests on `logs_daily_cap` firing at 80% and a human acting in hours.
 
-Read the ingestion volume for a day with no cap in force, and record the measured
-GB/day here with the date. **If headroom is under roughly 2×**, pull a documented
-lever rather than waiting for the 80% alert to become routine: drop the
-`host.json` log level, or move `AppTraces` (about 38% of the cap) to the Basic
-table plan.
+**The cap is 0.25 GB/day and it resets at 08:00 UTC**, not midnight — Azure
+assigns the hour and it cannot be configured, so a day summed from midnight
+under-counts for eight hours after every reset.
 
-Anchors: `infra/observability.tf:329-341,78-99`, `infra/main.tf:80-84,110-112`.
+**First, is today even measurable?** A day sitting at the cap is truncation, not
+demand, and reading it as demand is the mistake worth avoiding:
+
+```powershell
+az monitor log-analytics workspace show --resource-group rg-mgmt-plat-prod-cus --workspace-name log-plat-prod-cus-01 --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e -o json | ConvertFrom-Json | Select-Object -ExpandProperty workspaceCapping
+```
+
+**Success:** `dailyQuotaGb`, a `quotaNextResetTime` near 08:00 UTC, and
+`dataIngestionStatus`. `RespectQuota` means collection is running;
+**`OverQuota` means the number below is a floor, not the demand.**
+
+**Then the daily volume**, aligned to the reset and using the same `/ 1000.0` the
+`logs_daily_cap` alert uses, so the two agree:
+
+```powershell
+az monitor log-analytics query --workspace cf80dc24-2499-49a0-8c66-9522bcc294ed --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e --analytics-query "Usage | where IsBillable | where StartTime > ago(14d) | summarize IngestedGb = round(sum(Quantity) / 1000.0, 4) by CapDay = bin(StartTime - 8h, 1d) + 8h | order by CapDay desc" -o json | ConvertFrom-Json | Format-Table CapDay, IngestedGb -AutoSize
+```
+
+**Success:** about 14 rows, one per cap-day. The query is one line because on
+Windows `az` is a batch file that cannot receive an argument containing a
+newline — a multi-line query arrives truncated at the first break and the call
+still exits 0.
+
+**To take a real measurement**, raise `logs_daily_quota_gb` in the workspace
+(https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
+platform cannot reach in a day, approve the run, leave it one full cap period,
+read the volume, then put it back to `0.25`. It is a variable rather than a code
+literal precisely so this costs no pull request. **Do not set it to -1**: Azure
+accepts that for "unlimited", but the alert threshold is this value times 0.8, so
+an unlimited workspace gives that rule a negative threshold and it fires forever
+about a cap that does not exist. The variable refuses it.
+
+Record the measured GB/day here with the date. **If headroom is under roughly
+2×**, pull a documented lever rather than waiting for the 80% alert to become
+routine: drop the `host.json` log level, or move `AppTraces` (about 38% of the
+cap) to the Basic table plan.
+
+Anchors: `infra/observability.tf:329-341,78-99`, `infra/main.tf:80-88`,
+`infra/variables.tf` (`logs_daily_quota_gb`).
 
 ### 6. T-721 — telemetry costs five times the workload it observes — Medium, decision
 
