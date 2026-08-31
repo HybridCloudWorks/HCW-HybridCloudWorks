@@ -24,9 +24,21 @@
 # request queues no run". It is VCS-connected — `terraform apply` from a
 # desktop answers "Apply not allowed for workspaces with a VCS connection"
 # (2026-08-31), and HCP Terraform posts a commit status on every pull-request
-# head. So a pull request DOES have a speculative plan of its own. What has not
-# been built is the part that would make wiring this in safe: selecting THAT
-# run rather than the latest one. Until it is, dispatch-only stands.
+# head. So a pull request DOES have a speculative plan of its own.
+#
+# `--commit` now selects THAT run, which was the missing piece. This stays
+# dispatch-only anyway, and the reason has changed rather than gone away: the
+# decision this tool gates happens AFTER the merge, when the owner is looking
+# at a run in HCP Terraform deciding whether to confirm it. A speculative plan
+# on a pull request gates nothing — nobody approves it — so a check there would
+# be decoration on the busiest surface in the repository. Dispatch it with the
+# merge commit when the run is waiting, which is the moment the question is
+# real.
+#
+# Wiring it to `push: main` automatically was considered and not built: the
+# speculative plan lags the push, so the job would have to poll, and a polling
+# loop that cannot be exercised from a checkout is a worse thing to own than a
+# dispatch someone runs at the moment they care.
 #
 # So this is dispatched deliberately, at the one moment the question is real:
 # a plan is sitting in HCP Terraform waiting to be confirmed, and the reviewer
@@ -54,6 +66,10 @@ on:
     inputs:
       run_id:
         description: 'HCP Terraform run to check, e.g. run-AbCdEf1234567890. Leave blank for the workspace latest.'
+        required: false
+        default: ''
+      commit:
+        description: 'Commit SHA to check the run for, e.g. the head of a pull request. Selects that run instead of the latest. Leave blank unless you mean it.'
         required: false
         default: ''
 
@@ -105,10 +121,19 @@ jobs:
         env:
           TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
           RUN_ID: ${{ inputs.run_id }}
+          COMMIT: ${{ inputs.commit }}
         run: |
           set +e
+          if [ -n "${RUN_ID}" ] && [ -n "${COMMIT}" ]; then
+            echo "Pass a run id or a commit, not both — they select the same thing two ways."
+            echo "code=2" >> "$GITHUB_OUTPUT"
+            echo "awaiting=yes" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -n "${RUN_ID}" ]; then
             node scripts/check-tfc-plan.mjs --run "${RUN_ID}" 2>&1 | tee /tmp/verdict.txt
+          elif [ -n "${COMMIT}" ]; then
+            node scripts/check-tfc-plan.mjs --commit "${COMMIT}" 2>&1 | tee /tmp/verdict.txt
           else
             node scripts/check-tfc-plan.mjs 2>&1 | tee /tmp/verdict.txt
           fi

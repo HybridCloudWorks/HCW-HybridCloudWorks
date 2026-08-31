@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import CoderCornerSnippet from '@/components/shared/CoderCornerSnippet';
 import { markdownCodeComponents } from '@/components/shared/CodeBlock';
 import remarkGfm from 'remark-gfm';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentItem } from '@/lib/publicApi';
 import { Separator } from '@/components/ui/separator';
@@ -368,7 +368,7 @@ export default function BlogDetailTemplate({
                               <div
                                 key={item.key}
                                 className={ARTICLE_PROSE_CLASS}
-                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.text) }}
+                                dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.text) }}
                               />
                             ) : (
                               <div key={item.key} className={ARTICLE_PROSE_CLASS}>
@@ -480,7 +480,7 @@ export default function BlogDetailTemplate({
                   ) : bodyIsHtml ? (
                     <div
                       className={ARTICLE_PROSE_CLASS}
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(contentToRender) }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(contentToRender) }}
                     />
                   ) : (
                     <div className={ARTICLE_PROSE_CLASS}>

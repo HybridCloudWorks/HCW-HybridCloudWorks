@@ -160,10 +160,34 @@ engineering work on them is done.
 - **Ruleset bypass for the manifest push (from T-726).** The workflow is now
   two jobs, so nothing holding `contents: write` also holds the Azure identity
   or runs `npm ci`. What remains: for that push to land on a main protected by
-  twelve required contexts, the ruleset must bypass the Actions token — so
-  every workflow with `contents: write` can push past all checks. Narrow the
-  bypass to a deploy key scoped to `frontend/data/content-manifest.json`, or
-  replace the push with an auto-merging pull request.
+  twelve required contexts, the ruleset must bypass the Actions token — and a
+  bypass is granted to the TOKEN, not to a workflow, so every workflow holding
+  `contents: write` can push past all checks.
+
+  **Bounded, not closed, on 2026-08-31.**
+  `scripts/workflow-write-permissions.test.mjs` pins the set of workflows
+  holding the grant to a reviewed two — `publish-content-manifest.yml` and
+  `sync-wiki.yml` — each with a written justification. A third becomes a
+  failing test rather than a line in an unrelated pull request that nobody
+  reads as a security decision, which is how this kind of grant spreads. The
+  guard is mutation-tested: granting `contents: write` to `iac-validate.yml`
+  fails it.
+
+  **Both named exits cost something, which is why neither was taken.** A deploy
+  key as the bypass actor is a stored, non-expiring credential — the thing
+  T-727 removed the same day — and cannot be scoped to one path, because deploy
+  keys are repository-wide. An auto-merging pull request removes the bypass
+  entirely, but a pull request opened with `GITHUB_TOKEN` does not trigger
+  workflows (by design, to prevent recursion), so its required checks would
+  never start, auto-merge would never fire, and the manifest would stop
+  refreshing; making it work needs a GitHub App or a PAT to open the pull
+  request, which is another credential. Generating the manifest during the
+  frontend build was rejected on stronger ground: it would put Cosmos access
+  back into the deploy job, which is what T-718 exists to prevent.
+
+  **The decision that would actually close this is the owner's:** accept a
+  deploy key, stand up a GitHub App, or accept the bounded bypass as a recorded
+  risk. It is not a code change.
 - **Retire the SWA token (T-727) — decided and BUILT 2026-08-30.** The
   repository half is done: `deploy-azure-frontend.yml` mints the deployment
   token from ARM under federated identity at deploy time, the `swa_token`
@@ -209,13 +233,31 @@ engineering work on them is done.
 
       TFC_TOKEN=... node scripts/check-tfc-plan.mjs
 
-  It resolves the workspace's latest run, fetches the JSON plan, calls
-  `checkPlan` directly and reports the verdict. Needs a HCP Terraform **user or
-  team** token with admin access to `hcw/hcw-azure` — an *organization* token
-  cannot read `json-output` and fails with 404, which reads like a missing plan
-  rather than a permissions problem. Wiring the same check into
-  `iac-validate.yml` needs that token as a repository secret and is still open;
-  the script is already Node so it runs on `ubuntu-latest` unchanged.
+  It fetches the JSON plan, calls `checkPlan` directly and reports the verdict.
+  Needs a HCP Terraform **user or team** token with admin access to
+  `hcw/hcw-azure` — an *organization* token cannot read `json-output` and fails
+  with 404, which reads like a missing plan rather than a permissions problem.
+
+  **`--commit <sha>` was added on 2026-08-31**, so the tool can select the run
+  HCP Terraform planned for one commit rather than the workspace's latest. That
+  was the missing piece behind "wire this into CI", and `TFC Plan Check` now
+  takes a `commit` dispatch input. **One owner action remains: seed `TFC_TOKEN`**
+  (Settings → Secrets and variables → Actions). The workflow is self-arming —
+  without the secret it reports that it did not run rather than failing.
+
+  **What deliberately was NOT built, so the next reader does not assume it was
+  forgotten.** Wiring it to run automatically on every infra pull request would
+  put a check on a speculative plan nobody approves; the decision it gates
+  happens after the merge, in HCP Terraform, when someone is about to confirm a
+  run. Wiring it to `push: main` instead would need a polling loop, because the
+  run lags the push — and a polling loop that cannot be exercised from a
+  checkout is a worse thing to own than a dispatch run at the moment the
+  question is real. `tfc-plan-check.yml`'s header carries the same reasoning.
+
+  The `--commit` traversal is unit-tested against synthetic JSON:API payloads
+  rather than the live API, which this environment cannot reach. It throws on a
+  payload shape it cannot read rather than reporting "no run for this commit" —
+  the distinction `check-unresolved-secrets.mjs` draws, for the same reason.
 - ~~A scheduled-query alert on `unresolvedSecrets` (from T-720).~~ **Built
   2026-08-30 as `monitor-unresolved-secrets.yml`, not as an alert rule — the
   alert this line asked for could not exist.** It said "needs an apply" for

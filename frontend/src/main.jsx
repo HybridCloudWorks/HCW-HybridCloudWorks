@@ -27,13 +27,18 @@ function normalizePath(value) {
  * READ FROM THE MOUNT POINT, NOT FROM A `<script id="...">` ISLAND. The island
  * is the usual shape for this, and it is the shape this used to have, but it
  * is found with `document.getElementById` — which returns the first element
- * carrying that id, of any kind. Article bodies are author-written HTML passed
- * through `DOMPurify.sanitize`, whose default configuration strips an injected
- * `<script>` but keeps `<div id="...">`; an injected div sits inside `#root`,
- * so it comes first in document order and would have supplied the seed for its
- * own page. `<div id="root">` comes from the template, ahead of everything the
- * pre-render puts inside it, so nothing an author writes can precede it.
+ * carrying that id, of any kind. Article bodies are author-written HTML, and
+ * DOMPurify's DEFAULT configuration strips an injected `<script>` but keeps
+ * `<div id="...">`; such a div sits inside `#root`, so it comes first in
+ * document order and would have supplied the seed for its own page. `<div
+ * id="root">` comes from the template, ahead of everything the pre-render puts
+ * inside it, so nothing an author writes can precede it.
  * scripts/prerender.mjs writes the matching attribute and says the same there.
+ *
+ * `src/lib/sanitizeHtml.js` now also prefixes author ids, so the clobber is
+ * closed on both sides. Neither fix is redundant: this one holds even if the
+ * sanitizer is reconfigured, and that one holds for every id the app looks up,
+ * not just this one.
  *
  * A malformed value is treated as absent rather than fatal. It would mean the
  * build wrote something JSON.parse rejects, which is a build bug — but taking

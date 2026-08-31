@@ -19,7 +19,12 @@
  * pending states may be added freely; a finished one may not.
  */
 import { describe, it, expect } from 'vitest';
-import { AWAITING_DECISION, FINISHED, normaliseRunId } from './check-tfc-plan.mjs';
+import {
+  AWAITING_DECISION,
+  FINISHED,
+  normaliseRunId,
+  selectRunForCommit,
+} from './check-tfc-plan.mjs';
 
 /**
  * Run states in which HashiCorp considers the run over. From
@@ -137,5 +142,176 @@ describe('normaliseRunId', () => {
     // Refused HERE, with the expected shape, instead of reaching the API and
     // coming back as a 404 that reads like a permissions problem.
     expect(() => normaliseRunId(input)).toThrow(/not a run id/);
+  });
+});
+
+/**
+ * Selecting the run that belongs to one commit.
+ *
+ * ## The failure this catches
+ *
+ * `tfc-plan-check.yml` refuses to run on every pull request, and its stated
+ * reason is that the tool resolves the workspace's LATEST run — so the check
+ * would be green, or red, about a run nobody asked about. `selectRunForCommit`
+ * is what removes that objection, which makes its traversal load-bearing: if
+ * it silently returned null on a payload shape it could not read, the caller
+ * would report "no plan for this commit" for a commit that has one, and the
+ * decision would be made without the check.
+ *
+ * So the distinction under test is between "readable, nothing matched" (null)
+ * and "I could not read this" (throw) — the same split
+ * `check-unresolved-secrets.mjs` draws, for the same reason.
+ */
+describe('selectRunForCommit', () => {
+  const SHA = 'a'.repeat(40);
+
+  function payload({ runs, included }) {
+    return { data: runs, included };
+  }
+
+  function runFor(id, cvId, createdAt = '2026-08-31T00:00:00Z') {
+    return {
+      id,
+      type: 'runs',
+      attributes: { 'created-at': createdAt, status: 'planned' },
+      relationships: cvId
+        ? { 'configuration-version': { data: { id: cvId, type: 'configuration-versions' } } }
+        : {},
+    };
+  }
+
+  function cvFor(id, iaId) {
+    return {
+      id,
+      type: 'configuration-versions',
+      relationships: { 'ingress-attributes': { data: { id: iaId, type: 'ingress-attributes' } } },
+    };
+  }
+
+  function iaFor(id, sha) {
+    return { id, type: 'ingress-attributes', attributes: { 'commit-sha': sha } };
+  }
+
+  it('finds the run whose ingress commit matches, through both hops', () => {
+    const found = selectRunForCommit(
+      payload({
+        runs: [runFor('run-other', 'cv-2'), runFor('run-mine', 'cv-1')],
+        included: [cvFor('cv-1', 'ia-1'), iaFor('ia-1', SHA), cvFor('cv-2', 'ia-2'), iaFor('ia-2', 'b'.repeat(40))],
+      }),
+      SHA
+    );
+    expect(found.id).toBe('run-mine');
+  });
+
+  it('is case-insensitive about the sha, since git and the API disagree on case', () => {
+    const found = selectRunForCommit(
+      payload({ runs: [runFor('run-mine', 'cv-1')], included: [cvFor('cv-1', 'ia-1'), iaFor('ia-1', SHA.toUpperCase())] }),
+      SHA
+    );
+    expect(found.id).toBe('run-mine');
+  });
+
+  // A re-planned head has two runs on one commit and the later one is the one
+  // a reviewer is looking at.
+  it('returns the newest run when a commit was planned more than once', () => {
+    const found = selectRunForCommit(
+      payload({
+        runs: [
+          runFor('run-old', 'cv-1', '2026-08-31T01:00:00Z'),
+          runFor('run-new', 'cv-2', '2026-08-31T09:00:00Z'),
+        ],
+        included: [cvFor('cv-1', 'ia-1'), iaFor('ia-1', SHA), cvFor('cv-2', 'ia-2'), iaFor('ia-2', SHA)],
+      }),
+      SHA
+    );
+    expect(found.id).toBe('run-new');
+  });
+
+  it('returns null — not an error — when the payload is readable and nothing matches', () => {
+    const found = selectRunForCommit(
+      payload({ runs: [runFor('run-other', 'cv-1')], included: [cvFor('cv-1', 'ia-1'), iaFor('ia-1', 'c'.repeat(40))] }),
+      SHA
+    );
+    expect(found).toBeNull();
+  });
+
+  // CLI-driven runs carry no configuration version. That is a fact about the
+  // run, not a shape this tool failed to read, so it is skipped rather than
+  // thrown on — otherwise one CLI run in the window would break the check.
+  it('skips runs with no configuration version instead of throwing', () => {
+    const found = selectRunForCommit(
+      payload({
+        runs: [runFor('run-cli', null), runFor('run-mine', 'cv-1')],
+        included: [cvFor('cv-1', 'ia-1'), iaFor('ia-1', SHA)],
+      }),
+      SHA
+    );
+    expect(found.id).toBe('run-mine');
+  });
+
+  // A configuration version with no ingress attributes was uploaded through the
+  // API rather than ingressed from VCS. Also a fact about the run.
+  it('skips a configuration version with no ingress attributes', () => {
+    const found = selectRunForCommit(
+      payload({
+        runs: [runFor('run-api', 'cv-api'), runFor('run-mine', 'cv-1')],
+        included: [
+          { id: 'cv-api', type: 'configuration-versions', relationships: {} },
+          cvFor('cv-1', 'ia-1'),
+          iaFor('ia-1', SHA),
+        ],
+      }),
+      SHA
+    );
+    expect(found.id).toBe('run-mine');
+  });
+
+  // FOUND IN REVIEW (Copilot, 2026-08-31). The first draft skipped a reference
+  // whose target was missing from `included`, which meant an ignored or changed
+  // `include=` parameter produced "No run in the last 50" for a commit that has
+  // one — the exact confusion this function was written to prevent, in the
+  // function that documents preventing it. Checking that `included` merely
+  // EXISTS does not catch it: an empty array passes that and then every run is
+  // silently skipped.
+  it('throws when a configuration version is referenced but not included', () => {
+    expect(() =>
+      selectRunForCommit(payload({ runs: [runFor('run-mine', 'cv-1')], included: [] }), SHA)
+    ).toThrow(/did not include it/);
+  });
+
+  it('throws when ingress attributes are referenced but not included', () => {
+    expect(() =>
+      selectRunForCommit(
+        payload({ runs: [runFor('run-mine', 'cv-1')], included: [cvFor('cv-1', 'ia-1')] }),
+        SHA
+      )
+    ).toThrow(/did not include it/);
+  });
+
+  it('throws when ingress attributes carry no commit sha', () => {
+    expect(() =>
+      selectRunForCommit(
+        payload({
+          runs: [runFor('run-mine', 'cv-1')],
+          included: [cvFor('cv-1', 'ia-1'), { id: 'ia-1', type: 'ingress-attributes', attributes: {} }],
+        }),
+        SHA
+      )
+    ).toThrow(/no string commit-sha/);
+  });
+
+  // The distinction that matters: an unreadable payload must not be reported
+  // as "no run for this commit", which would let the decision proceed
+  // unchecked while looking like the check had run.
+  it('throws when the payload carries no data array', () => {
+    expect(() => selectRunForCommit({}, SHA)).toThrow(/no `data` array/);
+  });
+
+  it('throws when include was omitted, so shas cannot be resolved', () => {
+    expect(() => selectRunForCommit({ data: [] }, SHA)).toThrow(/no `included` section/);
+  });
+
+  it('refuses a blank sha rather than matching the first run it sees', () => {
+    expect(() => selectRunForCommit(payload({ runs: [], included: [] }), '  ')).toThrow(/needs a commit sha/);
   });
 });

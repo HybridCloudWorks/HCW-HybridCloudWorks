@@ -2,7 +2,7 @@
  * Renders admin-authored prose that may be HTML *or* markdown.
  *
  * The architecture and framework overviews were HTML-only —
- * `dangerouslySetInnerHTML` over a DOMPurify pass — which is correct for the
+ * `dangerouslySetInnerHTML` over a sanitizer pass — which is correct for the
  * `overviewHtml` field they were written for. But both publish contracts also
  * accept the blog body fields, and those hold **markdown**: pushing markdown
  * through innerHTML renders `## Heading` as literal text rather than a heading.
@@ -14,7 +14,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { markdownCodeComponents } from '@/components/shared/CodeBlock';
 
 /**
@@ -32,9 +32,7 @@ export default function RichTextBody({ value, className }) {
   if (!text) return null;
 
   if (looksLikeHtml(text)) {
-    return (
-      <div className={className} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(text) }} />
-    );
+    return <div className={className} dangerouslySetInnerHTML={{ __html: sanitizeHtml(text) }} />;
   }
 
   return (

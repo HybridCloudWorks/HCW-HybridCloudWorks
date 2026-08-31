@@ -57,14 +57,34 @@ concurrency:
 # with `--ignore-scripts`, so lifecycle scripts do not execute at all — verified
 # that the install and the manifest build both succeed without them.
 #
-# STILL OPEN, and it is an owner action, not a code change: for the push in
-# `commit` to land on a main protected by twelve required contexts, the ruleset
-# must bypass the Actions token — which means every workflow holding
-# `contents: write` can push past all checks. Narrowing that bypass to a deploy
-# key scoped to `frontend/data/content-manifest.json`, or replacing the push
-# with an auto-merging pull request, needs repository-admin access. Tracked in
-# TODO.md. The split above shrinks what can reach that push; it does not remove
-# the bypass.
+# STILL OPEN: for the push in `commit` to land on a main protected by twelve
+# required contexts, the ruleset must bypass the Actions token — and a bypass
+# is granted to the TOKEN, not to a workflow, so every workflow holding
+# `contents: write` can push past all checks. The split above shrinks what can
+# reach that push; it does not remove the bypass.
+#
+# BOUNDED ON 2026-08-31 by `scripts/workflow-write-permissions.test.mjs`, which
+# pins the set of workflows holding the grant to a reviewed two. Adding a third
+# is now a failing test with a justification to write, rather than a line in an
+# unrelated pull request that nobody reads as a security decision. That is a
+# bound, not a fix.
+#
+# THE TWO EXITS BOTH COST SOMETHING, which is why neither was taken unasked:
+#
+#   - A deploy key as the bypass actor narrows the grant to workflows that
+#     mount the key. It is also a stored, non-expiring credential — the exact
+#     thing T-727 removed from this repository on the same day, and it cannot
+#     be scoped to one path: deploy keys are repository-wide.
+#   - An auto-merging pull request removes the bypass entirely, but a pull
+#     request opened with GITHUB_TOKEN does not trigger workflows, by design,
+#     to prevent recursion. Its required checks would never start, so auto-merge
+#     would never fire and the manifest would stop refreshing. Making it work
+#     needs a GitHub App or a PAT to open the pull request — another credential.
+#
+# Generating the manifest during the frontend build instead was considered and
+# rejected on the strongest ground available: it would put Cosmos access back
+# into the deploy job, which is precisely what T-718 and the split above exist
+# to prevent.
 jobs:
   build:
     name: Fetch the published corpus and build the manifest
