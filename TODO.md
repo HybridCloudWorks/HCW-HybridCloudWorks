@@ -18,10 +18,15 @@ and `Gate: owner` still marks the rest.
 
 ## Status — 2026-08-31
 
-> **Five items are open. None is critical, none has a deadline, and none can be
-> closed from a checkout.** Each carries what to run or click, and what a
-> successful result looks like, so a real failure can be told apart from a
-> reporting failure.
+> **Six items are open. None can be closed from a checkout.** Each carries what
+> to run or click, and what a successful result looks like, so a real failure
+> can be told apart from a reporting failure.
+>
+> **One of them is a live degradation and it is first.** The pre-render manifest
+> has not refreshed since 2026-08-23: the route that feeds it was merged on
+> 2026-08-30 and the Function App has not been deployed since 01:21 UTC that
+> morning, an hour and a half before the merge. The nightly job has failed with
+> a 404 twice. Every other item is a decision or a measurement with no deadline.
 >
 > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
 > resolved or carried below as owner gates. The per-finding record — method,
@@ -55,16 +60,21 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
-| 1 | `T-726` — the ruleset bypass | — | Built; create the App, enable auto-merge, then drop the bypass actor |
-| 2 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
-| 3 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 2 |
-| 4 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 5 | `T-519` — arm the reachability alert | Medium | One query, then one variable |
+| 1 | `T-763` — the manifest route is merged but not deployed | High | One dispatch of Deploy Functions on `main` |
+| 2 | `T-726` — the nightly refresh cannot reach `main` | — | Built; create the App, then enable auto-merge |
+| 3 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
+| 4 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 3 |
+| 5 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
+| 6 | `T-519` — arm the reachability alert | Medium | One query, then one variable |
 
-Item 1 carries no severity because it is not a review finding: it is an owner
-action left behind by a finding that is closed. Item 2 is a measurement, 3 a
-cost decision waiting on it, 4 a repeated procedure, and 5 one query followed by
-one variable.
+Item 1 is a dispatch. Item 2 carries no severity because it is not a review
+finding: it is an owner action left behind by a finding that is closed. Item 3
+is a measurement, 4 a cost decision waiting on it, 5 a repeated procedure, and 6
+one query followed by one variable.
+
+Items 1 and 2 are two halves of the same night's work and are listed separately
+on purpose. Item 1 is why the job fails today; item 2 is why it could not have
+committed anything even if it had succeeded.
 
 **Closed on 2026-08-31 and removed from this list:** seeding `TFC_TOKEN` (done),
 and `T-749`, the SCM lock — Terraform owns
@@ -75,7 +85,104 @@ applied.
 
 ## What is open, and exactly what closes it
 
-### 1. T-726 — the App is built; two settings remain
+### 1. T-763 — the manifest route is merged but not deployed
+
+**What is wrong.** `publish-content-manifest.yml` has failed on 2026-08-30 and
+2026-08-31 with the same line:
+
+```
+[content-manifest] FAILED: https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest answered 404.
+```
+
+**The Function App is healthy.** `Monitor Functions Registered` ran at
+2026-08-31 20:23 UTC and reported 121 registered functions, `AzureWebJobsStorage`
+absent, `RUNTIME_CONFIG_WRITER` = `azapi-strip`, host storage `Deny`, no
+leftover CI firewall rules — every row green. It was not wrong. It counts
+functions, and 121 correct functions cannot tell you about a 122nd that is
+missing.
+
+**The timeline, all UTC.** `git cat-file -e` and the workflow run list are the
+evidence; nothing here is inferred.
+
+| When | What |
+| --- | --- |
+| 08-29 23:18 | `7fd9f2a` lands on `main` (a dependabot bump). Tip of `main`. |
+| **08-30 01:21** | **Deploy Functions run 80, on `7fd9f2a`. The last deploy.** |
+| 08-30 01:34 | `63de5d3`. |
+| **08-30 02:45** | **`4218785` (#277) adds `functions/src/functions/public-content-manifest.js`** and switches the nightly job from reading Cosmos to fetching this route. |
+| 08-30 11:51 | First 404. |
+| 08-31 13:39 | Second 404. |
+
+The deploy ran **84 minutes before the route existed**.
+`git cat-file -e 7fd9f2a:functions/src/functions/public-content-manifest.js`
+reports the path absent from that commit, so the app is serving a revision that
+has never had this function. It is not a regression, a firewall, or Cloudflare.
+
+**This is by design, and that is the uncomfortable part.**
+`.github/workflows/deploy-functions.yml` is `workflow_dispatch` only — the
+`push` trigger is commented out with a recorded reason ("Keep releases
+observable until the deployment and smoke checks have an approved
+automatic-release policy"). So merging a route never deploys it, and #277 shipped
+a caller for a route it did not ship to production.
+
+**Owner action — one dispatch.** Open
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/deploy-functions.yml
+→ **Run workflow** → branch `main` → **Run workflow**. It takes no inputs, and
+the job refuses any ref that is not `main`.
+
+**Success:** the run is green, and then this returns the manifest rather than a
+404. Run it in PowerShell:
+
+```powershell
+(Invoke-WebRequest -Uri 'https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest' -SkipHttpErrorCheck).StatusCode
+```
+
+That will answer **403**, not 200, and 403 is the correct result: the route is
+behind the Function App's origin allow list, and only the per-run window the
+nightly job opens admits a caller. **403 means deployed and protected. 404 means
+still not deployed.** That is the whole test, and it is the distinction the
+failure message got wrong until 2026-08-31 — it read "anything else is the app
+itself", which sent a night at a Function App that was fine.
+
+Then re-run the nightly job to confirm end to end:
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/publish-content-manifest.yml
+→ **Run workflow** on `main`.
+
+**What is still open after that, and is not being fixed here.** Nothing detects
+this class of drift. `Monitor Functions Registered` checks a count, and a count
+cannot see a route present in `main` and absent from the deployed revision. The
+detector that would is a comparison of `az functionapp function list --query
+"[].name"` against the repository's own route inventory
+(`functions/src/functions/route-inventory.test.js`, `.azure/api-surface.json`) —
+but with dispatch-only deploys, `main` being ahead of production is the NORMAL
+state between a merge and a release, so such a check fires constantly unless it
+is scoped to routes a caller in this repository actually depends on. That
+scoping is a design decision, and it is recorded here rather than guessed at.
+
+### 2. T-726 — the App is built; one setting remains
+
+**Corrected 2026-08-31, and the correction is the important part.** This item
+said, in five places across the repository, that the ruleset listed the Actions
+token as a **bypass actor**, and that the App retired that bypass. It does not
+exist. Reading
+`/repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114` returns
+`enforcement: active`, **no `bypass_actors`**, and the rules `deletion`,
+`non_fast_forward`, `pull_request`, `required_status_checks`.
+
+So the nightly push to `main` was never privileged — it was **refused**, and had
+been since the ruleset was last updated on 2026-08-25. The bot's only successful
+manifest push is `4b8c36d`, dated 2026-08-23. Every scheduled run from 08-24 to
+08-29 reported success because the published set had not moved, so the push was
+never attempted. A workflow can be broken for five days and go green every
+night, if the only thing that would exercise the broken part is a change that
+did not happen.
+
+The App is therefore a **repair**, not a de-escalation, and the third owner
+action this item used to carry — "remove the bypass actor" — is deleted, because
+there is nothing to remove. The workflow, `scripts/github-app-token.mjs`,
+`scripts/open-manifest-pr.mjs` and
+`scripts/workflow-write-permissions.test.mjs` all carried the wrong claim and
+now carry the correction beside it.
 
 **The repository half is done (2026-08-31).** `publish-content-manifest.yml`'s
 `commit` job no longer pushes to `main`. It mints a GitHub App installation
@@ -84,21 +191,33 @@ token, pushes a branch and opens a pull request that the required checks run on
 `GITHUB_TOKEN`. The job's own permission is now `contents: read`, and
 `scripts/workflow-write-permissions.test.mjs` is down to one entry.
 
-**Owner action 1 — create the App.** Organisation settings → Developer settings
-→ GitHub Apps → New GitHub App. Repository permissions: **Contents: Read and
-write** and **Pull requests: Read and write**, nothing else. No webhook. Install
-it on this repository only, then generate a private key.
+**Owner action 1 — create the App, and find the App ID.** The App itself is
+created at
+https://github.com/organizations/HybridCloudWorks/settings/apps/new — repository
+permissions **Contents: Read and write** and **Pull requests: Read and write**,
+nothing else, no webhook. Install it on this repository only, then generate a
+private key.
+
+**The App ID is not the number in the URL you land on after installing.**
+Installing redirects to `.../settings/installations/<number>`, and that number
+is the *installation* ID — a different thing, and not what
+`scripts/github-app-token.mjs` signs with. The App ID is on the App's own
+**General** tab, in a field labelled `App ID`, a six- or seven-digit number.
+Reach it from the list of Apps this organisation owns:
+https://github.com/organizations/HybridCloudWorks/settings/apps — click the App,
+and it is near the top of the General page beside the App's name and slug.
 
 Store both here:
 https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/variables/actions
-— variable `MANIFEST_APP_ID` (the numeric App ID from the App's page), and at
+— variable `MANIFEST_APP_ID` (that six- or seven-digit App ID), and at
 https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions
 — secret `MANIFEST_APP_PRIVATE_KEY` (the whole PEM, `-----BEGIN` line included).
 
 **Success:** the next nightly run that finds a change opens a pull request
 titled `chore: refresh content manifest (N article routes)`. Until both are set
 the job warns that the App is not configured and does nothing else — it does not
-fail.
+fail. If the App ID is wrong, the mint step fails with a **401** and the script
+says so; if the App exists but is not installed here, a **404**.
 
 **Owner action 2 — enable auto-merge.**
 https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings → Pull
@@ -106,19 +225,20 @@ Requests → **Allow auto-merge**. It was **off** when this was built, so withou
 it the pull request opens and waits for you. The workflow reports that as a
 notice naming this setting rather than failing.
 
-**Then remove the bypass.** Once a manifest pull request has merged through the
-checks, the Actions token no longer needs to be a bypass actor on the ruleset:
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/rules — that
-is what actually closes T-726. Removing it before the App works would stop the
-nightly refresh landing at all, so it goes last.
+**What this costs, stated plainly and no longer offset:** one stored
+non-expiring App private key, granting push-a-branch and open-a-pull-request on
+this repository. It cannot merge past a check and it cannot push to `main`,
+because the ruleset exempts nobody. Calling it "strictly less than what it
+replaces" — as this file did — was only true of a bypass that was never there.
+The honest case is narrower: the nightly refresh has to reach `main` somehow,
+every route to `main` goes through a pull request, and a pull request opened
+with `GITHUB_TOKEN` runs no checks. The key is the price of that.
 
-**What this cost, stated plainly:** one stored non-expiring App private key. It
-grants push-a-branch and open-a-pull-request on this repository and cannot merge
-past a check — strictly less than the bypass it retires, which is why it was
-chosen over a deploy key (repository-wide, also stored, and the bypass survives)
-and over accepting the risk.
+**Note the ordering with item 1.** Even with the App configured, the nightly job
+cannot open a pull request until the route is deployed — it fails at the *build*
+step, before `commit` ever runs. Item 1 first.
 
-### 2. T-719 — the cap is binding, measured 2026-08-31
+### 3. T-719 — the cap is binding, measured 2026-08-31
 
 **This is no longer a margin question.** Billable ingestion, aligned to the
 08:00 UTC cap reset:
@@ -153,7 +273,7 @@ below under *Reading the ingestion volume*.
 (https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
 platform cannot reach in a day, approve the run, leave it one full cap period,
 read the volume, put it back. That measures **demand** rather than the ceiling,
-which is the number item 3 needs to size its lever. Record it here with the date.
+which is the number item 4 needs to size its lever. Record it here with the date.
 
 **Do not set it to -1.** Azure accepts that for "unlimited", but the
 `logs_daily_cap` alert threshold is this value times 0.8, so an unlimited
@@ -197,7 +317,7 @@ Windows `az` is a batch file that cannot receive an argument containing a
 newline — a multi-line query arrives truncated at the first break and the call
 still exits 0.
 
-### 3. T-721 — telemetry costs five times the workload it observes — after item 2
+### 4. T-721 — telemetry costs five times the workload it observes — after item 3
 
 Telemetry runs about USD 17–21 a month against an application-subscription
 workload of roughly USD 4 — together roughly 80% of predictable Azure spend on a
@@ -206,7 +326,7 @@ platform that documents cost to the cent.
 **Raising the cap is not the answer on its own.** At roughly USD 2.76/GB,
 doubling it roughly doubles the larger of those two numbers. The levers are:
 drop the `host.json` log level, or move `AppTraces` — about 38% of the cap — to
-the Basic table plan at roughly USD 0.65/GB. Item 2's measurement is what says
+the Basic table plan at roughly USD 0.65/GB. Item 3's measurement is what says
 which is enough.
 
 **Separately, re-justify the Static Web App Standard tier** (about USD 9/month).
@@ -221,7 +341,7 @@ Standard tier and the comment justifying it live — **not** `infra/main.tf`,
 which T-754 cut to 102 lines and which the review's anchor pointed past the end
 of.
 
-### 4. T-518 — arm the remaining 15 timers — repeated procedure
+### 5. T-518 — arm the remaining 15 timers — repeated procedure
 
 Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
 `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
@@ -243,11 +363,11 @@ pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Ho
 between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
 truncation fixed on 2026-08-31, and it means the window is not being applied.
 
-**Note the interaction with item 2:** arming timers adds `AppTraces` volume
+**Note the interaction with item 3:** arming timers adds `AppTraces` volume
 against a cap that is already binding. Take that measurement first, or arm and
 watch the volume with it.
 
-### 5. T-519 — the probe is deployed; arm the alert once a row lands
+### 6. T-519 — the probe is deployed; arm the alert once a row lands
 
 The Cloudflare Worker was deployed on 2026-08-31 and runs on `*/5 * * * *`.
 Every other alert needs the app healthy enough to emit telemetry; this is the

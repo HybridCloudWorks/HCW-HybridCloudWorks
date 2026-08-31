@@ -3,13 +3,19 @@
  *
  * ## Why this exists rather than `actions/create-github-app-token`
  *
- * T-726: `publish-content-manifest.yml` commits to `main`, and for that push to
- * land on a branch with twelve required contexts the ruleset must list the
- * Actions token as a bypass actor. A bypass is granted to the TOKEN, not to a
- * workflow, so every workflow holding `contents: write` can push past every
- * check. An App removes the bypass entirely: it opens a pull request, and the
- * checks run precisely because the pull request is not opened with
- * `GITHUB_TOKEN`.
+ * T-726: `publish-content-manifest.yml` used to commit straight to `main`. The
+ * ruleset refuses that — `pull_request` is one of its rules and it has no
+ * bypass actors, verified 2026-08-31 against
+ * /repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114 — so the push
+ * had been failing since the ruleset was updated on 2026-08-25, unnoticed
+ * because the manifest had not changed in that window. An App fixes it by
+ * opening a pull request instead, and the checks run precisely because the pull
+ * request is not opened with `GITHUB_TOKEN`.
+ *
+ * An earlier version of this header said the ruleset listed the Actions token
+ * as a bypass actor and that this script retired that bypass. It did not; there
+ * was none. Corrected here rather than deleted, because the wrong version is
+ * what justified the stored private key below.
  *
  * The obvious way to get the token is the marketplace action. This repository
  * pins every action by commit SHA, and the SHA could not be resolved from the
@@ -21,9 +27,16 @@
  *
  * ## What it grants
  *
- * `contents: write` and `pull_requests: write` on ONE repository, for one hour,
- * and it cannot merge past a check. That is strictly less than the ruleset
- * bypass it replaces, which is the whole argument for doing this.
+ * `contents: write` and `pull_requests: write` on ONE repository, for one hour.
+ * It cannot merge past a check and it cannot push to `main`, because the
+ * ruleset exempts nobody.
+ *
+ * This is a NEW stored credential, not a smaller replacement for an existing
+ * one — the bypass it was said to replace does not exist. The honest case for
+ * it is narrower: the nightly refresh has to reach `main` somehow, every route
+ * to `main` goes through a pull request, and a pull request opened with
+ * `GITHUB_TOKEN` runs no checks. The key is the price of that, and the
+ * scoping below is what keeps the price small.
  *
  * ## Handling
  *

@@ -63,32 +63,47 @@ concurrency:
 # the credential `commit` holds cannot merge past a check, so a postinstall
 # script that reached it could open a pull request and nothing more.
 #
-# THE BYPASS IS NO LONGER NEEDED, as of 2026-08-31 (T-726). It used to be:
-# for the push in `commit` to land on a main protected by twelve required
-# contexts, the ruleset had to list the Actions token as a bypass actor — and a
-# bypass belongs to the TOKEN, not to a workflow, so every workflow holding
-# `contents: write` could push past every check.
+# WHY `commit` OPENS A PULL REQUEST (T-726) — AND WHAT THAT ACTUALLY FIXED.
 #
-# `commit` no longer pushes. It mints a GitHub App installation token, pushes a
-# BRANCH, and opens a pull request that the required checks run on. They run
-# precisely because the pull request is not opened with GITHUB_TOKEN: GitHub
-# does not trigger workflows for events its own token creates, which is why the
-# obvious version of this idea silently never merges.
+# CORRECTED 2026-08-31. This block, and four other files, said the App path
+# retired a ruleset bypass: that for the push to land on a main protected by
+# twelve required contexts the ruleset had to list the Actions token as a bypass
+# actor, and that a bypass belongs to the TOKEN, so every workflow holding
+# `contents: write` inherited the ability to push past every check.
 #
-# What that costs, stated because it is real: one stored non-expiring App
-# private key. It grants push-a-branch and open-a-pull-request on this
-# repository and cannot merge past a check — strictly less than the bypass it
-# retires, which is the whole argument.
+# THERE IS NO SUCH BYPASS AND THE ARGUMENT WAS BUILT ON A GUESS. Reading
+# /repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114 returns
+# `enforcement: active`, no `bypass_actors` at all, and the rules `deletion`,
+# `non_fast_forward`, `pull_request` and `required_status_checks`. The
+# `pull_request` rule refuses a direct push to main from anyone, this token
+# included.
 #
-# TWO OWNER ACTIONS REMAIN, and until both are done this degrades rather than
-# breaks:
-#   1. Remove the Actions token as a bypass actor from the ruleset. Nothing
-#      needs it now. scripts/workflow-write-permissions.test.mjs bounds the
-#      blast radius until then.
-#   2. Enable auto-merge (Settings -> General -> Pull Requests). It was OFF
-#      when this was written, so the pull request opens and waits for a human
-#      instead of merging itself. scripts/open-manifest-pr.mjs reports that as
-#      a notice naming the setting rather than failing the night.
+# So the push in `commit` was not privileged. It was BROKEN, and had been since
+# the ruleset was last updated on 2026-08-25. The bot's only successful manifest
+# push is 4b8c36d, dated 2026-08-23. Every scheduled run between 08-24 and 08-29
+# went green because the published set had not moved, so the push path was never
+# reached — a workflow can be dead for five days and report success every night
+# if the only thing that would exercise it is a change that did not happen.
+#
+# The App path is therefore a REPAIR, not a de-escalation. It is still the right
+# shape: `commit` mints a GitHub App installation token, pushes a BRANCH, and
+# opens a pull request that the required checks run on. They run precisely
+# because the pull request is not opened with GITHUB_TOKEN — GitHub does not
+# trigger workflows for events its own token creates, which is why the obvious
+# version of this idea silently never merges.
+#
+# What it costs, stated because it is real and no longer offset by a bypass
+# being retired: one stored non-expiring App private key, granting
+# push-a-branch and open-a-pull-request on this repository. It cannot merge past
+# a check and it cannot push to main, so it is bounded by the same ruleset as
+# everything else — but it is a new stored credential, and calling it "strictly
+# less than what it replaces" was only true of a thing that did not exist.
+#
+# ONE OWNER ACTION REMAINS, and until it is done this degrades rather than
+# breaks: enable auto-merge (Settings -> General -> Pull Requests). It was OFF
+# when this was written, so the pull request opens and waits for a human instead
+# of merging itself. scripts/open-manifest-pr.mjs reports that as a notice
+# naming the setting rather than failing the night.
 #
 # Generating the manifest during the frontend build instead was considered and
 # rejected on the strongest ground available: it would put Cosmos access back
@@ -218,13 +233,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # `contents: read` for the checkout, and NOTHING ELSE. The writing is done
-    # by a GitHub App installation token, which is the entire point of T-726:
-    # a ruleset bypass belongs to the TOKEN, so while this job held
-    # `contents: write` every workflow that held it could push to main past all
-    # twelve required contexts. The App opens a pull request instead, and the
-    # checks run on it — precisely because a pull request opened with
-    # GITHUB_TOKEN does not trigger workflows, and one opened with an App token
-    # does.
+    # by a GitHub App installation token. This job used to hold `contents:
+    # write` and push straight to main — which the ruleset's `pull_request`
+    # rule refuses, with no bypass actor to exempt it (see the header; the
+    # earlier claim that one existed was wrong). The App opens a pull request
+    # instead, and the checks run on it — precisely because a pull request
+    # opened with GITHUB_TOKEN does not trigger workflows, and one opened with
+    # an App token does.
     permissions:
       contents: read # checkout only — this job can no longer push anywhere
     steps:
