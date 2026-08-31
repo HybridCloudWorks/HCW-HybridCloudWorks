@@ -18,7 +18,7 @@ and `Gate: owner` still marks the rest.
 
 ## Status — 2026-08-31
 
-> **Five items are open. None is critical, none has a deadline, and none can be
+> **Seven items are open. None is critical, none has a deadline, and none can be
 > closed from a checkout.** Each carries what to run or click, and what a
 > successful result looks like, so a real failure can be told apart from a
 > reporting failure.
@@ -46,18 +46,28 @@ and `Gate: owner` still marks the rest.
 > in the workspace on 2026-08-31. A field that contradicts its own workspace
 > reads exactly like a setting.
 
-| Priority | Open items |
-| --- | ---: |
-| Critical | 0 |
-| High | 1 |
-| Medium | 3 |
-| Low | 1 |
-| Total | 5 |
+**This table is the list below, and nothing else.** An earlier version counted
+five, because the two owner actions left by closed findings were tracked in a
+different section from the five findings that carry `T-` numbers — so the
+summary said five above a list of seven. That is the T-722 defect, in the
+document restructured to prevent it, and it is why there is now one table
+rather than a count and a list that can drift apart. Found by review, 2026-08-31.
 
-**Two of the five need nothing but a decision** (`T-721`, `T-726`). Two need a
-measurement or a deployment (`T-719`, `T-519`). One is a repeated, observed
-procedure (`T-518`). They are listed newest-blocker-first below, then in the
-long-form sections that carry their evidence.
+| # | Open item | Priority | What closes it |
+| ---: | --- | --- | --- |
+| 1 | Seed `TFC_TOKEN` | — | Two links, about two minutes |
+| 2 | `T-726` — the ruleset bypass | — | A decision between three options |
+| 3 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
+| 4 | `T-519` — deploy the edge availability probe | Medium | A Worker deployment |
+| 5 | `T-719` — measure the workspace volume | Medium | A measurement on an uncapped day |
+| 6 | `T-721` — telemetry cost | Medium | Two separable decisions |
+| 7 | `T-749` — flip the SCM lock | Low | Confirm one deploy, flip one variable |
+
+Items 1 and 2 carry no severity because they are not review findings: they are
+owner actions left behind by findings that are closed. Two of the seven need
+nothing but a decision (2 and 6); two need a measurement or a deployment (4 and
+5); one is a repeated procedure (3); two are a few minutes of clicking (1 and
+7).
 
 ## What is open, and exactly what closes it
 
@@ -99,7 +109,13 @@ Three ways to close it, and each costs something:
 | A deploy key as the bypass actor | A stored, non-expiring credential — the thing T-727 removed — and deploy keys are repository-wide, so it cannot be scoped to the one file |
 | A GitHub App to open an auto-merging pull request | Removes the bypass entirely. A pull request opened with `GITHUB_TOKEN` does not trigger workflows by design, so its required checks never start and auto-merge never fires; an App or PAT is what makes it work |
 
-**Say which and I will build it**, or say "accept" and I will write the risk row.
+**Recording the decision.** Choosing the first option means adding a row to
+*Accepted risks* at the foot of this file, in the same terms as the rows already
+there: the risk, who accepted it and when, and what compensates. Choosing either
+of the others means the work is a normal change — a ruleset edit plus the
+credential or App it depends on — and this entry is then replaced by a
+CHANGELOG entry rather than edited. Until one is chosen the guard holds the set
+at two, so nothing degrades by waiting.
 
 ### 3. T-518 — arm the remaining 15 timers — repeated procedure
 
