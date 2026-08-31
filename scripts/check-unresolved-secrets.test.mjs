@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXPECTED_UNRESOLVED,
   assertKnownShape,
+  canonicalName,
   evaluate,
   formatReport,
   parseReferenceStatuses,
@@ -103,35 +105,110 @@ describe('formatReport', () => {
         reference: '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/A-KEY/abc123)',
       },
     });
-    const out = formatReport(evaluate(raw).unresolved);
+    const out = formatReport(evaluate(raw).unexpected);
     expect(out).not.toContain('vault.azure.net');
     expect(out).not.toContain('SecretUri');
     expect(out).not.toContain('abc123');
   });
 });
 
+describe('canonicalName', () => {
+  it('strips the platform-added APPSETTING_ prefix', () => {
+    expect(canonicalName('APPSETTING_AZURE_SPEECH_KEY')).toBe('AZURE_SPEECH_KEY');
+  });
+
+  it('leaves an unprefixed name alone', () => {
+    expect(canonicalName('AZURE_SPEECH_KEY')).toBe('AZURE_SPEECH_KEY');
+  });
+});
+
 describe('evaluate', () => {
-  it('reports a healthy estate as zero unresolved', () => {
+  it('reports a healthy estate as nothing unexpected', () => {
     const got = evaluate(shapeA({ A: { status: 'Resolved' }, B: { status: 'Resolved' } }));
-    expect(got).toEqual({ checked: 2, unresolved: [] });
+    expect(got.checked).toBe(2);
+    expect(got.unexpected).toEqual([]);
+    expect(got.expected).toEqual([]);
   });
 
   it('counts what it checked alongside what failed', () => {
-    const got = evaluate(
-      shapeA({ A: { status: 'Resolved' }, B: { status: 'SecretNotFound' } }),
-    );
+    const got = evaluate(shapeA({ A: { status: 'Resolved' }, B: { status: 'SecretNotFound' } }));
     expect(got.checked).toBe(2);
-    expect(got.unresolved.map((s) => s.name)).toEqual(['B']);
+    expect(got.unexpected.map((s) => s.name)).toEqual(['B']);
   });
 
-  // An app with no Key Vault references at all is a real state — and it is not
-  // an error. It is only alarming if you expected some, which is a different
-  // check than this one.
   it('accepts an empty but well-formed collection', () => {
-    expect(evaluate(shapeA({}))).toEqual({ checked: 0, unresolved: [] });
+    const got = evaluate(shapeA({}));
+    expect(got.checked).toBe(0);
+    expect(got.unexpected).toEqual([]);
   });
 
   it('throws rather than returning zero for an unrecognised payload', () => {
     expect(() => evaluate({ nope: true })).toThrow(/nothing about the references is known/);
+  });
+
+  // THE FIRST LIVE RUN, replayed. It went red on a condition
+  // infra/functionapp.tf:444 documents as intended, and reported it twice
+  // because Azure surfaces every setting with and without the APPSETTING_
+  // prefix. Both halves of that are asserted here.
+  it('does not flag a reference that is unresolved on purpose', () => {
+    const got = evaluate(
+      shapeA({
+        ANTHROPIC_API_KEY: { status: 'Resolved' },
+        AZURE_SPEECH_KEY: { status: 'SecretNotFound' },
+        APPSETTING_AZURE_SPEECH_KEY: { status: 'SecretNotFound' },
+      }),
+    );
+    expect(got.unexpected).toEqual([]);
+    expect(got.expected.map((s) => s.name)).toEqual(['AZURE_SPEECH_KEY']);
+  });
+
+  it('counts one broken secret once, not once per platform alias', () => {
+    const got = evaluate(
+      shapeA({
+        REPLICATE_API_KEY: { status: 'SecretNotFound' },
+        APPSETTING_REPLICATE_API_KEY: { status: 'SecretNotFound' },
+      }),
+    );
+    expect(got.unexpected).toHaveLength(1);
+    expect(got.unexpected[0].name).toBe('REPLICATE_API_KEY');
+  });
+
+  // The allowlist must not become a place findings go to be ignored. A genuine
+  // break still pages even when an expected one is present in the same payload.
+  it('still fails on an unexpected break alongside an expected one', () => {
+    const got = evaluate(
+      shapeA({
+        AZURE_SPEECH_KEY: { status: 'SecretNotFound' },
+        REPLICATE_API_KEY: { status: 'SecretNotFound' },
+      }),
+    );
+    expect(got.expected.map((s) => s.name)).toEqual(['AZURE_SPEECH_KEY']);
+    expect(got.unexpected.map((s) => s.name)).toEqual(['REPLICATE_API_KEY']);
+  });
+
+  it('notices when an allowlisted reference starts resolving', () => {
+    const got = evaluate(shapeA({ AZURE_SPEECH_KEY: { status: 'Resolved' } }));
+    expect(got.staleAllowlist).toEqual(['AZURE_SPEECH_KEY']);
+    expect(got.unexpected).toEqual([]);
+  });
+
+  it('reports no stale entries when the allowlist matches reality', () => {
+    const got = evaluate(shapeA({ AZURE_SPEECH_KEY: { status: 'SecretNotFound' } }));
+    expect(got.staleAllowlist).toEqual([]);
+  });
+});
+
+describe('EXPECTED_UNRESOLVED', () => {
+  // An entry without a reason is a mute wearing a disguise. Every one has to
+  // say why, and point at where the decision lives.
+  it('gives a reason for every entry', () => {
+    for (const [name, reason] of EXPECTED_UNRESOLVED) {
+      expect(reason, `${name} has no reason`).toBeTruthy();
+      expect(reason.length, `${name}'s reason is too short to be one`).toBeGreaterThan(20);
+    }
+  });
+
+  it('is deliberately small', () => {
+    expect(EXPECTED_UNRESOLVED.size).toBeLessThanOrEqual(3);
   });
 });
