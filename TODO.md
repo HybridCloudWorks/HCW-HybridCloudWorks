@@ -149,11 +149,14 @@ engineering work on them is done.
 
   **Two owner actions, in this order:**
 
-  1. `az role definition create --role-definition @infra/roles/static-web-app-deployer.json`
+  1. `az role definition create --role-definition '@infra/roles/static-web-app-deployer.json'`
      — the Terraform identity deliberately lacks
      `Microsoft.Authorization/roleDefinitions/write`, so a definition it
      consumes has to exist first or the apply fails on Microsoft.Authorization
-     rather than on the feature.
+     rather than on the feature. **Run `Test-Path` on that file first**; it is
+     on this branch only until the merge, and `az` reports a missing file as
+     `Failed to parse string as JSON` rather than as a missing file.
+     `wiki/Cutover-Runbook.md` carries the fetch command.
   2. `terraform -chdir=infra apply` — assigns that role to `github_deploy`,
      scoped to the one Static Web App.
 

@@ -101,15 +101,42 @@ minting step with an authorization error that names the role.
 deliberate control now, rather than a disabling condition someone has to
 remember to remove.
 
-Two prerequisites replace the edits, and both are owner actions (T-727):
+Two prerequisites replace the edits, and both are owner actions (T-727).
+
+**The role definition is a repository file, so check it is in the working tree
+first.** It arrived on `claude/status-check-2vqe7d` and is on `main` only once
+that branch merges. Run this from the repository root:
 
 ```powershell
-az role definition create --role-definition @infra/roles/static-web-app-deployer.json
+Test-Path infra/roles/static-web-app-deployer.json
 ```
+
+`True` means go on. `False` means fetch it before anything else:
+
+```powershell
+git fetch origin claude/status-check-2vqe7d; git checkout origin/claude/status-check-2vqe7d -- infra/roles/static-web-app-deployer.json
+```
+
+This check is here because skipping it does not fail in a way that says so.
+`az` treats a `@`-prefixed value that is neither valid JSON nor an existing
+file as JSON, so a missing file reports **`Failed to parse string as JSON`**
+naming the path — an error about the wrong subject entirely. It cost two round
+trips on 2026-08-30, the first spent on quoting, which was never the problem.
+
+```powershell
+az role definition create --role-definition '@infra/roles/static-web-app-deployer.json'
+```
+
+Success echoes the definition back with `"roleName": "HCW Static Web App
+Deployer"` and an `"id"` ending in a GUID.
 
 ```powershell
 terraform -chdir=infra apply
 ```
+
+Run that from the repository root — `-chdir` is relative to where you are, so
+from inside `infra/` it looks for `infra/infra` and says the directory does not
+exist.
 
 The deploy mints its token from ARM under federated identity, so it needs that
 role assigned before its first run. Without it the job fails at the minting
