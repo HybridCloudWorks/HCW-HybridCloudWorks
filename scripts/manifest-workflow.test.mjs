@@ -69,6 +69,30 @@ describe('the manifest workflow', () => {
     expect(maskAt).toBeLessThan(writeAt);
   });
 
+  // FOUND IN REVIEW. The branch name was `...-${GITHUB_RUN_ID}` alone, and a
+  // re-run of the same run keeps that id: the branch would already exist on the
+  // remote, so the push fails — or succeeds against a stale branch whose pull
+  // request is already open, which answers 422 on create. A nightly job that
+  // breaks on its own re-run is a job nobody can retry.
+  it('makes the branch name unique per attempt, not just per run', () => {
+    const branchLine = lines.find((l) => l.includes('branch="chore/content-manifest-'));
+    expect(branchLine, 'the branch name line moved or was renamed').toBeTruthy();
+    expect(branchLine).toContain('GITHUB_RUN_ID');
+    expect(branchLine).toContain('GITHUB_RUN_ATTEMPT');
+  });
+
+  // ALSO FOUND IN REVIEW, and the reason it needs a test of its own: the
+  // permission assertions below read non-comment lines, so a header describing
+  // a security model the file no longer implements passes every one of them.
+  // The header said `commit` holds `contents: write` for as long as it did not.
+  it('has no comment claiming the commit job holds contents: write', () => {
+    const claims = String(source)
+      .split(/\r?\n/)
+      .filter((l) => /^\s*#/.test(l))
+      .filter((l) => /commit`?\s*(job\s*)?holds\s*`?contents:\s*write/.test(l));
+    expect(claims, `stale header claim: ${claims.join(' | ')}`).toEqual([]);
+  });
+
   // The whole point of T-726: this job must not be able to push to main itself.
   it('gives the commit job no write permission of its own', () => {
     const commitJob = source.slice(source.indexOf('  commit:'));

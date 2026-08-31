@@ -51,11 +51,17 @@ concurrency:
 # a token that could push arbitrary commits to a protected branch and an Azure
 # federated credential in the same environment.
 #
-# Now `build` holds the Azure identity and NEVER `contents: write`, and `commit`
-# holds `contents: write` and NEVER an Azure identity. Neither is enough on its
-# own, and the artifact between them is a plain JSON file. `build` also installs
-# with `--ignore-scripts`, so lifecycle scripts do not execute at all — verified
-# that the install and the manifest build both succeed without them.
+# Now `build` holds the Azure identity and never any write to this repository,
+# and `commit` holds neither: since 2026-08-31 its own permission is
+# `contents: read`, and the writing is done by a GitHub App installation token
+# it mints for the length of two API calls. Neither job is enough on its own,
+# and the artifact between them is a plain JSON file. `build` also installs with
+# `--ignore-scripts`, so lifecycle scripts do not execute at all — verified that
+# the install and the manifest build both succeed without them.
+#
+# The concentration this split broke up is therefore smaller again than it was:
+# the credential `commit` holds cannot merge past a check, so a postinstall
+# script that reached it could open a pull request and nothing more.
 #
 # THE BYPASS IS NO LONGER NEEDED, as of 2026-08-31 (T-726). It used to be:
 # for the push in `commit` to land on a main protected by twelve required
@@ -294,7 +300,11 @@ jobs:
           ROUTES: ${{ steps.changed.outputs.routes }}
         run: |
           set -euo pipefail
-          branch="chore/content-manifest-${GITHUB_RUN_ID}"
+          # RUN_ATTEMPT, not RUN_ID alone: a re-run of the same run keeps the
+          # id, so the branch would already exist on the remote and the push
+          # would fail — or worse, succeed against a stale branch with a pull
+          # request already open, which answers 422 on create. Found in review.
+          branch="chore/content-manifest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "branch=${branch}" >> "$GITHUB_ENV"
           git config user.name  'hcw-manifest[bot]'
           git config user.email 'hcw-manifest[bot]@users.noreply.github.com'
