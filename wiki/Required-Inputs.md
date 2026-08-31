@@ -144,7 +144,7 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| ~~`AZURE_STATIC_WEB_APPS_API_TOKEN`~~ | **RETIRED 2026-08-30 (T-727)** | Nothing. `deploy-azure-frontend.yml` now mints the deployment token from ARM under federated identity at deploy time, so no stored value is needed and there is nothing to rotate. If the secret is still present in repository settings it is unused and can be deleted |
+| ~~`AZURE_STATIC_WEB_APPS_API_TOKEN`~~ | **RETIRED 2026-08-30, DELETED 2026-08-31 (T-727)** | Nothing. `deploy-azure-frontend.yml` mints the deployment token from ARM under federated identity at deploy time, so no stored value is needed and there is nothing to rotate. The secret was removed from repository settings by the owner on 2026-08-31, after the role assignment applied |
 
 **No stored, non-expiring credential remains in this repository's secrets.**
 `GITHUB_TOKEN` is contractual and injected per run; it is never stored.
