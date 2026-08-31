@@ -192,33 +192,50 @@ export function splitHead(rendered) {
  * the template's is the generic one.
  */
 /**
- * The id `main.jsx` looks for. Changing it in one place and not the other turns
- * hydration back into a full client re-render, silently — the page still works,
- * it just throws away the pre-rendered DOM again, which is precisely the bug
- * T-714 was opened for. `prerender.contract.test.mjs` pins the pair.
+ * The attribute `main.jsx` reads the seed from. Agreed in two files; changing
+ * it in one and not the other turns hydration back into a full client
+ * re-render, silently — the page still works, it just throws away the
+ * pre-rendered DOM again, which is precisely the bug T-714 was opened for.
+ * `prerender.test.js` pins the pair.
  */
-export const SEED_ELEMENT_ID = '__PRERENDER_DATA__';
+export const SEED_ATTRIBUTE = 'data-prerendered-seed';
 
 /**
- * Serialize the seed into a script tag the browser can read synchronously.
+ * Serialize the seed into an attribute on the mount point.
  *
  * WHY THIS EXISTS AT ALL. Hydration requires the client's first render to
  * produce the same tree the pre-render produced. `usePublicData` fetches in an
  * effect, so without the data in hand at mount the client renders a skeleton,
  * React sees a mismatch against the article markup, and discards the whole
- * pre-rendered DOM — the 104 documents would be built, shipped, and thrown away
- * exactly as they are today, only more expensively.
+ * pre-rendered DOM — the 120 documents would be built, shipped, and thrown away
+ * exactly as they were before T-714, only more expensively.
  *
- * `application/json`, not a `window.__DATA__ =` assignment. The browser never
- * executes it, so a value that somehow contained a script cannot run; it is
- * read with JSON.parse at a moment of our choosing. The `<` escape below is
- * belt to that braces: it stops `</script>` inside a string from closing the
- * element early, which is the one way a JSON island can still break out.
+ * WHY AN ATTRIBUTE AND NOT A `<script type="application/json" id="...">`
+ * ISLAND, which is the usual shape for this (it is what Next.js does with
+ * `__NEXT_DATA__`). An island is found with `document.getElementById`, and
+ * `getElementById` returns the FIRST element with that id in document order —
+ * any element, not just a script. Article bodies are author-written HTML
+ * rendered through `DOMPurify.sanitize`, and DOMPurify's default configuration
+ * keeps `id` attributes on ordinary elements: it strips an injected
+ * `<script id="__PRERENDER_DATA__">` but passes an injected
+ * `<div id="__PRERENDER_DATA__">` through untouched. That div sits inside
+ * `#root`, so it comes first, and it would have become the seed for its own
+ * page — an author-controlled object flowing into every `href` and `src` on it.
+ * That is not theoretical: it was reproduced against this repo's DOMPurify
+ * before this attribute replaced the island.
+ *
+ * The mount point cannot be shadowed the same way. `<div id="root">` is written
+ * by the template, ahead of everything the pre-render puts inside it, so an
+ * injected `id="root"` is always later in document order and always loses. The
+ * seed therefore stops depending on a sanitizer's configuration staying right.
+ *
+ * `escapeAttr` handles the quoting, and it escapes `<` as well as `&` and `"`,
+ * so a literal `</script>` or `<img onerror=...>` inside article text is inert
+ * markup-wise — it is attribute text that only ever reaches `JSON.parse`.
  */
-export function seedScript(seededData) {
+export function seedAttribute(seededData) {
   if (!seededData) return '';
-  const json = JSON.stringify(seededData).replace(/</g, '\\u003c');
-  return `<script type="application/json" id="${SEED_ELEMENT_ID}">${json}</script>`;
+  return ` ${SEED_ATTRIBUTE}="${escapeAttr(JSON.stringify(seededData))}"`;
 }
 
 export function injectIntoTemplate(template, { head, body }, route = '/', seededData = null) {
@@ -266,11 +283,11 @@ export function injectIntoTemplate(template, { head, body }, route = '/', seeded
     }
     throw new Error('dist/index.html has no <div id="root"></div> to render into');
   }
-  // The seed rides immediately after the mount point, inside <body>. Vite's
-  // entry is a module script and therefore deferred, so it runs after parsing
-  // and the element is always present by the time main.jsx looks for it —
-  // there is no ordering race to reason about.
-  const seed = seedScript(seededData);
+  // The seed rides on the mount point itself. Vite's entry is a module script
+  // and therefore deferred, so it runs after parsing and the attribute is
+  // always present by the time main.jsx reads it — there is no ordering race
+  // to reason about.
+  const seed = seedAttribute(seededData);
 
   // THE ROUTE IS STAMPED ON THE MOUNT POINT, and main.jsx refuses to hydrate
   // unless it matches the URL being displayed. This is not belt-and-braces; it
@@ -288,7 +305,7 @@ export function injectIntoTemplate(template, { head, body }, route = '/', seeded
   // route addition can silently trip into a decision made per page load.
   return html.replace(
     rootDiv,
-    `<div id="root" data-prerendered-route="${escapeAttr(route)}">${body}</div>${seed}`
+    `<div id="root" data-prerendered-route="${escapeAttr(route)}"${seed}>${body}</div>`
   );
 }
 

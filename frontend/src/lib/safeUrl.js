@@ -4,9 +4,9 @@
  * WHY THIS EXISTS. CodeQL raised 27 high-severity "DOM text reinterpreted as
  * HTML" alerts on 2026-08-30, every one of them a `href={...}` or `src={...}`
  * fed from content data. They appeared when pre-render hydration (T-714) gave
- * the analyzer a source it could follow — the seed island, read with
- * `document.getElementById(...).textContent` — through usePublicData and into
- * those attributes.
+ * the analyzer a source it could follow — the seed, then read from a
+ * `<script id="__PRERENDER_DATA__">` island with `.textContent` — through
+ * usePublicData and into those attributes.
  *
  * THE ALERTS ARE NEW; THE WEAKNESS IS NOT. The same values previously arrived
  * from `fetch()` of the public API and reached the same attributes unchecked.
@@ -14,6 +14,13 @@
  * in a feed link or a curated article executes on click either way, and the
  * data behind these fields is scraped and author-supplied rather than
  * constant.
+ *
+ * THIS IS NOT WHAT SILENCED THE ALERTS, and it was never going to be: CodeQL
+ * has no way to know a wrapper returning its own argument validated anything,
+ * so the taint ran straight through `safeUrl` to the same sinks. The alerts
+ * ended when the seed stopped being read from an id-addressed island (see
+ * `readSeed` in src/main.jsx). This stays because the sinks are worth guarding
+ * on their own terms, from the API path as much as the seed path.
  *
  * ALLOWED: http, https, mailto, and relative references (`/x`, `#x`, `?x`).
  * REFUSED: `javascript:`, `data:`, `vbscript:`, `file:`, and anything else.

@@ -16,12 +16,22 @@ import {
   injectIntoTemplate,
   canonicalFor,
   socialTags,
-  seedScript,
-  SEED_ELEMENT_ID,
+  seedAttribute,
+  SEED_ATTRIBUTE,
 } from './prerender.mjs';
 // Imported rather than read from a path: under Vitest `import.meta.url` is a
 // Vite module id, not a file: URL, so fileURLToPath on it throws.
 import swaConfig from '../staticwebapp.config.json';
+
+/**
+ * The browser's side of `escapeAttr`, so a round-trip assertion tests the
+ * escaping rather than restating it. Deliberately not a DOM parse: these tests
+ * run in node, and a hand-written inverse fails loudly if `escapeAttr` ever
+ * grows an escape this does not know about.
+ */
+function unescapeAttr(value) {
+  return value.replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+}
 
 const TEMPLATE = [
   '<!DOCTYPE html>',
@@ -107,17 +117,27 @@ describe('injectIntoTemplate', () => {
     expect(canonical).not.toContain('<');
   });
 
-  it('emits no seed island for a route that was given no data', () => {
+  it('emits no seed attribute for a route that was given no data', () => {
     const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/about', null);
-    expect(html).not.toContain(SEED_ELEMENT_ID);
+    expect(html).not.toContain(SEED_ATTRIBUTE);
   });
 
-  it('emits the seed island for a route that was given data', () => {
+  it('emits the seed attribute for a route that was given data', () => {
     const seed = { 'article:x': { title: 'T' } };
     const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a/blog/x', seed);
-    expect(html).toContain(SEED_ELEMENT_ID);
-    const [, json] = new RegExp(`id="${SEED_ELEMENT_ID}">(.*?)</script>`, 's').exec(html);
-    expect(JSON.parse(json)).toEqual(seed);
+    expect(html).toContain(SEED_ATTRIBUTE);
+    const [, encoded] = new RegExp(`${SEED_ATTRIBUTE}="([^"]*)"`).exec(html);
+    expect(JSON.parse(unescapeAttr(encoded))).toEqual(seed);
+  });
+
+  // The seed has to be INSIDE the opening tag of the mount point, not trailing
+  // after it. Getting this wrong emits `<div id="root">...</div> data-...="{}"`,
+  // which is visible text on the page and an absent seed — and the page still
+  // renders, so only an assertion catches it.
+  it('puts the seed on the mount point rather than after it', () => {
+    const seed = { 'article:x': { title: 'T' } };
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a/blog/x', seed);
+    expect(html).toMatch(new RegExp(`<div id="root"[^>]*\\s${SEED_ATTRIBUTE}="[^"]*"[^>]*>`));
   });
 
   it('REPLACES the template title rather than adding a second one', () => {
@@ -307,39 +327,47 @@ describe('article detail routes', () => {
   });
 });
 
-describe('seedScript', () => {
+describe('seedAttribute', () => {
   it('is empty for no seed, so nothing is emitted', () => {
-    expect(seedScript(null)).toBe('');
+    expect(seedAttribute(null)).toBe('');
   });
 
-  // The one way a JSON island can still break out of its own script element.
-  // Content is author-written article HTML, so a literal </script> inside it is
-  // not a hypothetical.
-  it('escapes < so an embedded </script> cannot close the element early', () => {
-    const evil = { 'article:x': { body: '</script><img src=x onerror=alert(1)>' } };
-    const out = seedScript(evil);
-    expect(out).not.toContain('</script><img');
+  // Article bodies are author-written HTML, so a literal `"` or `</script>`
+  // inside one is not a hypothetical. In an attribute the quote is the escape
+  // that matters: an unescaped one ends the value and everything after it is
+  // parsed as further attributes on the mount point.
+  it('escapes the characters that would end the attribute or open a tag', () => {
+    const evil = { 'article:x': { body: '"></div><img src=x onerror=alert(1)>' } };
+    const out = seedAttribute(evil);
 
-    // Sliced, not regex-stripped. CodeQL flags a `<script[^>]*>` strip as bad
-    // HTML filtering because it misses `<SCRIPT>` — irrelevant to output this
-    // test just generated, but the index form has no case question at all and
-    // says what it means: take what lies between the tags.
-    const body = out.slice(out.indexOf('>') + 1, out.lastIndexOf('<'));
+    expect(out).not.toContain('"></div>');
+    expect(out).not.toContain('<img');
 
-    // lastIndexOf('<') is only correct because the escaping worked: every `<`
-    // inside the payload became \u003c, so the last one in the string is the
-    // closing tag's. Asserting that is asserting the property under test.
-    expect(body).not.toContain('<');
-    expect(JSON.parse(body)).toEqual(evil);
+    const [, encoded] = new RegExp(`${SEED_ATTRIBUTE}="([^"]*)"`).exec(out);
+    expect(JSON.parse(unescapeAttr(encoded))).toEqual(evil);
   });
 
-  // THE CONTRACT WITH main.jsx. The id is agreed in two files; changing one
-  // without the other does not break the page, it silently stops hydration and
-  // goes back to discarding the pre-rendered DOM — the exact bug T-714 exists
-  // for, reintroduced invisibly.
-  it('uses the id main.jsx looks for', () => {
+  // THE CLOBBERING CASE THIS SHAPE EXISTS FOR. DOMPurify strips an injected
+  // <script> but keeps <div id="...">, and getElementById returns the first
+  // element with an id regardless of tag — so an id-addressed island inside
+  // #root could be supplied by the article it belongs to. An attribute on the
+  // mount point cannot: the template writes <div id="root"> ahead of anything
+  // the pre-render puts inside it.
+  it('carries no id for article markup to shadow', () => {
+    const out = seedAttribute({ 'article:x': { title: 'T' } });
+    expect(out).not.toContain('id=');
+    expect(out).not.toContain('<');
+  });
+
+  // THE CONTRACT WITH main.jsx. The attribute is agreed in two files; changing
+  // one without the other does not break the page, it silently stops hydration
+  // and goes back to discarding the pre-rendered DOM — the exact bug T-714
+  // exists for, reintroduced invisibly.
+  it('uses the attribute main.jsx reads', () => {
     const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
-    expect(mainJsx).toContain(`const SEED_ELEMENT_ID = '${SEED_ELEMENT_ID}'`);
+    // dataset.prerenderedSeed is the DOM spelling of data-prerendered-seed.
+    expect(SEED_ATTRIBUTE).toBe('data-prerendered-seed');
+    expect(mainJsx).toContain('dataset.prerenderedSeed');
   });
 
   it('agrees with main.jsx on the stamp attribute name', () => {

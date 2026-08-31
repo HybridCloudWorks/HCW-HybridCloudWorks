@@ -129,7 +129,7 @@ test.describe('pre-render hydration', () => {
     // The seed is what makes the first client render match; without it the page
     // renders a skeleton and React discards the article markup.
     const seed = await page.evaluate(
-      () => document.getElementById('__PRERENDER_DATA__')?.textContent?.length ?? 0
+      () => document.getElementById('root')?.dataset?.prerenderedSeed?.length ?? 0
     );
     expect(seed, 'the article page carries a pre-render seed').toBeGreaterThan(0);
     expect(errors.filter(isHydrationError)).toEqual([]);

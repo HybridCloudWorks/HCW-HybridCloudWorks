@@ -14,9 +14,6 @@ if (!rootElement) {
   throw new Error('Root element not found. Make sure you have a div with id="root" in your HTML.');
 }
 
-/** Must match SEED_ELEMENT_ID in scripts/prerender.mjs. */
-const SEED_ELEMENT_ID = '__PRERENDER_DATA__';
-
 /** `/about/` and `/about` are the same route; `/` stays `/`. */
 function normalizePath(value) {
   if (!value) return '/';
@@ -27,16 +24,28 @@ function normalizePath(value) {
 /**
  * The data the pre-renderer used, or null.
  *
- * A malformed island is treated as absent rather than fatal. It would mean the
+ * READ FROM THE MOUNT POINT, NOT FROM A `<script id="...">` ISLAND. The island
+ * is the usual shape for this, and it is the shape this used to have, but it
+ * is found with `document.getElementById` — which returns the first element
+ * carrying that id, of any kind. Article bodies are author-written HTML passed
+ * through `DOMPurify.sanitize`, whose default configuration strips an injected
+ * `<script>` but keeps `<div id="...">`; an injected div sits inside `#root`,
+ * so it comes first in document order and would have supplied the seed for its
+ * own page. `<div id="root">` comes from the template, ahead of everything the
+ * pre-render puts inside it, so nothing an author writes can precede it.
+ * scripts/prerender.mjs writes the matching attribute and says the same there.
+ *
+ * A malformed value is treated as absent rather than fatal. It would mean the
  * build wrote something JSON.parse rejects, which is a build bug — but taking
  * the whole site down in the browser is a strictly worse response than
  * rendering it the way it rendered before any of this existed.
  */
 function readSeed() {
-  const el = document.getElementById(SEED_ELEMENT_ID);
-  if (!el?.textContent) return null;
+  // dataset.prerenderedSeed is the DOM spelling of data-prerendered-seed.
+  const raw = rootElement.dataset.prerenderedSeed;
+  if (!raw) return null;
   try {
-    return JSON.parse(el.textContent);
+    return JSON.parse(raw);
   } catch (error) {
     console.error('Pre-render seed could not be parsed; falling back to a client render.', error);
     return null;
