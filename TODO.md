@@ -123,6 +123,13 @@ Consumption publishes no HTTP metrics — have been going dark for part of most
 days, along with the telemetry itself. That is the silent-under-cap failure the
 alerting fabric was built to eliminate, happening.
 
+**This is not the first observation, and the entry said otherwise before it was
+checked.** `wiki/Cost-Analysis.md` already recorded the workspace "sitting *at*
+that cap (`dataIngestionStatus: OverQuota`)" — a single reading, used to argue
+that the top of the USD 17–21 range was the realistic figure. What the series
+above adds is that it is not an incident but the normal state, on dated
+evidence, which is what turns a cost note into an alerting problem.
+
 The commands that produced this, and how to read `dataIngestionStatus`, are
 below under *Reading the ingestion volume*.
 
@@ -137,8 +144,19 @@ which is the number item 3 needs to size its lever. Record it here with the date
 workspace gives that rule a negative threshold and it fires forever about a cap
 that does not exist. The variable refuses it.
 
-Anchors: `infra/observability.tf:329-341,78-99`, `infra/main.tf:80-88`,
-`infra/variables.tf` (`logs_daily_quota_gb`).
+**Anchors, by name rather than by line.** The line numbers this entry carried
+until 2026-08-31 came from the architecture review, which states outright that
+its anchors are pinned to a commit and unmaintained — and they had drifted:
+`observability.tf:329-341` landed in a comment above the alert it meant, and
+`main.tf:138-144` pointed past the end of a file that T-754 had cut to 102
+lines. Names do not drift.
+
+- `infra/observability.tf` — `function_http_5xx` and `function_response_time`
+  are the log rules that stop evaluating at the cap; `logs_daily_cap` is the
+  80% alert whose threshold derives from the quota.
+- `infra/main.tf` — `azurerm_log_analytics_workspace.hcw` carries
+  `daily_quota_gb`.
+- `infra/variables.tf` — `logs_daily_quota_gb`.
 
 #### Reading the ingestion volume
 
@@ -181,7 +199,11 @@ bandwidth — all of which the Free tier also provides. The genuinely
 Standard-only features are the SLA and pull-request staging environments, which
 the rationale does not mention. Downgrade if neither is load-bearing.
 
-Anchors: `wiki/Cost-Analysis.md:74-84`, `infra/main.tf:138-144,128-133`.
+**Anchors, by name.** `wiki/Cost-Analysis.md`, the section beginning "The
+largest controllable line is telemetry"; and `infra/frontend.tf`, where the
+Standard tier and the comment justifying it live — **not** `infra/main.tf`,
+which T-754 cut to 102 lines and which the review's anchor pointed past the end
+of.
 
 ### 4. T-518 — arm the remaining 15 timers — repeated procedure
 
