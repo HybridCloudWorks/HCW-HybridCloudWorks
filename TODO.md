@@ -242,8 +242,12 @@ moment** — see the paragraph below for where the count stands now — so the
 platform still ran almost no scheduled work, but "nothing is scheduled" was no
 longer true and the arming mechanism was no longer an assumption.
 
-**`PUBLISH_SCHEDULED_CONTENT` was armed and then observed on 2026-08-31**, and
-the observation is unusually clean, because it straddles the apply:
+**`PUBLISH_SCHEDULED_CONTENT` was armed and then observed on the evening of
+2026-08-30 Chicago time** — `2026-08-31` in UTC, which is why the surrounding
+entries and the timestamps below appear to disagree. Every timestamp in this
+section is CDT (`-05:00`), matching what the host itself writes; the two UTC
+instants are named as UTC where they appear. The observation is unusually
+clean, because it straddles the apply:
 
 ```
 publishScheduledContent  8 invocations  4 ran  4 skipped
@@ -252,8 +256,9 @@ publishScheduledContent  8 invocations  4 ran  4 skipped
 
 Eight invocations at exactly fifteen-minute spacing with no gap. The four at
 18:30, 18:45, 19:00 and 19:15 skipped; the four at 19:30, 19:45, 20:00 and
-20:15 ran. The apply that set the flag landed at 00:30 UTC — 19:30 CDT — so the
-split falls on the boundary rather than near it. That is the same timer,
+20:15 ran. The apply that set the flag landed at 00:30 UTC on 2026-08-31, which is
+19:30 CDT on 2026-08-30 — so the split falls on the boundary rather than near
+it. That is the same timer,
 observed skipping and then running, with the flag change as the only variable:
 a stronger reading than a bare "it fired", because it also proves the gate the
 flag controls.
@@ -320,7 +325,8 @@ it leaves PowerShell, and by asserting that returned rows carry the columns the
 caller asked for — a truncated query answers a different question rather than
 failing, which is why nothing in the error handling ever fired.
 
-**Confirmed end-to-end on 2026-08-31**, on the Windows host where it failed:
+**Confirmed end-to-end in the same run** (2026-08-30 CDT / 2026-08-31 UTC), on
+the Windows host where it failed:
 the same command that had returned 58,265 blank rows returned one correct
 summary row, the `ScheduleStatus` section came back filtered to the requested
 timer and ordered, and the preflight reported 431 worker traces where it had
