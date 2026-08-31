@@ -16,77 +16,35 @@ an engineer working from a checkout if it needs tenant, Cloudflare or
 repository-admin access — the carried-over sections say so in their own words,
 and `Gate: owner` still marks the rest.
 
-## Status — 2026-08-30
+## Status — 2026-08-31
 
-> **The Blog Machine program and four remediation passes are closed.** All
-> seven Blog Machine phases (T-601…T-607) and 55 of the architecture review's
-> 62 findings are merged; their entries are in [CHANGELOG.md](CHANGELOG.md),
-> the per-finding record is
+> **Five items are open. None is critical, none has a deadline, and none can be
+> closed from a checkout.** Each carries what to run or click, and what a
+> successful result looks like, so a real failure can be told apart from a
+> reporting failure.
+>
+> **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
+> resolved or carried below as owner gates. The per-finding record — method,
+> evidence standard, every failure mode and outcome — is
 > [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md),
-> and the program of record is [wiki/Blog-Machine.md](wiki/Blog-Machine.md).
-> Nothing about that work is repeated below; this file carries only what is
-> still open.
+> which is now a dated historical document rather than a live list. Its three
+> findings that still need an owner (`T-719`, `T-721`, `T-749`) are stated in
+> full below instead of by reference, because a tracker that says "see the
+> review" is a tracker you have to read two documents to use.
 >
-> **T-526 is closed, and this file was wrong about it.** The Telegram webhook
-> was already registered against Azure — `getWebhookInfo` on 2026-08-28 returned
-> `https://api-azure.hybridcloudworks.com/api/telegram/webhook`, and `/help`
-> answered in the chat, which is the acceptance criterion this file itself
-> specified. It had been carried here as "the one deadline on this list" and a
-> countdown against the GCP deletion, for work that was already done. Nobody
-> re-ran anything to close it; running `-Mode Show` to *start* the work is what
-> revealed it. Entry in [CHANGELOG.md](CHANGELOG.md).
+> **The `hcw-azure` workspace is VCS-connected, and auto-apply is off.** Merging
+> infra code queues a plan that waits for approval at
+> https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs — it does not
+> apply on its own, and `terraform apply` from a desktop is refused outright.
+> Every run carries the permanent diff, which replaces three `azapi` resources
+> and restarts the function app.
 >
-> **There is no deadline on this list any more.** The GCP deletion no longer
-> silences anything, which was the only time-bound consequence here.
->
-> **The `hcw-azure` workspace HAS a VCS connection, and there is no CLI apply.**
-> Terraform said so itself on 2026-08-31, when the owner ran
-> `terraform -chdir=infra apply` at this file's instruction:
->
-> > Error: Apply not allowed for workspaces with a VCS connection
-> >
-> > A workspace that is connected to a VCS requires the VCS-driven workflow to
-> > ensure that the VCS remains the single source of truth.
->
-> **This file has now been wrong about this twice, in opposite directions.** It
-> said "merged infra code reaches HCP Terraform on its own" from 2026-08-26 to
-> 2026-08-30; that was replaced on 2026-08-30 with "CLI-driven, with no VCS
-> connection", described as read off the workspace configuration. The
-> replacement was the wrong one, and the instruction that came with it — run
-> `terraform apply` from a desktop — cannot work at all.
->
-> A second observable agrees: HCP Terraform posts a commit status
-> (`Terraform Cloud/hcw/repo-id-2153Zj6FyEd7RRFW`) on **every** pull-request
-> head — `success` on `main` at `d80f428`, `failure` on the T-727 branch from
-> the commit that added a role lookup. A workspace with no VCS connection does
-> not do that.
->
-> **Auto-apply is OFF, read off the settings page on 2026-08-31.** Both
-> checkboxes — *Auto-apply API, UI, & VCS runs* and *Auto-apply run triggers* —
-> are unchecked, so "runs require operator approval". Execution mode is
-> `Remote`; working directory `infra`. Merging infra code queues a plan and
-> waits. That is worth stating precisely rather than loosely, because every run
-> here carries the permanent diff, which replaces three `azapi` resources and
-> restarts the function app: under auto-apply a merge would restart production
-> without asking.
->
-> **HOW THIS FILE GOT IT WRONG TWICE, which is the part worth keeping.** The
-> workspace's **Description** field reads, verbatim:
->
-> > Azure platform for HCWSite, from HybridCloudWorks/HCW-HybridCloudWorks
-> > (infra/). CLI-driven; no VCS connection.
->
-> That is free text somebody typed into a box. It is not configuration, nothing
-> validates it against the connection, and it is stale. The 2026-08-30 entry
-> said its claim was "read off the workspace configuration"; it was read off
-> that sentence. A description contradicting its own workspace is worse than an
-> empty one, because it reads exactly like a setting.
->
-> **Corrected in the workspace on 2026-08-31**, so the description no longer
-> contradicts the connection. The account of how it misled two sessions stays
-> here, because the lesson is not about one stale sentence: a free-text field
-> beside real settings reads like a setting, and this file twice reported one
-> as though it had been read off the configuration.
+> This file was wrong about that twice in opposite directions, and the reason is
+> worth keeping: HCP Terraform's workspace **Description** is free text beside
+> the real settings, validated by nothing, and it read "CLI-driven; no VCS
+> connection". That sentence was read and reported as configuration. Corrected
+> in the workspace on 2026-08-31. A field that contradicts its own workspace
+> reads exactly like a setting.
 
 | Priority | Open items |
 | --- | ---: |
@@ -96,257 +54,195 @@ and `Gate: owner` still marks the rest.
 | Low | 1 |
 | Total | 5 |
 
-Three of the five are architecture-review findings still to be worked (two
-Medium — both owner-gated — and one Low). The other two are the pre-program
-platform gates: **T-518** (High) and **T-519** (Medium). Both carry **Gate: owner** and have no repository-side half — what is
-left of them is a Worker deployment and a set of feature flags, each needing
-tenant or edge access. They are listed anyway, because a tracker that omits
-them is quietly shorter than the truth.
+**Two of the five need nothing but a decision** (`T-721`, `T-726`). Two need a
+measurement or a deployment (`T-719`, `T-519`). One is a repeated, observed
+procedure (`T-518`). They are listed newest-blocker-first below, then in the
+long-form sections that carry their evidence.
 
-**T-522 moved to [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)**
-on 2026-08-26 — the recovery objectives and the Cosmos export that would
-support them, joined on 2026-08-28 by the remainder of T-707 (an out-of-account
-copy of media, which no account setting can provide). Neither is closed and
-neither is abandoned; both are tracked where a feature with a design, a cost
-model and acceptance criteria belongs, rather than as a tracker line that only
-ever said "two numbers are missing".
+## What is open, and exactly what closes it
 
-## Owner actions left behind by closed findings
+### 1. Seed `TFC_TOKEN` so the plan check can run — 2 minutes
 
-These are the residue of remediated findings: the code half is merged and
-in [CHANGELOG.md](CHANGELOG.md), and what remains needs access this repository
-does not have. They are not counted in the six above, because the
-engineering work on them is done.
+Without it `TFC Plan Check` self-arms off and reports that it did not run.
 
-- **`production` deployment-branch rule (from T-705).** Reduced to one setting
-  by an owner decision on 2026-08-29: **required reviewers are deliberately not
-  configured**, because this is a single-operator estate and a reviewer you
-  approve yourself is not a control — it is a click that produces an audit
-  trail implying oversight that did not happen. The half that still matters and
-  costs nothing: Settings → Environments → `production` → Deployment branches →
-  *Selected branches* → `main`. Without it the environment-scoped federated
-  credential matches from any branch, so `workflow_dispatch` can ship an
-  unreviewed ref past all 12 required contexts. The guard step in both
-  workflows stays as the backstop — nothing in a checkout can prove an
-  environment rule set outside the repository is still set.
-- **Default-branch ruleset hardening (verified 2026-08-30).** Ruleset `Default`
-  is active on `~DEFAULT_BRANCH`: pull requests are required; deletion and
-  non-fast-forward updates are blocked; all 12 documented status contexts are
-  required; and there are no bypass actors. Two settings remain choices rather
-  than hidden defaults: `strict_required_status_checks_policy` is `false`, so a
-  head need not be brought up to date with `main` before merge, and
-  `required_review_thread_resolution` is `false`. Decide whether to enable each.
-  The zero required approvals remains the deliberate single-operator decision
-  recorded under T-705; this row does not reopen it.
-- ~~**Second alert channel (from T-709).**~~ **Closed 2026-08-30. Two delivery
-  paths, both observed arriving.**
+Mint a **user or team** token (an *organization* token cannot read
+`json-output` and fails with 404, which reads like a missing plan):
+https://app.terraform.io/app/settings/tokens
 
-  **Email** — a sample budget alert from `ag-plat-prod-cus-01` reached the
-  `ops-email` receiver's inbox, fired 21:36 UTC, receiver `Enabled`, CLI
-  reporting `"Status": "Succeeded"`. The first time any alert on this estate had
-  been seen to arrive rather than merely be accepted by ARM.
+Store it as `TFC_TOKEN`:
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions
 
-  **SMS** — `ops_sms_receiver` was set the same evening, the `dynamic` block
-  armed on apply, and the test message arrived. The carrier enrolled the number
-  first (*"You're in hcw-ops group"* — the action group's `short_name`,
-  `observability.tf:38`), which is worth noting because it confirms the message
-  came from THIS action group rather than merely that some SMS reached the
-  handset.
+Then dispatch the workflow against a commit, from **Actions → TFC Plan Check →
+Run workflow**, filling the `commit` field with the merge commit whose run is
+waiting:
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/tfc-plan-check.yml
 
-  The estate went from zero proven delivery paths to two in one evening. Before
-  that, every alert rule in `observability.tf` rested on a hop only ever proven
-  to be ACCEPTED by ARM. The procedure that worked, and the portal button that
-  does not, are under *Live confirmation* below.
-- **Ruleset bypass for the manifest push (from T-726).** The workflow is now
-  two jobs, so nothing holding `contents: write` also holds the Azure identity
-  or runs `npm ci`. What remains: for that push to land on a main protected by
-  twelve required contexts, the ruleset must bypass the Actions token — and a
-  bypass is granted to the TOKEN, not to a workflow, so every workflow holding
-  `contents: write` can push past all checks.
+**Success:** the job summary says the plan carries the known permanent diff and
+nothing else. `UNEXPECTED` lines name the addresses that do not belong — read
+those rather than the summary counts, which cannot tell three different
+replacements from the three expected ones.
 
-  **Bounded, not closed, on 2026-08-31.**
-  `scripts/workflow-write-permissions.test.mjs` pins the set of workflows
-  holding the grant to a reviewed two — `publish-content-manifest.yml` and
-  `sync-wiki.yml` — each with a written justification. A third becomes a
-  failing test rather than a line in an unrelated pull request that nobody
-  reads as a security decision, which is how this kind of grant spreads. The
-  guard is mutation-tested: granting `contents: write` to `iac-validate.yml`
-  fails it.
+### 2. Decide T-726 — the ruleset bypass — a decision, not code
 
-  **Both named exits cost something, which is why neither was taken.** A deploy
-  key as the bypass actor is a stored, non-expiring credential — the thing
-  T-727 removed the same day — and cannot be scoped to one path, because deploy
-  keys are repository-wide. An auto-merging pull request removes the bypass
-  entirely, but a pull request opened with `GITHUB_TOKEN` does not trigger
-  workflows (by design, to prevent recursion), so its required checks would
-  never start, auto-merge would never fire, and the manifest would stop
-  refreshing; making it work needs a GitHub App or a PAT to open the pull
-  request, which is another credential. Generating the manifest during the
-  frontend build was rejected on stronger ground: it would put Cosmos access
-  back into the deploy job, which is what T-718 exists to prevent.
+`publish-content-manifest.yml` commits to `main` nightly. For that push to land
+on a branch with twelve required contexts, the ruleset lists the Actions token
+as a bypass actor — and a bypass belongs to the **token**, not to a workflow, so
+every workflow holding `contents: write` can push past every check.
+`scripts/workflow-write-permissions.test.mjs` pins that set to a reviewed two;
+that bounds it and does not close it.
 
-  **The decision that would actually close this is the owner's:** accept a
-  deploy key, stand up a GitHub App, or accept the bounded bypass as a recorded
-  risk. It is not a code change.
-- **Retire the SWA token (T-727) — decided and BUILT 2026-08-30.** The
-  repository half is done: `deploy-azure-frontend.yml` mints the deployment
-  token from ARM under federated identity at deploy time, the `swa_token`
-  Terraform output is deleted, and `AZURE_STATIC_WEB_APPS_API_TOKEN` is no
-  longer read by anything.
+Three ways to close it, and each costs something:
 
-  **No new federated credential was needed.** The deploy job already declares
-  `environment: production`, and `github_deploy` already holds
-  `repo:<org>/<repo>:environment:production` plus its immutable form
-  (`infra/oidc.tf:153-167`). The estimate of "one federated credential" was
-  wrong in the owner's favour.
+| Option | Cost |
+| --- | --- |
+| Accept the bounded bypass as a recorded risk | Nothing to build. The guard keeps the set from growing silently. Add a row to *Accepted risks* below |
+| A deploy key as the bypass actor | A stored, non-expiring credential — the thing T-727 removed — and deploy keys are repository-wide, so it cannot be scoped to the one file |
+| A GitHub App to open an auto-merging pull request | Removes the bypass entirely. A pull request opened with `GITHUB_TOKEN` does not trigger workflows by design, so its required checks never start and auto-merge never fires; an App or PAT is what makes it work |
 
-  **Two owner actions, in this order:**
+**Say which and I will build it**, or say "accept" and I will write the risk row.
 
-  1. `az role definition create --role-definition '@infra/roles/static-web-app-deployer.json'`
-     — the Terraform identity deliberately lacks
-     `Microsoft.Authorization/roleDefinitions/write`, so a definition it
-     consumes has to exist first or the apply fails on Microsoft.Authorization
-     rather than on the feature. **Run `Test-Path` on that file first**; it is
-     on this branch only until the merge, and `az` reports a missing file as
-     `Failed to parse string as JSON` rather than as a missing file.
-     `wiki/Cutover-Runbook.md` carries the fetch command.
-  2. Merge the pull request. The assignment to `github_deploy`, scoped to the
-     one Static Web App, reaches Azure through the VCS-driven run — **not**
-     through `terraform apply`, which this workspace refuses. The run then
-     waits for approval, because auto-apply is off (see the status note at the
-     top of this file).
+### 3. T-518 — arm the remaining 15 timers — repeated procedure
 
-  **Both ran on 2026-08-31 and the loop is closed.** The role exists, the
-  assignment applied through the VCS-driven run, and the owner deleted
-  `AZURE_STATIC_WEB_APPS_API_TOKEN` from repository settings. No stored,
-  non-expiring credential remains in this repository's secrets.
+Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
+`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
+is already `true`.
 
-  **What this does not claim.** The token still exists in Terraform state as an
-  attribute of `azurerm_static_web_app.hcw`, which no output block could ever
-  have changed. What is retired is its exposure on the HCP Terraform Outputs
-  tab and its life as a stored, non-expiring GitHub secret.
-- **A TFC API token for the plan assertion (from T-724).**
-  `scripts/assert-expected-plan.mjs` fails when a plan contains anything but the
-  known permanent diff, but the plan lives in HCP Terraform and
-  `iac-validate.yml` has no workspace token, so it is run by hand today.
-  **`scripts/check-tfc-plan.mjs` is now that hand-run**, in one command:
+For each remaining timer, one at a time: add its name to `enabled_timers` in the
+workspace variable, merge, approve the run, then observe it firing before adding
+the next. The evidence standard is the observed invocation, not the applied
+setting — `wiki/Cutover-Runbook.md` step 5 has the four gates.
 
-      TFC_TOKEN=... node scripts/check-tfc-plan.mjs
+Verify with (PowerShell, from the repository root):
 
-  It fetches the JSON plan, calls `checkPlan` directly and reports the verdict.
-  Needs a HCP Terraform **user or team** token with admin access to
-  `hcw/hcw-azure` — an *organization* token cannot read `json-output` and fails
-  with 404, which reads like a missing plan rather than a permissions problem.
+```powershell
+pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
+```
 
-  **`--commit <sha>` was added on 2026-08-31**, so the tool can select the run
-  HCP Terraform planned for one commit rather than the workspace's latest. That
-  was the missing piece behind "wire this into CI", and `TFC Plan Check` now
-  takes a `commit` dispatch input. **One owner action remains: seed `TFC_TOKEN`**
-  (Settings → Secrets and variables → Actions). The workflow is self-arming —
-  without the secret it reports that it did not run rather than failing.
+**Success:** a single summary row with a plausible invocation count and a
+`ScheduleStatus` section filtered to that timer. If the count barely changes
+between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
+truncation fixed on 2026-08-31, and it means the window is not being applied.
 
-  **What deliberately was NOT built, so the next reader does not assume it was
-  forgotten.** Wiring it to run automatically on every infra pull request would
-  put a check on a speculative plan nobody approves; the decision it gates
-  happens after the merge, in HCP Terraform, when someone is about to confirm a
-  run. Wiring it to `push: main` instead would need a polling loop, because the
-  run lags the push — and a polling loop that cannot be exercised from a
-  checkout is a worse thing to own than a dispatch run at the moment the
-  question is real. `tfc-plan-check.yml`'s header carries the same reasoning.
+The full record, including the 2026-08-30 observation that straddles the apply
+boundary, is under **T-518** below.
 
-  The `--commit` traversal is unit-tested against synthetic JSON:API payloads
-  rather than the live API, which this environment cannot reach. It throws on a
-  payload shape it cannot read rather than reporting "no run for this commit" —
-  the distinction `check-unresolved-secrets.mjs` draws, for the same reason.
-- ~~A scheduled-query alert on `unresolvedSecrets` (from T-720).~~ **Built
-  2026-08-30 as `monitor-unresolved-secrets.yml`, not as an alert rule — the
-  alert this line asked for could not exist.** It said "needs an apply" for
-  weeks; there was nothing to apply. `unresolvedSecrets` is a field in the
-  `/api/health` **response body** and nothing writes it to Log Analytics, so a
-  KQL rule would have queried a table that never receives it and returned zero
-  rows forever — reading as healthy precisely because it could never fire.
-  Curling `/api/health` from a runner fails too: Bot Fight Mode answers with a
-  403 through Cloudflare, and the origin lock answers with a 403 direct, which
-  `validate-deployed.yml` already documents. The workflow reads the condition
-  through ARM instead — the same argument `monitor-functions-registered.yml`
-  makes, and it wins on the same axes: it survives the Log Analytics daily cap,
-  does not traverse Cloudflare, needs no metric that does not exist, and names
-  *which* setting is broken rather than a count. **One owner action remains:**
-  dispatch it once from the Actions tab. The ARM payload shape could not be
-  verified from a container with no `az` and no tenant, so the parser accepts
-  the two documented shapes and **throws on anything else** rather than
-  reporting health it cannot vouch for — a first run either passes or says
-  exactly what it did not understand.
-- **Vault seeding and seeded documents (from the Blog Machine program).**
-  ~~`PREVIEW-SIGNING-SECRET`~~ **seeded 2026-08-30** — the admin secrets page
-  reports it green, which per `admin-secrets.js` means resolved through the
-  vault reference and not reported broken by any upstream, so the preview route
-  and the notification link are live. `REPLICATE-API-KEY` (AI
-  heroes; the default heroes cover its absence once the ~8 covers are uploaded
-  and `admin_config/default_heroes` is seeded), and
-  `admin_config/social_autopost` `{ enabled, accountIds: [{ id, provider }],
-  scheduleDelayMinutes }` with the Publer account ids from the Social Hub.
-  Absent or disabled, every one of these paths no-ops rather than failing.
-- **`GCP-BILLING-API-KEY`, if the GCP column in the public pricing tool is
-  wanted.** GCP console: enable the Cloud Billing API, create an API key,
-  restrict it to that API. It reads a public price list for the site's
-  comparison tools — this estate bills on Azure and nothing here touches that.
-  Unseeded, the GCP column is absent and the AWS and Azure columns still render.
+### 4. T-519 — deploy the edge availability probe — the only signal that survives the app being down
 
-**These are now portal work, not desktop work.** Every secret above is seeded at
+Every other alert needs the app healthy enough to emit telemetry. The Azure
+availability test stays disabled because Cloudflare's Bot Fight Mode challenges
+Azure's agents, and a WAF skip rule against it was built, applied and confirmed
+inert — Bot Fight Mode does not run on the Ruleset Engine.
+
+The approved way around it is `edge/availability-probe`, a Cloudflare Worker
+whose same-zone subrequest is not challenged.
+[wiki/Availability-Probe.md](wiki/Availability-Probe.md) is the procedure:
+deploy with wrangler, seed the connection-string secret, observe a `success == 1`
+row in Application Insights, then set `availability_probe_alert_enabled = true`.
+
+**Success:** a `success == 1` row appears within one 5-minute cron period, and
+the alert rule shows as enabled after the apply.
+
+### 5. T-719 — measure the workspace volume on an uncapped day — Medium
+
+Flex Consumption publishes no HTTP metrics, so `function_http_5xx` and
+`function_response_time` are **log** rules — which re-creates, for the two most
+important workload signals, the silent-under-cap failure the alerting fabric was
+built to eliminate. The workspace was at its cap before pruning and the
+post-prune volume was never confirmed, so today's margin is an estimate and the
+whole chain rests on `logs_daily_cap` firing at 80% and a human acting in hours.
+
+Read the ingestion volume for a day with no cap in force, and record the measured
+GB/day here with the date. **If headroom is under roughly 2×**, pull a documented
+lever rather than waiting for the 80% alert to become routine: drop the
+`host.json` log level, or move `AppTraces` (about 38% of the cap) to the Basic
+table plan.
+
+Anchors: `infra/observability.tf:329-341,78-99`, `infra/main.tf:80-84,110-112`.
+
+### 6. T-721 — telemetry costs five times the workload it observes — Medium, decision
+
+Neither line is over budget, but together they are roughly 80% of predictable
+Azure spend on a platform that documents cost to the cent: telemetry runs about
+USD 17–21 a month against an application-subscription workload of roughly USD 4.
+
+Two separable decisions:
+
+1. **After T-719's measurement**, drop the host trace level or move `AppTraces`
+   to the Basic table plan.
+2. **Re-justify the Static Web App Standard tier** (about USD 9/month). The
+   in-file rationale cites custom domain plus SSL, SPA routing and 100 GB
+   bandwidth — all of which the Free tier also provides. The genuinely
+   Standard-only features are the SLA and pull-request staging environments,
+   which the rationale does not mention. Downgrade if neither is load-bearing.
+
+Anchors: `wiki/Cost-Analysis.md:74-84`, `infra/main.tf:138-144,128-133`.
+
+### 7. T-749 — flip the SCM lock — Low
+
+The credential half is already closed: basic auth is off on both SCM and FTP, so
+exposure is Entra-token-gated, and the per-run window in `deploy-functions.yml`
+exists to make `Deny` survivable. The design work is done. The finding is only
+that the flip has a stated precondition.
+
+Confirm one deploy has succeeded **through the per-run window** since
+2026-08-24, then set `functions_scm_lock_enabled = true` as a workspace
+variable and merge an infra change so the run queues.
+
+**Success:** the apply completes and a subsequent `deploy-functions.yml` run
+still succeeds. If a deploy fails after the flip, the window is not working and
+the variable should go back to `false` in the same way.
+
+Anchors: `infra/main.tf:1055-1077`, `infra/variables.tf:886-889`. Overlaps T-520.
+
+## Optional, and only if you want the feature
+
+None of these blocks anything. Each path no-ops when its key is absent; seed at
 **Admin → Platform → API Keys**, which writes straight to Key Vault through a
-role that can create a secret version and cannot read one. No firewall window,
-no `admin_ip_rules` apply, no Azure CLI. `scripts/cutover/06-seed-secret.ps1`
-stays as the break-glass path for the case the page cannot serve — the app being
-down is exactly when you might need to fix a credential. Two things still need
-a Terraform apply first, because they are new: the page's own role assignments,
-and the `FUNCTION_APP_RESOURCE_ID` setting that the refresh call reads.
+role that can create a secret version and cannot read one:
+https://hybridcloudworks.com/admin/api-keys
 
-## The architecture review — open findings
+| Secret or document | What it turns on | Without it |
+| --- | --- | --- |
+| `REPLICATE-API-KEY` | AI-generated hero images | The default-hero fallback covers it, once the covers below exist |
+| ~8 cover images + `admin_config/default_heroes` | A deterministic hero per provider when generation is off or fails | Posts publish with no cover |
+| `admin_config/social_autopost` | Scheduled social posting. Shape: `{ enabled, accountIds: [{ id, provider }], scheduleDelayMinutes }`, with Publer account ids from the Social Hub | No autoposting |
+| `YOUTUBE-API-KEY` | Listen & Learn "watch next" links. ~505 of 10,000 daily quota units per certification | Episodes publish with an empty video list |
+| `GCP-BILLING-API-KEY` | The GCP column in the public pricing tool. GCP console → enable the Cloud Billing API → create an API key → restrict it to that API. **Not a billing credential** — it reads Google's public price list | The GCP column is absent; AWS and Azure still render |
 
-Six specialist reviews, one per technology layer, run against merged main at
-`31f9613`: Azure platform, Terraform IaC, backend Functions, frontend React,
-CI/CD, and the remaining ops surfaces (Cloudflare Worker, PowerShell scripts,
-Python harness, VPS agent). 62 findings, `T-701`…`T-762`; **55 resolved** as of 2026-08-28
-(#249 records; #250, #257, #258 and the CI/Terraform pass remediate).
+`GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
 
-**The review of record is
-[wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md)** —
-it carries the method, the evidence standard, every finding's failure mode,
-recommendation and outcome, the cross-cutting observations, and the areas that
-came back sound, organised by layer. The entries below carry only what "open"
-means for each finding, in the order they should be worked. This split follows
-the Blog Machine precedent: the Wiki holds the narrative, this file holds the
-list.
+## Repository settings still worth a look
 
-Every finding cites `file:line`. Three evidence levels are distinguished in the
-Wiki page: **verified** (re-read against the code by a second reader after the
-finding was written), **reported** (the anchor resolves but no second reader
-re-derived it), and **verify** (could not be settled from the repository —
-exactly one finding, T-705).
+Neither is counted above, because neither is a finding — they are settings that
+are currently choices rather than defaults.
 
-Deliberately **not** re-reported, being owner gates rather than findings:
-T-518, T-519, the unseeded Key Vault secrets, the unseeded
-`admin_config` documents, and the absent analytics provider.
+- **`production` deployment-branch rule.** Without it the environment-scoped
+  federated credential matches from **any** branch, so `workflow_dispatch` can
+  ship an unreviewed ref past all twelve required contexts. The guard step in
+  both workflows is the backstop, and nothing in a checkout can prove a rule set
+  outside the repository is still set.
+  https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/environments
+  → `production` → Deployment branches → **Selected branches** → `main`.
 
-### High — 0 of 12 open
+  Required reviewers stay deliberately unconfigured (owner, 2026-08-29): a
+  reviewer you approve yourself is not a control, it is a click that produces an
+  audit trail implying oversight that did not happen.
 
-| ID | Layer | Finding | Anchor |
-| --- | --- | --- | --- |
-| T-714 | frontend | **DONE 2026-08-30 — wired and verified in Chromium.** `main.jsx` hydrates when the mount point's `data-prerendered-route` stamp matches the live path, seeded from `data-prerendered-seed` on that same element; otherwise it client-renders exactly as before. The seed started as a `<script type="application/json" id="__PRERENDER_DATA__">` island and moved onto the mount point because the island was clobberable: `getElementById` returns the first element with an id of any kind, and DOMPurify's default configuration — which every article body passes through — strips an injected `<script id="…">` but keeps an injected `<div id="…">`, which sits inside `#root` and would therefore have won. `<div id="root">` comes from the template, ahead of anything the pre-render puts inside it. Every `href`/`src` fed from content data also goes through `safeUrl` now, which is worth having on its own but is not what cleared CodeQL's 27 `js/xss-through-dom` alerts — the source change was. The stamp is what makes it safe: `navigationFallback` serves the home page's markup for every unprerendered path at HTTP 200, so hydrating on "the mount point has children" would have mismatched on every `/admin` route. Five Playwright tests drive a real browser, including a node-identity probe proving the server DOM is reused rather than coincidentally identical, and both guards are mutation-tested. `onRecoverableError` now reports a mismatch, which was silent in a production build. **Found on the way:** the canonical `<link>` interpolated the route unescaped while every tag beside it went through `escapeAttr`, so a slug could put a live element in `<head>`; routes come from content slugs via `manifest.routes`. Fixed in the same change. Original finding: **decided 2026-08-30** The 120 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`); the seed mechanism exists but is deliberately never mounted. What made this undecidable was that the hydration-mismatch risk could only be argued about — it is testable now, because Chromium and Playwright can drive the real pages and diff hydrated output against the prerendered HTML. Ships behind that verification or not at all. Removing the prerender path instead was rejected: it gives up first paint and crawler content to avoid a risk that can be measured | `main.jsx`, `hooks/prerenderData.js` |
+- **Two ruleset settings, both `false`.**
+  https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/rules →
+  `Default`. `strict_required_status_checks_policy` off means a head need not be
+  up to date with `main` before merge; `required_review_thread_resolution` off
+  means an unresolved thread does not block. Decide each. Zero required
+  approvals remains the deliberate single-operator decision under T-705 and this
+  does not reopen it.
 
-### Medium — 2 of 30 open
 
-**Open, owner-gated:** T-719 (measure workspace volume on an uncapped day),
-T-721 (telemetry vs SWA tier cost decision).
+## The long-form records
 
-### Low — 1 of 15 open
-
-| ID | Layer | Finding | Anchor |
-| --- | --- | --- | --- |
-| T-749 | ci | SCM lock flip — **Gate: owner**, overlaps T-520 | `functionapp.tf`, workspace variable |
-
-## High
+Everything below is evidence for the items above, not a second list of them.
+Each carries how the finding was established, what was observed, and the limits
+of that observation — the part a summary loses and the next reader needs before
+changing anything.
 
 ### T-518 — 15 of 18 timers are still no-ops; the mechanism is proven
 
@@ -461,8 +357,6 @@ been reporting none. That last number is the one worth remembering — the
 The fifteen that remain go one at a time, each observed firing before the next
 is added.
 
-## Medium
-
 ### T-519 — Reachability is the one signal with no alert behind it
 
 **Gate: owner (Worker deploy)** — [ADR 0024](wiki/0024-edge-availability-probe.md);
@@ -521,9 +415,9 @@ Entra row below, which is where it belongs.
 | Item | Human action required | Safe repository-side state |
 | --- | --- | --- |
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
-| Frontend release | Approve whether releases remain manual or become push-triggered; provide/rotate the Static Web App deployment credential through the approved Azure/GitHub path | `deploy-azure-frontend.yml` stays dispatch-only |
+| Frontend release | Approve whether releases remain manual or become push-triggered. **The credential half of this row is closed (T-727, 2026-08-31):** the deploy mints its token from ARM per run under federated identity, and the stored secret is deleted — there is nothing left to provide or rotate | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | Decide whether to arm the remaining 15 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and proven. Separately deploy the edge probe before enabling its Terraform alert | The three proven timers remain armed; the other 15 remain no-ops. The Azure availability test remains disabled because Bot Fight Mode challenges Azure agents; T-519's Cloudflare Worker is the approved path around it and still needs an owner deployment |
+| Timers and the availability test | See items 3 and 4 above for the procedure and what success looks like. Decide whether to arm the remaining 15 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and proven. Separately deploy the edge probe before enabling its Terraform alert | The three proven timers remain armed; the other 15 remain no-ops. The Azure availability test remains disabled because Bot Fight Mode challenges Azure agents; T-519's Cloudflare Worker is the approved path around it and still needs an owner deployment |
 | Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |
@@ -594,7 +488,7 @@ or someone "fixes" it without knowing it was a choice.
 | Risk | Accepted | Reasoning, and what compensates |
 | --- | --- | --- |
 | **Key Vault purge protection is off** on `kv-site-prod-cus-01`, which holds 18 live secrets. Raised as Go-Live blocker B2 on 2026-08-24 | Owner, 2026-08-24 | Enabling it is a **one-way** switch: once on it cannot be turned off, a deleted vault can no longer be purged, and its name stays reserved for the retention period — which removes the teardown-and-recreate path a single-environment estate depends on. The secrets are seeded and resolving, so the exposure is not "unprotected during setup". Compensating control: soft delete at 90 days, which still makes an accidental delete recoverable. What is given up is protection against a *deliberate* purge by someone already holding the rights to perform one. Recorded in the same terms in `infra/variables.tf` and `infra/README.md` |
-| ~~**The Static Web Apps deployment token is a Terraform output** (`swa_token`)~~ Raised as T-722, 2026-08-28 | **CLOSED 2026-08-30 (T-727).** The output is deleted and the stored GitHub secret is unused; the deploy mints the token under federated identity. Not an accepted risk any more, and kept in this table only so the row does not appear to have been quietly dropped | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
+| ~~**The Static Web Apps deployment token is a Terraform output** (`swa_token`)~~ Raised as T-722, 2026-08-28 | **CLOSED (T-727).** The output was deleted on 2026-08-30 and the owner deleted the `AZURE_STATIC_WEB_APPS_API_TOKEN` secret on 2026-08-31; the deploy mints the token from ARM under federated identity, per run. No stored, non-expiring credential remains in this repository's secrets. Not an accepted risk any more, and kept in this table only so the row does not appear to have been quietly dropped | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
 | **`cloudflare_origin_secret` is a real shared-secret value in Terraform state.** Raised as T-723, 2026-08-28 | Recorded 2026-08-28 | Unavoidable rather than chosen: Terraform configures the Cloudflare end of the origin handshake, so the value has to pass through it. It was simply never written down, which is the part that is fixed here. **Rotation consequence, which is the reason this needs a record:** the value must change in three places in one window — the HCP Terraform workspace variable, Key Vault `CF-ORIGIN-SECRET`, and the Cloudflare transform rule Terraform writes — and a mismatch throws on *every anonymous request*, so a partial rotation is a full outage of the public API rather than a degradation. The companion exposure — the azapi read-back exporting the whole live app-settings map into state — is not accepted but *bounded*: it is safe only while every secret-shaped setting is a Key Vault reference, and `functions/src/functions/app-settings-secrets.test.js` now fails CI if one is not |
 
 ## Handling rules

@@ -1,8 +1,14 @@
 # Architecture review — 2026-08-28
 
+> **CLOSED 2026-08-31. This page is a dated record, not a live list.** All 62
+> findings are resolved or handed to the owner. The three that still need an
+> owner — `T-719`, `T-721` and `T-749` — are stated in full in
+> [TODO.md](../TODO.md) rather than by reference to this page, so nobody has to
+> read two documents to know what is open. Do not add findings here; a new
+> review is a new dated page.
+
 The review of record for the six-layer architecture review opened on
-2026-08-28. [TODO.md](../TODO.md) carries the open list and the priority
-ordering; this page carries the evidence, the failure mode, and the
+2026-08-28. This page carries the evidence, the failure mode, and the
 recommendation for each finding, organised by the layer an engineer would be
 working in rather than by severity.
 
