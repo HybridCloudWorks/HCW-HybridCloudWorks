@@ -61,15 +61,14 @@ and `Gate: owner` still marks the rest.
 | Priority | Open items |
 | --- | ---: |
 | Critical | 0 |
-| High | 2 |
+| High | 1 |
 | Medium | 3 |
 | Low | 1 |
-| Total | 6 |
+| Total | 5 |
 
-Four of the six are architecture-review findings still to be worked
-(`T-714`, two Medium — both owner-gated — and one Low). The other
-two are the pre-program platform gates: **T-518** (High) and **T-519**
-(Medium). Both carry **Gate: owner** and have no repository-side half — what is
+Three of the five are architecture-review findings still to be worked (two
+Medium — both owner-gated — and one Low). The other two are the pre-program
+platform gates: **T-518** (High) and **T-519** (Medium). Both carry **Gate: owner** and have no repository-side half — what is
 left of them is a Worker deployment and a set of feature flags, each needing
 tenant or edge access. They are listed anyway, because a tracker that omits
 them is quietly shorter than the truth.
@@ -253,11 +252,11 @@ Deliberately **not** re-reported, being owner gates rather than findings:
 T-518, T-519, the unseeded Key Vault secrets, the unseeded
 `admin_config` documents, and the absent analytics provider.
 
-### High — 1 of 12 open
+### High — 0 of 12 open
 
 | ID | Layer | Finding | Anchor |
 | --- | --- | --- | --- |
-| T-714 | frontend | **DONE 2026-08-30 — wired and verified in Chromium.** `main.jsx` hydrates when the mount point's `data-prerendered-route` stamp matches the live path, seeded from a JSON island the pre-renderer emits; otherwise it client-renders exactly as before. The stamp is what makes it safe: `navigationFallback` serves the home page's markup for every unprerendered path at HTTP 200, so hydrating on "the mount point has children" would have mismatched on every `/admin` route. Five Playwright tests drive a real browser, including a node-identity probe proving the server DOM is reused rather than coincidentally identical, and both guards are mutation-tested. `onRecoverableError` now reports a mismatch, which was silent in a production build. **Found on the way:** the canonical `<link>` interpolated the route unescaped while every tag beside it went through `escapeAttr`, so a slug could put a live element in `<head>`; routes come from content slugs via `manifest.routes`. Fixed in the same change. Original finding: **decided 2026-08-30** The 104 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`); the seed mechanism exists but is deliberately never mounted. What made this undecidable was that the hydration-mismatch risk could only be argued about — it is testable now, because Chromium and Playwright can drive the real pages and diff hydrated output against the prerendered HTML. Ships behind that verification or not at all. Removing the prerender path instead was rejected: it gives up first paint and crawler content to avoid a risk that can be measured | `main.jsx`, `hooks/prerenderData.js` |
+| T-714 | frontend | **DONE 2026-08-30 — wired and verified in Chromium.** `main.jsx` hydrates when the mount point's `data-prerendered-route` stamp matches the live path, seeded from `data-prerendered-seed` on that same element; otherwise it client-renders exactly as before. The seed started as a `<script type="application/json" id="__PRERENDER_DATA__">` island and moved onto the mount point because the island was clobberable: `getElementById` returns the first element with an id of any kind, and DOMPurify's default configuration — which every article body passes through — strips an injected `<script id="…">` but keeps an injected `<div id="…">`, which sits inside `#root` and would therefore have won. `<div id="root">` comes from the template, ahead of anything the pre-render puts inside it. Every `href`/`src` fed from content data also goes through `safeUrl` now, which is worth having on its own but is not what cleared CodeQL's 27 `js/xss-through-dom` alerts — the source change was. The stamp is what makes it safe: `navigationFallback` serves the home page's markup for every unprerendered path at HTTP 200, so hydrating on "the mount point has children" would have mismatched on every `/admin` route. Five Playwright tests drive a real browser, including a node-identity probe proving the server DOM is reused rather than coincidentally identical, and both guards are mutation-tested. `onRecoverableError` now reports a mismatch, which was silent in a production build. **Found on the way:** the canonical `<link>` interpolated the route unescaped while every tag beside it went through `escapeAttr`, so a slug could put a live element in `<head>`; routes come from content slugs via `manifest.routes`. Fixed in the same change. Original finding: **decided 2026-08-30** The 120 pre-rendered documents are discarded at boot (`createRoot`, not `hydrateRoot`); the seed mechanism exists but is deliberately never mounted. What made this undecidable was that the hydration-mismatch risk could only be argued about — it is testable now, because Chromium and Playwright can drive the real pages and diff hydrated output against the prerendered HTML. Ships behind that verification or not at all. Removing the prerender path instead was rejected: it gives up first paint and crawler content to avoid a risk that can be measured | `main.jsx`, `hooks/prerenderData.js` |
 
 ### Medium — 2 of 30 open
 
