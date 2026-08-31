@@ -49,7 +49,9 @@ and `Gate: owner` still marks the rest.
 > resources and restarts the function app, so auto-apply would restart
 > production on every merge — including documentation-only merges. A
 > single-operator estate gains little from removing the one deliberate pause,
-> and the 2026-08-30 session turned on reading a plan before it ran. The corrected claim was
+> and the 2026-08-30 session turned on reading a plan before it ran.
+>
+> The corrected claim was
 > read off the workspace configuration on 2026-08-30, after the earlier one was
 > used to explain the run list and explained it wrongly. Anyone reading the old
 > sentence would assume an apply was coming after a merge; several merged

@@ -166,8 +166,8 @@ async function main() {
 // does not, so the two URLs differ and main() silently never runs. The process
 // then exits 0 having checked nothing — a monitor reporting healthy because it
 // did not execute, which is the same failure this file's shape assertion
-// exists to prevent, one layer up. checked-invocation.test.mjs pins it by
-// spawning the script for real.
+// exists to prevent, one layer up. check-unresolved-secrets.invocation.test.mjs
+// pins it by spawning the script for real.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
