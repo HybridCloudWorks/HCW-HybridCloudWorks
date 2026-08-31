@@ -39,24 +39,53 @@ and `Gate: owner` still marks the rest.
 > **There is no deadline on this list any more.** The GCP deletion no longer
 > silences anything, which was the only time-bound consequence here.
 >
-> **The `hcw-azure` workspace is CLI-driven, with no VCS connection.** This
-> file claimed the opposite from 2026-08-26 until 2026-08-30 — "merged infra
-> code reaches HCP Terraform on its own" — and it does not. Merging infra code
-> queues nothing. A run exists only when someone starts one, and auto-apply is
-> off, so an apply additionally needs a confirmation. **That is now a decision
-> rather than a default (owner, 2026-08-30): applies stay manual.** Every run in
-> this workspace carries the permanent diff, which replaces three `azapi`
-> resources and restarts the function app, so auto-apply would restart
-> production on every merge — including documentation-only merges. A
-> single-operator estate gains little from removing the one deliberate pause,
-> and the 2026-08-30 session turned on reading a plan before it ran.
+> **The `hcw-azure` workspace HAS a VCS connection, and there is no CLI apply.**
+> Terraform said so itself on 2026-08-31, when the owner ran
+> `terraform -chdir=infra apply` at this file's instruction:
 >
-> The corrected claim was
-> read off the workspace configuration on 2026-08-30, after the earlier one was
-> used to explain the run list and explained it wrongly. Anyone reading the old
-> sentence would assume an apply was coming after a merge; several merged
-> changes sitting unapplied is what that assumption looks like from the
-> outside.
+> > Error: Apply not allowed for workspaces with a VCS connection
+> >
+> > A workspace that is connected to a VCS requires the VCS-driven workflow to
+> > ensure that the VCS remains the single source of truth.
+>
+> **This file has now been wrong about this twice, in opposite directions.** It
+> said "merged infra code reaches HCP Terraform on its own" from 2026-08-26 to
+> 2026-08-30; that was replaced on 2026-08-30 with "CLI-driven, with no VCS
+> connection", described as read off the workspace configuration. The
+> replacement was the wrong one, and the instruction that came with it — run
+> `terraform apply` from a desktop — cannot work at all.
+>
+> A second observable agrees: HCP Terraform posts a commit status
+> (`Terraform Cloud/hcw/repo-id-2153Zj6FyEd7RRFW`) on **every** pull-request
+> head — `success` on `main` at `d80f428`, `failure` on the T-727 branch from
+> the commit that added a role lookup. A workspace with no VCS connection does
+> not do that.
+>
+> **Auto-apply is OFF, read off the settings page on 2026-08-31.** Both
+> checkboxes — *Auto-apply API, UI, & VCS runs* and *Auto-apply run triggers* —
+> are unchecked, so "runs require operator approval". Execution mode is
+> `Remote`; working directory `infra`. Merging infra code queues a plan and
+> waits. That is worth stating precisely rather than loosely, because every run
+> here carries the permanent diff, which replaces three `azapi` resources and
+> restarts the function app: under auto-apply a merge would restart production
+> without asking.
+>
+> **HOW THIS FILE GOT IT WRONG TWICE, which is the part worth keeping.** The
+> workspace's **Description** field reads, verbatim:
+>
+> > Azure platform for HCWSite, from HybridCloudWorks/HCW-HybridCloudWorks
+> > (infra/). CLI-driven; no VCS connection.
+>
+> That is free text somebody typed into a box. It is not configuration, nothing
+> validates it against the connection, and it is stale. The 2026-08-30 entry
+> said its claim was "read off the workspace configuration"; it was read off
+> that sentence. A description contradicting its own workspace is worse than an
+> empty one, because it reads exactly like a setting.
+>
+> **Owner action, one field:** correct the description at
+> https://app.terraform.io/app/hcw/workspaces/hcw-azure/settings/general so the
+> next reader is not told the same thing — e.g. "VCS-connected to
+> HybridCloudWorks/HCW-HybridCloudWorks (infra/). Manual apply."
 
 | Priority | Open items |
 | --- | ---: |
@@ -156,8 +185,11 @@ engineering work on them is done.
      on this branch only until the merge, and `az` reports a missing file as
      `Failed to parse string as JSON` rather than as a missing file.
      `wiki/Cutover-Runbook.md` carries the fetch command.
-  2. `terraform -chdir=infra apply` — assigns that role to `github_deploy`,
-     scoped to the one Static Web App.
+  2. Merge the pull request. The assignment to `github_deploy`, scoped to the
+     one Static Web App, reaches Azure through the VCS-driven run — **not**
+     through `terraform apply`, which this workspace refuses. The run then
+     waits for approval, because auto-apply is off (see the status note at the
+     top of this file).
 
   Then the GitHub secret can be deleted; nothing reads it. Until step 1 runs,
   the deploy fails at the minting step with an error naming the missing role.

@@ -130,13 +130,24 @@ az role definition create --role-definition '@infra/roles/static-web-app-deploye
 Success echoes the definition back with `"roleName": "HCW Static Web App
 Deployer"` and an `"id"` ending in a GUID.
 
-```powershell
-terraform -chdir=infra apply
-```
+**The assignment reaches Azure by merging, not by `terraform apply`.** The
+`hcw-azure` workspace is VCS-connected and refuses a CLI apply outright:
 
-Run that from the repository root — `-chdir` is relative to where you are, so
-from inside `infra/` it looks for `infra/infra` and says the directory does not
-exist.
+> Error: Apply not allowed for workspaces with a VCS connection
+
+So step 2 is to merge the pull request carrying `infra/oidc.tf`, then watch the
+run in HCP Terraform:
+
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs
+
+Whether that run applies on its own or waits for a confirmation depends on the
+workspace's **Apply Method**, which is read here:
+
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/settings/general
+
+Read it before merging rather than after. Every run in this workspace carries
+the permanent diff, which replaces three `azapi` resources and restarts the
+function app — so on `Auto apply`, a merge restarts production without asking.
 
 The deploy mints its token from ARM under federated identity, so it needs that
 role assigned before its first run. Without it the job fails at the minting
