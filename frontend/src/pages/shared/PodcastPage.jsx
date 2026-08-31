@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import { useLocation } from 'react-router';
 import usePodcastData from '@/hooks/usePodcastData';
 import { useProvider, useProviderConfig } from '@/context/ProviderContext';
+import { safeUrl } from '@/lib/safeUrl';
 
 const PLATFORM_LOGOS = {
   spotify: '/icons/logos/spotify.png',
@@ -181,7 +182,7 @@ function EpisodeImage({ image, title, size = 'md', meta }) {
   if (image) {
     return (
       <img
-        src={image}
+        src={safeUrl(image)}
         alt={title}
         loading="lazy"
         decoding="async"
@@ -380,7 +381,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                       </span>
                     </button>
                     <a
-                      href={featured.mediaUrl || '#'}
+                      href={safeUrl(featured.mediaUrl, '#')}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
@@ -389,7 +390,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                       Download
                     </a>
                     <a
-                      href={featured.link || '#'}
+                      href={safeUrl(featured.link, '#')}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"

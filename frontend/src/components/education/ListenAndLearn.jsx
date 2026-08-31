@@ -16,6 +16,7 @@ import React, { useState } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublishedEpisodes, isSupportedPlatform } from '@/lib/listenAndLearn';
 import { resolveMediaUrl } from '@/lib/functionsBase';
+import { safeUrl } from '@/lib/safeUrl';
 
 const ACCENTS = {
   azure: {
@@ -116,7 +117,7 @@ function Episode({ episode, accent }) {
             {videos.map((video) => (
               <a
                 key={video.videoId}
-                href={video.url}
+                href={safeUrl(video.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`flex items-center gap-2 group rounded-lg px-2 py-1.5 border border-transparent ${accent.hover} transition-all`}

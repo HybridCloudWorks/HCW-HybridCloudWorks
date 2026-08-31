@@ -4,6 +4,7 @@ import { useGenerateCuratedImages } from '@/hooks/useGenerateCuratedImages';
 import { normalizePublicImageUrl } from '@/lib/blogUtils';
 import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
 import { resolveMediaUrl } from '../../lib/functionsBase';
+import { safeUrl } from '@/lib/safeUrl';
 
 // Pulls the WebP variants that match whichever imageUrl resolveImageUrl
 // picked. Returns null when the source doesn't carry variants.
@@ -182,7 +183,7 @@ const CuratedArticleCard = React.memo(({ article, index, generatedImageUrl }) =>
   return (
     <ScrollTrigger animation="slideUp" duration={0.4} delay={index * 0.03}>
       <a
-        href={externalUrl}
+        href={safeUrl(externalUrl)}
         target="_blank"
         rel="noopener noreferrer"
         className="group flex h-full flex-col rounded-2xl overflow-hidden transition-all duration-300 border

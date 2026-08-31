@@ -12,6 +12,7 @@ import ConfirmModal from '@/components/admin/ConfirmModal';
 import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { unpublishToInspected } from '@/lib/contentWorkflow';
+import { safeUrl } from '@/lib/safeUrl';
 import {
   getCanonicalContentType,
   getContentPublicPath,
@@ -162,7 +163,7 @@ function LiveItemRow({ item, onArchive, onUnpublish, actionId }) {
     <div className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-card hover:bg-muted/40 transition-colors">
       {coverUrl ? (
         <img
-          src={coverUrl}
+          src={safeUrl(coverUrl)}
           alt=""
           className="h-12 w-16 object-cover rounded shrink-0"
           loading="lazy"
@@ -193,7 +194,7 @@ function LiveItemRow({ item, onArchive, onUnpublish, actionId }) {
       <div className="flex items-center gap-1.5 shrink-0">
         {publicUrl && (
           <a
-            href={publicUrl}
+            href={safeUrl(publicUrl)}
             target="_blank"
             rel="noopener noreferrer"
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -292,7 +293,7 @@ function ArchiveRow({ item }) {
       </div>
       {publicUrl && (
         <a
-          href={publicUrl}
+          href={safeUrl(publicUrl)}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1 text-xs text-blue-500 hover:underline shrink-0"

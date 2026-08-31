@@ -12,6 +12,7 @@ import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentMode
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import { postJSON, getJSON } from '@/lib/api';
 import { toMillis } from '@/lib/dateUtils';
+import { safeUrl } from '@/lib/safeUrl';
 
 function getProvider(item) {
   return item['Cloud Provider'] || item.cloudProvider || item.provider || 'Unknown';
@@ -238,7 +239,7 @@ export default function LivePagesPage() {
                       </Badge>
                     </div>
                     <a
-                      href={liveUrl || '#'}
+                      href={safeUrl(liveUrl, '#')}
                       target={liveUrl ? '_blank' : undefined}
                       rel={liveUrl ? 'noreferrer' : undefined}
                       className={`mt-2 block truncate text-sm ${liveUrl ? 'text-blue-600 hover:underline' : 'text-muted-foreground'}`}
@@ -262,7 +263,7 @@ export default function LivePagesPage() {
                     </Button>
                     {liveUrl && (
                       <Button size="sm" asChild>
-                        <a href={liveUrl} target="_blank" rel="noreferrer">
+                        <a href={safeUrl(liveUrl)} target="_blank" rel="noreferrer">
                           <ExternalLink className="mr-2 h-4 w-4" />
                           Open Live Page
                         </a>
