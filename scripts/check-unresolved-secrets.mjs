@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
+
 // Report app settings whose Key Vault reference is NOT resolving (T-720).
 //
 // WHY THIS IS A WORKFLOW AND NOT THE ALERT RULE THE TRACKER ASKED FOR.
@@ -157,6 +159,15 @@ async function main() {
   process.exit(1);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL, not a `file://` template — matching check-tfc-plan.mjs:301.
+// Node resolves process.argv[1] to an absolute path, so the naive form does
+// match for an ordinary invocation. It stops matching when the path needs
+// escaping: pathToFileURL percent-encodes a space, and string concatenation
+// does not, so the two URLs differ and main() silently never runs. The process
+// then exits 0 having checked nothing — a monitor reporting healthy because it
+// did not execute, which is the same failure this file's shape assertion
+// exists to prevent, one layer up. checked-invocation.test.mjs pins it by
+// spawning the script for real.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
