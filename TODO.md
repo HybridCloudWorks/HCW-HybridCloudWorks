@@ -55,7 +55,7 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
-| 1 | `T-726` — the ruleset bypass | — | A GitHub App (chosen 2026-08-31); owner creates it, the workflow rework follows |
+| 1 | `T-726` — the ruleset bypass | — | Built; create the App, enable auto-merge, then drop the bypass actor |
 | 2 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
 | 3 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 2 |
 | 4 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
@@ -75,32 +75,48 @@ applied.
 
 ## What is open, and exactly what closes it
 
-### 1. T-726 — the ruleset bypass — the decision is made, the work is not
+### 1. T-726 — the App is built; two settings remain
 
-`publish-content-manifest.yml` commits to `main` nightly. For that push to land
-on a branch with twelve required contexts, the ruleset lists the Actions token
-as a bypass actor — and a bypass belongs to the **token**, not to a workflow, so
-every workflow holding `contents: write` can push past every check.
-`scripts/workflow-write-permissions.test.mjs` pins that set to a reviewed two,
-which bounds it without closing it.
+**The repository half is done (2026-08-31).** `publish-content-manifest.yml`'s
+`commit` job no longer pushes to `main`. It mints a GitHub App installation
+token, pushes a branch and opens a pull request that the required checks run on
+— which they do precisely because the pull request is not opened with
+`GITHUB_TOKEN`. The job's own permission is now `contents: read`, and
+`scripts/workflow-write-permissions.test.mjs` is down to one entry.
 
-**A GitHub App was chosen on 2026-08-31, over a deploy key and over accepting the
-risk.** The reasoning that decided it: the App's private key grants **push a
-branch and open a pull request**, and with the bypass removed even the App
-cannot merge past checks — so the credential it costs is strictly *less*
-powerful than the bypass it retires. A deploy key does not achieve that; it
-narrows who can use a bypass that still exists. Two costs, stated because they
-are real: one stored non-expiring key, and twelve checks running nightly on a
-data-file pull request that previously ran none.
+**Owner action 1 — create the App.** Organisation settings → Developer settings
+→ GitHub Apps → New GitHub App. Repository permissions: **Contents: Read and
+write** and **Pull requests: Read and write**, nothing else. No webhook. Install
+it on this repository only, then generate a private key.
 
-**Owner:** create the App in the organisation scoped to this repository, with
-`contents: write` and `pull_requests: write`; generate a private key; install
-it; store the App ID as a variable and the key as a secret.
+Store both here:
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/variables/actions
+— variable `MANIFEST_APP_ID` (the numeric App ID from the App's page), and at
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions
+— secret `MANIFEST_APP_PRIVATE_KEY` (the whole PEM, `-----BEGIN` line included).
 
-**Then:** the `commit` job mints an installation token, pushes a branch, opens a
-pull request and enables auto-merge — the checks run precisely because the pull
-request is not opened with `GITHUB_TOKEN`. After that, remove the Actions-token
-bypass from the ruleset, and the guard above drops to one entry.
+**Success:** the next nightly run that finds a change opens a pull request
+titled `chore: refresh content manifest (N article routes)`. Until both are set
+the job warns that the App is not configured and does nothing else — it does not
+fail.
+
+**Owner action 2 — enable auto-merge.**
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings → Pull
+Requests → **Allow auto-merge**. It was **off** when this was built, so without
+it the pull request opens and waits for you. The workflow reports that as a
+notice naming this setting rather than failing.
+
+**Then remove the bypass.** Once a manifest pull request has merged through the
+checks, the Actions token no longer needs to be a bypass actor on the ruleset:
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/rules — that
+is what actually closes T-726. Removing it before the App works would stop the
+nightly refresh landing at all, so it goes last.
+
+**What this cost, stated plainly:** one stored non-expiring App private key. It
+grants push-a-branch and open-a-pull-request on this repository and cannot merge
+past a check — strictly less than the bypass it retires, which is why it was
+chosen over a deploy key (repository-wide, also stored, and the bypass survives)
+and over accepting the risk.
 
 ### 2. T-719 — the cap is binding, measured 2026-08-31
 

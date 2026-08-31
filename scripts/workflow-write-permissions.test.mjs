@@ -3,19 +3,21 @@
  *
  * ## The exposure this bounds
  *
- * `publish-content-manifest.yml` commits a refreshed manifest to `main`. For
- * that push to land on a branch protected by twelve required contexts, the
- * ruleset must list the Actions token as a bypass actor — and a ruleset bypass
- * is granted to the TOKEN, not to a workflow. So **every** workflow holding
- * `contents: write` can push to `main` past every required check. That is
- * T-726, and it is not closed by this file.
+ * A ruleset bypass is granted to the TOKEN, not to a workflow. So while the
+ * ruleset lists the Actions token as a bypass actor, **every** workflow holding
+ * `contents: write` can push to `main` past every required check.
  *
- * What this file does is bound it. The bypass is unavoidable while the manifest
- * is committed at all, but the set of workflows that can USE it does not have
- * to be open-ended. Pinned here, adding one becomes a reviewed change with a
- * justification, instead of a line in an unrelated pull request that nobody
- * reads as a security decision — which is exactly how this kind of grant
- * spreads.
+ * THE BYPASS IS NO LONGER NEEDED, as of 2026-08-31.
+ * `publish-content-manifest.yml` was the only thing that required it, and its
+ * `commit` job now opens a pull request with a GitHub App installation token
+ * instead of pushing — so the checks run rather than being skipped. Removing
+ * the bypass actor from the ruleset is an owner action, and until it happens
+ * this file is still the thing bounding the blast radius.
+ *
+ * Either way the list earns its keep: pinned here, adding a `contents: write`
+ * grant becomes a reviewed change with a justification, instead of a line in an
+ * unrelated pull request that nobody reads as a security decision — which is
+ * exactly how this kind of grant spreads.
  *
  * ## Why a text scan and not a YAML parse
  *
@@ -46,17 +48,21 @@ const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), '..', '.github',
  */
 const ALLOWED = new Map([
   [
-    'publish-content-manifest.yml',
-    'The `commit` job commits frontend/data/content-manifest.json on the nightly ' +
-      'refresh. It holds no Azure identity and runs no npm install — the `build` ' +
-      'job that talks to Cosmos holds `contents: read` (T-726).',
-  ],
-  [
     'sync-wiki.yml',
     'Publishes wiki/ to the repository wiki. The wiki is a separate git ' +
       'repository, but the grant is repository-scoped and therefore counts here.',
   ],
 ]);
+
+/**
+ * `publish-content-manifest.yml` left this list on 2026-08-31 and should not
+ * come back to it. Its `commit` job now holds `contents: read` and does its
+ * writing with a GitHub App installation token, which opens a pull request that
+ * the required checks run on. Re-adding the grant there would restore the thing
+ * T-726 removed — the ability to push to main past every check — so if a future
+ * change makes this test fail on that file, the question to ask is why the App
+ * path stopped working, not whether to widen the list.
+ */
 
 /** Tolerant on purpose — see the header. */
 const GRANT = /contents\s*:\s*['"]?write['"]?/;
