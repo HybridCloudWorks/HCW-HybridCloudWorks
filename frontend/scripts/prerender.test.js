@@ -11,7 +11,14 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { splitHead, injectIntoTemplate, canonicalFor, socialTags } from './prerender.mjs';
+import {
+  splitHead,
+  injectIntoTemplate,
+  canonicalFor,
+  socialTags,
+  seedScript,
+  SEED_ELEMENT_ID,
+} from './prerender.mjs';
 // Imported rather than read from a path: under Vitest `import.meta.url` is a
 // Vite module id, not a file: URL, so fileURLToPath on it throws.
 import swaConfig from '../staticwebapp.config.json';
@@ -67,8 +74,50 @@ describe('splitHead', () => {
 
 describe('injectIntoTemplate', () => {
   it('renders the body into the mount point, keeping the id for hydration', () => {
-    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>hello</p>' });
-    expect(html).toContain('<div id="root"><p>hello</p></div>');
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>hello</p>' }, '/about');
+    expect(html).toContain('<p>hello</p></div>');
+    expect(html).toContain('id="root"');
+  });
+
+  // THE STAMP IS WHAT MAKES HYDRATION SAFE (T-714). navigationFallback serves
+  // /index.html — the home page's markup — for any path without a file of its
+  // own, at HTTP 200. Without a stamp to compare against, main.jsx would
+  // hydrate the admin tree against the home page DOM on every /admin route.
+  it('stamps the mount point with the route it rendered', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/aws/blog/thing');
+    expect(html).toContain('data-prerendered-route="/aws/blog/thing"');
+  });
+
+  // This assertion failed when it was written, and NOT on the stamp: it matched
+  // the canonical link, which interpolated the route raw while every other tag
+  // beside it went through escapeAttr. A route of `/a"><script>x` closed the
+  // href and put a live element in <head>. Kept as one test because it is one
+  // property — no route reaches the document unescaped, by any path.
+  it('lets no route break out of an attribute, in the stamp or the canonical', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a"><script>x');
+    expect(html).not.toContain('"><script>x');
+    expect(html).toContain('&quot;');
+
+    const [, stamp] = /data-prerendered-route="([^"]*)"/.exec(html) || [];
+    expect(stamp).toBeTruthy();
+    expect(stamp).not.toContain('<');
+
+    const [, canonical] = /rel="canonical" href="([^"]*)"/.exec(html) || [];
+    expect(canonical).toBeTruthy();
+    expect(canonical).not.toContain('<');
+  });
+
+  it('emits no seed island for a route that was given no data', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/about', null);
+    expect(html).not.toContain(SEED_ELEMENT_ID);
+  });
+
+  it('emits the seed island for a route that was given data', () => {
+    const seed = { 'article:x': { title: 'T' } };
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/a/blog/x', seed);
+    expect(html).toContain(SEED_ELEMENT_ID);
+    const [, json] = new RegExp(`id="${SEED_ELEMENT_ID}">(.*?)</script>`, 's').exec(html);
+    expect(JSON.parse(json)).toEqual(seed);
   });
 
   it('REPLACES the template title rather than adding a second one', () => {
@@ -255,5 +304,39 @@ describe('article detail routes', () => {
     const head = '<meta property="og:image" content="https://cdn.example/hero.png" />';
     const tags = socialTags(head, '/aws/blog/my-post', 'A | HCW');
     expect(tags).not.toContain('og:image');
+  });
+});
+
+describe('seedScript', () => {
+  it('is empty for no seed, so nothing is emitted', () => {
+    expect(seedScript(null)).toBe('');
+  });
+
+  // The one way a JSON island can still break out of its own script element.
+  // Content is author-written article HTML, so a literal </script> inside it is
+  // not a hypothetical.
+  it('escapes < so an embedded </script> cannot close the element early', () => {
+    const evil = { 'article:x': { body: '</script><img src=x onerror=alert(1)>' } };
+    const out = seedScript(evil);
+    expect(out).not.toContain('</script><img');
+    const json = out.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, '');
+    expect(JSON.parse(json)).toEqual(evil);
+  });
+
+  // THE CONTRACT WITH main.jsx. The id is agreed in two files; changing one
+  // without the other does not break the page, it silently stops hydration and
+  // goes back to discarding the pre-rendered DOM — the exact bug T-714 exists
+  // for, reintroduced invisibly.
+  it('uses the id main.jsx looks for', () => {
+    const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    expect(mainJsx).toContain(`const SEED_ELEMENT_ID = '${SEED_ELEMENT_ID}'`);
+  });
+
+  it('agrees with main.jsx on the stamp attribute name', () => {
+    const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    // dataset.prerenderedRoute is the DOM spelling of data-prerendered-route.
+    expect(mainJsx).toContain('dataset.prerenderedRoute');
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/');
+    expect(html).toContain('data-prerendered-route=');
   });
 });

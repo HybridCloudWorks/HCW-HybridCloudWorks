@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppWrapper from '@/App';
 import { HelmetProvider } from 'react-helmet-async';
+import { PrerenderDataContext } from '@/hooks/prerenderData';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
@@ -13,10 +14,95 @@ if (!rootElement) {
   throw new Error('Root element not found. Make sure you have a div with id="root" in your HTML.');
 }
 
-ReactDOM.createRoot(rootElement).render(
+/** Must match SEED_ELEMENT_ID in scripts/prerender.mjs. */
+const SEED_ELEMENT_ID = '__PRERENDER_DATA__';
+
+/** `/about/` and `/about` are the same route; `/` stays `/`. */
+function normalizePath(value) {
+  if (!value) return '/';
+  const trimmed = String(value).replace(/\/+$/, '');
+  return trimmed === '' ? '/' : trimmed;
+}
+
+/**
+ * The data the pre-renderer used, or null.
+ *
+ * A malformed island is treated as absent rather than fatal. It would mean the
+ * build wrote something JSON.parse rejects, which is a build bug — but taking
+ * the whole site down in the browser is a strictly worse response than
+ * rendering it the way it rendered before any of this existed.
+ */
+function readSeed() {
+  const el = document.getElementById(SEED_ELEMENT_ID);
+  if (!el?.textContent) return null;
+  try {
+    return JSON.parse(el.textContent);
+  } catch (error) {
+    console.error('Pre-render seed could not be parsed; falling back to a client render.', error);
+    return null;
+  }
+}
+
+/**
+ * Is the markup in this document actually for the URL being displayed?
+ *
+ * THE QUESTION IS NOT "was anything pre-rendered". staticwebapp.config.json's
+ * navigationFallback serves /index.html — the pre-rendered HOME PAGE — for any
+ * path without a file of its own, at HTTP 200. Every /admin route and anything
+ * added to the router but not to the pre-render list arrives that way. Asking
+ * only whether the mount point has children would hydrate the admin tree
+ * against the home page's DOM on every one of them.
+ *
+ * So the pre-renderer stamps the route it rendered and this compares it to the
+ * live path. A mismatch is not an error: it is the fallback working as
+ * designed, and the answer is a normal client render.
+ */
+function prerenderedForThisUrl() {
+  const stamped = rootElement.dataset.prerenderedRoute;
+  if (!stamped) return false;
+  if (!rootElement.firstChild) return false;
+  return normalizePath(stamped) === normalizePath(window.location.pathname);
+}
+
+const seed = readSeed();
+
+const tree = (
   <React.StrictMode>
     <HelmetProvider>
-      <AppWrapper />
+      {/*
+        In a client render this provider holds null and usePrerenderedData
+        returns undefined for every key — identical to having no provider at
+        all, which is what main.jsx did before. On a hydrated page it holds the
+        same object the pre-render used, which is the whole point: the first
+        client render has to produce the tree that is already in the DOM, and
+        usePublicData fetches in an effect that has not run yet.
+      */}
+      <PrerenderDataContext.Provider value={seed}>
+        <AppWrapper />
+      </PrerenderDataContext.Provider>
     </HelmetProvider>
   </React.StrictMode>
 );
+
+/**
+ * A hydration mismatch is otherwise SILENT in a production build.
+ *
+ * React recovers by discarding the server markup and client-rendering, so the
+ * page looks right and the 104 pre-rendered documents are quietly wasted —
+ * which is indistinguishable from the createRoot behaviour this replaces. That
+ * is exactly how this could regress without anyone noticing, so it is reported
+ * rather than swallowed. e2e/hydration.spec.js fails on it.
+ */
+function onRecoverableError(error, errorInfo) {
+  console.error(
+    '[hydration] React recovered from an error',
+    error,
+    errorInfo?.componentStack || ''
+  );
+}
+
+if (prerenderedForThisUrl()) {
+  ReactDOM.hydrateRoot(rootElement, tree, { onRecoverableError });
+} else {
+  ReactDOM.createRoot(rootElement).render(tree);
+}
