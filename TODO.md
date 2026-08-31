@@ -26,7 +26,14 @@ and `Gate: owner` still marks the rest.
 > has not refreshed since 2026-08-23: the route that feeds it was merged on
 > 2026-08-30 and the Function App has not been deployed since 01:21 UTC that
 > morning, an hour and a half before the merge. The nightly job has failed with
-> a 404 twice. Every other item is a decision or a measurement with no deadline.
+> a 404 twice.
+>
+> **And one is a detection gap that was being reported as closed.** The hourly
+> registration monitor is delivered by GitHub 22% of the time, with a 12.7-hour
+> worst-case blind window — measured 2026-08-31, over the workflow's whole life.
+> The fast half of that pair, the Cloudflare probe, is deployed but its alert is
+> not armed. That is item 6, and it is why item 6 is no longer Medium. The
+> remaining items are decisions or measurements with no deadline.
 >
 > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
 > resolved or carried below as owner gates. The per-finding record — method,
@@ -65,7 +72,7 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | 3 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
 | 4 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 3 |
 | 5 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 6 | `T-519` — arm the reachability alert | Medium | One query, then one variable |
+| 6 | `T-519` — arm the reachability alert | **High** | One query, then one variable |
 
 Item 1 is a dispatch. Item 2 carries no severity because it is not a review
 finding: it is an owner action left behind by a finding that is closed. Item 3
@@ -75,6 +82,13 @@ one query followed by one variable.
 Items 1 and 2 are two halves of the same night's work and are listed separately
 on purpose. Item 1 is why the job fails today; item 2 is why it could not have
 committed anything even if it had succeeded.
+
+**Item 6 moved from Medium to High on 2026-08-31**, on a measurement rather than
+a judgement: `monitor-functions-registered.yml` asks GitHub for an hourly run
+and GitHub delivers 22% of them, with a worst observed blind window of 12.7
+hours. The Cloudflare probe is the half of that pair GitHub cannot drop, and it
+is not armed. The work is unchanged — one query, then one variable — but it is
+no longer polish on something finished.
 
 **Closed on 2026-08-31 and removed from this list:** seeding `TFC_TOKEN` (done),
 and `T-749`, the SCM lock — Terraform owns
@@ -369,9 +383,34 @@ watch the volume with it.
 
 ### 6. T-519 — the probe is deployed; arm the alert once a row lands
 
-The Cloudflare Worker was deployed on 2026-08-31 and runs on `*/5 * * * *`.
-Every other alert needs the app healthy enough to emit telemetry; this is the
-only signal that survives the app being down.
+**Raised in importance on 2026-08-31, on a measurement rather than an opinion.**
+This item read as the last polish on a finished piece of work. It is not: it is
+what closes a real detection gap, because the other half of the pair is not
+delivering.
+
+`monitor-functions-registered.yml` asks GitHub for a run every hour at `:41`.
+Over the 132 hours from 08-26 08:23 to 08-31 20:23, on a cron that never
+changed, **29 of 133 slots produced a run — 22%.** When one lands it is a median
+36 minutes late; only 3 of 29 arrived within 5 minutes. The longest window with
+no check at all was **12.7 hours**, and three separate gaps ran over 10. That is
+one check every 4.6 hours on average, against a header that claimed hourly.
+
+It is not one workflow being unlucky. `monitor-unresolved-secrets.yml`
+(`29 */6 * * *`, added 08-30) has produced 2 runs where about 8 were due, and
+`publish-content-manifest.yml` (`15 6 * * *`) has landed anywhere from 07:05 to
+18:37. GitHub documents that `schedule` is delayed under load and that delayed
+runs are dropped rather than queued; nothing in the repository can fix that.
+
+**Which is why the probe matters more than it looked.** The Cloudflare Worker
+was deployed on 2026-08-31 and runs on `*/5 * * * *` — a scheduler GitHub has no
+say in. `worker.js` records `success = res.status === 200`, so an unregistered
+host, which 404s every route including `/api/health`, is caught twelve times an
+hour instead of once every 4.6. Every other alert needs the app healthy enough
+to emit telemetry; this is the only signal that survives the app being down.
+
+The two are meant to be a pair — the probe notices fast, the GitHub monitor
+names which condition — and **until this is armed only the slow, unreliable half
+is live.**
 
 Confirm a result landed — ingestion lags a few minutes:
 

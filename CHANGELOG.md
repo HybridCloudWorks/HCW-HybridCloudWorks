@@ -152,6 +152,46 @@ This project has not cut a tagged release; entries are grouped under
   absent from the deployed revision, because `Monitor Functions Registered`
   counts functions and a count cannot see a missing one.
 
+- **The hourly registration monitor is delivered 22% of the time, and its
+  header said otherwise (T-519).** `monitor-functions-registered.yml` asks
+  GitHub for a run at `:41` every hour. Measured across the 132 hours from
+  2026-08-26 08:23 to 08-31 20:23 — the workflow's whole life, on a cron that
+  never changed — **29 of 133 slots produced a run.** When one lands it is a
+  median 36 minutes late; only 3 of 29 arrived within 5 minutes of `:41`. The
+  longest window with no check at all was **12.7 hours**, and three separate
+  gaps ran over 10. One check every 4.6 hours, from a workflow documented as
+  hourly.
+
+  The header had claimed "an hour of detection latency on a personal site is
+  not the binding constraint." The premise was never true on this repository,
+  and the reason it survived is worth keeping: it reasoned from the cron
+  expression rather than from the run history the cron produced. A schedule is
+  a request, not a guarantee, and nothing had ever compared the two.
+
+  Not one unlucky workflow. `monitor-unresolved-secrets.yml` (`29 */6 * * *`,
+  added 08-30) has produced 2 runs where about 8 were due;
+  `publish-content-manifest.yml` (`15 6 * * *`) has landed anywhere from 07:05
+  to 18:37. GitHub documents that `schedule` is delayed under load and that
+  delayed runs are dropped rather than queued. Nothing in this repository can
+  fix that, so nothing here tries.
+
+  **What changes instead is which half of the pair is treated as load-bearing.**
+  This workflow checks the CAUSE — function count, `AzureWebJobsStorage`,
+  `RUNTIME_CONFIG_WRITER`, firewall posture. The SYMPTOM is watched by
+  `edge/availability-probe`, a Cloudflare Worker on a 5-minute cron that GitHub
+  has no say in; `worker.js` records `success = res.status === 200`, so an
+  unregistered host — which 404s every route including `/api/health` — is caught
+  twelve times an hour rather than once every 4.6. That probe's alert is gated
+  on `availability_probe_alert_enabled`, which is still false, so today only the
+  slow, unreliable half is live. `TODO.md` raises arming it from Medium to High
+  on that basis, and the workflow header now carries the measurement, the
+  correction, and the dependency.
+
+  The budget argument was wrong too, in the direction that mattered less: it
+  read "~720 minutes a month" assuming every firing lands. At 29 runs per 5.5
+  days the real cost is about 160. Lowering the cron would buy nothing —
+  delivery rate is the constraint, not the requested rate.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up

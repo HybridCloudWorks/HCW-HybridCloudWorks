@@ -42,12 +42,51 @@
 # deliberately does not route through ag-plat-prod-cus-01: that path depends on
 # the subscription this job exists to watch.
 #
-# HOURLY, and the number is a budget decision rather than a detection one.
-# GitHub bills Actions by the minute and rounds up per job, so hourly is ~720
-# minutes a month against the free allowance, alongside heal-computed-properties
-# (every 6h) and publish-content-manifest (daily). Every 30 minutes would double
-# it. Tighten the cron if the allowance allows; an hour of detection latency on
-# a personal site is not the binding constraint.
+# THE CRON SAYS HOURLY. GITHUB DELIVERS ABOUT A FIFTH OF THAT.
+#
+# Measured 2026-08-31 over the 132 hours from 08-26 08:23 to 08-31 20:23, the
+# whole life of this workflow at an unchanged `41 * * * *`:
+#
+#   133 :41 slots in the window, 29 produced a run  ->  22% delivered
+#   when one lands, it is a median 36 minutes late (min 0, max 59)
+#   only 3 of 29 arrived within 5 minutes of :41
+#   longest window with no check at all: 12.7 hours (08-28 06:20 -> 19:00)
+#   three separate gaps over 10 hours
+#
+# So this ran every 4.6 hours on average, not hourly. It is not specific to this
+# workflow: monitor-unresolved-secrets.yml (`29 */6 * * *`, added 08-30) has
+# produced 2 runs where ~8 were due, and publish-content-manifest.yml (`15 6 * * *`)
+# has landed anywhere from 07:05 to 18:37. GitHub documents that `schedule` can
+# be delayed under load and that delayed runs are DROPPED rather than queued;
+# what the numbers add is how much, on this repository, on a free allowance.
+#
+# WHAT THAT MEANS FOR THE CLAIM ABOVE, which used to end this paragraph: "an
+# hour of detection latency on a personal site is not the binding constraint."
+# The premise was never true here. The real figure is up to 12.7 hours observed,
+# and it was never checked against the run history — the sentence reasoned from
+# the cron rather than from what the cron produced.
+#
+# WHY THAT IS TOLERABLE, AND EXACTLY WHEN IT STOPS BEING. This is the CAUSE
+# check. The SYMPTOM is watched by edge/availability-probe, a Cloudflare Worker
+# on a 5-minute cron that GETs /api/health and records success only on a 200 —
+# so an unregistered host, which 404s every route including that one, shows up
+# there twelve times an hour on a scheduler GitHub cannot drop. Two independent
+# schedulers is the right shape: this one names WHICH condition (function count,
+# AzureWebJobsStorage, RUNTIME_CONFIG_WRITER, firewall posture), and the probe
+# notices FAST.
+#
+# The probe's alert is armed by `availability_probe_alert_enabled`, and it was
+# still false when this was written (TODO.md, T-519). Until it is set, nothing
+# pages on the symptom and this workflow is in practice the only thing that
+# would notice — at 22% delivery and a 12.7-hour worst case. That is the gap,
+# and arming the probe alert closes it; nothing about this file can.
+#
+# THE BUDGET NUMBER WAS ALSO WRONG, in the direction that mattered less. It read
+# "~720 minutes a month", assuming every firing lands. At 29 runs per 5.5 days,
+# each billed as one rounded-up minute, the real cost is about 160 minutes a
+# month. Lowering the cron would not buy anything worth having: delivery rate is
+# the constraint, not the requested rate, and asking for less can only deliver
+# less.
 #
 # NO `environment:` KEY — declaring one changes the OIDC subject from
 # repo:<org>/<repo>:ref:<ref> to :environment:<name>, which the branch
