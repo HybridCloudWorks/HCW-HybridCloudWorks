@@ -1,0 +1,14 @@
+{
+  "Name": "HCW Static Web App Deployer",
+  "IsCustom": true,
+  "Description": "List the deployment token for static sites in rg-web-site-prod-cus. Microsoft.Web/staticSites/listSecrets/action is an action rather than a read, so no built-in read role reaches it, and the built-ins that do (Contributor, Website Contributor) also grant write over the resource. This is what lets deploy-azure-frontend.yml mint the token at deploy time under federated identity instead of holding it as a long-lived GitHub secret and a Terraform output (T-727). It grants nothing else: the holder cannot create, configure, or delete a static site. Consumed by infra/oidc.tf; created once by the owner because the Terraform identity deliberately lacks Microsoft.Authorization/roleDefinitions/write.",
+  "Actions": [
+    "Microsoft.Web/staticSites/listSecrets/action"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/b9e02281-ebb6-49e9-bd7b-f275b1350726/resourceGroups/rg-web-site-prod-cus"
+  ]
+}

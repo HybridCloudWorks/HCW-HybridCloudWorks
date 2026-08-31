@@ -3,14 +3,24 @@
 # Used by CI/CD workflows and application configuration.
 #
 # SECURITY NOTE: Sensitive key/connection-string outputs are intentionally
-# omitted, with ONE recorded exception — `swa_token` below. All *runtime* access
+# omitted, and as of 2026-08-30 there are NO exceptions. All *runtime* access
 # uses managed identity + RBAC; no static key is passed to application code.
 # See Required-Inputs for the full secrets catalog.
 #
-# The exception is stated here rather than left to be discovered, because this
-# sentence used to read as an unqualified "no key outputs exist" eleven lines
-# above one that does (T-722). A security note that a reader can falsify by
-# scrolling is worse than no note: it teaches them not to trust the next one.
+# There was one, and the history is worth keeping because the note is only
+# trustworthy if its corrections are visible. `swa_token` exported the Static
+# Web App deployment key here from the beginning; T-722 caught that this
+# paragraph read as an unqualified "no key outputs exist" eleven lines above one
+# that did, and the sentence was amended to name the exception rather than be
+# falsifiable by scrolling. T-727 then retired the output itself:
+# deploy-azure-frontend.yml now mints the token from ARM under federated
+# identity at deploy time, so nothing needs it exported.
+#
+# ONE THING THIS DOES NOT CLAIM. The token still exists in Terraform state, via
+# `azurerm_static_web_app.hcw.api_key`, because that is an attribute of a
+# resource this module manages. Removing the output removed its exposure on the
+# HCP Terraform Outputs tab and the long-lived GitHub secret beside it. It did
+# not remove the credential from state, and no output block ever could.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -19,30 +29,6 @@
 output "swa_hostname" {
   description = "Default hostname of the Azure Static Web App (also the Cloudflare CNAME target)"
   value       = azurerm_static_web_app.hcw.default_host_name
-}
-
-# THE RECORDED EXCEPTION to the header's rule (T-722).
-#
-# This is the estate's last long-lived credential; everything else a workflow
-# uses is federated OIDC. `sensitive` keeps it out of logs and plan output, but
-# it is still surfaced on the HCP Terraform Outputs tab to anyone with state
-# read, and it is consumed by GitHub Actions as exactly the kind of static
-# credential the IaC standard's Principle 2 prohibits.
-#
-# Kept because removing it does not remove the credential: the token exists in
-# state via `azurerm_static_web_app.hcw.api_key` whatever this block says, and
-# `deploy-azure-frontend.yml` has no other way to authenticate today. Deleting
-# the output alone would hide it rather than retire it.
-#
-# Retiring it means moving the SWA deploy to OIDC, which is owner-gated and
-# tracked as T-727. Until then it is an accepted exception recorded in
-# TODO.md's accepted-risks table, in the same terms as Key Vault purge
-# protection — and the deploy workflow now at least isolates it in a job that
-# installs nothing.
-output "swa_token" {
-  description = "Deployment token (API key) for Static Web App deployment (used in GitHub Actions). Accepted exception to the no-key-outputs rule — see TODO.md accepted risks and TODO.md T-727."
-  value       = azurerm_static_web_app.hcw.api_key
-  sensitive   = true
 }
 
 # -----------------------------------------------------------------------------

@@ -135,15 +135,35 @@ engineering work on them is done.
   every workflow with `contents: write` can push past all checks. Narrow the
   bypass to a deploy key scoped to `frontend/data/content-manifest.json`, or
   replace the push with an auto-merging pull request.
-- **Retire the SWA token (T-727) — decided 2026-08-30: move the deploy to
-  OIDC.** It is the estate's last long-lived credential; everything else a
-  workflow uses is federated. The isolation job that installs nothing was a
-  fence, not a fix, and the environment-secret alternative was rejected because
-  it keeps the credential *and* depends on the `production` deployment-branch
-  rule that is still unset — two owner actions instead of one, for a weaker
-  result. OIDC is the only option that lets the `outputs.tf` exception be
-  deleted rather than documented. The owner action is one federated
-  credential.
+- **Retire the SWA token (T-727) — decided and BUILT 2026-08-30.** The
+  repository half is done: `deploy-azure-frontend.yml` mints the deployment
+  token from ARM under federated identity at deploy time, the `swa_token`
+  Terraform output is deleted, and `AZURE_STATIC_WEB_APPS_API_TOKEN` is no
+  longer read by anything.
+
+  **No new federated credential was needed.** The deploy job already declares
+  `environment: production`, and `github_deploy` already holds
+  `repo:<org>/<repo>:environment:production` plus its immutable form
+  (`infra/oidc.tf:153-167`). The estimate of "one federated credential" was
+  wrong in the owner's favour.
+
+  **Two owner actions, in this order:**
+
+  1. `az role definition create --role-definition @infra/roles/static-web-app-deployer.json`
+     — the Terraform identity deliberately lacks
+     `Microsoft.Authorization/roleDefinitions/write`, so a definition it
+     consumes has to exist first or the apply fails on Microsoft.Authorization
+     rather than on the feature.
+  2. `terraform -chdir=infra apply` — assigns that role to `github_deploy`,
+     scoped to the one Static Web App.
+
+  Then the GitHub secret can be deleted; nothing reads it. Until step 1 runs,
+  the deploy fails at the minting step with an error naming the missing role.
+
+  **What this does not claim.** The token still exists in Terraform state as an
+  attribute of `azurerm_static_web_app.hcw`, which no output block could ever
+  have changed. What is retired is its exposure on the HCP Terraform Outputs
+  tab and its life as a stored, non-expiring GitHub secret.
 - **A TFC API token for the plan assertion (from T-724).**
   `scripts/assert-expected-plan.mjs` fails when a plan contains anything but the
   known permanent diff, but the plan lives in HCP Terraform and
@@ -495,7 +515,7 @@ or someone "fixes" it without knowing it was a choice.
 | Risk | Accepted | Reasoning, and what compensates |
 | --- | --- | --- |
 | **Key Vault purge protection is off** on `kv-site-prod-cus-01`, which holds 18 live secrets. Raised as Go-Live blocker B2 on 2026-08-24 | Owner, 2026-08-24 | Enabling it is a **one-way** switch: once on it cannot be turned off, a deleted vault can no longer be purged, and its name stays reserved for the retention period — which removes the teardown-and-recreate path a single-environment estate depends on. The secrets are seeded and resolving, so the exposure is not "unprotected during setup". Compensating control: soft delete at 90 days, which still makes an accidental delete recoverable. What is given up is protection against a *deliberate* purge by someone already holding the rights to perform one. Recorded in the same terms in `infra/variables.tf` and `infra/README.md` |
-| **The Static Web Apps deployment token is a Terraform output** (`swa_token`), which `outputs.tf`'s own header otherwise says does not exist. Raised as T-722, 2026-08-28 | **Resolved by decision 2026-08-30: retire it via OIDC (T-727).** No longer an accepted risk — an accepted risk is one nobody intends to fix, and this one now has a chosen fix and a named owner action | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
+| ~~**The Static Web Apps deployment token is a Terraform output** (`swa_token`)~~ Raised as T-722, 2026-08-28 | **CLOSED 2026-08-30 (T-727).** The output is deleted and the stored GitHub secret is unused; the deploy mints the token under federated identity. Not an accepted risk any more, and kept in this table only so the row does not appear to have been quietly dropped | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
 | **`cloudflare_origin_secret` is a real shared-secret value in Terraform state.** Raised as T-723, 2026-08-28 | Recorded 2026-08-28 | Unavoidable rather than chosen: Terraform configures the Cloudflare end of the origin handshake, so the value has to pass through it. It was simply never written down, which is the part that is fixed here. **Rotation consequence, which is the reason this needs a record:** the value must change in three places in one window — the HCP Terraform workspace variable, Key Vault `CF-ORIGIN-SECRET`, and the Cloudflare transform rule Terraform writes — and a mismatch throws on *every anonymous request*, so a partial rotation is a full outage of the public API rather than a degradation. The companion exposure — the azapi read-back exporting the whole live app-settings map into state — is not accepted but *bounded*: it is safe only while every secret-shaped setting is a Key Vault reference, and `functions/src/functions/app-settings-secrets.test.js` now fails CI if one is not |
 
 ## Handling rules

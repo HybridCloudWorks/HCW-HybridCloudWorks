@@ -311,6 +311,48 @@ resource "azurerm_role_assignment" "github_reader_function_settings" {
   principal_id       = azurerm_user_assigned_identity.github_reader.principal_id
 }
 
+# The deployment token, minted at deploy time instead of stored (T-727).
+#
+# Azure/static-web-apps-deploy CANNOT authenticate with a federated credential.
+# That is not an oversight in this workflow: azure/static-web-apps#1304 is an
+# open request asking Microsoft for exactly that, and until it lands the action
+# takes a deployment token or nothing. So "move the SWA deploy to OIDC" cannot
+# mean "stop using the token" — it means stop STORING it.
+#
+# What that changes, precisely, because the difference is easy to overstate:
+#
+#   - Retired: the `swa_token` Terraform output, visible on the HCP Terraform
+#     Outputs tab to anyone with state read, and the long-lived
+#     AZURE_STATIC_WEB_APPS_API_TOKEN GitHub secret. Neither exists after this.
+#   - Unchanged: the token still exists in Terraform state via
+#     azurerm_static_web_app.hcw.api_key, which is an attribute of the resource
+#     and cannot be removed while the resource is managed here. outputs.tf said
+#     this before the retirement and it is still true after it.
+#
+# The job now asks ARM for the token under the same federated identity it
+# already uses, and it lives for the length of one run.
+#
+# WHY A CUSTOM ROLE. Microsoft.Web/staticSites/listSecrets/action is an action,
+# not a read, so Reader cannot express it — the same shape as the function
+# settings reader above. The built-ins that do carry it, Contributor and
+# Website Contributor, also grant write over the site: the identity could
+# reconfigure or delete the Static Web App to read one token. This grants the
+# single action and nothing else.
+data "azurerm_role_definition" "static_web_app_deployer" {
+  name  = "HCW Static Web App Deployer"
+  scope = azurerm_resource_group.app["web"].id
+}
+
+# Scoped to the ONE site, not the resource group the definition is assignable
+# in. The definition has to be assignable at the group; the assignment does not
+# have to use that breadth, and a future second static site should not inherit
+# this by accident.
+resource "azurerm_role_assignment" "github_deploy_swa_token" {
+  scope              = azurerm_static_web_app.hcw.id
+  role_definition_id = data.azurerm_role_definition.static_web_app_deployer.id
+  principal_id       = azurerm_user_assigned_identity.github_deploy.principal_id
+}
+
 # Open and close the per-run origin window (T-718).
 #
 # publish-content-manifest USED to hold Cosmos Data Reader on two containers and

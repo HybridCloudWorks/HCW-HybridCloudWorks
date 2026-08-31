@@ -77,13 +77,22 @@ lists four URIs, and an admin sign-in reaches the UI without a 401 on every call
 
 **You run:**
 
+**RETIRED 2026-08-30 (T-727). Skip this step.** It read the SWA deploy token
+and stored it as `AZURE_STATIC_WEB_APPS_API_TOKEN`:
+
 ```powershell
 ./scripts/cutover/02-swa-token.ps1
 ```
 
-Reads the SWA deploy token and stores it as `AZURE_STATIC_WEB_APPS_API_TOKEN`.
-The repository currently holds **no secrets at all**, and any token recorded
-before the centralus rebuild is dead — the rebuild reissued it.
+`deploy-azure-frontend.yml` now mints the token from ARM under federated
+identity at deploy time, so there is no value to store and none to rotate. The
+step is kept here rather than deleted because a runbook that silently loses a
+step reads as an incomplete procedure to the next person following it.
+
+What the step needs instead is a one-time prerequisite, recorded under
+*Frontend release*: the owner creates the `HCW Static Web App Deployer` role
+definition and applies the assignment. Without it the deploy fails at the
+minting step with an authorization error that names the role.
 
 **Then enable the workflow.** `deploy-azure-frontend.yml` is gated with
 `if: ${{ false }}`. Enabling it is a deliberate, reviewed change — TODO.md.
