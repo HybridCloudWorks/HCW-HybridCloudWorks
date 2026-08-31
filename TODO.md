@@ -153,8 +153,10 @@ engineering work on them is done.
   "greater than 0 for 15 minutes" turns four silent failure classes into one
   page. Needs an apply.
 - **Vault seeding and seeded documents (from the Blog Machine program).**
-  `PREVIEW-SIGNING-SECRET` (staging links; the preview route 404s and
-  notifications say "link unavailable" until then), `REPLICATE-API-KEY` (AI
+  ~~`PREVIEW-SIGNING-SECRET`~~ **seeded 2026-08-30** — the admin secrets page
+  reports it green, which per `admin-secrets.js` means resolved through the
+  vault reference and not reported broken by any upstream, so the preview route
+  and the notification link are live. `REPLICATE-API-KEY` (AI
   heroes; the default heroes cover its absence once the ~8 covers are uploaded
   and `admin_config/default_heroes` is seeded), and
   `admin_config/social_autopost` `{ enabled, accountIds: [{ id, provider }],
@@ -239,6 +241,15 @@ criterion is the observed invocation, not the applied setting.
 no-ops, so the platform still runs almost no scheduled work — but "nothing is
 scheduled" is no longer true, and the arming mechanism is no longer an
 assumption.
+
+`PUBLISH_SCHEDULED_CONTENT` was added to `enabled_timers` later the same
+evening and the app settings confirm `FEATURE_FLAG_PUBLISH_SCHEDULED_CONTENT =
+true`. **That is the setting, not the gate.** The acceptance criterion in
+Cutover-Runbook step 5 is the observed invocation, and it has not been
+collected: the verification run was made with a stale working copy of
+`scripts/cutover/05-verify-timer.ps1` that predates the KQL aggregation, so its
+output is not evidence either way. Fifteen of eighteen remain no-ops; the
+sixteenth is armed and unobserved.
 
 It gates two other things, which is why it outranks its own blast radius:
 the Blog Machine's scheduled throughput (`forgeScheduled`,
@@ -393,9 +404,11 @@ Entra row below, which is where it belongs.
   estate has had a second path to fall back on.
 - Confirm any third-party webhook or scheduled integration after its owner has
   approved a real external mutation test.
-- Apply the Terraform change that creates the `listenandlearn` blob container.
-  Until it runs, Listen & Learn generation saves episodes and their transcripts
-  but the audio upload has nowhere to land. The same apply declares the fallback
+- ~~Apply the Terraform change that creates the `listenandlearn` blob
+  container.~~ **Applied 2026-08-30.** `az storage container-rm show` reports
+  `listenandlearn` with `publicAccess: None` — private, as intended;
+  `PUBLIC_MEDIA_CONTAINERS` in `blob-paths.js` is what makes an episode
+  reachable, not the container ACL. The same apply declares the fallback
   `AZURE_SPEECH_*` settings, which stay unresolved and inert.
 
 ## Accepted risks
