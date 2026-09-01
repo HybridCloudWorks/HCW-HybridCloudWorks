@@ -327,11 +327,8 @@ This project has not cut a tagged release; entries are grouped under
   else in this rule is measured against, and every mistake so far has come from
   reasoning about one of the pair without the other.
 
-- **Every Terraform run printed the same deprecation twice for an output nothing
-  consumed (2026-09-01).** Once for the refresh and once for the plan, both
-  naming the same line — distinct from the "Value for undeclared variable"
-  warnings on those runs, which come from stale TFC workspace values and are an
-  owner-side deletion. `cloudflare_plan` read
+- **Every Terraform run printed a deprecation warning for an output nothing
+  consumed (2026-09-01).** `cloudflare_plan` read
   `data.cloudflare_zone.current.plan`, deprecated in Cloudflare provider v5:
 
   > Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.

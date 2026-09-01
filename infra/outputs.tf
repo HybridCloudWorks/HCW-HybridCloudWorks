@@ -218,8 +218,7 @@ output "subnet_id" {
 # assumption about the plan tier, which decides what the edge can and cannot do:
 # Origin Rules' Host Header override, Super Bot Fight Mode and mTLS all gate on
 # it. That argument was settled, and since then the output's only job was to
-# emit THE SAME deprecation twice on every run — once each for the refresh and
-# the plan, both naming this line:
+# emit a deprecation warning on every run:
 #
 #   Warning: Deprecated value used ... on outputs.tf line 223
 #   Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
