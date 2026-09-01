@@ -192,6 +192,28 @@ This project has not cut a tagged release; entries are grouped under
   days the real cost is about 160. Lowering the cron would buy nothing —
   delivery rate is the constraint, not the requested rate.
 
+- **The manifest route is deployed and the nightly refresh is green again
+  (T-763, closed 2026-09-01).** Deploy Functions run 81 ran at 2026-08-31 23:45
+  UTC on `b24371e`, the first deploy carrying
+  `functions/src/functions/public-content-manifest.js`. Manifest run 11 at
+  2026-09-01 00:06 then went green end to end — `Build the manifest` succeeded
+  where it had answered 404 on 08-30 and 08-31.
+
+  Two things that run confirmed beyond the route itself. The commit job reported
+  **"No change to the published set"**, so the manifest committed on 2026-08-23
+  already matched what the API serves — the refresh was blocked, but the
+  pre-rendered data was never wrong. And it was the first real exercise of the
+  action majors merged in #303: the log shows `digest-mismatch: error`,
+  `Expected Digest: sha256:dac23a82…`, `SHA256 digest of downloaded artifact is
+  dac23a82…`, `Artifact download completed successfully` — `upload-artifact` v7
+  and `download-artifact` v8 working under v8's new strict default, which no CI
+  job could have shown because neither workflow using them runs in CI.
+
+  **What is still unproven:** because the published set had not moved, every
+  step after that check was skipped, the GitHub App branch included. T-726's
+  path is exercised for the first time on the first run where the set actually
+  changes.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up

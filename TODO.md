@@ -16,24 +16,26 @@ an engineer working from a checkout if it needs tenant, Cloudflare or
 repository-admin access — the carried-over sections say so in their own words,
 and `Gate: owner` still marks the rest.
 
-## Status — 2026-08-31
+## Status — 2026-09-01
 
-> **Six items are open. None can be closed from a checkout.** Each carries what
+> **Five items are open. None can be closed from a checkout.** Each carries what
 > to run or click, and what a successful result looks like, so a real failure
 > can be told apart from a reporting failure.
 >
-> **One of them is a live degradation and it is first.** The pre-render manifest
-> has not refreshed since 2026-08-23: the route that feeds it was merged on
-> 2026-08-30 and the Function App has not been deployed since 01:21 UTC that
-> morning, an hour and a half before the merge. The nightly job has failed with
-> a 404 twice.
+> **The one live degradation closed overnight.** `T-763` — the manifest route
+> merged on 2026-08-30 against a Function App last deployed 84 minutes earlier —
+> was fixed by Deploy Functions run 81 at 2026-08-31 23:45 UTC. Verified rather
+> than assumed: manifest run 11 at 2026-09-01 00:06 went green end to end and
+> reported "No change to the published set", so the committed manifest already
+> matched what the API serves. Recorded in CHANGELOG.md and removed from this
+> list.
 >
-> **And one is a detection gap that was being reported as closed.** The hourly
-> registration monitor is delivered by GitHub 22% of the time, with a 12.7-hour
-> worst-case blind window — measured 2026-08-31, over the workflow's whole life.
-> The fast half of that pair, the Cloudflare probe, is deployed but its alert is
-> not armed. That is item 6, and it is why item 6 is no longer Medium. The
-> remaining items are decisions or measurements with no deadline.
+> **What is first now is a detection gap that was being reported as closed.**
+> The hourly registration monitor is delivered by GitHub 22% of the time, with a
+> 12.7-hour worst-case blind window — measured 2026-08-31, over the workflow's
+> whole life. The fast half of that pair, the Cloudflare probe, is deployed but
+> its alert is not armed. That is item 1, and it is why it is no longer Medium.
+> The remaining items are decisions or measurements with no deadline.
 >
 > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
 > resolved or carried below as owner gates. The per-finding record — method,
@@ -67,23 +69,30 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
-| 1 | `T-763` — the manifest route is merged but not deployed | High | One dispatch of Deploy Functions on `main` |
+| 1 | `T-519` — arm the reachability alert | **High** | One query, then one variable |
 | 2 | `T-726` — the nightly refresh cannot reach `main` | — | Built; create the App, then enable auto-merge |
-| 3 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
-| 4 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 3 |
-| 5 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 6 | `T-519` — arm the reachability alert | **High** | One query, then one variable |
+| 3 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
+| 4 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
+| 5 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 4 |
 
-Item 1 is a dispatch. Item 2 carries no severity because it is not a review
-finding: it is an owner action left behind by a finding that is closed. Item 3
-is a measurement, 4 a cost decision waiting on it, 5 a repeated procedure, and 6
-one query followed by one variable.
+Item 1 is one query followed by one variable. Item 2 carries no severity
+because it is not a review finding: it is an owner action left behind by a
+finding that is closed. Item 3 is a repeated procedure, 4 a measurement, and 5 a
+cost decision waiting on it.
 
-Items 1 and 2 are two halves of the same night's work and are listed separately
-on purpose. Item 1 is why the job fails today; item 2 is why it could not have
-committed anything even if it had succeeded.
+**The table and the sections below are in the same order, and that order is the
+one to work them in — not a sort of the Priority column.** Item 2 carries no
+severity at all and still sits above a High, because it is the one whose next
+step is a settings page you can open now. Said this way because an earlier draft
+claimed "ordered by priority", which the dash in row 2 plainly contradicts;
+found in review on 2026-09-01.
 
-**Item 6 moved from Medium to High on 2026-08-31**, on a measurement rather than
+The two are checked against each other by number AND by `T-` identity, never by
+counting rows. Also from 2026-09-01: an edit reordered the table while
+renumbering the sections in document order, and because both still read `1..5`
+a digits-only check passed with every row pointing at the wrong section.
+
+**Item 1 moved from Medium to High on 2026-08-31**, on a measurement rather than
 a judgement: `monitor-functions-registered.yml` asks GitHub for an hourly run
 and GitHub delivers 22% of them, with a worst observed blind window of 12.7
 hours. The Cloudflare probe is the half of that pair GitHub cannot drop, and it
@@ -99,80 +108,48 @@ applied.
 
 ## What is open, and exactly what closes it
 
-### 1. T-763 — the manifest route is merged but not deployed
+### 1. T-519 — the probe is deployed; arm the alert once a row lands
 
-**What is wrong.** `publish-content-manifest.yml` has failed on 2026-08-30 and
-2026-08-31 with the same line:
+**Raised in importance on 2026-08-31, on a measurement rather than an opinion.**
+This item read as the last polish on a finished piece of work. It is not: it is
+what closes a real detection gap, because the other half of the pair is not
+delivering.
 
-```
-[content-manifest] FAILED: https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest answered 404.
-```
+`monitor-functions-registered.yml` asks GitHub for a run every hour at `:41`.
+Over the 132 hours from 08-26 08:23 to 08-31 20:23, on a cron that never
+changed, **29 of 133 slots produced a run — 22%.** When one lands it is a median
+36 minutes late; only 3 of 29 arrived within 5 minutes. The longest window with
+no check at all was **12.7 hours**, and three separate gaps ran over 10. That is
+one check every 4.6 hours on average, against a header that claimed hourly.
 
-**The Function App is healthy.** `Monitor Functions Registered` ran at
-2026-08-31 20:23 UTC and reported 121 registered functions, `AzureWebJobsStorage`
-absent, `RUNTIME_CONFIG_WRITER` = `azapi-strip`, host storage `Deny`, no
-leftover CI firewall rules — every row green. It was not wrong. It counts
-functions, and 121 correct functions cannot tell you about a 122nd that is
-missing.
+It is not one workflow being unlucky. `monitor-unresolved-secrets.yml`
+(`29 */6 * * *`, added 08-30) has produced 2 runs where about 8 were due, and
+`publish-content-manifest.yml` (`15 6 * * *`) has landed anywhere from 07:05 to
+18:37. GitHub documents that `schedule` is delayed under load and that delayed
+runs are dropped rather than queued; nothing in the repository can fix that.
 
-**The timeline, all UTC.** `git cat-file -e` and the workflow run list are the
-evidence; nothing here is inferred.
+**Which is why the probe matters more than it looked.** The Cloudflare Worker
+was deployed on 2026-08-31 and runs on `*/5 * * * *` — a scheduler GitHub has no
+say in. `worker.js` records `success = res.status === 200`, so an unregistered
+host, which 404s every route including `/api/health`, is caught twelve times an
+hour instead of once every 4.6. Every other alert needs the app healthy enough
+to emit telemetry; this is the only signal that survives the app being down.
 
-| When | What |
-| --- | --- |
-| 08-29 23:18 | `7fd9f2a` lands on `main` (a dependabot bump). Tip of `main`. |
-| **08-30 01:21** | **Deploy Functions run 80, on `7fd9f2a`. The last deploy.** |
-| 08-30 01:34 | `63de5d3`. |
-| **08-30 02:45** | **`4218785` (#277) adds `functions/src/functions/public-content-manifest.js`** and switches the nightly job from reading Cosmos to fetching this route. |
-| 08-30 11:51 | First 404. |
-| 08-31 13:39 | Second 404. |
+The two are meant to be a pair — the probe notices fast, the GitHub monitor
+names which condition — and **until this is armed only the slow, unreliable half
+is live.**
 
-The deploy ran **84 minutes before the route existed**.
-`git cat-file -e 7fd9f2a:functions/src/functions/public-content-manifest.js`
-reports the path absent from that commit, so the app is serving a revision that
-has never had this function. It is not a regression, a firewall, or Cloudflare.
+Confirm a result landed — ingestion lags a few minutes:
 
-**This is by design, and that is the uncomfortable part.**
-`.github/workflows/deploy-functions.yml` is `workflow_dispatch` only — the
-`push` trigger is commented out with a recorded reason ("Keep releases
-observable until the deployment and smoke checks have an approved
-automatic-release policy"). So merging a route never deploys it, and #277 shipped
-a caller for a route it did not ship to production.
-
-**Owner action — one dispatch.** Open
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/deploy-functions.yml
-→ **Run workflow** → branch `main` → **Run workflow**. It takes no inputs, and
-the job refuses any ref that is not `main`.
-
-**Success:** the run is green, and then this returns the manifest rather than a
-404. Run it in PowerShell:
-
-```powershell
-(Invoke-WebRequest -Uri 'https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest' -SkipHttpErrorCheck).StatusCode
+```kusto
+availabilityResults | where name == "edge-api-health" | order by timestamp desc | take 5
 ```
 
-That will answer **403**, not 200, and 403 is the correct result: the route is
-behind the Function App's origin allow list, and only the per-run window the
-nightly job opens admits a caller. **403 means deployed and protected. 404 means
-still not deployed.** That is the whole test, and it is the distinction the
-failure message got wrong until 2026-08-31 — it read "anything else is the app
-itself", which sent a night at a Function App that was fine.
-
-Then re-run the nightly job to confirm end to end:
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/publish-content-manifest.yml
-→ **Run workflow** on `main`.
-
-**What is still open after that, and is not being fixed here.** Nothing detects
-this class of drift. `Monitor Functions Registered` checks a count, and a count
-cannot see a route present in `main` and absent from the deployed revision. The
-detector that would is a comparison of `az functionapp function list --query
-"[].name"` against the repository's own route inventory
-(`functions/src/functions/route-inventory.test.js`, `.azure/api-surface.json`) —
-but with dispatch-only deploys, `main` being ahead of production is the NORMAL
-state between a merge and a release, so such a check fires constantly unless it
-is scoped to routes a caller in this repository actually depends on. That
-scoping is a design decision, and it is recorded here rather than guessed at.
-
+**Only after rows with `success == 1` are visible**, set
+`availability_probe_alert_enabled = true` in the workspace and approve the run.
+The alert fires on ABSENT successes rather than present failures, so arming it
+before the first observed success creates a rule that fires immediately and
+permanently on the missing data it watches for.
 ### 2. T-726 — the App is built; one setting remains
 
 **Corrected 2026-08-31, and the correction is the important part.** This item
@@ -248,11 +225,39 @@ The honest case is narrower: the nightly refresh has to reach `main` somehow,
 every route to `main` goes through a pull request, and a pull request opened
 with `GITHUB_TOKEN` runs no checks. The key is the price of that.
 
-**Note the ordering with item 1.** Even with the App configured, the nightly job
-cannot open a pull request until the route is deployed — it fails at the *build*
-step, before `commit` ever runs. Item 1 first.
+**Still untested end to end, and worth knowing why.** Manifest run 11
+(2026-09-01 00:06) went green for the first time since the route was deployed,
+but it reported "No change to the published set" — so every step after that
+check was skipped, the App branch included. The first real exercise of this path
+is the first run where the published set has actually moved.
 
-### 3. T-719 — the cap is binding, measured 2026-08-31
+### 3. T-518 — arm the remaining 15 timers — repeated procedure
+
+Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
+`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
+is already `true` and `enabled_timers` is the HCL-typed workspace variable
+holding those three.
+
+For each remaining timer, one at a time: add its name at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables, approve the run,
+then observe it firing before adding the next. The evidence standard is the
+observed invocation, not the applied setting — `wiki/Cutover-Runbook.md` step 5
+has the four gates.
+
+```powershell
+pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
+```
+
+**Success:** a single summary row with a plausible invocation count and a
+`ScheduleStatus` section filtered to that timer. If the count barely changes
+between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
+truncation fixed on 2026-08-31, and it means the window is not being applied.
+
+**Note the interaction with item 4:** arming timers adds `AppTraces` volume
+against a cap that is already binding. Take that measurement first, or arm and
+watch the volume with it.
+
+### 4. T-719 — the cap is binding, measured 2026-08-31
 
 **This is no longer a margin question.** Billable ingestion, aligned to the
 08:00 UTC cap reset:
@@ -287,7 +292,7 @@ below under *Reading the ingestion volume*.
 (https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
 platform cannot reach in a day, approve the run, leave it one full cap period,
 read the volume, put it back. That measures **demand** rather than the ceiling,
-which is the number item 4 needs to size its lever. Record it here with the date.
+which is the number item 5 needs to size its lever. Record it here with the date.
 
 **Do not set it to -1.** Azure accepts that for "unlimited", but the
 `logs_daily_cap` alert threshold is this value times 0.8, so an unlimited
@@ -331,7 +336,7 @@ Windows `az` is a batch file that cannot receive an argument containing a
 newline — a multi-line query arrives truncated at the first break and the call
 still exits 0.
 
-### 4. T-721 — telemetry costs five times the workload it observes — after item 3
+### 5. T-721 — telemetry costs five times the workload it observes — after item 4
 
 Telemetry runs about USD 17–21 a month against an application-subscription
 workload of roughly USD 4 — together roughly 80% of predictable Azure spend on a
@@ -340,7 +345,7 @@ platform that documents cost to the cent.
 **Raising the cap is not the answer on its own.** At roughly USD 2.76/GB,
 doubling it roughly doubles the larger of those two numbers. The levers are:
 drop the `host.json` log level, or move `AppTraces` — about 38% of the cap — to
-the Basic table plan at roughly USD 0.65/GB. Item 3's measurement is what says
+the Basic table plan at roughly USD 0.65/GB. Item 4's measurement is what says
 which is enough.
 
 **Separately, re-justify the Static Web App Standard tier** (about USD 9/month).
@@ -355,74 +360,6 @@ Standard tier and the comment justifying it live — **not** `infra/main.tf`,
 which T-754 cut to 102 lines and which the review's anchor pointed past the end
 of.
 
-### 5. T-518 — arm the remaining 15 timers — repeated procedure
-
-Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
-`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
-is already `true` and `enabled_timers` is the HCL-typed workspace variable
-holding those three.
-
-For each remaining timer, one at a time: add its name at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables, approve the run,
-then observe it firing before adding the next. The evidence standard is the
-observed invocation, not the applied setting — `wiki/Cutover-Runbook.md` step 5
-has the four gates.
-
-```powershell
-pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
-```
-
-**Success:** a single summary row with a plausible invocation count and a
-`ScheduleStatus` section filtered to that timer. If the count barely changes
-between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
-truncation fixed on 2026-08-31, and it means the window is not being applied.
-
-**Note the interaction with item 3:** arming timers adds `AppTraces` volume
-against a cap that is already binding. Take that measurement first, or arm and
-watch the volume with it.
-
-### 6. T-519 — the probe is deployed; arm the alert once a row lands
-
-**Raised in importance on 2026-08-31, on a measurement rather than an opinion.**
-This item read as the last polish on a finished piece of work. It is not: it is
-what closes a real detection gap, because the other half of the pair is not
-delivering.
-
-`monitor-functions-registered.yml` asks GitHub for a run every hour at `:41`.
-Over the 132 hours from 08-26 08:23 to 08-31 20:23, on a cron that never
-changed, **29 of 133 slots produced a run — 22%.** When one lands it is a median
-36 minutes late; only 3 of 29 arrived within 5 minutes. The longest window with
-no check at all was **12.7 hours**, and three separate gaps ran over 10. That is
-one check every 4.6 hours on average, against a header that claimed hourly.
-
-It is not one workflow being unlucky. `monitor-unresolved-secrets.yml`
-(`29 */6 * * *`, added 08-30) has produced 2 runs where about 8 were due, and
-`publish-content-manifest.yml` (`15 6 * * *`) has landed anywhere from 07:05 to
-18:37. GitHub documents that `schedule` is delayed under load and that delayed
-runs are dropped rather than queued; nothing in the repository can fix that.
-
-**Which is why the probe matters more than it looked.** The Cloudflare Worker
-was deployed on 2026-08-31 and runs on `*/5 * * * *` — a scheduler GitHub has no
-say in. `worker.js` records `success = res.status === 200`, so an unregistered
-host, which 404s every route including `/api/health`, is caught twelve times an
-hour instead of once every 4.6. Every other alert needs the app healthy enough
-to emit telemetry; this is the only signal that survives the app being down.
-
-The two are meant to be a pair — the probe notices fast, the GitHub monitor
-names which condition — and **until this is armed only the slow, unreliable half
-is live.**
-
-Confirm a result landed — ingestion lags a few minutes:
-
-```kusto
-availabilityResults | where name == "edge-api-health" | order by timestamp desc | take 5
-```
-
-**Only after rows with `success == 1` are visible**, set
-`availability_probe_alert_enabled = true` in the workspace and approve the run.
-The alert fires on ABSENT successes rather than present failures, so arming it
-before the first observed success creates a rule that fires immediately and
-permanently on the missing data it watches for.
 
 ## Optional, and only if you want the feature
 
