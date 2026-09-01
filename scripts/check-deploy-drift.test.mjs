@@ -305,6 +305,29 @@ describe('driftFor', () => {
     expect(out.hours).toBeUndefined();
   });
 
+  it('treats a non-array commits payload as unreadable, not as no drift', async () => {
+    // Defaulting to [] here would report the service up to date — the same
+    // healthier-than-reality direction as every other defect found in this
+    // file. A ⚠️ says "could not read"; a ✅ says "nothing to deploy", and only
+    // one of those is honest about an unrecognised payload.
+    const out = await driftFor(SERVICES[0], {
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      nowMs: NOW,
+      fetchImpl: async (url) => {
+        if (url.includes('/runs?status=success'))
+          return { ok: true, json: async () => ({ workflow_runs: [{ head_sha: 'deployed' }] }) };
+        if (url.includes('/commits/deployed'))
+          return { ok: true, json: async () => ({ commit: { committer: { date: hoursAgo(99) } } }) };
+        return { ok: true, json: async () => ({ message: 'not an array' }) };
+      },
+    });
+    expect(out.error).toContain('non-array commits payload');
+    expect(out.count).toBeUndefined();
+    expect(formatReport([out], 24).failed).toBe(true);
+  });
+
   it('returns the failure as a row instead of throwing, so one service cannot hide the others', async () => {
     const out = await driftFor(SERVICES[0], {
       token: 't',

@@ -262,7 +262,21 @@ export async function driftFor(service, { token, owner, repo, nowMs, fetchImpl =
             `&since=${encodeURIComponent(since)}&per_page=${COMMITS_PER_PAGE}&page=${page}`,
           token
         );
-        const rows = Array.isArray(batch) ? batch : [];
+        // THROWN, not defaulted to []. Silently treating an unreadable payload
+        // as an empty page reports the service as up to date — the same
+        // healthier-than-reality direction as every other defect found in this
+        // file, and the one the whole check exists to avoid. driftFor's catch
+        // turns this into a ⚠️ row, which says "could not read" rather than
+        // "nothing to deploy". parseLastSuccessfulRun and parseCommitDate above
+        // already work this way; this line did not, which was the
+        // inconsistency review caught.
+        if (!Array.isArray(batch)) {
+          throw new Error(
+            `GitHub returned a non-array commits payload for ${path} (page ${page}). Expected ` +
+              'the response of GET /repos/:owner/:repo/commits.'
+          );
+        }
+        const rows = batch;
         for (const c of rows) {
           // `since` is inclusive of the boundary commit, which is the deployed
           // one when it touched this path. Excluding it by sha keeps a
