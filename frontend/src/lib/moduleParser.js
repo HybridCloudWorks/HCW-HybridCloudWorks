@@ -39,11 +39,16 @@ export const JSON_MODULE_TYPES = [
 
 export const MAX_MODULES = 14;
 
+// One grammar for the module tag, shared by every function that scans for it.
+// Built per call site because the 'g' flag makes a shared instance stateful.
+const moduleTagRegex = () =>
+  /<module\s+type="(\w+)"(?:\s+align="([^"]*)")?\s*>([\s\S]*?)<\/module>/g;
+
 export function parseModulesFromMarkdown(markdown) {
   if (!markdown) return { text: '', modules: [] };
 
   const modules = [];
-  const moduleRegex = /<module\s+type="(\w+)"(?:\s+align="([^"]*)")?\s*>([\s\S]*?)<\/module>/g;
+  const moduleRegex = moduleTagRegex();
 
   let match;
   let lastIndex = 0;
@@ -140,16 +145,22 @@ export function moduleDataToString(module) {
 /**
  * Insert a module into markdown at specified position
  * Position is the module index to insert before; -1 or an index past the
- * last module appends to the end.
+ * last module appends to the end. The insert is a string splice ahead of
+ * that module's tag, so every other byte of the document — trailing prose
+ * included — stays where it was.
  */
 export function insertModuleIntoMarkdown(markdown, module, position = -1) {
   const source = String(markdown ?? '');
 
   if (position >= 0) {
-    const { text, modules } = parseModulesFromMarkdown(source);
-    if (position < modules.length) {
-      modules.splice(position, 0, module);
-      return rebuildMarkdownWithModules(text, modules);
+    const moduleRegex = moduleTagRegex();
+    let index = 0;
+    let match;
+    while ((match = moduleRegex.exec(source)) !== null) {
+      if (index === position) {
+        return `${source.slice(0, match.index)}${moduleDataToString(module)}\n\n${source.slice(match.index)}`;
+      }
+      index += 1;
     }
   }
 

@@ -147,21 +147,24 @@ describe('insertModuleIntoMarkdown', () => {
     expect(insertModuleIntoMarkdown('Prose', inserted)).toBe(`Prose\n\n${insertedStr}\n\n`);
   });
 
-  it('inserts before the module at the given index', () => {
-    const result = insertModuleIntoMarkdown(`Intro\n\n${first}\n\n${second}`, inserted, 1);
-    const { modules } = parseModulesFromMarkdown(result);
-    expect(modules.map((m) => m.content)).toEqual(['first', 'inserted', 'second']);
+  it('inserts before the module at the given index, byte-identical elsewhere', () => {
+    const result = insertModuleIntoMarkdown(
+      `Intro\n\n${first}\n\nMiddle\n\n${second}\n\nOutro`,
+      inserted,
+      1
+    );
+    expect(result).toBe(`Intro\n\n${first}\n\nMiddle\n\n${insertedStr}\n\n${second}\n\nOutro`);
   });
 
-  it('inserts at position 0 ahead of every existing module', () => {
-    const result = insertModuleIntoMarkdown(`Intro\n\n${first}`, inserted, 0);
-    const { modules } = parseModulesFromMarkdown(result);
-    expect(modules.map((m) => m.content)).toEqual(['inserted', 'first']);
+  it('inserts at position 0 without moving the existing module past trailing prose', () => {
+    // The regression net for the placeholder-count mismatch: an insert built
+    // on parse → splice → rebuild appended the displaced module after "Outro".
+    const result = insertModuleIntoMarkdown(`Intro\n\n${first}\n\nOutro`, inserted, 0);
+    expect(result).toBe(`Intro\n\n${insertedStr}\n\n${first}\n\nOutro`);
   });
 
   it('appends when the position is past the last module', () => {
     const result = insertModuleIntoMarkdown(`Intro\n\n${first}`, inserted, 5);
-    const { modules } = parseModulesFromMarkdown(result);
-    expect(modules.map((m) => m.content)).toEqual(['first', 'inserted']);
+    expect(result).toBe(`Intro\n\n${first}\n\n${insertedStr}\n\n`);
   });
 });
