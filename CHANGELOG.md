@@ -143,12 +143,26 @@ This project has not cut a tagged release; entries are grouped under
   has ample margin against 24. The workflow header records that the reasoning
   stops holding if the threshold ever drops near the delivery gap.
 
-  23 tests, and the two load-bearing decisions are mutation-verified: taking the
-  newest commit instead of the oldest (which would read as healthy immediately
-  after the merge that created the drift) and `>` instead of `>=` on the
-  threshold both fail the suite. Caught while writing it: the `setup-node` pin
-  was a SHA that appears in no other workflow in this repository — invented
-  rather than copied — and is now the pin the other eight workflows use.
+  29 tests, and four load-bearing decisions are mutation-verified: reading only
+  the first page of commits, dropping the de-duplication, taking the newest
+  commit instead of the oldest, and `>` instead of `>=` on the threshold. All
+  four fail the suite when introduced, and **all four fail in the same
+  direction — reporting a service as healthier than it is**, which is why they
+  are the ones pinned.
+
+  Two defects were caught before merge and are worth recording:
+
+  - `oldestCommit` originally took the **last element**, on the true-but-narrow
+    grounds that GitHub returns commits newest first. That holds for one page of
+    one path and nothing else — the merged list is newest-first only within each
+    per-path segment, so with two paths the last element is the second path's
+    oldest, which can be far newer. Found in review. It now takes the minimum by
+    date and assumes no ordering at all, which removes the class rather than the
+    instance. The same review found the missing pagination and de-duplication.
+  - The `setup-node` pin was a SHA appearing in no other workflow here —
+    invented rather than copied, which is the exact defect pinning by SHA exists
+    to prevent. It is now the pin the other eight workflows use, and both action
+    SHAs were verified against `.github/workflows` before commit.
 
 ### Fixed
 

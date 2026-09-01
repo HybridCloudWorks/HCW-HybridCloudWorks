@@ -74,6 +74,16 @@ export const SERVICES = Object.freeze([
 /** Hours of drift tolerated before this is called stale. */
 export const DEFAULT_THRESHOLD_HOURS = 24;
 
+/** GitHub's maximum page size for the commits API. */
+export const COMMITS_PER_PAGE = 100;
+
+/**
+ * A ceiling on pagination, so an unexpected answer cannot loop against the API
+ * forever. Ten pages is 1,000 commits since the last deploy — far past any
+ * drift worth measuring rather than simply deploying.
+ */
+export const MAX_COMMIT_PAGES = 10;
+
 /**
  * The last run of a workflow that actually deployed.
  *
@@ -115,21 +125,43 @@ export function parseCommitDate(body) {
 }
 
 /**
- * The oldest commit in a newest-first list, or null for an empty list.
+ * The oldest commit in a list, BY DATE — not by position.
  *
- * The GitHub commits API returns newest first, so the oldest undeployed commit
- * is the LAST element — which is the one whose age is the drift. Taking the
- * first would report how recently someone merged, which is nearly the opposite
- * question and would read as healthy right after a merge.
+ * The first version took the last element, because the GitHub commits API
+ * returns newest first. That is true of a single page of a single path and of
+ * nothing else. Review pointed out that `driftFor` concatenates one list per
+ * declared path, so a merged array is newest-first only WITHIN each segment:
+ * with two paths the last element is the second path's oldest commit, which can
+ * be far newer than the first path's. The answer would read healthier than
+ * reality — the same failure direction as taking the newest commit outright,
+ * which this module's tests already treat as the thing most worth preventing.
+ *
+ * Ordering is now not assumed at all. A minimum over parsed dates cannot be
+ * wrong about which commit is oldest, however the list was assembled, and that
+ * removes a class of bug rather than the one instance of it.
+ *
+ * Commits with no readable date are skipped rather than treated as epoch zero,
+ * which would report drift of half a century. `driftFor` turns "commits exist
+ * but none are dated" into an error row, because that is a shape problem rather
+ * than a healthy service.
  */
 export function oldestCommit(commits) {
   if (!Array.isArray(commits) || commits.length === 0) return null;
-  const last = commits[commits.length - 1];
-  return {
-    sha: last?.sha ?? null,
-    date: last?.commit?.committer?.date || last?.commit?.author?.date || null,
-    message: String(last?.commit?.message ?? '').split('\n')[0],
-  };
+
+  let best = null;
+  let bestMs = Infinity;
+  for (const c of commits) {
+    const date = c?.commit?.committer?.date || c?.commit?.author?.date || null;
+    const ms = date ? Date.parse(date) : Number.NaN;
+    if (!Number.isFinite(ms) || ms >= bestMs) continue;
+    bestMs = ms;
+    best = {
+      sha: c?.sha ?? null,
+      date,
+      message: String(c?.commit?.message ?? '').split('\n')[0],
+    };
+  }
+  return best;
 }
 
 /** Whole hours between an ISO timestamp and now, floored, never negative. */
@@ -213,23 +245,46 @@ export async function driftFor(service, { token, owner, repo, nowMs, fetchImpl =
     );
     const since = parseCommitDate(deployed);
 
-    let commits = [];
+    // Keyed by sha, for the two reasons review named: a commit touching two of a
+    // service's declared paths comes back once per path and would be counted
+    // twice, and pagination can repeat a boundary commit between pages.
+    const seen = new Map();
+
     for (const path of service.paths) {
-      const page = await ghJson(
-        fetchImpl,
-        `${API}/repos/${owner}/${repo}/commits?sha=main&path=${encodeURIComponent(path)}` +
-          `&since=${encodeURIComponent(since)}&per_page=100`,
-        token
-      );
-      // `since` is inclusive of the boundary commit, which is the deployed one
-      // when it touched this path. Excluding it by sha keeps a just-deployed
-      // service from reporting itself as one commit behind.
-      commits = commits.concat(
-        (Array.isArray(page) ? page : []).filter((c) => c?.sha !== last.sha)
-      );
+      // PAGINATED. One page is 100 commits, and drift matters MOST when it is
+      // large — the frontend was 35 behind, and a longer gap is exactly the case
+      // a first-page-only read under-reports, returning a too-recent "oldest"
+      // and therefore a healthier age than the truth.
+      for (let page = 1; page <= MAX_COMMIT_PAGES; page += 1) {
+        const batch = await ghJson(
+          fetchImpl,
+          `${API}/repos/${owner}/${repo}/commits?sha=main&path=${encodeURIComponent(path)}` +
+            `&since=${encodeURIComponent(since)}&per_page=${COMMITS_PER_PAGE}&page=${page}`,
+          token
+        );
+        const rows = Array.isArray(batch) ? batch : [];
+        for (const c of rows) {
+          // `since` is inclusive of the boundary commit, which is the deployed
+          // one when it touched this path. Excluding it by sha keeps a
+          // just-deployed service from reporting itself one commit behind.
+          if (c?.sha && c.sha !== last.sha) seen.set(c.sha, c);
+        }
+        if (rows.length < COMMITS_PER_PAGE) break;
+      }
     }
 
+    const commits = [...seen.values()];
     const oldest = oldestCommit(commits);
+
+    // Commits exist but none carries a readable date. An error row rather than
+    // zero drift: answering "0 hours" would call an unanswerable service
+    // healthy, which is the failure direction this whole file avoids.
+    if (commits.length > 0 && !oldest) {
+      return {
+        name: service.name,
+        error: `${commits.length} undeployed commit(s), none with a readable date`,
+      };
+    }
     return {
       name: service.name,
       deployedSha: last.sha,

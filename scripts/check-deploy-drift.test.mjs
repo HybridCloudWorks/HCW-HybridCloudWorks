@@ -16,6 +16,7 @@ import {
   isStale,
   formatReport,
   driftFor,
+  COMMITS_PER_PAGE,
 } from './check-deploy-drift.mjs';
 
 const NOW = Date.parse('2026-09-01T04:00:00Z');
@@ -61,11 +62,10 @@ describe('parseCommitDate', () => {
 });
 
 describe('oldestCommit', () => {
-  // THE ASSERTION THIS FILE EXISTS FOR. GitHub returns commits newest-first, so
-  // the drift is the age of the LAST element. Taking the first would report how
-  // recently someone merged — which reads as healthy immediately after the merge
-  // that created the drift, i.e. exactly backwards.
-  it('takes the LAST element, because GitHub returns newest first', () => {
+  // THE ASSERTION THIS FILE EXISTS FOR. Getting this wrong reports how recently
+  // someone merged instead of how long the drift has lasted — which reads as
+  // healthy immediately after the merge that created it, exactly backwards.
+  it('picks the oldest by date', () => {
     const out = oldestCommit([
       commit('new', hoursAgo(1), 'newest'),
       commit('mid', hoursAgo(30), 'middle'),
@@ -73,6 +73,33 @@ describe('oldestCommit', () => {
     ]);
     expect(out.sha).toBe('old');
     expect(out.message).toBe('oldest');
+  });
+
+  // The first version took the last element, on the true-but-narrow grounds
+  // that GitHub returns newest first. driftFor merges one list per declared
+  // path, so the merged array is newest-first only within each segment — with
+  // two paths the last element is the SECOND path's oldest, which can be far
+  // newer. Found in review; the fix was to stop assuming order at all.
+  it('does not care what order the list is in', () => {
+    const rows = [
+      commit('mid', hoursAgo(30), 'middle'),
+      commit('old', hoursAgo(50), 'oldest'),
+      commit('new', hoursAgo(1), 'newest'),
+    ];
+    expect(oldestCommit(rows).sha).toBe('old');
+    expect(oldestCommit([...rows].reverse()).sha).toBe('old');
+  });
+
+  it('skips undated commits rather than treating them as epoch zero', () => {
+    // Date.parse(undefined) is NaN; a naive min would make it 1970 and report
+    // fifty-five years of drift.
+    const out = oldestCommit([{ sha: 'undated', commit: { message: 'no date' } }, commit('old', hoursAgo(9), 'real')]);
+    expect(out.sha).toBe('old');
+    expect(out.message).toBe('real');
+  });
+
+  it('is null when nothing in the list has a date', () => {
+    expect(oldestCommit([{ sha: 'a', commit: { message: 'x' } }])).toBe(null);
   });
 
   it('takes only the first line of the message', () => {
@@ -206,6 +233,76 @@ describe('driftFor', () => {
     expect(out.count).toBe(2);
     expect(out.hours).toBe(49);
     expect(out.oldest.message).toBe('add the manifest route');
+  });
+
+  it('paginates past the first page', async () => {
+    // Drift matters most when it is large, so stopping at 100 under-reports
+    // exactly the case this exists for: it would return a too-recent oldest and
+    // therefore a healthier age than the truth.
+    const pageOne = Array.from({ length: COMMITS_PER_PAGE }, (_, i) =>
+      commit(`p1-${i}`, hoursAgo(10), 'recent')
+    );
+    const pageTwo = [commit('ancient', hoursAgo(200), 'the forgotten one')];
+    const out = await driftFor(SERVICES[0], {
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      nowMs: NOW,
+      fetchImpl: async (url) => {
+        if (url.includes('/runs?status=success'))
+          return { ok: true, json: async () => ({ workflow_runs: [{ head_sha: 'deployed' }] }) };
+        if (url.includes('/commits/deployed'))
+          return { ok: true, json: async () => ({ commit: { committer: { date: hoursAgo(300) } } }) };
+        // `&page=`, not `page=` — `per_page=100` contains `page=100`, which
+        // contains `page=1`, so the loose form matched every page and this test
+        // failed against correct code. A stub that lies is worse than no stub.
+        if (url.includes('&page=1')) return { ok: true, json: async () => pageOne };
+        if (url.includes('&page=2')) return { ok: true, json: async () => pageTwo };
+        return { ok: true, json: async () => [] };
+      },
+    });
+    expect(out.count).toBe(COMMITS_PER_PAGE + 1);
+    expect(out.hours).toBe(200);
+    expect(out.oldest.message).toBe('the forgotten one');
+  });
+
+  it('de-duplicates a commit that touches two of a service multiple declared paths', async () => {
+    const shared = commit('both', hoursAgo(40), 'touches both paths');
+    const out = await driftFor(
+      { name: 'Two paths', workflow: 'w.yml', paths: ['a', 'b'] },
+      {
+        token: 't',
+        owner: 'o',
+        repo: 'r',
+        nowMs: NOW,
+        fetchImpl: async (url) => {
+          if (url.includes('/runs?status=success'))
+            return { ok: true, json: async () => ({ workflow_runs: [{ head_sha: 'deployed' }] }) };
+          if (url.includes('/commits/deployed'))
+            return { ok: true, json: async () => ({ commit: { committer: { date: hoursAgo(99) } } }) };
+          return { ok: true, json: async () => [shared] };
+        },
+      }
+    );
+    expect(out.count).toBe(1);
+  });
+
+  it('reports undated commits as an error rather than as zero drift', async () => {
+    const out = await driftFor(SERVICES[0], {
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      nowMs: NOW,
+      fetchImpl: async (url) => {
+        if (url.includes('/runs?status=success'))
+          return { ok: true, json: async () => ({ workflow_runs: [{ head_sha: 'deployed' }] }) };
+        if (url.includes('/commits/deployed'))
+          return { ok: true, json: async () => ({ commit: { committer: { date: hoursAgo(99) } } }) };
+        return { ok: true, json: async () => [{ sha: 'x', commit: { message: 'no date' } }] };
+      },
+    });
+    expect(out.error).toContain('none with a readable date');
+    expect(out.hours).toBeUndefined();
   });
 
   it('returns the failure as a row instead of throwing, so one service cannot hide the others', async () => {
