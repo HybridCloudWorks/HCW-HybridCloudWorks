@@ -327,6 +327,31 @@ This project has not cut a tagged release; entries are grouped under
   else in this rule is measured against, and every mistake so far has come from
   reasoning about one of the pair without the other.
 
+- **Every Terraform run printed two deprecation warnings for an output nothing
+  consumed (2026-09-01).** `cloudflare_plan` read
+  `data.cloudflare_zone.current.plan`, deprecated in Cloudflare provider v5:
+
+  > Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
+  > Changing this value will create/cancel associated subscriptions.
+
+  Removed rather than migrated, because **the replacement the warning names is
+  not usable here.** In v5 the non-deprecated path is
+  `cloudflare_zone_subscription` — a *resource*, not a data source — so reading
+  the plan through it would put Terraform in charge of the subscription, with
+  exactly the create/cancel behaviour the warning describes. Trading a cosmetic
+  warning for a plan Terraform can cancel is not a trade worth making for a
+  value nothing reads.
+
+  The output existed since 2026-08-20 to settle an architecture argument about
+  the plan tier, and that argument is settled. The tier still matters — ADR
+  0024, `wiki/Availability-Probe.md`, `infra/observability.tf` and
+  `infra/variables.tf` all reason about "this Cloudflare plan" — but it is a
+  static fact that changes only when a human changes it, so
+  `wiki/Required-Inputs.md` now records where to read it instead of Terraform
+  re-reading it on every plan. The `cloudflare_zone` data source went with it;
+  the output was its only consumer, and `var.cloudflare_zone_id` is still used
+  by `infra/frontend.tf`.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up

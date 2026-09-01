@@ -317,12 +317,26 @@ written, omitting `deploy_principal_id`, because it was built by reading
 which is the only listing guaranteed to be complete.
 
 From `infra/outputs.tf`: `api_base_url` · `app_principal_id` · `blob_endpoint` ·
-`cloudflare_plan` · `cosmos_database` · `cosmos_endpoint` ·
+`cosmos_database` · `cosmos_endpoint` ·
 `cosmos_resource_group` · `function_app_name` · `function_hostname` ·
 `function_url` · `functions_storage_account` · `insights_connection` ·
 `storage_account` · `storage_resource_group` · `subnet_id` · `swa_hostname` ·
 `swa_token` · `vault_name` · `vault_uri` · `web_resource_group` ·
 `workspace_id`
+
+**`cloudflare_plan` was removed on 2026-09-01** and is not replaced. It read
+`data.cloudflare_zone.current.plan`, which the Cloudflare provider deprecated in
+v5 in favour of `/zones/{zone_id}/subscription` — reachable only through the
+`cloudflare_zone_subscription` **resource**, which would put Terraform in charge
+of the subscription and, in the provider's own words, "create/cancel associated
+subscriptions". Not a trade worth making for a value nothing consumes.
+
+The plan tier still matters — ADR 0024, `wiki/Availability-Probe.md`,
+`infra/observability.tf` and `infra/variables.tf` all reason about "this
+Cloudflare plan", because Bot Fight Mode, Origin Rules' Host Header override and
+mTLS gate on it. Read it from the zone's Overview page in the Cloudflare
+dashboard when a decision turns on it; it changes only when someone deliberately
+changes it.
 
 From `infra/oidc.tf`: `client_id` · `deploy_principal_id` ·
 `federated_subjects`

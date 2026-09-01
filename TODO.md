@@ -495,10 +495,33 @@ https://hybridcloudworks.com/admin/api-keys
 
 `GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
 
-## Repository settings still worth a look
+## Settings still worth a look
 
-Neither is counted above, because neither is a finding — they are settings that
-are currently choices rather than defaults.
+None is counted above, because none is a finding — they are settings that are
+currently choices rather than defaults.
+
+- **Three stale Terraform Cloud variables, one deletion each.** Every plan and
+  apply prints:
+
+  > Warning: Value for undeclared variable — The root module does not declare a
+  > variable named "migration_writer_enabled" … "cosmos_scratch_enabled" … and
+  > "1 other variable(s) defined without being declared".
+
+  The third is `storage_scratch_enabled`. All three were **deliberately removed
+  from the code on 2026-08-24** when the migration rehearsal finished —
+  `infra/variables.tf` carries the removal record and says "Do not reintroduce
+  these as variables." Their values were never deleted from the workspace, so
+  Terraform reports values with nothing to bind to.
+
+  **The fix is deletion, not declaration.** Adding `variable` blocks would
+  silence the warning by contradicting a recorded decision and reintroducing
+  three switches that gate nothing. Delete them at
+  https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables — the three
+  rows named `migration_writer_enabled`, `cosmos_scratch_enabled` and
+  `storage_scratch_enabled`.
+
+  **Success:** the next plan prints neither "Value for undeclared variable" nor
+  the "1 other variable(s)" summary line.
 
 - **`production` deployment-branch rule.** Without it the environment-scoped
   federated credential matches from **any** branch, so `workflow_dispatch` can
