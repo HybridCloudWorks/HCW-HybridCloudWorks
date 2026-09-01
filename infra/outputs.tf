@@ -218,10 +218,29 @@ output "subnet_id" {
 # assumption about the plan tier, which decides what the edge can and cannot do:
 # Origin Rules' Host Header override, Super Bot Fight Mode and mTLS all gate on
 # it. That argument was settled, and since then the output's only job was to
-# emit a deprecation warning on every run:
+# emit THE SAME deprecation TWICE on every run. Not once — twice, and the count
+# is quoted from a real run rather than reasoned about, because it was changed
+# to "a deprecation warning" on 2026-09-01 by an automated review that asserted
+# "a single deprecation warning (not two)" without one:
 #
-#   Warning: Deprecated value used ... on outputs.tf line 223
+#   Warning: Deprecated value used
+#   on outputs.tf line 223, in output "cloudflare_plan":
+#       value       = data.cloudflare_zone.current.plan
 #   Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
+#
+#   Warning: Deprecated value used
+#   on outputs.tf line 223, in output "cloudflare_plan":
+#       value       = data.cloudflare_zone.current.plan
+#   Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
+#
+# Two complete blocks, same line, same text — Terraform emits provider
+# deprecations once for the refresh and once for the plan.
+#
+# (Not to be confused with the "Value for undeclared variable" warnings on the
+# same runs. Those come from three stale values in the TFC workspace, are
+# unrelated to this output, and are fixed by deleting them there — TODO.md.
+# That distinction is why the count is spelled out at all, and deleting it was
+# the more costly half of the same automated edit.)
 #
 # (Not to be confused with the "Value for undeclared variable" warnings on the
 # same runs. Those come from three stale values in the TFC workspace, are

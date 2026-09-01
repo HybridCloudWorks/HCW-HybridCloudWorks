@@ -327,8 +327,13 @@ This project has not cut a tagged release; entries are grouped under
   else in this rule is measured against, and every mistake so far has come from
   reasoning about one of the pair without the other.
 
-- **Every Terraform run printed a deprecation warning for an output nothing
-  consumed (2026-09-01).** `cloudflare_plan` read
+- **Every Terraform run printed the same deprecation twice for an output nothing
+  consumed (2026-09-01).** Once for the refresh and once for the plan, both
+  naming the same line — two complete, identical blocks in the run output, which
+  is where the count comes from. Distinct from the "Value for undeclared
+  variable" warnings on those runs, which come from three stale TFC workspace
+  values and are an owner-side deletion; that distinction is the reason the
+  count is stated at all. `cloudflare_plan` read
   `data.cloudflare_zone.current.plan`, deprecated in Cloudflare provider v5:
 
   > Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
