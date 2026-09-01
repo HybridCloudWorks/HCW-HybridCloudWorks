@@ -98,6 +98,85 @@ This project has not cut a tagged release; entries are grouped under
   Corrected in the workspace and in `TODO.md`, `wiki/Cutover-Runbook.md` and
   `.github/workflows/tfc-plan-check.yml`.
 
+### Added
+
+- **Deployment drift is measured now, instead of being discovered by accident
+  (2026-09-01).** `deploy-functions.yml` and `deploy-azure-frontend.yml` are
+  both `workflow_dispatch` only, by a recorded decision — enabling a workflow
+  and enabling auto-deploy-on-merge are separate choices, and only the first was
+  made. So merging deploys nothing, and **nothing said so.**
+
+  That one gap produced both of 2026-08-31's incidents, hours apart, each found
+  by accident rather than by a check:
+
+  - The manifest route merged at 2026-08-30 02:45 UTC against a Function App
+    last deployed at 01:21. `publish-content-manifest.yml` then failed with a
+    404 for two nights, and its own error message blamed the app — which was
+    healthy, reporting 121 registered functions throughout.
+  - The frontend was **35 commits** behind, including a hydration change and a
+    sanitizer hardening, found only because someone deployed for another reason.
+
+  **AGE, NOT COMMIT COUNT**, and that is the whole design. The first incident was
+  ONE commit behind; the second was THIRTY-FIVE. No count threshold separates
+  them — catch the one and you fire on every ordinary merge, tolerate ordinary
+  merges and you miss the outage. What they share is that both sat undeployed
+  for days. Age tolerates the normal merge-then-deploy gap, which is the entire
+  point of dispatch-only releases, and still catches a change merged and
+  forgotten.
+
+  `monitor-deploy-drift.yml` runs every four hours and fails when a service has
+  been behind for 24 hours or more, emailing the owner through GitHub's own
+  notifications — the mechanism `monitor-functions-registered.yml` already uses,
+  needing no action group and no dependency on the subscription being watched.
+  It reads only the GitHub API: the last successful run of each deploy workflow,
+  and the commits on `main` touching that service's paths since. No Azure, no
+  OIDC, no `environment:`, and `contents: read` plus `actions: read`.
+
+  Drift is measured per service over the paths that service ships, so thirty
+  commits touching only `wiki/` leave the Function App exactly as correct as it
+  was.
+
+  **On running this from a schedule GitHub delivers 22% of the time**, said
+  plainly rather than assumed away: for an outage detector that is a real
+  problem, and here it is not. This watches a condition measured in days against
+  a threshold measured in hours, so a check landing every 4.6 hours on average
+  has ample margin against 24. The workflow header records that the reasoning
+  stops holding if the threshold ever drops near the delivery gap.
+
+  36 tests, and six load-bearing decisions are mutation-verified: reading only
+  the first page of commits, dropping the de-duplication, defaulting an
+  unreadable commits payload to an empty page, taking the newest commit instead
+  of the oldest, `>` instead of `>=` on the threshold, and leaving a raw `|` in
+  a table cell. All six fail the suite when introduced.
+
+  **All five fail in the same direction — reporting a service as healthier than
+  it is — and that direction is the actual finding.** Every defect review caught
+  in this file, and every one caught while writing it, made a stale service look
+  current. None made a current service look stale. A monitor whose bugs all
+  point at "everything is fine" fails the one way it must not, so the mutation
+  set is exactly those.
+
+  The sixth is a legibility failure rather than a correctness one, and belongs
+  with them anyway: commit subjects and error text are not this script's to
+  constrain, and a `|` in either ends its Markdown cell early — the row grows a
+  column, everything after it shifts, and the table stops rendering as a table.
+  That table IS the report, read to decide whether to deploy, at the hour a
+  monitor tends to fire. Newlines are folded for the same reason.
+
+  Two defects were caught before merge and are worth recording:
+
+  - `oldestCommit` originally took the **last element**, on the true-but-narrow
+    grounds that GitHub returns commits newest first. That holds for one page of
+    one path and nothing else — the merged list is newest-first only within each
+    per-path segment, so with two paths the last element is the second path's
+    oldest, which can be far newer. Found in review. It now takes the minimum by
+    date and assumes no ordering at all, which removes the class rather than the
+    instance. The same review found the missing pagination and de-duplication.
+  - The `setup-node` pin was a SHA appearing in no other workflow here —
+    invented rather than copied, which is the exact defect pinning by SHA exists
+    to prevent. It is now the pin the other eight workflows use, and both action
+    SHAs were verified against `.github/workflows` before commit.
+
 ### Fixed
 
 - **The nightly manifest job opens a pull request instead of pushing to `main`
