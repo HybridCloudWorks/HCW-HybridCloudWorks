@@ -228,14 +228,23 @@ runs as `github_reader`, whose grant is Reader — `*/read`, which does not
 include the Log Analytics query action. That is deliberate (T-728) and worth
 leaving alone for one query a year.
 
-**Step 2 — arm it.** Only after a `success == 1` row is visible, set
-`availability_probe_alert_enabled = true` at
+**Step 2 — arm it, but not until the WINDOW is populated, which is not the same
+as the first row.** Re-run the count query above and wait for **6 or more**.
+
+The arithmetic, because "wait for a success row" is the wrong gate and this file
+said it until 2026-09-01: the rule fires when successes in the trailing
+**PT30M** are `LessThan 3`, and the Worker writes one row every 5 minutes, so a
+full window holds 6. Arm it with 2 rows on the board and the first evaluation
+counts 2, which is less than 3, and it pages — for exactly the same reason
+arming with 0 rows would. A healthy probe is a precondition; **30 minutes of
+healthy probe is the precondition.** At 6 the window is full and the designed
+tolerance, 3 missing out of 6, applies from the first evaluation rather than
+some minutes later.
+
+Then set `availability_probe_alert_enabled = true` at
 https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables (plain value
-`true`, not HCL — it is a bool), then approve the run at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs. The alert fires on
-ABSENT successes rather than present failures, so arming it before the first
-observed success creates a rule that fires immediately and permanently on the
-missing data it watches for.
+`true`, not HCL — it is a bool), and approve the run at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs.
 
 **Expect the Function App to restart.** Every run on this workspace carries the
 permanent diff that replaces three `azapi` resources, and the app was last

@@ -303,6 +303,30 @@ This project has not cut a tagged release; entries are grouped under
   moves. Manifest run 11 reported "No change to the published set" and skipped
   the mint entirely. The first article published is the test.
 
+- **"Wait for a success row" was the wrong gate for arming the reachability
+  alert (T-519).** The runbook written earlier the same night said to arm
+  `availability_probe_alert_enabled` once a `success == 1` row was visible. That
+  is necessary and not sufficient, and the gap is arithmetic rather than
+  judgement.
+
+  The rule fires when successes in the trailing **PT30M** window are
+  `LessThan 3`, and the Worker writes one row per 5 minutes, so a full window
+  holds 6. When the probe's secret was fixed at 2026-09-01 01:35 UTC the table
+  went from 0 rows to 2 within ten minutes — satisfying the old gate exactly.
+  Arming there would have counted 2 successes, which is less than 3, and paged
+  Sev 1 on a probe that was working perfectly, for the same reason arming with
+  zero rows would.
+
+  The gate is now the count itself: **6 or more**, which is 30 minutes of
+  healthy probing and means the window is full and the designed tolerance — 3
+  missing out of 6 — applies from the first evaluation.
+
+  Third time in one night that this alert's window and threshold had to be
+  reasoned about together (after T-745's half-applied `PT15M`, and the pairing
+  warnings added beside both halves). The window is the parameter everything
+  else in this rule is measured against, and every mistake so far has come from
+  reasoning about one of the pair without the other.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up
