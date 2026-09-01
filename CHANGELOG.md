@@ -152,7 +152,11 @@ This project has not cut a tagged release; entries are grouped under
   extensions. A docs-only pull request drops from six installs, a frontend
   build and three CodeQL analyses to nine ~10-second no-ops; pushes to
   `main` and the weekly CodeQL schedule still run everything, so the merged
-  combination and newly published queries are never skipped.
+  combination and newly published queries are never skipped. The decision,
+  its rejected alternatives and its accepted risks are
+  [ADR 0026](wiki/0026-required-checks-filter-inside-the-job.md); a public
+  write-up of the pattern is staged as
+  [Blog-FinOps-01-CI-Refund](wiki/Blog-FinOps-01-CI-Refund.md).
 
 - **The code-review skill moved to `.github/skills/code-review/`, and its
   consumer is now GitHub Copilot code review.** Owner decision, 2026-09-01:

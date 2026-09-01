@@ -70,6 +70,7 @@ Every ADR includes:
 | [0023](0023-migration-estate-retirement) | Retire the migration-era estate, grants and reverse path | Accepted | Close the decommission gate deliberately rather than by neglect |
 | [0024](0024-edge-availability-probe) | Reachability probing from a Cloudflare Worker | Proposed | Give T-519's signal a path that runs on the current Cloudflare plan |
 | [0025](0025-cosmos-firewall-datacenter-sentinel) | The Cosmos datacenter-IP sentinel — kept, then removed | Accepted; recommendation reversed by its own addendum | Weigh closing T-718 against its cost — then remove the sentinel once a cheaper route appeared |
+| [0026](0026-required-checks-filter-inside-the-job) | Required checks filter inside the job, not at the trigger | Accepted | Keep every merge gate while paying only for checks that can fail |
 
 ## Template
 
