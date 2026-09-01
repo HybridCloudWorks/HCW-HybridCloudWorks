@@ -167,6 +167,7 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
+    $relativePath.StartsWith('.github/skills/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath -eq '.github/pull_request_template.md' -or
     # Tooling-adjacent documentation, allowed by the same README clause that
     # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING and
