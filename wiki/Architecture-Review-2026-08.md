@@ -1333,8 +1333,15 @@ counter in `poll()`, include it in the guard, release it in a `finally`.
 >
 > **Status (2026-09-01): that was half true, and the wrong half.** The threshold moved to 3 and every prose description — this line, the resource's `description`, the inline comment, `wrangler.toml` — moved to "30-minute window". `window_duration` stayed at `PT15M`. Three rows per window against a threshold of 3 tolerates nothing, so the finding was not merely open, it was **inverted**: the pre-fix shape (`PT15M`, threshold 2) tolerated one miss and the "fixed" one tolerated none. Caught 2026-09-01 while preparing to arm `availability_probe_alert_enabled` for the first time, so it never fired. `window_duration` is now `PT30M`, matching the recommendation below and the four places that already claimed it.
 
-`edge/availability-probe/wrangler.toml:23,31` ·
-`infra/observability.tf:869-883` · `edge/availability-probe/worker.js:80-98`
+`edge/availability-probe/wrangler.toml` (`[triggers] crons`) ·
+`infra/observability.tf` (`azurerm_monitor_scheduled_query_rules_alert_v2.edge_probe_availability`) ·
+`edge/availability-probe/worker.js` (`buildEnvelope`)
+
+**The analysis below is the state as found on 2026-08-28 and is deliberately
+left as written** — it is the evidence for the finding, not a description of the
+rule today. Read the status lines above for that. (Same treatment as ADR 0025,
+whose heading changed while its analysis did not.) Today the rule is `PT30M`
+with `threshold = 3`.
 
 The telemetry shape genuinely matches the alert — `PROBE_NAME` equals the
 query's `name ==` filter, the envelope is a well-formed
