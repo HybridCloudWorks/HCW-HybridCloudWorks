@@ -214,6 +214,34 @@ This project has not cut a tagged release; entries are grouped under
   path is exercised for the first time on the first run where the set actually
   changes.
 
+- **The reachability alert's window never moved, so the "fixed" rule tolerated
+  nothing (T-745, re-opened and closed 2026-09-01).** `edge_probe_availability`
+  fires when successful probes in its window are `LessThan 3`. T-745 was
+  recorded FIXED on 2026-08-28 as "30-minute window expecting 6 results, firing
+  below 3" — and the threshold did move to 3, and the resource `description`,
+  the inline comment and `edge/availability-probe/wrangler.toml` all moved to
+  describe a 30-minute window. **`window_duration` stayed at `PT15M`.**
+
+  At the Worker's `*/5` cadence a 15-minute window holds 3 rows, so a threshold
+  of 3 fires unless every one of them arrives and is queryable. `wrangler.toml`
+  records that App Insights availability rows "land 1-3 minutes late and
+  sometimes later" — which is why the 30-minute window existed. The finding was
+  not just left open; it was **inverted**. The shape it replaced (`PT15M`,
+  threshold 2) tolerated one miss. The shape that replaced it tolerated none, on
+  a **Sev 1** rule re-evaluating every 5 minutes.
+
+  Caught while preparing to arm `availability_probe_alert_enabled` for the first
+  time, so it never fired. `window_duration` is now `PT30M`. Both halves now
+  carry the pairing rule in the place someone would edit them —
+  `observability.tf` beside the window, `wrangler.toml` beside the cron — and
+  the review entry records the correction rather than quietly flipping back to
+  open.
+
+  **The transferable part:** every artefact that *described* the fix was
+  updated, and the one line that *implemented* it was not. Nothing compares a
+  Terraform attribute to the prose around it, so four consistent descriptions
+  read as four confirmations.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up
