@@ -80,11 +80,17 @@ because it is not a review finding: it is an owner action left behind by a
 finding that is closed. Item 3 is a repeated procedure, 4 a measurement, and 5 a
 cost decision waiting on it.
 
-**The table is ordered by priority, and the sections below are in the same
-order.** They are checked against each other by number AND by `T-` identity, not
-by counting rows — an earlier edit on 2026-09-01 reordered the table by priority
-while renumbering the sections in document order, which passed a digits-only
-check and still had every row pointing at the wrong section.
+**The table and the sections below are in the same order, and that order is the
+one to work them in — not a sort of the Priority column.** Item 2 carries no
+severity at all and still sits above a High, because it is the one whose next
+step is a settings page you can open now. Said this way because an earlier draft
+claimed "ordered by priority", which the dash in row 2 plainly contradicts;
+found in review on 2026-09-01.
+
+The two are checked against each other by number AND by `T-` identity, never by
+counting rows. Also from 2026-09-01: an edit reordered the table while
+renumbering the sections in document order, and because both still read `1..5`
+a digits-only check passed with every row pointing at the wrong section.
 
 **Item 1 moved from Medium to High on 2026-08-31**, on a measurement rather than
 a judgement: `monitor-functions-registered.yml` asks GitHub for an hourly run
