@@ -18,7 +18,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
-- **TODO.md gains one working order across everything open.** A repo-wide
+- **TODO.md gains one working order across everything open (#314).** A repo-wide
   sweep (dedicated tracker, wiki backlogs, inline markers, `notImplemented`
   contract) confirmed the five-item table is complete, then added an "attack
   sequence" section that sequences all of it — the five items, the settings
@@ -34,7 +34,7 @@ This project has not cut a tagged release; entries are grouped under
   path moved `GUARDED_FILES` → `LIVE_FILES`) because the validator asserts
   both directions.
 
-- **`insertModuleIntoMarkdown` honours its `position` parameter.** The last
+- **`insertModuleIntoMarkdown` honours its `position` parameter (#314).** The last
   genuine inline code TODO: both branches appended to the end, so a caller
   passing a real index got a silent no-op. It now splices via the existing
   parse → rebuild machinery — the exact inverse of `removeModuleFromMarkdown`
@@ -84,7 +84,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
-- **Three stale wiki records corrected before they cost a round trip.**
+- **Three stale wiki records corrected before they cost a round trip (#314).**
   `Architecture-Review-2026-08.md` still read T-714 "OPEN — needs an owner
   decision" (closed by #296, hydration landed) and T-709 "owner action open"
   (closed 2026-08-30/31, both channels observed delivering); each block now
