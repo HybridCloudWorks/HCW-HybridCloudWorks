@@ -146,7 +146,8 @@ This project has not cut a tagged release; entries are grouped under
   leaves the PR waiting on "Expected" forever, so the job itself diffs
   against the base and skips its expensive steps, still posting success).
   Each filter names the component's real dependency set, not just its own
-  tree: functions tests read `infra/` Terraform source, `.azure/` and the
+  tree: functions tests read `infra/` Terraform source,
+  `.azure/api-surface.json` and the
   `wiki/Blog-Machine.md` grammar contract; scripts tests pin
   `.github/workflows/` and `infra/roles`; CodeQL filters by language file
   extensions. A docs-only pull request drops from six installs, a frontend

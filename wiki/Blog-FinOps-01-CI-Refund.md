@@ -95,8 +95,13 @@ job still completes — in seconds — and still posts its required context.
         if [ "${{ github.event_name }}" != "pull_request" ]; then
           echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
         fi
-        if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-           | grep -qE '^(frontend/|\.azure/)'; then
+        # Capture the diff first: `set -e` is inert inside an `if`
+        # condition, so a failed diff would read as "no changes" and
+        # silently skip required work.
+        changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+          echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+        }
+        if grep -qE '^(frontend/|\.azure/api-surface\.json)' <<<"$changed"; then
           echo "relevant=true" >> "$GITHUB_OUTPUT"
         else
           echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -106,7 +111,7 @@ job still completes — in seconds — and still posts its required context.
       if: steps.changes.outputs.relevant == 'true'
       run: npm test
 
-Three rules make this safe rather than merely fast:
+Four rules make this safe rather than merely fast:
 
 1. **The filter is a dependency map, not a directory name.** Our functions
    suite asserts against Terraform source and a machine-readable API
@@ -120,7 +125,13 @@ Three rules make this safe rather than merely fast:
    confirming — and the weekly security scan analyzes the whole repository,
    so a newly published CodeQL query never waits for a PR to touch the
    affected language.
-3. **Write the doctrine where the next editor will trip on it.** Our
+3. **A diff that cannot be computed fails toward running, not skipping.**
+   That capture-first shape in the snippet is not style: `set -e` does not
+   fire inside an `if` condition, so the naive `git diff | grep` form reads
+   a *failed* diff — an unfetchable base commit, say — as "no changes" and
+   silently skips the very checks the merge gate exists to run. Ours shipped
+   that way first; review caught it. When in doubt, spend the compute.
+4. **Write the doctrine where the next editor will trip on it.** Our
    workflows carry a comment that says, in effect: *do not re-add `paths:`
    to `pull_request` without first removing these contexts from the ruleset,
    in that order.* A pattern that only lives in one engineer's head reverts
