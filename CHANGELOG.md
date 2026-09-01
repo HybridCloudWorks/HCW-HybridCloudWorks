@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **T-519 closed: the reachability alert is armed, and the estate's one
-  outage-surviving signal finally pages.** The blocker was what
+  outage-surviving signal finally pages (#315).** The blocker was what
   `wrangler.toml` predicted: the Worker's secret held the Instrumentation Key,
   not the connection string, so `parseConnectionString` threw on every `*/5`
   invocation and `availabilityResults` stayed empty. Fixed 2026-09-01 with the
