@@ -18,6 +18,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **T-519 closed: the reachability alert is armed, and the estate's one
+  outage-surviving signal finally pages (#315).** The blocker was what
+  `wrangler.toml` predicted: the Worker's secret held the Instrumentation Key,
+  not the connection string, so `parseConnectionString` threw on every `*/5`
+  invocation and `availabilityResults` stayed empty. Fixed 2026-09-01 with the
+  piped command in `edge/availability-probe/wrangler.toml` — the value never
+  touched a screen or clipboard — and verified as a chain, not a deploy:
+  `wrangler tail` showed a clean `Ok` invocation; twelve
+  `success == 1` / HTTP 200 rows landed on the 5-minute cadence (18:25–18:45
+  UTC and onward), twice the six a full PT30M window needs, so the rule's
+  first evaluation ran against a populated window;
+  `availability_probe_alert_enabled = true` was applied in the `hcw-azure`
+  workspace; `alert-api-reachability-prod-cus` now lists among the four
+  scheduled-query rules in `rg-web-site-prod-cus`; and the registered function
+  count read 122 both before and after the apply's expected Function App
+  restart. Justification unchanged from the 2026-08-31 measurement: the
+  GitHub-scheduled half of the detection pair delivers 22% of its hourly runs
+  with a 12.7-hour worst-case blind window, and the probe runs on a scheduler
+  GitHub cannot drop. Removed from TODO.md, whose open list drops to four;
+  the standard Azure web test stays disarmed in Terraform (Bot Fight Mode,
+  ADR 0024) with the Worker as the approved path around it.
+
 - **TODO.md gains one working order across everything open (#314).** A repo-wide
   sweep (dedicated tracker, wiki backlogs, inline markers, `notImplemented`
   contract) confirmed the five-item table is complete, then added an "attack

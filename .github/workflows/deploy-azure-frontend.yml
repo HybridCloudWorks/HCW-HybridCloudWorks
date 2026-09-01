@@ -37,10 +37,13 @@ name: Deploy Frontend
 # today. A GitHub-hosted runner asking `https://hybridcloudworks.com` is a
 # datacenter client, and Cloudflare's Bot Fight Mode answers those with a 403
 # interstitial; that is the whole reason the availability test is disarmed and
-# ADR 0024 routes around it with a Worker (TODO.md T-519). A smoke step written
+# ADR 0024 routes around it with a Worker (T-519). A smoke step written
 # against the public host would fail on a healthy deploy and trigger a rollback
-# of good code, which is worse than having no smoke step. Revisit when T-519's
-# Worker is deployed and can be asked instead.
+# of good code, which is worse than having no smoke step. The revisit
+# precondition is now met — the Worker was deployed and its alert armed on
+# 2026-09-01 — so asking the probe's availabilityResults instead of the public
+# host is available; wiring that is a deliberate owner decision, not assumed
+# here.
 #
 # on:
 #   push:
