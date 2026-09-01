@@ -18,7 +18,7 @@ and `Gate: owner` still marks the rest.
 
 ## Status — 2026-09-01
 
-> **Five items are open. None can be closed from a checkout.** Each carries what
+> **Four items are open. None can be closed from a checkout.** Each carries what
 > to run or click, and what a successful result looks like, so a real failure
 > can be told apart from a reporting failure.
 >
@@ -30,12 +30,15 @@ and `Gate: owner` still marks the rest.
 > matched what the API serves. Recorded in CHANGELOG.md and removed from this
 > list.
 >
-> **What is first now is a detection gap that was being reported as closed.**
-> The hourly registration monitor is delivered by GitHub 22% of the time, with a
-> 12.7-hour worst-case blind window — measured 2026-08-31, over the workflow's
-> whole life. The fast half of that pair, the Cloudflare probe, is deployed but
-> its alert is not armed. That is item 1, and it is why it is no longer Medium.
-> The remaining items are decisions or measurements with no deadline.
+> **The detection gap is closed — `T-519` was armed on 2026-09-01.** The probe's
+> secret held the Instrumentation Key rather than the connection string; the
+> piped command in `edge/availability-probe/wrangler.toml` replaced it, twelve
+> `success == 1` / HTTP 200 rows landed on the `*/5` cadence before arming
+> (a full PT30M window needs six), and the apply created
+> `alert-api-reachability-prod-cus` in `rg-web-site-prod-cus`. The registered
+> function count was 122 before and after the apply's restart. Recorded in
+> CHANGELOG.md and removed from this list. What remains is decisions or
+> measurements with no deadline.
 >
 > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
 > resolved or carried below as owner gates. The per-finding record — method,
@@ -69,35 +72,27 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
-| 1 | `T-519` — arm the reachability alert | **High** | One query, then one variable |
-| 2 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
-| 3 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 4 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
-| 5 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 4 |
+| 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
+| 2 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
+| 3 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
+| 4 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 3 |
 
-Item 1 is one query followed by one variable. Item 2 carries no severity
-because it is not a review finding: it is an owner action left behind by a
-finding that is closed. Item 3 is a repeated procedure, 4 a measurement, and 5 a
-cost decision waiting on it.
+Item 1 carries no severity because it is not a review finding: it is an owner
+action left behind by a finding that is closed. Item 2 is a repeated
+procedure, 3 a measurement, and 4 a cost decision waiting on it.
 
 **The table and the sections below are in the same order, and that order is the
-one to work them in — not a sort of the Priority column.** Item 2 carries no
-severity at all and still sits above a High, because it is the one whose next
-step is a settings page you can open now. Said this way because an earlier draft
-claimed "ordered by priority", which the dash in row 2 plainly contradicts;
-found in review on 2026-09-01.
+one to work them in — not a sort of the Priority column.** Item 1 carries no
+severity at all and still sits above a High, because there is nothing left to
+run on it — it waits on the first content change, which any published article
+supplies in passing. Said this way because an earlier draft claimed "ordered by
+priority", which the dash in row 1 plainly contradicts; found in review on
+2026-09-01.
 
 The two are checked against each other by number AND by `T-` identity, never by
 counting rows. Also from 2026-09-01: an edit reordered the table while
 renumbering the sections in document order, and because both still read `1..5`
 a digits-only check passed with every row pointing at the wrong section.
-
-**Item 1 moved from Medium to High on 2026-08-31**, on a measurement rather than
-a judgement: `monitor-functions-registered.yml` asks GitHub for an hourly run
-and GitHub delivers 22% of them, with a worst observed blind window of 12.7
-hours. The Cloudflare probe is the half of that pair GitHub cannot drop, and it
-is not armed. The work is unchanged — one query, then one variable — but it is
-no longer polish on something finished.
 
 **Closed on 2026-08-31 and removed from this list:** seeding `TFC_TOKEN` (done),
 and `T-749`, the SCM lock — Terraform owns
@@ -113,16 +108,16 @@ items and restates no procedures. Each phase points at the one section that
 carries the commands and the success criteria, so this list cannot drift from
 those sections the way a restatement would — the T-722 lesson, applied in
 advance. The ordering rule is dependency, not priority: the settings sweep
-sits second because every click in it is available today and fits inside
-Phase 1's wait, and the cost decision sits after the measurement it waits on.
+sits early because every click in it is available today, and the cost decision
+sits after the measurement it waits on.
 
 | Phase | What | Where the procedure lives | Why this position |
 | ---: | --- | --- | --- |
-| 1 | Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`) | [Section 1](#1-t-519--the-probe-is-deployed-arm-the-alert-once-a-row-lands) | The one High with a live detection gap behind it. The ≥30-minute wait for a populated window is when Phase 2 happens |
-| 2 | Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans | [Settings still worth a look](#settings-still-worth-a-look) | Every step is a settings page that can be opened now; doing it inside Phase 1's wait costs nothing and needs no apply |
-| 3 | Raise the ingestion cap for one full day and read the demand (`T-719`), then pull the telemetry lever and re-justify the SWA tier (`T-721`) | [Section 4](#4-t-719--the-cap-is-binding-measured-2026-08-31) then [Section 5](#5-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-4) | The measurement must precede both the cost decision and the timer arming, because timers add `AppTraces` volume against a cap that is already binding |
-| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 3](#3-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's measurement, so the new volume lands under a cap sized for it rather than darkening the log-based alerts further |
-| 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 2](#2-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
+| 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
+| 2 | Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans | [Settings still worth a look](#settings-still-worth-a-look) | Every step is a settings page that can be opened now; it costs nothing and needs no apply |
+| 3 | Raise the ingestion cap for one full day and read the demand (`T-719`), then pull the telemetry lever and re-justify the SWA tier (`T-721`) | [Section 3](#3-t-719--the-cap-is-binding-measured-2026-08-31) then [Section 4](#4-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-3) | The measurement must precede both the cost decision and the timer arming, because timers add `AppTraces` volume against a cap that is already binding |
+| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's measurement, so the new volume lands under a cap sized for it rather than darkening the log-based alerts further |
+| 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
 | 6 | Optional features: seed the keys and documents you actually want; decide which dark provider sections go live | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature); the provider-pages row in [Owner decisions](#owner-decisions-and-external-access) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
 
@@ -139,152 +134,7 @@ exist.
 
 ## What is open, and exactly what closes it
 
-### 1. T-519 — the probe is deployed; arm the alert once a row lands
-
-**Raised in importance on 2026-08-31, on a measurement rather than an opinion.**
-This item read as the last polish on a finished piece of work. It is not: it is
-what closes a real detection gap, because the other half of the pair is not
-delivering.
-
-`monitor-functions-registered.yml` asks GitHub for a run every hour at `:41`.
-Over the 132 hours from 08-26 08:23 to 08-31 20:23, on a cron that never
-changed, **29 of 133 slots produced a run — 22%.** When one lands it is a median
-36 minutes late; only 3 of 29 arrived within 5 minutes. The longest window with
-no check at all was **12.7 hours**, and three separate gaps ran over 10. That is
-one check every 4.6 hours on average, against a header that claimed hourly.
-
-It is not one workflow being unlucky. `monitor-unresolved-secrets.yml`
-(`29 */6 * * *`, added 08-30) has produced 2 runs where about 8 were due, and
-`publish-content-manifest.yml` (`15 6 * * *`) has landed anywhere from 07:05 to
-18:37. GitHub documents that `schedule` is delayed under load and that delayed
-runs are dropped rather than queued; nothing in the repository can fix that.
-
-**Which is why the probe matters more than it looked.** The Cloudflare Worker
-was deployed on 2026-08-31 and runs on `*/5 * * * *` — a scheduler GitHub has no
-say in. `worker.js` records `success = res.status === 200`, so an unregistered
-host, which 404s every route including `/api/health`, is caught twelve times an
-hour instead of once every 4.6. Every other alert needs the app healthy enough
-to emit telemetry; this is the only signal that survives the app being down.
-
-The two are meant to be a pair — the probe notices fast, the GitHub monitor
-names which condition — and **until this is armed only the slow, unreliable half
-is live.**
-
-**Precondition, added 2026-09-01: the rule's window was wrong and is fixed on
-`main` now.** `window_duration` was `PT15M` against a threshold of 3, which at
-the probe's `*/5` cadence expects 3 rows and tolerates none — a Sev 1 on a
-healthy site the first time an App Insights row landed a minute late. T-745 had
-moved the threshold and every description to "30-minute window" and left the
-window itself behind. It is `PT30M` now. **Do not arm a checkout that predates
-that fix.**
-
-**Blocked as of 2026-09-01 01:15 UTC: the probe has never written a row, and
-the cause is measured rather than guessed.** `availabilityResults | summarize
-rows=count()` returns **0** for the whole table, and `wrangler tail` shows why —
-every `*/5` invocation throws before sending anything:
-
-```
-"*/5 * * * *" @ 8/31/2026, 8:15:28 PM - Exception Thrown
-  Error: APPLICATIONINSIGHTS_CONNECTION_STRING must carry InstrumentationKey and IngestionEndpoint
-    at parseConnectionString (worker.js:15:11)
-```
-
-So the cron, the deploy and the schedule are all fine — the secret holds
-something that is not a connection string, almost certainly the Instrumentation
-Key, which the Azure portal displays directly above it. Fix it with the piped
-command in `edge/availability-probe/wrangler.toml`, which sets the secret
-without the value reaching a screen or a clipboard, then confirm with Step 1
-below.
-
-Two hypotheses were eliminated on the way and are recorded so nobody re-runs
-them: the workspace is **not** over quota (`dataIngestionStatus: RespectQuota`
-against the 0.25 GB cap), and the cross-subscription read works (`rows: [[0]]`
-is a valid result set, not a denial). Note that `log-plat-prod-cus-01` lives in
-the **Management** subscription, so any `az` command against
-`rg-mgmt-plat-prod-cus` needs `--subscription` or it answers
-`ResourceGroupNotFound`.
-
-**Step 1 — confirm a result landed.** Ingestion lags a few minutes. PowerShell,
-one line — the KQL must stay on one line because `az` on Windows is a batch file
-and truncates an argument at the first newline while still exiting 0:
-
-```powershell
-az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --analytics-query "availabilityResults | summarize rows=count()" -o json
-```
-
-**Raw `-o json`, and no `.tables[0].rows` on the end.** Both shortcuts were
-tried on 2026-09-01 and both hide the answer: `(… | ConvertFrom-Json).tables[0].rows`
-yields `$null` silently when `az` fails, so a broken tool and an empty table
-print the same blank line; and `-o table` renders nothing at all for this
-nested shape, whatever the row count. `summarize count()` with no `by` always
-returns exactly one row, so the raw JSON distinguishes every case.
-
-Resource names are from `infra/main.tf` (`azurerm_application_insights.hcw`,
-resource group `azurerm_resource_group.app["web"]`) with the defaults in
-`infra/variables.tf`.
-
-**Success:** `"rows": [[N]]` with N greater than 0.
-
-Then read the rows themselves. This is a **different query, not an addition** —
-`name` does not survive `summarize`, so appending a `where` to the command above
-fails:
-
-```powershell
-az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --analytics-query "availabilityResults | where name == 'edge-api-health' | project timestamp, success, message | order by timestamp desc | take 5" -o json
-```
-
-**`[[0]]` is not "wait longer".** It is the failure `wrangler.toml` warns
-about, and it is what actually happened. `wrangler tail` is the tiebreaker, and
-it names the cause in one line — leave it open six minutes so a `*/5` invocation
-lands:
-
-```powershell
-npx wrangler tail --config edge/availability-probe/wrangler.toml --format pretty
-```
-
-An exception from `parseConnectionString` means the secret. A clean invocation
-with the table still empty means the ingestion endpoint. **No invocation at all
-means the cron never registered** — a different repair entirely.
-
-Those three are worth distinguishing because **from Azure's side they are the
-same empty table.** `runProbe` deliberately does not retry or trap the ingestion
-POST, so a failure produces no telemetry at all rather than a failure row. What
-makes them separable is the `.catch` T-746 added in `scheduled`, which logs and
-rethrows purely so the rejection lands somewhere — the `[availability-probe] run
-failed:` line in the tail output above is that `console.error`, and without it
-this would have been diagnosed by guesswork.
-
-**This step cannot be automated with what exists.** `verify-alert-state.yml`
-runs as `github_reader`, whose grant is Reader — `*/read`, which does not
-include the Log Analytics query action. That is deliberate (T-728) and worth
-leaving alone for one query a year.
-
-**Step 2 — arm it, but not until the WINDOW is populated, which is not the same
-as the first row.** Re-run the count query above and wait for **6 or more**.
-
-The arithmetic, because "wait for a success row" is the wrong gate and this file
-said it until 2026-09-01: the rule fires when successes in the trailing
-**PT30M** are `LessThan 3`, and the Worker writes one row every 5 minutes, so a
-full window holds 6. Arm it with 2 rows on the board and the first evaluation
-counts 2, which is less than 3, and it pages — for exactly the same reason
-arming with 0 rows would. A healthy probe is a precondition; **30 minutes of
-healthy probe is the precondition.** At 6 the window is full and the designed
-tolerance, 3 missing out of 6, applies from the first evaluation rather than
-some minutes later.
-
-Then set `availability_probe_alert_enabled = true` at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables (plain value
-`true`, not HCL — it is a bool), and approve the run at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs.
-
-**Expect the Function App to restart.** Every run on this workspace carries the
-permanent diff that replaces three `azapi` resources, and the app was last
-deployed 2026-08-31 23:45 UTC. Re-check the registered function count
-afterwards.
-
-**Success:** the rule `alert-api-reachability-prod-cus` exists in
-`rg-web-site-prod-cus` and stays quiet.
-### 2. T-726 — built and configured; unproven until content moves
+### 1. T-726 — built and configured; unproven until content moves
 
 **Corrected 2026-08-31, and the correction is the important part.** This item
 said, in five places across the repository, that the ruleset listed the Actions
@@ -379,7 +229,7 @@ but it reported "No change to the published set" — so every step after that
 check was skipped, the App branch included. The first real exercise of this path
 is the first run where the published set has actually moved.
 
-### 3. T-518 — arm the remaining 15 timers — repeated procedure
+### 2. T-518 — arm the remaining 15 timers — repeated procedure
 
 Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
 `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
@@ -401,11 +251,11 @@ pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Ho
 between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
 truncation fixed on 2026-08-31, and it means the window is not being applied.
 
-**Note the interaction with item 4:** arming timers adds `AppTraces` volume
+**Note the interaction with item 3:** arming timers adds `AppTraces` volume
 against a cap that is already binding. Take that measurement first, or arm and
 watch the volume with it.
 
-### 4. T-719 — the cap is binding, measured 2026-08-31
+### 3. T-719 — the cap is binding, measured 2026-08-31
 
 **This is no longer a margin question.** Billable ingestion, aligned to the
 08:00 UTC cap reset:
@@ -440,7 +290,7 @@ below under *Reading the ingestion volume*.
 (https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
 platform cannot reach in a day, approve the run, leave it one full cap period,
 read the volume, put it back. That measures **demand** rather than the ceiling,
-which is the number item 5 needs to size its lever. Record it here with the date.
+which is the number item 4 needs to size its lever. Record it here with the date.
 
 **Do not set it to -1.** Azure accepts that for "unlimited", but the
 `logs_daily_cap` alert threshold is this value times 0.8, so an unlimited
@@ -484,7 +334,7 @@ Windows `az` is a batch file that cannot receive an argument containing a
 newline — a multi-line query arrives truncated at the first break and the call
 still exits 0.
 
-### 5. T-721 — telemetry costs five times the workload it observes — after item 4
+### 4. T-721 — telemetry costs five times the workload it observes — after item 3
 
 Telemetry runs about USD 17–21 a month against an application-subscription
 workload of roughly USD 4 — together roughly 80% of predictable Azure spend on a
@@ -711,33 +561,6 @@ been reporting none. That last number is the one worth remembering — the
 The fifteen that remain go one at a time, each observed firing before the next
 is added.
 
-### T-519 — Reachability is the one signal with no alert behind it
-
-**Gate: owner (Worker deploy)** — [ADR 0024](wiki/0024-edge-availability-probe.md);
-[TODO.md](TODO.md), *Timers and the availability test*.
-
-`availability_test_enabled` defaults to `false` and both the standard web test
-and its alert are gated on it, for a measured reason: Cloudflare's Bot Fight
-Mode serves datacenter clients — which is exactly what Azure's availability
-agents are — a 403 interstitial for `https://api-azure.<domain>/api/health`,
-and a WAF skip rule against it was built, applied and confirmed **inert**,
-because Bot Fight Mode does not run on the Ruleset Engine. It matters more
-than one rule out of six suggests: every other alert needs the app healthy
-enough to emit telemetry, and reachability is the only signal that survives
-the app being completely down.
-
-**The gate changed shape on 2026-08-28.** ADR 0024 routes around Bot Fight
-Mode instead of waiting on it: `edge/availability-probe` is a Cloudflare
-Worker on a 5-minute cron whose same-zone subrequest is not challenged,
-reporting every `/api/health` attempt to Application Insights, with a
-success-counting alert (`edge_probe_availability`, gated on
-`availability_probe_alert_enabled`, default `false`) in the same fabric as
-every other rule. What remains is owner-held but no longer a plan decision:
-deploy the Worker with wrangler, seed the connection-string secret, observe a
-`success == 1` row, then flip the variable
-([Availability-Probe](wiki/Availability-Probe.md) is the procedure). The standard
-web test stays in Terraform, disarmed, for the day #127 upgrades the plan.
-
 ## Test coverage follow-up
 
 One boundary case is left, and it is not resolvable from the repository:
@@ -771,7 +594,7 @@ Entra row below, which is where it belongs.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered. **The credential half of this row is closed (T-727, 2026-08-31):** the deploy mints its token from ARM per run under federated identity, and the stored secret is deleted — there is nothing left to provide or rotate | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | See items 3 and 4 above for the procedure and what success looks like. Decide whether to arm the remaining 15 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and proven. Separately deploy the edge probe before enabling its Terraform alert | The three proven timers remain armed; the other 15 remain no-ops. The Azure availability test remains disabled because Bot Fight Mode challenges Azure agents; T-519's Cloudflare Worker is the approved path around it and still needs an owner deployment |
+| Timers and the availability test | See items 2 and 3 above for the procedure and what success looks like. Decide whether to arm the remaining 15 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and proven. The availability half of this row is closed: the edge probe is deployed and its alert armed 2026-09-01 (T-519) | The three proven timers remain armed; the other 15 remain no-ops. The Azure standard availability test stays disabled in Terraform because Bot Fight Mode challenges Azure agents; the reachability signal is served by the ADR 0024 Cloudflare Worker, whose alert `alert-api-reachability-prod-cus` is live |
 | Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |

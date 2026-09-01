@@ -1,5 +1,11 @@
 # Availability probe — the reachability signal T-519 could not get
 
+> **Status: deployed and armed.** The secret was corrected and
+> `availability_probe_alert_enabled` applied on 2026-09-01 (T-519 closed);
+> `alert-api-reachability-prod-cus` is live in `rg-web-site-prod-cus`, armed
+> only after a full 30-minute window held 6 healthy rows. The procedure below
+> is kept for redeploys and secret rotation.
+
 A Cloudflare Worker on a 5-minute cron asks
 `https://api-azure.hybridcloudworks.com/api/health` and reports each attempt
 to Application Insights as an availability result. The design, and why the
@@ -22,12 +28,23 @@ Needs the Cloudflare account and the Application Insights connection string —
 both owner-held, neither in CI, matching how every other Cloudflare change in
 this estate is made.
 
-```bash
-cd edge/availability-probe
+From the repository root. PowerShell, one line each — the secret is piped
+straight from Azure so the value never reaches a screen, a clipboard, or shell
+history, and the portal's Instrumentation-Key-above-Connection-String trap
+cannot recur (it did, on 2026-08-31 — see `wrangler.toml`, whose comment this
+command mirrors; the resource is `appi-site-prod-cus-01`, instance suffix
+included):
+
+```powershell
 npx wrangler login
-npx wrangler secret put APPLICATIONINSIGHTS_CONNECTION_STRING
-# paste the connection string of appi-site-prod-cus (portal → resource → Connection String)
-npx wrangler deploy
+```
+
+```powershell
+az monitor app-insights component show --app appi-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Select-Object -ExpandProperty connectionString | npx wrangler secret put APPLICATIONINSIGHTS_CONNECTION_STRING --config edge/availability-probe/wrangler.toml
+```
+
+```powershell
+npx wrangler deploy --config edge/availability-probe/wrangler.toml
 ```
 
 The connection string is a write-only ingestion credential: it can submit

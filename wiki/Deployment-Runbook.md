@@ -288,8 +288,10 @@ problem means production is already degraded rather than merely unchanged.
    direct to the origin it is answered by the origin lock with a 403.
    `deploy-functions.yml` depends on exactly that behaviour — it fails the
    deploy if the same URL returns 200 from a runner. Making the smoke job pass
-   from CI needs the same Cloudflare change that gates arming the availability
-   test (TODO **T-519**); the alternatives are weakening the origin lock or
+   from CI needs the same Cloudflare change that blocked the standard
+   availability test (T-519 itself closed 2026-09-01 by routing around it with
+   the ADR 0024 Worker; runner paths stay blocked); the alternatives are
+   weakening the origin lock or
    asserting against a host that answers without touching the API. Tiers 2–3
    need credentials and stay operator-run regardless.
 5. Azure portal / CLI spot checks for the changed resources.

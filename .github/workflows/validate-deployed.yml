@@ -39,10 +39,12 @@ on:
         #
         #   node scripts/smoke-deployed.mjs --base https://api-azure.hybridcloudworks.com/api
         #
-        # Making the workflow itself pass needs the same Cloudflare change that
-        # blocks arming the availability test — TODO T-519. It is not worked
-        # around here, because the alternatives are to weaken the origin lock or
-        # to assert against a host that answers without touching the API.
+        # Making the workflow itself pass needs the Cloudflare change that
+        # blocked the standard availability test — the block T-519 routed
+        # around with the ADR 0024 Worker (closed 2026-09-01; GitHub-runner
+        # paths stay 403d). It is not worked around here, because the
+        # alternatives are to weaken the origin lock or to assert against a
+        # host that answers without touching the API.
         default: 'https://api-azure.hybridcloudworks.com/api'
 
 permissions:
