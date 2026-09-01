@@ -26,9 +26,10 @@ This project has not cut a tagged release; entries are grouped under
   checks the PR template and Repository Policy already enforce — secrets,
   content-free telemetry, pinning, the Markdown allowlist, TODO/CHANGELOG
   movement, and the owner-facing instruction rules in `.claude/CLAUDE.md`.
-  Each reference file carries the component's real verification commands
-  (the same ones CI runs), so a review's Verification section reports what
-  was actually executed rather than what was assumed. The directory lives
+  Each reference file carries the component's real verification commands —
+  the ones CI runs plus the review-time validators CI does not — so a
+  review's Verification section reports what was actually executed rather
+  than what was assumed. The directory lives
   under `.claude/`, already allowlisted as a harness directory in
   `scripts/validate-repository-structure.ps1`.
 

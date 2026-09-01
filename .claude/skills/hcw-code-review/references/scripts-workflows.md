@@ -8,8 +8,8 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
 
 ### `scripts/*.mjs`
 - Every non-trivial script here has a sibling `*.test.mjs`; changed behavior
-  without a test change is a flag. The tests run with `npx vitest run` from
-  `scripts/`.
+  without a test change is a flag. The tests run with `npm test` from
+  `scripts/` (the same command `ci.yml` runs).
 - Several scripts are **workflow contracts** — they're invoked by a workflow
   with specific inputs/outputs, and some have invocation tests pinning that
   (`check-unresolved-secrets.invocation.test.mjs`,
@@ -53,11 +53,14 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
 
 ## Verification commands
 
-Run from `scripts/`:
+Run from `scripts/` — including for workflow-only diffs: several tests in
+this suite (`workflow-write-permissions.test.mjs`, the invocation tests) pin
+`.github/workflows/` content, so a workflow change can fail them without
+touching any `.mjs` file:
 
 ```bash
 npm run lint
-npx vitest run
+npm test
 ```
 
 PowerShell validation (`pwsh` required — note in the report if unavailable):

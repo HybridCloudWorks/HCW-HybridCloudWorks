@@ -22,9 +22,11 @@ Read `infra/README.md` before reviewing anything non-trivial here.
 
 ### Hygiene CI will enforce (`iac-validate.yml`)
 - `terraform fmt` clean, `terraform validate` clean, tflint, and Trivy
-  (IaC misconfiguration scan). Run fmt/validate locally; note that
-  validate/plan need TFC credentials — if unavailable, say so in the report
-  rather than guessing.
+  (IaC misconfiguration scan). All of these are credential-free — the
+  workflow runs `terraform init -backend=false`, so fmt and validate never
+  touch the TFC workspace and can always run locally. Only `terraform plan`
+  and state-backed checks need TFC credentials; if a plan is needed and
+  credentials are unavailable, say so in the report rather than guessing.
 - No state files, saved plans, real `tfvars`, or credentials in the diff.
   `terraform.tfvars.example` carries shapes only.
 
@@ -55,9 +57,14 @@ Read `infra/README.md` before reviewing anything non-trivial here.
 
 ## Verification commands
 
+Mirror `iac-validate.yml` exactly. All four need the `terraform` binary — if
+it isn't installed in the review environment, report the checks as skipped
+(CI covers them) rather than improvising substitutes:
+
 ```bash
-terraform -chdir=infra fmt -check -recursive
-terraform -chdir=infra validate     # needs TFC credentials; report if unavailable
-cd scripts && npx vitest run terraform-role-definitions.test.mjs   # when infra/roles/*.json changed
-cd scripts && node generate-cosmos-container-spec.mjs --check      # when cosmos-containers.json changed
+terraform -chdir=infra fmt -recursive -check -diff
+terraform -chdir=infra init -backend=false -input=false
+terraform -chdir=infra validate -no-color
+cd scripts && npm test -- terraform-role-definitions.test.mjs   # when infra/roles/*.json changed
+cd scripts && npm run container-spec:check                      # when cosmos-containers.json changed
 ```

@@ -62,4 +62,7 @@ npm run build         # includes prerender + SWA config staging
 `npm run code:quality` bundles lint + format + the three validators.
 Playwright e2e (`npm run test:e2e` — smoke, hydration, console-errors,
 contrast specs) is the release-level check; run it when the diff touches
-routing, hydration, or theming and the environment allows a browser.
+routing, hydration, theming, or the shape of prerendered output and the
+environment allows a browser. When it can't run, a full `npm run build`
+plus the unit suite against the real dist output is the fallback evidence —
+say which you used.

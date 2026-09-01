@@ -23,12 +23,15 @@ Establish exactly what is being reviewed before reading any code:
 ```bash
 git diff --stat main...HEAD        # a branch
 git diff --stat HEAD               # the working tree
+git show <sha> --stat              # a single commit
 ```
 
 For a PR, fetch its diff/files first. Then map every touched path to a
 component using the table below, and read the matching reference file for each
 component in the diff. Don't read references for components the diff doesn't
-touch.
+touch — with one exception: a frontend diff that adds or changes an API call
+also needs `references/functions.md` for the contract check, even when
+`functions/**` itself is untouched.
 
 | Touched path | Component | Reference to read |
 | --- | --- | --- |
@@ -52,8 +55,12 @@ For each component, do three passes in this order:
    plane over production data. Apply the security checklist in Section 3 and
    the component reference.
 3. **Verification** — run the component's own checks (each reference lists
-   them). CI runs the same checks; a review that skips them just moves the
-   failure to CI. Report what you ran and what it proved, matching the PR
+   them). Some of these CI runs too (`ci.yml`: lint, format, build, test per
+   package; `iac-validate.yml`: fmt/validate/tflint/Trivy) — skipping those
+   just moves the failure to CI. Others are review-time validators CI does
+   not run (the frontend route/provider/content-matrix checks, PowerShell
+   validation), which makes running them here the only gate. Report what you
+   ran and what it proved, matching the PR
    template's Verification section: checks run, evidence, checks not run and
    why.
 
