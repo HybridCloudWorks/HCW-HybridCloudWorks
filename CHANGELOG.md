@@ -143,12 +143,18 @@ This project has not cut a tagged release; entries are grouped under
   has ample margin against 24. The workflow header records that the reasoning
   stops holding if the threshold ever drops near the delivery gap.
 
-  29 tests, and four load-bearing decisions are mutation-verified: reading only
-  the first page of commits, dropping the de-duplication, taking the newest
-  commit instead of the oldest, and `>` instead of `>=` on the threshold. All
-  four fail the suite when introduced, and **all four fail in the same
-  direction — reporting a service as healthier than it is**, which is why they
-  are the ones pinned.
+  30 tests, and five load-bearing decisions are mutation-verified: reading only
+  the first page of commits, dropping the de-duplication, defaulting an
+  unreadable commits payload to an empty page, taking the newest commit instead
+  of the oldest, and `>` instead of `>=` on the threshold. All five fail the
+  suite when introduced.
+
+  **All five fail in the same direction — reporting a service as healthier than
+  it is — and that direction is the actual finding.** Every defect review caught
+  in this file, and every one caught while writing it, made a stale service look
+  current. None made a current service look stale. A monitor whose bugs all
+  point at "everything is fine" fails the one way it must not, so the mutation
+  set is exactly those five.
 
   Two defects were caught before merge and are worth recording:
 
