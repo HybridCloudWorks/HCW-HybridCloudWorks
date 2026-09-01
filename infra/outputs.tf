@@ -218,10 +218,15 @@ output "subnet_id" {
 # assumption about the plan tier, which decides what the edge can and cannot do:
 # Origin Rules' Host Header override, Super Bot Fight Mode and mTLS all gate on
 # it. That argument was settled, and since then the output's only job was to
-# print two warnings on every single run:
+# emit THE SAME deprecation twice on every run — once each for the refresh and
+# the plan, both naming this line:
 #
 #   Warning: Deprecated value used ... on outputs.tf line 223
 #   Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
+#
+# (Not to be confused with the "Value for undeclared variable" warnings on the
+# same runs. Those come from three stale values in the TFC workspace, are
+# unrelated to this output, and are fixed by deleting them there — TODO.md.)
 #
 # THE REPLACEMENT THE WARNING NAMES IS NOT USABLE HERE, which is why this is a
 # removal rather than a migration. In provider v5 the non-deprecated path to a

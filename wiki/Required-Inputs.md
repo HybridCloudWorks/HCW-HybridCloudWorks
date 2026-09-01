@@ -328,6 +328,19 @@ looking plausible. Found in review on 2026-09-01, alongside the
 grep -c '^output "' infra/outputs.tf infra/oidc.tf
 ```
 
+It prints one line per file, not a total — which is what this section needs,
+because it quotes both numbers:
+
+```
+infra/outputs.tf:19
+infra/oidc.tf:4
+```
+
+The total is their sum. Said explicitly because "the command that produces the
+count" implied a single number, and a command whose output does not look like
+the thing it was described as producing is how a reader concludes they ran it
+wrong.
+
 From `infra/outputs.tf` (19): `api_base_url` · `app_principal_id` ·
 `blob_endpoint` · `cosmos_database` · `cosmos_endpoint` ·
 `cosmos_resource_group` · `function_app_name` · `function_hostname` ·
