@@ -10,7 +10,19 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Every path in this file is resolved from THIS MODULE, never from
+// process.cwd(). The distance from this file to the frontend package and to the
+// repository root is fixed; the distance from the working directory is whatever
+// the runner happened to be in. Reading them as cwd-relative passed under
+// `cd frontend && npm test` — the way CI invokes this — and failed from the
+// repository root with ENOENT on paths pointing outside the repository, so the
+// suite guarding the deploy could not be run from the one place someone would
+// run every suite from.
+const FRONTEND_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_ROOT = join(FRONTEND_ROOT, '..');
 import {
   splitHead,
   injectIntoTemplate,
@@ -215,8 +227,7 @@ describe('the SPA fallback must not be a pre-rendered page', () => {
     // A rewrite target that does not exist is a 404 for every article page,
     // which is the one thing the fallback exists to serve.
     const target = config.navigationFallback.rewrite.replace(/^\//, '');
-    // vitest runs with the frontend package as cwd.
-    const source = readFileSync(join(process.cwd(), 'scripts', 'prerender.mjs'), 'utf8');
+    const source = readFileSync(join(FRONTEND_ROOT, 'scripts', 'prerender.mjs'), 'utf8');
     expect(source).toContain(`'${target}'`);
   });
 });
@@ -369,14 +380,14 @@ describe('seedAttribute', () => {
   // and goes back to discarding the pre-rendered DOM — the exact bug T-714
   // exists for, reintroduced invisibly.
   it('uses the attribute main.jsx reads', () => {
-    const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    const mainJsx = readFileSync(join(FRONTEND_ROOT, 'src', 'main.jsx'), 'utf8');
     // dataset.prerenderedSeed is the DOM spelling of data-prerendered-seed.
     expect(SEED_ATTRIBUTE).toBe('data-prerendered-seed');
     expect(mainJsx).toContain('dataset.prerenderedSeed');
   });
 
   it('agrees with main.jsx on the stamp attribute name', () => {
-    const mainJsx = readFileSync(join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    const mainJsx = readFileSync(join(FRONTEND_ROOT, 'src', 'main.jsx'), 'utf8');
     // dataset.prerenderedRoute is the DOM spelling of data-prerendered-route.
     expect(mainJsx).toContain('dataset.prerenderedRoute');
     const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/');
@@ -408,7 +419,7 @@ describe('seedAttribute', () => {
  */
 describe('the deploy workflow mount-point check', () => {
   const workflow = readFileSync(
-    join(process.cwd(), '..', '.github', 'workflows', 'deploy-azure-frontend.yml'),
+    join(REPO_ROOT, '.github', 'workflows', 'deploy-azure-frontend.yml'),
     'utf8'
   );
 
