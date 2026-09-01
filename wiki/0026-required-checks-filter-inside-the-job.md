@@ -71,6 +71,13 @@ Two details of the implementation are the substance of the decision:
   should be confirmed — and the weekly CodeQL schedule analyses everything,
   so a newly published query never waits for a pull request to touch the
   affected language.
+- **A diff that cannot be computed fails toward running, not skipping.**
+  `set -e` is inert inside an `if` condition, so the original
+  pipe-into-grep shape read a failed `git diff` (an unfetchable base sha)
+  as "no changes" and skipped required work — found by review on #319, and
+  present in `iac-validate.yml`'s production copy since #220. Every detect
+  step now captures the diff first and treats a capture failure as
+  "run everything".
 
 ## Consequences
 

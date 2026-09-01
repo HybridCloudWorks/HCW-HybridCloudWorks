@@ -80,8 +80,16 @@ jobs:
             echo "non-pull_request event — analysing everything"
             exit 0
           fi
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '${{ matrix.filter }}|^\.github/workflows/codeql\.yml$|^\.github/codeql/'; then
+          # Capture the diff first: `set -e` is inert inside an `if`
+          # condition, so a failed diff (an unfetchable base sha) would read
+          # as "no changes" and silently skip the analysis. A diff that
+          # cannot be computed fails toward analysing.
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "could not compute the diff — analysing rather than guessing"
+            exit 0
+          }
+          if grep -qE '${{ matrix.filter }}|^\.github/workflows/codeql\.yml$|^\.github/codeql/' <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "${{ matrix.language }} files changed — analysing"
           else

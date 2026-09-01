@@ -105,8 +105,16 @@ jobs:
             echo "non-pull_request event — running all checks"
             exit 0
           fi
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '${{ matrix.filter }}|^\.github/workflows/ci\.yml$'; then
+          # Capture the diff first: `set -e` is inert inside an `if`
+          # condition, so a failed diff (an unfetchable base sha) would read
+          # as "no changes" and silently skip required work. A diff that
+          # cannot be computed fails toward running everything.
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "could not compute the diff — running all checks rather than guessing"
+            exit 0
+          }
+          if grep -qE '${{ matrix.filter }}|^\.github/workflows/ci\.yml$' <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "component files changed — running all checks"
           else
@@ -173,8 +181,14 @@ jobs:
             echo "non-pull_request event — running all checks"
             exit 0
           fi
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '^(hooks/|tooling/)|^\.github/workflows/ci\.yml$'; then
+          # Capture the diff first — same reasoning as the matrix job's
+          # detect step: a failed diff must fail toward running, not skipping.
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "could not compute the diff — running all checks rather than guessing"
+            exit 0
+          }
+          if grep -qE '^(hooks/|tooling/)|^\.github/workflows/ci\.yml$' <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "harness files changed — running all checks"
           else
