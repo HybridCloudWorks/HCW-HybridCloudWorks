@@ -75,11 +75,12 @@
 # AzureWebJobsStorage, RUNTIME_CONFIG_WRITER, firewall posture), and the probe
 # notices FAST.
 #
-# The probe's alert is armed by `availability_probe_alert_enabled`, and it was
-# still false when this was written (TODO.md, T-519). Until it is set, nothing
-# pages on the symptom and this workflow is in practice the only thing that
-# would notice — at 22% delivery and a 12.7-hour worst case. That is the gap,
-# and arming the probe alert closes it; nothing about this file can.
+# The probe's alert is armed by `availability_probe_alert_enabled`, set `true`
+# on 2026-09-01 (T-519 closed): alert-api-reachability-prod-cus now pages on
+# the symptom, and this workflow's job is naming WHICH condition. While the
+# variable was false, this workflow was in practice the only watcher — at 22%
+# delivery and a 12.7-hour worst case. That gap is closed by the probe alert;
+# nothing about this file could have closed it.
 #
 # THE BUDGET NUMBER WAS ALSO WRONG, in the direction that mattered less. It read
 # "~720 minutes a month", assuming every firing lands. At 29 runs per 5.5 days,
