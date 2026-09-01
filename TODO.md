@@ -70,7 +70,7 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
 | 1 | `T-519` — arm the reachability alert | **High** | One query, then one variable |
-| 2 | `T-726` — the nightly refresh cannot reach `main` | — | Built; create the App, then enable auto-merge |
+| 2 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
 | 3 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
 | 4 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
 | 5 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 4 |
@@ -147,28 +147,70 @@ moved the threshold and every description to "30-minute window" and left the
 window itself behind. It is `PT30M` now. **Do not arm a checkout that predates
 that fix.**
 
-**Step 1 — confirm a result landed.** Ingestion lags a few minutes, and the
-probe has been running since 2026-08-31, so there should be plenty. PowerShell,
+**Blocked as of 2026-09-01 01:15 UTC: the probe has never written a row, and
+the cause is measured rather than guessed.** `availabilityResults | summarize
+rows=count()` returns **0** for the whole table, and `wrangler tail` shows why —
+every `*/5` invocation throws before sending anything:
+
+```
+"*/5 * * * *" @ 8/31/2026, 8:15:28 PM - Exception Thrown
+  Error: APPLICATIONINSIGHTS_CONNECTION_STRING must carry InstrumentationKey and IngestionEndpoint
+    at parseConnectionString (worker.js:15:11)
+```
+
+So the cron, the deploy and the schedule are all fine — the secret holds
+something that is not a connection string, almost certainly the Instrumentation
+Key, which the Azure portal displays directly above it. Fix it with the piped
+command in `edge/availability-probe/wrangler.toml`, which sets the secret
+without the value reaching a screen or a clipboard, then confirm with Step 1
+below.
+
+Two hypotheses were eliminated on the way and are recorded so nobody re-runs
+them: the workspace is **not** over quota (`dataIngestionStatus: RespectQuota`
+against the 0.25 GB cap), and the cross-subscription read works (`rows: [[0]]`
+is a valid result set, not a denial). Note that `log-plat-prod-cus-01` lives in
+the **Management** subscription, so any `az` command against
+`rg-mgmt-plat-prod-cus` needs `--subscription` or it answers
+`ResourceGroupNotFound`.
+
+**Step 1 — confirm a result landed.** Ingestion lags a few minutes. PowerShell,
 one line — the KQL must stay on one line because `az` on Windows is a batch file
 and truncates an argument at the first newline while still exiting 0:
 
 ```powershell
-(az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --analytics-query "availabilityResults | where name == 'edge-api-health' | project timestamp, success, message | order by timestamp desc | take 5" -o json | ConvertFrom-Json).tables[0].rows
+az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --analytics-query "availabilityResults | summarize rows=count()" -o json
 ```
+
+**Raw `-o json`, and no `.tables[0].rows` on the end.** Both shortcuts were
+tried on 2026-09-01 and both hide the answer: `(… | ConvertFrom-Json).tables[0].rows`
+yields `$null` silently when `az` fails, so a broken tool and an empty table
+print the same blank line; and `-o table` renders nothing at all for this
+nested shape, whatever the row count. `summarize count()` with no `by` always
+returns exactly one row, so the raw JSON distinguishes every case.
 
 Resource names are from `infra/main.tf` (`azurerm_application_insights.hcw`,
 resource group `azurerm_resource_group.app["web"]`) with the defaults in
 `infra/variables.tf`. Note `edge/availability-probe/wrangler.toml` calls the
 component `appi-site-prod-cus`, missing the `-01`.
 
-**Success:** five rows, at least one with `success = True` and
-`message = HTTP 200`.
+**Success:** `"rows": [[N]]` with N greater than 0. Then check the detail with
+the same command and `| where name == "edge-api-health" | take 5`.
 
-**Nothing returned is not "wait longer".** It is the failure `wrangler.toml`
-warns about: a mistyped `wrangler secret put` makes `parseConnectionString`
-throw every five minutes with nothing reaching Azure. Workers Logs is the
-tiebreaker (observability is enabled) — https://dash.cloudflare.com → Workers &
-Pages → `hcw-availability-probe` → Logs.
+**`[[0]]` is not "wait longer".** It is the failure `wrangler.toml` warns
+about, and it is what actually happened. `wrangler tail` is the tiebreaker, and
+it names the cause in one line — leave it open six minutes so a `*/5` invocation
+lands:
+
+```powershell
+npx wrangler tail --config edge/availability-probe/wrangler.toml --format pretty
+```
+
+An exception from `parseConnectionString` means the secret. A clean invocation
+with the table still empty means the ingestion endpoint. **No invocation at all
+means the cron never registered** — which is a different repair, and worth
+distinguishing because `runProbe` is called through `ctx.waitUntil` with no
+catch, so a dead cron and a dead ingestion path look identical from Azure's
+side. That is the whole reason T-746 turned Workers Logs on.
 
 **This step cannot be automated with what exists.** `verify-alert-state.yml`
 runs as `github_reader`, whose grant is Reader — `*/read`, which does not
@@ -191,7 +233,7 @@ afterwards.
 
 **Success:** the rule `alert-api-reachability-prod-cus` exists in
 `rg-web-site-prod-cus` and stays quiet.
-### 2. T-726 — the App is built; one setting remains
+### 2. T-726 — built and configured; unproven until content moves
 
 **Corrected 2026-08-31, and the correction is the important part.** This item
 said, in five places across the repository, that the ruleset listed the Actions
@@ -251,11 +293,25 @@ the job warns that the App is not configured and does nothing else — it does n
 fail. If the App ID is wrong, the mint step fails with a **401** and the script
 says so; if the App exists but is not installed here, a **404**.
 
-**Owner action 2 — enable auto-merge.**
+**Owner action 2 — enable auto-merge.** ✅ **Done 2026-09-01.**
 https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings → Pull
-Requests → **Allow auto-merge**. It was **off** when this was built, so without
-it the pull request opens and waits for you. The workflow reports that as a
-notice naming this setting rather than failing.
+Requests → **Allow auto-merge**.
+
+**Both owner actions are done as of 2026-09-01**, and one open question about
+them is now answered from evidence: the ruleset's `pull_request` rule requires
+**0 approving reviews**, so nothing blocks the pull request from merging itself
+once the checks pass. Every pull request merged on 2026-08-31 and 09-01
+(#301-#308) went in with no `APPROVED` review on it — #308 carried two, both
+`COMMENTED` — and with no bypass actors on the ruleset each of those merges had
+to satisfy the rule on its own terms.
+
+**What is still unproven, and only content can prove it:** the App path runs
+only on a night the published set has actually moved. Manifest run 11
+(2026-09-01 00:06) went green and reported "No change to the published set", so
+every step after that check was skipped, the mint and the pull request
+included. The first article published is the test. A wrong App ID fails the
+mint with **401**, an App not installed here with **404**, and each is named in
+the step's own error.
 
 **What this costs, stated plainly and no longer offset:** one stored
 non-expiring App private key, granting push-a-branch and open-a-pull-request on

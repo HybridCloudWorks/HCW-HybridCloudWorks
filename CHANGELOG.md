@@ -242,6 +242,61 @@ This project has not cut a tagged release; entries are grouped under
   Terraform attribute to the prose around it, so four consistent descriptions
   read as four confirmations.
 
+- **The probe's secret held the wrong value, and the diagnostic built for
+  exactly this found it in one look (T-519, T-746).** `availabilityResults`
+  was empty for the whole table — not just for `edge-api-health` — since the
+  Worker was deployed on 2026-08-31. `wrangler tail` named the cause on the
+  first `*/5` invocation it saw:
+
+  ```
+  "*/5 * * * *" @ 8/31/2026, 8:15:28 PM - Exception Thrown
+    Error: APPLICATIONINSIGHTS_CONNECTION_STRING must carry InstrumentationKey and IngestionEndpoint
+      at parseConnectionString (worker.js:15:11)
+  ```
+
+  The cron, the deploy and the schedule were all healthy; `parseConnectionString`
+  threw before a byte was sent, every five minutes, silently. T-746 turned
+  Workers Logs on precisely because `runProbe` runs under `ctx.waitUntil` with
+  no catch, so a dead cron and a dead ingestion path are indistinguishable from
+  Azure's side. It paid for itself here.
+
+  **The instruction is what caused it**, so that is what changed.
+  `wrangler.toml` said "Azure portal → the Application Insights resource →
+  Connection String" — and the portal shows *Instrumentation Key* directly above
+  *Connection String*, only one of which parses. It now carries a piped
+  one-liner that reads the value from ARM and feeds it straight to
+  `wrangler secret put`, so it never reaches a screen, a clipboard or shell
+  history and cannot be the wrong field. The comment also said
+  `appi-site-prod-cus`; the resource is `appi-site-prod-cus-01`.
+
+  **Two eliminated hypotheses are recorded so nobody re-runs them:** the
+  workspace is not over quota (`dataIngestionStatus: RespectQuota` against the
+  0.25 GB cap), and the cross-subscription read works — `rows: [[0]]` is a valid
+  result set, not a denial. `log-plat-prod-cus-01` is in the Management
+  subscription, so `az` against `rg-mgmt-plat-prod-cus` needs `--subscription`
+  or it answers `ResourceGroupNotFound`.
+
+  `TODO.md`'s verification command was replaced for the same reason the
+  instruction was: `(… | ConvertFrom-Json).tables[0].rows` yields `$null`
+  silently when `az` fails, and `-o table` renders nothing for this nested shape
+  at any row count. Both make a broken tool and an empty table print the same
+  blank line. It is now raw `-o json` over `summarize count()`, which always
+  returns exactly one row.
+
+- **T-726's owner actions are complete, and the merge question is answered
+  (2026-09-01).** The App is created, `MANIFEST_APP_ID` and
+  `MANIFEST_APP_PRIVATE_KEY` are stored, and auto-merge is enabled. The open
+  question — whether the ruleset would let the manifest pull request merge
+  unattended — resolves to **yes**, on evidence rather than assumption: every
+  pull request merged on 2026-08-31 and 09-01 (#301-#308) went in with no
+  `APPROVED` review, #308 carrying two `COMMENTED` ones, and with no bypass
+  actors each merge had to satisfy the `pull_request` rule on its own terms. So
+  `required_approving_review_count` is 0.
+
+  Still unproven: the App path itself, which runs only when the published set
+  moves. Manifest run 11 reported "No change to the published set" and skipped
+  the mint entirely. The first article published is the test.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up
