@@ -309,20 +309,36 @@ Their role in this inventory is that they are the *source* of §4.2 rather than
 a thing to be provisioned. `scripts/set-github-variables.ps1` reads them and
 writes the repository variables; nothing there is set by hand.
 
-**Twenty-four, and they live in two files.** Twenty-one in `infra/outputs.tf`
-and three in `infra/oidc.tf` — `client_id`, `deploy_principal_id` and
-`federated_subjects`. This section listed twenty-three when it was first
-written, omitting `deploy_principal_id`, because it was built by reading
-`outputs.tf` alone. Corrected 2026-08-25 against the apply's own output block,
-which is the only listing guaranteed to be complete.
+**Twenty-three, and they live in two files.** Nineteen in `infra/outputs.tf`
+and four in `infra/oidc.tf`.
 
-From `infra/outputs.tf`: `api_base_url` · `app_principal_id` · `blob_endpoint` ·
-`cosmos_database` · `cosmos_endpoint` ·
+**This count has now been wrong three times, each in the same way**, so the
+method matters more than the number. It said twenty-three when first written,
+omitting `deploy_principal_id`, because it was built by reading `outputs.tf`
+alone. It was corrected to twenty-four on 2026-08-25 against the apply's own
+output block. It then stayed at twenty-four while `swa_token` was retired
+(#296, in favour of a token minted per run) and `reader_client_id` was added
+(T-728) — two changes in opposite directions that happened to leave the total
+looking plausible. Found in review on 2026-09-01, alongside the
+`cloudflare_plan` removal below.
+
+**Count by reading the files, never by adjusting the previous number:**
+
+```bash
+grep -c '^output "' infra/outputs.tf infra/oidc.tf
+```
+
+From `infra/outputs.tf` (19): `api_base_url` · `app_principal_id` ·
+`blob_endpoint` · `cosmos_database` · `cosmos_endpoint` ·
 `cosmos_resource_group` · `function_app_name` · `function_hostname` ·
 `function_url` · `functions_storage_account` · `insights_connection` ·
 `storage_account` · `storage_resource_group` · `subnet_id` · `swa_hostname` ·
-`swa_token` · `vault_name` · `vault_uri` · `web_resource_group` ·
-`workspace_id`
+`vault_name` · `vault_uri` · `web_resource_group` · `workspace_id`
+
+**`swa_token` is not among them.** It was retired in #296 (T-727): the Static
+Web Apps deployment token is now read from ARM under the federated identity on
+each run and lives for that run, rather than sitting in Terraform state and on
+the HCP Terraform outputs page.
 
 **`cloudflare_plan` was removed on 2026-09-01** and is not replaced. It read
 `data.cloudflare_zone.current.plan`, which the Cloudflare provider deprecated in
@@ -338,8 +354,13 @@ mTLS gate on it. Read it from the zone's Overview page in the Cloudflare
 dashboard when a decision turns on it; it changes only when someone deliberately
 changes it.
 
-From `infra/oidc.tf`: `client_id` · `deploy_principal_id` ·
-`federated_subjects`
+From `infra/oidc.tf` (4): `client_id` · `reader_client_id` ·
+`deploy_principal_id` · `federated_subjects`
+
+`reader_client_id` arrived with T-728, which split the read-only identity out
+of the deploy identity — `monitor-functions-registered.yml`,
+`monitor-unresolved-secrets.yml` and `verify-alert-state.yml` all authenticate
+with it.
 
 The four scratch outputs that fed §4.2's three now-deleted variables are gone
 from `infra/outputs.tf`.
