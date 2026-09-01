@@ -161,8 +161,20 @@ export function socialTags(head, route, title) {
   return tags.join('\n    ');
 }
 
+/**
+ * `>` IS ESCAPED TOO, and that is not cosmetic. A raw `>` inside a quoted
+ * attribute value is legal HTML, so nothing rendered wrong — but it makes the
+ * attribute value unscannable by any `[^>]*` pattern, and the mount point this
+ * writes is scanned by exactly such a pattern in deploy-azure-frontend.yml. A
+ * seed containing `>` would have made that check read the tag as ending early.
+ * Added 2026-09-01 alongside the guard that depends on it.
+ */
 function escapeAttr(value) {
-  return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 /**
@@ -199,6 +211,30 @@ export function splitHead(rendered) {
  * `prerender.test.js` pins the pair.
  */
 export const SEED_ATTRIBUTE = 'data-prerendered-seed';
+
+/**
+ * The shape of a pre-rendered mount point, as a string a shell `grep` can use.
+ *
+ * WHY THIS IS EXPORTED RATHER THAN WRITTEN OUT IN THE WORKFLOW. It was written
+ * out in the workflow, as `<div id="root"><[^/]`, and #296 then added
+ * `data-prerendered-route` to the mount point below. The literal stopped
+ * existing, so the check could never pass — and because its failure BLOCKS a
+ * deploy rather than letting one through, it sat unnoticed until someone tried
+ * to ship. Every frontend deploy between 2026-08-31 and 2026-09-01 would have
+ * failed on a correctly pre-rendered page.
+ *
+ * A bash literal in a workflow encoding a shape this file defines is a
+ * two-place truth with nothing holding the places together. prerender.test.js
+ * reads the pattern back out of the workflow and asserts it against real
+ * output, so the next change to the mount point fails a test instead of a
+ * deploy.
+ *
+ * The pattern deliberately allows attributes (`[^>]*`) and deliberately
+ * requires a child element (`<[^/]`) — an empty mount point is `…></div>`,
+ * where `/` follows `<` and the match fails. It relies on escapeAttr escaping
+ * `>`; see the note there.
+ */
+export const MOUNT_POINT_PATTERN = '<div id="root"[^>]*><[^/]';
 
 /**
  * Serialize the seed into an attribute on the mount point.

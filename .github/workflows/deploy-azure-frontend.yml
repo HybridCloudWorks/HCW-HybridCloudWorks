@@ -198,7 +198,17 @@ jobs:
             echo "::error::only $html HTML documents in dist — pre-rendering did not run or mostly failed. See frontend/scripts/prerender.mjs."
             exit 1
           }
-          grep -q '<div id="root"><[^/]' dist/about/index.html || {
+          # The pattern is MOUNT_POINT_PATTERN in frontend/scripts/prerender.mjs
+          # and prerender.test.js reads it back out of THIS FILE to assert the
+          # two still agree. Change one and the frontend test job fails.
+          #
+          # It was `<div id="root"><[^/]` until 2026-09-01, written when the
+          # mount point carried no attributes. #296 added
+          # data-prerendered-route and the literal stopped existing, so this
+          # check could never pass — and since it BLOCKS rather than admits, it
+          # failed every deploy on correctly pre-rendered output instead of
+          # being noticed.
+          grep -q '<div id="root"[^>]*><[^/]' dist/about/index.html || {
             echo "::error::dist/about/index.html has an empty mount point — it is a shell, not a pre-rendered page."
             exit 1
           }

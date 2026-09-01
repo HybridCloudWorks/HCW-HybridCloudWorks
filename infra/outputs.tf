@@ -210,18 +210,57 @@ output "subnet_id" {
 # above and were consolidated into them — their Cloudflare-CNAME note now lives
 # on those descriptions. Consume function_hostname / swa_hostname for CNAMEs.
 
-# Which Cloudflare plan this zone is on. Added 2026-08-20 because an
-# architecture argument was being made on an assumption about it, and the plan
-# tier decides what the edge can and cannot do — Origin Rules' Host Header
-# override, Super Bot Fight Mode, and mTLS all gate on it.
-data "cloudflare_zone" "current" {
-  zone_id = var.cloudflare_zone_id
-}
-
-output "cloudflare_plan" {
-  description = "Cloudflare plan for the zone — determines which edge features are reachable at all"
-  value       = data.cloudflare_zone.current.plan
-}
+# -----------------------------------------------------------------------------
+# REMOVED 2026-09-01 — cloudflare_plan, and the cloudflare_zone data source that
+# fed it.
+#
+# It was added 2026-08-20 because an architecture argument was being made on an
+# assumption about the plan tier, which decides what the edge can and cannot do:
+# Origin Rules' Host Header override, Super Bot Fight Mode and mTLS all gate on
+# it. That argument was settled, and since then the output's only job was to
+# emit THE SAME deprecation TWICE on every run. Not once — twice, and the count
+# is quoted from a real run rather than reasoned about, because it was changed
+# to "a deprecation warning" on 2026-09-01 by an automated review that asserted
+# "a single deprecation warning (not two)" without one:
+#
+#   Warning: Deprecated value used
+#   on outputs.tf line 223, in output "cloudflare_plan":
+#       value       = data.cloudflare_zone.current.plan
+#   Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
+#
+#   Warning: Deprecated value used
+#   on outputs.tf line 223, in output "cloudflare_plan":
+#       value       = data.cloudflare_zone.current.plan
+#   Please use the `/zones/{zone_id}/subscription` API to update a zone's plan.
+#
+# Two complete blocks, same line, same text — Terraform emits provider
+# deprecations once for the refresh and once for the plan.
+#
+# (Not to be confused with the "Value for undeclared variable" warnings on the
+# same runs. Those come from three stale values in the TFC workspace, are
+# unrelated to this output, and are fixed by deleting them there — TODO.md.
+# That distinction is why the count is spelled out at all, and deleting it was
+# the more costly half of the same automated edit.)
+#
+# (Not to be confused with the "Value for undeclared variable" warnings on the
+# same runs. Those come from three stale values in the TFC workspace, are
+# unrelated to this output, and are fixed by deleting them there — TODO.md.)
+#
+# THE REPLACEMENT THE WARNING NAMES IS NOT USABLE HERE, which is why this is a
+# removal rather than a migration. In provider v5 the non-deprecated path to a
+# zone's plan is `cloudflare_zone_subscription` — a RESOURCE, not a data
+# source. Reading the plan through it would mean Terraform managing the
+# subscription, and the warning says plainly what that risks: "Changing this
+# value will create/cancel associated subscriptions." Trading a cosmetic
+# warning for a plan Terraform can cancel is not a trade worth making for a
+# value nothing consumes.
+#
+# The plan tier is a static fact that changes only when a human deliberately
+# changes it, so it belongs in documentation rather than in a data read on
+# every plan. wiki/Required-Inputs.md records where to read it.
+#
+# The data source went with it because this output was its only consumer.
+# -----------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
 # REMOVED 2026-08-24 — cosmos_scratch_endpoint, cosmos_scratch_account_name,

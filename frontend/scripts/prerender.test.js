@@ -18,6 +18,7 @@ import {
   socialTags,
   seedAttribute,
   SEED_ATTRIBUTE,
+  MOUNT_POINT_PATTERN,
 } from './prerender.mjs';
 // Imported rather than read from a path: under Vitest `import.meta.url` is a
 // Vite module id, not a file: URL, so fileURLToPath on it throws.
@@ -30,7 +31,11 @@ import swaConfig from '../staticwebapp.config.json';
  * grows an escape this does not know about.
  */
 function unescapeAttr(value) {
-  return value.replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
 }
 
 const TEMPLATE = [
@@ -376,5 +381,68 @@ describe('seedAttribute', () => {
     expect(mainJsx).toContain('dataset.prerenderedRoute');
     const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<p>x</p>' }, '/');
     expect(html).toContain('data-prerendered-route=');
+  });
+});
+
+/**
+ * The deploy's mount-point check, tied to the thing it checks.
+ *
+ * WHY THIS EXISTS. `deploy-azure-frontend.yml` greps the built `/about` page to
+ * prove pre-rendering produced a page rather than a shell. Its pattern was the
+ * literal `<div id="root"><[^/]`, written when the mount point carried no
+ * attributes. #296 (T-714) then stamped `data-prerendered-route` onto that same
+ * div, so the literal stopped existing anywhere in the output.
+ *
+ * The check could no longer pass. Not "was more likely to fail" — could not
+ * pass, on any input, however correct. It went unnoticed because this guard
+ * FAILS CLOSED: a broken check blocks the deploy instead of admitting bad
+ * output, so nothing was shipped wrong and nothing looked wrong until someone
+ * tried to deploy on 2026-09-01 and the run died on a perfectly good build.
+ *
+ * A bash literal in a workflow describing a shape this module emits is a truth
+ * in two places with nothing holding them together. So the pattern now lives in
+ * prerender.mjs, the workflow uses that exact text, and this test reads it back
+ * OUT OF THE WORKFLOW FILE to prove the two still agree. Editing either one
+ * alone fails here — in the frontend test job, minutes after the push, instead
+ * of at the next deploy whenever that happens to be.
+ */
+describe('the deploy workflow mount-point check', () => {
+  const workflow = readFileSync(
+    join(process.cwd(), '..', '.github', 'workflows', 'deploy-azure-frontend.yml'),
+    'utf8'
+  );
+
+  it('greps for exactly the pattern prerender.mjs exports', () => {
+    // Single-quoted in bash, so the pattern is literal between the quotes.
+    const found = /grep -q '(<div id="root"[^']*)' dist\/about\/index\.html/.exec(workflow);
+    expect(found, 'the workflow no longer greps dist/about/index.html for a mount point').not.toBe(
+      null
+    );
+    expect(found[1]).toBe(MOUNT_POINT_PATTERN);
+  });
+
+  it('matches a real pre-rendered document', () => {
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<main>real</main>' }, '/about');
+    expect(new RegExp(MOUNT_POINT_PATTERN).test(html)).toBe(true);
+  });
+
+  it('matches when a seed rides along, including one containing a bracket', () => {
+    // The case that made escapeAttr escape `>`: a raw `>` inside the attribute
+    // value would end the tag as far as `[^>]*` is concerned, and the pattern
+    // would look for a child element in the middle of an attribute.
+    const html = injectIntoTemplate(TEMPLATE, { head: '', body: '<main>real</main>' }, '/about', {
+      'public:x': { note: 'a > b' },
+    });
+    expect(html).toContain('&gt;');
+    expect(new RegExp(MOUNT_POINT_PATTERN).test(html)).toBe(true);
+  });
+
+  it('REJECTS a shell, which is the whole point', () => {
+    const shell = injectIntoTemplate(TEMPLATE, { head: '', body: '' }, '/about');
+    expect(new RegExp(MOUNT_POINT_PATTERN).test(shell)).toBe(false);
+  });
+
+  it('rejects the untouched vite template', () => {
+    expect(new RegExp(MOUNT_POINT_PATTERN).test(TEMPLATE)).toBe(false);
   });
 });
