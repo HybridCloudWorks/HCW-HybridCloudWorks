@@ -17,9 +17,11 @@
 # portal shows both fields on the same blade, one above the other, and only the
 # connection string parses — parseConnectionString needs InstrumentationKey AND
 # IngestionEndpoint, and a bare key carries neither. This is not hypothetical:
-# it happened on 2026-08-31, and the Worker then threw on every one of the 5xx
-# invocations between the deploy and 2026-09-01 01:15 UTC while Azure showed an
-# empty availabilityResults table. The command above cannot make that mistake,
+# it happened on 2026-08-31, and the Worker then threw on every `*/5` invocation
+# between the deploy and 2026-09-01 01:15 UTC — one every five minutes — while
+# Azure showed an empty availabilityResults table. ("5xx" was written here
+# first; during an incident that reads as an HTTP status, which is the wrong
+# thing to have someone chasing.) The command above cannot make that mistake,
 # which is why it replaced "Azure portal → the Application Insights resource →
 # Connection String" here.
 #

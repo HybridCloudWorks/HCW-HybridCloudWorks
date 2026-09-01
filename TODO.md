@@ -190,11 +190,17 @@ returns exactly one row, so the raw JSON distinguishes every case.
 
 Resource names are from `infra/main.tf` (`azurerm_application_insights.hcw`,
 resource group `azurerm_resource_group.app["web"]`) with the defaults in
-`infra/variables.tf`. Note `edge/availability-probe/wrangler.toml` calls the
-component `appi-site-prod-cus`, missing the `-01`.
+`infra/variables.tf`.
 
-**Success:** `"rows": [[N]]` with N greater than 0. Then check the detail with
-the same command and `| where name == "edge-api-health" | take 5`.
+**Success:** `"rows": [[N]]` with N greater than 0.
+
+Then read the rows themselves. This is a **different query, not an addition** —
+`name` does not survive `summarize`, so appending a `where` to the command above
+fails:
+
+```powershell
+az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --analytics-query "availabilityResults | where name == 'edge-api-health' | project timestamp, success, message | order by timestamp desc | take 5" -o json
+```
 
 **`[[0]]` is not "wait longer".** It is the failure `wrangler.toml` warns
 about, and it is what actually happened. `wrangler tail` is the tiebreaker, and
@@ -207,10 +213,15 @@ npx wrangler tail --config edge/availability-probe/wrangler.toml --format pretty
 
 An exception from `parseConnectionString` means the secret. A clean invocation
 with the table still empty means the ingestion endpoint. **No invocation at all
-means the cron never registered** — which is a different repair, and worth
-distinguishing because `runProbe` is called through `ctx.waitUntil` with no
-catch, so a dead cron and a dead ingestion path look identical from Azure's
-side. That is the whole reason T-746 turned Workers Logs on.
+means the cron never registered** — a different repair entirely.
+
+Those three are worth distinguishing because **from Azure's side they are the
+same empty table.** `runProbe` deliberately does not retry or trap the ingestion
+POST, so a failure produces no telemetry at all rather than a failure row. What
+makes them separable is the `.catch` T-746 added in `scheduled`, which logs and
+rethrows purely so the rejection lands somewhere — the `[availability-probe] run
+failed:` line in the tail output above is that `console.error`, and without it
+this would have been diagnosed by guesswork.
 
 **This step cannot be automated with what exists.** `verify-alert-state.yml`
 runs as `github_reader`, whose grant is Reader — `*/read`, which does not

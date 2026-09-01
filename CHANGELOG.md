@@ -255,10 +255,16 @@ This project has not cut a tagged release; entries are grouped under
   ```
 
   The cron, the deploy and the schedule were all healthy; `parseConnectionString`
-  threw before a byte was sent, every five minutes, silently. T-746 turned
-  Workers Logs on precisely because `runProbe` runs under `ctx.waitUntil` with
-  no catch, so a dead cron and a dead ingestion path are indistinguishable from
-  Azure's side. It paid for itself here.
+  threw before a byte was sent, every five minutes — silent **from Azure's
+  side**, which is the only side anyone was watching.
+
+  It was not silent in Cloudflare, and that distinction is the whole value of
+  T-746. `runProbe` deliberately does not retry or trap the ingestion POST, so a
+  failure yields no telemetry rather than a failure row, and a dead cron, a dead
+  Worker and a dead ingestion path all render as the same empty table. What
+  separates them is the `.catch` in `scheduled` that logs and rethrows — the
+  `[availability-probe] run failed:` line quoted above is that `console.error`.
+  It paid for itself here.
 
   **The instruction is what caused it**, so that is what changed.
   `wrangler.toml` said "Azure portal → the Application Insights resource →
