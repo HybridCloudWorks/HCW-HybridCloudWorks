@@ -362,6 +362,19 @@ describe('cell', () => {
     expect(cell('fix: handle a | b')).toBe('fix: handle a \\| b');
   });
 
+  it('escapes a backslash, so it survives as a backslash', () => {
+    expect(cell('use C:\\path')).toBe('use C:\\\\path');
+  });
+
+  // The ordering case. Escape only `|` and the subject below becomes
+  // `a \\| b`: Markdown renders the doubled backslash as one literal
+  // backslash and then reads the pipe as a live column break — the escape
+  // is what breaks the table. Escaping `\` first is what makes the pipe
+  // stay escaped.
+  it('keeps a pipe escaped even when the subject already contains a backslash', () => {
+    expect(cell('a \\| b')).toBe('a \\\\\\| b');
+  });
+
   it('folds newlines, which break a row as thoroughly as a pipe', () => {
     expect(cell('line one\nline two')).toBe('line one line two');
     expect(cell('crlf\r\nhere')).toBe('crlf here');

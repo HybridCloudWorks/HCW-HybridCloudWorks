@@ -193,9 +193,16 @@ export function isStale(hours, thresholdHours) {
  * Newlines are folded too. `oldestCommit` already takes only the first line of
  * a commit message, but error text comes from anywhere, and a newline inside a
  * row breaks the table exactly as thoroughly as a pipe.
+ *
+ * Backslashes are escaped FIRST, and that order is the whole correctness
+ * argument. Escaping only `|` turns the subject `a \| b` into `a \\| b` — a
+ * literal backslash, then a pipe Markdown still reads as a column break. The
+ * escape meant to protect the table is what broke it. Escaping `\` first makes
+ * that subject `a \\\| b`: one rendered backslash, one escaped pipe.
  */
 export function cell(value) {
   return String(value ?? '')
+    .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
     .replace(/\r?\n/g, ' ');
 }
