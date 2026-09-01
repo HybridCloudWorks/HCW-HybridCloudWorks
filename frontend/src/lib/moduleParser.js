@@ -143,7 +143,7 @@ export function moduleDataToString(module) {
  * last module appends to the end.
  */
 export function insertModuleIntoMarkdown(markdown, module, position = -1) {
-  const source = String(markdown || '');
+  const source = String(markdown ?? '');
 
   if (position >= 0) {
     const { text, modules } = parseModulesFromMarkdown(source);
