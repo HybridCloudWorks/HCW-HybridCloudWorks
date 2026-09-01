@@ -36,11 +36,16 @@ This project has not cut a tagged release; entries are grouped under
 
 - **`insertModuleIntoMarkdown` honours its `position` parameter (#314).** The last
   genuine inline code TODO: both branches appended to the end, so a caller
-  passing a real index got a silent no-op. It now splices via the existing
-  parse → rebuild machinery — the exact inverse of `removeModuleFromMarkdown`
-  — inserting before the module at that index; `-1` or an index past the last
-  module appends, byte-identical to the old behaviour. Four new test cases
-  pin the contract.
+  passing a real index got a silent no-op. It now string-splices the
+  serialized module directly ahead of the `position`-th `<module>` tag,
+  leaving every other byte of the document — trailing prose included — where
+  it was; `-1` or an index past the last module appends, byte-identical to
+  the old behaviour. Deliberately NOT parse → splice → rebuild: an insert
+  makes the module list outnumber the placeholders, and
+  `rebuildMarkdownWithModules` appends the surplus at the document end, so a
+  middle insert would move the last existing module past any trailing prose
+  — the first draft did exactly that, and review caught it. Four new test
+  cases pin the contract as exact document bytes.
 
 - **The pre-rendered DOM is hydrated instead of discarded (T-714, #296).**
   `main.jsx` used `createRoot`, so 120 pre-rendered documents were built,
