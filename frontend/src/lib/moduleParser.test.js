@@ -12,6 +12,7 @@ import {
   parseModulesFromMarkdown,
   rebuildMarkdownWithModules,
   moduleDataToString,
+  insertModuleIntoMarkdown,
 } from './moduleParser.js';
 
 describe('module grammar contract', () => {
@@ -133,5 +134,37 @@ describe('rebuildMarkdownWithModules', () => {
       { type: 'fact', align: 'left', content: 'only one' },
     ]);
     expect(rebuilt).toBe('a <module type="fact" align="left">only one</module> b');
+  });
+});
+
+describe('insertModuleIntoMarkdown', () => {
+  const first = '<module type="fact" align="left">first</module>';
+  const second = '<module type="fact" align="left">second</module>';
+  const inserted = { type: 'text', align: 'left', content: 'inserted' };
+  const insertedStr = '<module type="text" align="left">inserted</module>';
+
+  it('appends with the default position of -1', () => {
+    expect(insertModuleIntoMarkdown('Prose', inserted)).toBe(`Prose\n\n${insertedStr}\n\n`);
+  });
+
+  it('inserts before the module at the given index, byte-identical elsewhere', () => {
+    const result = insertModuleIntoMarkdown(
+      `Intro\n\n${first}\n\nMiddle\n\n${second}\n\nOutro`,
+      inserted,
+      1
+    );
+    expect(result).toBe(`Intro\n\n${first}\n\nMiddle\n\n${insertedStr}\n\n${second}\n\nOutro`);
+  });
+
+  it('inserts at position 0 without moving the existing module past trailing prose', () => {
+    // The regression net for the placeholder-count mismatch: an insert built
+    // on parse → splice → rebuild appended the displaced module after "Outro".
+    const result = insertModuleIntoMarkdown(`Intro\n\n${first}\n\nOutro`, inserted, 0);
+    expect(result).toBe(`Intro\n\n${insertedStr}\n\n${first}\n\nOutro`);
+  });
+
+  it('appends when the position is past the last module', () => {
+    const result = insertModuleIntoMarkdown(`Intro\n\n${first}`, inserted, 5);
+    expect(result).toBe(`Intro\n\n${first}\n\n${insertedStr}\n\n`);
   });
 });

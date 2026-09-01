@@ -18,6 +18,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **TODO.md gains one working order across everything open (#314).** A repo-wide
+  sweep (dedicated tracker, wiki backlogs, inline markers, `notImplemented`
+  contract) confirmed the five-item table is complete, then added an "attack
+  sequence" section that sequences all of it — the five items, the settings
+  sweep, the optional seeds, the live confirmations — into seven
+  dependency-ordered phases. It adds no items and restates no procedures:
+  each phase links to the one section carrying the commands and success
+  criteria, so the sequence cannot drift from the sections (the T-722 lesson,
+  applied in advance). The 24 dark provider pages gain a row in "Owner
+  decisions" — previously that gate lived only in the inline
+  `// TODO: remove to re-enable` markers and
+  `frontend/scripts/validate-provider-pages.js`, outside the tracker, and the
+  row records that re-enabling a page is two edits (markers deleted AND the
+  path moved `GUARDED_FILES` → `LIVE_FILES`) because the validator asserts
+  both directions.
+
+- **`insertModuleIntoMarkdown` honours its `position` parameter (#314).** The last
+  genuine inline code TODO: both branches appended to the end, so a caller
+  passing a real index got a silent no-op. It now string-splices the
+  serialized module directly ahead of the `position`-th `<module>` tag,
+  leaving every other byte of the document — trailing prose included — where
+  it was; `-1` or an index past the last module appends, byte-identical to
+  the old behaviour. Deliberately NOT parse → splice → rebuild: an insert
+  makes the module list outnumber the placeholders, and
+  `rebuildMarkdownWithModules` appends the surplus at the document end, so a
+  middle insert would move the last existing module past any trailing prose
+  — the first draft did exactly that, and review caught it. Four new test
+  cases pin the contract as exact document bytes.
+
 - **The pre-rendered DOM is hydrated instead of discarded (T-714, #296).**
   `main.jsx` used `createRoot`, so 120 pre-rendered documents were built,
   shipped and thrown away at boot. It now calls `hydrateRoot` when the mount
@@ -57,6 +86,18 @@ This project has not cut a tagged release; entries are grouped under
   required contexts. This pins that set to a reviewed two, each with a written
   justification. It bounds the exposure; it does not close it. Mutation-tested:
   granting the permission to `iac-validate.yml` fails the guard.
+
+### Fixed
+
+- **Three stale wiki records corrected before they cost a round trip (#314).**
+  `Architecture-Review-2026-08.md` still read T-714 "OPEN — needs an owner
+  decision" (closed by #296, hydration landed) and T-709 "owner action open"
+  (closed 2026-08-30/31, both channels observed delivering); each block now
+  carries a dated closing status pointing at the record. And
+  `Resource-Validation-Report.md` §3 still instructed enabling Key Vault
+  purge protection — the exact opposite of the 2026-08-24 accepted risk — and
+  now marks that item superseded with the reasoning, so the next reader does
+  not re-raise a decided question.
 
 ### Changed
 

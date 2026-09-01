@@ -135,8 +135,13 @@ control layer) regardless of that decision.
    drift to investigate before any deploy.
 2. **Smoke tiers 2–3** (Cosmos conditional patch; authenticated guard) —
    need `az login` / a bearer token, per the script header.
-3. **Purge protection:** set the TFC variable `purge_protection_enabled =
-   true` and apply before any production secret is seeded.
+3. ~~**Purge protection:** set the TFC variable `purge_protection_enabled =
+   true` and apply before any production secret is seeded.~~ **Superseded
+   2026-08-24:** the owner accepted purge protection **off** as a recorded
+   risk — enabling it is a one-way switch that removes the
+   teardown-and-recreate path a single-environment estate depends on, and
+   90-day soft delete compensates. See TODO.md → Accepted risks; do not
+   re-raise from this line.
 4. **TODO.md decisions** (Cloudflare synthetic access; plan
    reconciliation) and the outstanding §0.2 (was a Cosmos key ever
    deployed?) — §0.2 gains urgency from Cosmos being network-open with key
