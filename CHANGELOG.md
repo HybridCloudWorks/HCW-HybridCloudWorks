@@ -18,6 +18,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The repository gains its own code-review skill (#316).**
+  `.claude/skills/hcw-code-review/` teaches an agent to review a diff the way
+  this repository's CI and reviewers do: `SKILL.md` scopes the change, routes
+  each touched path to a per-component checklist (frontend, Functions, infra,
+  scripts/workflows, VPS agent and edge probe), and applies the cross-cutting
+  checks the PR template and Repository Policy already enforce — secrets,
+  content-free telemetry, pinning, the Markdown allowlist, TODO/CHANGELOG
+  movement, and the owner-facing instruction rules in `.claude/CLAUDE.md`.
+  Each reference file carries the component's real verification commands —
+  the ones CI runs plus the review-time validators CI does not — so a
+  review's Verification section reports what was actually executed rather
+  than what was assumed. The directory lives
+  under `.claude/`, already allowlisted as a harness directory in
+  `scripts/validate-repository-structure.ps1`.
+
 - **T-519 closed: the reachability alert is armed, and the estate's one
   outage-surviving signal finally pages (#315).** The blocker was what
   `wrangler.toml` predicted: the Worker's secret held the Instrumentation Key,
