@@ -7,6 +7,22 @@
 # It exists because dependency pull requests previously had nothing validating
 # them — `npm ci` alone catches the most common failure mode, a package.json
 # and package-lock.json that disagree.
+#
+# WHY THE pull_request TRIGGER IS NOT PATH-FILTERED — the T-523 doctrine,
+# stated in full in iac-validate.yml: every job here is a required context on
+# the `main` ruleset, and a required context whose workflow was filtered out
+# is never auto-satisfied — the pull request waits on "Expected" forever. So
+# the trigger fires on every pull request and THE FILTERING LIVES INSIDE each
+# job: it diffs against the base, and when the component's own tree (and the
+# out-of-tree files its tests actually read) did not change, the expensive
+# steps skip while the job still completes and posts its context. Each
+# matrix row's `filter` regex names that dependency set — the out-of-tree
+# entries are real test-time reads (functions tests assert against infra/
+# Terraform source and .azure/api-surface.json; scripts tests pin
+# .github/workflows contracts and infra/roles), not caution.
+#
+# Do not re-add `paths:` to `pull_request` without first removing these
+# contexts from the ruleset, in that order.
 
 name: CI
 
@@ -35,15 +51,18 @@ jobs:
         include:
           - name: frontend
             dir: frontend
+            filter: '^(frontend/|\.azure/)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build
             test: npm test
           - name: functions (azure)
             dir: functions
+            filter: '^(functions/|\.azure/|infra/|wiki/Blog-Machine\.md)'
             test: npm test
           - name: scripts (operations)
             dir: scripts
+            filter: '^(scripts/|\.github/workflows/|infra/)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached
@@ -54,9 +73,11 @@ jobs:
           # package's single-dependency lockfile intact.
           - name: vps-agent
             dir: vps-agent
+            filter: '^vps-agent/'
             test: npm test
           - name: edge (availability probe)
             dir: edge/availability-probe
+            filter: '^edge/'
             test: npm test
 
     defaults:
@@ -64,10 +85,37 @@ jobs:
         working-directory: ${{ matrix.dir }}
 
     steps:
+      # fetch-depth: 0 so the change detection below can diff against the base
+      # commit — same reasoning as iac-validate.yml: a shallow clone fails the
+      # diff rather than returning "no changes".
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      # Non-pull_request events (the push to main) run everything: a merge is
+      # exactly when the full matrix should confirm the combined result.
+      - name: Detect component changes
+        id: changes
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "non-pull_request event — running all checks"
+            exit 0
+          fi
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
+             | grep -qE '${{ matrix.filter }}|^\.github/workflows/ci\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "component files changed — running all checks"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no relevant change — skipping checks, still reporting this context"
+          fi
 
       - name: Set up Node.js
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
@@ -78,25 +126,26 @@ jobs:
       # when the lockfile is out of sync with package.json, which is exactly
       # how a bad dependency bump shows up.
       - name: Install (lockfile-strict)
+        if: steps.changes.outputs.relevant == 'true'
         run: npm ci
 
       # Lint and format run before the build so style feedback arrives fast.
       # `npm run lint` exits non-zero only on errors, not warnings, so the 19
       # pre-existing warnings do not fail the job.
       - name: Lint
-        if: matrix.lint != ''
+        if: steps.changes.outputs.relevant == 'true' && matrix.lint != ''
         run: ${{ matrix.lint }}
 
       - name: Format check
-        if: matrix.format != ''
+        if: steps.changes.outputs.relevant == 'true' && matrix.format != ''
         run: ${{ matrix.format }}
 
       - name: Build
-        if: matrix.build != ''
+        if: steps.changes.outputs.relevant == 'true' && matrix.build != ''
         run: ${{ matrix.build }}
 
       - name: Test
-        if: matrix.test != ''
+        if: steps.changes.outputs.relevant == 'true' && matrix.test != ''
         run: ${{ matrix.test }}
 
   # hooks/claude_event.py runs on every Claude Code session start and stop, and
@@ -112,16 +161,39 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect harness changes
+        id: changes
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "non-pull_request event — running all checks"
+            exit 0
+          fi
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
+             | grep -qE '^(hooks/|tooling/)|^\.github/workflows/ci\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "harness files changed — running all checks"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no relevant change — skipping checks, still reporting this context"
+          fi
 
       - name: Set up Python
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.12'
 
       - name: Compile
+        if: steps.changes.outputs.relevant == 'true'
         run: python -m compileall -q hooks tooling
 
       - name: Workflow round trip
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
           python tooling/workflow.py init --mode selected --agents ci-probe \
@@ -137,6 +209,7 @@ jobs:
           test "$(python -c 'import json;print(json.load(open(".agentic/workflows/wf-ci-smoke/WORKFLOW.json"))["status"])')" = empty
 
       - name: Close refuses to fake a completed workflow
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
           python tooling/workflow.py init --mode selected --agents ci-required \
@@ -161,6 +234,7 @@ jobs:
       # the registry entry is what `discover` matches it against. Both are
       # throwaway edits to an ephemeral checkout.
       - name: Handoff validator accepts real work and rejects fabricated work
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
           mkdir -p .claude/agents
@@ -232,6 +306,7 @@ jobs:
           fi
 
       - name: Stop hook stays fail-open without state
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
           rm -rf .agentic .claude/agents

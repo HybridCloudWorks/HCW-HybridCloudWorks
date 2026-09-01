@@ -138,6 +138,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Every pull-request check now runs only when its component actually
+  changed.** The 14 checks stay — every context the ruleset requires still
+  reports on every pull request — but `ci.yml`'s six jobs and CodeQL's three
+  analyses adopt the filtering-inside-the-job pattern `iac-validate.yml`
+  proved under T-523 (a trigger-level `paths:` filter on a required context
+  leaves the PR waiting on "Expected" forever, so the job itself diffs
+  against the base and skips its expensive steps, still posting success).
+  Each filter names the component's real dependency set, not just its own
+  tree: functions tests read `infra/` Terraform source, `.azure/` and the
+  `wiki/Blog-Machine.md` grammar contract; scripts tests pin
+  `.github/workflows/` and `infra/roles`; CodeQL filters by language file
+  extensions. A docs-only pull request drops from six installs, a frontend
+  build and three CodeQL analyses to nine ~10-second no-ops; pushes to
+  `main` and the weekly CodeQL schedule still run everything, so the merged
+  combination and newly published queries are never skipped.
+
 - **The code-review skill moved to `.github/skills/code-review/`, and its
   consumer is now GitHub Copilot code review.** Owner decision, 2026-09-01:
   Copilot reads agent skills only from `.github/skills/`, Claude Code only
