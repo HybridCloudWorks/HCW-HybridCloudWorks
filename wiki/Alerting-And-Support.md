@@ -41,16 +41,20 @@ platform has actually had, three times**:
 | 2026-08-21 | Timer listeners down through the 104-function deploy |
 
 All three are the same shape: the host is up and healthy, the functions are not
-registered, requests 404. **None of the five armed rules detects it.** `Http5xx`
-does not count 404s. `AppExceptions` cannot fire because no handler runs to
-throw. The availability rule is the only one that asks from outside, and it is
-the one that cannot be armed.
+registered, requests 404. **None of the log or metric rules detects it.**
+`Http5xx` does not count 404s. `AppExceptions` cannot fire because no handler
+runs to throw. The availability rule is the only one that asks from outside —
+and **it is armed as of 2026-09-01 (T-519 closed):**
+`alert-api-reachability-prod-cus`, fed by the Worker probe below, fires when
+successes in a trailing 30-minute window drop below 3 of the expected 6.
 
-Until the probe below is armed (TODO **T-519**), that failure class is caught
-by a human running the check in *[The failure with no alert](#the-failure-with-no-alert)*
-below, by the scheduled `Monitor Functions Registered` workflow (which reads
-ARM, not the network path), or by the assertion inside `deploy-functions.yml`,
-which only runs when someone deploys.
+Until that date this failure class was caught only by a human running the
+check in *[The failure with no alert](#the-failure-with-no-alert)* below, by
+the scheduled `Monitor Functions Registered` workflow (which reads ARM, not
+the network path, and which GitHub delivers 22% of the time), or by the
+assertion inside `deploy-functions.yml`, which only runs when someone deploys.
+Those remain the diagnosing checks that name WHICH condition; the probe is the
+one that notices fast.
 
 Since 2026-08-28 the arm path no longer waits on a Cloudflare plan change:
 [ADR 0024](0024-edge-availability-probe) probes `/api/health` from a
