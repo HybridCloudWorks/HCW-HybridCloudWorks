@@ -1330,6 +1330,8 @@ counter in `poll()`, include it in the guard, release it in a `finally`.
 ### T-745 — The availability alert has no ingestion-lag headroom (Medium, verified)
 
 > **Status (2026-08-28):** **FIXED** — 30-minute window expecting 6 results, firing below 3; the Worker cadence comment moved with it, since the two must change together.
+>
+> **Status (2026-09-01): that was half true, and the wrong half.** The threshold moved to 3 and every prose description — this line, the resource's `description`, the inline comment, `wrangler.toml` — moved to "30-minute window". `window_duration` stayed at `PT15M`. Three rows per window against a threshold of 3 tolerates nothing, so the finding was not merely open, it was **inverted**: the pre-fix shape (`PT15M`, threshold 2) tolerated one miss and the "fixed" one tolerated none. Caught 2026-09-01 while preparing to arm `availability_probe_alert_enabled` for the first time, so it never fired. `window_duration` is now `PT30M`, matching the recommendation below and the four places that already claimed it.
 
 `edge/availability-probe/wrangler.toml:23,31` ·
 `infra/observability.tf:869-883` · `edge/availability-probe/worker.js:80-98`

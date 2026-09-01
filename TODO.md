@@ -139,17 +139,58 @@ The two are meant to be a pair — the probe notices fast, the GitHub monitor
 names which condition — and **until this is armed only the slow, unreliable half
 is live.**
 
-Confirm a result landed — ingestion lags a few minutes:
+**Precondition, added 2026-09-01: the rule's window was wrong and is fixed on
+`main` now.** `window_duration` was `PT15M` against a threshold of 3, which at
+the probe's `*/5` cadence expects 3 rows and tolerates none — a Sev 1 on a
+healthy site the first time an App Insights row landed a minute late. T-745 had
+moved the threshold and every description to "30-minute window" and left the
+window itself behind. It is `PT30M` now. **Do not arm a checkout that predates
+that fix.**
 
-```kusto
-availabilityResults | where name == "edge-api-health" | order by timestamp desc | take 5
+**Step 1 — confirm a result landed.** Ingestion lags a few minutes, and the
+probe has been running since 2026-08-31, so there should be plenty. PowerShell,
+one line — the KQL must stay on one line because `az` on Windows is a batch file
+and truncates an argument at the first newline while still exiting 0:
+
+```powershell
+(az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --analytics-query "availabilityResults | where name == 'edge-api-health' | project timestamp, success, message | order by timestamp desc | take 5" -o json | ConvertFrom-Json).tables[0].rows
 ```
 
-**Only after rows with `success == 1` are visible**, set
-`availability_probe_alert_enabled = true` in the workspace and approve the run.
-The alert fires on ABSENT successes rather than present failures, so arming it
-before the first observed success creates a rule that fires immediately and
-permanently on the missing data it watches for.
+Resource names are from `infra/main.tf` (`azurerm_application_insights.hcw`,
+resource group `azurerm_resource_group.app["web"]`) with the defaults in
+`infra/variables.tf`. Note `edge/availability-probe/wrangler.toml` calls the
+component `appi-site-prod-cus`, missing the `-01`.
+
+**Success:** five rows, at least one with `success = True` and
+`message = HTTP 200`.
+
+**Nothing returned is not "wait longer".** It is the failure `wrangler.toml`
+warns about: a mistyped `wrangler secret put` makes `parseConnectionString`
+throw every five minutes with nothing reaching Azure. Workers Logs is the
+tiebreaker (observability is enabled) — https://dash.cloudflare.com → Workers &
+Pages → `hcw-availability-probe` → Logs.
+
+**This step cannot be automated with what exists.** `verify-alert-state.yml`
+runs as `github_reader`, whose grant is Reader — `*/read`, which does not
+include the Log Analytics query action. That is deliberate (T-728) and worth
+leaving alone for one query a year.
+
+**Step 2 — arm it.** Only after a `success == 1` row is visible, set
+`availability_probe_alert_enabled = true` at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables (plain value
+`true`, not HCL — it is a bool), then approve the run at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs. The alert fires on
+ABSENT successes rather than present failures, so arming it before the first
+observed success creates a rule that fires immediately and permanently on the
+missing data it watches for.
+
+**Expect the Function App to restart.** Every run on this workspace carries the
+permanent diff that replaces three `azapi` resources, and the app was last
+deployed 2026-08-31 23:45 UTC. Re-check the registered function count
+afterwards.
+
+**Success:** the rule `alert-api-reachability-prod-cus` exists in
+`rg-web-site-prod-cus` and stays quiet.
 ### 2. T-726 — the App is built; one setting remains
 
 **Corrected 2026-08-31, and the correction is the important part.** This item

@@ -877,8 +877,18 @@ resource "azurerm_monitor_metric_alert" "api_availability" {
 # no failure rows at all, and a failure-counting rule reads that silence as
 # health. Counting successes makes "the probe stopped running" and "the API
 # stopped answering" the same incident, which they are from a visitor's seat.
-# The probe writes 3 results per 15-minute window; below 2 is an incident, so
-# one dropped cron run is tolerated and two are not.
+# The probe writes 6 results per 30-minute window; below 3 is an incident, so
+# ingestion lag plus one dropped cron run is tolerated (T-745).
+#
+# THE WINDOW IS THE HALF OF THAT PAIR THAT GOT LEFT BEHIND, and it is recorded
+# here because the rule read as fixed for four days while being worse than
+# before. T-745 moved the threshold from 2 to 3 and rewrote every comment,
+# `description` and wrangler.toml note to describe a 30-minute window — and
+# left `window_duration` at PT15M. Three rows per window against a threshold of
+# 3 tolerates NOTHING: one row landing a minute late is a Sev 1 on a healthy
+# site, where the pre-T-745 shape (PT15M, threshold 2) at least tolerated one.
+# Half a fix inverted the finding it closed. Corrected 2026-09-01, before the
+# variable below was ever armed.
 #
 # A log rule, not a metric alert on availabilityResults/availabilityPercentage,
 # for the same blind-spot reason: that metric goes silent when the probe dies,
@@ -900,7 +910,14 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
   severity            = 1
 
   evaluation_frequency = "PT5M"
-  window_duration      = "PT15M"
+
+  # PT30M, not PT15M, and it must stay paired with `threshold` below: at the
+  # Worker's */5 cadence this window expects 6 rows and the threshold tolerates
+  # 3 missing. Narrow it to PT15M and the same threshold expects 3 and tolerates
+  # none. edge/availability-probe/wrangler.toml carries the same warning from
+  # the cron's side — "change one and you must change the other" — and that is
+  # exactly what went wrong here once already.
+  window_duration = "PT30M"
 
   # Stateful like every other rule here (#226): reachability incidents are
   # exactly the kind that run long, and one mail per incident is the design.
