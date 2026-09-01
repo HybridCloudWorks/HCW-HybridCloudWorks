@@ -143,18 +143,25 @@ This project has not cut a tagged release; entries are grouped under
   has ample margin against 24. The workflow header records that the reasoning
   stops holding if the threshold ever drops near the delivery gap.
 
-  30 tests, and five load-bearing decisions are mutation-verified: reading only
+  36 tests, and six load-bearing decisions are mutation-verified: reading only
   the first page of commits, dropping the de-duplication, defaulting an
   unreadable commits payload to an empty page, taking the newest commit instead
-  of the oldest, and `>` instead of `>=` on the threshold. All five fail the
-  suite when introduced.
+  of the oldest, `>` instead of `>=` on the threshold, and leaving a raw `|` in
+  a table cell. All six fail the suite when introduced.
 
   **All five fail in the same direction — reporting a service as healthier than
   it is — and that direction is the actual finding.** Every defect review caught
   in this file, and every one caught while writing it, made a stale service look
   current. None made a current service look stale. A monitor whose bugs all
   point at "everything is fine" fails the one way it must not, so the mutation
-  set is exactly those five.
+  set is exactly those.
+
+  The sixth is a legibility failure rather than a correctness one, and belongs
+  with them anyway: commit subjects and error text are not this script's to
+  constrain, and a `|` in either ends its Markdown cell early — the row grows a
+  column, everything after it shifts, and the table stops rendering as a table.
+  That table IS the report, read to decide whether to deploy, at the hour a
+  monitor tends to fire. Newlines are folded for the same reason.
 
   Two defects were caught before merge and are worth recording:
 

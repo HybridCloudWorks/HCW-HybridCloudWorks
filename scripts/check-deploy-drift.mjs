@@ -181,14 +181,33 @@ export function isStale(hours, thresholdHours) {
   return hours >= thresholdHours;
 }
 
+/**
+ * A value safe to drop into a Markdown table cell.
+ *
+ * Commit subjects and error text are not ours to constrain, and a `|` in either
+ * ends the cell early: the row grows a column, everything after it shifts, and
+ * the table stops rendering as a table. That matters more here than it sounds,
+ * because this table IS the report — it is what an operator reads to decide
+ * whether to deploy, at the hour a monitor tends to fire.
+ *
+ * Newlines are folded too. `oldestCommit` already takes only the first line of
+ * a commit message, but error text comes from anywhere, and a newline inside a
+ * row breaks the table exactly as thoroughly as a pipe.
+ */
+export function cell(value) {
+  return String(value ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, ' ');
+}
+
 /** The job-summary table, and whether anything in it is stale. */
 export function formatReport(results, thresholdHours) {
   const rows = results.map((r) => {
-    if (r.error) return `| ${r.name} | ⚠️ | ${r.error} |`;
-    if (r.neverDeployed) return `| ${r.name} | ❌ | never deployed |`;
-    if (!r.oldest) return `| ${r.name} | ✅ | up to date |`;
+    if (r.error) return `| ${cell(r.name)} | ⚠️ | ${cell(r.error)} |`;
+    if (r.neverDeployed) return `| ${cell(r.name)} | ❌ | never deployed |`;
+    if (!r.oldest) return `| ${cell(r.name)} | ✅ | up to date |`;
     const stale = isStale(r.hours, thresholdHours);
-    return `| ${r.name} | ${stale ? '❌' : '✅'} | ${r.count} commit(s), oldest ${r.hours}h — ${r.oldest.message} |`;
+    return `| ${cell(r.name)} | ${stale ? '❌' : '✅'} | ${r.count} commit(s), oldest ${r.hours}h — ${cell(r.oldest.message)} |`;
   });
 
   const failed = results.some(

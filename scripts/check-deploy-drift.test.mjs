@@ -17,6 +17,7 @@ import {
   formatReport,
   driftFor,
   COMMITS_PER_PAGE,
+  cell,
 } from './check-deploy-drift.mjs';
 
 const NOW = Date.parse('2026-09-01T04:00:00Z');
@@ -350,5 +351,47 @@ describe('SERVICES', () => {
 
   it('gives every service at least one path, or drift would always be zero', () => {
     for (const s of SERVICES) expect(s.paths.length).toBeGreaterThan(0);
+  });
+});
+
+describe('cell', () => {
+  // Commit subjects and error text are not ours to constrain. A `|` ends the
+  // cell early, the row grows a column, and the table stops being a table —
+  // in the one artefact an operator reads to decide whether to deploy.
+  it('escapes a pipe', () => {
+    expect(cell('fix: handle a | b')).toBe('fix: handle a \\| b');
+  });
+
+  it('folds newlines, which break a row as thoroughly as a pipe', () => {
+    expect(cell('line one\nline two')).toBe('line one line two');
+    expect(cell('crlf\r\nhere')).toBe('crlf here');
+  });
+
+  it('is empty for null and undefined rather than printing the words', () => {
+    expect(cell(null)).toBe('');
+    expect(cell(undefined)).toBe('');
+  });
+
+  it('leaves ordinary text alone', () => {
+    expect(cell('add the manifest route')).toBe('add the manifest route');
+  });
+});
+
+describe('formatReport escaping', () => {
+  it('keeps the row a single row when a commit subject contains a pipe', () => {
+    const { text } = formatReport(
+      [{ name: 'Function App', count: 1, oldest: { message: 'feat: a | b' }, hours: 50 }],
+      24
+    );
+    const row = text.split('\n').find((l) => l.startsWith('| Function App'));
+    // Three cells means three unescaped separators plus the leading and
+    // trailing ones. An unescaped pipe in the subject would make it more.
+    expect(row.match(/(?<!\\)\|/g)).toHaveLength(4);
+    expect(row).toContain('a \\| b');
+  });
+
+  it('escapes error text too, which comes from anywhere', () => {
+    const { text } = formatReport([{ name: 'X', error: 'boom | bang' }], 24);
+    expect(text).toContain('boom \\| bang');
   });
 });
