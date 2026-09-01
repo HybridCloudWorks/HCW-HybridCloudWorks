@@ -12,6 +12,30 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  splitHead,
+  injectIntoTemplate,
+  canonicalFor,
+  socialTags,
+  seedAttribute,
+  SEED_ATTRIBUTE,
+  MOUNT_POINT_PATTERN,
+} from './prerender.mjs';
+// Imported rather than read from a path, so the JSON is parsed once by the
+// bundler and a malformed file fails at import instead of mid-assertion.
+//
+// An earlier version of this comment justified the import by claiming that
+// under Vitest `import.meta.url` is a Vite module id rather than a file: URL,
+// so `fileURLToPath` on it throws. That is not true here and the roots below
+// depend on it not being true, so it is corrected rather than deleted —
+// vitest 4.1.11 reports
+//
+//     file:///…/frontend/scripts/prerender.test.js
+//
+// which `fileURLToPath` resolves, from the repository root and from frontend/
+// alike. Measured, not assumed: a false warning left in place would tell the
+// next reader the root resolution below is unsafe.
+import swaConfig from '../staticwebapp.config.json';
 
 // Every path in this file is resolved from THIS MODULE, never from
 // process.cwd(). The distance from this file to the frontend package and to the
@@ -23,18 +47,6 @@ import { fileURLToPath } from 'node:url';
 // run every suite from.
 const FRONTEND_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = join(FRONTEND_ROOT, '..');
-import {
-  splitHead,
-  injectIntoTemplate,
-  canonicalFor,
-  socialTags,
-  seedAttribute,
-  SEED_ATTRIBUTE,
-  MOUNT_POINT_PATTERN,
-} from './prerender.mjs';
-// Imported rather than read from a path: under Vitest `import.meta.url` is a
-// Vite module id, not a file: URL, so fileURLToPath on it throws.
-import swaConfig from '../staticwebapp.config.json';
 
 /**
  * The browser's side of `escapeAttr`, so a round-trip assertion tests the
