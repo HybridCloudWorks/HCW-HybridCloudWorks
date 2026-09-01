@@ -4,11 +4,31 @@
 # nothing in CI deploys this, deliberately: the account credential lives with
 # the owner, like every other Cloudflare change in this estate (REVIEW.md).
 #
-# The one secret is set once, out of band:
-#   wrangler secret put APPLICATIONINSIGHTS_CONNECTION_STRING
-# with the connection string of appi-site-prod-cus (Azure portal → the
-# Application Insights resource → Connection String). It is a write-only
-# ingestion credential: it can submit telemetry and nothing else.
+# The one secret is set once, out of band. Set it with this, which never puts
+# the value on screen, in a clipboard, or in shell history (PowerShell, one
+# line):
+#
+#   az monitor app-insights component show --app appi-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Select-Object -ExpandProperty connectionString | npx wrangler secret put APPLICATIONINSIGHTS_CONNECTION_STRING --config edge/availability-probe/wrangler.toml
+#
+# It is a write-only ingestion credential: it can submit telemetry and nothing
+# else.
+#
+# IT MUST BE THE CONNECTION STRING, NOT THE INSTRUMENTATION KEY. The Azure
+# portal shows both fields on the same blade, one above the other, and only the
+# connection string parses — parseConnectionString needs InstrumentationKey AND
+# IngestionEndpoint, and a bare key carries neither. This is not hypothetical:
+# it happened on 2026-08-31, and the Worker then threw on every `*/5` invocation
+# between the deploy and 2026-09-01 01:15 UTC — one every five minutes — while
+# Azure showed an empty availabilityResults table. ("5xx" was written here
+# first; during an incident that reads as an HTTP status, which is the wrong
+# thing to have someone chasing.) The command above cannot make that mistake,
+# which is why it replaced "Azure portal → the Application Insights resource →
+# Connection String" here.
+#
+# The resource is appi-site-prod-cus-01. This comment said appi-site-prod-cus
+# until 2026-09-01; the name is built in infra/main.tf as
+# appi-<workload>-<env>-<region>-<instance> and the instance suffix is not
+# optional.
 
 name = "hcw-availability-probe"
 main = "worker.js"
