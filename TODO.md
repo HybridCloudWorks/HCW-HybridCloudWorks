@@ -106,6 +106,37 @@ variable is already `true` and the last Deploy Functions run succeeded on
 2026-08-30 at 01:21 UTC. The tracker had it open against a reality where it was
 applied.
 
+## The attack sequence — one working order across everything open
+
+This section sequences what the rest of this file already tracks; it adds no
+items and restates no procedures. Each phase points at the one section that
+carries the commands and the success criteria, so this list cannot drift from
+those sections the way a restatement would — the T-722 lesson, applied in
+advance. The ordering rule is dependency, not priority: the settings sweep
+sits second because every click in it is available today and fits inside
+Phase 1's wait, and the cost decision sits after the measurement it waits on.
+
+| Phase | What | Where the procedure lives | Why this position |
+| ---: | --- | --- | --- |
+| 1 | Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`) | [Section 1](#1-t-519--the-probe-is-deployed-arm-the-alert-once-a-row-lands) | The one High with a live detection gap behind it. The ≥30-minute wait for a populated window is when Phase 2 happens |
+| 2 | Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans | [Settings still worth a look](#settings-still-worth-a-look) | Every step is a settings page that can be opened now; doing it inside Phase 1's wait costs nothing and needs no apply |
+| 3 | Raise the ingestion cap for one full day and read the demand (`T-719`), then pull the telemetry lever and re-justify the SWA tier (`T-721`) | [Section 4](#4-t-719--the-cap-is-binding-measured-2026-08-31) then [Section 5](#5-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-4) | The measurement must precede both the cost decision and the timer arming, because timers add `AppTraces` volume against a cap that is already binding |
+| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 3](#3-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's measurement, so the new volume lands under a cap sized for it rather than darkening the log-based alerts further |
+| 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 2](#2-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
+| 6 | Optional features: seed the keys and documents you actually want; decide which dark provider sections go live | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature); the provider-pages row in [Owner decisions](#owner-decisions-and-external-access) | Decisions, not repairs — nothing above depends on any of them |
+| 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
+
+The deliberately unscheduled feature backlog — analytics-informed topic
+weighting, the voice-drift monitor, stale-post refresh, A/B titles, the
+duplicate-angle advisor — stays in
+[Blog-Machine § Backlog](wiki/Blog-Machine.md) on purpose: none of it is open
+work, and pulling it here would turn this file into a wish list. The one
+backlog entry that is also a real route gap, `createContentFromRecording`,
+already lives in the AI-providers and third-party rows of
+[Owner decisions](#owner-decisions-and-external-access) — it stays in
+`.azure/api-surface.json` `notImplemented` until its provider credentials
+exist.
+
 ## What is open, and exactly what closes it
 
 ### 1. T-519 — the probe is deployed; arm the alert once a row lands
@@ -750,6 +781,7 @@ Entra row below, which is where it belongs.
 | Listen & Learn speech | Nothing to provide: it synthesises with Gemini TTS on the existing `GEMINI-API-KEY`. Audio is billed against that key at roughly $0.17 an episode / $0.87 a certification on the default model; every run is logged to the AI Engine usage tab under "Breakdown by Feature", so the spend is checkable there rather than estimated. Azure AI Speech is a written, tested fallback for the day the preview Gemini TTS models are retired; using it means creating a Cognitive Services resource, which is a spend decision and is not assumed | Provider is chosen by key presence, Gemini first. With no key at all the feature still publishes each episode's transcript, takeaways and videos and records `audioError` instead of failing |
 | Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
+| Provider-section go-live | Decide when each dark section ships. 24 pages across `frontend/src/pages/finops`, `gcp`, `github` and `terraform` return `ComingSoonPage` behind a two-line guard; several carry fully written components behind the early return. Re-enabling a page is two edits in one change: delete its two `// TODO: remove to re-enable` marker lines, and move its path from `GUARDED_FILES` to `LIVE_FILES` in `frontend/scripts/validate-provider-pages.js` — the validator asserts both directions, so either edit alone fails the build. Decide per **section**, not per file: some pages render content that needs its RSS or content route live first. This row exists because the gate previously lived only in the inline markers and the validator, outside this tracker | The `aws` and `azure` sections are live. The four dark sections stay guarded, and `frontend/scripts/validate-provider-pages.js` fails the build if a guarded page's markers are altered rather than cleanly removed |
 
 ## Live confirmation still requiring an authorized operator
 

@@ -156,6 +156,8 @@ explicitly.
 ### T-709 — One action group, one receiver, delivery never observed (High, verified)
 
 > **Status (2026-08-28):** **CODE HALF FIXED; owner action open.** An optional SMS receiver is available via a `dynamic` block, so an unset variable leaves the action group byte-identical. Delivery has still never been observed — `az monitor action-group test-notifications` remains owner-run.
+>
+> **Status (2026-09-01):** **CLOSED.** Both channels have now been observed delivering: the sample budget email arrived on 2026-08-30 and the SMS the same evening, via `az monitor action-group test-notifications create` from the CLI — the portal's test button reported status **Unknown** twice and delivered nothing. The full command shape and the evidence standard are recorded in [TODO.md](../TODO.md) under "Live confirmation still requiring an authorized operator".
 
 `infra/observability.tf:30-47,157-189`
 
@@ -758,6 +760,8 @@ submission quota.
 ### T-714 — Pre-rendered HTML is discarded at boot (High, verified)
 
 > **Status (2026-08-28):** **OPEN — needs an owner decision.** The seed mechanism exists but is deliberately never mounted in the browser; switching to `hydrateRoot` without wiring it trades a spinner for hydration mismatches on every page. This needs real-browser verification, not a quiet edit.
+>
+> **Status (2026-09-01):** **CLOSED (#296).** The wiring landed: `main.jsx` calls `hydrateRoot` when the mount point's `data-prerendered-route` stamp matches the live path, seeded from the same element, and client-renders as before when it does not. Verified by five Playwright tests in a real browser, including a node-identity probe; both guards mutation-tested. Record in [CHANGELOG.md](../CHANGELOG.md).
 
 `frontend/src/main.jsx:16` · `frontend/scripts/prerender.mjs:219-220` ·
 `frontend/src/App.jsx:275`

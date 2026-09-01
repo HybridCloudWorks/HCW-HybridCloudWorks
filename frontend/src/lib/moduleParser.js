@@ -139,18 +139,21 @@ export function moduleDataToString(module) {
 
 /**
  * Insert a module into markdown at specified position
- * If position is -1, appends to end
+ * Position is the module index to insert before; -1 or an index past the
+ * last module appends to the end.
  */
 export function insertModuleIntoMarkdown(markdown, module, position = -1) {
-  const moduleStr = moduleDataToString(module);
-  const newSection = `\n\n${moduleStr}\n\n`;
+  const source = String(markdown || '');
 
-  if (position === -1) {
-    return markdown + newSection;
+  if (position >= 0) {
+    const { text, modules } = parseModulesFromMarkdown(source);
+    if (position < modules.length) {
+      modules.splice(position, 0, module);
+      return rebuildMarkdownWithModules(text, modules);
+    }
   }
 
-  // TODO: implement positional insert if needed
-  return markdown + newSection;
+  return `${source}\n\n${moduleDataToString(module)}\n\n`;
 }
 
 /**
