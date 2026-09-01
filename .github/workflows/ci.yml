@@ -19,7 +19,8 @@
 # matrix row's `filter` regex names that dependency set — the out-of-tree
 # entries are real test-time reads (functions tests assert against infra/
 # Terraform source and .azure/api-surface.json; scripts tests pin
-# .github/workflows contracts and infra/roles), not caution.
+# .github/workflows contracts and scan infra/ Terraform source, roles
+# included), not caution.
 #
 # Do not re-add `paths:` to `pull_request` without first removing these
 # contexts from the ruleset, in that order.
@@ -51,14 +52,14 @@ jobs:
         include:
           - name: frontend
             dir: frontend
-            filter: '^(frontend/|\.azure/)'
+            filter: '^(frontend/|\.azure/api-surface\.json)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build
             test: npm test
           - name: functions (azure)
             dir: functions
-            filter: '^(functions/|\.azure/|infra/|wiki/Blog-Machine\.md)'
+            filter: '^(functions/|\.azure/api-surface\.json|infra/|wiki/Blog-Machine\.md)'
             test: npm test
           - name: scripts (operations)
             dir: scripts
