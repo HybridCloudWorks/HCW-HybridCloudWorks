@@ -98,6 +98,58 @@ This project has not cut a tagged release; entries are grouped under
   Corrected in the workspace and in `TODO.md`, `wiki/Cutover-Runbook.md` and
   `.github/workflows/tfc-plan-check.yml`.
 
+### Added
+
+- **Deployment drift is measured now, instead of being discovered by accident
+  (2026-09-01).** `deploy-functions.yml` and `deploy-azure-frontend.yml` are
+  both `workflow_dispatch` only, by a recorded decision — enabling a workflow
+  and enabling auto-deploy-on-merge are separate choices, and only the first was
+  made. So merging deploys nothing, and **nothing said so.**
+
+  That one gap produced both of 2026-08-31's incidents, hours apart, each found
+  by accident rather than by a check:
+
+  - The manifest route merged at 2026-08-30 02:45 UTC against a Function App
+    last deployed at 01:21. `publish-content-manifest.yml` then failed with a
+    404 for two nights, and its own error message blamed the app — which was
+    healthy, reporting 121 registered functions throughout.
+  - The frontend was **35 commits** behind, including a hydration change and a
+    sanitizer hardening, found only because someone deployed for another reason.
+
+  **AGE, NOT COMMIT COUNT**, and that is the whole design. The first incident was
+  ONE commit behind; the second was THIRTY-FIVE. No count threshold separates
+  them — catch the one and you fire on every ordinary merge, tolerate ordinary
+  merges and you miss the outage. What they share is that both sat undeployed
+  for days. Age tolerates the normal merge-then-deploy gap, which is the entire
+  point of dispatch-only releases, and still catches a change merged and
+  forgotten.
+
+  `monitor-deploy-drift.yml` runs every four hours and fails when a service has
+  been behind for 24 hours or more, emailing the owner through GitHub's own
+  notifications — the mechanism `monitor-functions-registered.yml` already uses,
+  needing no action group and no dependency on the subscription being watched.
+  It reads only the GitHub API: the last successful run of each deploy workflow,
+  and the commits on `main` touching that service's paths since. No Azure, no
+  OIDC, no `environment:`, and `contents: read` plus `actions: read`.
+
+  Drift is measured per service over the paths that service ships, so thirty
+  commits touching only `wiki/` leave the Function App exactly as correct as it
+  was.
+
+  **On running this from a schedule GitHub delivers 22% of the time**, said
+  plainly rather than assumed away: for an outage detector that is a real
+  problem, and here it is not. This watches a condition measured in days against
+  a threshold measured in hours, so a check landing every 4.6 hours on average
+  has ample margin against 24. The workflow header records that the reasoning
+  stops holding if the threshold ever drops near the delivery gap.
+
+  23 tests, and the two load-bearing decisions are mutation-verified: taking the
+  newest commit instead of the oldest (which would read as healthy immediately
+  after the merge that created the drift) and `>` instead of `>=` on the
+  threshold both fail the suite. Caught while writing it: the `setup-node` pin
+  was a SHA that appears in no other workflow in this repository — invented
+  rather than copied — and is now the pin the other eight workflows use.
+
 ### Fixed
 
 - **The nightly manifest job opens a pull request instead of pushing to `main`

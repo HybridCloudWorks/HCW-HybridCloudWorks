@@ -1,0 +1,101 @@
+# Is production behind `main`, and for how long?
+#
+# WHY THIS EXISTS. deploy-functions.yml and deploy-azure-frontend.yml are both
+# workflow_dispatch only, by a recorded decision — enabling a workflow and
+# enabling auto-deploy-on-merge are separate choices, and only the first was
+# made. So merging deploys nothing, and until 2026-09-01 nothing said so.
+#
+# That one gap produced both of 2026-08-31's incidents, hours apart, both found
+# by accident rather than by a check:
+#
+#   - The manifest route merged 2026-08-30 02:45 UTC against a Function App last
+#     deployed at 01:21. publish-content-manifest.yml then failed with a 404 for
+#     two nights, and its own error message blamed the app — which was healthy,
+#     reporting 121 registered functions the whole time.
+#   - The frontend was 35 commits behind, including a hydration change and a
+#     security fix, discovered only because someone deployed for another reason.
+#
+# AGE, NOT COMMIT COUNT — the design decision this workflow turns on. The first
+# incident was ONE commit behind and the second was THIRTY-FIVE. No count
+# threshold separates them: catch the one and you fire on every ordinary merge;
+# tolerate ordinary merges and you miss the outage. What they share is that both
+# sat undeployed for days. Age tolerates the normal merge-then-deploy gap, which
+# is the entire point of dispatch-only releases, and still catches a change that
+# was merged and forgotten. scripts/check-deploy-drift.mjs carries the reasoning
+# beside the code.
+#
+# HOW IT PAGES. A failed scheduled run emails the repository owner through
+# GitHub's own notifications — the same mechanism monitor-functions-registered.yml
+# uses, and for the same reason: no action group, no Azure alert rule, no cost,
+# and no dependency on the subscription being watched.
+#
+# ON THE SCHEDULE BEING UNRELIABLE, said plainly rather than assumed away.
+# GitHub delivers about 22% of this repository's scheduled runs, a median 36
+# minutes late, with a 12.7-hour worst case (measured 2026-08-31 over
+# monitor-functions-registered.yml's whole life). For an outage detector that is
+# a real problem. Here it is not: this watches a condition measured in DAYS
+# against a threshold measured in HOURS, so a check landing every 4.6 hours on
+# average has ample margin against a 24-hour threshold. If the threshold ever
+# drops near the delivery gap, that reasoning stops holding and this comment is
+# the thing that should stop it.
+#
+# NO AZURE, NO OIDC, NO `environment:`. Everything here is answerable from the
+# GitHub API: the last successful run of each deploy workflow, and the commits on
+# main touching that service's paths since. Nothing to authenticate to, nothing
+# to leak, and no self-arming gate needed.
+
+name: Monitor Deploy Drift
+
+on:
+  schedule:
+    # Offset from the top of the hour, and from the other monitors' minutes, so
+    # three jobs do not queue against each other on a scheduler that is already
+    # dropping most of them.
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      threshold_hours:
+        description: 'Fail when a service has been behind for at least this many hours.'
+        required: false
+        default: '24'
+
+# Reads the commit log and the run history. Writes nothing, anywhere.
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-drift
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Is production behind main?
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      # No `npm ci`. The script imports node:url and uses global fetch, and a
+      # monitor that installs third-party packages to check a commit log has
+      # more supply chain than subject matter.
+      - name: Measure the drift
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRIFT_THRESHOLD_HOURS: ${{ inputs.threshold_hours || '24' }}
+        run: |
+          set -uo pipefail
+          # Captured, then written to BOTH the summary and stdout. The summary is
+          # readable from the GitHub mobile app; stdout is what the REST logs API
+          # exposes. verify-alert-state.yml's first run wrote only the summary
+          # and could not be diagnosed without a browser.
+          report=$(node scripts/check-deploy-drift.mjs)
+          status=$?
+          echo "$report" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $status

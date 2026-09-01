@@ -495,6 +495,22 @@ https://hybridcloudworks.com/admin/api-keys
 
 `GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
 
+## Watch out for
+
+- **Deployment drift is now measured, not noticed.**
+  `.github/workflows/monitor-deploy-drift.yml` runs every four hours and fails
+  when a service has been behind `main` for **24 hours or more**, emailing the
+  owner the way the other monitors do. A failure names the service, the number
+  of undeployed commits touching its paths, and the subject of the oldest one.
+
+  **The fix is to dispatch that service's deploy.** Both are dispatch-only by a
+  recorded decision, so merging never ships them; this check is the thing that
+  says so. Deploying clears it on the next run.
+
+  It measures AGE, not commit count, and that is the whole design: the manifest
+  404 was **one** commit behind and the frontend was **thirty-five**. No count
+  threshold separates those. Both had sat undeployed for days.
+
 ## Settings still worth a look
 
 None is counted above, because none is a finding — they are settings that are
