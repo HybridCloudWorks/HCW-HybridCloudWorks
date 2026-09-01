@@ -352,6 +352,46 @@ This project has not cut a tagged release; entries are grouped under
   the output was its only consumer, and `var.cloudflare_zone_id` is still used
   by `infra/frontend.tf`.
 
+- **The frontend deploy's pre-render guard could not pass, and blocked every
+  deploy for two days (2026-09-01).** `deploy-azure-frontend.yml` greps the
+  built `/about` page to prove pre-rendering produced a page rather than a
+  shell. Its pattern was the literal `<div id="root"><[^/]`, written when the
+  mount point carried no attributes. **#296 (T-714) then stamped
+  `data-prerendered-route` onto that same div**, so the literal stopped existing
+  anywhere in the output:
+
+  ```
+  dist contains 121 HTML documents
+  ##[error]dist/about/index.html has an empty mount point — it is a shell, not a pre-rendered page.
+  ```
+
+  The page was fine — 21 KB of real markup. The check could no longer pass on
+  any input, however correct.
+
+  **It went unnoticed because it fails closed.** A broken guard here blocks a
+  deploy rather than admitting bad output, so nothing shipped wrong and nothing
+  looked wrong; it simply waited until someone deployed. Two runs died on it
+  before the cause was read. That is the good failure direction and it is still
+  a two-day outage of the deploy path, which is worth separating: failing closed
+  bought correctness, not visibility.
+
+  **Fixed structurally, because the pattern was a truth in two places.** A bash
+  literal in a workflow described a shape `prerender.mjs` emits, with nothing
+  holding them together. The pattern is now `MOUNT_POINT_PATTERN`, exported from
+  `prerender.mjs`; the workflow greps that exact text; and `prerender.test.js`
+  reads the pattern back **out of the workflow file** and asserts it against real
+  `injectIntoTemplate` output — matching a rendered page, matching one whose seed
+  contains a bracket, and rejecting both a shell and the untouched vite template.
+  Editing either side alone now fails the frontend test job minutes after a
+  push, instead of a deploy whenever the next one happens to be. Mutation
+  tested: restoring the old literal fails the assertion and names both patterns.
+
+  `escapeAttr` also escapes `>` now. A raw `>` inside a quoted attribute is legal
+  HTML so nothing rendered wrong, but it makes the value unscannable by the
+  `[^>]*` the guard relies on — a seed containing `>` would have made the check
+  read the tag as ending early. The test's hand-written `unescapeAttr` inverse
+  learned it too, which is exactly the drift that function exists to catch.
+
 ### Security
 
 - **Author-written HTML can no longer claim ids the application looks up
