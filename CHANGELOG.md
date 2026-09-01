@@ -138,6 +138,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The code-review skill moved to `.github/skills/code-review/`, its
+  consumer now GitHub Copilot code review.** Owner decision, 2026-09-01:
+  Copilot reads agent skills only from `.github/skills/`, Claude Code only
+  from `.claude/skills/`, and rather than keep two drifting copies the one
+  canonical copy lives where the automatic PR reviewer finds it. The
+  trade-off, accepted explicitly: Claude Code sessions no longer auto-load
+  the skill (an agent can still be pointed at the files when asked to
+  review). The structure validator's Markdown allowlist gains
+  `.github/skills/` with the reasoning inline; the #316 entry above
+  describes the skill's content, whose location this entry supersedes.
+
 - **The Static Web Apps deployment token is minted per run instead of stored
   (T-727, #296).** The decision was "move the SWA deploy to OIDC", which cannot
   mean what it sounds like: `Azure/static-web-apps-deploy` cannot authenticate

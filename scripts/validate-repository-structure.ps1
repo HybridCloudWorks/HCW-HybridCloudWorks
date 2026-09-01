@@ -167,6 +167,10 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
+    # GitHub Copilot code review reads agent skills from .github/skills/ —
+    # the canonical home of the hcw-code-review skill (owner decision,
+    # 2026-09-01, relocated from .claude/skills/ which Copilot cannot read).
+    $relativePath.StartsWith('.github/skills/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath -eq '.github/pull_request_template.md' -or
     # Tooling-adjacent documentation, allowed by the same README clause that
     # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING and
