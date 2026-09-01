@@ -138,8 +138,8 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **The code-review skill moved to `.github/skills/code-review/`, its
-  consumer now GitHub Copilot code review.** Owner decision, 2026-09-01:
+- **The code-review skill moved to `.github/skills/code-review/`, and its
+  consumer is now GitHub Copilot code review.** Owner decision, 2026-09-01:
   Copilot reads agent skills only from `.github/skills/`, Claude Code only
   from `.claude/skills/`, and rather than keep two drifting copies the one
   canonical copy lives where the automatic PR reviewer finds it. The
