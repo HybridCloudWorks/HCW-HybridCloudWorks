@@ -47,13 +47,58 @@ jobs:
     strategy:
       # One language failing should not mask the state of the other.
       fail-fast: false
+      # Each language carries the file pattern that makes analysing it worth
+      # a run. Filtering happens INSIDE the job (the T-523 doctrine, stated in
+      # full in iac-validate.yml): these contexts are required on the `main`
+      # ruleset, and a trigger-level `paths:` filter would leave every
+      # non-matching pull request waiting on "Expected" forever. The weekly
+      # schedule and the push to main still analyse everything, so a newly
+      # published query never waits on a pull request to touch the language.
       matrix:
-        language: [javascript-typescript, actions, python]
+        include:
+          - language: javascript-typescript
+            filter: '\.(js|jsx|ts|tsx|mjs|cjs)$'
+          - language: actions
+            filter: '^\.github/(workflows|actions)/'
+          - language: python
+            filter: '\.py$'
     steps:
+      # fetch-depth: 0 so the change detection below can diff against the base
+      # commit — a shallow clone fails the diff rather than returning "no
+      # changes".
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect language changes
+        id: changes
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "non-pull_request event — analysing everything"
+            exit 0
+          fi
+          # Capture the diff first: `set -e` is inert inside an `if`
+          # condition, so a failed diff (an unfetchable base sha) would read
+          # as "no changes" and silently skip the analysis. A diff that
+          # cannot be computed fails toward analysing.
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "could not compute the diff — analysing rather than guessing"
+            exit 0
+          }
+          if grep -qE '${{ matrix.filter }}|^\.github/workflows/codeql\.yml$|^\.github/codeql/' <<<"$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.language }} files changed — analysing"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no ${{ matrix.language }} change — skipping analysis, still reporting this context"
+          fi
 
       - name: Initialize CodeQL
+        if: steps.changes.outputs.relevant == 'true'
         uses: github/codeql-action/init@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827 # v4
         with:
           languages: ${{ matrix.language }}
@@ -63,6 +108,7 @@ jobs:
       # No build step: both languages are analysed by interpretation, which is
       # why the config's paths-ignore applies to them.
       - name: Perform CodeQL analysis
+        if: steps.changes.outputs.relevant == 'true'
         uses: github/codeql-action/analyze@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827 # v4
         with:
           category: /language:${{ matrix.language }}
