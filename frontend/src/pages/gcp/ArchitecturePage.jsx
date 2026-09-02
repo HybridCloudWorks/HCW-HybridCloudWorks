@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 function firstPresent(...values) {
   for (const value of values) {
@@ -33,7 +32,6 @@ function mapDynamicBlueprint(doc, index, normalizeCategory) {
 }
 
 export default function ArchitecturePage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const staticBlueprints = [
     {
       id: 1,

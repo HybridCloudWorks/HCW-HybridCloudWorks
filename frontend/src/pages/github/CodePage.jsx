@@ -3,10 +3,8 @@ import { useNavigate } from 'react-router';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
 import { useCoderCornerData } from '@/hooks/useCoderCornerData';
 import { routes } from '@/lib/routeFactory';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function GitHubCodePage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const navigate = useNavigate();
   const { items, loading } = useCoderCornerData('github');
 

@@ -2,10 +2,8 @@ import React from 'react';
 import { Link } from 'react-router';
 import { Helmet } from 'react-helmet-async';
 import { routes } from '@/lib/routeFactory';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function ToolsPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   return (
     <>
       <Helmet>

@@ -1,9 +1,7 @@
 import React from 'react';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function FinOpsFocusPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const focusAreas = [
     {
       title: 'Informing',
@@ -12,7 +10,6 @@ export default function FinOpsFocusPage() {
       category: 'Foundation',
       complexity: 'Beginner',
       tags: ['Awareness', 'Dashboards', 'Reporting'],
-      date: 'Updated Feb 2026',
     },
     {
       title: 'Optimizing',
@@ -21,7 +18,6 @@ export default function FinOpsFocusPage() {
       category: 'Operational',
       complexity: 'Intermediate',
       tags: ['Optimization', 'Savings', 'Automation'],
-      date: 'Updated Feb 2026',
     },
     {
       title: 'Evolving',
@@ -30,7 +26,6 @@ export default function FinOpsFocusPage() {
       category: 'Strategic',
       complexity: 'Advanced',
       tags: ['Evolution', 'Maturity', 'Integration'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'Allocating',
@@ -39,7 +34,6 @@ export default function FinOpsFocusPage() {
       category: 'Organizational',
       complexity: 'Intermediate',
       tags: ['Allocation', 'Chargeback', 'Accountability'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'Planning',
@@ -48,7 +42,6 @@ export default function FinOpsFocusPage() {
       category: 'Financial',
       complexity: 'Intermediate',
       tags: ['Planning', 'Forecasting', 'Budget'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'Managing',
@@ -57,7 +50,6 @@ export default function FinOpsFocusPage() {
       category: 'Governance',
       complexity: 'Intermediate',
       tags: ['Governance', 'Controls', 'Policies'],
-      date: 'Updated Dec 2025',
     },
   ];
 

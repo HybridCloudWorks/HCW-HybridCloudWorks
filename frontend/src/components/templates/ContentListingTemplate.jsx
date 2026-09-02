@@ -63,17 +63,30 @@ function renderContentCard(item, index, itemType, actionLabel) {
           className="group hover:border-primary/60 transition-all duration-300 bg-card/40 hover:shadow-lg hover:shadow-primary/10"
         >
           <CardHeader className="pb-2">
-            <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-              <Calendar className="h-3 w-3" />
-              <span>{item.date || 'Feb 10, 2026'}</span>
-              {item.author && (
-                <>
-                  <span>•</span>
-                  <User className="h-3 w-3" />
-                  <span>{item.author}</span>
-                </>
-              )}
-            </div>
+            {/* An absent date renders nothing at all. This used to fall back to
+                the literal 'Feb 10, 2026', which stamped a specific publication
+                date onto any item that had none — a fabricated fact rather than
+                a placeholder, and indistinguishable from a real one on screen.
+                The row itself is conditional too: an item with neither date nor
+                author would otherwise leave an empty mb-2 div above the title,
+                and the bullet separator only appears when it has both sides. */}
+            {(item.date || item.author) && (
+              <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+                {item.date && (
+                  <>
+                    <Calendar className="h-3 w-3" />
+                    <span>{item.date}</span>
+                  </>
+                )}
+                {item.author && (
+                  <>
+                    {item.date && <span>•</span>}
+                    <User className="h-3 w-3" />
+                    <span>{item.author}</span>
+                  </>
+                )}
+              </div>
+            )}
             <CardTitle className="group-hover:text-primary transition-colors line-clamp-2">
               {item.title}
             </CardTitle>

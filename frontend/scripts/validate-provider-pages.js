@@ -7,32 +7,14 @@ const GUARDED_MARKER_IMPORT =
   "import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable";
 const GUARDED_MARKER_RETURN = 'return <ComingSoonPage />; // TODO: remove to re-enable';
 
-const GUARDED_FILES = [
-  'src/pages/gcp/ArchitecturePage.jsx',
-  'src/pages/gcp/BlogPage.jsx',
-  'src/pages/gcp/EducationPage.jsx',
-  'src/pages/gcp/FrameworksPage.jsx',
-  'src/pages/gcp/PodcastPage.jsx',
-  'src/pages/gcp/RssPage.jsx',
-  'src/pages/terraform/BlogPage.jsx',
-  'src/pages/terraform/CodePage.jsx',
-  'src/pages/terraform/EducationPage.jsx',
-  'src/pages/terraform/ModulesPage.jsx',
-  'src/pages/terraform/RssPage.jsx',
-  'src/pages/terraform/ToolsPage.jsx',
-  'src/pages/github/BlogPage.jsx',
-  'src/pages/github/CodePage.jsx',
-  'src/pages/github/EducationPage.jsx',
-  'src/pages/github/RssPage.jsx',
-  'src/pages/github/ToolsPage.jsx',
-  'src/pages/github/WorkflowsPage.jsx',
-  'src/pages/finops/BlogPage.jsx',
-  'src/pages/finops/EducationPage.jsx',
-  'src/pages/finops/FocusPage.jsx',
-  'src/pages/finops/FrameworksPage.jsx',
-  'src/pages/finops/RssPage.jsx',
-  'src/pages/finops/ToolsPage.jsx',
-];
+// Empty since 2026-09-02: every provider page is live (T-518-era go-live decision).
+//
+// The array stays, and so does validateGuardedFile below, because the mechanism
+// is what makes shipping a page dark reviewable — a page behind ComingSoonPage
+// with no entry here is an accident, and an entry here with the markers removed
+// is a page that went live without anyone deciding. Deleting the empty array
+// would delete that check for the next page that needs it.
+const GUARDED_FILES = [];
 
 const LIVE_FILES = [
   'src/pages/aws/ArchitecturePage.jsx',
@@ -70,6 +52,31 @@ const LIVE_FILES = [
   'src/pages/ansible/BlogPage.jsx',
   'src/pages/ansible/EducationPage.jsx',
   'src/pages/ansible/RssPage.jsx',
+  // Every remaining provider page taken live 2026-09-02 by owner decision.
+  'src/pages/gcp/ArchitecturePage.jsx',
+  'src/pages/gcp/BlogPage.jsx',
+  'src/pages/gcp/EducationPage.jsx',
+  'src/pages/gcp/FrameworksPage.jsx',
+  'src/pages/gcp/PodcastPage.jsx',
+  'src/pages/gcp/RssPage.jsx',
+  'src/pages/terraform/BlogPage.jsx',
+  'src/pages/terraform/CodePage.jsx',
+  'src/pages/terraform/EducationPage.jsx',
+  'src/pages/terraform/ModulesPage.jsx',
+  'src/pages/terraform/RssPage.jsx',
+  'src/pages/terraform/ToolsPage.jsx',
+  'src/pages/github/BlogPage.jsx',
+  'src/pages/github/CodePage.jsx',
+  'src/pages/github/EducationPage.jsx',
+  'src/pages/github/RssPage.jsx',
+  'src/pages/github/ToolsPage.jsx',
+  'src/pages/github/WorkflowsPage.jsx',
+  'src/pages/finops/BlogPage.jsx',
+  'src/pages/finops/EducationPage.jsx',
+  'src/pages/finops/FocusPage.jsx',
+  'src/pages/finops/FrameworksPage.jsx',
+  'src/pages/finops/RssPage.jsx',
+  'src/pages/finops/ToolsPage.jsx',
 ];
 
 function read(relativePath) {

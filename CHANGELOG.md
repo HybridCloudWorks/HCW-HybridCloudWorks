@@ -18,6 +18,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`ContentListingTemplate` invented a publication date for any item that had
+  none (#325).** The blog-variant card read `{item.date || 'Feb 10, 2026'}`, so
+  an item without a date was stamped with that specific day — not a visible
+  placeholder but a plausible, wrong fact, rendered identically to a real one.
+  Found while removing the hardcoded stamps above: dropping the `date` fields
+  would have replaced eighteen varied stale dates with one uniform fabricated
+  date, which is worse, so the fallback had to go first.
+
+  An absent date now renders nothing. The surrounding row is conditional too —
+  an item with neither date nor author would otherwise leave an empty `mb-2`
+  div above the title — and the bullet separator appears only when it has both
+  sides to separate. This reaches every caller of the variant, including the
+  already-live `terraform`, `github` and `ansible` code pages, whose items come
+  from `useCoderCornerData` and are not guaranteed to carry a date.
+
+- **A stale count in `frontend/src/main.jsx` (#325).** A comment on the
+  hydration-mismatch handler described "the 104 pre-rendered documents". The
+  build has written 120 since 2026-08-28, when 16 standalone routes were added
+  and the sitemap moved 104 → 120 with it; the comment was not updated. The
+  number is removed rather than corrected, because the comment's point is that a
+  silent mismatch wastes the pre-rendering, and that holds at any count.
+
 - **Two links in `wiki/Required-Inputs.md` pointed at a heading that is not in
   that file (#324).** Both read `[Accepted risks](#accepted-risks)`, and the
   accepted-risks table lives in `TODO.md` — so the in-document form resolved to
@@ -33,6 +55,34 @@ This project has not cut a tagged release; entries are grouped under
   in the repository.
 
 ### Added
+
+- **Every provider page is live: the last 24 shipped-dark pages came out from
+  behind `ComingSoonPage` (#325).** `finops`, `gcp`, `github` and `terraform` now
+  serve their full sections alongside `aws`, `azure`, `vmware` and `ansible`.
+  Owner decision 2026-09-02, taken as one release rather than section by section.
+
+  The pages were never unfinished. Each is structurally identical to its live
+  AWS or Azure counterpart — the same shared component with a different
+  `provider` prop — so the guard was two lines and nothing else:
+  `ComingSoonPage`'s import and an early `return` above the real one. The routes
+  were already public; visitors have been landing on these URLs and reading
+  "coming soon". What changed is what those URLs answer with.
+
+  **`GUARDED_FILES` in `frontend/scripts/validate-provider-pages.js` is now
+  empty, and the array and its checker deliberately stay.** The mechanism is
+  what makes shipping a page dark *reviewable*: a page behind `ComingSoonPage`
+  with no entry there is an accident, and an entry there with its markers gone
+  is a page that went live without anyone deciding. Deleting the empty array
+  would delete that check for the next page that needs it. The validator reports
+  55 live files, 0 guarded.
+
+  **Eighteen hardcoded `date: 'Updated <month> 2026'` stamps were removed rather
+  than refreshed**, across `terraform/ToolsPage`, `terraform/ModulesPage` and
+  `finops/FocusPage`. Nothing maintains them: they were written months ago and
+  would have gone live in September still claiming February. A date no process
+  updates is a stale claim on a page that will never change, and removing it is
+  the fix that does not need doing again — the same reasoning applied to the
+  timer counts in TODO.md the same day.
 
 - **T-518 Wave 1 armed and observed: the platform's two safe timers now run
   (#323).** `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` were added
