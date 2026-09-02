@@ -18,6 +18,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The runbook now covers signing in, because five separate `az` failures cost
+  round trips in two days and none of them named its own cause.**
+  `wiki/Cutover-Runbook.md` gains **Step 0**, ahead of the Entra step: the
+  estate's single tenant and its four subscriptions in one table, the scoped
+  device-code login, the subscription pin, and the `az account show` line that
+  says whether any of it worked.
+
+  The five, each recorded with what it actually was rather than what it looked
+  like: a plain `az login` handing off to the Windows WAM broker and spinning
+  with nothing to read; `AADSTS700082`, which reads as a permissions problem
+  and is a cached token past its 90-day inactivity window; a cached tenant that
+  is not the estate tenant — **the expensive one, because reads then succeed
+  and return nothing**, and an empty result from the wrong estate is
+  indistinguishable from a real absence; a tenant-wide login that enumerates
+  everything and leaves scripted reads apparently stuck, with the
+  `az logout` → `az account clear` → scoped-login reset written out; and
+  `AADSTS50076` MFA warnings for two tenants that are not this estate — one of
+  them named `hybridcloudworks.com`, which is the trap — printed several loud
+  lines *above* the results table, so a command that fully succeeded reads at a
+  glance as one that failed.
+
+  The tenant id is written out rather than referenced. It is not a secret —
+  Entra publishes it for any domain at that domain's OpenID configuration
+  endpoint — and the alternative is a placeholder in a command meant to be
+  pasted, which `.claude/CLAUDE.md` prohibits, having twice paid for one.
+  Subscription ids were already written out in this file and in
+  `scripts/cutover/05-verify-timer.ps1`; no credential, key or token appears.
+
+  Also recorded there: `sub-plat-mgmt-prod-cus` and `rg-mgmt-plat-prod-cus`
+  swap their two middle tokens, which is easy to write backwards and fails as
+  a not-found against a name that looks correct.
+
 - **TODO.md's handling rule is now a merge gate, not prose.**
   `scripts/check-todo-changelog-movement.mjs`, run by the Repository Policy
   workflow on every pull request, fails when a T-identifier leaves TODO.md

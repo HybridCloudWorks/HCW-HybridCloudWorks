@@ -38,6 +38,108 @@ file is the mechanics.
 
 ---
 
+## Step 0 — `az` sign-in, and the five ways it goes wrong
+
+Every `az` command in this runbook assumes a session against the estate's
+tenant with the right subscription pinned. Five distinct failures cost round
+trips on 2026-09-01 and 2026-09-02, and not one of them described its own
+cause. This step exists so the next operator pays for none of them.
+
+The estate is **one tenant** — `1a2fce27-b5f6-43c7-a86e-cf0bb74d4672` — holding
+four subscriptions:
+
+| Subscription | Id | What lives in it |
+| --- | --- | --- |
+| `sub-app-site-prod-cus` | `b9e02281-ebb6-49e9-bd7b-f275b1350726` | The workload: Function App, Static Web App, Cosmos, storage, Key Vault |
+| `sub-plat-mgmt-prod-cus` | `02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e` | Log Analytics `log-plat-prod-cus-01` and the action group — every telemetry query below |
+| `sub-plat-conn-prod-cus` | `8f3c6d82-2d55-4b25-ad40-27c19da5e3d8` | Connectivity |
+| `sub-plat-ident-prod-cus` | `10ae90b5-9149-4063-a1b8-9301974ea997` | Identity |
+
+Note the token order in the platform names: the subscription is
+`sub-plat-mgmt-prod-cus` while its resource group is `rg-mgmt-plat-prod-cus`.
+The two middle tokens swap between the two, which is easy to write backwards
+and produces a not-found against a name that looks right.
+
+The tenant id is written out here rather than referenced. It is not a secret —
+Entra publishes it for any domain, at
+`https://login.microsoftonline.com/hybridcloudworks.com/v2.0/.well-known/openid-configuration`
+— and the alternative is a placeholder inside a command meant to be pasted,
+which `.claude/CLAUDE.md` forbids for reasons this page has already paid.
+
+Sign in scoped to that tenant:
+
+```powershell
+az login --use-device-code --tenant 1a2fce27-b5f6-43c7-a86e-cf0bb74d4672
+```
+
+Pin the workload subscription:
+
+```powershell
+az account set --subscription b9e02281-ebb6-49e9-bd7b-f275b1350726
+```
+
+**Success:**
+
+```powershell
+az account show -o json | ConvertFrom-Json | Select-Object name, id, tenantId
+```
+
+returns `sub-app-site-prod-cus`, `b9e02281-ebb6-49e9-bd7b-f275b1350726`, and
+the tenant above. Anything else and every read that follows is against the
+wrong estate.
+
+### The five failures, and what each one actually was
+
+**1. `--use-device-code` is not a preference.** Plain `az login` hands off to
+the Windows WAM broker and its account picker, which spun indefinitely on
+2026-09-02 without erroring. There is nothing to read while it hangs. Use the
+device-code flow above as the default on Windows, not as the fallback.
+
+**2. `AADSTS700082 — the refresh token has expired due to inactivity.`** Reads
+like a permissions or configuration problem and is neither: the cached token
+had simply gone unused past its 90-day window. The fix is the login above.
+Nothing in the estate changed.
+
+**3. The cached tenant is not the estate tenant.** `az` will suggest a tenant
+it has seen before, and on 2026-09-02 that put the session in an unrelated
+tenant. This is the expensive one, because reads then **succeed and return
+nothing** rather than failing — an empty result from the wrong estate is
+indistinguishable from a real absence. `az account show` naming any tenant
+other than `1a2fce27-…` invalidates everything read after it.
+
+**4. A broad login enumerates every tenant, and scripts then hang.** `az login`
+with no `--tenant` pulls in every tenant the identity can reach; subsequent
+scripted reads slow to the point of appearing stuck. Reset completely and
+re-scope — three commands, in this order:
+
+```powershell
+az logout
+```
+
+```powershell
+az account clear
+```
+
+```powershell
+az login --use-device-code --tenant 1a2fce27-b5f6-43c7-a86e-cf0bb74d4672
+```
+
+**5. `AADSTS50076` MFA warnings that are pure noise.** `az account list --all
+--refresh` prints authentication failures for two tenants —
+`hybridcloudworks.com` (`6443da0e-660d-42b4-a1bb-db4293a8b7d6`) and
+`simplysoph.com` (`83d9aa10-e1de-455e-a9b8-1cc73e99685a`) — demanding MFA
+against `797f4846-ba00-4fd7-ba43-dac1f8f63013`, which is Azure CLI's own
+first-party application rather than anything in this estate.
+
+**Neither tenant is the estate tenant, including the one named for the
+domain.** All four subscriptions above carry `1a2fce27-…`, so the estate is
+fully accounted for and nothing behind those warnings is needed by any command
+in this runbook. The warnings matter only because of where they print: several
+loud lines *above* the table of results, so a command that fully succeeded
+reads at a glance as one that failed.
+
+---
+
 ## Step 1 — Entra sign-in
 
 **Already done, verified against the live tenant:** the `HCWSite API`
