@@ -80,7 +80,7 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
-| 2 | `T-518` — arm the remaining 15 timers | High | Risk-grouped waves, each observed before the next; the two destructive timers stay solo |
+| 2 | `T-518` — arm the remaining timers | High | Risk-grouped waves, each observed before the next; the two destructive timers stay solo |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated,
@@ -120,7 +120,7 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
-| 4 | Arm the remaining 15 timers in risk-grouped waves, each wave observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts |
+| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
 | 6 | Optional features: seed the keys and documents you actually want; decide which dark provider sections go live | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature); the provider-pages row in [Owner decisions](#owner-decisions-and-external-access) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
@@ -233,12 +233,13 @@ but it reported "No change to the published set" — so every step after that
 check was skipped, the App branch included. The first real exercise of this path
 is the first run where the published set has actually moved.
 
-### 2. T-518 — arm the remaining 15 timers, in waves
+### 2. T-518 — arm the remaining timers, in waves
 
-Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
-`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
+Five of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
+`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`, and Wave 1's
+`PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE`. `schedulers_master_enabled`
 is already `true` and `enabled_timers` is the HCL-typed workspace variable
-holding those three.
+holding all five.
 
 **Owner decision, 2026-09-02: arm in waves, not one at a time — a deliberate
 departure from [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5, recorded
@@ -262,7 +263,7 @@ calendar arithmetic, not to destructive operations.
 
 | Wave | Timers | Why grouped | Observable in |
 | ---: | --- | --- | --- |
-| 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | One is idempotent by etag-conditioned claim, the other is a read-only watchdog. Neither can damage data | 6 h |
+| 1 | ~~`PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE`~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | All four gates observed; the pipeline's `ScheduleStatus.Last` landed on its intended Chicago hour |
 | 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | Same class — both ingest feeds and create content documents | 2 h |
 | 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents, no dry-run pin | 4 h |
 | 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Deletes rejected documents, no dry-run pin | 24 h |
@@ -498,7 +499,7 @@ Entra row below, which is where it belongs.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered. **The credential half of this row is closed (T-727, 2026-08-31):** the deploy mints its token from ARM per run under federated identity, and the stored secret is deleted — there is nothing left to provide or rotate | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | See items 2 and 3 above for the procedure and what success looks like. Decide whether to arm the remaining 15 schedulers, adding each to `enabled_timers` one at a time and observing it before the next. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and proven. The availability half of this row is closed: the edge probe is deployed and its alert armed 2026-09-01 (T-519) | The three proven timers remain armed; the other 15 remain no-ops. The Azure standard availability test stays disabled in Terraform because Bot Fight Mode challenges Azure agents; the reachability signal is served by the ADR 0024 Cloudflare Worker, whose alert `alert-api-reachability-prod-cus` is live |
+| Timers and the availability test | See items 2 and 3 above for the procedure and what success looks like. Decide whether to arm the remaining schedulers, adding each wave to `enabled_timers` and observing every timer in it before starting the next — the wave table in item 2 is the plan. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT` and Wave 1's `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` are armed and proven. The availability half of this row is closed: the edge probe is deployed and its alert armed 2026-09-01 (T-519) | The five proven timers remain armed; the rest remain no-ops. The Azure standard availability test stays disabled in Terraform because Bot Fight Mode challenges Azure agents; the reachability signal is served by the ADR 0024 Cloudflare Worker, whose alert `alert-api-reachability-prod-cus` is live |
 | Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |

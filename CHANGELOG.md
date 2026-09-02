@@ -18,6 +18,118 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **T-518 Wave 1 armed and observed: the platform's two safe timers now run
+  (#323).** `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` were added
+  to `enabled_timers` in the `hcw-azure` workspace in one apply, taking the
+  estate from three armed timers of eighteen to five.
+
+  **Two timers in one apply is a departure from [Cutover-Runbook](wiki/Cutover-Runbook.md)
+  step 5, and it was an owner decision rather than a shortcut.** Step 5 reads
+  one timer per apply, observed before the next. Taken literally across the
+  fifteen that remain that is fifteen applies over roughly five weeks — three
+  of the fifteen fire *weekly*, so their observation windows alone are three
+  weeks — and every one of those applies restarts the Function App through the
+  workspace's permanent `azapi` diff. What the rule exists to prove is that
+  arming works at all, and that was settled before this wave: the mechanism had
+  been observed three times, once across the apply boundary itself
+  (`publishScheduledContent`, four skipped invocations then four ran, with the
+  flag as the only variable). What remains is per-handler behaviour, which
+  groups by risk. The precedent is `CHECK_AGENT_HEALTH` and
+  `CLEANUP_TEMP_STORAGE`, armed together on 2026-08-30 and recorded as a
+  departure with its justification.
+
+  **What still does not group**, and this is the limit of the concession: the
+  two timers that delete documents with no dry-run pin —
+  `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
+  apply. Grouping is a concession to calendar arithmetic, not to destructive
+  operations.
+
+  These two were the right first wave because neither can damage data.
+  `platformJobSweeper` re-enqueues jobs that have sat `queued` past
+  `STALE_QUEUED_MS`, closing the gap in `functions/src/lib/jobs.js` where the
+  job document is written before the queue output binding sends the message —
+  so a binding failure used to leave a job `queued` forever. Re-delivery is
+  safe by construction: the worker claims with an etag-conditioned replace, so
+  a duplicate message for a job that did start is skipped rather than
+  double-processed. `monitorPublishingPipeline` is a read-only watchdog.
+
+  **Observed, not merely applied.** The standard is step 5's fourth gate, and
+  all four were read from the workspace with
+  `scripts/cutover/05-verify-timer.ps1` on 2026-09-02:
+
+  - *Deployment*: both flags read `true` from a live
+    `az functionapp config appsettings list` against `func-site-prod-cus-01`,
+    with the armed set printing as `CHECK_AGENT_HEALTH`,
+    `CLEANUP_TEMP_STORAGE`, `MONITOR_PUBLISHING_PIPELINE`,
+    `PLATFORM_JOB_SWEEPER`, `PUBLISH_SCHEDULED_CONTENT`.
+  - *Runtime*: `platformJobSweeper` registered with schedule `0 */15 * * * *`,
+    read back from the host rather than from source.
+  - *Behaviour*: the sweeper's own `re-enqueued … stale job(s), reaped …
+    abandoned running job(s)` line present in the trace stream, which is the
+    handler reporting its work rather than the host reporting an invocation.
+  - *Invocation*: both timers observed firing inside their windows.
+
+  **The clock half of the gate applies to only one of the two, and saying so
+  matters more than the counts do.** `platformJobSweeper` fires every fifteen
+  minutes, so it has no local-time dependency and the `WEBSITE_TIME_ZONE` trap
+  cannot express itself in its history — for it the gate is the count and the
+  handler's own line, and a timestamp check would prove nothing.
+  `monitorPublishingPipeline` runs `0 0 */6 * * *`, which is 00:00, 06:00,
+  12:00 and 18:00 **Chicago**, so it is the one that can fire five hours early
+  and still pass a naive "did it run" check. Its `ScheduleStatus.Last` landed
+  on the intended local hour. A wave that reported one number for both timers
+  would have proven the weaker thing twice.
+
+  **Arming two timers made four counts elsewhere in TODO.md wrong at once**, and
+  they were removed rather than corrected. The section heading, the master-table
+  row, the attack-sequence phase and an owner-decisions row each said "the
+  remaining 15 timers" — accurate when three of eighteen were armed, wrong the
+  moment five were, and wrong again after every wave that follows. That is the
+  T-722 defect, in the file whose own wave table already carries the rule
+  ("this table is the plan, and no count above it is"), so the fix is the rule
+  rather than an arithmetic update: the counts are gone and the enumerated
+  sentence that lists the armed timers by name — which cannot drift from itself
+  — is what remains. The one remaining count in that section was found by
+  review: `enabled_timers` was still described as "holding those three".
+
+  The per-run figures are not restated here. They were read by the operator at
+  their own prompt and the evidence standard is the observation, not a number
+  copied into a second document where it can drift from the first — the same
+  reason `infra/frontend.tf` states its ingestion reduction as a floor rather
+  than a measurement.
+
+- **The runbook now covers signing in, because five separate `az` failures cost
+  round trips in two days and none of them named its own cause (#323).**
+  `wiki/Cutover-Runbook.md` gains **Step 0**, ahead of the Entra step: the
+  estate's single tenant and its four subscriptions in one table, the scoped
+  device-code login, the subscription pin, and the `az account show` line that
+  says whether any of it worked.
+
+  The five, each recorded with what it actually was rather than what it looked
+  like: a plain `az login` handing off to the Windows WAM broker and spinning
+  with nothing to read; `AADSTS700082`, which reads as a permissions problem
+  and is a cached token past its 90-day inactivity window; a cached tenant that
+  is not the estate tenant — **the expensive one, because reads then succeed
+  and return nothing**, and an empty result from the wrong estate is
+  indistinguishable from a real absence; a tenant-wide login that enumerates
+  everything and leaves scripted reads apparently stuck, with the
+  `az logout` → `az account clear` → scoped-login reset written out; and
+  `AADSTS50076` MFA warnings for two tenants that are not this estate — one of
+  them named `hybridcloudworks.com`, which is the trap — printed several loud
+  lines *above* the results table, so a command that fully succeeded reads at a
+  glance as one that failed.
+
+  The tenant id is written out rather than referenced. It is not a secret —
+  Entra publishes it for any domain at that domain's OpenID configuration
+  endpoint — and the alternative is a placeholder in a command meant to be
+  pasted, which `.claude/CLAUDE.md` prohibits, having twice paid for one.
+  Subscription ids were already written out in this file and in
+  `scripts/cutover/05-verify-timer.ps1`; no credential, key or token appears.
+
+  Also recorded there: `sub-plat-mgmt-prod-cus` and `rg-mgmt-plat-prod-cus`
+  swap their two middle tokens, which is easy to write backwards and fails as
+  a not-found against a name that looks correct.
+
 - **TODO.md's handling rule is now a merge gate, not prose.**
   `scripts/check-todo-changelog-movement.mjs`, run by the Repository Policy
   workflow on every pull request, fails when a T-identifier leaves TODO.md
