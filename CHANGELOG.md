@@ -18,6 +18,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **TODO.md's handling rule is now a merge gate, not prose.**
+  `scripts/check-todo-changelog-movement.mjs`, run by the Repository Policy
+  workflow on every pull request, fails when a T-identifier leaves TODO.md
+  without CHANGELOG.md carrying it — the "completed items are removed after
+  the corresponding entry is present" rule, enforced at the same head.
+  Renumbers and moves within TODO.md pass (the id still exists); earlier
+  changelog entries pass (the changelog only grows); and a base that cannot
+  be read exits loudly rather than passing, because a gate that cannot
+  evaluate has not evaluated. Unit-tested for all four shapes and
+  mutation-tested against a fabricated removal.
+
 - **The repository gains its own code-review skill (#316).**
   `.claude/skills/hcw-code-review/` teaches an agent to review a diff the way
   this repository's CI and reviewers do: `SKILL.md` scopes the change, routes
