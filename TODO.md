@@ -74,8 +74,8 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
 | 2 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 3 | `T-719` — the ingestion cap is binding | Medium | One day at a raised cap, to learn what demand actually is |
-| 4 | `T-721` — telemetry costs 5× the workload | Medium | Pull an ingestion lever, after 3 |
+| 3 | `T-719` — the cap binds on host verbosity | Medium | Decided 2026-09-02: verbosity cut at the source; closes on one cap-day below 0.25 after the next deploy |
+| 4 | `T-721` — telemetry costs 5× the workload | Medium | Lever chosen (item 3); the post-deploy volume reading says if more is needed. SWA tier decision separate |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated
@@ -115,8 +115,8 @@ sized for their volume.
 | ---: | --- | --- | --- |
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
-| 3 | Raise the ingestion cap for one full day and read the demand (`T-719`), then pull the telemetry lever and re-justify the SWA tier (`T-721`) | [Section 3](#3-t-719--the-cap-is-binding-measured-2026-08-31) then [Section 4](#4-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-3) | The measurement must precede both the cost decision and the timer arming, because timers add `AppTraces` volume against a cap that is already binding |
-| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's measurement, so the new volume lands under a cap sized for it rather than darkening the log-based alerts further |
+| 3 | Cut the host verbosity at the source (`T-719`, decided 2026-09-02), deploy, then read one cap-day; re-justify the SWA tier (`T-721`) | [Section 3](#3-t-719--the-cap-binds-on-host-verbosity-decided-cut-the-source-keep-the-cap) then [Section 4](#4-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-3) | The verbosity cut replaces the measurement day: once volume sits below the cap, true demand is visible for free and the alerts stay lit all day |
+| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's post-deploy reading, so timer volume lands under a cap with real headroom rather than darkening the log-based alerts |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
 | 6 | Optional features: seed the keys and documents you actually want; decide which dark provider sections go live | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature); the provider-pages row in [Owner decisions](#owner-decisions-and-external-access) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
@@ -255,7 +255,7 @@ truncation fixed on 2026-08-31, and it means the window is not being applied.
 against a cap that is already binding. Take that measurement first, or arm and
 watch the volume with it.
 
-### 3. T-719 — the cap is binding, measured 2026-08-31
+### 3. T-719 — the cap binds on host verbosity; decided: cut the source, keep the cap
 
 **This is no longer a margin question.** Billable ingestion, aligned to the
 08:00 UTC cap reset:
@@ -286,11 +286,25 @@ evidence, which is what turns a cost note into an alerting problem.
 The commands that produced this, and how to read `dataIngestionStatus`, are
 below under *Reading the ingestion volume*.
 
-**What closes it:** raise `logs_daily_quota_gb` in the workspace
-(https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables) to a number the
-platform cannot reach in a day, approve the run, leave it one full cap period,
-read the volume, put it back. That measures **demand** rather than the ceiling,
-which is the number item 4 needs to size its lever. Record it here with the date.
+**Decided by the owner, 2026-09-02: no measurement day, no raised cap.** This
+is a personal content site whose ingestion is dominated by the Functions
+host's own narration, not by traffic — so the volume is cut at the source
+instead of being measured at a raised cap. `functions/host.json` drops
+`default` and `Function` from Information to Warning; `Host.Results` stays at
+Information deliberately (it feeds `AppRequests`, which the 5xx/latency
+alerts and the timer-observation gate read — the pinning test refuses the
+change that would empty it). The cap stays at 0.25 GB and becomes headroom
+rather than a daily ceiling; once volume sits below it, true demand is
+visible for free and item 4's lever question answers itself.
+
+**Accepted with the decision:** if the cap ever binds again, the log-based
+alerts sleep from cap-hit to the 08:00 UTC reset — recorded in
+[Accepted risks](#accepted-risks). The edge probe (T-519, armed) covers
+reachability on a pipeline the cap cannot touch.
+
+**What closes it:** the next Functions deploy carrying the `host.json`
+change, then one full cap-day measurably below 0.25 GB, read with the
+commands below. Record the number here with the date.
 
 **Do not set it to -1.** Azure accepts that for "unlimited", but the
 `logs_daily_cap` alert threshold is this value times 0.8, so an unlimited
@@ -340,11 +354,10 @@ Telemetry runs about USD 17–21 a month against an application-subscription
 workload of roughly USD 4 — together roughly 80% of predictable Azure spend on a
 platform that documents cost to the cent.
 
-**Raising the cap is not the answer on its own.** At roughly USD 2.76/GB,
-doubling it roughly doubles the larger of those two numbers. The levers are:
-drop the `host.json` log level, or move `AppTraces` — about 38% of the cap — to
-the Basic table plan at roughly USD 0.65/GB. Item 4's measurement is what says
-which is enough.
+**The lever is chosen: the `host.json` log level (item 3, decided
+2026-09-02).** The alternative — moving `AppTraces` (about 38% of the cap) to
+the Basic table plan at roughly USD 0.65/GB — stays in reserve: pull it only
+if the post-deploy volume reading says the verbosity cut was not enough.
 
 **Separately, re-justify the Static Web App Standard tier** (about USD 9/month).
 The in-file rationale cites custom domain plus SSL, SPA routing and 100 GB
@@ -616,6 +629,7 @@ or someone "fixes" it without knowing it was a choice.
 
 | Risk | Accepted | Reasoning, and what compensates |
 | --- | --- | --- |
+| **Log-based alerts sleep when the ingestion cap binds.** If daily volume ever again reaches the 0.25 GB cap, `function_http_5xx` and `function_response_time` stop evaluating from cap-hit until the 08:00 UTC reset — a partial failure in that window surfaces the next morning. Accepted with the T-719 decision | Owner, 2026-09-02 | A personal content site with RTO 8 h does not need same-hour paging on partial failures. The exposure was daily and unrecorded while host verbosity pinned the cap; after the verbosity cut the cap is headroom and the window should not recur. Compensating controls: the T-519 edge probe pages on unreachability twelve times an hour on a pipeline the cap cannot touch, and `logs_daily_cap` alerts at 80% of quota before the blindness starts |
 | **Key Vault purge protection is off** on `kv-site-prod-cus-01`, which holds 18 live secrets. Raised as Go-Live blocker B2 on 2026-08-24 | Owner, 2026-08-24 | Enabling it is a **one-way** switch: once on it cannot be turned off, a deleted vault can no longer be purged, and its name stays reserved for the retention period — which removes the teardown-and-recreate path a single-environment estate depends on. The secrets are seeded and resolving, so the exposure is not "unprotected during setup". Compensating control: soft delete at 90 days, which still makes an accidental delete recoverable. What is given up is protection against a *deliberate* purge by someone already holding the rights to perform one. Recorded in the same terms in `infra/variables.tf` and `infra/README.md` |
 | ~~**The Static Web Apps deployment token is a Terraform output** (`swa_token`)~~ Raised as T-722, 2026-08-28 | **CLOSED (T-727).** The output was deleted on 2026-08-30 and the owner deleted the `AZURE_STATIC_WEB_APPS_API_TOKEN` secret on 2026-08-31; the deploy mints the token from ARM under federated identity, per run. No stored, non-expiring credential remains in this repository's secrets. Not an accepted risk any more, and kept in this table only so the row does not appear to have been quietly dropped | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
 | **`cloudflare_origin_secret` is a real shared-secret value in Terraform state.** Raised as T-723, 2026-08-28 | Recorded 2026-08-28 | Unavoidable rather than chosen: Terraform configures the Cloudflare end of the origin handshake, so the value has to pass through it. It was simply never written down, which is the part that is fixed here. **Rotation consequence, which is the reason this needs a record:** the value must change in three places in one window — the HCP Terraform workspace variable, Key Vault `CF-ORIGIN-SECRET`, and the Cloudflare transform rule Terraform writes — and a mismatch throws on *every anonymous request*, so a partial rotation is a full outage of the public API rather than a degradation. The companion exposure — the azapi read-back exporting the whole live app-settings map into state — is not accepted but *bounded*: it is safe only while every secret-shaped setting is a Key Vault reference, and `functions/src/functions/app-settings-secrets.test.js` now fails CI if one is not |

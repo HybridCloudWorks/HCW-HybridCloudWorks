@@ -149,6 +149,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The Functions host stops narrating itself: `host.json` drops `default`
+  and `Function` to Warning (T-719 decided, T-721's lever pulled).** Twelve
+  days of data showed daily ingestion pinned at the 0.25 GB cap — the
+  ceiling, not demand — with the log-based 5xx/latency alerts going dark
+  from cap-hit to the 08:00 UTC reset on most days. The owner's decision,
+  2026-09-02: this is a personal content site whose volume is host
+  verbosity, not traffic, so the source is cut instead of the cap being
+  raised for a measurement day. `Host.Results` stays at Information
+  deliberately — it feeds `AppRequests`, which those alerts and the
+  timer-observation gate read, and the pinning test refuses the change that
+  would empty it; `Azure.Core`/`Azure.Identity` were already pinned quiet
+  after T-514. The cap stays at 0.25 GB as headroom. Accepted and recorded
+  with the decision: if the cap ever binds again, log alerts sleep until
+  the reset — the T-519 probe covers unreachability on a pipeline the cap
+  cannot touch, and `logs_daily_cap` warns at 80% first. T-719 closes on
+  one cap-day measurably below 0.25 after the next Functions deploy; the
+  Basic-table-plan move stays in reserve if that reading says the cut was
+  not enough.
+
 - **The settings sweep is done — the tracker's Phase 2, three settings that
   were choices rather than defaults, all clicked by the owner 2026-09-02.**
   The three stale Terraform Cloud variables
