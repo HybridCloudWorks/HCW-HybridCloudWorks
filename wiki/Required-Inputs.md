@@ -111,7 +111,7 @@ changes behaviour without a workspace edit first:
 | `availability_probe_alert_enabled` | `false` in code, **set `true` in the workspace 2026-09-01 (T-519 closed)** | Arms `edge_probe_availability` (`alert-api-reachability-prod-cus`) on the Worker probe's `availabilityResults` rows. Armed only after a full 30-minute window held 6 healthy rows |
 | `functions_scm_lock_enabled` | `false` in code, **set `true` in the workspace 2026-08-25** | Denies SCM/Kudu by default; `deploy-functions.yml` opens a per-run window. Proven under `Deny` by run 32902534458 |
 | `functions_origin_lock_enabled` | `true` | Restricts the origin to Cloudflare ranges. Already on |
-| `purge_protection_enabled` | `false` | Key Vault purge protection. Off as an accepted risk — see [Accepted risks](#accepted-risks) |
+| `purge_protection_enabled` | `false` | Key Vault purge protection. Off as an accepted risk — see [Accepted risks](../TODO.md#accepted-risks) |
 | `cloudflare_origin_secret` | — (sensitive) | Must match Key Vault `CF-ORIGIN-SECRET` exactly; a mismatch throws on every anonymous request |
 
 ## 4.2 GitHub repository variables
@@ -197,7 +197,7 @@ it, because a repair would hide a regression in that fix.
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
 correct posture. The nineteen names below are what `infra/main.tf` references,
 so each has a named consumer and a fixed spelling; presence is what is
-unconfirmed. [Accepted risks](#accepted-risks) records the vault as holding 18
+unconfirmed. [Accepted risks](../TODO.md#accepted-risks) records the vault as holding 18
 live secrets as of 2026-08-24.
 
 Seeding one is an owner action through the approved vault procedure, and the

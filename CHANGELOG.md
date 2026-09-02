@@ -16,6 +16,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two links in `wiki/Required-Inputs.md` pointed at a heading that is not in
+  that file (#324).** Both read `[Accepted risks](#accepted-risks)`, and the
+  accepted-risks table lives in `TODO.md` — so the in-document form resolved to
+  nothing and silently did nothing when clicked. One of them is the only
+  explanation a reader gets for why `purge_protection_enabled` is `false`, which
+  is exactly the link worth following. Now `../TODO.md#accepted-risks`, matching
+  how the other Wiki pages reach the root documents.
+
+  Found by an audit of every relative Markdown link and heading anchor in the
+  74 tracked Markdown files, prompted by a near-miss in #323: a heading was
+  renamed there and its in-document link had to be updated by hand, with
+  nothing in CI that would have caught it. These two were the only dead anchors
+  in the repository.
+
 ### Added
 
 - **T-518 Wave 1 armed and observed: the platform's two safe timers now run
