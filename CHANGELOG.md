@@ -156,7 +156,7 @@ This project has not cut a tagged release; entries are grouped under
   the evidence standard is the owner's to set on a single-operator estate.
   Held in reserve if a later reading says the cut was not enough: move
   `AppTraces` (~38% of the old cap volume) to the Basic table plan at
-  roughly USD 0.65/GB versus 2.76. The accepted risk (log alerts sleep from
+  roughly USD 0.65/GB versus USD 2.76/GB. The accepted risk (log alerts sleep from
   cap-hit to the 08:00 UTC reset if the cap ever binds again) stays
   recorded in TODO.md's Accepted risks; the Static Web App tier
   re-justification that lived inside T-721 moved to TODO.md's Owner
@@ -178,8 +178,10 @@ This project has not cut a tagged release; entries are grouped under
   after T-514. The cap stays at 0.25 GB as headroom. Accepted and recorded
   with the decision: if the cap ever binds again, log alerts sleep until
   the reset — the T-519 probe covers unreachability on a pipeline the cap
-  cannot touch, and `logs_daily_cap` warns at 80% first. T-719 closes on
-  one cap-day measurably below 0.25 after the next Functions deploy; the
+  cannot touch, and `logs_daily_cap` warns at 80% first. The closure
+  criterion stated here when this shipped — one cap-day measurably below
+  0.25 — was superseded the same day by the owner's decision recorded
+  above; the below-cap reading is confirmation, not a gate. The
   Basic-table-plan move stays in reserve if that reading says the cut was
   not enough.
 
