@@ -1,9 +1,7 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function GitHubToolsPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   return (
     <>
       <Helmet>

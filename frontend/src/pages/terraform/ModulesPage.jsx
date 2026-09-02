@@ -1,9 +1,7 @@
 import React from 'react';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function TerraformModulesPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const modules = [
     {
       title: 'AWS VPC Module',
@@ -11,7 +9,6 @@ export default function TerraformModulesPage() {
       category: 'Networking',
       complexity: 'Intermediate',
       tags: ['VPC', 'Module', 'AWS'],
-      date: 'Updated Feb 2026',
     },
     {
       title: 'Kubernetes on EKS Module',
@@ -19,7 +16,6 @@ export default function TerraformModulesPage() {
       category: 'Containers',
       complexity: 'Advanced',
       tags: ['EKS', 'Kubernetes', 'Module'],
-      date: 'Updated Feb 2026',
     },
     {
       title: 'RDS Database Module',
@@ -27,7 +23,6 @@ export default function TerraformModulesPage() {
       category: 'Databases',
       complexity: 'Intermediate',
       tags: ['RDS', 'Database', 'Module'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'S3 Storage Module',
@@ -35,7 +30,6 @@ export default function TerraformModulesPage() {
       category: 'Storage',
       complexity: 'Beginner',
       tags: ['S3', 'Storage', 'Module'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'IAM & Security Module',
@@ -43,7 +37,6 @@ export default function TerraformModulesPage() {
       category: 'Security',
       complexity: 'Intermediate',
       tags: ['IAM', 'Security', 'Module'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'Azure & GCP Equivalents',
@@ -51,7 +44,6 @@ export default function TerraformModulesPage() {
       category: 'Multi-Cloud',
       complexity: 'Advanced',
       tags: ['Azure', 'GCP', 'Module'],
-      date: 'Updated Dec 2025',
     },
   ];
 

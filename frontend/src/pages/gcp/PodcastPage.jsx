@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import usePodcastData from '@/hooks/usePodcastData';
 import { useProviderConfig } from '@/context/ProviderContext';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 const PLATFORM_LOGOS = {
   spotify: '/icons/logos/spotify.png',
@@ -56,7 +55,6 @@ function EpisodeImage({ image, title, size = 'md' }) {
 }
 
 export default function PodcastPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const podcastConfig = useProviderConfig();
   const { episodes = [], loading } = usePodcastData('gcp');
 

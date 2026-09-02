@@ -1,9 +1,7 @@
 import React from 'react';
 import ProviderBlogPage from '@/components/shared/ProviderBlogPage';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function TerraformBlogPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   return (
     <ProviderBlogPage
       provider="terraform"

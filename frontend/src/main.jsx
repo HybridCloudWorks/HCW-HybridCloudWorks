@@ -102,7 +102,7 @@ const tree = (
  * A hydration mismatch is otherwise SILENT in a production build.
  *
  * React recovers by discarding the server markup and client-rendering, so the
- * page looks right and the 104 pre-rendered documents are quietly wasted —
+ * page looks right and every pre-rendered document is quietly wasted —
  * which is indistinguishable from the createRoot behaviour this replaces. That
  * is exactly how this could regress without anyone noticing, so it is reported
  * rather than swallowed. e2e/hydration.spec.js fails on it.

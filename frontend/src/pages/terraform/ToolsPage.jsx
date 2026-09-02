@@ -1,9 +1,7 @@
 import React from 'react';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function TerraformToolsPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const tools = [
     {
       title: 'Terraform CLI',
@@ -11,7 +9,6 @@ export default function TerraformToolsPage() {
       category: 'Core',
       complexity: 'Beginner',
       tags: ['CLI', 'Core', 'Official'],
-      date: 'Updated Feb 2026',
     },
     {
       title: 'Terragrunt',
@@ -19,7 +16,6 @@ export default function TerraformToolsPage() {
       category: 'Orchestration',
       complexity: 'Intermediate',
       tags: ['Orchestration', 'DRY', 'State'],
-      date: 'Updated Feb 2026',
     },
     {
       title: 'Infracost',
@@ -27,7 +23,6 @@ export default function TerraformToolsPage() {
       category: 'Cost Management',
       complexity: 'Beginner',
       tags: ['Cost', 'Estimation', 'CI/CD'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'TFLint',
@@ -35,7 +30,6 @@ export default function TerraformToolsPage() {
       category: 'Quality',
       complexity: 'Beginner',
       tags: ['Linting', 'Quality', 'Security'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'Sentinel',
@@ -43,7 +37,6 @@ export default function TerraformToolsPage() {
       category: 'Governance',
       complexity: 'Advanced',
       tags: ['Policy', 'Governance', 'Compliance'],
-      date: 'Updated Jan 2026',
     },
     {
       title: 'Atlantis',
@@ -51,7 +44,6 @@ export default function TerraformToolsPage() {
       category: 'Automation',
       complexity: 'Advanced',
       tags: ['Automation', 'CI/CD', 'Collaboration'],
-      date: 'Updated Dec 2025',
     },
   ];
 

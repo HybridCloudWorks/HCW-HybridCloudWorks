@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -215,7 +214,6 @@ const resources = [
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FinOpsEducationPage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const [levelFilter, setLevelFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [carouselPage, setCarouselPage] = useState(0);

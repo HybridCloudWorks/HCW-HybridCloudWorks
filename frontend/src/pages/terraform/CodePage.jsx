@@ -2,10 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
 import { useCoderCornerData } from '@/hooks/useCoderCornerData';
-import ComingSoonPage from '@/pages/ComingSoonPage'; // TODO: remove to re-enable
 
 export default function TerraformCodePage() {
-  return <ComingSoonPage />; // TODO: remove to re-enable
   const navigate = useNavigate();
   const { items, loading } = useCoderCornerData('terraform');
 
