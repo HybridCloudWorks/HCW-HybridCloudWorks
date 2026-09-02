@@ -514,6 +514,21 @@ local time". A timer firing five hours early passes a naive "fired once" check
 and fails the real one; the script prints both zones so the comparison is
 against the local column.
 
+### Superseded on 2026-09-02: the remaining timers are armed in waves
+
+This step's "one timer per apply" rule was set when the arming mechanism was
+unproven. It has since been observed three times, once across the apply
+boundary itself, so the owner decided on 2026-09-02 to arm the remaining
+fifteen in six risk-grouped waves — recorded with its reasoning in TODO.md
+under T-518, which is the live plan. Taken literally the rule cost roughly
+five weeks and fifteen Function App restarts, three of the fifteen timers
+being weekly.
+
+**The four gates below are unchanged, and apply to every timer in a wave.**
+So do both ordering constraints in the next section, and the two timers that
+delete documents with no dry-run pin — `CLEANUP_SOFT_DELETED_CONTENT` and
+`CLEANUP_REJECTED_CONTENT` — are still armed one per apply.
+
 ### Order matters for two of them
 
 - `SYNC_SOCIAL_CALENDAR` — not until after step 4, or Azure becomes a third

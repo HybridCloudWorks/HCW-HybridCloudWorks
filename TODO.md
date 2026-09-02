@@ -80,11 +80,11 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
-| 2 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
+| 2 | `T-518` — arm the remaining 15 timers | High | Six waves, each observed before the next; the two destructive timers stay solo |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated,
-observed procedure.
+observed procedure, now sequenced into waves.
 
 **The table and the sections below are in the same order, and that order is the
 one to work them in — not a sort of the Priority column.** Item 1 carries no
@@ -120,7 +120,7 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
-| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts |
+| 4 | Arm the remaining 15 timers in six waves, each wave observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
 | 6 | Optional features: seed the keys and documents you actually want; decide which dark provider sections go live | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature); the provider-pages row in [Owner decisions](#owner-decisions-and-external-access) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
@@ -233,18 +233,62 @@ but it reported "No change to the published set" — so every step after that
 check was skipped, the App branch included. The first real exercise of this path
 is the first run where the published set has actually moved.
 
-### 2. T-518 — arm the remaining 15 timers — repeated procedure
+### 2. T-518 — arm the remaining 15 timers, in waves
 
 Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
 `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
 is already `true` and `enabled_timers` is the HCL-typed workspace variable
 holding those three.
 
-For each remaining timer, one at a time: add its name at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables, approve the run,
-then observe it firing before adding the next. The evidence standard is the
-observed invocation, not the applied setting — `wiki/Cutover-Runbook.md` step 5
-has the four gates.
+**Owner decision, 2026-09-02: arm in waves, not one at a time — a deliberate
+departure from [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5, recorded
+here so the two documents do not disagree silently.** Taken literally, one
+timer per apply serialises into roughly five weeks and fifteen applies, each
+one restarting the Function App through the workspace's permanent `azapi`
+diff — and three of the fifteen fire *weekly*, so their observation windows
+alone are three weeks. What the one-at-a-time rule exists to prove is that
+arming works at all, and that is settled: the mechanism has been observed
+three times, once across the apply boundary itself
+(`publishScheduledContent`, four skipped invocations then four ran, with the
+flag as the only variable). What remains is per-handler behaviour, which
+groups by risk. There is precedent: `CHECK_AGENT_HEALTH` and
+`CLEANUP_TEMP_STORAGE` were armed in a single apply on 2026-08-30, recorded
+as a departure with its justification.
+
+**What does not group.** The two timers that delete documents with no
+dry-run pin — `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` —
+stay one per apply, observed before the next. Grouping is a concession to
+calendar arithmetic, not to destructive operations.
+
+| Wave | Timers | Why grouped | Observable in |
+| ---: | --- | --- | --- |
+| 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | One is idempotent by etag-conditioned claim, the other is a read-only watchdog. Neither can damage data | 6 h |
+| 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | Same class — both ingest feeds and create content documents | 2 h |
+| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents, no dry-run pin | 4 h |
+| 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Deletes rejected documents, no dry-run pin | 24 h |
+| 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail — decide each on its merits before the wave, then arm together | 24 h |
+| 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. Arm only if Plaud and Publer are seeded; an armed timer with no credential is an erroring loop, not a no-op | 12 h |
+| 6 | `CHECK_LIVE_LINKS`, `REVERIFY_CERTIFICATIONS`, `SCRAPE_SKILLS_HUB_RSS`, `CLEANUP_UNUSED_CERT_IMAGES` | The three weekly timers fire on Monday, Sunday and Friday — non-overlapping windows, so one week observes all three. The fourth is dry-run pinned by `CERT_IMAGE_CLEANUP_DELETE` | 7 days |
+
+Per wave: add the names at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables (keep **HCL**
+ticked — `enabled_timers` is a typed list), approve the run, expect the
+Function App restart, then observe every timer in the wave firing before
+starting the next. The evidence standard is the observed invocation, not the
+applied setting — [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5 has the
+four gates, and its two ordering constraints still bind: `SYNC_SOCIAL_CALENDAR`
+is the live writer of `social_posts`, and arming a cleanup timer is a separate
+decision from arming its deletion (T-302).
+
+Gate 1 for a wave, one timer at a time — bracket-free, because `az --query`
+with `[?...]` is re-parsed by PowerShell and fails (`.claude/CLAUDE.md`):
+
+```powershell
+az functionapp config appsettings list --name func-site-prod-cus-01 --resource-group rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq FEATURE_FLAG_PLATFORM_JOB_SWEEPER | Select-Object name, value
+```
+
+**Success:** one row, value `true`. Substitute the flag name for each timer in
+the wave.
 
 ```powershell
 pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
