@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Fixed
 
 - **`ContentListingTemplate` invented a publication date for any item that had
-  none (#PR).** The blog-variant card read `{item.date || 'Feb 10, 2026'}`, so
+  none (#325).** The blog-variant card read `{item.date || 'Feb 10, 2026'}`, so
   an item without a date was stamped with that specific day — not a visible
   placeholder but a plausible, wrong fact, rendered identically to a real one.
   Found while removing the hardcoded stamps above: dropping the `date` fields
@@ -33,7 +33,7 @@ This project has not cut a tagged release; entries are grouped under
   already-live `terraform`, `github` and `ansible` code pages, whose items come
   from `useCoderCornerData` and are not guaranteed to carry a date.
 
-- **A stale count in `frontend/src/main.jsx` (#PR).** A comment on the
+- **A stale count in `frontend/src/main.jsx` (#325).** A comment on the
   hydration-mismatch handler described "the 104 pre-rendered documents". The
   build has written 120 since 2026-08-28, when 16 standalone routes were added
   and the sitemap moved 104 → 120 with it; the comment was not updated. The
@@ -57,7 +57,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **Every provider page is live: the last 24 shipped-dark pages came out from
-  behind `ComingSoonPage` (#PR).** `finops`, `gcp`, `github` and `terraform` now
+  behind `ComingSoonPage` (#325).** `finops`, `gcp`, `github` and `terraform` now
   serve their full sections alongside `aws`, `azure`, `vmware` and `ansible`.
   Owner decision 2026-09-02, taken as one release rather than section by section.
 
