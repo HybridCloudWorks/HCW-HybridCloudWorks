@@ -125,18 +125,24 @@ az login --use-device-code --tenant 1a2fce27-b5f6-43c7-a86e-cf0bb74d4672
 ```
 
 **5. `AADSTS50076` MFA warnings that are pure noise.** `az account list --all
---refresh` prints authentication failures for two tenants —
-`hybridcloudworks.com` (`6443da0e-660d-42b4-a1bb-db4293a8b7d6`) and
-`simplysoph.com` (`83d9aa10-e1de-455e-a9b8-1cc73e99685a`) — demanding MFA
-against `797f4846-ba00-4fd7-ba43-dac1f8f63013`, which is Azure CLI's own
-first-party application rather than anything in this estate.
+--refresh` prints authentication failures for other tenants the signed-in
+identity can reach, demanding MFA against
+`797f4846-ba00-4fd7-ba43-dac1f8f63013` — which is Azure CLI's own first-party
+application rather than anything in this estate, so it is not worth chasing.
 
-**Neither tenant is the estate tenant, including the one named for the
-domain.** All four subscriptions above carry `1a2fce27-…`, so the estate is
-fully accounted for and nothing behind those warnings is needed by any command
-in this runbook. The warnings matter only because of where they print: several
-loud lines *above* the table of results, so a command that fully succeeded
-reads at a glance as one that failed.
+**None of them is the estate tenant, and on 2026-09-02 one of them was named
+`hybridcloudworks.com` while holding none of the estate — which is the trap.**
+A tenant named for the domain reads like the right one. The test is not the
+name: it is that all four subscriptions in the table above carry
+`1a2fce27-…`, so the estate is fully accounted for and nothing behind those
+warnings is needed by any command in this runbook.
+
+Which tenants appear is a property of the identity rather than of this estate,
+so they are deliberately not listed here — the set changes without anything in
+the runbook changing, and a stale list of someone else's tenants would be worse
+than none. The warnings matter only because of where they print: several loud
+lines *above* the table of results, so a command that fully succeeded reads at
+a glance as one that failed.
 
 ---
 

@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **The runbook now covers signing in, because five separate `az` failures cost
-  round trips in two days and none of them named its own cause.**
+  round trips in two days and none of them named its own cause (#323).**
   `wiki/Cutover-Runbook.md` gains **Step 0**, ahead of the Entra step: the
   estate's single tenant and its four subscriptions in one table, the scoped
   device-code login, the subscription pin, and the `az account show` line that
