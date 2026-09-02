@@ -149,6 +149,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **T-719 and T-721 closed by owner decision, 2026-09-02.** The verbosity
+  cut merged (#321) and Deploy Functions was dispatched the same day; the
+  owner closed both without gating on the first clean cap-day reading — the
+  below-cap volume is expected confirmation, not a closure criterion, and
+  the evidence standard is the owner's to set on a single-operator estate.
+  Held in reserve if a later reading says the cut was not enough: move
+  `AppTraces` (~38% of the old cap volume) to the Basic table plan at
+  roughly USD 0.65/GB versus 2.76. The accepted risk (log alerts sleep from
+  cap-hit to the 08:00 UTC reset if the cap ever binds again) stays
+  recorded in TODO.md's Accepted risks; the Static Web App tier
+  re-justification that lived inside T-721 moved to TODO.md's Owner
+  decisions table rather than closing silently with it. The tracker drops
+  to two open items: T-726 (waits on the first content change) and T-518
+  (arm the timers).
+
 - **The Functions host stops narrating itself: `host.json` drops `default`
   and `Function` to Warning (T-719 decided, T-721's lever pulled).** Twelve
   days of data showed daily ingestion pinned at the 0.25 GB cap — the
