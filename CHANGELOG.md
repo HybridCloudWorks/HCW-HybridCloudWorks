@@ -80,6 +80,18 @@ This project has not cut a tagged release; entries are grouped under
   on the intended local hour. A wave that reported one number for both timers
   would have proven the weaker thing twice.
 
+  **Arming two timers made four counts elsewhere in TODO.md wrong at once**, and
+  they were removed rather than corrected. The section heading, the master-table
+  row, the attack-sequence phase and an owner-decisions row each said "the
+  remaining 15 timers" — accurate when three of eighteen were armed, wrong the
+  moment five were, and wrong again after every wave that follows. That is the
+  T-722 defect, in the file whose own wave table already carries the rule
+  ("this table is the plan, and no count above it is"), so the fix is the rule
+  rather than an arithmetic update: the counts are gone and the enumerated
+  sentence that lists the armed timers by name — which cannot drift from itself
+  — is what remains. The one remaining count in that section was found by
+  review: `enabled_timers` was still described as "holding those three".
+
   The per-run figures are not restated here. They were read by the operator at
   their own prompt and the evidence standard is the observation, not a number
   copied into a second document where it can drift from the first — the same
