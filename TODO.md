@@ -251,9 +251,11 @@ pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Ho
 between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
 truncation fixed on 2026-08-31, and it means the window is not being applied.
 
-**Note the interaction with item 3:** arming timers adds `AppTraces` volume
-against a cap that is already binding. Take that measurement first, or arm and
-watch the volume with it.
+**Note the interaction with item 3:** arming timers adds `AppTraces` volume.
+Item 3's verbosity cut (decided 2026-09-02) is what makes room for it — arm
+after that change has deployed and the post-deploy cap-day reading shows the
+volume sitting below the cap, so timer traffic lands in real headroom rather
+than pushing the workspace back to the ceiling.
 
 ### 3. T-719 — the cap binds on host verbosity; decided: cut the source, keep the cap
 
