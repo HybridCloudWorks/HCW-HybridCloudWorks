@@ -16,9 +16,9 @@ an engineer working from a checkout if it needs tenant, Cloudflare or
 repository-admin access — the carried-over sections say so in their own words,
 and `Gate: owner` still marks the rest.
 
-## Status — 2026-09-01
+## Status — 2026-09-02
 
-> **Four items are open. None can be closed from a checkout.** Each carries what
+> **Two items are open. Neither can be closed from a checkout.** Each carries what
 > to run or click, and what a successful result looks like, so a real failure
 > can be told apart from a reporting failure.
 >
@@ -37,17 +37,24 @@ and `Gate: owner` still marks the rest.
 > (a full PT30M window needs six), and the apply created
 > `alert-api-reachability-prod-cus` in `rg-web-site-prod-cus`. The registered
 > function count was 122 before and after the apply's restart. Recorded in
-> CHANGELOG.md and removed from this list. What remains is decisions or
-> measurements with no deadline.
+> CHANGELOG.md and removed from this list.
+>
+> **`T-719` and `T-721` closed on 2026-09-02, by owner decision.** The host
+> verbosity is cut at the source (#321, `host.json` `default` and `Function` to
+> Warning), the deploy was dispatched the same day, and the owner closed both
+> without gating on the cap-day reading — the below-cap volume is expected
+> confirmation, not a closure criterion. The accepted risk (log alerts sleep
+> if the cap ever binds again) is recorded below; the Basic-table-plan move
+> stays in reserve in CHANGELOG.md if the reading ever says the cut was not
+> enough. What remains is one observation and one procedure.
 >
 > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
 > resolved or carried below as owner gates. The per-finding record — method,
 > evidence standard, every failure mode and outcome — is
 > [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md),
-> which is now a dated historical document rather than a live list. Its three
-> findings that still need an owner (`T-719`, `T-721`, `T-749`) are stated in
-> full below instead of by reference, because a tracker that says "see the
-> review" is a tracker you have to read two documents to use.
+> which is now a dated historical document rather than a live list. Its last
+> three owner-gated findings are all closed — `T-749` on 2026-08-31,
+> `T-719` and `T-721` on 2026-09-02.
 >
 > **The `hcw-azure` workspace is VCS-connected, and auto-apply is off.** Merging
 > infra code queues a plan that waits for approval at
@@ -73,13 +80,11 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
-| 2 | `T-518` — arm the remaining 15 timers | High | A repeated, observed procedure |
-| 3 | `T-719` — the cap binds on host verbosity | Medium | Decided 2026-09-02: verbosity cut at the source; closes on one cap-day below 0.25 after the next deploy |
-| 4 | `T-721` — telemetry costs 5× the workload | Medium | Lever chosen (item 3); the post-deploy volume reading says if more is needed. SWA tier decision separate |
+| 2 | `T-518` — arm the remaining 15 timers | High | Risk-grouped waves, each observed before the next; the two destructive timers stay solo |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
-action left behind by a finding that is closed. Item 2 is a repeated
-procedure, 3 a measurement, and 4 a cost decision waiting on it.
+action left behind by a finding that is closed. Item 2 is a repeated,
+observed procedure, now sequenced into waves.
 
 **The table and the sections below are in the same order, and that order is the
 one to work them in — not a sort of the Priority column.** Item 1 carries no
@@ -107,16 +112,15 @@ This section sequences what the rest of this file already tracks; it adds no
 items and restates no procedures. Each phase points at the one section that
 carries the commands and the success criteria, so this list cannot drift from
 those sections the way a restatement would — the T-722 lesson, applied in
-advance. The ordering rule is dependency, not priority: the cost decision
-sits after the measurement it waits on, and the timers after the cap is
-sized for their volume.
+advance. The ordering rule is dependency, not priority: the timers arm after
+the verbosity cut has deployed, so their volume lands in real headroom.
 
 | Phase | What | Where the procedure lives | Why this position |
 | ---: | --- | --- | --- |
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
-| 3 | Cut the host verbosity at the source (`T-719`, decided 2026-09-02), deploy, then read one cap-day; re-justify the SWA tier (`T-721`) | [Section 3](#3-t-719--the-cap-binds-on-host-verbosity-decided-cut-the-source-keep-the-cap) then [Section 4](#4-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-3) | The verbosity cut replaces the measurement day: once volume sits below the cap, true demand is visible for free and the alerts stay lit all day |
-| 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's post-deploy reading, so timer volume lands under a cap with real headroom rather than darkening the log-based alerts |
+| 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
+| 4 | Arm the remaining 15 timers in risk-grouped waves, each wave observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
 | 6 | Optional features: seed the keys and documents you actually want; decide which dark provider sections go live | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature); the provider-pages row in [Owner decisions](#owner-decisions-and-external-access) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
@@ -229,18 +233,69 @@ but it reported "No change to the published set" — so every step after that
 check was skipped, the App branch included. The first real exercise of this path
 is the first run where the published set has actually moved.
 
-### 2. T-518 — arm the remaining 15 timers — repeated procedure
+### 2. T-518 — arm the remaining 15 timers, in waves
 
 Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
 `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
 is already `true` and `enabled_timers` is the HCL-typed workspace variable
 holding those three.
 
-For each remaining timer, one at a time: add its name at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables, approve the run,
-then observe it firing before adding the next. The evidence standard is the
-observed invocation, not the applied setting — `wiki/Cutover-Runbook.md` step 5
-has the four gates.
+**Owner decision, 2026-09-02: arm in waves, not one at a time — a deliberate
+departure from [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5, recorded
+here so the two documents do not disagree silently.** Taken literally, one
+timer per apply serialises into roughly five weeks and fifteen applies, each
+one restarting the Function App through the workspace's permanent `azapi`
+diff — and three of the fifteen fire *weekly*, so their observation windows
+alone are three weeks. What the one-at-a-time rule exists to prove is that
+arming works at all, and that is settled: the mechanism has been observed
+three times, once across the apply boundary itself
+(`publishScheduledContent`, four skipped invocations then four ran, with the
+flag as the only variable). What remains is per-handler behaviour, which
+groups by risk. There is precedent: `CHECK_AGENT_HEALTH` and
+`CLEANUP_TEMP_STORAGE` were armed in a single apply on 2026-08-30, recorded
+as a departure with its justification.
+
+**What does not group.** The two timers that delete documents with no
+dry-run pin — `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` —
+stay one per apply, observed before the next. Grouping is a concession to
+calendar arithmetic, not to destructive operations.
+
+| Wave | Timers | Why grouped | Observable in |
+| ---: | --- | --- | --- |
+| 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | One is idempotent by etag-conditioned claim, the other is a read-only watchdog. Neither can damage data | 6 h |
+| 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | Same class — both ingest feeds and create content documents | 2 h |
+| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents, no dry-run pin | 4 h |
+| 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Deletes rejected documents, no dry-run pin | 24 h |
+| 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail — decide each on its merits before the wave, then arm together | 24 h |
+| 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. Arm only if Plaud and Publer are seeded; an armed timer with no credential is an erroring loop, not a no-op | 12 h |
+| 6 | `CHECK_LIVE_LINKS`, `REVERIFY_CERTIFICATIONS`, `SCRAPE_SKILLS_HUB_RSS`, `CLEANUP_UNUSED_CERT_IMAGES` | The three weekly timers fire on Monday, Sunday and Friday — non-overlapping windows, so one week observes all three. The fourth is dry-run pinned by `CERT_IMAGE_CLEANUP_DELETE` | 7 days |
+
+**This table is the plan, and no count above it is.** Wave 3 is one risk
+group but two applies — `3a` and `3b` are the destructive pair, which never
+share one — so the table is seven applies across six groups, and any summary
+that states a single number will be wrong from one side or the other. The
+rows are the authority; that is the T-722 lesson applied to this plan rather
+than re-learned on it.
+
+Per wave: add the names at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables (keep **HCL**
+ticked — `enabled_timers` is a typed list), approve the run, expect the
+Function App restart, then observe every timer in the wave firing before
+starting the next. The evidence standard is the observed invocation, not the
+applied setting — [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5 has the
+four gates, and its two ordering constraints still bind: `SYNC_SOCIAL_CALENDAR`
+is the live writer of `social_posts`, and arming a cleanup timer is a separate
+decision from arming its deletion (T-302).
+
+Gate 1 for a wave, one timer at a time — bracket-free, because `az --query`
+with `[?...]` is re-parsed by PowerShell and fails (`.claude/CLAUDE.md`):
+
+```powershell
+az functionapp config appsettings list --name func-site-prod-cus-01 --resource-group rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq FEATURE_FLAG_PLATFORM_JOB_SWEEPER | Select-Object name, value
+```
+
+**Success:** one row, value `true`. Substitute the flag name for each timer in
+the wave.
 
 ```powershell
 pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
@@ -251,128 +306,11 @@ pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Ho
 between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
 truncation fixed on 2026-08-31, and it means the window is not being applied.
 
-**Note the interaction with item 3:** arming timers adds `AppTraces` volume.
-Item 3's verbosity cut (decided 2026-09-02) is what makes room for it — arm
-after that change has deployed and the post-deploy cap-day reading shows the
-volume sitting below the cap, so timer traffic lands in real headroom rather
-than pushing the workspace back to the ceiling.
-
-### 3. T-719 — the cap binds on host verbosity; decided: cut the source, keep the cap
-
-**This is no longer a margin question.** Billable ingestion, aligned to the
-08:00 UTC cap reset:
-
-| Cap-day | GB | | Cap-day | GB |
-| --- | ---: | --- | --- | ---: |
-| 08-30 | 0.2710 | | 08-24 | 0.2692 |
-| 08-29 | 0.2591 | | 08-23 | 0.2691 |
-| 08-28 | 0.2345 | | 08-22 | 0.2691 |
-| 08-27 | 0.2292 | | 08-21 | 0.2625 |
-| 08-26 | 0.2140 | | 08-20 | 0.0657 |
-| 08-25 | 0.2690 | | 08-19 | 0.0013 |
-
-Seven days pinned inside 0.009 GB of each other, just above a 0.25 cap. Natural
-demand does not land on the same number six times; that is the ceiling. So
-`function_http_5xx` and `function_response_time` — **log** rules, because Flex
-Consumption publishes no HTTP metrics — have been going dark for part of most
-days, along with the telemetry itself. That is the silent-under-cap failure the
-alerting fabric was built to eliminate, happening.
-
-**This is not the first observation, and the entry said otherwise before it was
-checked.** `wiki/Cost-Analysis.md` already recorded the workspace "sitting *at*
-that cap (`dataIngestionStatus: OverQuota`)" — a single reading, used to argue
-that the top of the USD 17–21 range was the realistic figure. What the series
-above adds is that it is not an incident but the normal state, on dated
-evidence, which is what turns a cost note into an alerting problem.
-
-The commands that produced this, and how to read `dataIngestionStatus`, are
-below under *Reading the ingestion volume*.
-
-**Decided by the owner, 2026-09-02: no measurement day, no raised cap.** This
-is a personal content site whose ingestion is dominated by the Functions
-host's own narration, not by traffic — so the volume is cut at the source
-instead of being measured at a raised cap. `functions/host.json` drops
-`default` and `Function` from Information to Warning; `Host.Results` stays at
-Information deliberately (it feeds `AppRequests`, which the 5xx/latency
-alerts and the timer-observation gate read — the pinning test refuses the
-change that would empty it). The cap stays at 0.25 GB and becomes headroom
-rather than a daily ceiling; once volume sits below it, true demand is
-visible for free and item 4's lever question answers itself.
-
-**Accepted with the decision:** if the cap ever binds again, the log-based
-alerts sleep from cap-hit to the 08:00 UTC reset — recorded in
-[Accepted risks](#accepted-risks). The edge probe (T-519, armed) covers
-reachability on a pipeline the cap cannot touch.
-
-**What closes it:** the next Functions deploy carrying the `host.json`
-change, then one full cap-day measurably below 0.25 GB, read with the
-commands below. Record the number here with the date.
-
-**Do not set it to -1.** Azure accepts that for "unlimited", but the
-`logs_daily_cap` alert threshold is this value times 0.8, so an unlimited
-workspace gives that rule a negative threshold and it fires forever about a cap
-that does not exist. The variable refuses it.
-
-**Anchors, by name rather than by line.** The line numbers this entry carried
-until 2026-08-31 came from the architecture review, which states outright that
-its anchors are pinned to a commit and unmaintained — and they had drifted:
-`observability.tf:329-341` landed in a comment above the alert it meant, and
-`main.tf:138-144` pointed past the end of a file that T-754 had cut to 102
-lines. Names do not drift.
-
-- `infra/observability.tf` — `function_http_5xx` and `function_response_time`
-  are the log rules that stop evaluating at the cap; `logs_daily_cap` is the
-  80% alert whose threshold derives from the quota.
-- `infra/main.tf` — `azurerm_log_analytics_workspace.hcw` carries
-  `daily_quota_gb`.
-- `infra/variables.tf` — `logs_daily_quota_gb`.
-
-#### Reading the ingestion volume
-
-Is today measurable at all — a day at the cap is truncation, not demand:
-
-```powershell
-az monitor log-analytics workspace show --resource-group rg-mgmt-plat-prod-cus --workspace-name log-plat-prod-cus-01 --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e -o json | ConvertFrom-Json | Select-Object -ExpandProperty workspaceCapping
-```
-
-**Success:** `dailyQuotaGb`, a `quotaNextResetTime` near 08:00 UTC, and
-`dataIngestionStatus`. `RespectQuota` means collection is running; `OverQuota`
-means any volume number is a floor.
-
-Then the daily volume, using the same `/ 1000.0` the alert uses so the two agree:
-
-```powershell
-az monitor log-analytics query --workspace cf80dc24-2499-49a0-8c66-9522bcc294ed --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e --analytics-query "Usage | where IsBillable | where StartTime > ago(14d) | summarize IngestedGb = round(sum(Quantity) / 1000.0, 4) by CapDay = bin(StartTime - 8h, 1d) + 8h | order by CapDay desc" -o json | ConvertFrom-Json | Format-Table CapDay, IngestedGb -AutoSize
-```
-
-**Success:** about 14 rows, one per cap-day. The query is one line because on
-Windows `az` is a batch file that cannot receive an argument containing a
-newline — a multi-line query arrives truncated at the first break and the call
-still exits 0.
-
-### 4. T-721 — telemetry costs five times the workload it observes — after item 3
-
-Telemetry runs about USD 17–21 a month against an application-subscription
-workload of roughly USD 4 — together roughly 80% of predictable Azure spend on a
-platform that documents cost to the cent.
-
-**The lever is chosen: the `host.json` log level (item 3, decided
-2026-09-02).** The alternative — moving `AppTraces` (about 38% of the cap) to
-the Basic table plan at roughly USD 0.65/GB — stays in reserve: pull it only
-if the post-deploy volume reading says the verbosity cut was not enough.
-
-**Separately, re-justify the Static Web App Standard tier** (about USD 9/month).
-The in-file rationale cites custom domain plus SSL, SPA routing and 100 GB
-bandwidth — all of which the Free tier also provides. The genuinely
-Standard-only features are the SLA and pull-request staging environments, which
-the rationale does not mention. Downgrade if neither is load-bearing.
-
-**Anchors, by name.** `wiki/Cost-Analysis.md`, the section beginning "The
-largest controllable line is telemetry"; and `infra/frontend.tf`, where the
-Standard tier and the comment justifying it live — **not** `infra/main.tf`,
-which T-754 cut to 102 lines and which the review's anchor pointed past the end
-of.
-
+**Note on volume:** arming timers adds `AppTraces` volume. The host
+verbosity cut (T-719, closed 2026-09-02, #321) is what made room for it —
+if a cap-day reading after arming shows the workspace back near 0.25 GB,
+the Basic-table-plan reserve lever in the T-719/T-721 CHANGELOG record is
+the next move.
 
 ## Optional, and only if you want the feature
 
@@ -570,6 +508,7 @@ Entra row below, which is where it belongs.
 | Listen & Learn speech | Nothing to provide: it synthesises with Gemini TTS on the existing `GEMINI-API-KEY`. Audio is billed against that key at roughly $0.17 an episode / $0.87 a certification on the default model; every run is logged to the AI Engine usage tab under "Breakdown by Feature", so the spend is checkable there rather than estimated. Azure AI Speech is a written, tested fallback for the day the preview Gemini TTS models are retired; using it means creating a Cognitive Services resource, which is a spend decision and is not assumed | Provider is chosen by key presence, Gemini first. With no key at all the feature still publishes each episode's transcript, takeaways and videos and records `audioError` instead of failing |
 | Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
+| Static Web App tier | Decide whether the Standard tier (about USD 9/month, the workload's one fixed line) buys anything this estate uses — carried here when T-721 closed on 2026-09-02. **Checked against Microsoft's plan comparison on 2026-09-02, correcting what this row said before:** Free also provides custom domains with managed SSL (2 per app, against 5), global distribution, SPA routing, 100 GB included bandwidth — and **3 preview environments per app**, so "PR staging is Standard-only" was wrong. Standard-only and **none of it in use here**: `networking.allowedIpRanges` (absent from `staticwebapp.config.json`, which carries only `navigationFallback`, `globalHeaders`, `routes`, `responseOverrides`, `trailingSlash`), bring-your-own-Functions linking (the API is a separate app on its own hostname), custom auth registrations and function-assigned roles (admin auth is MSAL in the browser), private endpoints. So downgrading gives up exactly two things: the 99.95% SLA, and bandwidth overage — Free has **none**, so past 100 GB the site stops serving rather than billing USD 0.20/GB, which Cloudflare caching in front makes unlikely but not impossible. Verify two Free limits first: at most 2 custom domains (`az staticwebapp hostname list --name stapp-site-prod-cus-01 --resource-group rg-web-site-prod-cus -o json` — no pipe, so it pastes as-is out of this table) and a build under 250 MB | The tier stays Standard until decided; the change is `sku_tier`/`sku_size` in `infra/frontend.tf` plus an approved run, and Microsoft documents moving between Free and Standard in either direction — a two-way door, unlike purge protection |
 | Provider-section go-live | Decide when each dark section ships. 24 pages across `frontend/src/pages/finops`, `gcp`, `github` and `terraform` return `ComingSoonPage` behind a two-line guard; several carry fully written components behind the early return. Re-enabling a page is two edits in one change: delete its two `// TODO: remove to re-enable` marker lines, and move its path from `GUARDED_FILES` to `LIVE_FILES` in `frontend/scripts/validate-provider-pages.js` — the validator asserts both directions, so either edit alone fails the build. Decide per **section**, not per file: some pages render content that needs its RSS or content route live first. This row exists because the gate previously lived only in the inline markers and the validator, outside this tracker | The `aws` and `azure` sections are live. The four dark sections stay guarded, and `frontend/scripts/validate-provider-pages.js` fails the build if a guarded page's markers are altered rather than cleanly removed |
 
 ## Live confirmation still requiring an authorized operator
