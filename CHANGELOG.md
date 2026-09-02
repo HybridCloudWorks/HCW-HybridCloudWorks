@@ -18,6 +18,74 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **T-518 Wave 1 armed and observed: the platform's two safe timers now run
+  (#323).** `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` were added
+  to `enabled_timers` in the `hcw-azure` workspace in one apply, taking the
+  estate from three armed timers of eighteen to five.
+
+  **Two timers in one apply is a departure from [Cutover-Runbook](wiki/Cutover-Runbook.md)
+  step 5, and it was an owner decision rather than a shortcut.** Step 5 reads
+  one timer per apply, observed before the next. Taken literally across the
+  fifteen that remain that is fifteen applies over roughly five weeks — three
+  of the fifteen fire *weekly*, so their observation windows alone are three
+  weeks — and every one of those applies restarts the Function App through the
+  workspace's permanent `azapi` diff. What the rule exists to prove is that
+  arming works at all, and that was settled before this wave: the mechanism had
+  been observed three times, once across the apply boundary itself
+  (`publishScheduledContent`, four skipped invocations then four ran, with the
+  flag as the only variable). What remains is per-handler behaviour, which
+  groups by risk. The precedent is `CHECK_AGENT_HEALTH` and
+  `CLEANUP_TEMP_STORAGE`, armed together on 2026-08-30 and recorded as a
+  departure with its justification.
+
+  **What still does not group**, and this is the limit of the concession: the
+  two timers that delete documents with no dry-run pin —
+  `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
+  apply. Grouping is a concession to calendar arithmetic, not to destructive
+  operations.
+
+  These two were the right first wave because neither can damage data.
+  `platformJobSweeper` re-enqueues jobs that have sat `queued` past
+  `STALE_QUEUED_MS`, closing the gap in `functions/src/lib/jobs.js` where the
+  job document is written before the queue output binding sends the message —
+  so a binding failure used to leave a job `queued` forever. Re-delivery is
+  safe by construction: the worker claims with an etag-conditioned replace, so
+  a duplicate message for a job that did start is skipped rather than
+  double-processed. `monitorPublishingPipeline` is a read-only watchdog.
+
+  **Observed, not merely applied.** The standard is step 5's fourth gate, and
+  all four were read from the workspace with
+  `scripts/cutover/05-verify-timer.ps1` on 2026-09-02:
+
+  - *Deployment*: both flags read `true` from a live
+    `az functionapp config appsettings list` against `func-site-prod-cus-01`,
+    with the armed set printing as `CHECK_AGENT_HEALTH`,
+    `CLEANUP_TEMP_STORAGE`, `MONITOR_PUBLISHING_PIPELINE`,
+    `PLATFORM_JOB_SWEEPER`, `PUBLISH_SCHEDULED_CONTENT`.
+  - *Runtime*: `platformJobSweeper` registered with schedule `0 */15 * * * *`,
+    read back from the host rather than from source.
+  - *Behaviour*: the sweeper's own `re-enqueued … stale job(s), reaped …
+    abandoned running job(s)` line present in the trace stream, which is the
+    handler reporting its work rather than the host reporting an invocation.
+  - *Invocation*: both timers observed firing inside their windows.
+
+  **The clock half of the gate applies to only one of the two, and saying so
+  matters more than the counts do.** `platformJobSweeper` fires every fifteen
+  minutes, so it has no local-time dependency and the `WEBSITE_TIME_ZONE` trap
+  cannot express itself in its history — for it the gate is the count and the
+  handler's own line, and a timestamp check would prove nothing.
+  `monitorPublishingPipeline` runs `0 0 */6 * * *`, which is 00:00, 06:00,
+  12:00 and 18:00 **Chicago**, so it is the one that can fire five hours early
+  and still pass a naive "did it run" check. Its `ScheduleStatus.Last` landed
+  on the intended local hour. A wave that reported one number for both timers
+  would have proven the weaker thing twice.
+
+  The per-run figures are not restated here. They were read by the operator at
+  their own prompt and the evidence standard is the observation, not a number
+  copied into a second document where it can drift from the first — the same
+  reason `infra/frontend.tf` states its ingestion reduction as a floor rather
+  than a measurement.
+
 - **The runbook now covers signing in, because five separate `az` failures cost
   round trips in two days and none of them named its own cause (#323).**
   `wiki/Cutover-Runbook.md` gains **Step 0**, ahead of the Entra step: the

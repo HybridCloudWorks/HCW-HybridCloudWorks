@@ -235,8 +235,9 @@ is the first run where the published set has actually moved.
 
 ### 2. T-518 — arm the remaining 15 timers, in waves
 
-Three of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
-`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`. `schedulers_master_enabled`
+Five of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
+`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`, and Wave 1's
+`PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE`. `schedulers_master_enabled`
 is already `true` and `enabled_timers` is the HCL-typed workspace variable
 holding those three.
 
@@ -262,7 +263,7 @@ calendar arithmetic, not to destructive operations.
 
 | Wave | Timers | Why grouped | Observable in |
 | ---: | --- | --- | --- |
-| 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | One is idempotent by etag-conditioned claim, the other is a read-only watchdog. Neither can damage data | 6 h |
+| 1 | ~~`PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE`~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | All four gates observed; the pipeline's `ScheduleStatus.Last` landed on its intended Chicago hour |
 | 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | Same class — both ingest feeds and create content documents | 2 h |
 | 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents, no dry-run pin | 4 h |
 | 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Deletes rejected documents, no dry-run pin | 24 h |

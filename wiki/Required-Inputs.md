@@ -40,6 +40,15 @@ page decides where a value belongs, this one records whether it is there.
 > only: `X` = letter, `0` = number, `!` = special. If a real value ever appears
 > here, treat it as disclosed and rotate it.
 
+> **Which is why the `az` sign-in details are not here.** The estate's tenant,
+> its four subscriptions, the scoped device-code login and the five ways
+> signing in fails live in [Cutover-Runbook](Cutover-Runbook) **Step 0**. They
+> are operator procedure rather than inventory, and the rule above forbids the
+> one thing that makes such a procedure usable — a command carrying its real
+> values instead of a placeholder. Putting them here would have meant either
+> breaking that rule or shipping a login command nobody can paste. Recorded as
+> a pointer so the question is answered in the file where it gets asked.
+
 **Status vocabulary:** `SET` (present and confirmed) · `VERIFIED` (observed
 working in the deployed system) · `MISSING` (consumed by code, not
 provisioned) · `RETIRED` (no longer read by anything; listed so it is not
