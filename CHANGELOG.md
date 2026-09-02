@@ -138,6 +138,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The settings sweep is done — the tracker's Phase 2, three settings that
+  were choices rather than defaults, all clicked by the owner 2026-09-02.**
+  The three stale Terraform Cloud variables
+  (`migration_writer_enabled`, `cosmos_scratch_enabled`,
+  `storage_scratch_enabled`) are deleted from the `hcw-azure` workspace —
+  deletion, not declaration, per the 2026-08-24 removal record; the success
+  criterion (a plan printing no "Value for undeclared variable" warnings)
+  is observable on the next queued run. The `production` environment now
+  carries the `main`-only deployment-branch rule, closing the path where
+  the environment-scoped federated credential matched from any branch
+  (T-705's other half; required reviewers stay deliberately unconfigured
+  per the 2026-08-29 decision). And the two Default-ruleset booleans are
+  decided: **branches must be up to date before merging** (on — a stale
+  head re-proves itself against the moved base before it can land) and
+  **required thread resolution stays off**. "Settings still worth a look"
+  is removed from TODO.md and the attack sequence's Phase 2 is struck.
+
 - **Every pull-request check now runs only when its component actually
   changed.** The 14 checks stay — every context the ruleset requires still
   reports on every pull request — but `ci.yml`'s six jobs and CodeQL's three

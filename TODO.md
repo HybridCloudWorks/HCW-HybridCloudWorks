@@ -107,14 +107,14 @@ This section sequences what the rest of this file already tracks; it adds no
 items and restates no procedures. Each phase points at the one section that
 carries the commands and the success criteria, so this list cannot drift from
 those sections the way a restatement would — the T-722 lesson, applied in
-advance. The ordering rule is dependency, not priority: the settings sweep
-sits early because every click in it is available today, and the cost decision
-sits after the measurement it waits on.
+advance. The ordering rule is dependency, not priority: the cost decision
+sits after the measurement it waits on, and the timers after the cap is
+sized for their volume.
 
 | Phase | What | Where the procedure lives | Why this position |
 | ---: | --- | --- | --- |
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
-| 2 | Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans | [Settings still worth a look](#settings-still-worth-a-look) | Every step is a settings page that can be opened now; it costs nothing and needs no apply |
+| 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | Raise the ingestion cap for one full day and read the demand (`T-719`), then pull the telemetry lever and re-justify the SWA tier (`T-721`) | [Section 3](#3-t-719--the-cap-is-binding-measured-2026-08-31) then [Section 4](#4-t-721--telemetry-costs-five-times-the-workload-it-observes--after-item-3) | The measurement must precede both the cost decision and the timer arming, because timers add `AppTraces` volume against a cap that is already binding |
 | 4 | Arm the remaining 15 timers, one at a time, each observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-15-timers--repeated-procedure); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After Phase 3's measurement, so the new volume lands under a cap sized for it rather than darkening the log-based alerts further |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
@@ -391,55 +391,6 @@ https://hybridcloudworks.com/admin/api-keys
   It measures AGE, not commit count, and that is the whole design: the manifest
   404 was **one** commit behind and the frontend was **thirty-five**. No count
   threshold separates those. Both had sat undeployed for days.
-
-## Settings still worth a look
-
-None is counted above, because none is a finding — they are settings that are
-currently choices rather than defaults.
-
-- **Three stale Terraform Cloud variables, one deletion each.** Every plan and
-  apply prints:
-
-  > Warning: Value for undeclared variable — The root module does not declare a
-  > variable named "migration_writer_enabled" … "cosmos_scratch_enabled" … and
-  > "1 other variable(s) defined without being declared".
-
-  The third is `storage_scratch_enabled`. All three were **deliberately removed
-  from the code on 2026-08-24** when the migration rehearsal finished —
-  `infra/variables.tf` carries the removal record and says "Do not reintroduce
-  these as variables." Their values were never deleted from the workspace, so
-  Terraform reports values with nothing to bind to.
-
-  **The fix is deletion, not declaration.** Adding `variable` blocks would
-  silence the warning by contradicting a recorded decision and reintroducing
-  three switches that gate nothing. Delete them at
-  https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables — the three
-  rows named `migration_writer_enabled`, `cosmos_scratch_enabled` and
-  `storage_scratch_enabled`.
-
-  **Success:** the next plan prints neither "Value for undeclared variable" nor
-  the "1 other variable(s)" summary line.
-
-- **`production` deployment-branch rule.** Without it the environment-scoped
-  federated credential matches from **any** branch, so `workflow_dispatch` can
-  ship an unreviewed ref past all twelve required contexts. The guard step in
-  both workflows is the backstop, and nothing in a checkout can prove a rule set
-  outside the repository is still set.
-  https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/environments
-  → `production` → Deployment branches → **Selected branches** → `main`.
-
-  Required reviewers stay deliberately unconfigured (owner, 2026-08-29): a
-  reviewer you approve yourself is not a control, it is a click that produces an
-  audit trail implying oversight that did not happen.
-
-- **Two ruleset settings, both `false`.**
-  https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/rules →
-  `Default`. `strict_required_status_checks_policy` off means a head need not be
-  up to date with `main` before merge; `required_review_thread_resolution` off
-  means an unresolved thread does not block. Decide each. Zero required
-  approvals remains the deliberate single-operator decision under T-705 and this
-  does not reopen it.
-
 
 ## The long-form records
 
