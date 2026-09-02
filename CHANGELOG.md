@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Fixed
 
 - **Two links in `wiki/Required-Inputs.md` pointed at a heading that is not in
-  that file (#PR).** Both read `[Accepted risks](#accepted-risks)`, and the
+  that file (#324).** Both read `[Accepted risks](#accepted-risks)`, and the
   accepted-risks table lives in `TODO.md` — so the in-document form resolved to
   nothing and silently did nothing when clicked. One of them is the only
   explanation a reader gets for why `purge_protection_enabled` is `false`, which
