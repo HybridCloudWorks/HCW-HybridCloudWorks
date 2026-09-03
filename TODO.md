@@ -319,11 +319,11 @@ the next move.
 
 ### 3. T-764 — the podcast pages have no data, and only Wave 2 can give them any
 
-`podcasts` is written by exactly one thing in the whole codebase:
-`functions/src/lib/timers/podcasts.js`, reached only from
-`schedulers.js` as the `fetchPodcastFeeds` timer. `FETCH_PODCAST_FEEDS` has
-never been `true`, so the container has never been written and every provider
-podcast page renders empty.
+`podcasts` has exactly one **production** writer:
+`functions/src/lib/timers/podcasts.js`, reached from `schedulers.js` as the
+`fetchPodcastFeeds` timer and from nowhere else that runs in Azure.
+`FETCH_PODCAST_FEEDS` has never been `true`, so the container has never been
+written and every provider podcast page renders empty.
 
 **What makes this different from the news pages it was found beside.** The
 empty news pages had a manual escape hatch — `fetch-rss-feeds` is a registered
@@ -331,14 +331,17 @@ platform job with a Run Now button at
 https://hybridcloudworks.com/admin/ops-health, and running it on 2026-09-02
 filled `rss_cache` from 21 feeds in one click. There is no equivalent for
 podcasts: `createPodcastIngest` has no job registration and no admin route, so
-**arming Wave 2 is the only way to put data in that container.** A grep for
-`createPodcastIngest` returns the definition, the import, and the timer — and
-nothing else.
+**arming Wave 2 is the only way to put data in that container.** Outside its own
+definition, the only callers are `schedulers.js` and
+`functions/src/lib/timers/ingestion-timers.test.js` — nothing that a human or a
+queue can reach.
 
-That also means the handler has never executed in this environment. Wave 1 and
-the RSS run both proved their handlers before or during arming; this one cannot
-be proved first. Re-delivery is safe by construction — `processFeed` reads each
-episode by id and preserves `createdAt` before upserting — so the risk is an
+That also means the handler has never executed **in this environment**. It is
+not untested code — `ingestion-timers.test.js` covers the happy path and a
+failing-parser path against fakes — but a passing unit test is not an
+observation, and Wave 1 and the RSS run both had one before or during arming
+where this cannot. Re-delivery is safe by construction: `processFeed` reads each
+episode by id and preserves `createdAt` before upserting, so the risk is an
 erroring loop rather than damaged data, and the `-Hours 4` verification in
 [Section 2](#2-t-518--arm-the-remaining-timers-in-waves) is what would catch it.
 
@@ -349,10 +352,13 @@ podcast page renders an episode.
 
 `GET /api/public/feed` returns an `insights` array beside `rssCache`, and the
 news pages render it as a panel. Nothing in this repository writes
-`ai_insights`. The only references are the read in
-`functions/src/lib/public-reads.js`, the container declaration in
-`scripts/generate-cosmos-container-spec.mjs`, and
+`ai_insights`. Eleven files name it and every one of them reads, declares or
+describes: the query in `functions/src/lib/public-reads.js` and its test, the
+container definitions in `infra/cosmos-containers.json`,
+`scripts/generate-cosmos-container-spec.mjs` and `.azure/api-surface.json`, the
+client-side doc comment in `frontend/src/lib/publicApi.js`, and
 `scripts/lib/migration-manifest.mjs`, which lists it `disposition: 'migrate'`.
+No write helper is called against it anywhere.
 
 **So the panel is frozen, not necessarily empty** — and the distinction is the
 point. Whatever insights came across in the migration are still served, filtered
