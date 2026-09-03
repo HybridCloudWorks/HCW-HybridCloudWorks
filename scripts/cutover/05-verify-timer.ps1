@@ -241,8 +241,33 @@ function Invoke-WorkspaceQuery {
 # `extension.use_dynamic_install=yes_without_prompt`, because auto-installing a
 # preview extension mid-run is a surprise of its own; the operator is told the
 # one command to run instead.
-$extensions = Invoke-AzJson @('extension', 'list')
-if ($null -eq $extensions -or -not ($extensions | Where-Object name -eq 'log-analytics')) {
+#
+# DELIBERATELY NOT ROUTED THROUGH Invoke-AzJson, and the reason is the whole
+# point of this block. That helper returns $null for every failure it can have,
+# and — because `ConvertFrom-Json '[]'` emits nothing — it ALSO returns $null
+# for a perfectly successful `az extension list` on a machine with no
+# extensions at all. That machine is exactly the one this guard exists for. A
+# check written on top of it therefore cannot tell "az is broken" from "az
+# works and there are no extensions", and would either misname the cause or
+# miss the case entirely. Splitting on the raw exit code and the raw output is
+# what keeps the two apart.
+$extList = $null
+try { $extList = az extension list -o json 2>$null }
+catch { $extList = $null }
+
+if ($LASTEXITCODE -ne 0 -or -not $extList) {
+    Write-Bad 'Could not run `az extension list`.'
+    Write-Host ''
+    Write-Host 'This is NOT "the extension is missing" — az itself did not answer, so its'
+    Write-Host 'extensions were never enumerated. Check that az is installed and on PATH,'
+    Write-Host 'then that you are signed in:'
+    Write-Host ''
+    Write-Host '  az account show -o json | ConvertFrom-Json | Select-Object name, id' -ForegroundColor Cyan
+    Write-Host ''
+    throw 'az extension list did not run; the extension state is unknown.'
+}
+
+if (-not (@($extList | ConvertFrom-Json) | Where-Object name -eq 'log-analytics')) {
     Write-Bad 'The az log-analytics extension is not installed.'
     Write-Host ''
     Write-Host 'Every workspace query below needs it. Without it az prompts to install it,'
