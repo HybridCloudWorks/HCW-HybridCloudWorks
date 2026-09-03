@@ -18,6 +18,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`fetchPodcastFeeds` reports its failures at Warning and Error, so the
+  #321 cut cannot hide them (#330).** The first Wave 2 witness read split:
+  `syncRssFeeds` fresh at the 02:00 Chicago boundary, `fetchPodcastFeeds`
+  with nothing newer than the May migration. That FAIL could not be read,
+  because the ingest caught every failure — the feed fetch, each episode, an
+  empty feed — and reported it through `context.log`, which is Information
+  level and gone since `host.json` gated `Function` at Warning. A run that
+  fired and failed looked exactly like a run that never fired. Now a feed
+  that throws logs at Error with the URL and the message, an episode that
+  throws logs at Warning with its title, and a feed that answers with no
+  items logs at Warning — the state nothing reported before. The Information
+  summary line is unchanged. `05-verify-timer.ps1` does not surface these
+  rows (its filter is `Executed` and the skip marker); they are one query
+  away, and they are the one trace the Warning cut still keeps for this
+  timer:
+
+  ```kusto
+  AppTraces
+  | where TimeGenerated > ago(6h)
+  | extend cat = tostring(Properties.Category)
+  | where cat startswith 'Function.fetchPodcastFeeds'
+  | where SeverityLevel >= 2
+  | project TimeGenerated, SeverityLevel, Message
+  ```
+
 - **The timer-observation gate was blind for every invocation after 17:59Z on
   2026-09-02, and the record explains how (#328).** #321 dropped `host.json`'s
   `Function` category to Warning to take host verbosity off the daily cap. The
