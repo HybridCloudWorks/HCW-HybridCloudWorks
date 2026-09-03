@@ -220,7 +220,7 @@ writes through ARM (containers read+write on the account — infra/oidc.tf).
 // pathToFileURL, not `file://${argv[1]}`: on Windows argv[1] is `C:\...`, which
 // never string-matches import.meta.url, so the script would exit 0 having run
 // nothing. Same fix as check-deploy-drift.mjs.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const mode = process.argv[2];
   const run = mode === '--inspect' ? inspect : mode === '--apply' ? apply : null;
   if (!run) {

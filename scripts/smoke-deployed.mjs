@@ -327,7 +327,7 @@ async function main() {
 // pathToFileURL, not `file://${argv[1]}`: on Windows argv[1] is `C:\...`, which
 // never string-matches import.meta.url — the smoke test would exit 0 from
 // PowerShell having checked nothing. Same fix as check-deploy-drift.mjs.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);
