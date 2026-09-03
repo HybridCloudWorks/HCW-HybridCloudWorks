@@ -346,7 +346,7 @@ describe('podcasts (PodBean)', () => {
     const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const r = await createPodcastIngest({ store, parser, now, log }).run();
     expect(r.azure.processed).toBe(2);
-    expect(r.azure.errors).toHaveLength(1);
+    expect(r.azure.errors).toEqual([{ position: 3, error: expect.any(String) }]);
     // The one bad episode must reach the workspace at Warning, because
     // host.json gates `Function` at Warning (#321) and the Information summary
     // below it does not.

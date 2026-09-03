@@ -123,7 +123,9 @@ export function createPodcastIngest({
         results.processed += 1;
       } catch (err) {
         const message = String(err?.message || err);
-        results.errors.push({ title: item?.title || null, error: message });
+        // Position, not title, for the same reason as the Warning below: this
+        // array is JSON-stringified into the summary line.
+        results.errors.push({ position: index + 1, error: message });
         // Warning, not Information: host.json gates `Function` at Warning
         // (#321), so anything logged below this level never reaches the
         // workspace. The witness for this timer is a fresh `updatedAt`; when
