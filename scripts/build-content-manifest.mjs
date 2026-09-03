@@ -34,7 +34,7 @@
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 // NOT under public/. Vite copies public/ verbatim into dist, so a manifest
@@ -317,8 +317,12 @@ async function main() {
   for (const reason of manifest.skipped) console.log(`  skipped ${reason}`);
 }
 
+// pathToFileURL, not `new URL(`file://${argv[1]}`)`: a Windows `C:\...` argv[1]
+// parses to a URL with host `C` that never matches import.meta.url, so the
+// build would exit 0 without writing the manifest. Same fix as
+// check-deploy-drift.mjs.
 const invokedDirectly =
-  process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly || process.env.FORCE_RUN === '1') {
   main().catch((error) => {
     console.error(`[content-manifest] FAILED: ${error?.message || error}`);
