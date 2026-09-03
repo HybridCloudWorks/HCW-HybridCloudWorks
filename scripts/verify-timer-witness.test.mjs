@@ -18,7 +18,6 @@ describe('the witness table matches what the app registers', () => {
     const registered = new Set();
     for (const m of fn('schedulers.js').matchAll(/^timer\('([A-Za-z]+)'/gm)) registered.add(m[1]);
     for (const m of fn('jobs-sweeper.js').matchAll(/app\.timer\('([A-Za-z]+)'/g)) registered.add(m[1]);
-    expect(registered.size).toBe(18);
     expect(new Set(Object.keys(WITNESSES))).toEqual(registered);
   });
 

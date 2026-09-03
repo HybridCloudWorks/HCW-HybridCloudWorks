@@ -33,6 +33,7 @@
  */
 
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 export const DEFAULT_BASE = 'https://api-azure.hybridcloudworks.com/api';
 
@@ -169,4 +170,7 @@ async function main() {
   process.exit(verdict.fresh ? 0 : 1);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+// pathToFileURL, not string concatenation: on Windows argv[1] is `C:\...`, and
+// `file://C:\...` never equals import.meta.url, so the script would exit 0
+// having done nothing — the worst possible failure for a gate.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main();
