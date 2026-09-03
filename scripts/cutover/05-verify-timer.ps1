@@ -295,7 +295,26 @@ if ($LASTEXITCODE -ne 0 -or -not $extList) {
     throw 'az extension list did not run; the extension state is unknown.'
 }
 
-if (-not (@($extList | ConvertFrom-Json) | Where-Object name -eq 'log-analytics')) {
+# Parsed inside a try, because $ErrorActionPreference is 'Stop' and an
+# unguarded ConvertFrom-Json on non-JSON stdout would terminate this script with
+# a raw parser exception — a failure that does not name its own cause, which is
+# the exact thing this whole block exists to stop happening.
+$installed = $null
+try { $installed = @($extList | ConvertFrom-Json) }
+catch { $installed = $null }
+
+if ($null -eq $installed) {
+    Write-Bad 'az extension list returned something that is not JSON.'
+    Write-Host ''
+    Write-Host 'The extension state is unknown — this is neither "az is broken" nor "the'
+    Write-Host 'extension is missing". Run it without redirection to see what came back:'
+    Write-Host ''
+    Write-Host '  az extension list -o json' -ForegroundColor Cyan
+    Write-Host ''
+    throw 'az extension list output could not be parsed; the extension state is unknown.'
+}
+
+if (-not ($installed | Where-Object name -eq 'log-analytics')) {
     Write-Bad 'The az log-analytics extension is not installed.'
     Write-Host ''
     Write-Host 'Every workspace query below needs it. Without it az prompts to install it,'
