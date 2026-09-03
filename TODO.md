@@ -81,10 +81,14 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
 | 2 | `T-518` — arm the remaining timers | High | Risk-grouped waves, each observed before the next; the two destructive timers stay solo |
+| 3 | `T-764` — the podcast pages have no data and only Wave 2 can give them any | Medium | `FETCH_PODCAST_FEEDS` observed writing `podcasts`; there is no manual path to fall back on |
+| 4 | `T-765` — `ai_insights` has a reader and no writer | Low | An owner decision on whether the insights panel is a feature or is retired |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated,
-observed procedure, now sequenced into waves.
+observed procedure, now sequenced into waves. Items 3 and 4 were found on
+2026-09-02 by tracing every container the public read layer reads back to
+whatever writes it — the audit that the empty news pages prompted.
 
 **The table and the sections below are in the same order, and that order is the
 one to work them in — not a sort of the Priority column.** Item 1 carries no
@@ -120,9 +124,9 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
-| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts |
+| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`), which is also the only thing that can fill the podcast pages (`T-764`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves) and [Section 3](#3-t-764--the-podcast-pages-have-no-data-and-only-wave-2-can-give-them-any); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 carries `T-764` with it — one apply closes two rows |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
-| 6 | Optional features: seed the keys and documents you actually want | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) | Decisions, not repairs — nothing above depends on any of them |
+| 6 | Optional features: seed the keys and documents you actually want; decide whether the AI insights panel is a feature or is retired (`T-765`) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) and [Section 4](#4-t-765--ai_insights-has-a-reader-and-no-writer) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
 
 The deliberately unscheduled feature backlog — analytics-informed topic
@@ -312,6 +316,63 @@ verbosity cut (T-719, closed 2026-09-02, #321) is what made room for it —
 if a cap-day reading after arming shows the workspace back near 0.25 GB,
 the Basic-table-plan reserve lever in the T-719/T-721 CHANGELOG record is
 the next move.
+
+### 3. T-764 — the podcast pages have no data, and only Wave 2 can give them any
+
+`podcasts` has exactly one **production** writer:
+`functions/src/lib/timers/podcasts.js`, reached from `schedulers.js` as the
+`fetchPodcastFeeds` timer and from nowhere else that runs in Azure.
+`FETCH_PODCAST_FEEDS` has never been `true`, so the container has never been
+written and every provider podcast page renders empty.
+
+**What makes this different from the news pages it was found beside.** The
+empty news pages had a manual escape hatch — `fetch-rss-feeds` is a registered
+platform job with a Run Now button at
+https://hybridcloudworks.com/admin/ops-health, and running it on 2026-09-02
+filled `rss_cache` from 21 feeds in one click. There is no equivalent for
+podcasts: `createPodcastIngest` has no job registration and no admin route, so
+**arming Wave 2 is the only way to put data in that container.** Outside its own
+definition, the only callers are `schedulers.js` and
+`functions/src/lib/timers/ingestion-timers.test.js` — nothing that a human or a
+queue can reach.
+
+That also means the handler has never executed **in this environment**. It is
+not untested code — `ingestion-timers.test.js` covers the happy path and a
+failing-parser path against fakes — but a passing unit test is not an
+observation, and Wave 1 and the RSS run both had one before or during arming
+where this cannot. Re-delivery is safe by construction: `processFeed` reads each
+episode by id and preserves `createdAt` before upserting, so the risk is an
+erroring loop rather than damaged data, and the `-Hours 4` verification in
+[Section 2](#2-t-518--arm-the-remaining-timers-in-waves) is what would catch it.
+
+Closes when `fetchPodcastFeeds` is observed writing `podcasts` and a provider
+podcast page renders an episode.
+
+### 4. T-765 — `ai_insights` has a reader and no writer
+
+`GET /api/public/feed` returns an `insights` array beside `rssCache`, and the
+news pages render it as a panel. Nothing in this repository writes
+`ai_insights`. Eleven files name it and every one of them reads, declares or
+describes: the query in `functions/src/lib/public-reads.js` and its test, the
+container definitions in `infra/cosmos-containers.json`,
+`scripts/generate-cosmos-container-spec.mjs` and `.azure/api-surface.json`, the
+client-side doc comment in `frontend/src/lib/publicApi.js`, and
+`scripts/lib/migration-manifest.mjs`, which lists it `disposition: 'migrate'`.
+No write helper is called against it anywhere.
+
+**So the panel is frozen, not necessarily empty** — and the distinction is the
+point. Whatever insights came across in the migration are still served, filtered
+by `active !== false`; nothing has generated one since, and nothing will. A
+reader looking at a populated panel would have no way to tell it has been
+static since the cutover.
+
+This is a **product decision rather than a defect**, which is why it is Low and
+why the closing condition is a decision rather than a fix. Either the generator
+is a Site-Main feature that was deliberately not ported and the panel should be
+retired from `NewsPage`, or it is an intended feature whose writer is missing.
+Recorded without a recommendation because the original intent is not visible in
+this repository — the answer lives in Site-Main's history or in the owner's
+memory, not in code that can be read here.
 
 ## Optional, and only if you want the feature
 
