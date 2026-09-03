@@ -191,17 +191,45 @@ function Invoke-WorkspaceQuery {
     # workspace-query.psm1 carries the full account.
     $oneLine = ConvertTo-SingleLineKql $Kql
 
+    # stderr is CAPTURED, not discarded, and printed when the call fails.
+    #
+    # It used to be `2>$null`. The intent was that a genuine az error should not
+    # spray over the report, and the cost was that az's own explanation of the
+    # failure went in the bin with it. Every time this script has failed, the
+    # operator has been handed "the workspace query did not run" and a list of
+    # three things to go and check by hand, while az had already said which one
+    # it was. That happened on 2026-09-03 for the Wave 2 gates, one commit after
+    # the same redirect was found hiding an interactive install prompt.
+    #
+    # A silent redirect is the wrong instrument for "keep the output tidy". The
+    # output is only untidy on the failure path, which is exactly the path where
+    # the detail is worth more than the tidiness.
+    $errFile = [System.IO.Path]::GetTempFileName()
     try {
         $json = az monitor log-analytics query `
             --workspace $WorkspaceId `
             --subscription $WorkspaceSubscription `
             --analytics-query $oneLine `
-            -o json 2>$null
+            -o json 2>$errFile
     }
     catch {
+        $json = $null
+    }
+
+    if ($LASTEXITCODE -ne 0 -or -not $json) {
+        $azSaid = (Get-Content -Path $errFile -Raw -ErrorAction SilentlyContinue)
+        Remove-Item -Path $errFile -ErrorAction SilentlyContinue
+        if ($azSaid -and $azSaid.Trim()) {
+            Write-Bad "az reported:"
+            Write-Host $azSaid.Trim() -ForegroundColor DarkYellow
+            Write-Host ''
+        }
+        else {
+            Write-Warn 'az exited non-zero and said nothing on stderr.'
+        }
         return $null
     }
-    if ($LASTEXITCODE -ne 0 -or -not $json) { return $null }
+    Remove-Item -Path $errFile -ErrorAction SilentlyContinue
 
     try { $rows = @($json | ConvertFrom-Json) }
     catch { return $null }
