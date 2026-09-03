@@ -121,8 +121,17 @@ export function createPodcastIngest({
         });
         results.processed += 1;
       } catch (err) {
-        results.errors.push({ title: item?.title || null, error: String(err?.message || err) });
+        const message = String(err?.message || err);
+        results.errors.push({ title: item?.title || null, error: message });
+        // Warning, not Information: host.json gates `Function` at Warning
+        // (#321), so anything logged below this level never reaches the
+        // workspace. The witness for this timer is a fresh `updatedAt`; when
+        // that is missing, this line is what says the run happened at all.
+        log.warn?.(`[fetchPodcastFeeds] ${provider}: episode ${item?.title || '(untitled)'} failed: ${message}`);
       }
+    }
+    if (results.processed === 0 && results.errors.length === 0) {
+      log.warn?.(`[fetchPodcastFeeds] ${provider}: feed at ${feedUrl} returned no items`);
     }
     return results;
   }
@@ -133,7 +142,9 @@ export function createPodcastIngest({
       try {
         summary[cfg.provider] = await processFeed(cfg.provider, cfg.url);
       } catch (err) {
-        summary[cfg.provider] = { processed: 0, error: String(err?.message || err) };
+        const message = String(err?.message || err);
+        summary[cfg.provider] = { processed: 0, error: message };
+        log.error?.(`[fetchPodcastFeeds] ${cfg.provider}: feed at ${cfg.url} failed: ${message}`);
       }
     }
     log.log?.(`[fetchPodcastFeeds] ${JSON.stringify(summary)}`);
