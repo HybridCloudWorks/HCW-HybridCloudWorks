@@ -38,7 +38,7 @@ file is the mechanics.
 
 ---
 
-## Step 0 — `az` sign-in, and the five ways it goes wrong
+## Step 0 — `az` sign-in, and the ways it goes wrong
 
 Every `az` command in this runbook assumes a session against the estate's
 tenant with the right subscription pinned. Five distinct failures cost round
@@ -88,7 +88,7 @@ returns `sub-app-site-prod-cus`, `b9e02281-ebb6-49e9-bd7b-f275b1350726`, and
 the tenant above. Anything else and every read that follows is against the
 wrong estate.
 
-### The five failures, and what each one actually was
+### The failures, and what each one actually was
 
 **1. `--use-device-code` is not a preference.** Plain `az login` hands off to
 the Windows WAM broker and its account picker, which spun indefinitely on
@@ -143,6 +143,24 @@ the runbook changing, and a stale list of someone else's tenants would be worse
 than none. The warnings matter only because of where they print: several loud
 lines *above* the table of results, so a command that fully succeeded reads at
 a glance as one that failed.
+
+---
+
+**6. `az monitor log-analytics query` is not core `az`, and a fresh machine
+hangs on it.** It ships in the `log-analytics` extension. Without it, az does
+not fail — it asks *"Do you want to install it now? (Y/n)"* on stderr, and
+`05-verify-timer.ps1` redirects stderr away, so the question is invisible and
+the script sits forever after printing its section header. Two evenings in a
+row on 2026-09-02/03, on a laptop whose `az extension list` returned nothing.
+Install it once; the script now refuses to run without it and says so:
+
+```powershell
+az extension add --name log-analytics
+```
+
+**Success:** `az extension list -o json | ConvertFrom-Json | Select-Object name, version`
+shows `log-analytics`. The only stable-channel version is a preview
+(`1.0.0b1` on 2026-09-03); that is expected.
 
 ---
 
@@ -567,7 +585,7 @@ point is that the earlier ones can pass while the later ones fail.
 | 1 | **Deployment** | ARM holds the setting | `az functionapp config appsettings list ... --query "[?name=='FEATURE_FLAG_X']"` |
 | 2 | **Runtime** | the *active worker* sees it | the startup log line — presence, never the value |
 | 3 | **Behaviour** | the feature reads it | exercise whatever depends on the setting |
-| 4 | **Invocation** | the timer actually fired | `Function.<name>` traces **and** the timer's own durable side effect |
+| 4 | **Invocation** | the timer actually fired | the timer's own durable side effect — since #321 that is the **primary** witness; `Function.<name>` traces exist only for history before 2026-09-02 17:59Z |
 
 The evidence chain, in order, with nothing skipped:
 
@@ -599,28 +617,80 @@ turns "the timer did not fire" and "the timer fired and nobody heard it" into
 the same observation.
 
 So pair the telemetry with a **durable side effect the timer necessarily
-creates** — a document write, a queue message, a blob, a timestamp:
+creates** — a document write, a queue message, a blob, a timestamp.
 
-| Timer | Durable witness |
-| --- | --- |
-| `checkAgentHealth` | `lab_agents` documents get a fresh health field |
-| `syncRssFeeds` | new `rss_cache` / `content` documents, or an updated marker |
-| `publishScheduledContent` | a `content` document moves to `published` |
-| `cleanupTempStorage` | a dry-run summary in the logs; blobs unchanged until `TEMP_STORAGE_CLEANUP_DELETE` |
+**Since 2026-09-02 17:59Z the telemetry half is gone, and the side effect is
+the only witness.** #321 dropped `host.json`'s `Function` category to Warning
+to take host verbosity off the daily cap. The `Executed` and `ScheduleStatus`
+rows this step used to read are Information-level in that category, so the
+host stopped writing them the moment that deploy landed. The #321 record
+believed it had protected this gate by keeping `Host.Results` at Information —
+but that feeds `AppRequests`, which `05-verify-timer.ps1`'s own header says has
+been empty for the app's entire life (T-514). The cut kept the table the gate
+never read and removed the one it did. Found 2026-09-03 when Wave 2's gates
+returned nothing and the sweeper's history stopped dead at 13:00 CDT — the
+deploy minute. Owner decision the same day: keep the cut, promote the witness.
 
-Read the witness directly from Cosmos or Storage. If telemetry and the witness
-disagree, believe the witness.
+`scripts/verify-timer-witness.mjs` reads the witness through the **public
+API**, so it needs no `az`, no workspace, and no telemetry plane at all —
+three fewer places for the observation to be lost:
+
+```powershell
+node scripts/verify-timer-witness.mjs --timer syncRssFeeds --since 2026-09-03T05:00:00Z
+```
+
+`--since` is the moment after which you expect a fire — the apply time, or the
+last scheduled tick, in ISO 8601 UTC. **Success:** a `PASS` line naming the
+witness, a document count, and a `newest` stamp at or after `--since`. `FAIL`
+with a count of zero on a container this timer alone writes means it has never
+run here. **Exit 2, `NO PUBLIC WITNESS`, is neither** — the timer's side effect
+is not publicly readable, nothing was evaluated, and the table below says why.
+
+| Timer | Public witness | Read by the script |
+| --- | --- | --- |
+| `syncRssFeeds` | `rss_cache.refreshedAt` re-stamped on every feed each run | yes |
+| `fetchPodcastFeeds` | `podcasts.updatedAt` re-stamped on every episode each run — **`azure` is the only provider with a configured feed**, so only that page fills | yes |
+| `publishScheduledContent` | a `content` document's `publishedAt` inside the window — only if something was actually scheduled; an empty window is not a failure | yes |
+| `platformJobSweeper` | re-enqueues on a private queue | no |
+| `monitorPublishingPipeline` | read-only watchdog; writes nothing | no |
+| `checkAgentHealth` | stamps `lab_agents`, no public route | no |
+| `cleanupTempStorage`, `cleanupUnusedCertImages` | dry-run until their `*_DELETE` setting; blobs are private | no |
+| `fetchBlogListings`, `scrapeSkillsHubRss`, `forgeScheduled` | draft `content` for review; drafts are not public | no |
+| `generateReviewerDigest` | sends mail; writes nothing | no |
+| `checkLiveLinks`, `reVerifyCertifications` | annotate documents; the annotation is not projected publicly | no |
+| `cleanupSoftDeletedContent`, `cleanupRejectedContent` | delete documents that were never public | no |
+| `syncSocialCalendarScheduled` | writes `social_posts`, no public route | no |
+| `refreshPlaudToken` | rotates a secret | no |
+
+The script's test asserts this table names exactly the timers the app
+registers, so a new timer without a row fails CI rather than arriving at a
+cutover with no gate. For a **no**-row timer the choices are to read its
+container directly with data-plane access, or to raise that one category —
+`"Function.<name>": "Information"` in `host.json` — for the wave and drop it
+after, which restores the trace for one timer at a few lines per invocation
+instead of the whole host's chatter. That is a per-wave decision (TODO.md
+T-766), not a default.
+
+If telemetry and the witness disagree, believe the witness.
 
 ### Then, per timer
 
 ```powershell
-./scripts/cutover/05-verify-timer.ps1 -Name syncRssFeeds
+pwsh -File scripts/cutover/05-verify-timer.ps1 -Name syncRssFeeds -Hours 24
 ```
 
+**Read this one for history only.** It still answers correctly for anything
+before 2026-09-02 17:59Z — on 2026-09-03 it returned the sweeper's 37
+invocations from before the cut with `-05:00` offsets on every `ScheduleStatus`
+line, which is what retroactively settled Wave 1 — and it now warns at the top
+of its invocation section when `host.json` gates `Function` above Information,
+so a zero after the cut reads as "instrument off" rather than "timer dead".
+
 The gate is not "did it run". It is "did it run at the intended **Chicago**
-local time". A timer firing five hours early passes a naive "fired once" check
-and fails the real one; the script prints both zones so the comparison is
-against the local column.
+local time". That clock half came from the host's `ScheduleStatus` line and is
+not available from a side effect; for a timer on local hours, compare the
+witness stamp against the schedule by hand — a `refreshedAt` of `05:00Z` on a
+`0 0 */2` timer is 00:00 CDT, which is the even-hour tick it should be.
 
 ### Superseded on 2026-09-02: the remaining timers are armed in waves
 
@@ -648,7 +718,9 @@ delete documents with no dry-run pin — `CLEANUP_SOFT_DELETED_CONTENT` and
 
 ### Before trusting telemetry as evidence at all
 
-Confirm the plane itself is alive, once, at the start of the session:
+Confirm the plane itself is alive, once, at the start of the session. Both
+commands need the `log-analytics` extension (Step 0, item 6); without it the
+second one prompts on a stream you cannot see and hangs.
 
 ```bash
 # ingestion is not capped
