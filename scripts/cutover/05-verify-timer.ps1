@@ -204,7 +204,14 @@ function Invoke-WorkspaceQuery {
     # A silent redirect is the wrong instrument for "keep the output tidy". The
     # output is only untidy on the failure path, which is exactly the path where
     # the detail is worth more than the tidiness.
+    # THREE DIFFERENT FAILURES REACH THE BRANCH BELOW, and saying the wrong one
+    # is how this script has misled an operator before. $LASTEXITCODE is only
+    # meaningful if az actually launched: when the call throws first, it still
+    # holds whatever the PREVIOUS native command left behind, so a message that
+    # asserts "az exited non-zero" can be describing a command that never ran.
+    # The PowerShell exception is kept for exactly that case.
     $errFile = [System.IO.Path]::GetTempFileName()
+    $psError = $null
     try {
         $json = az monitor log-analytics query `
             --workspace $WorkspaceId `
@@ -214,18 +221,25 @@ function Invoke-WorkspaceQuery {
     }
     catch {
         $json = $null
+        $psError = $_
     }
 
-    if ($LASTEXITCODE -ne 0 -or -not $json) {
+    if ($null -ne $psError -or $LASTEXITCODE -ne 0 -or -not $json) {
+        $exit = $LASTEXITCODE
         $azSaid = (Get-Content -Path $errFile -Raw -ErrorAction SilentlyContinue)
         Remove-Item -Path $errFile -ErrorAction SilentlyContinue
         if ($azSaid -and $azSaid.Trim()) {
-            Write-Bad "az reported:"
+            Write-Bad 'az reported:'
             Write-Host $azSaid.Trim() -ForegroundColor DarkYellow
             Write-Host ''
         }
+        elseif ($psError) {
+            Write-Bad 'The az call itself threw before it could report anything:'
+            Write-Host $psError.Exception.Message -ForegroundColor DarkYellow
+            Write-Host ''
+        }
         else {
-            Write-Warn 'az exited non-zero and said nothing on stderr.'
+            Write-Warn "az exited $exit and produced no output on stdout or stderr."
         }
         return $null
     }
@@ -279,13 +293,36 @@ function Invoke-WorkspaceQuery {
 # works and there are no extensions", and would either misname the cause or
 # miss the case entirely. Splitting on the raw exit code and the raw output is
 # what keeps the two apart.
+# stderr captured here for the same reason as the workspace query below it:
+# discarding az's own explanation is the defect this whole change exists to fix,
+# and a guard that hides the cause while complaining about hidden causes is not
+# a guard worth having.
+$extErrFile = [System.IO.Path]::GetTempFileName()
 $extList = $null
-try { $extList = az extension list -o json 2>$null }
-catch { $extList = $null }
+$extError = $null
+try { $extList = az extension list -o json 2>$extErrFile }
+catch { $extList = $null; $extError = $_ }
 
-if ($LASTEXITCODE -ne 0 -or -not $extList) {
+if ($null -ne $extError -or $LASTEXITCODE -ne 0 -or -not $extList) {
+    $extExit = $LASTEXITCODE
+    $extSaid = (Get-Content -Path $extErrFile -Raw -ErrorAction SilentlyContinue)
+    Remove-Item -Path $extErrFile -ErrorAction SilentlyContinue
     Write-Bad 'Could not run `az extension list`.'
     Write-Host ''
+    if ($extSaid -and $extSaid.Trim()) {
+        Write-Host 'az reported:'
+        Write-Host $extSaid.Trim() -ForegroundColor DarkYellow
+        Write-Host ''
+    }
+    elseif ($extError) {
+        Write-Host 'The call threw before az could report anything:'
+        Write-Host $extError.Exception.Message -ForegroundColor DarkYellow
+        Write-Host ''
+    }
+    else {
+        Write-Host "az exited $extExit and produced no output on stdout or stderr."
+        Write-Host ''
+    }
     Write-Host 'This is NOT "the extension is missing" — az itself did not answer, so its'
     Write-Host 'extensions were never enumerated. Check that az is installed and on PATH,'
     Write-Host 'then that you are signed in:'
@@ -294,6 +331,7 @@ if ($LASTEXITCODE -ne 0 -or -not $extList) {
     Write-Host ''
     throw 'az extension list did not run; the extension state is unknown.'
 }
+Remove-Item -Path $extErrFile -ErrorAction SilentlyContinue
 
 # Parsed inside a try, because $ErrorActionPreference is 'Stop' and an
 # unguarded ConvertFrom-Json on non-JSON stdout would terminate this script with
