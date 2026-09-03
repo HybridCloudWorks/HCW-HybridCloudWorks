@@ -83,12 +83,16 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | 2 | `T-518` — arm the remaining timers | High | Risk-grouped waves, each observed before the next; the two destructive timers stay solo |
 | 3 | `T-764` — the podcast pages have no data and only Wave 2 can give them any | Medium | `FETCH_PODCAST_FEEDS` observed writing `podcasts`; there is no manual path to fall back on |
 | 4 | `T-765` — `ai_insights` has a reader and no writer | Low | An owner decision on whether the insights panel is a feature or is retired |
+| 5 | `T-766` — the timer-observation gate lost its telemetry witness to #321 | High | A witness for every timer in a wave before it is armed: the public side effect where one exists, a per-category `host.json` override decided per wave where it does not |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated,
 observed procedure, now sequenced into waves. Items 3 and 4 were found on
 2026-09-02 by tracing every container the public read layer reads back to
-whatever writes it — the audit that the empty news pages prompted.
+whatever writes it — the audit that the empty news pages prompted. Item 5
+was found on 2026-09-03 when Wave 2's gates returned nothing: two workstreams
+had collided, and it is High because waves 2 through 6 cannot produce their
+own evidence until it is settled.
 
 **The table and the sections below are in the same order, and that order is the
 one to work them in — not a sort of the Priority column.** Item 1 carries no
@@ -124,7 +128,7 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
-| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`), which is also the only thing that can fill the podcast pages (`T-764`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves) and [Section 3](#3-t-764--the-podcast-pages-have-no-data-and-only-wave-2-can-give-them-any); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 carries `T-764` with it — one apply closes two rows |
+| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`), which is also the only thing that can fill the podcast pages (`T-764`) — and each wave needs its witness settled first (`T-766`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves), [Section 3](#3-t-764--the-podcast-pages-have-no-data-and-only-wave-2-can-give-them-any) and [Section 5](#5-t-766--the-timer-observation-gate-lost-its-telemetry-witness-to-321); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 carries `T-764` with it — one apply closes two rows |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
 | 6 | Optional features: seed the keys and documents you actually want; decide whether the AI insights panel is a feature or is retired (`T-765`) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) and [Section 4](#4-t-765--ai_insights-has-a-reader-and-no-writer) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
@@ -302,14 +306,22 @@ az functionapp config appsettings list --name func-site-prod-cus-01 --resource-g
 **Success:** one row, value `true`. Substitute the flag name for each timer in
 the wave.
 
+Gates 3 and 4 read the timer's **durable side effect**, not telemetry —
+since #321 the host writes no invocation traces (Section 5). For the three
+timers with a public witness:
+
 ```powershell
-pwsh -File scripts/cutover/05-verify-timer.ps1 -Name publishScheduledContent -Hours 24
+node scripts/verify-timer-witness.mjs --timer syncRssFeeds --since 2026-09-03T05:00:00Z
 ```
 
-**Success:** a single summary row with a plausible invocation count and a
-`ScheduleStatus` section filtered to that timer. If the count barely changes
-between `-Hours 1` and `-Hours 24`, stop — that was the signature of the query
-truncation fixed on 2026-08-31, and it means the window is not being applied.
+**Success:** `PASS`, a document count, and a `newest` stamp at or after
+`--since` (the apply time or the last scheduled tick, ISO 8601 UTC). `FAIL`
+with zero documents on a container only this timer writes means it has never
+run here. Exit 2 means the timer has no public witness and nothing was
+evaluated — settle that before arming its wave, per Section 5.
+
+`05-verify-timer.ps1 -Hours 24` still reads correctly for history before
+2026-09-02 17:59Z, and warns when the cut makes its invocation section blind.
 
 **Note on volume:** arming timers adds `AppTraces` volume. The host
 verbosity cut (T-719, closed 2026-09-02, #321) is what made room for it —
@@ -345,8 +357,12 @@ episode by id and preserves `createdAt` before upserting, so the risk is an
 erroring loop rather than damaged data, and the `-Hours 4` verification in
 [Section 2](#2-t-518--arm-the-remaining-timers-in-waves) is what would catch it.
 
-Closes when `fetchPodcastFeeds` is observed writing `podcasts` and a provider
-podcast page renders an episode.
+Closes when `fetchPodcastFeeds` is observed writing `podcasts` and **the
+`azure` podcast page** renders an episode. Only azure: `PODCAST_FEEDS` in
+`functions/src/lib/timers/podcasts.js` holds exactly one feed, so the aws, gcp
+and vmware podcast pages stay empty after this closes — by configuration, not
+by fault. Adding feeds for them is a content decision, not part of this row.
+Corrected 2026-09-03; the earlier wording implied all four pages.
 
 ### 4. T-765 — `ai_insights` has a reader and no writer
 
@@ -373,6 +389,51 @@ retired from `NewsPage`, or it is an intended feature whose writer is missing.
 Recorded without a recommendation because the original intent is not visible in
 this repository — the answer lives in Site-Main's history or in the owner's
 memory, not in code that can be read here.
+
+### 5. T-766 — the timer-observation gate lost its telemetry witness to #321
+
+Cutover-Runbook step 5's fourth gate proved a timer fired by reading
+`Function.<name>` traces from `AppTraces` — `Executed 'Functions.…'` and
+`Trigger Details: ScheduleStatus: {…}`, which the host writes at
+**Information** level. #321 dropped `host.json`'s `Function` category to
+Warning on 2026-09-02, deployed 17:59Z, to take host verbosity off the daily
+cap. From that minute the host wrote nothing for a successful invocation.
+
+**Two workstreams collided, and the record shows why nobody saw it.** The #321
+CHANGELOG entry says `Host.Results` was kept at Information *"because it feeds
+`AppRequests`, which … the timer-observation gate read."* But
+`05-verify-timer.ps1`'s own header says `AppRequests` has been empty for the
+app's whole life and is not the oracle (T-514); it reads `Function.*` rows in
+`AppTraces`. The cut protected the table the gate never used and removed the
+one it did. Neither document mentioned the other.
+
+Found 2026-09-03: Wave 2's gates returned nothing, the workspace was
+`RespectQuota`, the app was demonstrably running (the admin RSS job had
+processed 21 feeds three hours after the deploy), and `platformJobSweeper
+-Hours 24` showed 37 invocations ending at **13:00:00 CDT — 18:00Z, the deploy
+minute** — then silence. That read also settled Wave 1 retroactively: it was
+real, and the #323 record stands.
+
+**Owner decision 2026-09-03: keep the cut, make the side effect the witness.**
+`scripts/verify-timer-witness.mjs` reads it through the public API, with no
+`az`, workspace or telemetry plane involved. Three timers have a public
+witness — `syncRssFeeds`, `fetchPodcastFeeds`, `publishScheduledContent` —
+and the other fifteen do not; the runbook's table says why, per timer, and
+the script's test pins that table to what the app registers.
+
+**What stays open, and why this is High.** Waves 3 through 6 are entirely
+timers with **no** public witness. Each wave needs its evidence settled before
+the apply, and there are two honest options per timer: read its container
+directly with data-plane access, or raise that single category —
+`"Function.<name>": "Information"` in `host.json` — for the wave and remove it
+after. The override restores the trace for one timer at a few lines per
+invocation rather than the whole host's chatter, so it does not reopen T-719;
+but it is a `host.json` change and a deploy per wave, which is a real cost
+against the volume it saves. Decide per wave, at arming time, and record
+which was chosen in the wave's row.
+
+Closes when every wave in the T-518 table has a stated witness, and no wave
+is armed against a timer whose evidence path is "none".
 
 ## Optional, and only if you want the feature
 

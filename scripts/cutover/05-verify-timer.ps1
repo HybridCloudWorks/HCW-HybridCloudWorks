@@ -467,6 +467,35 @@ $timers | Sort-Object Name | Format-Table -AutoSize | Out-String | Write-Host
 # already WEBSITE_TIME_ZONE. That is the comparison §7 asks for, delivered by
 # the platform rather than computed here — so a bug in this script's own
 # arithmetic cannot manufacture a pass.
+# ---------------------------------------------------------------------------
+# Since #321 the workspace no longer carries the rows this section reads
+# ---------------------------------------------------------------------------
+# The query below counts `Function.<name>` traces, which the host writes at
+# INFORMATION level. host.json's `Function` category has been Warning since the
+# 2026-09-02 17:59Z deploy of #321, so for every invocation after that moment
+# the host wrote nothing and there is nothing here to find. A zero below is not
+# "the timer did not fire" — it is "this instrument was switched off", and the
+# two must not be confused on a timer someone has just armed.
+#
+# The repo's host.json is the deployed one (Deploy Functions ships it), so it is
+# read here as the authority. History from before the cut is still queryable,
+# which is why this warns and continues rather than stopping: -Hours 24 on
+# 2026-09-03 correctly returned 37 sweeper invocations from before 18:00Z.
+#
+# For anything after the cut, the witness is the timer's durable side effect:
+#   node scripts/verify-timer-witness.mjs --timer <name> --since <ISO>
+$hostJsonPath = Join-Path $PSScriptRoot '..' '..' 'functions' 'host.json'
+$functionLevel = $null
+try { $functionLevel = (Get-Content -Path $hostJsonPath -Raw | ConvertFrom-Json).logging.logLevel.Function }
+catch { $functionLevel = $null }
+if ($functionLevel -and $functionLevel -notin @('Information', 'Debug', 'Trace')) {
+    Write-Warn "host.json gates 'Function' at $functionLevel, so the host has written no Executed/ScheduleStatus"
+    Write-Warn 'traces since that shipped (#321, 2026-09-02 17:59Z). Rows below can only predate it.'
+    Write-Warn 'For invocations after the cut, read the durable side effect instead:'
+    Write-Host "  node scripts/verify-timer-witness.mjs --timer $Name --since <the apply time, ISO 8601>" -ForegroundColor Cyan
+    Write-Host ''
+}
+
 Write-Step "Invocations in the last $Hours h"
 
 # The host writes 'Function.<name>'; the handler's own context.log writes

@@ -41,7 +41,7 @@ page decides where a value belongs, this one records whether it is there.
 > here, treat it as disclosed and rotate it.
 
 > **Which is why the `az` sign-in details are not here.** The estate's tenant,
-> its four subscriptions, the scoped device-code login and the five ways
+> its four subscriptions, the scoped device-code login and the ways
 > signing in fails live in [Cutover-Runbook](Cutover-Runbook) **Step 0**. They
 > are operator procedure rather than inventory, and the rule above forbids the
 > one thing that makes such a procedure usable — a command carrying its real

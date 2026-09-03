@@ -19,6 +19,43 @@ This project has not cut a tagged release; entries are grouped under
 ### Fixed
 
 - **Three scripts exited 0 without running when invoked on Windows (#329).** `apply-computed-sortdate.mjs`, `smoke-deployed.mjs` and `build-content-manifest.mjs` compared `import.meta.url` against `` `file://${process.argv[1]}` ``, which never matches a `C:\...` path — so `smoke-deployed.mjs` run from PowerShell reported nothing and exited 0. Now `pathToFileURL(process.argv[1]).href`, as in `check-deploy-drift.mjs`; a spawn-based test asserts each entry point actually fires.
+- **The timer-observation gate was blind for every invocation after 17:59Z on
+  2026-09-02, and the record explains how (#328).** #321 dropped `host.json`'s
+  `Function` category to Warning to take host verbosity off the daily cap. The
+  `Executed` and `ScheduleStatus` rows that `05-verify-timer.ps1` reads are
+  Information-level in that category, so the host stopped writing them the
+  moment the deploy landed. The #321 entry below says `Host.Results` was kept
+  at Information *because the timer-observation gate reads `AppRequests`* —
+  but the verify script's own header says `AppRequests` has been empty for
+  the app's whole life and is not the oracle (T-514). The cut kept the table
+  the gate never used and removed the one it did, and neither document
+  mentioned the other.
+
+  Found when Wave 2's gates returned nothing on 2026-09-03: the workspace
+  was `RespectQuota`, the app was running (the admin RSS job had processed 21
+  feeds three hours after the deploy), and `platformJobSweeper -Hours 24`
+  returned 37 invocations ending at 13:00:00 CDT — 18:00Z, the deploy minute
+  — then nothing. The first hypothesis, the daily cap, was wrong and is
+  recorded as wrong.
+
+  Owner decision the same day: keep the cut, make the durable side effect the
+  primary witness. Tracked as T-766, High, because waves 3–6 cannot produce
+  their own evidence until each timer's witness is settled. The verify script
+  now warns at the top of its invocation section when `host.json` gates
+  `Function` above Information, so a zero after the cut reads as "instrument
+  off" rather than "timer dead" — the confusion this repository has paid for
+  more than once.
+
+- **Wave 1's invocation gate is confirmed, retroactively and by accident
+  (#328).** The #323 record says all four gates were observed; the operator
+  had reported them passed, but the run that would have shown gates 3 and 4
+  had in fact hung on `az`'s hidden install prompt (#327), so no figures were
+  ever seen. On 2026-09-03, with the extension installed, `platformJobSweeper
+  -Hours 24` returned **37 invocations, 37 ran, 0 skipped**, at exact
+  15-minute boundaries with `-05:00` offsets on every `ScheduleStatus` line —
+  04:00:25 to 13:00:00 CDT, continuous until the #321 deploy silenced the
+  host. Wave 1 was real. The #323 entry stands, and this is the observation
+  it was missing.
 
 - **`ContentListingTemplate` invented a publication date for any item that had
   none (#325).** The blog-variant card read `{item.date || 'Feb 10, 2026'}`, so
@@ -57,6 +94,32 @@ This project has not cut a tagged release; entries are grouped under
   in the repository.
 
 ### Added
+
+- **The arming gate reads the timer's durable side effect through the public
+  API, and needs nothing else (#328).** `scripts/verify-timer-witness.mjs`
+  takes a timer name and an ISO `--since`, fetches that timer's witness from
+  the Cloudflare-fronted API — `rss_cache.refreshedAt` for `syncRssFeeds`,
+  `podcasts.updatedAt` for `fetchPodcastFeeds`, `content.publishedAt` for
+  `publishScheduledContent` — and says whether the newest stamp is at or after
+  the moment named. No `az`, no workspace, no extension, no telemetry plane:
+  three fewer places for an observation to be lost. A malformed stamp never
+  counts as evidence; an unparseable `--since` refuses rather than comparing
+  against `NaN`. There is deliberately no cron parser — the schedule is
+  something the operator already knows, and a parser is a second thing to be
+  wrong about.
+
+  Fifteen of the eighteen timers have **no** public witness, and the script
+  says so with exit 2 rather than a pass or a fail, because "cannot evaluate"
+  and "evaluated and failed" are different findings. The runbook's witness
+  table now covers all eighteen with the reason for each *no*, and the
+  script's test asserts that table names exactly the timers `schedulers.js`
+  and `jobs-sweeper.js` register — a timer added without a row fails CI
+  instead of arriving at a cutover with no gate. Thirteen tests; the drift
+  guard was mutation-checked by deleting a row and watching it fail.
+
+  Also records what #327 deferred: the `log-analytics` extension is now
+  Step 0's sixth item in the Cutover-Runbook, and that step's heading no
+  longer carries a count of its own items.
 
 - **Every provider page is live: the last 24 shipped-dark pages came out from
   behind `ComingSoonPage` (#325).** `finops`, `gcp`, `github` and `terraform` now
