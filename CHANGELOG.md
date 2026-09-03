@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Fixed
 
 - **The timer-observation gate was blind for every invocation after 17:59Z on
-  2026-09-02, and the record explains how (#PR).** #321 dropped `host.json`'s
+  2026-09-02, and the record explains how (#328).** #321 dropped `host.json`'s
   `Function` category to Warning to take host verbosity off the daily cap. The
   `Executed` and `ScheduleStatus` rows that `05-verify-timer.ps1` reads are
   Information-level in that category, so the host stopped writing them the
@@ -46,7 +46,7 @@ This project has not cut a tagged release; entries are grouped under
   more than once.
 
 - **Wave 1's invocation gate is confirmed, retroactively and by accident
-  (#PR).** The #323 record says all four gates were observed; the operator
+  (#328).** The #323 record says all four gates were observed; the operator
   had reported them passed, but the run that would have shown gates 3 and 4
   had in fact hung on `az`'s hidden install prompt (#327), so no figures were
   ever seen. On 2026-09-03, with the extension installed, `platformJobSweeper
@@ -95,7 +95,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **The arming gate reads the timer's durable side effect through the public
-  API, and needs nothing else (#PR).** `scripts/verify-timer-witness.mjs`
+  API, and needs nothing else (#328).** `scripts/verify-timer-witness.mjs`
   takes a timer name and an ISO `--since`, fetches that timer's witness from
   the Cloudflare-fronted API — `rss_cache.refreshedAt` for `syncRssFeeds`,
   `podcasts.updatedAt` for `fetchPodcastFeeds`, `content.publishedAt` for
