@@ -191,17 +191,59 @@ function Invoke-WorkspaceQuery {
     # workspace-query.psm1 carries the full account.
     $oneLine = ConvertTo-SingleLineKql $Kql
 
+    # stderr is CAPTURED, not discarded, and printed when the call fails.
+    #
+    # It used to be `2>$null`. The intent was that a genuine az error should not
+    # spray over the report, and the cost was that az's own explanation of the
+    # failure went in the bin with it. Every time this script has failed, the
+    # operator has been handed "the workspace query did not run" and a list of
+    # three things to go and check by hand, while az had already said which one
+    # it was. That happened on 2026-09-03 for the Wave 2 gates, one commit after
+    # the same redirect was found hiding an interactive install prompt.
+    #
+    # A silent redirect is the wrong instrument for "keep the output tidy". The
+    # output is only untidy on the failure path, which is exactly the path where
+    # the detail is worth more than the tidiness.
+    # THREE DIFFERENT FAILURES REACH THE BRANCH BELOW, and saying the wrong one
+    # is how this script has misled an operator before. $LASTEXITCODE is only
+    # meaningful if az actually launched: when the call throws first, it still
+    # holds whatever the PREVIOUS native command left behind, so a message that
+    # asserts "az exited non-zero" can be describing a command that never ran.
+    # The PowerShell exception is kept for exactly that case.
+    $errFile = [System.IO.Path]::GetTempFileName()
+    $psError = $null
     try {
         $json = az monitor log-analytics query `
             --workspace $WorkspaceId `
             --subscription $WorkspaceSubscription `
             --analytics-query $oneLine `
-            -o json 2>$null
+            -o json 2>$errFile
     }
     catch {
+        $json = $null
+        $psError = $_
+    }
+
+    if ($null -ne $psError -or $LASTEXITCODE -ne 0 -or -not $json) {
+        $exit = $LASTEXITCODE
+        $azSaid = (Get-Content -Path $errFile -Raw -ErrorAction SilentlyContinue)
+        Remove-Item -Path $errFile -ErrorAction SilentlyContinue
+        if ($azSaid -and $azSaid.Trim()) {
+            Write-Bad 'az reported:'
+            Write-Host $azSaid.Trim() -ForegroundColor DarkYellow
+            Write-Host ''
+        }
+        elseif ($psError) {
+            Write-Bad 'The az call itself threw before it could report anything:'
+            Write-Host $psError.Exception.Message -ForegroundColor DarkYellow
+            Write-Host ''
+        }
+        else {
+            Write-Warn "az exited $exit and produced no output on stdout or stderr."
+        }
         return $null
     }
-    if ($LASTEXITCODE -ne 0 -or -not $json) { return $null }
+    Remove-Item -Path $errFile -ErrorAction SilentlyContinue
 
     try { $rows = @($json | ConvertFrom-Json) }
     catch { return $null }
@@ -212,6 +254,114 @@ function Invoke-WorkspaceQuery {
     # like data.
     Assert-WorkspaceRowShape -Rows $rows -ExpectColumns $ExpectColumns -What $What
     return $rows
+}
+
+# ---------------------------------------------------------------------------
+# The log-analytics extension must already be installed
+# ---------------------------------------------------------------------------
+# `az monitor log-analytics query` is NOT core az. It ships in the
+# `log-analytics` extension, and on a machine without it az does not fail — it
+# ASKS:
+#
+#   The command requires the extension log-analytics. Do you want to install
+#   it now? The command will continue to run after the extension is installed.
+#   (Y/n):
+#
+# That prompt is written to stderr, and Invoke-WorkspaceQuery redirects stderr
+# to $null so a genuine az error cannot spray over the report. The prompt goes
+# with it. az then blocks on stdin for an answer nobody can see, and the script
+# stops dead after printing "=== Invocations in the last N h ===" with no error,
+# no exit, and nothing to read.
+#
+# That is what happened on 2026-09-02 and again on 2026-09-03, on a laptop whose
+# `az extension list` returned EMPTY. It cost the Wave 1 invocation gate, which
+# was recorded as observed on the strength of a run that had actually hung.
+#
+# This check runs BEFORE -SkipPreflight is honoured, because the extension is
+# not a telemetry-trustworthiness question — it is whether the query can be
+# issued at all. Checked here rather than fixed by
+# `extension.use_dynamic_install=yes_without_prompt`, because auto-installing a
+# preview extension mid-run is a surprise of its own; the operator is told the
+# one command to run instead.
+#
+# DELIBERATELY NOT ROUTED THROUGH Invoke-AzJson, and the reason is the whole
+# point of this block. That helper returns $null for every failure it can have,
+# and — because `ConvertFrom-Json '[]'` emits nothing — it ALSO returns $null
+# for a perfectly successful `az extension list` on a machine with no
+# extensions at all. That machine is exactly the one this guard exists for. A
+# check written on top of it therefore cannot tell "az is broken" from "az
+# works and there are no extensions", and would either misname the cause or
+# miss the case entirely. Splitting on the raw exit code and the raw output is
+# what keeps the two apart.
+# stderr captured here for the same reason as the workspace query below it:
+# discarding az's own explanation is the defect this whole change exists to fix,
+# and a guard that hides the cause while complaining about hidden causes is not
+# a guard worth having.
+$extErrFile = [System.IO.Path]::GetTempFileName()
+$extList = $null
+$extError = $null
+try { $extList = az extension list -o json 2>$extErrFile }
+catch { $extList = $null; $extError = $_ }
+
+if ($null -ne $extError -or $LASTEXITCODE -ne 0 -or -not $extList) {
+    $extExit = $LASTEXITCODE
+    $extSaid = (Get-Content -Path $extErrFile -Raw -ErrorAction SilentlyContinue)
+    Remove-Item -Path $extErrFile -ErrorAction SilentlyContinue
+    Write-Bad 'Could not run `az extension list`.'
+    Write-Host ''
+    if ($extSaid -and $extSaid.Trim()) {
+        Write-Host 'az reported:'
+        Write-Host $extSaid.Trim() -ForegroundColor DarkYellow
+        Write-Host ''
+    }
+    elseif ($extError) {
+        Write-Host 'The call threw before az could report anything:'
+        Write-Host $extError.Exception.Message -ForegroundColor DarkYellow
+        Write-Host ''
+    }
+    else {
+        Write-Host "az exited $extExit and produced no output on stdout or stderr."
+        Write-Host ''
+    }
+    Write-Host 'This is NOT "the extension is missing" — az itself did not answer, so its'
+    Write-Host 'extensions were never enumerated. Check that az is installed and on PATH,'
+    Write-Host 'then that you are signed in:'
+    Write-Host ''
+    Write-Host '  az account show -o json | ConvertFrom-Json | Select-Object name, id' -ForegroundColor Cyan
+    Write-Host ''
+    throw 'az extension list did not run; the extension state is unknown.'
+}
+Remove-Item -Path $extErrFile -ErrorAction SilentlyContinue
+
+# Parsed inside a try, because $ErrorActionPreference is 'Stop' and an
+# unguarded ConvertFrom-Json on non-JSON stdout would terminate this script with
+# a raw parser exception — a failure that does not name its own cause, which is
+# the exact thing this whole block exists to stop happening.
+$installed = $null
+try { $installed = @($extList | ConvertFrom-Json) }
+catch { $installed = $null }
+
+if ($null -eq $installed) {
+    Write-Bad 'az extension list returned something that is not JSON.'
+    Write-Host ''
+    Write-Host 'The extension state is unknown — this is neither "az is broken" nor "the'
+    Write-Host 'extension is missing". Run it without redirection to see what came back:'
+    Write-Host ''
+    Write-Host '  az extension list -o json' -ForegroundColor Cyan
+    Write-Host ''
+    throw 'az extension list output could not be parsed; the extension state is unknown.'
+}
+
+if (-not ($installed | Where-Object name -eq 'log-analytics')) {
+    Write-Bad 'The az log-analytics extension is not installed.'
+    Write-Host ''
+    Write-Host 'Every workspace query below needs it. Without it az prompts to install it,'
+    Write-Host 'the prompt is swallowed by the stderr redirect, and this script hangs with no'
+    Write-Host 'error rather than reporting anything. Install it and re-run:'
+    Write-Host ''
+    Write-Host '  az extension add --name log-analytics' -ForegroundColor Cyan
+    Write-Host ''
+    throw 'log-analytics extension missing; no query was attempted.'
 }
 
 # ---------------------------------------------------------------------------
