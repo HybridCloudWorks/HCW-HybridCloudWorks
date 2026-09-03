@@ -110,7 +110,8 @@ export function createPodcastIngest({
   async function processFeed(provider, feedUrl) {
     const feed = await parser.parseURL(feedUrl);
     const results = { processed: 0, errors: [] };
-    for (const item of feed.items || []) {
+    const items = feed.items || [];
+    for (const [index, item] of items.entries()) {
       try {
         const episode = buildPodcastEpisode(provider, item, now());
         const existing = await store.readDoc('podcasts', episode.id, episode.id);
@@ -127,11 +128,14 @@ export function createPodcastIngest({
         // (#321), so anything logged below this level never reaches the
         // workspace. The witness for this timer is a fresh `updatedAt`; when
         // that is missing, this line is what says the run happened at all.
-        log.warn?.(`[fetchPodcastFeeds] ${provider}: episode ${item?.title || '(untitled)'} failed: ${message}`);
+        // Position, not title: the title is third-party text and the trace
+        // stays content-free. The feed itself is named by its provider —
+        // PODCAST_FEEDS holds one URL per provider, in this file.
+        log.warn?.(`[fetchPodcastFeeds] ${provider}: episode ${index + 1} of ${items.length} failed: ${message}`);
       }
     }
     if (results.processed === 0 && results.errors.length === 0) {
-      log.warn?.(`[fetchPodcastFeeds] ${provider}: feed at ${feedUrl} returned no items`);
+      log.warn?.(`[fetchPodcastFeeds] ${provider}: feed returned no items`);
     }
     return results;
   }
@@ -144,7 +148,7 @@ export function createPodcastIngest({
       } catch (err) {
         const message = String(err?.message || err);
         summary[cfg.provider] = { processed: 0, error: message };
-        log.error?.(`[fetchPodcastFeeds] ${cfg.provider}: feed at ${cfg.url} failed: ${message}`);
+        log.error?.(`[fetchPodcastFeeds] ${cfg.provider}: feed failed: ${message}`);
       }
     }
     log.log?.(`[fetchPodcastFeeds] ${JSON.stringify(summary)}`);

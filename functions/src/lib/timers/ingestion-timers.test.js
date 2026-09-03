@@ -351,7 +351,9 @@ describe('podcasts (PodBean)', () => {
     // host.json gates `Function` at Warning (#321) and the Information summary
     // below it does not.
     expect(log.warn).toHaveBeenCalledTimes(1);
-    expect(log.warn.mock.calls[0][0]).toMatch(/^\[fetchPodcastFeeds\] azure: episode \(untitled\) failed:/);
+    // Position in the feed, never the title: the trace stays content-free.
+    expect(log.warn.mock.calls[0][0]).toMatch(/^\[fetchPodcastFeeds\] azure: episode 3 of 3 failed:/);
+    expect(log.warn.mock.calls[0][0]).not.toContain('Ep ');
     expect(log.error).not.toHaveBeenCalled();
     expect(store.data.podcasts.get('g1')).toMatchObject({
       title: 'Ep 1',
@@ -368,9 +370,8 @@ describe('podcasts (PodBean)', () => {
       azure: { processed: 0, error: '504' },
     });
     expect(brokenLog.error).toHaveBeenCalledTimes(1);
-    expect(brokenLog.error.mock.calls[0][0]).toBe(
-      '[fetchPodcastFeeds] azure: feed at https://feed.podbean.com/PublicCloudWorks/feed.xml failed: 504'
-    );
+    // Provider, never the URL: PODCAST_FEEDS names the feed from the provider.
+    expect(brokenLog.error.mock.calls[0][0]).toBe('[fetchPodcastFeeds] azure: feed failed: 504');
   });
 
   it('fetchPodcastFeeds says so at Warning when the feed is reachable but empty', async () => {
@@ -382,9 +383,7 @@ describe('podcasts (PodBean)', () => {
     const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const r = await createPodcastIngest({ store, parser, now, log }).run();
     expect(r).toEqual({ azure: { processed: 0, errors: [] } });
-    expect(log.warn).toHaveBeenCalledWith(
-      '[fetchPodcastFeeds] azure: feed at https://feed.podbean.com/PublicCloudWorks/feed.xml returned no items'
-    );
+    expect(log.warn).toHaveBeenCalledWith('[fetchPodcastFeeds] azure: feed returned no items');
     expect(log.error).not.toHaveBeenCalled();
   });
 });

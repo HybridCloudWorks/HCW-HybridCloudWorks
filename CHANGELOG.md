@@ -26,10 +26,12 @@ This project has not cut a tagged release; entries are grouped under
   empty feed — and reported it through `context.log`, which is Information
   level and gone since `host.json` gated `Function` at Warning. A run that
   fired and failed looked exactly like a run that never fired. Now a feed
-  that throws logs at Error with the URL and the message, an episode that
-  throws logs at Warning with its title, and a feed that answers with no
-  items logs at Warning — the state nothing reported before. The Information
-  summary line is unchanged. `05-verify-timer.ps1` does not surface these
+  that throws logs at Error with the provider and the message, an episode
+  that throws logs at Warning with its position in the feed, and a feed that
+  answers with no items logs at Warning — the state nothing reported before.
+  The rows carry no URL and no title: the provider names the feed
+  (`PODCAST_FEEDS` holds one per provider) and a title is third-party text.
+  The Information summary line is unchanged. `05-verify-timer.ps1` does not surface these
   rows (its filter is `Executed` and the skip marker); they are one query
   away, and they are the one trace the Warning cut still keeps for this
   timer:
