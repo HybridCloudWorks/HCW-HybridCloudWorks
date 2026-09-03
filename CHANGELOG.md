@@ -18,6 +18,8 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Three scripts exited 0 without running when invoked on Windows (#329).** `apply-computed-sortdate.mjs`, `smoke-deployed.mjs` and `build-content-manifest.mjs` compared `import.meta.url` against `` `file://${process.argv[1]}` ``, which never matches a `C:\...` path — so `smoke-deployed.mjs` run from PowerShell reported nothing and exited 0. Now `pathToFileURL(process.argv[1]).href`, as in `check-deploy-drift.mjs`; a spawn-based test asserts each entry point actually fires.
+
 - **`ContentListingTemplate` invented a publication date for any item that had
   none (#325).** The blog-variant card read `{item.date || 'Feb 10, 2026'}`, so
   an item without a date was stamped with that specific day — not a visible
