@@ -343,9 +343,18 @@ describe('podcasts (PodBean)', () => {
     const parser = {
       parseURL: vi.fn(async () => ({ items: [item, { guid: 'g2', title: 'Ep 2' }, null] })),
     };
-    const r = await createPodcastIngest({ store, parser, now }).run();
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const r = await createPodcastIngest({ store, parser, now, log }).run();
     expect(r.azure.processed).toBe(2);
-    expect(r.azure.errors).toHaveLength(1);
+    expect(r.azure.errors).toEqual([{ position: 3, error: expect.any(String) }]);
+    // The one bad episode must reach the workspace at Warning, because
+    // host.json gates `Function` at Warning (#321) and the Information summary
+    // below it does not.
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    // Position in the feed, never the title: the trace stays content-free.
+    expect(log.warn.mock.calls[0][0]).toMatch(/^\[fetchPodcastFeeds\] azure: episode 3 of 3 failed:/);
+    expect(log.warn.mock.calls[0][0]).not.toContain('Ep ');
+    expect(log.error).not.toHaveBeenCalled();
     expect(store.data.podcasts.get('g1')).toMatchObject({
       title: 'Ep 1',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -356,8 +365,25 @@ describe('podcasts (PodBean)', () => {
         throw new Error('504');
       }),
     };
-    expect(await createPodcastIngest({ store, parser: broken, now }).run()).toEqual({
+    const brokenLog = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    expect(await createPodcastIngest({ store, parser: broken, now, log: brokenLog }).run()).toEqual({
       azure: { processed: 0, error: '504' },
     });
+    expect(brokenLog.error).toHaveBeenCalledTimes(1);
+    // Provider, never the URL: PODCAST_FEEDS names the feed from the provider.
+    expect(brokenLog.error.mock.calls[0][0]).toBe('[fetchPodcastFeeds] azure: feed failed: 504');
+  });
+
+  it('fetchPodcastFeeds says so at Warning when the feed is reachable but empty', async () => {
+    // The third silent state: no throw, no episode, no write. Without this
+    // line an empty feed and a timer that never fired look identical to the
+    // updatedAt witness.
+    const store = memStore({ podcasts: [] });
+    const parser = { parseURL: vi.fn(async () => ({ items: [] })) };
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const r = await createPodcastIngest({ store, parser, now, log }).run();
+    expect(r).toEqual({ azure: { processed: 0, errors: [] } });
+    expect(log.warn).toHaveBeenCalledWith('[fetchPodcastFeeds] azure: feed returned no items');
+    expect(log.error).not.toHaveBeenCalled();
   });
 });
