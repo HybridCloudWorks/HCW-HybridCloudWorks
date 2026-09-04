@@ -165,8 +165,10 @@ This project has not cut a tagged release; entries are grouped under
   that deletes documents rather than blobs — `infra/functionapp.tf` seeds it
   `"false"` beside the two blob pins — and origin is the rule the pin does not
   lift: a mark with no `deletionRequestedBy` and no `softDeletedReason` is
-  counted, logged at Warning as a count, recorded in the audit entry by id,
-  and left for a human in the admin content queue's `soft_deleted` filter.
+  counted, logged at Warning as a count, recorded by id in the audit entry
+  that every armed run writes once it has examined anything (a dry run
+  writes no audit document), and left for a human in the admin content
+  queue's `soft_deleted` filter.
 
   Every run now logs one summary line, idle runs included: in dry-run, what
   it would delete by origin; when armed, what it did. Before this an idle run

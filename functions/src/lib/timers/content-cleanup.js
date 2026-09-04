@@ -168,7 +168,10 @@ export function createContentCleanup({
       deletedContentCount: 0,
       deletedBlogCount: 0,
       deletedVersionCount: 0,
-      hasMore: candidates.length === maxLimit,
+      // Either window full means another pass is needed: the eligible one for
+      // the next deleting run, the refused one for the human review list.
+      hasMore: candidates.length === maxLimit || unknownRows.length === maxLimit,
+      refusedHasMore: unknownRows.length === maxLimit,
     };
     // Counts only: a document id is an identifier, and traces stay content-free.
     if (refusedIds.length) {

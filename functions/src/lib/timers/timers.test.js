@@ -214,6 +214,7 @@ describe('content cleanup', () => {
       deletedBlogCount: 2,
       deletedVersionCount: 1,
       hasMore: false,
+      refusedHasMore: false,
     });
     expect(store.deleteDoc.mock.calls).toEqual([
       ['blogs', 'b1', 'b1'],
@@ -244,6 +245,7 @@ describe('content cleanup', () => {
       deletedBlogCount: 0,
       deletedVersionCount: 0,
       hasMore: false,
+      refusedHasMore: false,
     });
     // An idle run still says so: the host.json override for this timer (T-766)
     // witnesses this line, and silence would be indistinguishable from never firing.
@@ -342,6 +344,12 @@ describe('content cleanup', () => {
     const idle = memStore({}, () => []);
     await createContentCleanup({ store: idle, now, uuid: () => 'a5', env }).hardDeleteSoftDeleted();
     expect(idle.data.admin_audit_logs).toBeUndefined();
+
+    // A full refused window reports hasMore even when the eligible window is not full.
+    const manyUnknown = Array.from({ length: 3 }, (_, i) => ({ id: `n${i}` }));
+    const store3 = memStore({}, (c, q) => (c === 'content' && q.includes('AND NOT (') ? manyUnknown : []));
+    const r3 = await createContentCleanup({ store: store3, now, uuid: () => 'a6', env }).hardDeleteSoftDeleted({ limit: 3 });
+    expect(r3).toMatchObject({ eligibleCount: 0, refusedCount: 3, hasMore: true, refusedHasMore: true });
 
     expect(deletionOrigin({ deletionRequestedBy: 'x' })).toBe('user');
     expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out' })).toBe('policy');
