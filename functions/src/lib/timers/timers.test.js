@@ -307,6 +307,28 @@ describe('content cleanup', () => {
       refusedIds: ['migrated', 'bare'],
       refusedCount: 2,
     });
+    // Armed, everything refused: nothing is deleted, but the audit entry is
+    // still written, because the refused ids are the record a human reviews.
+    const onlyUnknown = [{ id: 'bare1' }, { id: 'bare2' }];
+    const store2 = memStore({ content: onlyUnknown }, (c) => (c === 'content' ? onlyUnknown : []));
+    const log2 = { log: vi.fn(), warn: vi.fn() };
+    const r2 = await createContentCleanup({ store: store2, now, uuid: () => 'a4', env, log: log2 }).hardDeleteSoftDeleted();
+    expect(r2).toMatchObject({ dryRun: false, examinedCount: 2, eligibleCount: 0, refusedCount: 2, deletedContentCount: 0 });
+    expect(store2.deleteDoc).not.toHaveBeenCalled();
+    expect(store2.data.admin_audit_logs.get('a4').details).toMatchObject({
+      deletedContentCount: 0,
+      refusedCount: 2,
+      refusedIds: ['bare1', 'bare2'],
+      affectedIds: [],
+    });
+    expect(log2.log).toHaveBeenLastCalledWith(
+      '[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=2 examined=2'
+    );
+    // Armed and idle: nothing examined, so nothing to record and no audit entry.
+    const idle = memStore({}, () => []);
+    await createContentCleanup({ store: idle, now, uuid: () => 'a5', env }).hardDeleteSoftDeleted();
+    expect(idle.data.admin_audit_logs).toBeUndefined();
+
     expect(deletionOrigin({ deletionRequestedBy: 'x' })).toBe('user');
     expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out' })).toBe('policy');
     expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out', deletionRequestedBy: 'x' })).toBe('user');

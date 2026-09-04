@@ -165,13 +165,14 @@ export function createContentCleanup({
       );
       return summary;
     }
-    if (!eligible.length) {
-      log.log?.(
-        `[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=${refusedIds.length} examined=${rows.length}`
-      );
+    if (!rows.length) {
+      log.log?.('[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=0 examined=0');
       return summary;
     }
 
+    // From here the run is armed and examined something. The audit entry is
+    // written even when nothing was eligible, because the refused ids are what
+    // a human needs to find the documents the reaper would not touch.
     let deletedBlogCount = 0;
     let versionsDeleted = 0;
     for (const doc of eligible) {
