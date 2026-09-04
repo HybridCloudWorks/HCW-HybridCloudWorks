@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mergeDigest, raiseAlert, writeSystemAudit, toMillis } from './workflow-records.js';
 import { createReviewerDigest, createReviewerDigestManualHandler } from './reviewer-digest.js';
-import { createContentCleanup, getRejectionReferenceDate } from './content-cleanup.js';
+import { createContentCleanup, getRejectionReferenceDate, deletionOrigin } from './content-cleanup.js';
 import { createPublishingWatchdog } from './publishing-watchdog.js';
 import { createLinkCheck, collectLiveLinkTargets, probeUrl } from './link-check.js';
 import { createCertReverify, parseExpiryMs, isCredlyUrl } from './cert-reverify.js';
@@ -181,25 +181,40 @@ describe('content cleanup', () => {
   it('hard-deletes soft-deleted content with its blogs and version rows, best-effort on versions', async () => {
     const store = memStore(
       {
-        content: [{ id: 'c1', publishedBlogId: 'b1', softDeletedAt: iso(-8 * 24 * H) }],
+        content: [
+          {
+            id: 'c1',
+            publishedBlogId: 'b1',
+            softDeletedAt: iso(-8 * 24 * H),
+            deletionRequestedBy: 'editor',
+          },
+        ],
         blogs: [{ id: 'b1' }, { id: 'b2', sourceContentId: 'c1' }],
         content_versions: [{ id: 'v1', contentId: 'c1' }],
       },
       (c, q) => {
-        if (c === 'content') return [{ id: 'c1', publishedBlogId: 'b1' }];
+        if (c === 'content') return q.includes('AND NOT (') ? [] : [{ id: 'c1', publishedBlogId: 'b1', deletionRequestedBy: 'editor' }];
         if (c === 'blogs') return [{ id: 'b2' }];
         if (c === 'content_versions') return [{ id: 'v1' }];
         return [];
       }
     );
-    const r = await createContentCleanup({ store, now, uuid: () => 'a2' }).hardDeleteSoftDeleted({
-      olderThanHours: 24 * 7,
-    });
+    const env = { CONTENT_HARD_DELETE: 'true' };
+    const r = await createContentCleanup({ store, now, uuid: () => 'a2', env }).hardDeleteSoftDeleted(
+      { olderThanHours: 24 * 7 }
+    );
     expect(r).toEqual({
+      dryRun: false,
+      examinedCount: 1,
+      eligibleCount: 1,
+      userRequestedCount: 1,
+      policyCount: 0,
+      refusedCount: 0,
       deletedContentCount: 1,
       deletedBlogCount: 2,
-      examinedCount: 1,
+      deletedVersionCount: 1,
       hasMore: false,
+      refusedHasMore: false,
     });
     expect(store.deleteDoc.mock.calls).toEqual([
       ['blogs', 'b1', 'b1'],
@@ -214,14 +229,133 @@ describe('content cleanup', () => {
       deletedContentCount: 1,
       deletedBlogCount: 2,
       deletedVersionCount: 1,
+      userRequestedCount: 1,
+      refusedCount: 0,
     });
     const empty = memStore({}, () => []);
-    expect(await createContentCleanup({ store: empty, now }).hardDeleteSoftDeleted()).toEqual({
+    const log = { log: vi.fn(), warn: vi.fn() };
+    expect(await createContentCleanup({ store: empty, now, env, log }).hardDeleteSoftDeleted()).toEqual({
+      dryRun: false,
+      examinedCount: 0,
+      eligibleCount: 0,
+      userRequestedCount: 0,
+      policyCount: 0,
+      refusedCount: 0,
       deletedContentCount: 0,
       deletedBlogCount: 0,
-      examinedCount: 0,
+      deletedVersionCount: 0,
       hasMore: false,
+      refusedHasMore: false,
     });
+    // An idle run still says so: the host.json override for this timer (T-766)
+    // witnesses this line, and silence would be indistinguishable from never firing.
+    expect(log.log).toHaveBeenCalledWith(
+      '[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=0 examined=0'
+    );
+  });
+
+  it('is dry-run until CONTENT_HARD_DELETE=true: nothing is deleted, no audit is written, the plan is logged', async () => {
+    const known = [
+      { id: 'u1', deletionRequestedBy: 'editor' },
+      { id: 'p1', softDeletedReason: 'rejected_aged_out' },
+    ];
+    const unknown = [{ id: 'x1' }];
+    const rows = [...known, ...unknown];
+    const store = memStore({ content: rows }, (c, q) =>
+      c === 'content' ? (q.includes('AND NOT (') ? unknown : known) : []
+    );
+    const log = { log: vi.fn(), warn: vi.fn() };
+    for (const env of [{}, { CONTENT_HARD_DELETE: 'false' }, { CONTENT_HARD_DELETE: 'TRUE' }]) {
+      const r = await createContentCleanup({ store, now, env, log }).hardDeleteSoftDeleted();
+      expect(r).toMatchObject({
+        dryRun: true,
+        eligibleCount: 2,
+        userRequestedCount: 1,
+        policyCount: 1,
+        refusedCount: 1,
+        deletedContentCount: 0,
+      });
+    }
+    expect(store.deleteDoc).not.toHaveBeenCalled();
+    expect(store.data.admin_audit_logs).toBeUndefined();
+    expect(log.log).toHaveBeenLastCalledWith(
+      '[cleanupSoftDeletedContent] dry-run: would delete content=2 (user=1, policy=1) refused=1 examined=3'
+    );
+    // Counts only — the refused document's id is an identifier and stays out of the trace.
+    expect(log.warn).toHaveBeenLastCalledWith(
+      '[cleanupSoftDeletedContent] refused 1 document(s) whose deletion mark has no recorded origin — left for review'
+    );
+  });
+
+  it('never deletes a document whose deletion mark has no recorded origin, even when armed', async () => {
+    // `drift` comes back from the eligible query but classifies unknown in
+    // memory — the second guard must refuse it too.
+    const known = [
+      { id: 'u1', deletionRequestedBy: 'editor' },
+      { id: 'p1', softDeletedReason: 'rejected_aged_out' },
+      { id: 'drift', deletionRequestedBy: '' },
+    ];
+    const unknown = [{ id: 'migrated' }, { id: 'bare' }];
+    const rows = [...known, ...unknown];
+    const store = memStore({ content: rows }, (c, q) =>
+      c === 'content' ? (q.includes('AND NOT (') ? unknown : known) : []
+    );
+    const env = { CONTENT_HARD_DELETE: 'true' };
+    const r = await createContentCleanup({ store, now, uuid: () => 'a3', env }).hardDeleteSoftDeleted();
+    expect(r).toMatchObject({
+      dryRun: false,
+      examinedCount: 5,
+      eligibleCount: 2,
+      refusedCount: 3,
+      deletedContentCount: 2,
+    });
+    expect(store.deleteDoc.mock.calls.map((c) => c[1])).toEqual(['u1', 'p1']);
+    for (const id of ['migrated', 'bare', 'drift']) expect(store.data.content.has(id)).toBe(true);
+    expect(store.data.admin_audit_logs.get('a3').details).toMatchObject({
+      affectedIds: ['u1', 'p1'],
+      refusedIds: ['migrated', 'bare', 'drift'],
+      refusedCount: 3,
+    });
+    // The eligible query never sees an unknown-origin row, so refused rows
+    // cannot occupy its TOP window and starve the eligible ones.
+    const [eligibleQuery, unknownQuery] = store.queryDocs.mock.calls.map((c) => c[1]);
+    expect(eligibleQuery).toContain('c.softDeletedAt <= @cutoff AND ((IS_STRING(c.deletionRequestedBy)');
+    expect(unknownQuery).toContain('AND NOT ((IS_STRING(c.deletionRequestedBy)');
+    // Armed, everything refused: nothing is deleted, but the audit entry is
+    // still written, because the refused ids are the record a human reviews.
+    const onlyUnknown = [{ id: 'bare1' }, { id: 'bare2' }];
+    const store2 = memStore({ content: onlyUnknown }, (c, q) =>
+      c === 'content' && q.includes('AND NOT (') ? onlyUnknown : []
+    );
+    const log2 = { log: vi.fn(), warn: vi.fn() };
+    const r2 = await createContentCleanup({ store: store2, now, uuid: () => 'a4', env, log: log2 }).hardDeleteSoftDeleted();
+    expect(r2).toMatchObject({ dryRun: false, examinedCount: 2, eligibleCount: 0, refusedCount: 2, deletedContentCount: 0 });
+    expect(store2.deleteDoc).not.toHaveBeenCalled();
+    expect(store2.data.admin_audit_logs.get('a4').details).toMatchObject({
+      deletedContentCount: 0,
+      refusedCount: 2,
+      refusedIds: ['bare1', 'bare2'],
+      affectedIds: [],
+    });
+    expect(log2.log).toHaveBeenLastCalledWith(
+      '[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=2 examined=2'
+    );
+    // Armed and idle: nothing examined, so nothing to record and no audit entry.
+    const idle = memStore({}, () => []);
+    await createContentCleanup({ store: idle, now, uuid: () => 'a5', env }).hardDeleteSoftDeleted();
+    expect(idle.data.admin_audit_logs).toBeUndefined();
+
+    // A full refused window reports hasMore even when the eligible window is not full.
+    const manyUnknown = Array.from({ length: 3 }, (_, i) => ({ id: `n${i}` }));
+    const store3 = memStore({}, (c, q) => (c === 'content' && q.includes('AND NOT (') ? manyUnknown : []));
+    const r3 = await createContentCleanup({ store: store3, now, uuid: () => 'a6', env }).hardDeleteSoftDeleted({ limit: 3 });
+    expect(r3).toMatchObject({ eligibleCount: 0, refusedCount: 3, hasMore: true, refusedHasMore: true });
+
+    expect(deletionOrigin({ deletionRequestedBy: 'x' })).toBe('user');
+    expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out' })).toBe('policy');
+    expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out', deletionRequestedBy: 'x' })).toBe('user');
+    expect(deletionOrigin({})).toBe('unknown');
+    expect(deletionOrigin(null)).toBe('unknown');
   });
 });
 

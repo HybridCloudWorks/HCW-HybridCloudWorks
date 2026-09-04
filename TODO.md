@@ -265,16 +265,18 @@ groups by risk. There is precedent: `CHECK_AGENT_HEALTH` and
 `CLEANUP_TEMP_STORAGE` were armed in a single apply on 2026-08-30, recorded
 as a departure with its justification.
 
-**What does not group.** The two timers that delete documents with no
-dry-run pin — `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` —
-stay one per apply, observed before the next. Grouping is a concession to
+**What does not group.** The two content reapers —
+`CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
+apply, observed before the next. The first is dry-run until
+`CONTENT_HARD_DELETE` and refuses any mark with no recorded origin (#334); the
+second only marks, and the mark is reversible. Grouping is a concession to
 calendar arithmetic, not to destructive operations.
 
 | Wave | Timers | Why grouped | Observable in |
 | ---: | --- | --- | --- |
 | 1 | ~~`PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE`~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | All four gates observed; the pipeline's `ScheduleStatus.Last` landed on its intended Chicago hour |
 | 2 | ~~`SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS`~~ | **Done 2026-09-04** — record in [CHANGELOG.md](CHANGELOG.md) | Both witnessed through the public side effect, the T-766 path: `rss_cache.refreshedAt` at its 02:00 Chicago boundary on 2026-09-03, `podcasts.updatedAt` at the 13:30Z firing on 2026-09-04. The first podcast firing left no stamp and its cause is not recoverable; the next miss is readable since #330 |
-| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents, no dry-run pin | 4 h |
+| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents. Dry-run until `CONTENT_HARD_DELETE`, and a mark with no recorded origin is never deleted (#334). Witness, decided 2026-09-04 (T-766): the per-category `host.json` override at Information; remove it when the wave closes. Two steps: arm and read at least two dry-run summaries, then flip the pin and read a deleting run | 4 h per step |
 | 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Deletes rejected documents, no dry-run pin | 24 h |
 | 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail — decide each on its merits before the wave, then arm together | 24 h |
 | 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. Arm only if Plaud and Publer are seeded; an armed timer with no credential is an erroring loop, not a no-op | 12 h |
@@ -399,6 +401,15 @@ invocation rather than the whole host's chatter, so it does not reopen T-719;
 but it is a `host.json` change and a deploy per wave, which is a real cost
 against the volume it saves. Decide per wave, at arming time, and record
 which was chosen in the wave's row.
+
+**Wave 3a, decided 2026-09-04: the per-category override.** Its side effect is
+an absence, and on an idle run the reaper used to write nothing at all — not
+even its audit record — so no container read can tell an idle run from a
+timer that never fired. `"Function.cleanupSoftDeletedContent": "Information"`
+in `host.json` restores that one timer's `Executed` rows, and the reaper now
+logs one summary line every run (#334). Read them with
+`pwsh -File scripts/cutover/05-verify-timer.ps1 -Name cleanupSoftDeletedContent -Hours 8`,
+which honours the override. Remove the override when the wave closes.
 
 Closes when every wave in the T-518 table has a stated witness, and no wave
 is armed against a timer whose evidence path is "none".

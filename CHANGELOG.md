@@ -139,7 +139,41 @@ This project has not cut a tagged release; entries are grouped under
   nothing in CI that would have caught it. These two were the only dead anchors
   in the repository.
 
+### Changed
+
+- **`host.json` raises one log category, `Function.cleanupSoftDeletedContent`,
+  to Information for Wave 3a (#334).** The T-766 decision for the first wave
+  with no public witness. The reaper's side effect is an absence, so no
+  container read can tell an idle run from a timer that never fired; the
+  override restores that one timer's `Executed` rows at a few lines per
+  invocation, which does not reopen T-719. It is a wave-scoped change and
+  comes out when the wave closes. `05-verify-timer.ps1` now reads a
+  per-category override before the `Function` default, so it works for this
+  timer again.
+
 ### Added
+
+- **`cleanupSoftDeletedContent` is dry-run until `CONTENT_HARD_DELETE=true`,
+  never deletes a document whose deletion mark has no recorded origin, and
+  reports every run (#334).** Before this the hard reaper deleted anything
+  carrying `softDeletedAt` older than seven days, and three different writers
+  put that mark on a document: the admin soft-delete route, which also
+  records `deletionRequestedBy`; and the two rejected-content agers, which
+  record `softDeletedReason: 'rejected_aged_out'`. A migrated document with an
+  old mark from the Firebase days carries neither, and it would have gone at
+  the first firing. Now the pin is the T-302 rule applied to the one timer
+  that deletes documents rather than blobs — `infra/functionapp.tf` seeds it
+  `"false"` beside the two blob pins — and origin is the rule the pin does not
+  lift: a mark with no `deletionRequestedBy` and no `softDeletedReason` is
+  counted, logged at Warning as a count, recorded by id in the audit entry
+  that every armed run writes once it has examined anything (a dry run
+  writes no audit document), and left for a human in the admin content
+  queue's `soft_deleted` filter.
+
+  Every run now logs one summary line, idle runs included: in dry-run, what
+  it would delete by origin; when armed, what it did. Before this an idle run
+  wrote nothing, not even its audit record, which is why Wave 3a had no
+  witness at all. Traces carry counts only; ids go to the audit document.
 
 - **T-518 Wave 2 armed and observed: the two feed-ingesting timers now run,
   and `podcasts` has its first production write (#332).** `SYNC_RSS_FEEDS`

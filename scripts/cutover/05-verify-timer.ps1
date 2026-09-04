@@ -484,12 +484,21 @@ $timers | Sort-Object Name | Format-Table -AutoSize | Out-String | Write-Host
 #
 # For anything after the cut, the witness is the timer's durable side effect:
 #   node scripts/verify-timer-witness.mjs --timer <name> --since <ISO>
+#
+# A per-category override — "Function.<name>": "Information" — restores the
+# rows for that one timer (the T-766 per-wave path), so it is read first.
 $hostJsonPath = Join-Path $PSScriptRoot '..' '..' 'functions' 'host.json'
 $functionLevel = $null
-try { $functionLevel = (Get-Content -Path $hostJsonPath -Raw | ConvertFrom-Json).logging.logLevel.Function }
+$levelSource = 'Function'
+try {
+    $logLevel = (Get-Content -Path $hostJsonPath -Raw | ConvertFrom-Json).logging.logLevel
+    $override = $logLevel.PSObject.Properties["Function.$Name"]
+    if ($override) { $functionLevel = $override.Value; $levelSource = "Function.$Name" }
+    else { $functionLevel = $logLevel.Function }
+}
 catch { $functionLevel = $null }
 if ($functionLevel -and $functionLevel -notin @('Information', 'Debug', 'Trace')) {
-    Write-Warn "host.json gates 'Function' at $functionLevel, so the host has written no Executed/ScheduleStatus"
+    Write-Warn "host.json gates '$levelSource' at $functionLevel, so the host has written no Executed/ScheduleStatus"
     Write-Warn 'traces since that shipped (#321, 2026-09-02 17:59Z). Rows below can only predate it.'
     Write-Warn 'For invocations after the cut, read the durable side effect instead:'
     Write-Host "  node scripts/verify-timer-witness.mjs --timer $Name --since <the apply time, ISO 8601>" -ForegroundColor Cyan

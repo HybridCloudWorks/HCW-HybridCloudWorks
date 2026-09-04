@@ -12,6 +12,17 @@
  * Firestore's 500-write batch cap shaped the upstream code; Cosmos has no
  * batch here, so each document is its own operation and a failure stops the
  * run at that document rather than rolling anything back.
+ *
+ * The hard reaper is DRY-RUN until `CONTENT_HARD_DELETE=true` (the T-302 rule:
+ * arming the timer and arming the deletion are two decisions), and it never
+ * deletes a document whose mark has no recorded origin. Three things write
+ * `softDeletedAt`: the admin soft-delete route, which also writes
+ * `deletionRequestedBy`; and the two rejected-content agers (this file and the
+ * gallery route), which write `softDeletedReason: 'rejected_aged_out'`. A mark
+ * carrying neither — a migrated document, or a writer nobody has audited — is
+ * refused and left for a human: the admin content queue lists it under the
+ * `soft_deleted` filter. Every run logs one summary line, idle runs included,
+ * so the per-category host.json override (T-766) has something to witness.
  */
 import { getDocDateValue } from '../cms/content-dedup.js';
 import { writeSystemAudit } from './workflow-records.js';
@@ -25,7 +36,20 @@ export function getRejectionReferenceDate(data) {
   );
 }
 
-export function createContentCleanup({ store, now = () => new Date(), uuid, log = {} }) {
+/** Who put the deletion mark on a document — the only thing the hard reaper trusts. */
+export function deletionOrigin(doc) {
+  if (doc?.deletionRequestedBy) return 'user';
+  if (doc?.softDeletedReason === 'rejected_aged_out') return 'policy';
+  return 'unknown';
+}
+
+export function createContentCleanup({
+  store,
+  now = () => new Date(),
+  uuid,
+  log = {},
+  env = process.env,
+}) {
   const auditOpts = { now, ...(uuid && { uuid }) };
 
   /** Mark rejected content older than `olderThanHours` as soft-deleted. */
@@ -86,21 +110,92 @@ export function createContentCleanup({ store, now = () => new Date(), uuid, log 
     };
   }
 
-  /** Hard-delete content soft-deleted longer than `olderThanHours` ago, with its blogs and versions. */
+  /**
+   * Hard-delete content soft-deleted longer than `olderThanHours` ago, with its
+   * blogs and versions. Dry-run unless `CONTENT_HARD_DELETE=true`; documents
+   * whose mark has no recorded origin are refused in both modes.
+   */
   async function hardDeleteSoftDeleted({ olderThanHours = 24, limit = 200 } = {}) {
+    const deleteEnabled = env.CONTENT_HARD_DELETE === 'true';
     const maxLimit = Math.min(Number(limit) || 200, 500);
     const cutoff = new Date(now().getTime() - olderThanHours * 60 * 60 * 1000).toISOString();
-    const rows = await store.queryDocs(
-      'content',
-      `SELECT TOP ${maxLimit} c.id, c.publishedBlogId FROM c WHERE IS_DEFINED(c.softDeletedAt) AND c.softDeletedAt != null AND c.softDeletedAt <= @cutoff`,
-      [{ name: '@cutoff', value: cutoff }]
-    );
-    if (!rows || !rows.length)
-      return { deletedContentCount: 0, deletedBlogCount: 0, examinedCount: 0, hasMore: false };
+    // Origin is decided in the query, not only in memory: if unknown-origin
+    // rows shared the TOP window with eligible ones, enough of them would
+    // starve the eligible rows forever (they are never deleted, so they never
+    // leave the window). Eligible and refused are two bounded queries, and
+    // the in-memory check below stays as a second guard on what came back.
+    const params = [{ name: '@cutoff', value: cutoff }];
+    const agedClause =
+      'IS_DEFINED(c.softDeletedAt) AND c.softDeletedAt != null AND c.softDeletedAt <= @cutoff';
+    const knownOriginClause =
+      '((IS_STRING(c.deletionRequestedBy) AND c.deletionRequestedBy != "") OR c.softDeletedReason = "rejected_aged_out")';
+    const candidates =
+      (await store.queryDocs(
+        'content',
+        `SELECT TOP ${maxLimit} c.id, c.publishedBlogId, c.deletionRequestedBy, c.softDeletedReason FROM c WHERE ${agedClause} AND ${knownOriginClause}`,
+        params
+      )) || [];
+    const unknownRows =
+      (await store.queryDocs(
+        'content',
+        `SELECT TOP ${maxLimit} c.id FROM c WHERE ${agedClause} AND NOT ${knownOriginClause}`,
+        params
+      )) || [];
 
+    const eligible = [];
+    const refusedIds = unknownRows.map((d) => d.id);
+    let userRequestedCount = 0;
+    let policyCount = 0;
+    for (const doc of candidates) {
+      const origin = deletionOrigin(doc);
+      if (origin === 'unknown') {
+        refusedIds.push(doc.id);
+        continue;
+      }
+      if (origin === 'user') userRequestedCount += 1;
+      else policyCount += 1;
+      eligible.push(doc);
+    }
+    const examinedCount = candidates.length + unknownRows.length;
+
+    const summary = {
+      dryRun: !deleteEnabled,
+      examinedCount,
+      eligibleCount: eligible.length,
+      userRequestedCount,
+      policyCount,
+      refusedCount: refusedIds.length,
+      deletedContentCount: 0,
+      deletedBlogCount: 0,
+      deletedVersionCount: 0,
+      // Either window full means another pass is needed: the eligible one for
+      // the next deleting run, the refused one for the human review list.
+      hasMore: candidates.length === maxLimit || unknownRows.length === maxLimit,
+      refusedHasMore: unknownRows.length === maxLimit,
+    };
+    // Counts only: a document id is an identifier, and traces stay content-free.
+    if (refusedIds.length) {
+      log.warn?.(
+        `[cleanupSoftDeletedContent] refused ${refusedIds.length} document(s) whose deletion mark has no recorded origin — left for review`
+      );
+    }
+    if (!deleteEnabled) {
+      log.log?.(
+        `[cleanupSoftDeletedContent] dry-run: would delete content=${eligible.length} (user=${userRequestedCount}, policy=${policyCount}) refused=${refusedIds.length} examined=${examinedCount}`
+      );
+      return summary;
+    }
+    if (!examinedCount) {
+      log.log?.('[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=0 examined=0');
+      return summary;
+    }
+
+    // From here the run is armed and examined something. The audit entry is
+    // written even when nothing was eligible, because the refused ids are what
+    // a human needs to find the documents the reaper would not touch.
     let deletedBlogCount = 0;
     let versionsDeleted = 0;
-    for (const doc of rows) {
+    for (const doc of eligible) {
       const blogIds = new Set();
       if (
         doc.publishedBlogId &&
@@ -142,24 +237,29 @@ export function createContentCleanup({ store, now = () => new Date(), uuid, log 
         action: 'cron_hard_deleted_soft_deleted_content',
         source: 'cleanupSoftDeletedContent',
         details: {
-          deletedContentCount: rows.length,
+          deletedContentCount: eligible.length,
           deletedBlogCount,
           deletedVersionCount: versionsDeleted,
+          userRequestedCount,
+          policyCount,
+          refusedCount: refusedIds.length,
           olderThanHours,
-          affectedIds: rows.slice(0, 50).map((d) => d.id),
-          truncatedAffectedIds: rows.length > 50,
+          affectedIds: eligible.slice(0, 50).map((d) => d.id),
+          truncatedAffectedIds: eligible.length > 50,
+          refusedIds: refusedIds.slice(0, 50),
+          truncatedRefusedIds: refusedIds.length > 50,
         },
       },
       auditOpts
     );
     log.log?.(
-      `[cleanupSoftDeletedContent] content=${rows.length} blogs=${deletedBlogCount} versions=${versionsDeleted}`
+      `[cleanupSoftDeletedContent] content=${eligible.length} blogs=${deletedBlogCount} versions=${versionsDeleted} refused=${refusedIds.length} examined=${examinedCount}`
     );
     return {
-      deletedContentCount: rows.length,
+      ...summary,
+      deletedContentCount: eligible.length,
       deletedBlogCount,
-      examinedCount: rows.length,
-      hasMore: rows.length === maxLimit,
+      deletedVersionCount: versionsDeleted,
     };
   }
 
