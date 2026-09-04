@@ -122,6 +122,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **T-518 Wave 2 armed and observed: the two feed-ingesting timers now run,
+  and `podcasts` has its first production write (#PR).** `SYNC_RSS_FEEDS`
+  and `FETCH_PODCAST_FEEDS` were added to `enabled_timers` in the `hcw-azure`
+  workspace in one apply on 2026-09-03, ahead of the 00:00 Chicago window.
+  Same class, so they grouped: both ingest feeds and create content
+  documents, neither deletes anything, and re-delivery is safe by
+  construction — `cacheFeed` upserts `rss_cache` per feed, and `processFeed`
+  reads each episode by id and preserves `createdAt` before upserting.
+
+  **Observed through the durable side effect, not the host trace — the first
+  wave closed on the #328 witness.** The `Executed` rows the runbook's gate 4
+  used to read have not existed since #321 (T-766), so the evidence is what
+  each timer leaves behind, read through the public API by
+  `scripts/verify-timer-witness.mjs`:
+
+  - `syncRssFeeds` — PASS on the first read: every `rss_cache` document
+    re-stamped, newest `refreshedAt` 2026-09-03T07:00:16Z, which is the 02:00
+    Chicago boundary of its every-two-hours schedule to the second. Nothing
+    else writes that stamp at that minute — the admin `fetch-rss-feeds` job
+    had last run the previous evening — so this is the timer.
+  - `fetchPodcastFeeds` — FAIL on the first read (nothing newer than the May
+    migration after the 05:30Z firing), then PASS at the 13:30Z firing on
+    2026-09-04, the first after the #330 deploy restarted the host at
+    13:24Z. `podcasts.updatedAt` is re-stamped on every episode each run, so
+    a fresh stamp is the handler completing an upsert, not merely starting.
+
+  **What the record cannot say.** The 05:30Z miss is not explained. That
+  firing predates #330, so whatever happened — a feed that did not answer,
+  an empty feed, or a handler that did not run — was logged at Information
+  and dropped by the Warning gate; and the firings between the two reads
+  were not read. The next miss will be readable: since #330 a failed feed
+  writes an Error row and an empty feed a Warning row in the
+  `Function.fetchPodcastFeeds` category, with the query in the #330 entry
+  below. This is the collision T-766 describes, met on the first wave to arm
+  after it.
+
+  `T-764` does not close on this entry. Its writer is observed; the closing
+  condition also asks for the `azure` podcast page to render an episode, and
+  that read is still owed.
+
 - **The arming gate reads the timer's durable side effect through the public
   API, and needs nothing else (#328).** `scripts/verify-timer-witness.mjs`
   takes a timer name and an ISO `--since`, fetches that timer's witness from
