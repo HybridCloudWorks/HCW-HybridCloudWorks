@@ -63,7 +63,7 @@ locals {
     GENERATE_REVIEWER_DIGEST     = "generateReviewerDigest — daily 07:00 reviewer digest e-mail"
     CHECK_LIVE_LINKS             = "checkLiveLinks — weekly Monday link check"
     CLEANUP_REJECTED_CONTENT     = "cleanupRejectedContent — daily 04:00, deletes rejected documents"
-    CLEANUP_SOFT_DELETED_CONTENT = "cleanupSoftDeletedContent — every 4 hours, purges soft-deleted documents"
+    CLEANUP_SOFT_DELETED_CONTENT = "cleanupSoftDeletedContent — every 4 hours, purges soft-deleted documents (dry-run unless CONTENT_HARD_DELETE; a mark with no recorded origin is never deleted)"
     REVERIFY_CERTIFICATIONS      = "reVerifyCertifications — weekly Sunday certification re-verify"
     SCRAPE_SKILLS_HUB_RSS        = "scrapeSkillsHubRss — weekly Friday Skills Hub scrape"
     REFRESH_PLAUD_TOKEN          = "refreshPlaudToken — Plaud OAuth token refresh, every 12 hours"
@@ -536,12 +536,15 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # rather than silently arming nothing, because a typo here is indisting-
     # uishable from a timer that does not fire.
     }, local.timer_flags, {
-    # The two that delete blobs stay DRY-RUN even when their flag is on, until
+    # The three that delete stay DRY-RUN even when their flag is on, until
     # the matching *_DELETE setting is "true" (TODO.md T-302). Deliberately NOT
     # part of enabled_timers: arming the timer and arming the deletion are two
     # decisions, and conflating them is how a dry run becomes a data loss.
+    # CONTENT_HARD_DELETE is the content reaper's pin (T-518 Wave 3a): the
+    # only one of the three that deletes documents rather than blobs.
     "TEMP_STORAGE_CLEANUP_DELETE" = "false"
     "CERT_IMAGE_CLEANUP_DELETE"   = "false"
+    "CONTENT_HARD_DELETE"         = "false"
 
     # Extra browser origins allowed to call the API, comma-separated, on top of
     # the production allowlist compiled into lib/auth/cors.js

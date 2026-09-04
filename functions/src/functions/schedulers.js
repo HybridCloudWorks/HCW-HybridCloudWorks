@@ -149,7 +149,8 @@ timer('cleanupRejectedContent', 'CLEANUP_REJECTED_CONTENT', '0 0 4 * * *', (cont
 
 timer('cleanupSoftDeletedContent', 'CLEANUP_SOFT_DELETED_CONTENT', '0 0 */4 * * *', (context) =>
   // 7-day grace window from softDeletedAt; with the 24 h above, an accidental
-  // rejection is recoverable for ~8 days.
+  // rejection is recoverable for ~8 days. Dry-run until CONTENT_HARD_DELETE=true
+  // (T-302), and a mark with no recorded origin is never deleted.
   createContentCleanup({ store, log: context }).hardDeleteSoftDeleted({
     olderThanHours: 24 * 7,
     limit: 200,
