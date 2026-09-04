@@ -23,7 +23,7 @@ This project has not cut a tagged release; entries are grouped under
   had one production writer, the `fetchPodcastFeeds` timer, and its flag had
   never been `true`, so every provider podcast page rendered empty and, unlike
   the news pages, there was no admin job to fill the container by hand. The
-  only way in was Wave 2 of `T-518`, which is the entry above.
+  only way in was Wave 2 of `T-518`, recorded in the #332 entry under Added.
 
   Closed on two reads, both from the owner's laptop on 2026-09-04. The
   witness: `podcasts.updatedAt` fresh at the 13:30Z firing. The page:
