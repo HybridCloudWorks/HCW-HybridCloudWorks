@@ -18,6 +18,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The podcast pages had no data, and the `azure` one now plays real audio
+  (`T-764`, #PR).** Found 2026-09-02 beside the empty news pages: `podcasts`
+  had one production writer, the `fetchPodcastFeeds` timer, and its flag had
+  never been `true`, so every provider podcast page rendered empty and, unlike
+  the news pages, there was no admin job to fill the container by hand. The
+  only way in was Wave 2 of `T-518`, which is the entry above.
+
+  Closed on two reads, both from the owner's laptop on 2026-09-04. The
+  witness: `podcasts.updatedAt` fresh at the 13:30Z firing. The page:
+  https://hybridcloudworks.com/azure/audio-architecture renders the episodes,
+  and the public list behind it carries, for every episode, a `mediaUrl` on
+  podbean's media host with `mimeType` `audio/mpeg` and a `link` to the
+  podbean episode page — so Play and Download reach the file, and Open
+  reaches the page, which is what the player is built to do.
+
+  What this does not change: `PODCAST_FEEDS` holds exactly one feed, so the
+  aws, gcp and vmware podcast pages stay empty by configuration. Adding
+  feeds for them is a content decision, not a defect.
+
 - **`fetchPodcastFeeds` reports its failures at Warning and Error, so the
   #321 cut cannot hide them (#330).** The first Wave 2 witness read split:
   `syncRssFeeds` fresh at the 02:00 Chicago boundary, `fetchPodcastFeeds`
