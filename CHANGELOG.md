@@ -142,7 +142,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **`host.json` raises one log category, `Function.cleanupSoftDeletedContent`,
-  to Information for Wave 3a (#PR).** The T-766 decision for the first wave
+  to Information for Wave 3a (#334).** The T-766 decision for the first wave
   with no public witness. The reaper's side effect is an absence, so no
   container read can tell an idle run from a timer that never fired; the
   override restores that one timer's `Executed` rows at a few lines per
@@ -155,7 +155,7 @@ This project has not cut a tagged release; entries are grouped under
 
 - **`cleanupSoftDeletedContent` is dry-run until `CONTENT_HARD_DELETE=true`,
   never deletes a document whose deletion mark has no recorded origin, and
-  reports every run (#PR).** Before this the hard reaper deleted anything
+  reports every run (#334).** Before this the hard reaper deleted anything
   carrying `softDeletedAt` older than seven days, and three different writers
   put that mark on a document: the admin soft-delete route, which also
   records `deletionRequestedBy`; and the two rejected-content agers, which
