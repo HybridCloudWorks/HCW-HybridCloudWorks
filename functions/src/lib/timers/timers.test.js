@@ -193,7 +193,7 @@ describe('content cleanup', () => {
         content_versions: [{ id: 'v1', contentId: 'c1' }],
       },
       (c, q) => {
-        if (c === 'content') return [{ id: 'c1', publishedBlogId: 'b1', deletionRequestedBy: 'editor' }];
+        if (c === 'content') return q.includes('AND NOT (') ? [] : [{ id: 'c1', publishedBlogId: 'b1', deletionRequestedBy: 'editor' }];
         if (c === 'blogs') return [{ id: 'b2' }];
         if (c === 'content_versions') return [{ id: 'v1' }];
         return [];
@@ -253,12 +253,15 @@ describe('content cleanup', () => {
   });
 
   it('is dry-run until CONTENT_HARD_DELETE=true: nothing is deleted, no audit is written, the plan is logged', async () => {
-    const rows = [
+    const known = [
       { id: 'u1', deletionRequestedBy: 'editor' },
       { id: 'p1', softDeletedReason: 'rejected_aged_out' },
-      { id: 'x1' },
     ];
-    const store = memStore({ content: rows }, (c) => (c === 'content' ? rows : []));
+    const unknown = [{ id: 'x1' }];
+    const rows = [...known, ...unknown];
+    const store = memStore({ content: rows }, (c, q) =>
+      c === 'content' ? (q.includes('AND NOT (') ? unknown : known) : []
+    );
     const log = { log: vi.fn(), warn: vi.fn() };
     for (const env of [{}, { CONTENT_HARD_DELETE: 'false' }, { CONTENT_HARD_DELETE: 'TRUE' }]) {
       const r = await createContentCleanup({ store, now, env, log }).hardDeleteSoftDeleted();
@@ -283,34 +286,45 @@ describe('content cleanup', () => {
   });
 
   it('never deletes a document whose deletion mark has no recorded origin, even when armed', async () => {
-    const rows = [
+    // `drift` comes back from the eligible query but classifies unknown in
+    // memory — the second guard must refuse it too.
+    const known = [
       { id: 'u1', deletionRequestedBy: 'editor' },
       { id: 'p1', softDeletedReason: 'rejected_aged_out' },
-      { id: 'migrated', softDeletedReason: 'something_else' },
-      { id: 'bare' },
+      { id: 'drift', deletionRequestedBy: '' },
     ];
-    const store = memStore({ content: rows }, (c) => (c === 'content' ? rows : []));
+    const unknown = [{ id: 'migrated' }, { id: 'bare' }];
+    const rows = [...known, ...unknown];
+    const store = memStore({ content: rows }, (c, q) =>
+      c === 'content' ? (q.includes('AND NOT (') ? unknown : known) : []
+    );
     const env = { CONTENT_HARD_DELETE: 'true' };
     const r = await createContentCleanup({ store, now, uuid: () => 'a3', env }).hardDeleteSoftDeleted();
     expect(r).toMatchObject({
       dryRun: false,
-      examinedCount: 4,
+      examinedCount: 5,
       eligibleCount: 2,
-      refusedCount: 2,
+      refusedCount: 3,
       deletedContentCount: 2,
     });
     expect(store.deleteDoc.mock.calls.map((c) => c[1])).toEqual(['u1', 'p1']);
-    expect(store.data.content.has('migrated')).toBe(true);
-    expect(store.data.content.has('bare')).toBe(true);
+    for (const id of ['migrated', 'bare', 'drift']) expect(store.data.content.has(id)).toBe(true);
     expect(store.data.admin_audit_logs.get('a3').details).toMatchObject({
       affectedIds: ['u1', 'p1'],
-      refusedIds: ['migrated', 'bare'],
-      refusedCount: 2,
+      refusedIds: ['migrated', 'bare', 'drift'],
+      refusedCount: 3,
     });
+    // The eligible query never sees an unknown-origin row, so refused rows
+    // cannot occupy its TOP window and starve the eligible ones.
+    const [eligibleQuery, unknownQuery] = store.queryDocs.mock.calls.map((c) => c[1]);
+    expect(eligibleQuery).toContain('c.softDeletedAt <= @cutoff AND ((IS_STRING(c.deletionRequestedBy)');
+    expect(unknownQuery).toContain('AND NOT ((IS_STRING(c.deletionRequestedBy)');
     // Armed, everything refused: nothing is deleted, but the audit entry is
     // still written, because the refused ids are the record a human reviews.
     const onlyUnknown = [{ id: 'bare1' }, { id: 'bare2' }];
-    const store2 = memStore({ content: onlyUnknown }, (c) => (c === 'content' ? onlyUnknown : []));
+    const store2 = memStore({ content: onlyUnknown }, (c, q) =>
+      c === 'content' && q.includes('AND NOT (') ? onlyUnknown : []
+    );
     const log2 = { log: vi.fn(), warn: vi.fn() };
     const r2 = await createContentCleanup({ store: store2, now, uuid: () => 'a4', env, log: log2 }).hardDeleteSoftDeleted();
     expect(r2).toMatchObject({ dryRun: false, examinedCount: 2, eligibleCount: 0, refusedCount: 2, deletedContentCount: 0 });

@@ -119,18 +119,34 @@ export function createContentCleanup({
     const deleteEnabled = env.CONTENT_HARD_DELETE === 'true';
     const maxLimit = Math.min(Number(limit) || 200, 500);
     const cutoff = new Date(now().getTime() - olderThanHours * 60 * 60 * 1000).toISOString();
-    const rows =
+    // Origin is decided in the query, not only in memory: if unknown-origin
+    // rows shared the TOP window with eligible ones, enough of them would
+    // starve the eligible rows forever (they are never deleted, so they never
+    // leave the window). Eligible and refused are two bounded queries, and
+    // the in-memory check below stays as a second guard on what came back.
+    const params = [{ name: '@cutoff', value: cutoff }];
+    const agedClause =
+      'IS_DEFINED(c.softDeletedAt) AND c.softDeletedAt != null AND c.softDeletedAt <= @cutoff';
+    const knownOriginClause =
+      '((IS_STRING(c.deletionRequestedBy) AND c.deletionRequestedBy != "") OR c.softDeletedReason = "rejected_aged_out")';
+    const candidates =
       (await store.queryDocs(
         'content',
-        `SELECT TOP ${maxLimit} c.id, c.publishedBlogId, c.deletionRequestedBy, c.softDeletedReason FROM c WHERE IS_DEFINED(c.softDeletedAt) AND c.softDeletedAt != null AND c.softDeletedAt <= @cutoff`,
-        [{ name: '@cutoff', value: cutoff }]
+        `SELECT TOP ${maxLimit} c.id, c.publishedBlogId, c.deletionRequestedBy, c.softDeletedReason FROM c WHERE ${agedClause} AND ${knownOriginClause}`,
+        params
+      )) || [];
+    const unknownRows =
+      (await store.queryDocs(
+        'content',
+        `SELECT TOP ${maxLimit} c.id FROM c WHERE ${agedClause} AND NOT ${knownOriginClause}`,
+        params
       )) || [];
 
     const eligible = [];
-    const refusedIds = [];
+    const refusedIds = unknownRows.map((d) => d.id);
     let userRequestedCount = 0;
     let policyCount = 0;
-    for (const doc of rows) {
+    for (const doc of candidates) {
       const origin = deletionOrigin(doc);
       if (origin === 'unknown') {
         refusedIds.push(doc.id);
@@ -140,10 +156,11 @@ export function createContentCleanup({
       else policyCount += 1;
       eligible.push(doc);
     }
+    const examinedCount = candidates.length + unknownRows.length;
 
     const summary = {
       dryRun: !deleteEnabled,
-      examinedCount: rows.length,
+      examinedCount,
       eligibleCount: eligible.length,
       userRequestedCount,
       policyCount,
@@ -151,7 +168,7 @@ export function createContentCleanup({
       deletedContentCount: 0,
       deletedBlogCount: 0,
       deletedVersionCount: 0,
-      hasMore: rows.length === maxLimit,
+      hasMore: candidates.length === maxLimit,
     };
     // Counts only: a document id is an identifier, and traces stay content-free.
     if (refusedIds.length) {
@@ -161,11 +178,11 @@ export function createContentCleanup({
     }
     if (!deleteEnabled) {
       log.log?.(
-        `[cleanupSoftDeletedContent] dry-run: would delete content=${eligible.length} (user=${userRequestedCount}, policy=${policyCount}) refused=${refusedIds.length} examined=${rows.length}`
+        `[cleanupSoftDeletedContent] dry-run: would delete content=${eligible.length} (user=${userRequestedCount}, policy=${policyCount}) refused=${refusedIds.length} examined=${examinedCount}`
       );
       return summary;
     }
-    if (!rows.length) {
+    if (!examinedCount) {
       log.log?.('[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=0 examined=0');
       return summary;
     }
@@ -233,7 +250,7 @@ export function createContentCleanup({
       auditOpts
     );
     log.log?.(
-      `[cleanupSoftDeletedContent] content=${eligible.length} blogs=${deletedBlogCount} versions=${versionsDeleted} refused=${refusedIds.length} examined=${rows.length}`
+      `[cleanupSoftDeletedContent] content=${eligible.length} blogs=${deletedBlogCount} versions=${versionsDeleted} refused=${refusedIds.length} examined=${examinedCount}`
     );
     return {
       ...summary,
