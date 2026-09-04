@@ -123,7 +123,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **T-518 Wave 2 armed and observed: the two feed-ingesting timers now run,
-  and `podcasts` has its first production write (#PR).** `SYNC_RSS_FEEDS`
+  and `podcasts` has its first production write (#332).** `SYNC_RSS_FEEDS`
   and `FETCH_PODCAST_FEEDS` were added to `enabled_timers` in the `hcw-azure`
   workspace in one apply on 2026-09-03, ahead of the 00:00 Chicago window.
   Same class, so they grouped: both ingest feeds and create content
