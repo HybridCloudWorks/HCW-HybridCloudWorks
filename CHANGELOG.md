@@ -21,7 +21,7 @@ This project has not cut a tagged release; entries are grouped under
 - **Wave 3a's delete switch is on: `CONTENT_HARD_DELETE` is `true` (#343,
   T-518).** Owner decision 2026-09-05 after reading two dry-run firings
   (01:00Z and 05:00Z, both on their Chicago even-hour ticks) at
-  `content=0 (user=0, policy=0) refused=0 examined=0`: nothing has been
+  `[cleanupSoftDeletedContent] dry-run: would delete content=0 (user=0, policy=0) refused=0 examined=0`: nothing has been
   soft-deleted for longer than the reaper's 7-day grace window, so the
   first armed run deletes nothing. The origin refusal from #334 holds in
   both modes. The live witness for the classification is a test page the
