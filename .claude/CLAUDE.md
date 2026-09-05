@@ -99,10 +99,15 @@ so it is recorded here, where every session reads it.
   own checks have been run locally, or it exists to hold a question rather
   than a change, say so in the first line of the description and open it as
   a draft. Otherwise not.
-- **Copilot's "Approval recommended" is the owner's "merge".** Owner decision
-  2026-09-05: Copilot code review has authority to approve PRs in this
-  repository, so when its review of the **current head** recommends approval,
-  a session merges without waiting for the owner to say so — provided every
-  required check is green on that head and no review thread is unresolved.
-  A "Changes recommended" review is not that: fix, push, and wait for the
-  next review. Ready for review on its own is still not permission to merge.
+- **A Copilot review that recommends approval is the owner's "merge".** Owner
+  decision 2026-09-05: Copilot code review has authority to approve PRs in
+  this repository, so when its review of the **current head** recommends
+  approval, a session merges without waiting for the owner to say so —
+  provided every required check is green on that head and no review thread
+  is unresolved. Read the verdict, not the wording: Copilot's approval line
+  has changed before (in this repository it has read "This pull request is
+  ready to be approved."), so key on a review with no findings that
+  recommends approval, never on an exact string. A review that recommends
+  changes or leaves a finding open is not that: fix, push, and wait for the
+  next review of the new head. Ready for review on its own is still not
+  permission to merge.
