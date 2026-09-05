@@ -300,8 +300,10 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
   # #339 and nothing ever wrote it), and the guard cannot be lifted for one
   # instance of a for_each. The plan that carries this change must show
   # EXACTLY ONE resource to destroy — azurerm_cosmosdb_sql_container.hcw
-  # ["ai_insights"] — and nothing else destroyed or replaced. Any other
-  # destroy in that plan is a reason to discard the run, not to approve it.
+  # ["ai_insights"]. The workspace's permanent azapi diff (three resources
+  # replaced, Function App restart) is expected on this apply as on every
+  # other. Any destroy or replace beyond that baseline is a reason to
+  # discard the run, not to approve it.
   lifecycle {
     prevent_destroy = false
   }
