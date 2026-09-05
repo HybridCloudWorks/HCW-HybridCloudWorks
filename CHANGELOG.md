@@ -18,6 +18,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`05-verify-timer.ps1` reported a zero-row answer as a failed query (#336).**
+  `Invoke-WorkspaceQuery` ended with `return $rows`, and PowerShell unrolls
+  an array onto the pipeline on return — an empty one unrolls to nothing, so
+  a query that ran and found no rows reached the caller as `$null`, which
+  every caller reads as "the workspace query did not run", with the advice
+  to check `az login`, the subscription and Log Analytics Reader. None of
+  those was wrong on either occasion it fired: on 2026-09-03 the
+  `syncRssFeeds -Hours 8` read after the #321 cut, and on 2026-09-05 the
+  first `cleanupSoftDeletedContent` read before that timer had fired. The
+  helper now returns `,$rows`, so an empty answer arrives as an empty array
+  and reaches the branch that already existed for it — "No invocation rows
+  for these timers" with its two causes — and `$null` is reserved for the
+  call that failed. The #327 stderr capture had made a genuine failure
+  legible; this makes the absence of failure legible too.
+
 - **The podcast pages had no data, and the `azure` one now plays real audio
   (`T-764`, #PR).** Found 2026-09-02 beside the empty news pages: `podcasts`
   had one production writer, the `fetchPodcastFeeds` timer, and its flag had
