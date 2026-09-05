@@ -156,6 +156,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`T-766` closed: every remaining timer wave has a stated witness (#338).**
+  Found 2026-09-03 when Wave 2's gates returned nothing: #321 had cut the
+  `Function` log category to Warning, which removed the `Executed` and
+  `ScheduleStatus` rows the timer-observation gate read, while its own record
+  said it had protected the table the gate used. The owner kept the cut and
+  made the side effect the witness (`scripts/verify-timer-witness.mjs`, #328),
+  which observed Wave 2; the per-category `host.json` override was decided
+  for Wave 3a on 2026-09-04 (#334). On 2026-09-05 the owner decided the
+  remaining waves in one sitting — Wave 4's three timers all approved, Wave
+  5's two credentials both held, and waves 4, 5 and 6 to arm together in one
+  apply after 3b, since none of the nine deletes anything — and each row in
+  the T-518 table now names
+  its witness: the override, added for a wave when it arms and removed when
+  it closes. The item's closing condition was a stated witness per wave, so
+  it is met; the per-wave work stays in the wave rows. Two records were
+  corrected on the way: neither Wave 5 timer loops on a missing credential
+  (both skip), and the delta-import ordering rule on `SYNC_SOCIAL_CALENDAR`
+  is moot since the import was retired on 2026-08-24.
+
 - **`host.json` raises one log category, `Function.cleanupSoftDeletedContent`,
   to Information for Wave 3a (#334).** The T-766 decision for the first wave
   with no public witness. The reaper's side effect is an absence, so no
