@@ -16,7 +16,7 @@ an engineer working from a checkout if it needs tenant, Cloudflare or
 repository-admin access — the carried-over sections say so in their own words,
 and `Gate: owner` still marks the rest.
 
-## Status — 2026-09-02
+## Status — 2026-09-05
 
 > **Nothing is open as of 2026-09-05.** The last two items — `T-518`, arm the
 > remaining timers, and `T-726`, prove the nightly refresh — closed on the

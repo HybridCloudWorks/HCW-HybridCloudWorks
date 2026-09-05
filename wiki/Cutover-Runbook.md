@@ -700,8 +700,9 @@ witness stamp against the schedule by hand — a `refreshedAt` of `05:00Z` on a
 This step's "one timer per apply" rule was set when the arming mechanism was
 unproven. It has since been observed three times, once across the apply
 boundary itself, so the owner decided on 2026-09-02 to arm the remaining
-fifteen in risk-grouped waves — recorded with its reasoning in TODO.md
-under T-518, which is the live plan. Taken literally the rule cost roughly
+fifteen in risk-grouped waves — the plan, its reasoning and its close are
+recorded in CHANGELOG.md under T-518 (it lived in TODO.md until the last
+wave armed on 2026-09-05). Taken literally the rule cost roughly
 five weeks and fifteen Function App restarts, three of the fifteen timers
 being weekly.
 

@@ -33,13 +33,13 @@ This project has not cut a tagged release; entries are grouped under
 
   | Wave | Timers | Record |
   | ---: | --- | --- |
-  | 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) |
-  | 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | **Done 2026-09-04** — record in [CHANGELOG.md](CHANGELOG.md) |
-  | 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo. Armed, and its delete switch turned on, 2026-09-05.** Step 1 read: two dry-run firings (01:00Z and 05:00Z on 2026-09-05, both at their Chicago even-hour ticks) reported `[cleanupSoftDeletedContent] dry-run: would delete content=0… |
-  | 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Marks aged rejections soft-deleted with `softDeletedReason: rejected_aged_out`; no dry-run pin, because the mark is reversible and only 3a turns it into a deletion. Witness (T-766), decided 2026-09-05: the per-category override,… |
-  | 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail. **Decided 2026-09-05: all three approved, and waves 4, 5 and 6 arm together in one apply after 3b closes** — none of the nine deletes anything, and the only reason to separate them was the approvals and witnesses,… |
-  | 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. **Decided 2026-09-05: the owner holds both.** Seeding differs: Publer is the two Key Vault secrets `PUBLER-API-KEY` and `PUBLER-WORKSPACE-ID`, written at https://hybridcloudworks.com/admin/api-keys; Plaud is no… |
-  | 6 | `CHECK_LIVE_LINKS`, `REVERIFY_CERTIFICATIONS`, `SCRAPE_SKILLS_HUB_RSS`, `CLEANUP_UNUSED_CERT_IMAGES` | The three weekly timers fire on Monday, Sunday and Friday — non-overlapping windows, so one week observes all three. The fourth is dry-run pinned by `CERT_IMAGE_CLEANUP_DELETE`. Arms with waves 4 and 5 (decided 2026-09-05, row 4). Witness (T-766): the… |
+  | 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | Done 2026-09-02 (#323): all four gates observed |
+  | 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | Done 2026-09-04 (#332): both witnessed through the public side effect |
+  | 3a | `CLEANUP_SOFT_DELETED_CONTENT` | Destructive, solo. Armed 2026-09-05; delete switch flipped in #343 after two dry-run firings reported zero across the board; a mark with no recorded origin is refused in both modes (#334) |
+  | 3b | `CLEANUP_REJECTED_CONTENT` | Destructive, solo. Armed 2026-09-05 evening, one apply on its own; marks aged rejections soft-deleted, reversibly, and only 3a turns the mark into a deletion |
+  | 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends mail; all three approved 2026-09-05 and armed with waves 5 and 6 in the last apply |
+  | 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held credentials; Publer's two Key Vault secrets and both Plaud tokens were seeded on 2026-09-05 (#342) before the apply |
+  | 6 | `CHECK_LIVE_LINKS`, `REVERIFY_CERTIFICATIONS`, `SCRAPE_SKILLS_HUB_RSS`, `CLEANUP_UNUSED_CERT_IMAGES` | Three weekly timers on Monday, Sunday and Friday plus one daily timer still dry-run pinned by `CERT_IMAGE_CLEANUP_DELETE`; armed in the last apply |
 
   Waves 1 and 2 were observed through all four gates (#323, #332). The
   per-category `host.json` overrides that served as witnesses for 3a through
