@@ -541,10 +541,15 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # part of enabled_timers: arming the timer and arming the deletion are two
     # decisions, and conflating them is how a dry run becomes a data loss.
     # CONTENT_HARD_DELETE is the content reaper's pin (T-518 Wave 3a): the
-    # only one of the three that deletes documents rather than blobs.
+    # only one of the three that deletes documents rather than blobs. Flipped
+    # 2026-09-05 (#343) after two dry-run firings were read at zero across
+    # the board — nothing soft-deleted for longer than the 7-day grace window
+    # existed, so the first armed run deletes nothing. A mark with no recorded
+    # origin is refused in both modes (#334); the owner's planted test page is
+    # the live witness for the classification, due a week after its mark.
     "TEMP_STORAGE_CLEANUP_DELETE" = "false"
     "CERT_IMAGE_CLEANUP_DELETE"   = "false"
-    "CONTENT_HARD_DELETE"         = "false"
+    "CONTENT_HARD_DELETE"         = "true"
 
     # Extra browser origins allowed to call the API, comma-separated, on top of
     # the production allowlist compiled into lib/auth/cors.js
