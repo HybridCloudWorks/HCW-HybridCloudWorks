@@ -48,12 +48,23 @@
 # =============================================================================
 # Azure Static Web App (frontend hosting)
 #
-# Standard tier provides:
-#   - Custom domain with free managed SSL
-#   - Global CDN (Azure Front Door backbone)
-#   - SPA routing (navigationFallback in staticwebapp.config.json)
-#   - Staging environments (preview on PRs)
-#   - 100 GB bandwidth/month included
+# Free tier since 2026-09-05 (owner decision, #341). Everything this estate
+# uses is in Free: custom domains with managed SSL (2 per app — the apex and
+# www are exactly 2), global distribution, SPA routing (navigationFallback in
+# staticwebapp.config.json), 3 preview environments, 100 GB bandwidth a month
+# included, and a 250 MB app limit against a build of about 117 MB. The
+# comment that used to sit here listed those as Standard-only; checked
+# against Microsoft's plan comparison on 2026-09-02, none of them is.
+#
+# What Standard bought and this estate did not use: the 99.95% SLA, bandwidth
+# overage at USD 0.20/GB (Free has none — past 100 GB the site stops serving,
+# which Cloudflare caching in front makes unlikely), networking.allowedIpRanges,
+# bring-your-own-Functions linking, custom auth registrations, private
+# endpoints. About USD 9 a month, the workload's one fixed line.
+#
+# Microsoft documents moving between Free and Standard in either direction,
+# so this is a two-way door: a third custom domain or a bandwidth overage is
+# the signal to move back, and it is these two lines plus an apply.
 # =============================================================================
 resource "azurerm_static_web_app" "hcw" {
   name = "stapp-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
@@ -65,8 +76,8 @@ resource "azurerm_static_web_app" "hcw" {
   # to a single region is what retired that exception.
   location            = var.static_web_app_location
   resource_group_name = azurerm_resource_group.app["web"].name
-  sku_tier            = "Standard"
-  sku_size            = "Standard"
+  sku_tier            = "Free"
+  sku_size            = "Free"
   tags                = local.tags
 
   lifecycle {

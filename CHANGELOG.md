@@ -16,6 +16,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Changed
+
+- **The Static Web App runs on the Free tier (#341).** Owner decision
+  2026-09-05, closing the question carried in TODO.md since T-721 closed on
+  2026-09-02. Everything the estate uses is in Free — custom domains with
+  managed SSL, global distribution, SPA routing, preview environments, 100 GB
+  of bandwidth — and the two Free limits were verified from the repository
+  before the change: exactly two custom domains (the apex and www, Free's
+  maximum) and a build of about 117 MB against the 250 MB app limit. What
+  Standard bought and nothing here used: the 99.95% SLA and bandwidth
+  overage; past 100 GB a Free site stops serving instead of billing, which
+  Cloudflare caching in front makes unlikely. About USD 9 a month, the
+  workload's one fixed line. Microsoft documents the move in either
+  direction, so a third domain or an overage is the signal to move back.
+
+- **The container `prevent_destroy` guard is back on (#341).** #340 lifted
+  it for one apply to drop `ai_insights`; the owner read that plan at
+  exactly one destroy plus the workspace's permanent azapi baseline and
+  approved it on 2026-09-05. The guard comment now records the procedure
+  for the next deliberate drop: lift in its own PR, read the plan for one
+  destroy, restore in the next.
+
 ### Fixed
 
 - **`05-verify-timer.ps1` reported a zero-row answer as a failed query (#336).**
