@@ -18,6 +18,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`host.json` raises the nine remaining timer categories to Information
+  ahead of the last arming apply (#344, T-518 waves 4, 5 and 6).** Each of
+  `forgeScheduled`, `generateReviewerDigest`, `fetchBlogListings`,
+  `refreshPlaudToken`, `syncSocialCalendarScheduled`, `checkLiveLinks`,
+  `reVerifyCertifications`, `scrapeSkillsHubRss` and
+  `cleanupUnusedCertImages` gets the per-category override that was decided
+  as its witness on 2026-09-05, so `05-verify-timer.ps1` reads real
+  invocations the moment the owner adds the nine names to `enabled_timers`.
+  Until that apply the only cost is a `disabled — skipping` row per tick,
+  which for the five-minute calendar sync is a few hundred small rows a day
+  against a workspace running well under its cap. Every override comes out
+  again in the PR that closes its wave.
+
 - **Wave 3a's delete switch is on: `CONTENT_HARD_DELETE` is `true` (#343,
   T-518).** Owner decision 2026-09-05 after reading two dry-run firings
   (01:00Z and 05:00Z, both on their Chicago even-hour ticks) at
