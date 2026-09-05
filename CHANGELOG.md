@@ -156,6 +156,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Removed
 
+- **The `ai_insights` container is dropped from the estate (#340).** Owner
+  decision 2026-09-05, after its reader was retired in #339 (`T-765`):
+  nothing ever wrote it, so it held only the documents the 2026-08-21
+  migration carried across, with no reader. The manifest entry is gone,
+  `infra/cosmos-containers.json` is regenerated (72 containers, from 73),
+  and the container `prevent_destroy` guard is lifted for this one apply,
+  because it covers every instance of the `for_each` and cannot be lifted
+  for one. The apply is the owner's to approve, on a plan that must read
+  exactly one destroy; the PR that follows restores the guard. This is the
+  first container dropped from production since cutover, and it is done as
+  its own apply rather than a rider on any other change, the rule T-302 set
+  for cleanup timers and `scratch.tf` records for the sandbox.
+
 - **The AI insights panel and its `ai_insights` read path (#339, `T-765`).**
   Owner decision 2026-09-05: retire. `NewsPage` rendered the panel only when
   `VITE_NEWS_ENABLE_INSIGHTS` was `true` at build time, and the frontend

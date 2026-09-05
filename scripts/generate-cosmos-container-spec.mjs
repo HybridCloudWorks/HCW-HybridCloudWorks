@@ -148,13 +148,6 @@ const COMPOSITE_INDEXES = {
       ['lastFetched', 'descending'],
     ],
   ],
-  ai_insights: [
-    [
-      ['provider', 'ascending'],
-      ['active', 'ascending'],
-      ['generatedAt', 'descending'],
-    ],
-  ],
   podcasts: [
     [
       ['provider', 'ascending'],
