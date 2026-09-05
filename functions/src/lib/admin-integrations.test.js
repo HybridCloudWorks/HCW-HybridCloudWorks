@@ -462,6 +462,45 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
     expect(item.url).toBe('https://mcp.example/v2');
   });
 
+  it('reads never return oauthRefreshToken either, and report its presence (T-518 Wave 5)', async () => {
+    // The 12-hour refreshPlaudToken timer rotates with this value; the Connect
+    // tab shows whether auto-refresh is armed from the boolean, never the value.
+    const store = mergingStore(storedServer({ oauthRefreshToken: 'stored-ref' }));
+    const res = await patch(store, 'mcp-servers', { enabled: false });
+    const { item } = JSON.parse(res.body);
+
+    expect(res.body).not.toContain('stored-ref');
+    expect(item).not.toHaveProperty('oauthRefreshToken');
+    expect(item.hasOauthRefreshToken).toBe(true);
+    expect(JSON.parse((await patch(mergingStore(storedServer()), 'mcp-servers', { enabled: false })).body).item.hasOauthRefreshToken).toBe(false);
+  });
+
+  it('PATCH drops hasOauthRefreshToken as a read artefact and stores an explicit refresh token', async () => {
+    const store = mergingStore(storedServer());
+    await patch(store, 'mcp-servers', { oauthRefreshToken: 'new-ref', hasOauthRefreshToken: false });
+
+    const updates = store.patchDoc.mock.calls[0][2];
+    expect(updates.oauthRefreshToken).toBe('new-ref');
+    expect(updates).not.toHaveProperty('hasOauthRefreshToken');
+    expect((await patch(store, 'mcp-servers', { hasOauthRefreshToken: true })).status).toBe(400);
+  });
+
+  it('a PUT round trip carries a stored refresh token forward like the access token', async () => {
+    const store = mergingStore(storedServer({ oauthRefreshToken: 'stored-ref' }));
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    await h.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'plaud' },
+        body: { enabled: true, hasOauthToken: true, hasOauthRefreshToken: true },
+      }),
+      context
+    );
+    const saved = store.upsertDoc.mock.calls[0][1];
+    expect(saved.oauthToken).toBe('stored-tok');
+    expect(saved.oauthRefreshToken).toBe('stored-ref');
+    expect(saved).not.toHaveProperty('hasOauthRefreshToken');
+  });
+
   it('PATCH drops hasOauthToken instead of persisting it next to the token', async () => {
     // An edit form that PATCHes a field it read back sends the boolean with
     // it. Reads recompute the flag, so persisting it shadows nothing — it is

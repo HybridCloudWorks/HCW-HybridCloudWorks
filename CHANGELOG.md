@@ -16,6 +16,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **The Plaud Connect tab takes the refresh token too (#342, T-518 Wave 5).**
+  It stored only the access token, while `refreshPlaudToken` rotates the pair
+  with the refresh token and Plaud's access token lasts about a day — so the
+  Library lapsed daily and the timer, once armed, would have marked the
+  document `disconnected` at its first firing. The tab now has a second
+  field for `refresh_token` (both come from `~/.plaud/tokens-mcp.json`), the
+  API stores it write-only beside the access token — never returned, carried
+  through PUT round trips, reported as `hasOauthRefreshToken` — and the
+  banner says whether auto-refresh is armed. Reviewed against Plaud's
+  documentation on 2026-09-05: the quickstart's client id and secret belong
+  to Plaud Embedded, a different product (device SDK and transcription API)
+  that nothing here uses; the MCP tokens are the two values that matter.
+
+### Fixed
+
+- **`refreshPlaudToken` no longer disconnects a document that has an access
+  token but no refresh token (#342).** It warns and leaves the document as
+  it is; the access token expires on its own schedule.
+
 ### Changed
 
 - **The Static Web App runs on the Free tier (#341).** Owner decision

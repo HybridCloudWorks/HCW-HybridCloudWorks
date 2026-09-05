@@ -5,6 +5,18 @@
  * failed refresh flips the document to `disconnected` so the admin UI shows
  * the reconnect prompt.
  *
+ * A document with an access token but NO refresh token is not a failure:
+ * until 2026-09-05 the Connect tab stored only the access token, and this
+ * timer used to mark such a document disconnected every 12 hours — which
+ * would have broken a working Library the moment the timer was armed. It now
+ * warns and leaves the document alone; the access token expires on its own
+ * schedule and the Connect tab says whether auto-refresh is armed.
+ *
+ * These are the Plaud MCP tokens (the `third-party` OAuth flow behind
+ * `npx @plaud-ai/mcp install`), not Plaud Embedded's client id and secret —
+ * that is a different product (device SDK and transcription API) and nothing
+ * here uses it.
+ *
  * Ported from Site-Main index.js (088f458). The tokens live in the document,
  * as they did upstream — no app secret is involved.
  */
@@ -28,8 +40,9 @@ export function createPlaudTokenRefresh({
     }
     const refreshToken = doc.oauthRefreshToken;
     if (!refreshToken) {
-      log.warn?.('[refreshPlaudToken] no oauthRefreshToken stored');
-      await patch({ status: 'disconnected' });
+      log.warn?.(
+        '[refreshPlaudToken] no oauthRefreshToken stored; leaving the access token as it is'
+      );
       return { ok: false, reason: 'missing_refresh_token' };
     }
     try {

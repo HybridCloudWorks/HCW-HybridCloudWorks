@@ -53,12 +53,14 @@ const CONFIG_COLLECTIONS = {
   'mcp-servers': 'mcp_servers',
 };
 
-// The token value is write-only, but consumers need to know whether one is
-// stored (RecordingsPage renders 'connected' from status + token presence) —
-// so reads carry a boolean in its place.
-const stripOAuthToken = ({ oauthToken, ...rest }) => ({
+// The token values are write-only, but consumers need to know whether one is
+// stored (RecordingsPage renders 'connected' from status + token presence,
+// and since 2026-09-05 shows whether the 12-hour refresh timer has a refresh
+// token to work with) — so reads carry a boolean in place of each.
+const stripOAuthToken = ({ oauthToken, oauthRefreshToken, ...rest }) => ({
   ...rest,
   hasOauthToken: Boolean(oauthToken),
+  hasOauthRefreshToken: Boolean(oauthRefreshToken),
 });
 
 const SETTINGS_CONTAINER = 'admin_settings';
@@ -381,7 +383,7 @@ export function createAdminIntegrationHandlers({
         // An edit form round-tripping a read back into this handler would
         // otherwise persist the boolean into the stored document, where it
         // would then shadow the real value on the next read.
-        const { hasOauthToken: _ignored, ...incoming } = body;
+        const { hasOauthToken: _ignored, hasOauthRefreshToken: _ignored2, ...incoming } = body;
 
         const doc = {
           ...incoming,
@@ -402,6 +404,14 @@ export function createAdminIntegrationHandlers({
           existing?.oauthToken !== undefined
         ) {
           doc.oauthToken = existing.oauthToken;
+        }
+        // Same rule for the refresh token the 12-hour timer rotates with.
+        if (
+          container === 'mcp_servers' &&
+          !Object.prototype.hasOwnProperty.call(incoming, 'oauthRefreshToken') &&
+          existing?.oauthRefreshToken !== undefined
+        ) {
+          doc.oauthRefreshToken = existing.oauthRefreshToken;
         }
         await store.upsertDoc(container, doc);
         const item = container === 'mcp_servers' ? stripOAuthToken(doc) : doc;
@@ -434,7 +444,12 @@ export function createAdminIntegrationHandlers({
         // shadows the real value — it is simply a stale copy of a secret's
         // state, written into the document, that a later revoke would not
         // clear.
-        const { id: _ignored, hasOauthToken: _readArtefact, ...updates } = body;
+        const {
+          id: _ignored,
+          hasOauthToken: _readArtefact,
+          hasOauthRefreshToken: _readArtefact2,
+          ...updates
+        } = body;
         if (Object.keys(updates).length === 0) {
           return json(400, { error: 'Body must contain at least one updatable field' });
         }
