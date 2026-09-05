@@ -16,6 +16,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Changed
+
+- **Wave 3a's delete switch is on: `CONTENT_HARD_DELETE` is `true` (#343,
+  T-518).** Owner decision 2026-09-05 after reading two dry-run firings
+  (01:00Z and 05:00Z, both on their Chicago even-hour ticks) at
+  `content=0 (user=0, policy=0) refused=0 examined=0`: nothing has been
+  soft-deleted for longer than the reaper's 7-day grace window, so the
+  first armed run deletes nothing. The origin refusal from #334 holds in
+  both modes. The live witness for the classification is a test page the
+  owner soft-deleted the same day, which the reaper should delete a week
+  later as `user=1 refused=0` with an `admin_audit_logs` record; the wave
+  closes on that read, not on the flip. `host.json` also gains the
+  `Function.cleanupRejectedContent` override so Wave 3b has its witness
+  the moment it is armed.
+
 ### Added
 
 - **The Plaud Connect tab takes the refresh token too (#342, T-518 Wave 5).**

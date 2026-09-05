@@ -11,6 +11,7 @@
       "default": "Warning",
       "Function": "Warning",
       "Function.cleanupSoftDeletedContent": "Information",
+      "Function.cleanupRejectedContent": "Information",
       "Host.Results": "Information",
       "Host.Aggregator": "Warning",
       "Azure.Core": "Warning",
