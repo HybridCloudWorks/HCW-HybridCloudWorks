@@ -669,8 +669,9 @@ cutover with no gate. For a **no**-row timer the choices are to read its
 container directly with data-plane access, or to raise that one category —
 `"Function.<name>": "Information"` in `host.json` — for the wave and drop it
 after, which restores the trace for one timer at a few lines per invocation
-instead of the whole host's chatter. That is a per-wave decision (TODO.md
-T-766), not a default.
+instead of the whole host's chatter. That is a per-wave decision, not a
+default: every wave's choice is recorded in its row of the T-518 table in
+TODO.md (T-766, closed 2026-09-05 once each row had one).
 
 If telemetry and the witness disagree, believe the witness.
 
