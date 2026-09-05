@@ -18,7 +18,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
-- **`05-verify-timer.ps1` reported a zero-row answer as a failed query (#PR).**
+- **`05-verify-timer.ps1` reported a zero-row answer as a failed query (#336).**
   `Invoke-WorkspaceQuery` ended with `return $rows`, and PowerShell unrolls
   an array onto the pipeline on return — an empty one unrolls to nothing, so
   a query that ran and found no rows reached the caller as `$null`, which
