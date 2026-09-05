@@ -17,7 +17,7 @@ vi.mock('@/hooks/useBlogData', () => ({
 }));
 
 vi.mock('@/hooks/useNewsData', () => ({
-  useNewsData: () => ({ articles: [], rssItems: [], insights: [], loading: false }),
+  useNewsData: () => ({ articles: [], rssItems: [], loading: false }),
 }));
 
 vi.mock('@/hooks/usePublicData', () => ({
@@ -162,10 +162,6 @@ vi.mock('@/components/news/CuratedArticlesGrid', () => ({
 
 vi.mock('@/components/news/RssFeedTimeline', () => ({
   default: () => <div>RSS Feed Timeline</div>,
-}));
-
-vi.mock('@/components/news/AiInsightsPanel', () => ({
-  default: () => <div>AI Insights Panel</div>,
 }));
 
 // T-762. These three were declared twice — once inside the `/:provider` block

@@ -154,6 +154,22 @@ This project has not cut a tagged release; entries are grouped under
   nothing in CI that would have caught it. These two were the only dead anchors
   in the repository.
 
+### Removed
+
+- **The AI insights panel and its `ai_insights` read path (#339, `T-765`).**
+  Owner decision 2026-09-05: retire. `NewsPage` rendered the panel only when
+  `VITE_NEWS_ENABLE_INSIGHTS` was `true` at build time, and the frontend
+  deploy never set it, so no visitor has seen the panel since cutover; and
+  nothing in this repository ever wrote `ai_insights`, so it could only have
+  shown the documents the 2026-08-21 migration carried across, frozen.
+  Removed: `AiInsightsPanel.jsx`, the `insights` branch of `useNewsData` and
+  `fetchPublicFeed`, the build flag, and the second query in
+  `GET /api/public/feed`, whose response no longer carries `insights` (the
+  tests now assert one query, against `rss_cache` only). The container and
+  its documents are deliberately **not** dropped here: that is an apply that
+  destroys data, so it is recorded as its own owner decision in TODO.md
+  rather than riding on the next timer apply.
+
 ### Changed
 
 - **`T-766` closed: every remaining timer wave has a stated witness (#338).**

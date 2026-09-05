@@ -21,9 +21,10 @@
  *      Which filter depends on the collection, and this used to say
  *      "isPublicDocument" flatly, which was wrong in a way that mattered:
  *      `content` and `blogs` have an editorial workflow and use
- *      isPublicDocument; `podcasts`, `rss_cache` and `ai_insights` have none
- *      and use isSoftDeleted (plus `active` for insights). Applying
- *      isPublicDocument to the latter three rejects every document — see the
+ *      isPublicDocument; `podcasts` and `rss_cache` have none and use
+ *      isSoftDeleted (so did `ai_insights`, plus `active`, until its panel
+ *      was retired on 2026-09-05 — T-765). Applying
+ *      isPublicDocument to the latter two rejects every document — see the
  *      note on isSoftDeleted. The invariant is that a handler filters, not
  *      that every handler filters identically.
  *   2. NO ORDER BY ON published-date fields in Cosmos SQL. The published
@@ -93,15 +94,16 @@ export function isPublicDocument(doc = {}) {
  *   - `rss_cache` is a fetch cache, refilled by a scheduled job with a 7-day
  *     TTL (`infra/cosmos-containers.json`). Its documents are `{provider,
  *     feedName, items[]}`.
- *   - `ai_insights` is generated, and carries its own visibility flag,
- *     `active` — which is in its composite index precisely because that is how
- *     the collection expresses hidden.
  *   - `podcasts` is indexed on `provider + publishedAt`, with no status field.
+ *   - `ai_insights` was read here until 2026-09-05 (T-765): nothing in this
+ *     repository ever wrote it, so the panel it fed was retired and the
+ *     query with it. The container and its migrated documents remain until
+ *     the owner drops them in an apply of their own.
  *
  * TODO.md T-202 prescribed `.filter(isPublicDocument)` on the podcasts and feed
  * handlers. Applied literally it would have returned `false` for **every**
  * document in all three, silently emptying the podcasts page, the news feed and
- * the insights panel — the same shape of failure as T-101, arrived at through a
+ * the (since retired) insights panel — the same shape of failure as T-101, arrived at through a
  * security fix. The contract the module header states ("the server must
  * filter") is honoured by applying the part that is actually meaningful.
  *
@@ -370,7 +372,6 @@ const LIST_PROJECTION = PUBLIC_CONTENT_LIST_FIELDS.map((f) => `c["${f}"]`).join(
  * Do not tighten these to a render count.
  */
 const FEED_CACHE_MAX_DOCS = 200;
-const FEED_INSIGHTS_MAX_DOCS = 200;
 
 /**
  * Items served per `rss_cache` document (TODO.md T-319).
@@ -839,52 +840,40 @@ export function createPublicReadHandlers({ store }) {
     },
 
     /**
-     * GET /api/public/feed?provider= — rss_cache docs plus active ai_insights
-     * for one provider (useNewsData.js). Cache documents are trimmed to their
-     * newest items (T-319) and otherwise returned as stored; the flatten/sort
-     * across feeds stays client-side where it lives today.
+     * GET /api/public/feed?provider= — rss_cache docs for one provider
+     * (useNewsData.js). Cache documents are trimmed to their newest items
+     * (T-319) and otherwise returned as stored; the flatten/sort across feeds
+     * stays client-side where it lives today. Until 2026-09-05 the response
+     * also carried `insights` from `ai_insights` (T-765, retired).
      */
     async getFeed(request, context) {
       try {
         const provider = String(request.query.get('provider') || '').trim();
         if (!provider) return json(400, { error: 'provider required' });
 
-        // Both queries were unbounded on an anonymous endpoint, and queryDocs
+        // The query was unbounded on an anonymous endpoint, and queryDocs
         // calls .fetchAll() (TODO.md T-203). rss_cache is TTL-bounded at seven
         // days and syncRssFeeds now enforces that bound, but a document count
         // is not an item count and the timer only rewrites feeds it still
         // fetches — a retired feed's document keeps whatever it last held. The
-        // ceilings stay, and boundFeedItems below bounds the rest.
-        const [rssCache, insights] = await Promise.all([
-          store.queryDocs(
-            'rss_cache',
-            `SELECT TOP ${FEED_CACHE_MAX_DOCS} * FROM c WHERE c.provider = @provider`,
-            [{ name: '@provider', value: provider }]
-          ),
-          store.queryDocs(
-            'ai_insights',
-            `SELECT TOP ${FEED_INSIGHTS_MAX_DOCS} * FROM c WHERE c.provider = @provider`,
-            [{ name: '@provider', value: provider }]
-          ),
-        ]);
+        // ceiling stays, and boundFeedItems below bounds the rest.
+        const rssCache = await store.queryDocs(
+          'rss_cache',
+          `SELECT TOP ${FEED_CACHE_MAX_DOCS} * FROM c WHERE c.provider = @provider`,
+          [{ name: '@provider', value: provider }]
+        );
 
         return json(
           200,
           {
             success: true,
-            // Soft-delete applies to both; publication status applies to
-            // neither (see isSoftDeleted). `active !== false` is the
-            // ai_insights visibility model — it is in the container's composite
-            // index for exactly that reason — and a soft-deleted insight passed
-            // it, which is the half of T-202 that was a real leak.
-            // T-319: each surviving document is trimmed to its newest items so
-            // the response is bounded in articles, not just in feeds.
+            // Soft-delete applies; publication status does not (see
+            // isSoftDeleted). T-319: each surviving document is trimmed to its
+            // newest items so the response is bounded in articles, not just
+            // in feeds.
             rssCache: rssCache
               .filter((doc) => !isSoftDeleted(doc))
               .map((doc) => boundFeedItems(stripInternalFields(doc))),
-            insights: insights
-              .filter((doc) => doc.active !== false && !isSoftDeleted(doc))
-              .map(stripInternalFields),
           },
           120
         );

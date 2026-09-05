@@ -81,16 +81,15 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
 | 2 | `T-518` — arm the remaining timers | High | Three applies, each observed before the next: 3a (destructive, solo), 3b (destructive, solo), then waves 4, 5 and 6 together |
-| 3 | `T-765` — `ai_insights` has a reader and no writer | Low | An owner decision on whether the insights panel is a feature or is retired |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated,
-observed procedure, now sequenced into waves. Item 3 was found on
-2026-09-02 by tracing every container the public read layer reads back to
-whatever writes it — the audit that the empty news pages prompted, which also
-found `T-764`, closed 2026-09-04 by Wave 2. `T-766`, the witness gap that
-Wave 2 exposed, closed 2026-09-05 once every remaining wave had its witness
-stated in its own row below; the record is in [CHANGELOG.md](CHANGELOG.md).
+observed procedure, now sequenced into waves. The 2026-09-02 audit that
+traced every container the public read layer reads back to whatever writes
+it found `T-764` (closed 2026-09-04 by Wave 2) and `T-765` (closed 2026-09-05:
+the owner retired the insights panel). `T-766`, the witness gap that Wave 2
+exposed, closed 2026-09-05 once every remaining wave had its witness stated
+in its own row below. All three records are in [CHANGELOG.md](CHANGELOG.md).
 
 **The table and the sections below are in the same order, and that order is the
 one to work them in — not a sort of the Priority column.** Item 1 carries no
@@ -128,7 +127,7 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
 | 4 | Arm the remaining timers in three applies, each observed before the next — 3a, 3b, then waves 4, 5 and 6 together (`T-518`); every wave's witness is stated in its row (`T-766`, closed 2026-09-05) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 landed 2026-09-04 and closed `T-764` with it |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
-| 6 | Optional features: seed the keys and documents you actually want; decide whether the AI insights panel is a feature or is retired (`T-765`) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) and [Section 3](#3-t-765--ai_insights-has-a-reader-and-no-writer) | Decisions, not repairs — nothing above depends on any of them |
+| 6 | Optional features: seed the keys and documents you actually want (the insights-panel decision, `T-765`, was made 2026-09-05: retired) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
 
 The deliberately unscheduled feature backlog — analytics-informed topic
@@ -336,41 +335,6 @@ if a cap-day reading after arming shows the workspace back near 0.25 GB,
 the Basic-table-plan reserve lever in the T-719/T-721 CHANGELOG record is
 the next move.
 
-### 3. T-765 — `ai_insights` has a reader and no writer
-
-`GET /api/public/feed` returns an `insights` array beside `rssCache`, and the
-news pages render it as a panel. Nothing in this repository writes
-`ai_insights`. Eleven files name it and every one of them reads, declares or
-describes: the query in `functions/src/lib/public-reads.js` and its test, the
-container definitions in `infra/cosmos-containers.json`,
-`scripts/generate-cosmos-container-spec.mjs` and `.azure/api-surface.json`, the
-client-side doc comment in `frontend/src/lib/publicApi.js`, and
-`scripts/lib/migration-manifest.mjs`, which lists it `disposition: 'migrate'`.
-No write helper is called against it anywhere.
-
-**So the panel is frozen, not necessarily empty** — and the distinction is the
-point. Whatever insights came across in the migration are still served, filtered
-by `active !== false`; nothing has generated one since, and nothing will. A
-reader looking at a populated panel would have no way to tell it has been
-static since the cutover.
-
-This is a **product decision rather than a defect**, which is why it is Low and
-why the closing condition is a decision rather than a fix. Either the generator
-is a Site-Main feature that was deliberately not ported and the panel should be
-retired from `NewsPage`, or it is an intended feature whose writer is missing.
-Recorded without a recommendation because the original intent is not visible in
-this repository — the answer lives in Site-Main's history or in the owner's
-memory, not in code that can be read here.
-
-**Added 2026-09-05: the panel is already invisible in production.** `NewsPage`
-renders it only when `VITE_NEWS_ENABLE_INSIGHTS` is `true` at build time, and
-`deploy-azure-frontend.yml` does not set that variable, so the live news pages
-show no insights panel and no "AI Insights" stat card today. That narrows the
-decision: **retire** means deleting a component nobody sees, its query in
-`public-reads.js`, and the container definition; **keep** means building a
-generator that does not exist, which spends model calls, and then setting the
-flag. Recommendation: retire.
-
 ## Optional, and only if you want the feature
 
 None of these blocks anything. Each path no-ops when its key is absent; seed at
@@ -568,6 +532,7 @@ Entra row below, which is where it belongs.
 | Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
 | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
 | Static Web App tier | Decide whether the Standard tier (about USD 9/month, the workload's one fixed line) buys anything this estate uses — carried here when T-721 closed on 2026-09-02. **Checked against Microsoft's plan comparison on 2026-09-02, correcting what this row said before:** Free also provides custom domains with managed SSL (2 per app, against 5), global distribution, SPA routing, 100 GB included bandwidth — and **3 preview environments per app**, so "PR staging is Standard-only" was wrong. Standard-only and **none of it in use here**: `networking.allowedIpRanges` (absent from `staticwebapp.config.json`, which carries only `navigationFallback`, `globalHeaders`, `routes`, `responseOverrides`, `trailingSlash`), bring-your-own-Functions linking (the API is a separate app on its own hostname), custom auth registrations and function-assigned roles (admin auth is MSAL in the browser), private endpoints. So downgrading gives up exactly two things: the 99.95% SLA, and bandwidth overage — Free has **none**, so past 100 GB the site stops serving rather than billing USD 0.20/GB, which Cloudflare caching in front makes unlikely but not impossible. Verify two Free limits first: at most 2 custom domains (`az staticwebapp hostname list --name stapp-site-prod-cus-01 --resource-group rg-web-site-prod-cus -o json` — no pipe, so it pastes as-is out of this table) and a build under 250 MB | The tier stays Standard until decided; the change is `sku_tier`/`sku_size` in `infra/frontend.tf` plus an approved run, and Microsoft documents moving between Free and Standard in either direction — a two-way door, unlike purge protection |
+| `ai_insights` container | Drop it, or keep it. The panel that read it was retired on 2026-09-05 (T-765) and nothing ever wrote it, so the container now holds only the documents the 2026-08-21 migration carried across, with no reader. Dropping it is a manifest edit (`scripts/lib/migration-manifest.mjs`, then `node scripts/generate-cosmos-container-spec.mjs`) and an apply that **destroys the container and its documents** — irreversible, so it is its own apply and never a rider on a timer apply, the same rule T-302 sets for cleanup timers | Kept as-is: the definition stays in `infra/cosmos-containers.json`, costs nothing on a serverless account beyond its storage, and no code path reads or writes it |
 | ~~Provider-section go-live~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Owner decided all 24 pages ship at once. Every provider page is live; `GUARDED_FILES` in `frontend/scripts/validate-provider-pages.js` is now empty and the guard mechanism is retained for the next page that needs it |
 
 ## Live confirmation still requiring an authorized operator
