@@ -618,11 +618,23 @@ describe('plaud token refresh', () => {
       ok: false,
       reason: 'missing_doc',
     });
-    const noToken = memStore({ mcp_servers: [{ id: 'plaud' }] });
+    // An access token with no refresh token is the shape the Connect tab
+    // stored until 2026-09-05. It is not a failure: the document must be left
+    // exactly as it was, or arming the timer would break a working Library.
+    const noToken = memStore({
+      mcp_servers: [{ id: 'plaud', oauthToken: 'a1', status: 'connected' }],
+    });
+    const fetchCalls = fetch.mock.calls.length;
     expect(await createPlaudTokenRefresh({ store: noToken, fetch, now }).run()).toEqual({
       ok: false,
       reason: 'missing_refresh_token',
     });
+    expect(noToken.data.mcp_servers.get('plaud')).toEqual({
+      id: 'plaud',
+      oauthToken: 'a1',
+      status: 'connected',
+    });
+    expect(fetch.mock.calls).toHaveLength(fetchCalls);
   });
 });
 

@@ -12,13 +12,20 @@
  *
  * Auth flow:
  *   • User runs `npx -y @plaud-ai/mcp@latest install` or connects via Claude Web
- *   • Copies the resulting OAuth access token
- *   • Pastes it in the Connect tab → stored in Cosmos DB (server-side only)
- *   • mcpProxy uses the token; it never reaches the browser after saving
+ *   • Copies the resulting OAuth access token AND refresh token
+ *     (~/.plaud/tokens-mcp.json holds both)
+ *   • Pastes them in the Connect tab → stored in Cosmos DB (server-side only)
+ *   • mcpProxy uses the access token; the refreshPlaudToken timer rotates the
+ *     pair every 12 hours using the refresh token. Neither value reaches the
+ *     browser after saving — reads carry hasOauthToken / hasOauthRefreshToken.
+ *
+ * These are the Plaud MCP tokens. Plaud Embedded's client id and secret
+ * (docs.plaud.ai/plaud-embedded) are a different product — device SDK and
+ * transcription API — and nothing on this site uses them.
  *
  * Cosmos DB containers:
  *   recordings  — local copies routed into ContentForge pipeline
- *   mcp_servers/plaud — stores oauthToken (admin-write only)
+ *   mcp_servers/plaud — stores oauthToken + oauthRefreshToken (admin-write only)
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -637,19 +644,22 @@ function UploadTab() {
 
 // ─── Connect Tab (OAuth setup) ────────────────────────────────────────────────
 
-function ConnectTab({ isConnected, onConnected }) {
+function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
   const [token, setToken] = useState('');
+  const [refreshToken, setRefreshToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const { toast } = useToast();
 
   const handleSave = async () => {
     if (!token.trim()) return;
+    const refreshSupplied = Boolean(refreshToken.trim());
     setSaving(true);
     try {
-      await setMcpOAuthToken('plaud', token.trim());
+      await setMcpOAuthToken('plaud', token.trim(), refreshToken);
       toast({ title: 'Token saved ✓', description: 'Testing connection…' });
       setToken('');
+      setRefreshToken('');
       // Test immediately
       setTesting(true);
       await aiEngine.testProvider('plaud').catch(() => null);
@@ -660,7 +670,7 @@ function ConnectTab({ isConnected, onConnected }) {
           title: 'Connected to Plaud ✓',
           description: `${sync.tools?.length || 0} tools available`,
         });
-        onConnected();
+        onConnected({ refreshSupplied });
       } else {
         toast({
           title: 'Token saved but test failed',
@@ -681,7 +691,7 @@ function ConnectTab({ isConnected, onConnected }) {
     const sync = await aiEngine.syncMcpTools('plaud');
     if (sync.ok) {
       toast({ title: 'Still connected ✓', description: `${sync.tools?.length || 0} tools` });
-      onConnected();
+      onConnected({ refreshSupplied: false });
     } else {
       toast({ title: 'Connection failed', description: sync.error, variant: 'destructive' });
     }
@@ -702,7 +712,10 @@ function ConnectTab({ isConnected, onConnected }) {
           <>
             <CheckCircle className="h-5 w-5 shrink-0" />{' '}
             <span>
-              <strong>Connected</strong> — your Plaud recordings are live in the Library tab.
+              <strong>Connected</strong> — your Plaud recordings are live in the Library tab.{' '}
+              {hasRefreshToken
+                ? 'Auto-refresh is armed: a refresh token is stored.'
+                : 'No refresh token stored, so the access token expires on its own (about a day); paste both to keep it alive.'}
             </span>
           </>
         ) : (
@@ -758,14 +771,17 @@ function ConnectTab({ isConnected, onConnected }) {
             },
             {
               n: 3,
-              title: 'Copy your access token',
+              title: 'Copy your access token and refresh token',
               body: (
                 <p className="text-xs text-slate-500 mt-1">
-                  Your token is saved to{' '}
+                  Your tokens are saved to{' '}
                   <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">
                     ~/.plaud/tokens-mcp.json
                   </code>
-                  . Open that file and copy the <code>access_token</code> value.
+                  . Open that file and copy the <code>access_token</code> value and the{' '}
+                  <code>refresh_token</code> value. The access token connects the Library; the
+                  refresh token lets the site rotate it every 12 hours so the connection does not
+                  lapse after a day.
                   <br />
                   <br />
                   Alternatively, use <strong>Claude Web</strong>: open the Plaud connector at{' '}
@@ -785,16 +801,25 @@ function ConnectTab({ isConnected, onConnected }) {
             },
             {
               n: 4,
-              title: 'Paste your token below',
+              title: 'Paste your tokens below',
               body: (
                 <div className="mt-2 space-y-2">
+                  <Input
+                    type="password"
+                    className="h-9 text-xs font-mono"
+                    placeholder="access_token — eyJ…"
+                    aria-label="Plaud access token"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                  />
                   <div className="flex gap-2">
                     <Input
                       type="password"
                       className="h-9 text-xs font-mono flex-1"
-                      placeholder="eyJ…"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
+                      placeholder="refresh_token — eyJ… (optional, needed for auto-refresh)"
+                      aria-label="Plaud refresh token"
+                      value={refreshToken}
+                      onChange={(e) => setRefreshToken(e.target.value)}
                     />
                     <Button onClick={handleSave} disabled={saving || !token.trim()} className="h-9">
                       {saving ? (
@@ -807,8 +832,9 @@ function ConnectTab({ isConnected, onConnected }) {
                   </div>
                   <p className="text-xs text-slate-400 flex items-center gap-1">
                     <ShieldCheck className="h-3 w-3" />
-                    Token is stored server-side in Cosmos DB and never sent back to the browser
-                    after saving.
+                    Both values are stored server-side in Cosmos DB and never sent back to the
+                    browser after saving. Leaving the refresh token blank keeps whatever was stored
+                    before.
                   </p>
                 </div>
               ),
@@ -838,8 +864,10 @@ function ConnectTab({ isConnected, onConnected }) {
           get_current_user
         </p>
         <p>
-          <strong>Auth:</strong> OAuth — token is rotated by Plaud; if the Library stops working,
-          refresh your token here.
+          <strong>Auth:</strong> OAuth — the access token lasts about a day and the refresh token
+          about a week. With both stored, the site rotates the pair every 12 hours; if the Library
+          stops working, connect again here. Plaud Embedded&apos;s client id and secret are a
+          different product and are not used.
         </p>
         <a
           href="https://docs.plaud.ai/documentation/plaud_app/mcp"
@@ -860,6 +888,7 @@ export default function RecordingsPage() {
   useAuthReady();
   const [activeTab, setActiveTab] = useState('library');
   const [isConnected, setIsConnected] = useState(false);
+  const [hasRefreshToken, setHasRefreshToken] = useState(false);
   const [checkingConn, setCheckingConn] = useState(true);
 
   // Check Plaud connection status on mount
@@ -871,8 +900,10 @@ export default function RecordingsPage() {
         const res = await getJSON('cms/config/mcp-servers');
         const plaud = (res.items || []).find((d) => d.id === 'plaud');
         setIsConnected(plaud?.status === 'connected' && plaud?.hasOauthToken === true);
+        setHasRefreshToken(plaud?.hasOauthRefreshToken === true);
       } catch {
         setIsConnected(false);
+        setHasRefreshToken(false);
       } finally {
         setCheckingConn(false);
       }
@@ -919,8 +950,10 @@ export default function RecordingsPage() {
       {activeTab === 'connect' && (
         <ConnectTab
           isConnected={isConnected}
-          onConnected={() => {
+          hasRefreshToken={hasRefreshToken}
+          onConnected={({ refreshSupplied } = {}) => {
             setIsConnected(true);
+            if (refreshSupplied) setHasRefreshToken(true);
             setActiveTab('library');
           }}
         />

@@ -450,11 +450,19 @@ export async function addMcpServer(data) {
  * reads carry hasOauthToken (boolean) instead. Only mcpProxy uses the token
  * server-side.
  */
-export async function setMcpOAuthToken(serverId, oauthToken) {
-  await sendJSON(`cms/config/mcp-servers/${serverId}`, 'PATCH', {
+export async function setMcpOAuthToken(serverId, oauthToken, oauthRefreshToken = '') {
+  // The refresh token is what the 12-hour refreshPlaudToken timer rotates
+  // with. It is optional here so an access token alone still connects; when
+  // omitted the stored refresh token (if any) is left untouched, because the
+  // API merges a PATCH and never clears a field it was not sent.
+  const body = {
     oauthToken,
     status: 'untested', // force re-test after token update
-  });
+  };
+  if (typeof oauthRefreshToken === 'string' && oauthRefreshToken.trim()) {
+    body.oauthRefreshToken = oauthRefreshToken.trim();
+  }
+  await sendJSON(`cms/config/mcp-servers/${serverId}`, 'PATCH', body);
   await notifyConfigSubscribers('mcp-servers');
 }
 
