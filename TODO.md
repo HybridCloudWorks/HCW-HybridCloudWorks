@@ -81,18 +81,18 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 | ---: | --- | --- | --- |
 | 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
 | 2 | `T-518` — arm the remaining timers | High | Risk-grouped waves, each observed before the next; the two destructive timers stay solo |
-| 3 | `T-764` — the podcast pages have no data and only Wave 2 can give them any | Medium | `FETCH_PODCAST_FEEDS` observed writing `podcasts`; there is no manual path to fall back on |
-| 4 | `T-765` — `ai_insights` has a reader and no writer | Low | An owner decision on whether the insights panel is a feature or is retired |
-| 5 | `T-766` — the timer-observation gate lost its telemetry witness to #321 | High | A witness for every timer in a wave before it is armed: the public side effect where one exists, a per-category `host.json` override decided per wave where it does not |
+| 3 | `T-765` — `ai_insights` has a reader and no writer | Low | An owner decision on whether the insights panel is a feature or is retired |
+| 4 | `T-766` — the timer-observation gate lost its telemetry witness to #321 | High | A witness for every timer in a wave before it is armed: the public side effect where one exists, a per-category `host.json` override decided per wave where it does not |
 
 Item 1 carries no severity because it is not a review finding: it is an owner
 action left behind by a finding that is closed. Item 2 is a repeated,
-observed procedure, now sequenced into waves. Items 3 and 4 were found on
+observed procedure, now sequenced into waves. Item 3 was found on
 2026-09-02 by tracing every container the public read layer reads back to
-whatever writes it — the audit that the empty news pages prompted. Item 5
-was found on 2026-09-03 when Wave 2's gates returned nothing: two workstreams
-had collided, and it is High because waves 2 through 6 cannot produce their
-own evidence until it is settled.
+whatever writes it — the audit that the empty news pages prompted, which also
+found `T-764`, closed 2026-09-04 by Wave 2. Item 4 was found on 2026-09-03
+when Wave 2's gates returned nothing: two workstreams had collided, and it is
+High because waves 3 through 6 cannot produce their own evidence until it is
+settled.
 
 **The table and the sections below are in the same order, and that order is the
 one to work them in — not a sort of the Priority column.** Item 1 carries no
@@ -128,9 +128,9 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
-| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`), which is also the only thing that can fill the podcast pages (`T-764`) — and each wave needs its witness settled first (`T-766`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves), [Section 3](#3-t-764--the-podcast-pages-have-no-data-and-only-wave-2-can-give-them-any) and [Section 5](#5-t-766--the-timer-observation-gate-lost-its-telemetry-witness-to-321); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 carries `T-764` with it — one apply closes two rows |
+| 4 | Arm the remaining timers in risk-grouped waves, each wave observed before the next (`T-518`) — and each wave needs its witness settled first (`T-766`) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves) and [Section 4](#4-t-766--the-timer-observation-gate-lost-its-telemetry-witness-to-321); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 landed 2026-09-04 and closed `T-764` with it |
 | 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
-| 6 | Optional features: seed the keys and documents you actually want; decide whether the AI insights panel is a feature or is retired (`T-765`) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) and [Section 4](#4-t-765--ai_insights-has-a-reader-and-no-writer) | Decisions, not repairs — nothing above depends on any of them |
+| 6 | Optional features: seed the keys and documents you actually want; decide whether the AI insights panel is a feature or is retired (`T-765`) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) and [Section 3](#3-t-765--ai_insights-has-a-reader-and-no-writer) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
 
 The deliberately unscheduled feature backlog — analytics-informed topic
@@ -243,11 +243,12 @@ is the first run where the published set has actually moved.
 
 ### 2. T-518 — arm the remaining timers, in waves
 
-Five of eighteen are armed and observed: `CHECK_AGENT_HEALTH`,
-`CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`, and Wave 1's
-`PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE`. `schedulers_master_enabled`
-is already `true` and `enabled_timers` is the HCL-typed workspace variable
-holding all five.
+Armed and observed: `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE`,
+`PUBLISH_SCHEDULED_CONTENT`, Wave 1's `PLATFORM_JOB_SWEEPER` and
+`MONITOR_PUBLISHING_PIPELINE`, and Wave 2's `SYNC_RSS_FEEDS` and
+`FETCH_PODCAST_FEEDS`. `schedulers_master_enabled` is already `true` and
+`enabled_timers` is the HCL-typed workspace variable holding every one of
+them. The wave table below is the list of what remains.
 
 **Owner decision, 2026-09-02: arm in waves, not one at a time — a deliberate
 departure from [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5, recorded
@@ -264,16 +265,18 @@ groups by risk. There is precedent: `CHECK_AGENT_HEALTH` and
 `CLEANUP_TEMP_STORAGE` were armed in a single apply on 2026-08-30, recorded
 as a departure with its justification.
 
-**What does not group.** The two timers that delete documents with no
-dry-run pin — `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` —
-stay one per apply, observed before the next. Grouping is a concession to
+**What does not group.** The two content reapers —
+`CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
+apply, observed before the next. The first is dry-run until
+`CONTENT_HARD_DELETE` and refuses any mark with no recorded origin (#334); the
+second only marks, and the mark is reversible. Grouping is a concession to
 calendar arithmetic, not to destructive operations.
 
 | Wave | Timers | Why grouped | Observable in |
 | ---: | --- | --- | --- |
 | 1 | ~~`PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE`~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | All four gates observed; the pipeline's `ScheduleStatus.Last` landed on its intended Chicago hour |
-| 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | Same class — both ingest feeds and create content documents | 2 h |
-| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents, no dry-run pin | 4 h |
+| 2 | ~~`SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS`~~ | **Done 2026-09-04** — record in [CHANGELOG.md](CHANGELOG.md) | Both witnessed through the public side effect, the T-766 path: `rss_cache.refreshedAt` at its 02:00 Chicago boundary on 2026-09-03, `podcasts.updatedAt` at the 13:30Z firing on 2026-09-04. The first podcast firing left no stamp and its cause is not recoverable; the next miss is readable since #330 |
+| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo.** Purges soft-deleted documents. Dry-run until `CONTENT_HARD_DELETE`, and a mark with no recorded origin is never deleted (#334). Witness, decided 2026-09-04 (T-766): the per-category `host.json` override at Information; remove it when the wave closes. Two steps: arm and read at least two dry-run summaries, then flip the pin and read a deleting run | 4 h per step |
 | 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Deletes rejected documents, no dry-run pin | 24 h |
 | 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail — decide each on its merits before the wave, then arm together | 24 h |
 | 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. Arm only if Plaud and Publer are seeded; an armed timer with no credential is an erroring loop, not a no-op | 12 h |
@@ -307,7 +310,7 @@ az functionapp config appsettings list --name func-site-prod-cus-01 --resource-g
 the wave.
 
 Gates 3 and 4 read the timer's **durable side effect**, not telemetry —
-since #321 the host writes no invocation traces (Section 5). For the three
+since #321 the host writes no invocation traces (Section 4). For the three
 timers with a public witness:
 
 ```powershell
@@ -318,7 +321,7 @@ node scripts/verify-timer-witness.mjs --timer syncRssFeeds --since 2026-09-03T05
 `--since` (the apply time or the last scheduled tick, ISO 8601 UTC). `FAIL`
 with zero documents on a container only this timer writes means it has never
 run here. Exit 2 means the timer has no public witness and nothing was
-evaluated — settle that before arming its wave, per Section 5.
+evaluated — settle that before arming its wave, per Section 4.
 
 `05-verify-timer.ps1 -Hours 24` still reads correctly for history before
 2026-09-02 17:59Z, and warns when the cut makes its invocation section blind.
@@ -329,42 +332,7 @@ if a cap-day reading after arming shows the workspace back near 0.25 GB,
 the Basic-table-plan reserve lever in the T-719/T-721 CHANGELOG record is
 the next move.
 
-### 3. T-764 — the podcast pages have no data, and only Wave 2 can give them any
-
-`podcasts` has exactly one **production** writer:
-`functions/src/lib/timers/podcasts.js`, reached from `schedulers.js` as the
-`fetchPodcastFeeds` timer and from nowhere else that runs in Azure.
-`FETCH_PODCAST_FEEDS` has never been `true`, so the container has never been
-written and every provider podcast page renders empty.
-
-**What makes this different from the news pages it was found beside.** The
-empty news pages had a manual escape hatch — `fetch-rss-feeds` is a registered
-platform job with a Run Now button at
-https://hybridcloudworks.com/admin/ops-health, and running it on 2026-09-02
-filled `rss_cache` from 21 feeds in one click. There is no equivalent for
-podcasts: `createPodcastIngest` has no job registration and no admin route, so
-**arming Wave 2 is the only way to put data in that container.** Outside its own
-definition, the only callers are `schedulers.js` and
-`functions/src/lib/timers/ingestion-timers.test.js` — nothing that a human or a
-queue can reach.
-
-That also means the handler has never executed **in this environment**. It is
-not untested code — `ingestion-timers.test.js` covers the happy path and a
-failing-parser path against fakes — but a passing unit test is not an
-observation, and Wave 1 and the RSS run both had one before or during arming
-where this cannot. Re-delivery is safe by construction: `processFeed` reads each
-episode by id and preserves `createdAt` before upserting, so the risk is an
-erroring loop rather than damaged data, and the `-Hours 4` verification in
-[Section 2](#2-t-518--arm-the-remaining-timers-in-waves) is what would catch it.
-
-Closes when `fetchPodcastFeeds` is observed writing `podcasts` and **the
-`azure` podcast page** renders an episode. Only azure: `PODCAST_FEEDS` in
-`functions/src/lib/timers/podcasts.js` holds exactly one feed, so the aws, gcp
-and vmware podcast pages stay empty after this closes — by configuration, not
-by fault. Adding feeds for them is a content decision, not part of this row.
-Corrected 2026-09-03; the earlier wording implied all four pages.
-
-### 4. T-765 — `ai_insights` has a reader and no writer
+### 3. T-765 — `ai_insights` has a reader and no writer
 
 `GET /api/public/feed` returns an `insights` array beside `rssCache`, and the
 news pages render it as a panel. Nothing in this repository writes
@@ -390,7 +358,7 @@ Recorded without a recommendation because the original intent is not visible in
 this repository — the answer lives in Site-Main's history or in the owner's
 memory, not in code that can be read here.
 
-### 5. T-766 — the timer-observation gate lost its telemetry witness to #321
+### 4. T-766 — the timer-observation gate lost its telemetry witness to #321
 
 Cutover-Runbook step 5's fourth gate proved a timer fired by reading
 `Function.<name>` traces from `AppTraces` — `Executed 'Functions.…'` and
@@ -419,7 +387,9 @@ real, and the #323 record stands.
 `az`, workspace or telemetry plane involved. Three timers have a public
 witness — `syncRssFeeds`, `fetchPodcastFeeds`, `publishScheduledContent` —
 and the other fifteen do not; the runbook's table says why, per timer, and
-the script's test pins that table to what the app registers.
+the script's test pins that table to what the app registers. Wave 2 closed on
+that witness on 2026-09-04 — the first wave observed with no host trace at
+all.
 
 **What stays open, and why this is High.** Waves 3 through 6 are entirely
 timers with **no** public witness. Each wave needs its evidence settled before
@@ -431,6 +401,15 @@ invocation rather than the whole host's chatter, so it does not reopen T-719;
 but it is a `host.json` change and a deploy per wave, which is a real cost
 against the volume it saves. Decide per wave, at arming time, and record
 which was chosen in the wave's row.
+
+**Wave 3a, decided 2026-09-04: the per-category override.** Its side effect is
+an absence, and on an idle run the reaper used to write nothing at all — not
+even its audit record — so no container read can tell an idle run from a
+timer that never fired. `"Function.cleanupSoftDeletedContent": "Information"`
+in `host.json` restores that one timer's `Executed` rows, and the reaper now
+logs one summary line every run (#334). Read them with
+`pwsh -File scripts/cutover/05-verify-timer.ps1 -Name cleanupSoftDeletedContent -Hours 8`,
+which honours the override. Remove the override when the wave closes.
 
 Closes when every wave in the T-518 table has a stated witness, and no wave
 is armed against a timer whose evidence path is "none".
@@ -621,7 +600,7 @@ Entra row below, which is where it belongs.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered. **The credential half of this row is closed (T-727, 2026-08-31):** the deploy mints its token from ARM per run under federated identity, and the stored secret is deleted — there is nothing left to provide or rotate | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | See items 2 and 3 above for the procedure and what success looks like. Decide whether to arm the remaining schedulers, adding each wave to `enabled_timers` and observing every timer in it before starting the next — the wave table in item 2 is the plan. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT` and Wave 1's `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` are armed and proven. The availability half of this row is closed: the edge probe is deployed and its alert armed 2026-09-01 (T-519) | The five proven timers remain armed; the rest remain no-ops. The Azure standard availability test stays disabled in Terraform because Bot Fight Mode challenges Azure agents; the reachability signal is served by the ADR 0024 Cloudflare Worker, whose alert `alert-api-reachability-prod-cus` is live |
+| Timers and the availability test | See item 2 above for the procedure and what success looks like. Decide whether to arm the remaining schedulers, adding each wave to `enabled_timers` and observing every timer in it before starting the next — the wave table in item 2 is the plan. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`, Wave 1's `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE`, and Wave 2's `SYNC_RSS_FEEDS` and `FETCH_PODCAST_FEEDS` are armed and proven. The availability half of this row is closed: the edge probe is deployed and its alert armed 2026-09-01 (T-519) | The proven timers remain armed; the rest remain no-ops. The Azure standard availability test stays disabled in Terraform because Bot Fight Mode challenges Azure agents; the reachability signal is served by the ADR 0024 Cloudflare Worker, whose alert `alert-api-reachability-prod-cus` is live |
 | Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |

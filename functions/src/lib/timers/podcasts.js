@@ -110,7 +110,8 @@ export function createPodcastIngest({
   async function processFeed(provider, feedUrl) {
     const feed = await parser.parseURL(feedUrl);
     const results = { processed: 0, errors: [] };
-    for (const item of feed.items || []) {
+    const items = feed.items || [];
+    for (const [index, item] of items.entries()) {
       try {
         const episode = buildPodcastEpisode(provider, item, now());
         const existing = await store.readDoc('podcasts', episode.id, episode.id);
@@ -121,8 +122,22 @@ export function createPodcastIngest({
         });
         results.processed += 1;
       } catch (err) {
-        results.errors.push({ title: item?.title || null, error: String(err?.message || err) });
+        const message = String(err?.message || err);
+        // Position, not title, for the same reason as the Warning below: this
+        // array is JSON-stringified into the summary line.
+        results.errors.push({ position: index + 1, error: message });
+        // Warning, not Information: host.json gates `Function` at Warning
+        // (#321), so anything logged below this level never reaches the
+        // workspace. The witness for this timer is a fresh `updatedAt`; when
+        // that is missing, this line is what says the run happened at all.
+        // Position, not title: the title is third-party text and the trace
+        // stays content-free. The feed itself is named by its provider —
+        // PODCAST_FEEDS holds one URL per provider, in this file.
+        log.warn?.(`[fetchPodcastFeeds] ${provider}: episode ${index + 1} of ${items.length} failed: ${message}`);
       }
+    }
+    if (results.processed === 0 && results.errors.length === 0) {
+      log.warn?.(`[fetchPodcastFeeds] ${provider}: feed returned no items`);
     }
     return results;
   }
@@ -133,7 +148,9 @@ export function createPodcastIngest({
       try {
         summary[cfg.provider] = await processFeed(cfg.provider, cfg.url);
       } catch (err) {
-        summary[cfg.provider] = { processed: 0, error: String(err?.message || err) };
+        const message = String(err?.message || err);
+        summary[cfg.provider] = { processed: 0, error: message };
+        log.error?.(`[fetchPodcastFeeds] ${cfg.provider}: feed failed: ${message}`);
       }
     }
     log.log?.(`[fetchPodcastFeeds] ${JSON.stringify(summary)}`);

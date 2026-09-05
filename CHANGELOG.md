@@ -18,6 +18,52 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The podcast pages had no data, and the `azure` one now plays real audio
+  (`T-764`, #PR).** Found 2026-09-02 beside the empty news pages: `podcasts`
+  had one production writer, the `fetchPodcastFeeds` timer, and its flag had
+  never been `true`, so every provider podcast page rendered empty and, unlike
+  the news pages, there was no admin job to fill the container by hand. The
+  only way in was Wave 2 of `T-518`, recorded in the #332 entry under Added.
+
+  Closed on two reads, both from the owner's laptop on 2026-09-04. The
+  witness: `podcasts.updatedAt` fresh at the 13:30Z firing. The page:
+  https://hybridcloudworks.com/azure/audio-architecture renders the episodes,
+  and the public list behind it carries, for every episode, a `mediaUrl` on
+  podbean's media host with `mimeType` `audio/mpeg` and a `link` to the
+  podbean episode page — so Play and Download reach the file, and Open
+  reaches the page, which is what the player is built to do.
+
+  What this does not change: `PODCAST_FEEDS` holds exactly one feed, so the
+  aws, gcp and vmware podcast pages stay empty by configuration. Adding
+  feeds for them is a content decision, not a defect.
+
+- **`fetchPodcastFeeds` reports its failures at Warning and Error, so the
+  #321 cut cannot hide them (#330).** The first Wave 2 witness read split:
+  `syncRssFeeds` fresh at the 02:00 Chicago boundary, `fetchPodcastFeeds`
+  with nothing newer than the May migration. That FAIL could not be read,
+  because the ingest caught every failure — the feed fetch, each episode, an
+  empty feed — and reported it through `context.log`, which is Information
+  level and gone since `host.json` gated `Function` at Warning. A run that
+  fired and failed looked exactly like a run that never fired. Now a feed
+  that throws logs at Error with the provider and the message, an episode
+  that throws logs at Warning with its position in the feed, and a feed that
+  answers with no items logs at Warning — the state nothing reported before.
+  The rows carry no URL and no title: the provider names the feed
+  (`PODCAST_FEEDS` holds one per provider) and a title is third-party text.
+  The Information summary line is unchanged. `05-verify-timer.ps1` does not surface these
+  rows (its filter is `Executed` and the skip marker); they are one query
+  away, and they are the one trace the Warning cut still keeps for this
+  timer:
+
+  ```kusto
+  AppTraces
+  | where TimeGenerated > ago(6h)
+  | extend cat = tostring(Properties.Category)
+  | where cat startswith 'Function.fetchPodcastFeeds'
+  | where SeverityLevel >= 2
+  | project TimeGenerated, SeverityLevel, Message
+  ```
+
 - **Three scripts exited 0 without running when invoked on Windows (#329).** `apply-computed-sortdate.mjs`, `smoke-deployed.mjs` and `build-content-manifest.mjs` compared `import.meta.url` against `` `file://${process.argv[1]}` ``, which never matches a `C:\...` path — so `smoke-deployed.mjs` run from PowerShell reported nothing and exited 0. Now `pathToFileURL(process.argv[1]).href`, as in `check-deploy-drift.mjs`; a spawn-based test asserts each entry point actually fires.
 - **The timer-observation gate was blind for every invocation after 17:59Z on
   2026-09-02, and the record explains how (#328).** #321 dropped `host.json`'s
@@ -93,7 +139,81 @@ This project has not cut a tagged release; entries are grouped under
   nothing in CI that would have caught it. These two were the only dead anchors
   in the repository.
 
+### Changed
+
+- **`host.json` raises one log category, `Function.cleanupSoftDeletedContent`,
+  to Information for Wave 3a (#334).** The T-766 decision for the first wave
+  with no public witness. The reaper's side effect is an absence, so no
+  container read can tell an idle run from a timer that never fired; the
+  override restores that one timer's `Executed` rows at a few lines per
+  invocation, which does not reopen T-719. It is a wave-scoped change and
+  comes out when the wave closes. `05-verify-timer.ps1` now reads a
+  per-category override before the `Function` default, so it works for this
+  timer again.
+
 ### Added
+
+- **`cleanupSoftDeletedContent` is dry-run until `CONTENT_HARD_DELETE=true`,
+  never deletes a document whose deletion mark has no recorded origin, and
+  reports every run (#334).** Before this the hard reaper deleted anything
+  carrying `softDeletedAt` older than seven days, and three different writers
+  put that mark on a document: the admin soft-delete route, which also
+  records `deletionRequestedBy`; and the two rejected-content agers, which
+  record `softDeletedReason: 'rejected_aged_out'`. A migrated document with an
+  old mark from the Firebase days carries neither, and it would have gone at
+  the first firing. Now the pin is the T-302 rule applied to the one timer
+  that deletes documents rather than blobs — `infra/functionapp.tf` seeds it
+  `"false"` beside the two blob pins — and origin is the rule the pin does not
+  lift: a mark with no `deletionRequestedBy` and no `softDeletedReason` is
+  counted, logged at Warning as a count, recorded by id in the audit entry
+  that every armed run writes once it has examined anything (a dry run
+  writes no audit document), and left for a human in the admin content
+  queue's `soft_deleted` filter.
+
+  Every run now logs one summary line, idle runs included: in dry-run, what
+  it would delete by origin; when armed, what it did. Before this an idle run
+  wrote nothing, not even its audit record, which is why Wave 3a had no
+  witness at all. Traces carry counts only; ids go to the audit document.
+
+- **T-518 Wave 2 armed and observed: the two feed-ingesting timers now run,
+  and `podcasts` has its first production write (#332).** `SYNC_RSS_FEEDS`
+  and `FETCH_PODCAST_FEEDS` were added to `enabled_timers` in the `hcw-azure`
+  workspace in one apply on 2026-09-03, ahead of the 00:00 Chicago window.
+  Same class, so they grouped: both ingest feeds and create content
+  documents, neither deletes anything, and re-delivery is safe by
+  construction — `cacheFeed` upserts `rss_cache` per feed, and `processFeed`
+  reads each episode by id and preserves `createdAt` before upserting.
+
+  **Observed through the durable side effect, not the host trace — the first
+  wave closed on the #328 witness.** The `Executed` rows the runbook's gate 4
+  used to read have not existed since #321 (T-766), so the evidence is what
+  each timer leaves behind, read through the public API by
+  `scripts/verify-timer-witness.mjs`:
+
+  - `syncRssFeeds` — PASS on the first read: every `rss_cache` document
+    re-stamped, newest `refreshedAt` 2026-09-03T07:00:16Z, which is the 02:00
+    Chicago boundary of its every-two-hours schedule to the second. Nothing
+    else writes that stamp at that minute — the admin `fetch-rss-feeds` job
+    had last run the previous evening — so this is the timer.
+  - `fetchPodcastFeeds` — FAIL on the first read (nothing newer than the May
+    migration after the 05:30Z firing), then PASS at the 13:30Z firing on
+    2026-09-04, the first after the #330 deploy restarted the host at
+    13:24Z. `podcasts.updatedAt` is re-stamped on every episode each run, so
+    a fresh stamp is the handler completing an upsert, not merely starting.
+
+  **What the record cannot say.** The 05:30Z miss is not explained. That
+  firing predates #330, so whatever happened — a feed that did not answer,
+  an empty feed, or a handler that did not run — was logged at Information
+  and dropped by the Warning gate; and the firings between the two reads
+  were not read. The next miss will be readable: since #330 a failed feed
+  writes an Error row and an empty feed a Warning row in the
+  `Function.fetchPodcastFeeds` category, with the query in the #330 entry
+  below. This is the collision T-766 describes, met on the first wave to arm
+  after it.
+
+  `T-764` does not close on this entry. Its writer is observed; the closing
+  condition also asks for the `azure` podcast page to render an episode, and
+  that read is still owed.
 
 - **The arming gate reads the timer's durable side effect through the public
   API, and needs nothing else (#328).** `scripts/verify-timer-witness.mjs`
