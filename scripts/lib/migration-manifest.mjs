@@ -391,7 +391,11 @@ export const COLLECTIONS = [
 
   // --- AI / prompts / images -----------------------------------------------
   { name: 'ai_providers', disposition: 'migrate' },
-  { name: 'ai_insights', disposition: 'migrate' },
+  // ai_insights was here, disposition 'migrate', until 2026-09-05: the panel
+  // that read it was retired (T-765, #339) and nothing ever wrote it, so the
+  // owner decided to drop the container. Removing the entry removes it from
+  // infra/cosmos-containers.json, and the apply that follows DESTROYS the
+  // container and the documents the 2026-08-21 migration put in it.
   { name: 'ai_usage', disposition: 'migrate' },
   { name: 'mcp_servers', disposition: 'migrate' },
   { name: 'prompts', disposition: 'migrate' },

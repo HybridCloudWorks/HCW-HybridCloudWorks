@@ -62,32 +62,6 @@
       "note": null
     },
     {
-      "name": "ai_insights",
-      "partition_key_path": "/id",
-      "included_paths": [
-        "/*"
-      ],
-      "excluded_paths": [],
-      "composite_indexes": [
-        [
-          {
-            "path": "/provider",
-            "order": "ascending"
-          },
-          {
-            "path": "/active",
-            "order": "ascending"
-          },
-          {
-            "path": "/generatedAt",
-            "order": "descending"
-          }
-        ]
-      ],
-      "default_ttl": null,
-      "note": null
-    },
-    {
       "name": "ai_providers",
       "partition_key_path": "/id",
       "included_paths": [

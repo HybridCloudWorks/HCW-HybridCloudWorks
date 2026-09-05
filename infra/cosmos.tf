@@ -294,8 +294,21 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
   # destroy-and-create — on roughly 70k production documents. The guard turns
   # that from a plan someone has to read carefully into a plan that fails
   # (T-708). Dropping a container deliberately means removing this first.
+  #
+  # LIFTED 2026-09-05 FOR ONE APPLY, and restored by the PR that follows it.
+  # The owner decided to drop `ai_insights` (T-765: its reader was retired in
+  # #339 and nothing ever wrote it), and the guard cannot be lifted for one
+  # instance of a for_each. The plan that carries this change must show
+  # EXACTLY ONE resource to destroy, at this address:
+  #
+  #   azurerm_cosmosdb_sql_container.hcw["ai_insights"]
+  #
+  # The workspace's permanent azapi diff (three resources replaced, Function
+  # App restart) is expected on this apply as on every other. Any destroy or
+  # replace beyond that baseline is a reason to discard the run, not to
+  # approve it.
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
