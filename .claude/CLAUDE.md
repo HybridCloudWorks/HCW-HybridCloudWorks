@@ -107,8 +107,8 @@ so it is recorded here, where every session reads it.
   is green on that head and no review thread is unresolved. Read the
   verdict, not the wording: Copilot's approval line has changed before (in
   this repository it has read `This pull request is ready to be approved.`),
-  so key on a review with no findings that recommends approval, never on an
-  exact string. A review that recommends
-  changes or leaves a finding open is not that: fix, push, and wait for the
-  next review of the new head. Ready for review on its own is still not
+  so key on a review that recommends approval and opens no review thread,
+  never on an exact string. A review that recommends changes, or any review
+  thread still unresolved on the head, is not that: fix, push, and wait for
+  the next review of the new head. Ready for review on its own is still not
   permission to merge.
