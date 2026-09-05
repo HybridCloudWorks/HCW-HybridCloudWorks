@@ -84,3 +84,20 @@ from a reporting failure without asking. That distinction has been the expensive
 one: on 2026-08-30 the Azure portal reported a test as failed while the email
 arrived, and a timer script reported 57,581 invocations where the query returned
 two rows.
+
+## Pull requests open ready for review, not as drafts
+
+Owner decision 2026-09-05. Every PR opened from a session was arriving as a
+draft, and the owner had to flip each one to ready for review before merging
+— a round trip that from a phone is the whole cost of the PR. GitHub has no
+repository setting that forces this; it is chosen by whoever creates the PR,
+so it is recorded here, where every session reads it.
+
+- **Create the PR ready for review.** Copilot reviews either state, CI runs
+  on either state, and nothing in this repository keys on draft.
+- **Draft is the exception, and it is stated.** If a PR is opened before its
+  own checks have been run locally, or it exists to hold a question rather
+  than a change, say so in the first line of the description and open it as
+  a draft. Otherwise not.
+- **Never merge unasked.** Ready for review is not permission to merge. The
+  owner says "merge" — that convention is unchanged.
