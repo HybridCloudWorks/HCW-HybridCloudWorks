@@ -99,5 +99,10 @@ so it is recorded here, where every session reads it.
   own checks have been run locally, or it exists to hold a question rather
   than a change, say so in the first line of the description and open it as
   a draft. Otherwise not.
-- **Never merge unasked.** Ready for review is not permission to merge. The
-  owner says "merge" — that convention is unchanged.
+- **Copilot's "Approval recommended" is the owner's "merge".** Owner decision
+  2026-09-05: Copilot code review has authority to approve PRs in this
+  repository, so when its review of the **current head** recommends approval,
+  a session merges without waiting for the owner to say so — provided every
+  required check is green on that head and no review thread is unresolved.
+  A "Changes recommended" review is not that: fix, push, and wait for the
+  next review. Ready for review on its own is still not permission to merge.
