@@ -671,7 +671,8 @@ container directly with data-plane access, or to raise that one category —
 after, which restores the trace for one timer at a few lines per invocation
 instead of the whole host's chatter. That is a per-wave decision, not a
 default: every wave's choice is recorded in its row of the T-518 table in
-TODO.md (T-766, closed 2026-09-05 once each row had one).
+CHANGELOG.md (T-766, closed 2026-09-05 once each row had one; the overrides
+came out again on 2026-09-05 when the last wave closed).
 
 If telemetry and the witness disagree, believe the witness.
 
@@ -699,8 +700,9 @@ witness stamp against the schedule by hand — a `refreshedAt` of `05:00Z` on a
 This step's "one timer per apply" rule was set when the arming mechanism was
 unproven. It has since been observed three times, once across the apply
 boundary itself, so the owner decided on 2026-09-02 to arm the remaining
-fifteen in risk-grouped waves — recorded with its reasoning in TODO.md
-under T-518, which is the live plan. Taken literally the rule cost roughly
+fifteen in risk-grouped waves — the plan, its reasoning and its close are
+recorded in CHANGELOG.md under T-518 (it lived in TODO.md until the last
+wave armed on 2026-09-05). Taken literally the rule cost roughly
 five weeks and fifteen Function App restarts, three of the fifteen timers
 being weekly.
 
@@ -708,6 +710,14 @@ being weekly.
 So do both ordering constraints in the next section, and the two content
 reapers — `CLEANUP_SOFT_DELETED_CONTENT`, dry-run until `CONTENT_HARD_DELETE`,
 and `CLEANUP_REJECTED_CONTENT` — are still armed one per apply.
+
+**Completed 2026-09-05: all 18 timers are armed.** Waves 1 and 2 were observed
+through the gates; 3a and 3b were armed one per apply, 3a's delete switch
+flipped after two zero dry-runs; waves 4, 5 and 6 armed together in the last
+apply. The owner then dropped the per-wave observation read as a gate, so the
+per-category `host.json` overrides came out the same day. The record, with
+the wave table, is in CHANGELOG.md under T-518. This step is now history;
+the gates stay documented for the next timer that is ever added.
 
 ### Order matters for two of them
 

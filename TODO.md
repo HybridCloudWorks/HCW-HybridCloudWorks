@@ -16,11 +16,14 @@ an engineer working from a checkout if it needs tenant, Cloudflare or
 repository-admin access — the carried-over sections say so in their own words,
 and `Gate: owner` still marks the rest.
 
-## Status — 2026-09-02
+## Status — 2026-09-05
 
-> **Two items are open. Neither can be closed from a checkout.** Each carries what
-> to run or click, and what a successful result looks like, so a real failure
-> can be told apart from a reporting failure.
+> **Nothing is open as of 2026-09-05.** The last two items — `T-518`, arm the
+> remaining timers, and `T-726`, prove the nightly refresh — closed on the
+> owner's decision that evening, with all 18 timers armed and the observation
+> reads no longer a gate. Both records are in [CHANGELOG.md](CHANGELOG.md).
+> What follows below the status is kept as the working method and the
+> long-form evidence, not as a list of work.
 >
 > **The one live degradation closed overnight.** `T-763` — the manifest route
 > merged on 2026-08-30 against a Function App last deployed 84 minutes earlier —
@@ -79,30 +82,23 @@ rather than a count and a list that can drift apart. Found by review, 2026-08-31
 
 | # | Open item | Priority | What closes it |
 | ---: | --- | --- | --- |
-| 1 | `T-726` — the nightly refresh cannot reach `main` | — | Built and configured; waits on the first content change to prove |
-| 2 | `T-518` — arm the remaining timers | High | Three applies, each observed before the next: 3a (destructive, solo), 3b (destructive, solo), then waves 4, 5 and 6 together |
+| — | *(empty since 2026-09-05)* | — | — |
 
-Item 1 carries no severity because it is not a review finding: it is an owner
-action left behind by a finding that is closed. Item 2 is a repeated,
-observed procedure, now sequenced into waves. The 2026-09-02 audit that
+The table emptied on 2026-09-05. `T-726` (the nightly refresh) and `T-518`
+(arm the remaining timers) were the last two rows; both closed by owner
+decision that evening and their records, with the wave table that `T-518`
+carried, are in [CHANGELOG.md](CHANGELOG.md). The 2026-09-02 audit that
 traced every container the public read layer reads back to whatever writes
 it found `T-764` (closed 2026-09-04 by Wave 2) and `T-765` (closed 2026-09-05:
 the owner retired the insights panel). `T-766`, the witness gap that Wave 2
-exposed, closed 2026-09-05 once every remaining wave had its witness stated
-in its own row below. All three records are in [CHANGELOG.md](CHANGELOG.md).
+exposed, closed 2026-09-05. All records are in the changelog.
 
-**The table and the sections below are in the same order, and that order is the
-one to work them in — not a sort of the Priority column.** Item 1 carries no
-severity at all and still sits above a High, because there is nothing left to
-run on it — it waits on the first content change, which any published article
-supplies in passing. Said this way because an earlier draft claimed "ordered by
-priority", which the dash in row 1 plainly contradicts; found in review on
-2026-09-01.
-
-The two are checked against each other by number AND by `T-` identity, never by
-counting rows. Also from 2026-09-01: an edit reordered the table while
-renumbering the sections in document order, and because both still read `1..5`
-a digits-only check passed with every row pointing at the wrong section.
+**When the table fills again, the table and the sections below it are kept in
+the same order, and that order is the one to work them in — not a sort of the
+Priority column.** Checked against each other by number AND by `T-` identity,
+never by counting rows: on 2026-09-01 an edit reordered the table while
+renumbering the sections in document order, and because both still read
+`1..5` a digits-only check passed with every row pointing at the wrong section.
 
 **Closed on 2026-08-31 and removed from this list:** seeding `TFC_TOKEN` (done),
 and `T-749`, the SCM lock — Terraform owns
@@ -125,8 +121,8 @@ the verbosity cut has deployed, so their volume lands in real headroom.
 | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
 | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
 | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
-| 4 | Arm the remaining timers in three applies, each observed before the next — 3a, 3b, then waves 4, 5 and 6 together (`T-518`); every wave's witness is stated in its row (`T-766`, closed 2026-09-05) | [Section 2](#2-t-518--arm-the-remaining-timers-in-waves); the four gates are [Cutover-Runbook step 5](wiki/Cutover-Runbook.md) | After the verbosity cut has deployed (#321), so timer volume lands in real headroom rather than darkening the log-based alerts. Wave 2 landed 2026-09-04 and closed `T-764` with it |
-| 5 | Prove the nightly refresh's App-token path (`T-726`) | [Section 1](#1-t-726--built-and-configured-unproven-until-content-moves) | Passive — the first published content change is the test. Publishing anything in Phase 6 doubles as this proof |
+| 4 | ~~Arm the remaining timers in three applies — 3a, 3b, then waves 4, 5 and 6 together (`T-518`)~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | All 18 timers armed; the two reapers armed one per apply with the delete switch flipped after two zero dry-runs; the observation reads dropped as a gate by owner decision |
+| 5 | ~~Prove the nightly refresh's App-token path (`T-726`)~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision on the built-and-configured state; the first content change remains the live proof, and the failure signatures (401 = wrong App id, 404 = App not installed) are in the changelog entry |
 | 6 | Optional features: seed the keys and documents you actually want (the insights-panel decision, `T-765`, was made 2026-09-05: retired) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) | Decisions, not repairs — nothing above depends on any of them |
 | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
 
@@ -143,197 +139,10 @@ exist.
 
 ## What is open, and exactly what closes it
 
-### 1. T-726 — built and configured; unproven until content moves
-
-**Corrected 2026-08-31, and the correction is the important part.** This item
-said, in five places across the repository, that the ruleset listed the Actions
-token as a **bypass actor**, and that the App retired that bypass. It does not
-exist. Reading
-`/repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114` returns
-`enforcement: active`, **no `bypass_actors`**, and the rules `deletion`,
-`non_fast_forward`, `pull_request`, `required_status_checks`.
-
-So the nightly push to `main` was never privileged — it was **refused**, and had
-been since the ruleset was last updated on 2026-08-25. The bot's only successful
-manifest push is `4b8c36d`, dated 2026-08-23. Every scheduled run from 08-24 to
-08-29 reported success because the published set had not moved, so the push was
-never attempted. A workflow can be broken for five days and go green every
-night, if the only thing that would exercise the broken part is a change that
-did not happen.
-
-The App is therefore a **repair**, not a de-escalation, and the third owner
-action this item used to carry — "remove the bypass actor" — is deleted, because
-there is nothing to remove. The workflow, `scripts/github-app-token.mjs`,
-`scripts/open-manifest-pr.mjs` and
-`scripts/workflow-write-permissions.test.mjs` all carried the wrong claim and
-now carry the correction beside it.
-
-**The repository half is done (2026-08-31).** `publish-content-manifest.yml`'s
-`commit` job no longer pushes to `main`. It mints a GitHub App installation
-token, pushes a branch and opens a pull request that the required checks run on
-— which they do precisely because the pull request is not opened with
-`GITHUB_TOKEN`. The job's own permission is now `contents: read`, and
-`scripts/workflow-write-permissions.test.mjs` is down to one entry.
-
-**Owner action 1 — create the App, and find the App ID.** The App itself is
-created at
-https://github.com/organizations/HybridCloudWorks/settings/apps/new — repository
-permissions **Contents: Read and write** and **Pull requests: Read and write**,
-nothing else, no webhook. Install it on this repository only, then generate a
-private key.
-
-**The App ID is not the number in the URL you land on after installing.**
-Installing redirects to `.../settings/installations/<number>`, and that number
-is the *installation* ID — a different thing, and not what
-`scripts/github-app-token.mjs` signs with. The App ID is on the App's own
-**General** tab, in a field labelled `App ID`, a six- or seven-digit number.
-Reach it from the list of Apps this organisation owns:
-https://github.com/organizations/HybridCloudWorks/settings/apps — click the App,
-and it is near the top of the General page beside the App's name and slug.
-
-Store both here:
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/variables/actions
-— variable `MANIFEST_APP_ID` (that six- or seven-digit App ID), and at
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions
-— secret `MANIFEST_APP_PRIVATE_KEY` (the whole PEM, `-----BEGIN` line included).
-
-**Success:** the next nightly run that finds a change opens a pull request
-titled `chore: refresh content manifest (N article routes)`. Until both are set
-the job warns that the App is not configured and does nothing else — it does not
-fail. If the App ID is wrong, the mint step fails with a **401** and the script
-says so; if the App exists but is not installed here, a **404**.
-
-**Owner action 2 — enable auto-merge.** ✅ **Done 2026-09-01.**
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings → Pull
-Requests → **Allow auto-merge**.
-
-**Both owner actions are done as of 2026-09-01**, and one open question about
-them is now answered from evidence: the ruleset's `pull_request` rule requires
-**0 approving reviews**, so nothing blocks the pull request from merging itself
-once the checks pass. Every pull request merged on 2026-08-31 and 09-01
-(#301-#308) went in with no `APPROVED` review on it — #308 carried two, both
-`COMMENTED` — and with no bypass actors on the ruleset each of those merges had
-to satisfy the rule on its own terms.
-
-**What is still unproven, and only content can prove it:** the App path runs
-only on a night the published set has actually moved. Manifest run 11
-(2026-09-01 00:06) went green and reported "No change to the published set", so
-every step after that check was skipped, the mint and the pull request
-included. The first article published is the test. A wrong App ID fails the
-mint with **401**, an App not installed here with **404**, and each is named in
-the step's own error.
-
-**What this costs, stated plainly and no longer offset:** one stored
-non-expiring App private key, granting push-a-branch and open-a-pull-request on
-this repository. It cannot merge past a check and it cannot push to `main`,
-because the ruleset exempts nobody. Calling it "strictly less than what it
-replaces" — as this file did — was only true of a bypass that was never there.
-The honest case is narrower: the nightly refresh has to reach `main` somehow,
-every route to `main` goes through a pull request, and a pull request opened
-with `GITHUB_TOKEN` runs no checks. The key is the price of that.
-
-**Still untested end to end, and worth knowing why.** Manifest run 11
-(2026-09-01 00:06) went green for the first time since the route was deployed,
-but it reported "No change to the published set" — so every step after that
-check was skipped, the App branch included. The first real exercise of this path
-is the first run where the published set has actually moved.
-
-### 2. T-518 — arm the remaining timers, in waves
-
-Armed and observed: `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE`,
-`PUBLISH_SCHEDULED_CONTENT`, Wave 1's `PLATFORM_JOB_SWEEPER` and
-`MONITOR_PUBLISHING_PIPELINE`, and Wave 2's `SYNC_RSS_FEEDS` and
-`FETCH_PODCAST_FEEDS`. `schedulers_master_enabled` is already `true` and
-`enabled_timers` is the HCL-typed workspace variable holding every one of
-them. The wave table below is the list of what remains.
-
-**Owner decision, 2026-09-02: arm in waves, not one at a time — a deliberate
-departure from [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5, recorded
-here so the two documents do not disagree silently.** Taken literally, one
-timer per apply serialises into roughly five weeks and fifteen applies, each
-one restarting the Function App through the workspace's permanent `azapi`
-diff — and three of the fifteen fire *weekly*, so their observation windows
-alone are three weeks. What the one-at-a-time rule exists to prove is that
-arming works at all, and that is settled: the mechanism has been observed
-three times, once across the apply boundary itself
-(`publishScheduledContent`, four skipped invocations then four ran, with the
-flag as the only variable). What remains is per-handler behaviour, which
-groups by risk. There is precedent: `CHECK_AGENT_HEALTH` and
-`CLEANUP_TEMP_STORAGE` were armed in a single apply on 2026-08-30, recorded
-as a departure with its justification.
-
-**What does not group.** The two content reapers —
-`CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
-apply, observed before the next. The first is dry-run until
-`CONTENT_HARD_DELETE` and refuses any mark with no recorded origin (#334); the
-second only marks, and the mark is reversible. Grouping is a concession to
-calendar arithmetic, not to destructive operations.
-
-| Wave | Timers | Why grouped | Observable in |
-| ---: | --- | --- | --- |
-| 1 | ~~`PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE`~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | All four gates observed; the pipeline's `ScheduleStatus.Last` landed on its intended Chicago hour |
-| 2 | ~~`SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS`~~ | **Done 2026-09-04** — record in [CHANGELOG.md](CHANGELOG.md) | Both witnessed through the public side effect, the T-766 path: `rss_cache.refreshedAt` at its 02:00 Chicago boundary on 2026-09-03, `podcasts.updatedAt` at the 13:30Z firing on 2026-09-04. The first podcast firing left no stamp and its cause is not recoverable; the next miss is readable since #330 |
-| 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo. Armed, and its delete switch turned on, 2026-09-05.** Step 1 read: two dry-run firings (01:00Z and 05:00Z on 2026-09-05, both at their Chicago even-hour ticks) reported `[cleanupSoftDeletedContent] dry-run: would delete content=0 (user=0, policy=0) refused=0 examined=0` — nothing has been soft-deleted for longer than the 7-day grace window. Step 2, #343: `CONTENT_HARD_DELETE` flipped to `true`; the first armed run deletes nothing. A mark with no recorded origin is refused in both modes (#334). **Closes when** the owner's planted test page (soft-deleted from the admin on 2026-09-05) is deleted by the reaper a week later with `user=1 refused=0` and an `admin_audit_logs` record — the live witness for the classification; then remove the `host.json` override | 7 days |
-| 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Marks aged rejections soft-deleted with `softDeletedReason: rejected_aged_out`; no dry-run pin, because the mark is reversible and only 3a turns it into a deletion. Witness (T-766), decided 2026-09-05: the per-category override, added to `host.json` in #343 and carried by the next functions deploy; remove it when this wave closes. Arm by adding the name to `enabled_timers` once #343's deploy has landed | 24 h |
-| 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail. **Decided 2026-09-05: all three approved, and waves 4, 5 and 6 arm together in one apply after 3b closes** — none of the nine deletes anything, and the only reason to separate them was the approvals and witnesses, which are now settled. Witness (T-766): the per-category `host.json` override for all nine, added in #344 and removed wave by wave as each closes (the calendar sync's the day Wave 5 closes) | 24 h |
-| 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. **Decided 2026-09-05: the owner holds both.** Seeding differs: Publer is the two Key Vault secrets `PUBLER-API-KEY` and `PUBLER-WORKSPACE-ID`, written at https://hybridcloudworks.com/admin/api-keys; Plaud is no secret at all — its OAuth pair lives in the `mcp_servers/plaud` document, written from the Connect tab at https://hybridcloudworks.com/admin/recordings: paste both `access_token` and `refresh_token` from `~/.plaud/tokens-mcp.json` (the tab took only the access token until #342, and the refresh timer needs the other). Plaud Embedded's client id and secret (docs.plaud.ai/plaud-embedded) are a different product — device SDK and transcription API — and nothing here uses them; do not seed them. Publer, after seeding: tap **Test** on the Publer card at https://hybridcloudworks.com/admin/connections; success reads `Connected — N social account(s)`. Correction 2026-09-05, from the code: neither timer loops on a missing credential. `syncSocialCalendarScheduled` logs `not configured; skipping` and returns; `refreshPlaudToken` warns and leaves the document alone (#342 — it used to mark it `disconnected`, which would have broken a working Library). So arming before seeding is safe, but proves nothing. Arms with waves 4 and 6 (decided 2026-09-05, row 4). Witness (T-766): the per-category override for both, added in #344; the calendar sync fires every five minutes, so remove its override the day the wave closes | 12 h |
-| 6 | `CHECK_LIVE_LINKS`, `REVERIFY_CERTIFICATIONS`, `SCRAPE_SKILLS_HUB_RSS`, `CLEANUP_UNUSED_CERT_IMAGES` | The three weekly timers fire on Monday, Sunday and Friday — non-overlapping windows, so one week observes all three. The fourth is dry-run pinned by `CERT_IMAGE_CLEANUP_DELETE`. Arms with waves 4 and 5 (decided 2026-09-05, row 4). Witness (T-766): the per-category override for all four, added in #344 and removed when the wave closes | 7 days |
-
-**This table is the plan, and no count above it is.** Wave 3 is one risk
-group but two applies — `3a` and `3b` are the destructive pair, which never
-share one — and since 2026-09-05 waves 4, 5 and 6 share one apply, so the
-table is now three applies across four remaining groups (3a's pin flip, 3b,
-then 4+5+6), and any summary that states a single number will be wrong from
-one side or the other. The rows are the authority; that is the T-722 lesson
-applied to this plan rather than re-learned on it.
-
-Per wave: add the names at
-https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables (keep **HCL**
-ticked — `enabled_timers` is a typed list), approve the run, expect the
-Function App restart, then observe every timer in the wave firing before
-starting the next. The evidence standard is the observed invocation, not the
-applied setting — [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5 has the
-four gates. Of its two ordering constraints, one still binds: arming a cleanup
-timer is a separate decision from arming its deletion (T-302). The other —
-keep `SYNC_SOCIAL_CALENDAR` out until the delta import is done — is moot since
-the import was retired for good on 2026-08-24 (runbook step 4); nothing
-reconciles `social_posts` against another writer any more.
-
-Gate 1 for a wave, one timer at a time — bracket-free, because `az --query`
-with `[?...]` is re-parsed by PowerShell and fails (`.claude/CLAUDE.md`):
-
-```powershell
-az functionapp config appsettings list --name func-site-prod-cus-01 --resource-group rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq FEATURE_FLAG_PLATFORM_JOB_SWEEPER | Select-Object name, value
-```
-
-**Success:** one row, value `true`. Substitute the flag name for each timer in
-the wave.
-
-Gates 3 and 4 read the timer's **durable side effect**, not telemetry —
-since #321 the host writes no invocation traces (`T-766`, closed 2026-09-05;
-the record is in [CHANGELOG.md](CHANGELOG.md)). For the three
-timers with a public witness:
-
-```powershell
-node scripts/verify-timer-witness.mjs --timer syncRssFeeds --since 2026-09-03T05:00:00Z
-```
-
-**Success:** `PASS`, a document count, and a `newest` stamp at or after
-`--since` (the apply time or the last scheduled tick, ISO 8601 UTC). `FAIL`
-with zero documents on a container only this timer writes means it has never
-run here. Exit 2 means the timer has no public witness and nothing was
-evaluated — its wave's row in the table above says which witness was
-chosen instead, and the `host.json` override it names goes in with the
-arming deploy.
-
-`05-verify-timer.ps1 -Hours 24` still reads correctly for history before
-2026-09-02 17:59Z, and warns when the cut makes its invocation section blind.
-
-**Note on volume:** arming timers adds `AppTraces` volume. The host
-verbosity cut (T-719, closed 2026-09-02, #321) is what made room for it —
-if a cap-day reading after arming shows the workspace back near 0.25 GB,
-the Basic-table-plan reserve lever in the T-719/T-721 CHANGELOG record is
-the next move.
+Nothing, as of 2026-09-05. The sections that stood here — `T-726` and `T-518`
+— moved to [CHANGELOG.md](CHANGELOG.md) with their evidence, including the
+wave table `T-518` carried. The long-form records below stay as the account
+of how each was established.
 
 ## Optional, and only if you want the feature
 
@@ -376,6 +185,9 @@ of that observation — the part a summary loses and the next reader needs befor
 changing anything.
 
 ### T-518 — 15 of 18 timers are still no-ops; the mechanism is proven
+
+**Closed 2026-09-05: all 18 armed.** Kept as the evidence record; the wave
+table and the closing decision are in [CHANGELOG.md](CHANGELOG.md).
 
 **Gate: owner** — [TODO.md](TODO.md), *Timers and the availability test*.
 
@@ -521,7 +333,7 @@ Entra row below, which is where it belongs.
 | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
 | Frontend release | Approve whether releases remain manual or become push-triggered. **The credential half of this row is closed (T-727, 2026-08-31):** the deploy mints its token from ARM per run under federated identity, and the stored secret is deleted — there is nothing left to provide or rotate | `deploy-azure-frontend.yml` stays dispatch-only |
 | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
-| Timers and the availability test | See item 2 above for the procedure and what success looks like. Decide whether to arm the remaining schedulers, adding each wave to `enabled_timers` and observing every timer in it before starting the next — the wave table in item 2 is the plan. `schedulers_master_enabled` is already `true`; `CHECK_AGENT_HEALTH`, `CLEANUP_TEMP_STORAGE`, `PUBLISH_SCHEDULED_CONTENT`, Wave 1's `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE`, and Wave 2's `SYNC_RSS_FEEDS` and `FETCH_PODCAST_FEEDS` are armed and proven. The availability half of this row is closed: the edge probe is deployed and its alert armed 2026-09-01 (T-519) | The proven timers remain armed; the rest remain no-ops. The Azure standard availability test stays disabled in Terraform because Bot Fight Mode challenges Azure agents; the reachability signal is served by the ADR 0024 Cloudflare Worker, whose alert `alert-api-reachability-prod-cus` is live |
+| ~~Timers and the availability test~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | All 18 timers armed by 2026-09-05 (T-518); the reachability alert armed 2026-09-01 (T-519) |
 | Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
 | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
 | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |
