@@ -311,7 +311,8 @@ az functionapp config appsettings list --name func-site-prod-cus-01 --resource-g
 the wave.
 
 Gates 3 and 4 read the timer's **durable side effect**, not telemetry —
-since #321 the host writes no invocation traces (Section 4). For the three
+since #321 the host writes no invocation traces (`T-766`, closed 2026-09-05;
+the record is in [CHANGELOG.md](CHANGELOG.md)). For the three
 timers with a public witness:
 
 ```powershell
@@ -322,7 +323,9 @@ node scripts/verify-timer-witness.mjs --timer syncRssFeeds --since 2026-09-03T05
 `--since` (the apply time or the last scheduled tick, ISO 8601 UTC). `FAIL`
 with zero documents on a container only this timer writes means it has never
 run here. Exit 2 means the timer has no public witness and nothing was
-evaluated — settle that before arming its wave, per Section 4.
+evaluated — its wave's row in the table above says which witness was
+chosen instead, and the `host.json` override it names goes in with the
+arming deploy.
 
 `05-verify-timer.ps1 -Hours 24` still reads correctly for history before
 2026-09-02 17:59Z, and warns when the cut makes its invocation section blind.
