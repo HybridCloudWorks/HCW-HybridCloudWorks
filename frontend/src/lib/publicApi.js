@@ -181,14 +181,14 @@ export async function fetchPublicPodcasts({ provider, limit } = {}) {
 }
 
 /**
- * GET public/feed — rss_cache documents plus active ai_insights for one
- * provider, in a single round trip (the old code ran two Firestore queries).
+ * GET public/feed — rss_cache documents for one provider, in a single round
+ * trip (the old code ran two Firestore queries; the second, `ai_insights`,
+ * fed a panel retired on 2026-09-05 — T-765).
  */
 export async function fetchPublicFeed(provider) {
   const body = await publicGet(`public/feed?provider=${encodeURIComponent(provider)}`);
   return {
     rssCache: body?.rssCache || [],
-    insights: body?.insights || [],
   };
 }
 

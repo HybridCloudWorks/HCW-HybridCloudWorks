@@ -5,7 +5,6 @@ import { useNewsData } from '@/hooks/useNewsData';
 import { ScrollTrigger } from '@/components/animations';
 import CuratedArticlesGrid from '@/components/news/CuratedArticlesGrid';
 import RssFeedTimeline from '@/components/news/RssFeedTimeline';
-import AiInsightsPanel from '@/components/news/AiInsightsPanel';
 
 const NEWS_META = {
   azure: {
@@ -93,10 +92,7 @@ export default function NewsPage({ provider: providerProp } = {}) {
   const ctxProvider = useProvider();
   const provider = providerProp || ctxProvider;
   const config = useProviderConfig();
-  const showInsights = import.meta.env.VITE_NEWS_ENABLE_INSIGHTS === 'true';
-  const { articles, rssItems, insights, loading } = useNewsData(provider || null, {
-    includeInsights: showInsights,
-  });
+  const { articles, rssItems, loading } = useNewsData(provider || null);
 
   // Falling back to NEWS_META.azure gave VMware and Ansible AZURE'S IDENTITY:
   // /vmware/news served the title "Azure Platform News" and Azure's copy, at
@@ -108,7 +104,6 @@ export default function NewsPage({ provider: providerProp } = {}) {
 
   const articleCount = articles.length;
   const feedItemCount = rssItems.length;
-  const insightCount = insights.length;
   let trendingCategory = 'Updates';
   if (articles.length > 0) {
     trendingCategory = getMostCommonCategory(articles);
@@ -157,22 +152,12 @@ export default function NewsPage({ provider: providerProp } = {}) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
             <StatCard label="Curated Articles" value={articleCount} icon="article" />
             <StatCard label="Feed Items" value={feedItemCount} icon="rss_feed" />
-            {showInsights ? (
-              <StatCard label="AI Insights" value={insightCount} icon="auto_awesome" />
-            ) : (
-              <StatCard label="Status" value="Live Data" icon="tune" isText />
-            )}
+            <StatCard label="Status" value="Live Data" icon="tune" isText />
             <StatCard label="Trending" value={trendingCategory} icon="trending_up" isText />
           </div>
         </ScrollTrigger>
 
-        <div
-          className={`grid gap-6 items-start ${
-            showInsights
-              ? 'grid-cols-1 lg:grid-cols-[2fr_1fr_320px] xl:grid-cols-[2fr_1fr_350px]'
-              : 'grid-cols-1 lg:grid-cols-[2fr_1fr]'
-          }`}
-        >
+        <div className="grid gap-6 items-start grid-cols-1 lg:grid-cols-[2fr_1fr]">
           <ScrollTrigger animation="slideUp" duration={0.6}>
             <CuratedArticlesGrid
               articles={articles}
@@ -191,21 +176,13 @@ export default function NewsPage({ provider: providerProp } = {}) {
             </h2>
             <RssFeedTimeline items={rssItems} loading={loading} />
           </ScrollTrigger>
-
-          {showInsights && (
-            <ScrollTrigger animation="slideUp" duration={0.6} delay={0.2}>
-              <AiInsightsPanel insights={insights} loading={loading} />
-            </ScrollTrigger>
-          )}
         </div>
 
         <div className="mt-12 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 dark:bg-slate-800/30 border border-slate-200/10 dark:border-slate-700/30 backdrop-blur-sm">
             <span className="material-symbols-outlined text-primary text-sm">auto_awesome</span>
             <span className="text-xs text-slate-700 dark:text-slate-200">
-              {showInsights
-                ? `Content sourced from official ${config?.displayName || 'provider'} channels · AI insights by HCW Agents`
-                : `Content sourced from official ${config?.displayName || 'provider'} channels`}
+              {`Content sourced from official ${config?.displayName || 'provider'} channels`}
             </span>
           </div>
         </div>

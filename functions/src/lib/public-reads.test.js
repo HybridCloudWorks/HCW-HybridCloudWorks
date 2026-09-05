@@ -757,44 +757,30 @@ describe('T-202 — anonymous feeds filter deletions, not publication status', (
     expect(body.items).toHaveLength(2);
   });
 
-  it('getFeed drops soft-deleted cache documents and insights', async () => {
+  it('getFeed drops soft-deleted cache documents', async () => {
     const h = handlers({
       rss_cache: [
         { id: 'c1', provider: 'azure', feedName: 'Azure Blog', items: [] },
         { id: 'c2', provider: 'azure', feedName: 'Stale', items: [], softDeletedAt: '2026-02-01' },
-      ],
-      ai_insights: [
-        { id: 'i1', provider: 'azure', active: true, summary: 'Kept' },
-        {
-          id: 'i2',
-          provider: 'azure',
-          active: true,
-          summary: 'Deleted',
-          softDeletedAt: '2026-02-01',
-        },
-        { id: 'i3', provider: 'azure', active: false, summary: 'Hidden' },
       ],
     });
     const req = makeRequest({ query: { provider: 'azure' } });
     const body = JSON.parse((await h.getFeed(req, context)).body);
 
     expect(body.rssCache.map((d) => d.id)).toEqual(['c1']);
-    // A soft-deleted insight passed `active !== false` — that was the half of
-    // T-202 that leaked.
-    expect(body.insights.map((d) => d.id)).toEqual(['i1']);
+    // T-765 (2026-09-05): the response no longer carries `insights` at all —
+    // the panel that read them was retired, and nothing ever wrote them.
+    expect(body).not.toHaveProperty('insights');
   });
 
   it('getFeed still serves cache documents, which never carry a status', async () => {
     const h = handlers({
       rss_cache: [{ id: 'c1', provider: 'azure', feedName: 'Azure Blog', items: [{ title: 'x' }] }],
-      ai_insights: [{ id: 'i1', provider: 'azure', summary: 'No active flag set' }],
     });
     const req = makeRequest({ query: { provider: 'azure' } });
     const body = JSON.parse((await h.getFeed(req, context)).body);
 
     expect(body.rssCache).toHaveLength(1);
-    // `active` absent means visible — only an explicit false hides an insight.
-    expect(body.insights).toHaveLength(1);
   });
 });
 
@@ -813,12 +799,14 @@ describe('T-203 — the feed endpoint is bounded', () => {
     };
   };
 
-  it('bounds both containers, which were unbounded on an anonymous endpoint', async () => {
+  it('bounds the feed query, which was unbounded on an anonymous endpoint', async () => {
+    // Two containers were bounded here until 2026-09-05; the ai_insights read
+    // went with the retired panel (T-765), so one query remains to bound.
     const { queries, store } = capture();
     const h = createPublicReadHandlers({ store });
     await h.getFeed(makeRequest({ query: { provider: 'azure' } }), context);
 
-    expect(queries).toHaveLength(2);
+    expect(queries).toHaveLength(1);
     for (const { query } of queries) {
       expect(query).toMatch(/SELECT TOP \d+ /);
     }
@@ -878,8 +866,8 @@ describe('isSoftDeleted', () => {
   it('does not require a publication status, unlike isPublicDocument', () => {
     // This is the distinction T-202 turned on: a cache document has no
     // contentStatus, so isPublicDocument rejects it while isSoftDeleted admits
-    // it. Filtering rss_cache/podcasts/ai_insights on the former would have
-    // emptied three public pages.
+    // it. Filtering rss_cache/podcasts on the former would have emptied two
+    // public pages (three, while the ai_insights panel still existed).
     const cacheDoc = { provider: 'azure', feedName: 'Azure Blog', items: [] };
     expect(isSoftDeleted(cacheDoc)).toBe(false);
     expect(isPublicDocument(cacheDoc)).toBe(false);
@@ -905,16 +893,9 @@ describe('listPodcasts', () => {
 });
 
 describe('getFeed', () => {
-  it('requires a provider and returns rss cache plus active insights', async () => {
+  it('requires a provider and returns the rss cache, and reads only that container', async () => {
     const store = {
-      queryDocs: vi.fn(async (container) =>
-        container === 'rss_cache'
-          ? [{ id: 'cache1', provider: 'aws', items: [] }]
-          : [
-              { id: 'i1', provider: 'aws', active: true },
-              { id: 'i2', provider: 'aws', active: false },
-            ]
-      ),
+      queryDocs: vi.fn(async () => [{ id: 'cache1', provider: 'aws', items: [] }]),
       readDoc: vi.fn(),
     };
     const h = createPublicReadHandlers({ store });
@@ -924,7 +905,10 @@ describe('getFeed', () => {
     const res = await h.getFeed(makeRequest({ query: { provider: 'aws' } }), context);
     const body = JSON.parse(res.body);
     expect(body.rssCache.map((d) => d.id)).toEqual(['cache1']);
-    expect(body.insights.map((d) => d.id)).toEqual(['i1']); // active:false excluded
+    // T-765: one query, against rss_cache only — ai_insights is no longer read.
+    expect(store.queryDocs).toHaveBeenCalledTimes(1);
+    expect(store.queryDocs.mock.calls[0][0]).toBe('rss_cache');
+    expect(body).not.toHaveProperty('insights');
   });
 });
 

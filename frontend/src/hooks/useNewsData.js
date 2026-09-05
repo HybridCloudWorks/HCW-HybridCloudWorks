@@ -158,11 +158,10 @@ function curateArticlesFromRss(rssItems, provider) {
   };
 }
 
-export function useNewsData(provider, options = {}) {
-  const includeInsights = options.includeInsights === true;
-
-  // One round trip: the feed endpoint returns the rss_cache documents plus
-  // active insights for the provider (two separate Firestore queries before).
+export function useNewsData(provider) {
+  // One round trip: the feed endpoint returns the rss_cache documents for the
+  // provider. (It also carried `ai_insights` until 2026-09-05, when the panel
+  // that read them was retired — T-765; nothing ever wrote that container.)
   const {
     data: feed,
     loading,
@@ -170,7 +169,6 @@ export function useNewsData(provider, options = {}) {
   } = usePublicData(() => fetchPublicFeed(provider), provider ? `feed:${provider}` : '');
 
   const rawRssCache = feed?.rssCache;
-  const rawInsights = feed?.insights;
 
   const rssFromFirestore = useMemo(() => {
     if (rawRssCache && rawRssCache.length > 0) {
@@ -192,14 +190,6 @@ export function useNewsData(provider, options = {}) {
     return null;
   }, [rawRssCache]);
 
-  const insightsFromFirestore = useMemo(() => {
-    if (rawInsights && rawInsights.length > 0) {
-      const active = rawInsights.filter((item) => item.active !== false);
-      if (active.length > 0) return active;
-    }
-    return null;
-  }, [rawInsights]);
-
   const rssItemsFromProvider = useMemo(() => rssFromFirestore || [], [rssFromFirestore]);
 
   const { curatedArticles, liveItems } = useMemo(
@@ -209,9 +199,8 @@ export function useNewsData(provider, options = {}) {
 
   const articles = curatedArticles;
   const rssItems = liveItems;
-  const insights = includeInsights ? insightsFromFirestore || [] : [];
 
-  return { articles, rssItems, insights, loading, error };
+  return { articles, rssItems, loading, error };
 }
 
 export default useNewsData;

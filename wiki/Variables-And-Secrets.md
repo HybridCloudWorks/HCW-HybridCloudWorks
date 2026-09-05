@@ -385,7 +385,7 @@ Everything else there is a default nobody is expected to override.
 | `FUNCTIONS_STORAGE_ACCOUNT` | §7 | An account name, not a key. Three words to break the collision with the content storage account, which the standard permits |
 | `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID` | §6, §7 | Public-client registration values that ship in the bundle |
 | `VITE_SOCIAL_X_URL`, `VITE_SOCIAL_LINKEDIN_URL`, `VITE_SOCIAL_GITHUB_URL` | §6, §7 | Public URLs |
-| `VITE_TRANSLATIONS`, `VITE_DEFAULT_LANGUAGE`, `VITE_NEWS_ENABLE_INSIGHTS` | §6 | Feature flags in a public bundle |
+| `VITE_TRANSLATIONS`, `VITE_DEFAULT_LANGUAGE` | §6 | Feature flags in a public bundle (`VITE_NEWS_ENABLE_INSIGHTS` was retired with the insights panel on 2026-09-05, T-765) |
 
 ### Store 4 — GitHub Actions secrets, with justification
 

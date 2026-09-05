@@ -108,7 +108,6 @@ export default defineConfig(({ mode }) => {
     'VITE_SOCIAL_GITHUB_URL',
     'VITE_DEFAULT_LANGUAGE',
     'VITE_TRANSLATIONS',
-    'VITE_NEWS_ENABLE_INSIGHTS',
   ];
 
   // Create define object with fallbacks for non-prefixed versions just in case
