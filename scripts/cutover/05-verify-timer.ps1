@@ -253,7 +253,15 @@ function Invoke-WorkspaceQuery {
     # different question", which is worse, because every number below it looks
     # like data.
     Assert-WorkspaceRowShape -Rows $rows -ExpectColumns $ExpectColumns -What $What
-    return $rows
+    # The unary comma is load-bearing. `return $rows` unrolls the array onto the
+    # pipeline, and an EMPTY array unrolls to nothing — so a query that ran and
+    # answered "no rows" reached the caller as $null, which every caller reads
+    # as "the query did not run". That is how a zero-row answer was reported
+    # as an az failure on 2026-09-03 (syncRssFeeds -Hours 8, after the #321
+    # cut) and again on 2026-09-05 (cleanupSoftDeletedContent before its first
+    # firing). Wrapping keeps the array one object, empty or not, so $null
+    # stays reserved for the call that actually failed.
+    return ,$rows
 }
 
 # ---------------------------------------------------------------------------
