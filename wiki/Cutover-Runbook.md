@@ -671,7 +671,8 @@ container directly with data-plane access, or to raise that one category —
 after, which restores the trace for one timer at a few lines per invocation
 instead of the whole host's chatter. That is a per-wave decision, not a
 default: every wave's choice is recorded in its row of the T-518 table in
-TODO.md (T-766, closed 2026-09-05 once each row had one).
+CHANGELOG.md (T-766, closed 2026-09-05 once each row had one; the overrides
+came out again on 2026-09-05 when the last wave closed).
 
 If telemetry and the witness disagree, believe the witness.
 
@@ -708,6 +709,14 @@ being weekly.
 So do both ordering constraints in the next section, and the two content
 reapers — `CLEANUP_SOFT_DELETED_CONTENT`, dry-run until `CONTENT_HARD_DELETE`,
 and `CLEANUP_REJECTED_CONTENT` — are still armed one per apply.
+
+**Completed 2026-09-05: all 18 timers are armed.** Waves 1 and 2 were observed
+through the gates; 3a and 3b were armed one per apply, 3a's delete switch
+flipped after two zero dry-runs; waves 4, 5 and 6 armed together in the last
+apply. The owner then dropped the per-wave observation read as a gate, so the
+per-category `host.json` overrides came out the same day. The record, with
+the wave table, is in CHANGELOG.md under T-518. This step is now history;
+the gates stay documented for the next timer that is ever added.
 
 ### Order matters for two of them
 

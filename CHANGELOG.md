@@ -18,6 +18,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`T-518` closed: all 18 timers are armed (#345).** Owner decisions of
+  2026-09-05, in order: the content reaper's delete switch flipped after two
+  dry-run firings read `[cleanupSoftDeletedContent] dry-run: would delete
+  content=0 (user=0, policy=0) refused=0 examined=0` (#343); Wave 3b armed
+  the same evening, one apply on its own; waves 4, 5 and 6 armed together in
+  the last apply, with Publer and both Plaud tokens seeded beforehand so the
+  wave 5 timers do real work. The owner then decided that the per-wave
+  observation read is no longer a gate: the arming apply closes a wave, and
+  the reads stay available from `05-verify-timer.ps1` and the public-witness
+  script for anyone who wants them. Wave 3a's planted test page, soft-deleted
+  on 2026-09-05, will be reaped a week later and is the standing live check
+  of the origin classification. The wave table, as it stood at close:
+
+  | Wave | Timers | Record |
+  | ---: | --- | --- |
+  | 1 | `PLATFORM_JOB_SWEEPER`, `MONITOR_PUBLISHING_PIPELINE` | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) |
+  | 2 | `SYNC_RSS_FEEDS`, `FETCH_PODCAST_FEEDS` | **Done 2026-09-04** — record in [CHANGELOG.md](CHANGELOG.md) |
+  | 3a | `CLEANUP_SOFT_DELETED_CONTENT` | **Destructive, solo. Armed, and its delete switch turned on, 2026-09-05.** Step 1 read: two dry-run firings (01:00Z and 05:00Z on 2026-09-05, both at their Chicago even-hour ticks) reported `[cleanupSoftDeletedContent] dry-run: would delete content=0… |
+  | 3b | `CLEANUP_REJECTED_CONTENT` | **Destructive, solo.** Marks aged rejections soft-deleted with `softDeletedReason: rejected_aged_out`; no dry-run pin, because the mark is reversible and only 3a turns it into a deletion. Witness (T-766), decided 2026-09-05: the per-category override,… |
+  | 4 | `FORGE_SCHEDULED`, `GENERATE_REVIEWER_DIGEST`, `FETCH_BLOG_LISTINGS` | Each spends money or sends outbound mail. **Decided 2026-09-05: all three approved, and waves 4, 5 and 6 arm together in one apply after 3b closes** — none of the nine deletes anything, and the only reason to separate them was the approvals and witnesses,… |
+  | 5 | `REFRESH_PLAUD_TOKEN`, `SYNC_SOCIAL_CALENDAR` | Both need owner-held third-party credentials. **Decided 2026-09-05: the owner holds both.** Seeding differs: Publer is the two Key Vault secrets `PUBLER-API-KEY` and `PUBLER-WORKSPACE-ID`, written at https://hybridcloudworks.com/admin/api-keys; Plaud is no… |
+  | 6 | `CHECK_LIVE_LINKS`, `REVERIFY_CERTIFICATIONS`, `SCRAPE_SKILLS_HUB_RSS`, `CLEANUP_UNUSED_CERT_IMAGES` | The three weekly timers fire on Monday, Sunday and Friday — non-overlapping windows, so one week observes all three. The fourth is dry-run pinned by `CERT_IMAGE_CLEANUP_DELETE`. Arms with waves 4 and 5 (decided 2026-09-05, row 4). Witness (T-766): the… |
+
+  Waves 1 and 2 were observed through all four gates (#323, #332). The
+  per-category `host.json` overrides that served as witnesses for 3a through
+  6 came out in this PR, returning `host.json` to the #321 state:
+  `Function` at Warning, `Host.Results` at Information.
+
+- **`T-726` closed: the nightly refresh's App-token path is accepted as
+  built (#345).** Owner decision 2026-09-05. The App is installed, the
+  workflow mints its token from it, and the ruleset admits the App; the
+  first content change remains the live proof, and its two failure
+  signatures — `401` for a wrong App id, `404` for an App not installed on
+  the repository — are recorded here so the day it fails is diagnosable
+  without the tracker.
+
 - **`host.json` raises the nine remaining timer categories to Information
   ahead of the last arming apply (#344, T-518 waves 4, 5 and 6).** Each of
   `forgeScheduled`, `generateReviewerDigest`, `fetchBlogListings`,
