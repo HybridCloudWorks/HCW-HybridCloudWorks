@@ -109,6 +109,39 @@ export function dedupeRoutes(list) {
   return [...new Set(list)];
 }
 
+/**
+ * The routes the sitemap advertises: every published route except a section
+ * page the manifest knows to be empty (issue #373).
+ *
+ * The page is still rendered and still served — a visitor who types the URL
+ * gets the honest empty state — it is just not offered to search engines as a
+ * page worth indexing. A route `/<provider>/<section>` is dropped only when
+ * `manifest.sections[provider][section]` is exactly 0 AND the manifest counts
+ * no unattributed item for that section: the frameworks page infers a
+ * provider from titles and URLs as a last resort, so an unattributed item
+ * could appear on any provider's page and a zero is not trusted while one
+ * exists. A manifest without `sections` (the route predates the field) drops
+ * nothing. Returns the kept routes and the dropped ones, so the build log can
+ * say what left and why.
+ */
+export function sitemapRoutes(routes, manifest) {
+  const sections = manifest?.sections;
+  if (!sections || typeof sections !== 'object') return { kept: routes, dropped: [] };
+  const unattributed = sections._unattributed || {};
+  const kept = [];
+  const dropped = [];
+  for (const route of routes) {
+    const [, provider, section, ...rest] = route.split('/');
+    const count = sections[provider]?.[section];
+    if (rest.length === 0 && count === 0 && !(unattributed[section] > 0)) {
+      dropped.push(route);
+    } else {
+      kept.push(route);
+    }
+  }
+  return { kept, dropped };
+}
+
 /** `/azure/blog` -> `https://hybridcloudworks.com/azure/blog` (root keeps its slash) */
 export function canonicalFor(route) {
   const clean = String(route).replace(/^\/+|\/+$/g, '');
@@ -610,8 +643,13 @@ async function main() {
   // disagree: they have one source.
   //
   // Skipped routes are excluded by construction. Advertising a URL that renders
-  // the 404 page is worse than omitting it.
-  const urls = publishedRoutes
+  // the 404 page is worse than omitting it. Section pages the manifest knows to
+  // be empty are rendered but not advertised — see sitemapRoutes.
+  const sitemap = sitemapRoutes(publishedRoutes, manifest);
+  for (const route of sitemap.dropped) {
+    console.log(`[prerender] sitemap: omitted ${route} — no published items for this section`);
+  }
+  const urls = sitemap.kept
     .map((route) => ['  <url>', `    <loc>${canonicalFor(route)}</loc>`, '  </url>'].join('\n'))
     .join('\n');
   writeFileSync(

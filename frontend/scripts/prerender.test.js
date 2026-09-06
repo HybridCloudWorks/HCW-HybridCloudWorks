@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   dedupeRoutes,
+  sitemapRoutes,
   findStreamedBoundary,
   splitHead,
   injectIntoTemplate,
@@ -521,5 +522,47 @@ describe('dedupeRoutes', () => {
   it('passes an already-unique list through unchanged', () => {
     expect(dedupeRoutes(['/a', '/b'])).toEqual(['/a', '/b']);
     expect(dedupeRoutes([])).toEqual([]);
+  });
+});
+
+describe('sitemapRoutes', () => {
+  const routes = [
+    '/',
+    '/azure',
+    '/azure/frameworks',
+    '/aws/frameworks',
+    '/aws/frameworks/x',
+    '/azure/blog',
+  ];
+
+  it('drops a section page the manifest counts as empty, and nothing else', () => {
+    const manifest = {
+      sections: {
+        azure: { frameworks: 0 },
+        aws: { frameworks: 2 },
+        _unattributed: { frameworks: 0 },
+      },
+    };
+    expect(sitemapRoutes(routes, manifest)).toEqual({
+      kept: ['/', '/azure', '/aws/frameworks', '/aws/frameworks/x', '/azure/blog'],
+      dropped: ['/azure/frameworks'],
+    });
+  });
+
+  it('trusts no zero while an unattributed item of that section exists', () => {
+    const manifest = {
+      sections: { azure: { frameworks: 0 }, _unattributed: { frameworks: 1 } },
+    };
+    expect(sitemapRoutes(routes, manifest).dropped).toEqual([]);
+  });
+
+  it('drops nothing when the manifest has no sections or there is no manifest', () => {
+    expect(sitemapRoutes(routes, { routes: [] })).toEqual({ kept: routes, dropped: [] });
+    expect(sitemapRoutes(routes, null)).toEqual({ kept: routes, dropped: [] });
+  });
+
+  it('never drops a detail route or a section it has no count for', () => {
+    const manifest = { sections: { azure: { frameworks: 0 } } };
+    expect(sitemapRoutes(['/azure/frameworks/x', '/azure/code'], manifest).dropped).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@
  * sends a person somewhere else, which is more expensive than no message.
  */
 import { describe, it, expect } from 'vitest';
-import { buildManifest, describeFetchFailure } from './build-content-manifest.mjs';
+import { buildManifest, describeFetchFailure, sectionCounts } from './build-content-manifest.mjs';
 
 const URL = 'https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest';
 
@@ -88,5 +88,57 @@ describe('buildManifest', () => {
       { ...azure('a2', 'same'), title: 'second' },
     ]);
     expect(manifest.data['article:same'].title).toBe('first');
+  });
+});
+
+describe('sectionCounts', () => {
+  const doc = (provider, type) => ({ id: `${provider}-${type}`, slug: `${provider}-${type}`, cloudProvider: provider, type });
+
+  it('is null when no item carries type — unknown must not read as zero', () => {
+    expect(sectionCounts([{ id: 'a', slug: 'a', cloudProvider: 'azure' }])).toBeNull();
+    expect(sectionCounts([])).toBeNull();
+  });
+
+  it('treats a null, non-string or empty type as absent, not as a type of nothing', () => {
+    // Copilot review of #388: `type: null` used to count as present and return
+    // a map of zeros, which would have dropped every frameworks page.
+    expect(sectionCounts([{ id: 'a', slug: 'a', cloudProvider: 'azure', type: null }])).toBeNull();
+    expect(sectionCounts([{ id: 'b', slug: 'b', cloudProvider: 'azure', type: 7 }])).toBeNull();
+    expect(sectionCounts([{ id: 'c', slug: 'c', cloudProvider: 'azure', type: '  ' }])).toBeNull();
+    const mixed = sectionCounts([
+      { id: 'd', slug: 'd', cloudProvider: 'azure', type: null },
+      doc('aws', 'framework'),
+    ]);
+    expect(mixed.aws.frameworks).toBe(1);
+    expect(mixed.azure.frameworks).toBe(0);
+  });
+
+  it('counts framework items per provider, case-insensitively on type', () => {
+    const sections = sectionCounts([
+      doc('azure', 'framework'),
+      doc('azure', 'Framework'),
+      doc('aws', 'blog'),
+      { id: 'x', slug: 'x', cloudProvider: 'gcp', type: 'framework' },
+    ]);
+    expect(sections.azure.frameworks).toBe(2);
+    expect(sections.gcp.frameworks).toBe(1);
+    expect(sections.aws.frameworks).toBe(0);
+    expect(sections.finops.frameworks).toBe(0);
+    expect(sections._unattributed.frameworks).toBe(0);
+  });
+
+  it('counts a framework with no recognised provider as unattributed', () => {
+    const sections = sectionCounts([
+      { id: 'u', slug: 'u', type: 'framework' },
+      { id: 'v', slug: 'v', cloudProvider: 'Oracle', type: 'framework' },
+    ]);
+    expect(sections._unattributed.frameworks).toBe(2);
+    expect(sections.azure.frameworks).toBe(0);
+  });
+
+  it('is carried on the manifest', () => {
+    const manifest = buildManifest([doc('azure', 'framework')]);
+    expect(manifest.sections.azure.frameworks).toBe(1);
+    expect(buildManifest([{ id: 'a', slug: 'a', cloudProvider: 'azure' }]).sections).toBeNull();
   });
 });
