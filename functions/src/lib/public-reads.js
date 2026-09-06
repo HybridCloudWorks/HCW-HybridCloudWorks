@@ -114,6 +114,28 @@ export function isSoftDeleted(doc = {}) {
   return Boolean(doc?.softDeletedAt || doc?.softDeleteExpiresAt);
 }
 
+/**
+ * Media hosts that no longer serve anything (#372). PodBean's CDN answered
+ * 404 for every stored episode from 2026-09-05, after the show left it; the
+ * rows stayed in `podcasts` because #348 only stopped the timer from polling
+ * the feed. A row whose file is gone is a player that plays nothing, so the
+ * public list hides it — the rows themselves are kept until the new host's
+ * feed (#349) replaces them, and a row marked `mediaUnavailableAt` by any
+ * future liveness check is hidden the same way.
+ */
+export const RETIRED_PODCAST_MEDIA_HOSTS = Object.freeze(['mcdn.podbean.com', 'feed.podbean.com']);
+
+export function isPodcastMediaRetired(doc = {}) {
+  if (doc.mediaUnavailableAt) return true;
+  const url = String(doc.mediaUrl || '');
+  if (!url) return false;
+  try {
+    return RETIRED_PODCAST_MEDIA_HOSTS.includes(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /** Published-date resolution across the five aliases (useCoderCornerData). */
 export function resolvePublishedDateValue(doc = {}) {
   const candidate =
@@ -827,8 +849,10 @@ export function createPublicReadHandlers({ store }) {
         const rows = await store.queryDocs('podcasts', query, parameters);
         // Soft-delete only: podcasts have no publication workflow, so
         // isPublicDocument would reject every row. See isSoftDeleted.
+        // Plus media that is known to be gone (isPodcastMediaRetired): an
+        // episode whose file answers 404 is a player that plays nothing.
         const matching = rows
-          .filter((doc) => !isSoftDeleted(doc))
+          .filter((doc) => !isSoftDeleted(doc) && !isPodcastMediaRetired(doc))
           .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a));
         const items = matching.slice(0, limit).map(stripInternalFields);
         // Counted before the slice — see listContent above (TODO.md T-407).
