@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **Documentation moved from the GitHub Wiki to a MkDocs site under `docs/`,
-  published to docs.hybridcloudworks.com (#PR, issue #360).** Owner decisions
+  published to docs.hybridcloudworks.com (#363, issue #360).** Owner decisions
   2026-09-05: MkDocs Material, host name `docs.hybridcloudworks.com`, source
   is the former `wiki/` folder plus the live Wiki. The live Wiki held 106
   pages that were never staged in the repository (ADRs 0001–0017, the ADR
