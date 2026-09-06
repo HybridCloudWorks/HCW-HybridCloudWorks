@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **ADR 0027 records the documentation-site decision (#PR, issue #360).**
+- **ADR 0027 records the documentation-site decision (#367, issue #360).**
   The move from the Wiki to `docs/` shipped in #363 with its reasoning spread
   across the PR, the issue and the CHANGELOG; the ADR puts it in the register
   where the next reader will look — source layout, MkDocs Material and why
