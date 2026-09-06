@@ -527,6 +527,15 @@ The first reviews to watch are an `infra/` change (expect Terraform Registry
 and `azure` attributions — `role_assignment_list` on an `oidc.tf` change is
 the canonical one) and a `functions/` change (expect Microsoft Learn).
 
+### Verification record
+
+One row per session read against the list above, newest first. A row is
+added when the log has actually been read, not when the review is requested.
+
+| Read | Session | Setup steps | Servers | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-09-06 | First review after #378 merged (the pull request that added this table) | pending | pending | Filled in from the session log before that pull request leaves draft. |
+
 ## Change or roll back
 
 - **Change a server or tool:** edit `.github/copilot-mcp.json` in a pull
