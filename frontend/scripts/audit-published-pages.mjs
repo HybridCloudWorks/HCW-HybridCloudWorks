@@ -295,7 +295,11 @@ async function auditPage(context, url) {
 
   // ── Findings ──────────────────────────────────────────────────────────
   const f = record.findings;
-  if (record.status !== 200) f.push(`http ${record.status}`);
+  // No document response (navigation threw, timed out, or the host was
+  // unreachable) is its own class, not "http null": the page error above
+  // carries the reason, and the row must not read as the site answering.
+  if (record.status === null) f.push('no response');
+  else if (record.status !== 200) f.push(`http ${record.status}`);
   if (record.pageErrors.length) f.push(`page errors: ${record.pageErrors.length}`);
   if (record.consoleErrors.length) {
     const byClass = new Map();
