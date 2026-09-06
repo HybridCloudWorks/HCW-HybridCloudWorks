@@ -26,7 +26,7 @@ This project has not cut a tagged release; entries are grouped under
   what the repository contains — Microsoft Learn (Azure Functions, Cosmos DB,
   Key Vault, Static Web Apps, Entra ID), Cloudflare's public documentation
   server (the edge availability probe and DNS) and the HashiCorp Terraform
-  MCP server, pinned to `1.3.0` and held to the eight Registry read tools on
+  MCP server, pinned by image digest at `1.3.0` (a bare tag is mutable) and held to the eight Registry read tools on
   both its command line and Copilot's allowlist, with no HCP Terraform token
   so the live workspace stays unreachable. The Azure MCP Server and the
   Cloudflare account API server were left out on purpose; the runbook
