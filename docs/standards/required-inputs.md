@@ -121,7 +121,10 @@ list — the three scratch variables that used to sit here were deleted the same
 day (T-525). `READER_CLIENT_ID` was added to the table on 2026-08-29 (T-728) and
 is **not yet set**, so a reader comparing this against `gh variable list` should
 find exactly that one difference until the split is applied. Seeded from
-Terraform outputs by `scripts/set-github-variables.ps1` — never written by hand.
+Terraform outputs by `scripts/set-github-variables.ps1` — never written by
+hand, with one exception: `COPILOT_REVIEW_APP_ID` identifies a GitHub App that
+Terraform does not manage, so it is set by hand from the App page (runbook
+step 4) and its row says so.
 
 | Name | Status | Consumer |
 | --- | --- | --- |

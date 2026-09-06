@@ -158,12 +158,28 @@ jobs:
       # container images are pulled for the same reason. Nothing here changes
       # what runs; it only moves the wait out of the window that decides
       # which servers a review can use.
+      #
+      # Best-effort on purpose: a download that fails here is the server that
+      # will be missing from this session, which is the same fail-closed
+      # outcome as before this step existed. It must not fail the job, because
+      # in Copilot's runner a failed step skips every later step, and the
+      # token mint below has nothing to do with npm or Docker Hub being slow.
+      # Each miss is a warning in the step summary so the session log says
+      # which server to expect absent.
       - name: Warm the pinned MCP servers
         run: |
-          set -euo pipefail
-          npx -y @azure/mcp@3.0.0-beta.41 --version
-          docker pull hashicorp/terraform-mcp-server:1.3.0@sha256:423a6b8e2ee06affcf090892f40c86469caba45fd2448ffa8ca5d717a174f7d5
-          docker pull ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33
+          set -uo pipefail
+          warm() {
+            local what="$1"; shift
+            if "$@" > /dev/null 2>&1; then
+              echo "warmed: ${what}"
+            else
+              echo "::warning::Could not warm ${what}; that MCP server may be absent from this session's tool list (runbook: What the review runner keeps). The setup continues." | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          warm "@azure/mcp@3.0.0-beta.41" npx -y @azure/mcp@3.0.0-beta.41 --version
+          warm "terraform-mcp-server image" docker pull hashicorp/terraform-mcp-server:1.3.0@sha256:423a6b8e2ee06affcf090892f40c86469caba45fd2448ffa8ca5d717a174f7d5
+          warm "github-mcp-server image" docker pull ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33
 
       # Self-arming, like publish-content-manifest.yml: before the App exists
       # this reports honestly that it did not run rather than failing every
