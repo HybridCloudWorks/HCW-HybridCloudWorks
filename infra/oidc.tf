@@ -631,7 +631,7 @@ output "reader_client_id" {
 }
 
 output "copilot_review_client_id" {
-  description = "COPILOT_REVIEW_CLIENT_ID for azure/login in copilot-setup-steps.yml — a repository variable, mirrored as an Agents secret of the same name because Copilot's own runner resolves no variables (runbook step 2b); an identifier in both stores, not a secret"
+  description = "COPILOT_REVIEW_CLIENT_ID for azure/login in copilot-setup-steps.yml — a repository variable, mirrored as an Agents secret of the same name because Copilot's own runner resolves no repository variables (runbook step 2b); an identifier in both stores, not a secret"
   value       = azurerm_user_assigned_identity.github_copilot_review.client_id
 }
 
