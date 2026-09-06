@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **Every published page audited, in a browser, with a verdict each (#PR,
+- **Every published page audited, in a browser, with a verdict each (#375,
   issue #361).** `frontend/scripts/audit-published-pages.mjs` crawls every
   URL in the live sitemap with Playwright Chromium and records HTTP status,
   failed and 4xx/5xx requests (the public API called out separately),
