@@ -75,6 +75,7 @@ Every ADR includes:
 | [0024](../decisions/0024-edge-availability-probe.md) | Reachability probing from a Cloudflare Worker | Proposed | Give T-519's signal a path that runs on the current Cloudflare plan |
 | [0025](../decisions/0025-cosmos-firewall-datacenter-sentinel.md) | The Cosmos datacenter-IP sentinel — kept, then removed | Accepted; recommendation reversed by its own addendum | Weigh closing T-718 against its cost — then remove the sentinel once a cheaper route appeared |
 | [0026](../decisions/0026-required-checks-filter-inside-the-job.md) | Required checks filter inside the job, not at the trigger | Accepted | Keep every merge gate while paying only for checks that can fail |
+| [0027](../decisions/0027-documentation-site.md) | Documentation is a MkDocs site under `docs/`, published to docs.hybridcloudworks.com | Accepted | One reviewed, validated, redaction-gated source for every page; the Wiki is retired |
 
 ## Template
 
