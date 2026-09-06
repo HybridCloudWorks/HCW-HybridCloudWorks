@@ -311,23 +311,24 @@ git checkout main; git pull origin main; ./scripts/set-github-variables.ps1
 **Success looks like:** a line naming `COPILOT_REVIEW_CLIENT_ID` and a GUID.
 It is a variable, not a secret — the value is printed on purpose.
 
-### 2b. Mirror the three identifiers into the Agents store
+### 2b. Mirror the four identifiers into the Agents store
 
 Tracked as
 [issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381).
 Copilot's own runner reads only Agents secrets (see
 [the Azure server](#the-azure-server-read-only-federated-no-secret)), so the
-same three values the manual run takes from repository variables must also
-exist there. Nothing to retype: the first line prints the three values the
-variables hold, and the second copies each to the clipboard in turn for the
-paste.
+four identifiers the workflow reads — three for the Azure login, one for the
+GitHub App — must exist there as well as in the repository variables the
+manual run uses. Nothing to retype: the first line prints the four values the
+variables hold, and the later line copies each to the clipboard in turn for
+the paste.
 
 ```powershell
-gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID'
+gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID|COPILOT_REVIEW_APP_ID'
 ```
 
 Then, in the repository, **Settings → Secrets and variables → Agents →
-Secrets → New repository secret**, three times (the Agents tab sits beside
+Secrets → New repository secret**, four times (the Agents tab sits beside
 the Actions tab at
 <https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions>);
 `gh secret set` cannot write this store:
@@ -337,6 +338,7 @@ the Actions tab at
 | `COPILOT_REVIEW_CLIENT_ID` | `COPILOT_REVIEW_CLIENT_ID` |
 | `COPILOT_REVIEW_TENANT_ID` | `TENANT_ID` |
 | `COPILOT_REVIEW_SUBSCRIPTION_ID` | `SUBSCRIPTION_ID` |
+| `COPILOT_REVIEW_APP_ID` | `COPILOT_REVIEW_APP_ID` (exists once step 4 is done) |
 
 To copy one value without retyping it, PowerShell:
 
@@ -344,10 +346,8 @@ To copy one value without retyping it, PowerShell:
 gh variable get COPILOT_REVIEW_CLIENT_ID --repo HybridCloudWorks/HCW-HybridCloudWorks | Set-Clipboard
 ```
 
-and the same with `TENANT_ID` and `SUBSCRIPTION_ID` in place of the
-variable name. While step 4 is done, also add `COPILOT_REVIEW_APP_ID` to the
-Agents store with the value of the repository variable of the same name, so
-the token mint runs in Copilot's runner too.
+and the same with `TENANT_ID`, `SUBSCRIPTION_ID` and `COPILOT_REVIEW_APP_ID`
+in place of the variable name.
 
 **Success looks like:** four secrets listed under Agents (five with the App
 key), and the next review session's log showing `azure/login` with a

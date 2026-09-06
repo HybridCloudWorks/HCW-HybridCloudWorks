@@ -92,10 +92,10 @@ jobs:
       # with `secrets.`. So the same three identifiers are also held as Agents
       # SECRETS named COPILOT_REVIEW_CLIENT_ID, COPILOT_REVIEW_TENANT_ID and
       # COPILOT_REVIEW_SUBSCRIPTION_ID, and each `||` prefers that store when
-      # it is present. Identifiers in a secret store is a deliberate exception
-      # to docs/standards/variables-and-secrets.md, made because the Agents
-      # store is the only one Copilot's runner reads; the values are still not
-      # credentials.
+      # it is present. Holding identifiers in a secret store is a deliberate
+      # exception to docs/standards/variables-and-secrets.md, made because the
+      # Agents store is the only one Copilot's runner reads; the values are
+      # still not credentials.
       #
       # Self-arming, like the App step below and the reader workflows: while
       # any of the three is unresolved in the runner that is executing this
