@@ -211,6 +211,7 @@ async function auditPage(context, url) {
     brokenImages: [],
     media: [],
     notes: [],
+    acceptedFailures: 0,
     findings: [],
     verdict: 'works',
   };
@@ -244,6 +245,7 @@ async function auditPage(context, url) {
     const accepted = KNOWN_ACCEPTED.find((k) => k.match(u));
     if (accepted) {
       if (!record.notes.includes(accepted.note)) record.notes.push(accepted.note);
+      record.acceptedFailures += 1;
       return;
     }
     if (new URL(u).host === API_HOST) record.apiFailures.push(entry);
@@ -319,6 +321,15 @@ async function auditPage(context, url) {
     for (const text of record.consoleErrors) {
       const c = classifyConsole(text);
       byClass.set(c, (byClass.get(c) || 0) + 1);
+    }
+    // Chromium's "Failed to load resource" line does not always carry the
+    // resource URL, so the listener above cannot always match it to an
+    // accepted failure. Each accepted failed response accounts for at most
+    // one such line; the remainder is a real finding.
+    if (byClass.has('network-failed') && record.acceptedFailures > 0) {
+      const left = byClass.get('network-failed') - record.acceptedFailures;
+      if (left > 0) byClass.set('network-failed', left);
+      else byClass.delete('network-failed');
     }
     record.consoleClasses = [...byClass.keys()];
     for (const [c, n] of byClass) f.push(`console ${c}: ${n}`);
