@@ -66,10 +66,7 @@ function timer(name, flag, schedule, run) {
   });
 }
 
-const storage = () => ({
-  listBlobs: blobStorage.listBlobs,
-  deleteBlob: blobStorage.deleteBlob,
-});
+const storage = () => ({ listBlobs: blobStorage.listBlobs, deleteBlob: blobStorage.deleteBlob });
 
 // ── Ingestion and drafting ───────────────────────────────────────────────────
 
@@ -87,11 +84,7 @@ timer('syncRssFeeds', 'SYNC_RSS_FEEDS', '0 0 */2 * * *', async (context) => {
 timer('fetchPodcastFeeds', 'FETCH_PODCAST_FEEDS', '0 30 */2 * * *', async (context) =>
   // Site-Main: `every 2 hours`, offset from syncRssFeeds. Feed list comes
   // from admin_config/podcast_feeds at run time (#348).
-  createPodcastIngest({
-    store,
-    parser: await createPodcastParser(),
-    log: context,
-  }).run()
+  createPodcastIngest({ store, parser: await createPodcastParser(), log: context }).run()
 );
 
 timer('fetchBlogListings', 'FETCH_BLOG_LISTINGS', '0 15 */6 * * *', (context) =>
@@ -178,10 +171,7 @@ timer('cleanupUnusedCertImages', 'CLEANUP_UNUSED_CERT_IMAGES', '0 0 5 * * *', (c
 // ── Certifications ───────────────────────────────────────────────────────────
 
 timer('reVerifyCertifications', 'REVERIFY_CERTIFICATIONS', '0 0 0 * * 0', (context) => {
-  const snapshots = createSnapshotPublishHandlers({
-    guard: getDefaultGuard(),
-    store,
-  });
+  const snapshots = createSnapshotPublishHandlers({ guard: getDefaultGuard(), store });
   return createCertReverify({
     store,
     publishSnapshots: snapshots.publishSnapshots,
@@ -192,11 +182,7 @@ timer('reVerifyCertifications', 'REVERIFY_CERTIFICATIONS', '0 0 0 * * 0', (conte
 timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 4 * * 5', async (context) => {
   // Site-Main: `every friday 09:00` UTC; 04:00 CDT (03:00 CST) here.
   const { createRssParser } = await import('../lib/rss/ingest.js');
-  return createSkillsHubScrape({
-    store,
-    parser: await createRssParser(),
-    log: context,
-  }).run();
+  return createSkillsHubScrape({ store, parser: await createRssParser(), log: context }).run();
 });
 
 // ── Platform ─────────────────────────────────────────────────────────────────
@@ -204,11 +190,7 @@ timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 4 * * 5', async (conte
 timer('syncSocialCalendarScheduled', 'SYNC_SOCIAL_CALENDAR', '0 */5 * * * *', (context) =>
   // Site-Main: `every 5 minutes`. D12: the live writer of social_posts — this
   // flag stays off until the cutover delta import is done (§6).
-  createPublerReconcile({
-    store,
-    client: createPublerClient(),
-    log: context,
-  }).run()
+  createPublerReconcile({ store, client: createPublerClient(), log: context }).run()
 );
 
 timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
