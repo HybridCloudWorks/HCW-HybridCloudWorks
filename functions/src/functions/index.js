@@ -37,6 +37,7 @@ import './public-content-manifest.js';
 import './public-reads.js';
 import './publish-http.js';
 import './publish-jobs.js';
+import './recording-content-http.js';
 import './reviewer-digest-http.js';
 import './rss-jobs.js';
 import './public-submissions.js';

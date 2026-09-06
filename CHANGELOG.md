@@ -19,6 +19,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`createContentFromRecording` is implemented — the fifteenth and last RPC
+  the admin UI invoked without a route (#PR, closes #180).** RecordingsPage's
+  "Route to ContentForge Pipeline" has called it since the Firebase days and
+  received a 404 on Azure. It now does what the button says: the transcript
+  goes through `createDrafter().generateDraft`, the same drafter the forge,
+  the digest and `generateArticleDraft` use (feature-gated as
+  forgeDrafting), with an instruction block per content type — blog post,
+  technical guide, LinkedIn post, podcast show notes, meeting summary — and
+  the result is persisted through the `createContentItem` write path, so a
+  recording-born draft carries the same dedup, quality report and document
+  shape as every other. To make that reuse literal rather than a copy,
+  `lib/cms/content-create.js` gained `createContentDocument`, the write path
+  without the HTTP wrapper; `createContentItem` now calls it and its twelve
+  tests are unchanged. The recording is patched to `routed` with the content
+  id on the server, so the state is correct even when the browser dies before
+  its own PATCH. Input contract: a recording that exists (404), a transcript
+  of 200–400,000 characters (422/413), a known content type (400); AI
+  disabled or unconfigured is 503, the 75 s budget is 504, and the request's
+  `provider: 'gemini'` is recorded as a hint, never honoured as routing — the
+  router's configured order decides and the draft records what ran. Route
+  file `recording-content-http.js`; `.azure/api-surface.json` moves the name
+  to `implemented` and `notImplemented` is empty for the first time; the
+  client timeout for the call is 90 s like `generateArticleDraft`; the
+  service docs page no longer says the action is not live. Deployed
+  verification, owner-gated: route one real recording from
+  https://hybridcloudworks.com/admin/recordings and confirm the draft in the
+  editor and `status: routed` on the recording.
 - **Retire Wiki stubs the Home page too (#364).** The dry run on 2026-09-06
   reported `keep (not in map): Home`: Home maps to the site root, whose path
   is the empty string, and the guard tested truthiness instead of presence.

@@ -34,6 +34,7 @@ const FUNCTION_TIMEOUT_MS = {
   generateReviewerDigestManual: 30000,
   deleteRejectedContent: 90000,
   generateArticleDraft: 90000,
+  createContentFromRecording: 90000,
   generatePreviewImages: 30000,
 };
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);

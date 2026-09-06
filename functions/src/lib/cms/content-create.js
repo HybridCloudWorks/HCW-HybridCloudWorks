@@ -45,6 +45,110 @@ export const QUALITY_ENFORCED_STATUSES = ['inspected', 'approved', 'forge_ready'
 const nullCritique = async () => null;
 
 /**
+ * The write path itself, separated from the HTTP shape so a second caller
+ * (createContentFromRecording, #180) persists through the same dedup, quality
+ * gate and document shape instead of growing a parallel one. Returns
+ * `{ status, body }` in the handler's own vocabulary: 200 with `contentId`,
+ * 409 duplicate, 422 quality gate. Throws only on a store failure.
+ *
+ * @param {object} args
+ * @param {{ queryDocs: Function, upsertDoc: Function }} args.store
+ * @param {object} args.user       The guard's user (claims), for createdBy.
+ * @param {object} args.data       The content fields, as the request's `data`.
+ * @param {boolean} [args.runEditorialCritique=true]
+ * @param {boolean} [args.forceQualityBypass=false]
+ * @param {Function} [args.critiqueDraft]
+ * @param {() => Date} [args.now]
+ * @param {() => string} [args.uuid]
+ */
+export async function createContentDocument({
+  store,
+  user,
+  data,
+  runEditorialCritique = true,
+  forceQualityBypass = false,
+  critiqueDraft = nullCritique,
+  now = () => new Date(),
+  uuid = randomUUID,
+}) {
+  const requestedType = String(data.type || '').toLowerCase();
+  const normalizedType = SUPPORTED_PUBLISH_TARGETS.has(requestedType) ? requestedType : 'blog';
+
+  const normalizedData = normalizeContentBodyFields({
+    ...data,
+    publishTarget: normalizePublishTarget(data.publishTarget, normalizedType),
+    type: normalizedType,
+  });
+
+  const sourceUrl =
+    normalizedData.sourceUrl || normalizedData.url || normalizedData['CD Url'] || '';
+  const duplicate = await findDuplicateContent(store, {
+    url: sourceUrl,
+    canonicalUrl: normalizedData.canonicalUrl,
+    title: normalizedData.Title || normalizedData.title,
+    publishedAt:
+      normalizedData.publishedAt || normalizedData.publishedDate || normalizedData['Published At'],
+  });
+  if (duplicate.duplicate) {
+    return {
+      status: 409,
+      body: {
+        success: false,
+        error: 'Duplicate content detected',
+        duplicateReason: duplicate.reason,
+        existingId: duplicate.existingId,
+      },
+    };
+  }
+
+  const qualityCritique =
+    runEditorialCritique === false
+      ? null
+      : await critiqueDraft({
+          title: normalizedData.Title || normalizedData.title || '',
+          postContent: getPrimaryContentBody(normalizedData),
+        });
+  const contentQuality = buildContentQualityReport(normalizedData, qualityCritique);
+  const imageReadiness = buildImageReadinessReport(normalizedData);
+  const requestedStatus = normalizedData.contentStatus || 'draft';
+  const shouldEnforceQuality = QUALITY_ENFORCED_STATUSES.includes(requestedStatus);
+  if (shouldEnforceQuality && !contentQuality.ready && forceQualityBypass !== true) {
+    return {
+      status: 422,
+      body: { success: false, error: 'Content quality gate failed', contentQuality },
+    };
+  }
+
+  const dedupFields = buildDedupFields({
+    url: sourceUrl,
+    canonicalUrl: normalizedData.canonicalUrl,
+    title: normalizedData.Title || normalizedData.title,
+  });
+  const imageLineage = buildImageLineage(normalizedData);
+
+  const timestamp = now().toISOString();
+  const doc = {
+    ...normalizedData,
+    ...dedupFields,
+    id: uuid(),
+    contentStatus: requestedStatus,
+    storageCollection: 'content',
+    contentQuality,
+    imageReadiness,
+    // Source wrote the readiness report under both names; callers read both.
+    imageQuality: imageReadiness,
+    imageLineage,
+    createdBy: user?.email || user?.preferred_username || user?.oid || user?.sub || 'admin',
+    'Created At': timestamp,
+    updatedAt: timestamp,
+  };
+  // New doc with a fresh uuid — upsert can never overwrite (matches .add()).
+  await store.upsertDoc('content', doc);
+
+  return { status: 200, body: { success: true, contentId: doc.id } };
+}
+
+/**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ queryDocs: Function, upsertDoc: Function }} deps.store
@@ -71,83 +175,17 @@ export function createContentCreateHandler({
           ? body.data
           : {};
 
-      const requestedType = String(data.type || '').toLowerCase();
-      const normalizedType = SUPPORTED_PUBLISH_TARGETS.has(requestedType)
-        ? requestedType
-        : 'blog';
-
-      const normalizedData = normalizeContentBodyFields({
-        ...data,
-        publishTarget: normalizePublishTarget(data.publishTarget, normalizedType),
-        type: normalizedType,
+      const result = await createContentDocument({
+        store,
+        user,
+        data,
+        runEditorialCritique: body?.runEditorialCritique !== false,
+        forceQualityBypass: body?.forceQualityBypass === true,
+        critiqueDraft,
+        now,
+        uuid,
       });
-
-      const sourceUrl =
-        normalizedData.sourceUrl || normalizedData.url || normalizedData['CD Url'] || '';
-      const duplicate = await findDuplicateContent(store, {
-        url: sourceUrl,
-        canonicalUrl: normalizedData.canonicalUrl,
-        title: normalizedData.Title || normalizedData.title,
-        publishedAt:
-          normalizedData.publishedAt ||
-          normalizedData.publishedDate ||
-          normalizedData['Published At'],
-      });
-      if (duplicate.duplicate) {
-        return json(409, {
-          success: false,
-          error: 'Duplicate content detected',
-          duplicateReason: duplicate.reason,
-          existingId: duplicate.existingId,
-        });
-      }
-
-      const qualityCritique =
-        body?.runEditorialCritique === false
-          ? null
-          : await critiqueDraft({
-              title: normalizedData.Title || normalizedData.title || '',
-              postContent: getPrimaryContentBody(normalizedData),
-            });
-      const contentQuality = buildContentQualityReport(normalizedData, qualityCritique);
-      const imageReadiness = buildImageReadinessReport(normalizedData);
-      const requestedStatus = normalizedData.contentStatus || 'draft';
-      const shouldEnforceQuality = QUALITY_ENFORCED_STATUSES.includes(requestedStatus);
-      if (shouldEnforceQuality && !contentQuality.ready && body?.forceQualityBypass !== true) {
-        return json(422, {
-          success: false,
-          error: 'Content quality gate failed',
-          contentQuality,
-        });
-      }
-
-      const dedupFields = buildDedupFields({
-        url: sourceUrl,
-        canonicalUrl: normalizedData.canonicalUrl,
-        title: normalizedData.Title || normalizedData.title,
-      });
-      const imageLineage = buildImageLineage(normalizedData);
-
-      const timestamp = now().toISOString();
-      const doc = {
-        ...normalizedData,
-        ...dedupFields,
-        id: uuid(),
-        contentStatus: requestedStatus,
-        storageCollection: 'content',
-        contentQuality,
-        imageReadiness,
-        // Source wrote the readiness report under both names; callers read both.
-        imageQuality: imageReadiness,
-        imageLineage,
-        createdBy: user.email || user.preferred_username || user.oid || user.sub || 'admin',
-        'Created At': timestamp,
-        updatedAt: timestamp,
-      };
-      // New doc with a fresh uuid — upsert can never overwrite (matches .add()).
-      await store.upsertDoc('content', doc);
-
-      return json(200, { success: true, contentId: doc.id });
+      return json(result.status, result.body);
     } catch (error) {
       context.error('createContentItem failed:', error);
       return json(500, {
