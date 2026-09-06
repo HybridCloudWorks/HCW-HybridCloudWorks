@@ -29,7 +29,6 @@ issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/
 
 | Item | Issue |
 | --- | --- |
-| Mirror the four Copilot review identifiers into the Agents store, so Copilot's own runner can sign in (runbook step 2b) | [#381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381) |
 | Podbean feed returns 410; `fetchPodcastFeeds` fails every 2 hours; Podbean still on the pages | [#348](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/348) |
 | Replace Podbean: RSS.com hosting, ElevenLabs speech, StreamYard, one audio surface | [#349](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/349) |
 | Optional: `REPLICATE-API-KEY` for AI hero images | [#350](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/350) |

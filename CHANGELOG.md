@@ -39,13 +39,16 @@ This project has not cut a tagged release; entries are grouped under
   `secrets.COPILOT_REVIEW_… || vars.…`, so the Agents store Copilot exposes is
   preferred and the repository variables still serve a manual run; the
   `oidc-subjects` guard reads the variable out of that expression; the
-  standards record the identifiers-in-Agents exception; and mirroring the
-  four values is the owner's step 2b. And a review session runs MCP in
-  read-only mode, keeping only tools whose servers annotate them
-  `readOnlyHint: true` — the session log dropped every server, including the
-  built-in Playwright, as having no allowed tools. The Azure and GitHub
-  servers annotate; the runbook records what that means for the two
-  documentation servers and how to read the next session log.
+  standards record the identifiers-in-Agents exception; and the owner
+  mirrored the four values the same day (step 2b, issue #381, closed
+  2026-09-06). And a review session runs MCP in read-only mode, keeping only
+  tools whose servers annotate them `readOnlyHint: true` — the session log
+  kept `terraform` and dropped every other server, the built-in Playwright
+  included, as having no allowed tools. The Azure and GitHub servers
+  annotate; the runbook records what that means for the two documentation
+  servers and how to read the next session log. Every review session of
+  #378 itself ran the step list `main` held at the time, so the first review
+  after the merge is the one that shows the new steps.
 - **Four landing pages no longer request hero images that do not exist
   (#380, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
   listed five `/images/<provider>-hero/N.png` files that were never added, so

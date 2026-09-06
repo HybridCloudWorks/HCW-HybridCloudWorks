@@ -226,13 +226,13 @@ no `vars.*` — observed on the first review session, PR #378, 2026-09-06,
 where `azure/login` printed a `with:` block with every variable input empty.
 The only store it exposes is **Agents**, and GitHub's own Azure example reads
 its inputs from it with `secrets.`. So the client, tenant, subscription and
-App identifiers are to be mirrored there as well (`COPILOT_REVIEW_CLIENT_ID`,
+App identifiers are mirrored there as well (`COPILOT_REVIEW_CLIENT_ID`,
 `COPILOT_REVIEW_TENANT_ID`, `COPILOT_REVIEW_SUBSCRIPTION_ID`,
-`COPILOT_REVIEW_APP_ID` — owner step 2b, tracked as issue #381 and listed
-**NOT SET** in [Required inputs §4.3](required-inputs.md) until done), and the
-workflow prefers them with a fallback to the variables. They are still
-identifiers, still not credentials; the store is chosen by what the reader
-can see, not by what the value is.
+`COPILOT_REVIEW_APP_ID` — owner step 2b, issue #381, done 2026-09-06 and
+listed in [Required inputs §4.3](required-inputs.md)), and the workflow
+prefers them with a fallback to the variables. They are still identifiers,
+still not credentials; the store is chosen by what the reader can see, not by
+what the value is. A rotation changes both copies.
 
 ### Why OIDC federation means zero long-lived cloud credentials in GitHub
 

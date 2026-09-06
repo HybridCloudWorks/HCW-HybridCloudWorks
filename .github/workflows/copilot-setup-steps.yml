@@ -108,9 +108,9 @@ jobs:
       # any of the three is unresolved in the runner that is executing this
       # file, the login is skipped with a notice instead of failing the setup
       # — Copilot then reports the review without Azure context rather than
-      # posting "setup step failed" on every pull request until issue #381 is
-      # done. `secrets` is not available to a step-level `if`, so the test is
-      # a step of its own.
+      # posting "setup step failed" on every pull request while the Agents
+      # copies (runbook step 2b) are missing. `secrets` is not available to a
+      # step-level `if`, so the test is a step of its own.
       - name: Are the Azure identifiers resolvable here?
         id: azure
         env:
@@ -123,7 +123,7 @@ jobs:
             echo "armed=true" >> "$GITHUB_OUTPUT"
           else
             echo "armed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::COPILOT_REVIEW_CLIENT_ID, TENANT_ID or SUBSCRIPTION_ID is not resolvable in this runner, so Azure Login was skipped and the azure MCP server has no credential this session (runbook step 2b, issue #381)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::notice::COPILOT_REVIEW_CLIENT_ID, TENANT_ID or SUBSCRIPTION_ID is not resolvable in this runner, so Azure Login was skipped and the azure MCP server has no credential this session (runbook step 2b: the Agents copies are what Copilot's runner reads)." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Azure Login
@@ -182,7 +182,7 @@ jobs:
             echo "armed=true" >> "$GITHUB_OUTPUT"
           else
             echo "armed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::COPILOT_REVIEW_APP_ID or COPILOT_REVIEW_APP_PRIVATE_KEY is unset, so no GitHub token was minted; the github-mcp-server entry will fail closed this session (issue #369, step 4)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::notice::COPILOT_REVIEW_APP_ID or COPILOT_REVIEW_APP_PRIVATE_KEY is not resolvable in this runner, so no GitHub token was minted and the github-mcp-server entry will fail closed this session. Runbook step 4 registers the App and stores its key; step 2b mirrors COPILOT_REVIEW_APP_ID into the Agents store, the only store Copilot's runner reads, so a variable alone is unset here." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       # No `npm ci`: the minter imports only node:crypto and node:url and uses

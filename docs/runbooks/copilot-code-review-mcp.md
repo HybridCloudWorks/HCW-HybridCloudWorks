@@ -13,8 +13,8 @@
 > **First review session, same day (PR #378):** Copilot code review *does*
 > run `copilot-setup-steps.yml` — but in its own runner, which resolves no
 > `vars.*` at all, so the Azure login ran with empty inputs. The workflow now
-> reads the three identifiers from Agents secrets first (step 2b below), and
-> the read-only tool filter described under
+> reads the four identifiers from Agents secrets first (step 2b below, done
+> the same day as issue #381), and the read-only tool filter described under
 > [What the review runner keeps](#what-the-review-runner-keeps) decides which
 > servers a review can actually call.
 
@@ -322,9 +322,9 @@ It is a variable, not a secret — the value is printed on purpose.
 
 ### 2b. Mirror the four identifiers into the Agents store
 
-Tracked as
-[issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381).
-Copilot's own runner reads only Agents secrets (see
+Done 2026-09-06 as
+[issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381);
+kept here for a rotation, which has to change both copies. Copilot's own runner reads only Agents secrets (see
 [the Azure server](#the-azure-server-read-only-federated-no-secret)), so the
 four identifiers the workflow reads — three for the Azure login, one for the
 GitHub App — must exist there as well as in the repository variables the
