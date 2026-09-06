@@ -40,6 +40,13 @@ This project has not cut a tagged release; entries are grouped under
   Verification once the new feed is seeded: `podcasts.updatedAt` fresh at
   the 2-hour firing and no `feed failed` rows in `AppTraces` for
   `Function.fetchPodcastFeeds`.
+- **Retire Wiki stubs the Home page too (#364).** The dry run on 2026-09-06
+  reported `keep (not in map): Home`: Home maps to the site root, whose path
+  is the empty string, and the guard tested truthiness instead of presence.
+  It now tests `is None`, so 141 pages are stubbed rather than 140 and the
+  Wiki's landing page points at https://docs.hybridcloudworks.com/ like the
+  rest. Found by running the workflow with `dry_run` on, which is what the
+  input is for.
 - **Documentation moved from the GitHub Wiki to a MkDocs site under `docs/`,
   published to docs.hybridcloudworks.com (#363, issue #360).** Owner decisions
   2026-09-05: MkDocs Material, host name `docs.hybridcloudworks.com`, source
