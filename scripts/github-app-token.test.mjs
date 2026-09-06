@@ -207,7 +207,20 @@ describe('parsePermissions', () => {
     ['an empty object', '{}'],
     ['a bad level', '{"contents":"rw"}'],
     ['a bad name', '{"Contents":"read"}'],
+    ['a __proto__ key', '{"__proto__":"read"}'],
+    ['a constructor key', '{"constructor":"read"}'],
+    ['a prototype key', '{"prototype":"read"}'],
   ])('refuses %s rather than sending it to GitHub', (_label, json) => {
     expect(() => parsePermissions(json)).toThrow(/GITHUB_APP_PERMISSIONS/);
+  });
+
+  // JSON.parse will mint an object whose keys are prototype names; the parsed
+  // object must never be the one returned, and the copy must carry no
+  // prototype to pollute.
+  it('returns a null-prototype copy, not the parsed object', () => {
+    const parsed = parsePermissions('{"contents":"read"}');
+    expect(Object.getPrototypeOf(parsed)).toBeNull();
+    expect(JSON.stringify(parsed)).toBe('{"contents":"read"}');
+    expect(({}).polluted).toBeUndefined();
   });
 });

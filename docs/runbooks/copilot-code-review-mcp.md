@@ -303,15 +303,22 @@ No personal access token is created at any point in this step.
    downloads; it is the only copy GitHub will ever give you.
 3. Install it: in the App's left menu, **Install App** → `HybridCloudWorks`
    → *Only select repositories* → `HCW-HybridCloudWorks` → **Install**.
-4. Store the App ID as a repository **variable**. PowerShell, with the
-   integer from step 2 in place of the sample value on the right:
+4. Store the App ID as a repository **variable**. Nothing to retype: the
+   App's slug is fixed by its name (`hcw-copilot-review-reader`), so the
+   installation you just made can be looked up and its App ID written in one
+   line. PowerShell:
 
     ```powershell
-    gh variable set COPILOT_REVIEW_APP_ID --repo HybridCloudWorks/HCW-HybridCloudWorks --body 123456
+    $appId = (gh api /orgs/HybridCloudWorks/installations | ConvertFrom-Json).installations | Where-Object app_slug -eq 'hcw-copilot-review-reader' | Select-Object -ExpandProperty app_id; gh variable set COPILOT_REVIEW_APP_ID --repo HybridCloudWorks/HCW-HybridCloudWorks --body $appId
     ```
 
-    (Yes, that line carries a value to replace — it is the one number only
-    the App page knows. Everything else on this page is exact.)
+    **Success looks like:** `gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks`
+    shows `COPILOT_REVIEW_APP_ID` with the same integer the App page shows.
+    If the first half returns nothing, the App is not yet installed on the
+    organisation (step 3) — the variable would then be set empty, so check
+    before moving on. If `gh api` answers `403`, the CLI token lacks the
+    organisation scope: `gh auth refresh -h github.com -s admin:org`, then
+    run the line again.
 
 5. Store the private key as an **Agents** secret named
    `COPILOT_REVIEW_APP_PRIVATE_KEY`, pasting the whole `.pem` file contents

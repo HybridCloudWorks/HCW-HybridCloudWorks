@@ -61,7 +61,15 @@ export const DEFAULT_PERMISSIONS = Object.freeze({ contents: 'write', pull_reque
  * A permissions object is `{ name: 'read' | 'write' | 'admin', ... }` and
  * nothing else. Anything looser is refused here rather than sent to GitHub,
  * whose 422 would name the App rather than the typo.
+ *
+ * The result is a null-prototype copy, never the parsed object itself:
+ * JSON.parse happily produces keys named __proto__, constructor or prototype,
+ * and an object carrying them is a prototype-pollution vector the moment
+ * anything merges or walks it. Those three names match the permission-name
+ * shape (lowercase and underscores), so they are refused by name as well.
  */
+const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export function parsePermissions(json) {
   let value;
   try {
@@ -69,15 +77,21 @@ export function parsePermissions(json) {
   } catch {
     throw new Error('GITHUB_APP_PERMISSIONS must be a JSON object such as {"contents":"read"}.');
   }
-  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length === 0) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('GITHUB_APP_PERMISSIONS must be a non-empty JSON object of permission names to levels.');
   }
-  for (const [name, level] of Object.entries(value)) {
-    if (!/^[a-z_]+$/.test(name) || !['read', 'write', 'admin'].includes(level)) {
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    throw new Error('GITHUB_APP_PERMISSIONS must be a non-empty JSON object of permission names to levels.');
+  }
+  const permissions = Object.create(null);
+  for (const [name, level] of entries) {
+    if (RESERVED_KEYS.has(name) || !/^[a-z_]+$/.test(name) || !['read', 'write', 'admin'].includes(level)) {
       throw new Error(`GITHUB_APP_PERMISSIONS: "${name}": "${level}" is not a permission name mapped to read, write or admin.`);
     }
+    permissions[name] = level;
   }
-  return value;
+  return permissions;
 }
 
 /** GitHub rejects a JWT with `exp` more than 10 minutes out. */
