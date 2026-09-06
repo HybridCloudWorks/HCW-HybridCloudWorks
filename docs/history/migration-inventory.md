@@ -6,7 +6,7 @@
 
 
 **Status:** Architecture inventory; implementation mapping remains to be completed
-**Source of truth:** `C:\Users\saulp\Workspace\Personal-Site_HCW`
+**Source of truth:** the legacy `Personal-Site_HCW` repository (a local checkout at the time of writing)
 
 The migration unit is a user-visible or operational contract, not an individual file or cloud
 resource. Each domain must preserve its entry point, persisted state, consumer, authorization,

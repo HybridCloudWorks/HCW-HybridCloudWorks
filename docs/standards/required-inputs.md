@@ -5,13 +5,13 @@ Every variable, secret and setting the workload needs, with live status.
 > **Moved here from `TODO.md` on 2026-08-29**, when that file was retired and
 > its open work folded into [TODO.md](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/TODO.md).
 > TODO.md's own header explained why this inventory sat there rather than in
-> the Wiki: the two procedures that write to it — a contributor recording a new
+> the Wiki (now this docs site): the two procedures that write to it — a contributor recording a new
 > required input ([CONTRIBUTING](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/.github/CONTRIBUTING.md)),
 > an operator moving an entry from `SET` to `VERIFIED` after an apply
 > ([Deployment-Runbook](../runbooks/deployment-runbook.md)) — are gated on owner-level access.
 >
 > That argument stopped holding once TODO.md went away, and it was always
-> weaker than it looked: `wiki/` is reviewed through pull requests exactly as the
+> weaker than it looked: `docs/` (then `wiki/`) is reviewed through pull requests exactly as the
 > repository root is, so nothing about the write path changes by moving here.
 > What does change is that a 228-line reference inventory is no longer sitting
 > inside a document people opened to find out what to do next.
@@ -32,7 +32,7 @@ Every variable, secret and setting the workload needs, with live status.
 
 This section is the **inventory**: what exists, who consumes it, whether it is
 confirmed. It deliberately does not restate naming or placement rules — those
-live in [wiki/Variables-And-Secrets.md](../standards/variables-and-secrets.md), which
+live in [Variables and secrets](variables-and-secrets.md), which
 is the placement authority and holds no status. The two are read together: that
 page decides where a value belongs, this one records whether it is there.
 
@@ -79,7 +79,7 @@ ignored and the run fails claiming no credentials were supplied.
 | --- | --- | --- |
 | `TFC_AZURE_PROVIDER_AUTH` | **SET** (`true`) | Absent ⇒ no OIDC token is minted and the provider finds no credential |
 | `TFC_AZURE_RUN_CLIENT_ID` | **SET** | Client id of `id-plat-terraform-prod-cus-01`. Distinct from §4.2's `CLIENT_ID`, which is the GitHub Actions identity |
-| `ARM_TENANT_ID` | **SET** (sensitive) | Same value as the `entra_tenant_id` Terraform variable — see the exceptions table in the Wiki |
+| `ARM_TENANT_ID` | **SET** (sensitive) | Same value as the `entra_tenant_id` Terraform variable — see the exceptions table in [Variables and secrets](variables-and-secrets.md) |
 | `ARM_SUBSCRIPTION_ID` | **SET** (sensitive) | Provider fallback only; every provider pins `subscription_id` in HCL, so it never decides where resources land |
 
 **Terraform variables — required.** Eight of the configuration's 58 variables
@@ -370,7 +370,7 @@ v5 in favour of `/zones/{zone_id}/subscription` — reachable only through the
 of the subscription and, in the provider's own words, "create/cancel associated
 subscriptions". Not a trade worth making for a value nothing consumes.
 
-The plan tier still matters — ADR 0024, `wiki/Availability-Probe.md`,
+The plan tier still matters — ADR 0024, the [availability probe runbook](../runbooks/availability-probe.md),
 `infra/observability.tf` and `infra/variables.tf` all reason about "this
 Cloudflare plan", because Bot Fight Mode, Origin Rules' Host Header override and
 mTLS gate on it. Read it from the zone's Overview page in the Cloudflare

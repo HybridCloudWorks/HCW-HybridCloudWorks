@@ -5,7 +5,7 @@
     runbook for starting a new migration.
 
 
-**Status:** Active
+**Status:** Historical — the migration it tracked completed on 2026-08-21; open work is in GitHub issues
 
 **Last updated:** 2026-07-22
 

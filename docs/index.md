@@ -1,13 +1,14 @@
-# HybridCloudWorks Engineering Wiki
+# HybridCloudWorks Engineering
 
-This Wiki contains the reviewed engineering record for the HybridCloudWorks
-website: architecture decisions, Azure operations, deployment procedures,
-security controls, and historical implementation notes.
+The reviewed engineering record for the HybridCloudWorks website: architecture
+decisions, Azure operations, deployment procedures, security controls, and
+historical implementation notes. The source is the `docs/` folder of the
+repository, reviewed through pull requests and published here on every merge.
 
 The current product is an Azure-hosted website. The root [README](repo/readme.md)
-is the entry point for product features and local development. `TODO.md`,
-`TODO.md`, and `CHANGELOG.md` remain the repository's concise execution and
-release records; this Wiki holds the longer narrative.
+is the entry point for product features and local development. [TODO.md](repo/todo.md)
+and [CHANGELOG.md](repo/changelog.md) remain the repository's concise execution and
+release records; this site holds the longer narrative.
 
 ## Current platform
 

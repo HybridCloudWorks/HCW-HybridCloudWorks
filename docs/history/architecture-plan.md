@@ -5,11 +5,12 @@
     runbook for starting a new migration.
 
 
-> **ARCHIVED 2026-08-24; MOVED TO THE WIKI 2026-08-29.** This document records
+> **ARCHIVED 2026-08-24; moved to the Wiki 2026-08-29 and to `docs/history/`
+> 2026-09-06.** This document records
 > the architecture decisions and cost reasoning that shaped the current website
 > platform. It is retained for traceability, not as an implementation checklist,
-> and it is not maintained: where it disagrees with [TODO.md](../repo/todo.md),
-> [TODO.md](../repo/todo.md) or [CHANGELOG.md](../repo/changelog.md), those are right and
+> and it is not maintained: where it disagrees with [TODO.md](../repo/todo.md)
+> or [CHANGELOG.md](../repo/changelog.md), those are right and
 > this is a record of what was believed at the time.
 >
 > Its §8 criterion on monthly spend is the one line still worth acting on, and
