@@ -82,7 +82,8 @@ timer('syncRssFeeds', 'SYNC_RSS_FEEDS', '0 0 */2 * * *', async (context) => {
 });
 
 timer('fetchPodcastFeeds', 'FETCH_PODCAST_FEEDS', '0 30 */2 * * *', async (context) =>
-  // Site-Main: `every 2 hours`, offset from syncRssFeeds.
+  // Site-Main: `every 2 hours`, offset from syncRssFeeds. Feed list comes
+  // from admin_config/podcast_feeds at run time (#348).
   createPodcastIngest({ store, parser: await createPodcastParser(), log: context }).run()
 );
 

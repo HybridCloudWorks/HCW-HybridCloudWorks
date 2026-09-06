@@ -12,7 +12,15 @@ import {
   buildListingContentDoc,
   resolveArticleUrl,
 } from './blog-listings.js';
-import { createPodcastIngest, buildPodcastEpisode, normalizePodcastId } from './podcasts.js';
+import {
+  createPodcastIngest,
+  buildPodcastEpisode,
+  normalizePodcastId,
+  resolvePodcastFeeds,
+  dedupeFeedsByProvider,
+  isFeedGoneError,
+  PODCAST_FEEDS,
+} from './podcasts.js';
 
 const NOW = new Date('2026-08-21T12:00:00.000Z');
 const now = () => NOW;
@@ -52,8 +60,18 @@ describe('Publer reconcile', () => {
 
   it('normalizes posts, maps states, and builds the sync patch with aggregate status', () => {
     expect(
-      normalizePublerPost({ post_id: '9', status: 'Published', caption: 'c', scheduledAt: 'bad' })
-    ).toMatchObject({ id: '9', state: 'published', text: 'c', scheduledAt: null });
+      normalizePublerPost({
+        post_id: '9',
+        status: 'Published',
+        caption: 'c',
+        scheduledAt: 'bad',
+      })
+    ).toMatchObject({
+      id: '9',
+      state: 'published',
+      text: 'c',
+      scheduledAt: null,
+    });
     expect(publerStateToSocialStatus('failed_x')).toBe('failed');
     expect(publerStateToSocialStatus('')).toBe('unknown');
     const patch = buildSocialPostSyncPatch(
@@ -77,7 +95,10 @@ describe('Publer reconcile', () => {
 
   it('skips when not configured; ignores Key Vault literals', async () => {
     const client = createPublerClient({
-      env: { PUBLER_API_KEY: '@Microsoft.KeyVault(SecretUri=x)', PUBLER_WORKSPACE_ID: 'w' },
+      env: {
+        PUBLER_API_KEY: '@Microsoft.KeyVault(SecretUri=x)',
+        PUBLER_WORKSPACE_ID: 'w',
+      },
       fetch: vi.fn(),
     });
     expect(client.configured).toBe(false);
@@ -101,7 +122,10 @@ describe('Publer reconcile', () => {
             : [];
       return {
         ok: true,
-        json: async () => ({ posts, total_pages: state === 'scheduled' ? 2 : 1 }),
+        json: async () => ({
+          posts,
+          total_pages: state === 'scheduled' ? 2 : 1,
+        }),
       };
     });
     const client = createPublerClient({
@@ -115,7 +139,12 @@ describe('Publer reconcile', () => {
           { id: 's1', publerPostIds: ['p1'], status: 'draft' },
           { id: 's2', publerJobId: 'job3', status: 'scheduled' },
           { id: 's3', publerPostIds: ['gone'], status: 'scheduled' },
-          { id: 's4', publerPostIds: ['gone2'], status: 'scheduled', syncOrigin: 'publer' },
+          {
+            id: 's4',
+            publerPostIds: ['gone2'],
+            status: 'scheduled',
+            syncOrigin: 'publer',
+          },
         ],
       },
       (c, q, p, rows) => rows
@@ -211,7 +240,11 @@ describe('blog listings (Firecrawl)', () => {
         author: 'Au',
         imageUrl: 'https://i',
       },
-      source: { provider: 'aws', name: 'AWS Blogs Index', url: 'https://aws.amazon.com/blogs/' },
+      source: {
+        provider: 'aws',
+        name: 'AWS Blogs Index',
+        url: 'https://aws.amazon.com/blogs/',
+      },
       dedupFields: { urlKey: 'k' },
       now: NOW,
       uuid: () => 'u1',
@@ -234,7 +267,9 @@ describe('blog listings (Firecrawl)', () => {
 
     const store = memStore();
     const dedup = {
-      findDuplicateContent: vi.fn(async (_s, { url }) => ({ duplicate: url.endsWith('/dup') })),
+      findDuplicateContent: vi.fn(async (_s, { url }) => ({
+        duplicate: url.endsWith('/dup'),
+      })),
       buildDedupFields: vi.fn(() => ({ urlKey: 'k' })),
     };
     const fetch = vi.fn(async (_u, init) => {
@@ -275,7 +310,10 @@ describe('blog listings (Firecrawl)', () => {
       newArticles: 1,
       errors: 1,
       failures: [
-        { source: 'broken', error: 'Firecrawl scrape failed for https://broken/: HTTP 500' },
+        {
+          source: 'broken',
+          error: 'Firecrawl scrape failed for https://broken/: HTTP 500',
+        },
       ],
     });
     expect(store.upsertDoc).toHaveBeenCalledTimes(1);
@@ -285,12 +323,21 @@ describe('blog listings (Firecrawl)', () => {
       publishedMs: NOW.getTime(),
     });
     expect(
-      await createBlogListingsScrape({ store, dedup, fetch, env: {}, sources, now }).run()
+      await createBlogListingsScrape({
+        store,
+        dedup,
+        fetch,
+        env: {},
+        sources,
+        now,
+      }).run()
     ).toMatchObject({ skipped: true, reason: 'not_configured' });
   });
 });
 
-describe('podcasts (PodBean)', () => {
+describe('podcasts', () => {
+  // Pinned so these cases test ingestion, not feed resolution (below).
+  const feeds = [{ provider: 'azure', url: 'https://feeds.example.test/hcw.xml' }];
   it('builds episodes from enclosure or media:content, keeps createdAt across upserts, isolates item errors', async () => {
     expect(normalizePodcastId('https://podbean.com/e/Ep-1!', 't')).toBe('podbean-com-e-ep-1');
     const item = {
@@ -325,7 +372,9 @@ describe('podcasts (PodBean)', () => {
       {
         guid: 'g2',
         title: 'Ep 2',
-        'media:content': { $: { url: 'https://m/2.mp3', type: 'audio/mpeg', fileSize: '9' } },
+        'media:content': {
+          $: { url: 'https://m/2.mp3', type: 'audio/mpeg', fileSize: '9' },
+        },
         pubDate: 'nope',
       },
       NOW
@@ -341,10 +390,18 @@ describe('podcasts (PodBean)', () => {
       podcasts: [{ id: 'g1', createdAt: '2026-01-01T00:00:00.000Z', title: 'old' }],
     });
     const parser = {
-      parseURL: vi.fn(async () => ({ items: [item, { guid: 'g2', title: 'Ep 2' }, null] })),
+      parseURL: vi.fn(async () => ({
+        items: [item, { guid: 'g2', title: 'Ep 2' }, null],
+      })),
     };
     const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const r = await createPodcastIngest({ store, parser, now, log }).run();
+    const r = await createPodcastIngest({
+      store,
+      parser,
+      feeds,
+      now,
+      log,
+    }).run();
     expect(r.azure.processed).toBe(2);
     expect(r.azure.errors).toEqual([{ position: 3, error: expect.any(String) }]);
     // The one bad episode must reach the workspace at Warning, because
@@ -352,7 +409,9 @@ describe('podcasts (PodBean)', () => {
     // below it does not.
     expect(log.warn).toHaveBeenCalledTimes(1);
     // Position in the feed, never the title: the trace stays content-free.
-    expect(log.warn.mock.calls[0][0]).toMatch(/^\[fetchPodcastFeeds\] azure: episode 3 of 3 failed:/);
+    expect(log.warn.mock.calls[0][0]).toMatch(
+      /^\[fetchPodcastFeeds\] azure: episode 3 of 3 failed:/
+    );
     expect(log.warn.mock.calls[0][0]).not.toContain('Ep ');
     expect(log.error).not.toHaveBeenCalled();
     expect(store.data.podcasts.get('g1')).toMatchObject({
@@ -366,11 +425,19 @@ describe('podcasts (PodBean)', () => {
       }),
     };
     const brokenLog = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    expect(await createPodcastIngest({ store, parser: broken, now, log: brokenLog }).run()).toEqual({
+    expect(
+      await createPodcastIngest({
+        store,
+        parser: broken,
+        feeds,
+        now,
+        log: brokenLog,
+      }).run()
+    ).toEqual({
       azure: { processed: 0, error: '504' },
     });
     expect(brokenLog.error).toHaveBeenCalledTimes(1);
-    // Provider, never the URL: PODCAST_FEEDS names the feed from the provider.
+    // Provider, never the URL: the feed list names the feed from the provider.
     expect(brokenLog.error.mock.calls[0][0]).toBe('[fetchPodcastFeeds] azure: feed failed: 504');
   });
 
@@ -381,9 +448,111 @@ describe('podcasts (PodBean)', () => {
     const store = memStore({ podcasts: [] });
     const parser = { parseURL: vi.fn(async () => ({ items: [] })) };
     const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const r = await createPodcastIngest({ store, parser, now, log }).run();
+    const r = await createPodcastIngest({
+      store,
+      parser,
+      feeds,
+      now,
+      log,
+    }).run();
     expect(r).toEqual({ azure: { processed: 0, errors: [] } });
     expect(log.warn).toHaveBeenCalledWith('[fetchPodcastFeeds] azure: feed returned no items');
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('treats HTTP 410 as the feed being gone: Warning, skipped, no Error (#348)', async () => {
+    // PodBean's feed returned 410 from 2026-09-05 and the timer logged an
+    // Error every two hours. Gone is configuration, not an outage.
+    expect(isFeedGoneError(new Error('Status code 410'))).toBe(true);
+    expect(isFeedGoneError(new Error('Status code 504'))).toBe(false);
+    expect(isFeedGoneError(new Error('410 Gone but phrased differently'))).toBe(false);
+    const store = memStore({ podcasts: [] });
+    const parser = {
+      parseURL: vi.fn(async () => {
+        throw new Error('Status code 410');
+      }),
+    };
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const r = await createPodcastIngest({
+      store,
+      parser,
+      feeds,
+      now,
+      log,
+    }).run();
+    expect(r).toEqual({ azure: { processed: 0, skipped: 'gone' } });
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toMatch(
+      /^\[fetchPodcastFeeds\] azure: feed gone \(410\) — remove it from admin_config\/podcast_feeds/
+    );
+    expect(log.warn.mock.calls[0][0]).not.toContain('https://');
+  });
+
+  it('reads the feed list from admin_config/podcast_feeds, dropping rows it cannot use', async () => {
+    const store = memStore({
+      admin_config: [
+        {
+          id: 'podcast_feeds',
+          configScope: 'admin_config',
+          feeds: [
+            { provider: 'azure', url: 'https://media.rss.com/hcw/feed.xml' },
+            { provider: 'azure', url: 'https://second.example/feed.xml' },
+            { provider: 'aws', url: 'http://insecure.example/feed.xml' },
+            { provider: 'Bad Slug', url: 'https://x.example/feed.xml' },
+            { url: 'https://no-provider.example/feed.xml' },
+            null,
+          ],
+        },
+      ],
+    });
+    // The duplicate azure row is dropped: the summary is keyed by provider, so
+    // two rows would fetch twice and report once.
+    expect(await resolvePodcastFeeds(store)).toEqual({
+      feeds: [{ provider: 'azure', url: 'https://media.rss.com/hcw/feed.xml' }],
+      source: 'admin_config',
+    });
+    expect(
+      dedupeFeedsByProvider([
+        { provider: 'a', url: 'https://1' },
+        { provider: 'b', url: 'https://2' },
+        { provider: 'a', url: 'https://3' },
+      ])
+    ).toEqual([
+      { provider: 'a', url: 'https://1' },
+      { provider: 'b', url: 'https://2' },
+    ]);
+    expect(store.readDoc).toHaveBeenCalledWith('admin_config', 'podcast_feeds', 'admin_config');
+    // The run uses what the document says, not the constant.
+    const parser = {
+      parseURL: vi.fn(async () => ({ items: [{ guid: 'g1', title: 'Ep 1' }] })),
+    };
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const r = await createPodcastIngest({ store, parser, now, log }).run();
+    expect(parser.parseURL).toHaveBeenCalledWith('https://media.rss.com/hcw/feed.xml');
+    expect(r).toEqual({ azure: { processed: 1, errors: [] } });
+    expect(log.log.mock.calls[0][0]).toMatch(/^\[fetchPodcastFeeds\] \(admin_config\) /);
+  });
+
+  it('with no document and an empty default, says so at Warning and writes nothing', async () => {
+    // The default is empty on purpose: the dead PodBean feed must not come
+    // back as a fallback. Silence here would be indistinguishable from a
+    // timer that never fired.
+    expect(PODCAST_FEEDS).toEqual([]);
+    const store = memStore({ podcasts: [] });
+    const parser = { parseURL: vi.fn() };
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    expect(await resolvePodcastFeeds(store)).toEqual({
+      feeds: [],
+      source: 'default',
+    });
+    const r = await createPodcastIngest({ store, parser, now, log }).run();
+    expect(r).toEqual({});
+    expect(parser.parseURL).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      '[fetchPodcastFeeds] no feeds configured (source: default) — seed admin_config/podcast_feeds as { feeds: [{ provider, url }] }'
+    );
     expect(log.error).not.toHaveBeenCalled();
   });
 });

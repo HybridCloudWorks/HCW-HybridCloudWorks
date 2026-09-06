@@ -9,7 +9,7 @@ const PLATFORM_LOGOS = {
   spotify: '/icons/logos/spotify.png',
   apple: '/icons/logos/apple-podcast.png',
   amazon: '/icons/logos/AmazonMusic.png',
-  podbean: '/icons/logos/podbean.png',
+  rss: '/icons/logos/rss.svg',
 };
 
 const PROVIDER_META = {
@@ -177,6 +177,54 @@ function stripHtml(html) {
   return out.trim();
 }
 
+/**
+ * The subscribe box. Renders nothing when no platform has a link: an empty
+ * "Subscribe Now" box reads as broken UI (#348). Kept out of the page
+ * component so the page stays under the complexity ceiling.
+ */
+function SubscribeSidebar({ meta, platforms, urlFor }) {
+  if (platforms.length === 0) return null;
+  return (
+    <aside className="h-fit sticky top-28">
+      <div
+        className={`bg-gradient-to-br ${meta.subscribeBg} backdrop-blur-md border ${meta.subscribeBorder} rounded-2xl p-6`}
+      >
+        <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span className={`material-symbols-outlined ${meta.subscribeIcon} text-[20px]`}>
+            podcast
+          </span>
+          Subscribe Now
+        </h3>
+        <p className="text-sm text-foreground mb-5">
+          Get new episodes delivered to your favorite podcast app.
+        </p>
+        <div className="space-y-2">
+          {platforms.map((platform) => (
+            <a
+              key={platform.key}
+              href={urlFor(platform)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`w-full py-2.5 px-3 bg-card/50 ${meta.subscribeHover} border border-card/60 text-foreground rounded-lg transition-all text-sm font-semibold flex items-center gap-3`}
+            >
+              <img
+                src={PLATFORM_LOGOS[platform.key]}
+                alt={platform.name}
+                loading="lazy"
+                decoding="async"
+                width="20"
+                height="20"
+                className="w-5 h-5 object-contain rounded-sm flex-shrink-0"
+              />
+              {platform.name}
+            </a>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function EpisodeImage({ image, title, size = 'md', meta }) {
   const sizeClass = size === 'sm' ? 'w-14 h-14' : 'w-full aspect-square max-w-[200px]';
   if (image) {
@@ -271,8 +319,15 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
     { key: 'spotify', name: 'Spotify' },
     { key: 'apple', name: 'Apple Podcasts' },
     { key: 'amazon', name: 'Amazon Music' },
-    { key: 'podbean', name: 'PodBean' },
+    { key: 'rss', name: 'RSS feed' },
   ];
+  // Only platforms with a link are offered, and the whole sidebar goes when
+  // there are none: an empty "Subscribe Now" box reads as broken UI (#348).
+  const subscribeUrlFor = (platform) =>
+    platform.key === 'rss'
+      ? podcastConfig?.podcast?.feedUrl
+      : podcastConfig?.podcast?.subscribeLinks?.[platform.key];
+  const availablePlatforms = platforms.filter((platform) => subscribeUrlFor(platform));
 
   return (
     <>
@@ -478,49 +533,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
           </div>
 
           {/* Right Sidebar: Subscribe */}
-          <aside className="h-fit sticky top-28">
-            <div
-              className={`bg-gradient-to-br ${meta.subscribeBg} backdrop-blur-md border ${meta.subscribeBorder} rounded-2xl p-6`}
-            >
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <span className={`material-symbols-outlined ${meta.subscribeIcon} text-[20px]`}>
-                  podcast
-                </span>
-                Subscribe Now
-              </h3>
-              <p className="text-sm text-foreground mb-5">
-                Get new episodes delivered to your favorite podcast app.
-              </p>
-              <div className="space-y-2">
-                {platforms.map((platform) => {
-                  const url =
-                    podcastConfig?.podcast?.subscribeLinks?.[platform.key] ||
-                    podcastConfig?.podcast?.feedUrl ||
-                    '#';
-                  return (
-                    <a
-                      key={platform.key}
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`w-full py-2.5 px-3 bg-card/50 ${meta.subscribeHover} border border-card/60 text-foreground rounded-lg transition-all text-sm font-semibold flex items-center gap-3`}
-                    >
-                      <img
-                        src={PLATFORM_LOGOS[platform.key]}
-                        alt={platform.name}
-                        loading="lazy"
-                        decoding="async"
-                        width="20"
-                        height="20"
-                        className="w-5 h-5 object-contain rounded-sm flex-shrink-0"
-                      />
-                      {platform.name}
-                    </a>
-                  );
-                })}
-              </div>
-            </div>
-          </aside>
+          <SubscribeSidebar meta={meta} platforms={availablePlatforms} urlFor={subscribeUrlFor} />
         </div>
       </main>
     </>

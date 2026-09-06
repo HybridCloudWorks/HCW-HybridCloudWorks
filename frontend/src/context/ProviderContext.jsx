@@ -57,13 +57,17 @@ export function useProviderConfig() {
       ],
       blogSource: 'https://azure.microsoft.com/en-us/blog/',
       podcast: {
-        feedUrl: 'https://feed.podbean.com/PublicCloudWorks/feed.xml',
+        // No feed URL until the show is re-hosted (issue #349): PodBean's
+        // feed returned 410 Gone from 2026-09-05. The RSS button hides itself
+        // while this is null. The Apple link was the creator dashboard
+        // (podcastsconnect), not a listener page, so it is gone until the
+        // show is resubmitted; Spotify and Amazon are the listener pages
+        // that existed on 2026-09-06.
+        feedUrl: null,
         subscribeLinks: {
           spotify: 'https://open.spotify.com/show/66tno2OzalMJZOvSDqM77Y',
           amazon:
             'https://music.amazon.com/podcasts/d139c50a-8163-425c-8315-4e19cc9370ee/hybrid-cloud-works',
-          apple: 'https://podcastsconnect.apple.com/my-podcasts',
-          podbean: 'https://feed.podbean.com/PublicCloudWorks/feed.xml',
         },
       },
     },
