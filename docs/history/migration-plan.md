@@ -203,7 +203,7 @@ Phases 3 and 4 are independent and should run in parallel: the rehearsal needs n
 handlers, and Phase 3 needs no data to register routes.
 
 > **These are not the same numbers as the Wiki's.** The [Implementation
-> TODO](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Implementation-TODO) numbers
+> TODO](implementation-todo.md) numbers
 > _delivery_ phases 0–8; this table numbers _migration_ phases 0–6. Only Phase 4 means roughly the
 > same thing in both. Phase 3 is the worst collision — it is "Port the API and workers" here and
 > "Empty platform and observability" there. Cite this document's phases as **"Migration-Plan §N"**

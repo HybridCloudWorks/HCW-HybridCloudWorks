@@ -419,7 +419,7 @@ This project has not cut a tagged release; entries are grouped under
         az monitor action-group test-notifications create \
           --action-group ag-plat-prod-cus-01 \
           --resource-group rg-mgmt-plat-prod-cus \
-          --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e \
+          --subscription 00000000-0000-0000-0000-000000000003 \
           --alert-type budget -a email ops-email <address> usecommonalertschema
     The API response and the inbox are two independent witnesses, which is the
     standard the Cutover-Runbook asks for and what the portal alone could never

@@ -1307,7 +1307,7 @@ FIREBASE_PROJECT_ID=hybridcloudworks-61e8d
 ### Step 3: Build for Production
 
 ```bash
-cd "C:\Users\saulp\AppData\Workspace\Personal-Site_HCW"
+cd <your local checkout of Personal-Site_HCW>
 npm ci                    # Clean install
 npm run build             # Production build → dist/
 ```

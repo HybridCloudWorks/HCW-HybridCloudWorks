@@ -5,6 +5,14 @@
     runbook for starting a new migration.
 
 
+!!! info "Identifiers redacted"
+    Tenant, subscription, application and workspace ids in this page are
+    placeholders of the form `00000000-0000-0000-0000-0000000000NN`, one per
+    identity, as [Variables and secrets](../standards/variables-and-secrets.md)
+    prescribes. The real values live in the owner's tenant and Notion, never in
+    this repository.
+
+
 Ordered. Each step says **who** runs it and **how you know it worked**. Nothing
 here is reversible by itself except step 3c (DNS), which is the rollback.
 
@@ -50,15 +58,15 @@ tenant with the right subscription pinned. Five distinct failures cost round
 trips on 2026-09-01 and 2026-09-02, and not one of them described its own
 cause. This step exists so the next operator pays for none of them.
 
-The estate is **one tenant** — `1a2fce27-b5f6-43c7-a86e-cf0bb74d4672` — holding
+The estate is **one tenant** — `00000000-0000-0000-0000-000000000001` — holding
 four subscriptions:
 
 | Subscription | Id | What lives in it |
 | --- | --- | --- |
-| `sub-app-site-prod-cus` | `b9e02281-ebb6-49e9-bd7b-f275b1350726` | The workload: Function App, Static Web App, Cosmos, storage, Key Vault |
-| `sub-plat-mgmt-prod-cus` | `02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e` | Log Analytics `log-plat-prod-cus-01` and the action group — every telemetry query below |
-| `sub-plat-conn-prod-cus` | `8f3c6d82-2d55-4b25-ad40-27c19da5e3d8` | Connectivity |
-| `sub-plat-ident-prod-cus` | `10ae90b5-9149-4063-a1b8-9301974ea997` | Identity |
+| `sub-app-site-prod-cus` | `00000000-0000-0000-0000-000000000002` | The workload: Function App, Static Web App, Cosmos, storage, Key Vault |
+| `sub-plat-mgmt-prod-cus` | `00000000-0000-0000-0000-000000000003` | Log Analytics `log-plat-prod-cus-01` and the action group — every telemetry query below |
+| `sub-plat-conn-prod-cus` | `00000000-0000-0000-0000-000000000004` | Connectivity |
+| `sub-plat-ident-prod-cus` | `00000000-0000-0000-0000-000000000005` | Identity |
 
 Note the token order in the platform names: the subscription is
 `sub-plat-mgmt-prod-cus` while its resource group is `rg-mgmt-plat-prod-cus`.
@@ -74,13 +82,13 @@ which `.claude/CLAUDE.md` forbids for reasons this page has already paid.
 Sign in scoped to that tenant:
 
 ```powershell
-az login --use-device-code --tenant 1a2fce27-b5f6-43c7-a86e-cf0bb74d4672
+az login --use-device-code --tenant 00000000-0000-0000-0000-000000000001
 ```
 
 Pin the workload subscription:
 
 ```powershell
-az account set --subscription b9e02281-ebb6-49e9-bd7b-f275b1350726
+az account set --subscription 00000000-0000-0000-0000-000000000002
 ```
 
 **Success:**
@@ -89,7 +97,7 @@ az account set --subscription b9e02281-ebb6-49e9-bd7b-f275b1350726
 az account show -o json | ConvertFrom-Json | Select-Object name, id, tenantId
 ```
 
-returns `sub-app-site-prod-cus`, `b9e02281-ebb6-49e9-bd7b-f275b1350726`, and
+returns `sub-app-site-prod-cus`, `00000000-0000-0000-0000-000000000002`, and
 the tenant above. Anything else and every read that follows is against the
 wrong estate.
 
@@ -126,7 +134,7 @@ az account clear
 ```
 
 ```powershell
-az login --use-device-code --tenant 1a2fce27-b5f6-43c7-a86e-cf0bb74d4672
+az login --use-device-code --tenant 00000000-0000-0000-0000-000000000001
 ```
 
 **5. `AADSTS50076` MFA warnings that are pure noise.** `az account list --all
@@ -172,15 +180,15 @@ shows `log-analytics`. The only stable-channel version is a preview
 ## Step 1 — Entra sign-in
 
 **Already done, verified against the live tenant:** the `HCWSite API`
-registration (`ac696e96-e203-47be-ade8-c35ece8a6c4a`) exposes `access_as_admin`
+registration (`00000000-0000-0000-0000-000000000006`) exposes `access_as_admin`
 and carries the `Admin` and `LabAgent` app roles. The three build variables are
 set in the repository:
 
 | Variable | Value |
 | --- | --- |
-| `VITE_ENTRA_CLIENT_ID` | `ac696e96-e203-47be-ade8-c35ece8a6c4a` |
-| `VITE_ENTRA_TENANT_ID` | `1a2fce27-b5f6-43c7-a86e-cf0bb74d4672` |
-| `VITE_ENTRA_API_SCOPE` | `api://ac696e96-e203-47be-ade8-c35ece8a6c4a/access_as_admin` |
+| `VITE_ENTRA_CLIENT_ID` | `00000000-0000-0000-0000-000000000006` |
+| `VITE_ENTRA_TENANT_ID` | `00000000-0000-0000-0000-000000000001` |
+| `VITE_ENTRA_API_SCOPE` | `api://00000000-0000-0000-0000-000000000006/access_as_admin` |
 
 **You run:**
 
@@ -747,10 +755,10 @@ second one prompts on a stream you cannot see and hangs.
 
 ```bash
 # ingestion is not capped
-az monitor log-analytics workspace show -g rg-mgmt-plat-prod-cus -n log-plat-prod-cus-01   --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e   --query "workspaceCapping.dataIngestionStatus" -o tsv     # expect: RespectQuota
+az monitor log-analytics workspace show -g rg-mgmt-plat-prod-cus -n log-plat-prod-cus-01   --subscription 00000000-0000-0000-0000-000000000003   --query "workspaceCapping.dataIngestionStatus" -o tsv     # expect: RespectQuota
 
 # WORKER logs are arriving, not just host ones
-az monitor log-analytics query -w cf80dc24-2499-49a0-8c66-9522bcc294ed --analytics-query   "AppTraces | where TimeGenerated > ago(15m) | extend cat=tostring(Properties.Category)    | where cat startswith 'Function' | summarize count() by cat"
+az monitor log-analytics query -w 00000000-0000-0000-0000-000000000007 --analytics-query   "AppTraces | where TimeGenerated > ago(15m) | extend cat=tostring(Properties.Category)    | where cat startswith 'Function' | summarize count() by cat"
 ```
 
 **Send traffic first, and keep sending it.** `always_ready = 0`, so the app

@@ -114,7 +114,7 @@ npm run preview -- --port 5174
 
 ```bash
 # Make sure you're in the project root
-cd c:\Users\saulp\AppData\Workspace\Personal-Site_HCW
+cd <your local checkout of Personal-Site_HCW>
 lhci autorun --config=.lighthouserc.json
 ```
 

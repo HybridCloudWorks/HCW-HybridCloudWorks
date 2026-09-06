@@ -4,9 +4,9 @@
 
 **Decision scope:** Production target state and migration boundaries
 
-**Source workload:** `C:\Users\saulp\Workspace\Personal-Site_HCW`
+**Source workload:** the legacy `Personal-Site_HCW` repository (a local checkout at the time)
 
-**Target repository:** `C:\Users\saulp\Workspace\HCW-HybridCloudWorks`
+**Target repository:** this repository, `HCW-HybridCloudWorks`
 
 ## 1. Outcome and constraints
 
