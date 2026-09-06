@@ -115,6 +115,7 @@ nav:
       - 0024 Edge availability probe: decisions/0024-edge-availability-probe.md
       - 0025 Cosmos firewall datacenter sentinel: decisions/0025-cosmos-firewall-datacenter-sentinel.md
       - 0026 Required-checks filter inside the job: decisions/0026-required-checks-filter-inside-the-job.md
+      - 0027 Documentation site: decisions/0027-documentation-site.md
   - Runbooks:
       - Deployment: runbooks/deployment-runbook.md
       - Alerting and support: runbooks/alerting-and-support.md
