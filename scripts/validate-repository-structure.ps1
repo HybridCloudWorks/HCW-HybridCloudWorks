@@ -163,10 +163,7 @@ foreach ($markdownFile in $markdownFiles) {
   $relativePath = [System.IO.Path]::GetRelativePath($repositoryRoot, $markdownFile.FullName).Replace('\', '/')
   $isAllowed = $relativePath -eq 'README.md' -or
     $relativePath -in $allowedRootFiles -or
-    $relativePath.StartsWith('frontend/.copilot/', [System.StringComparison]::OrdinalIgnoreCase) -or
-    $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
-    $relativePath.StartsWith('.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     # GitHub Copilot code review reads agent skills from .github/skills/ —
     # the canonical home of the hcw-code-review skill (owner decision,
     # 2026-09-01, relocated from .claude/skills/ which Copilot cannot read).

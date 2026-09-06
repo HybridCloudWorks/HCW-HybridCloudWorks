@@ -18,6 +18,379 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The tracker is open work only, and the repository is leaner (#346).**
+  Owner instruction 2026-09-06: `TODO.md` keeps four things — the optional
+  seeds, the one live test-coverage case, the live confirmations still to
+  come due, and the accepted risks — and nothing else. Everything below moved
+  out of it verbatim on that day (headings demoted so the changelog's own
+  structure holds): the status narrative, the attack sequence, the "what is
+  open" note, the watch-out-for note, the long-form `T-518` record, the
+  owner-gated preamble carried from `REVIEW.md`, the owner-decisions table,
+  and the struck live confirmations and accepted risks. Removed from the
+  tree in the same change, each with no remaining consumer: `frontend/.firebaserc`
+  (the Firebase project pointer; the site has been on Azure since
+  2026-08-21), `scripts/cutover/02-swa-token.ps1` (minted a deploy token
+  that T-727 deleted on 2026-08-30), `frontend/.copilot/` (two
+  certified-architect agent prompts, an instructions file and an `llms.txt`
+  that Copilot never reads from that path), `.github/templates/` (21
+  document templates the Wiki policy superseded), `frontend/scripts/axe-quick-check.mjs`
+  (an ad-hoc accessibility probe wired to nothing),
+  `frontend/.lighthouserc.json` and `frontend/.pre-commit-config.yaml`
+  (neither referenced by any script, hook or workflow), and
+  `.azure/insights.json` (an empty array). The repository-structure validator
+  drops the allowlist lines for the removed directories.
+
+  **Status — 2026-09-05**
+
+  > **Nothing is open as of 2026-09-05.** The last two items — `T-518`, arm the
+  > remaining timers, and `T-726`, prove the nightly refresh — closed on the
+  > owner's decision that evening, with all 18 timers armed and the observation
+  > reads no longer a gate. Both records are in [CHANGELOG.md](CHANGELOG.md).
+  > What follows below the status is kept as the working method and the
+  > long-form evidence, not as a list of work.
+  >
+  > **The one live degradation closed overnight.** `T-763` — the manifest route
+  > merged on 2026-08-30 against a Function App last deployed 84 minutes earlier —
+  > was fixed by Deploy Functions run 81 at 2026-08-31 23:45 UTC. Verified rather
+  > than assumed: manifest run 11 at 2026-09-01 00:06 went green end to end and
+  > reported "No change to the published set", so the committed manifest already
+  > matched what the API serves. Recorded in CHANGELOG.md and removed from this
+  > list.
+  >
+  > **The detection gap is closed — `T-519` was armed on 2026-09-01.** The probe's
+  > secret held the Instrumentation Key rather than the connection string; the
+  > piped command in `edge/availability-probe/wrangler.toml` replaced it, twelve
+  > `success == 1` / HTTP 200 rows landed on the `*/5` cadence before arming
+  > (a full PT30M window needs six), and the apply created
+  > `alert-api-reachability-prod-cus` in `rg-web-site-prod-cus`. The registered
+  > function count was 122 before and after the apply's restart. Recorded in
+  > CHANGELOG.md and removed from this list.
+  >
+  > **`T-719` and `T-721` closed on 2026-09-02, by owner decision.** The host
+  > verbosity is cut at the source (#321, `host.json` `default` and `Function` to
+  > Warning), the deploy was dispatched the same day, and the owner closed both
+  > without gating on the cap-day reading — the below-cap volume is expected
+  > confirmation, not a closure criterion. The accepted risk (log alerts sleep
+  > if the cap ever binds again) is recorded below; the Basic-table-plan move
+  > stays in reserve in CHANGELOG.md if the reading ever says the cut was not
+  > enough. What remains is one observation and one procedure.
+  >
+  > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
+  > resolved or carried below as owner gates. The per-finding record — method,
+  > evidence standard, every failure mode and outcome — is
+  > [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md),
+  > which is now a dated historical document rather than a live list. Its last
+  > three owner-gated findings are all closed — `T-749` on 2026-08-31,
+  > `T-719` and `T-721` on 2026-09-02.
+  >
+  > **The `hcw-azure` workspace is VCS-connected, and auto-apply is off.** Merging
+  > infra code queues a plan that waits for approval at
+  > https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs — it does not
+  > apply on its own, and `terraform apply` from a desktop is refused outright.
+  > Every run carries the permanent diff, which replaces three `azapi` resources
+  > and restarts the function app.
+  >
+  > This file was wrong about that twice in opposite directions, and the reason is
+  > worth keeping: HCP Terraform's workspace **Description** is free text beside
+  > the real settings, validated by nothing, and it read "CLI-driven; no VCS
+  > connection". That sentence was read and reported as configuration. Corrected
+  > in the workspace on 2026-08-31. A field that contradicts its own workspace
+  > reads exactly like a setting.
+
+  **This table is the list below, and nothing else.** An earlier version counted
+  five, because the two owner actions left by closed findings were tracked in a
+  different section from the five findings that carry `T-` numbers — so the
+  summary said five above a list of seven. That is the T-722 defect, in the
+  document restructured to prevent it, and it is why there is now one table
+  rather than a count and a list that can drift apart. Found by review, 2026-08-31.
+
+  | # | Open item | Priority | What closes it |
+  | ---: | --- | --- | --- |
+  | — | *(empty since 2026-09-05)* | — | — |
+
+  The table emptied on 2026-09-05. `T-726` (the nightly refresh) and `T-518`
+  (arm the remaining timers) were the last two rows; both closed by owner
+  decision that evening and their records, with the wave table that `T-518`
+  carried, are in [CHANGELOG.md](CHANGELOG.md). The 2026-09-02 audit that
+  traced every container the public read layer reads back to whatever writes
+  it found `T-764` (closed 2026-09-04 by Wave 2) and `T-765` (closed 2026-09-05:
+  the owner retired the insights panel). `T-766`, the witness gap that Wave 2
+  exposed, closed 2026-09-05. All records are in the changelog.
+
+  **When the table fills again, the table and the sections below it are kept in
+  the same order, and that order is the one to work them in — not a sort of the
+  Priority column.** Checked against each other by number AND by `T-` identity,
+  never by counting rows: on 2026-09-01 an edit reordered the table while
+  renumbering the sections in document order, and because both still read
+  `1..5` a digits-only check passed with every row pointing at the wrong section.
+
+  **Closed on 2026-08-31 and removed from this list:** seeding `TFC_TOKEN` (done),
+  and `T-749`, the SCM lock — Terraform owns
+  `scm_ip_restriction_default_action`, a live read shows `Deny all`, so the
+  variable is already `true` and the last Deploy Functions run succeeded on
+  2026-08-30 at 01:21 UTC. The tracker had it open against a reality where it was
+  applied.
+
+  **The attack sequence — one working order across everything open**
+
+  This section sequences what the rest of this file already tracks; it adds no
+  items and restates no procedures. Each phase points at the one section that
+  carries the commands and the success criteria, so this list cannot drift from
+  those sections the way a restatement would — the T-722 lesson, applied in
+  advance. The ordering rule is dependency, not priority: the timers arm after
+  the verbosity cut has deployed, so their volume lands in real headroom.
+
+  | Phase | What | Where the procedure lives | Why this position |
+  | ---: | --- | --- | --- |
+  | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
+  | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
+  | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
+  | 4 | ~~Arm the remaining timers in three applies — 3a, 3b, then waves 4, 5 and 6 together (`T-518`)~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | All 18 timers armed; the two reapers armed one per apply with the delete switch flipped after two zero dry-runs; the observation reads dropped as a gate by owner decision |
+  | 5 | ~~Prove the nightly refresh's App-token path (`T-726`)~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision on the built-and-configured state; the first content change remains the live proof, and the failure signatures (401 = wrong App id, 404 = App not installed) are in the changelog entry |
+  | 6 | Optional features: seed the keys and documents you actually want (the insights-panel decision, `T-765`, was made 2026-09-05: retired) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) | Decisions, not repairs — nothing above depends on any of them |
+  | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
+
+  The deliberately unscheduled feature backlog — analytics-informed topic
+  weighting, the voice-drift monitor, stale-post refresh, A/B titles, the
+  duplicate-angle advisor — stays in
+  [Blog-Machine § Backlog](wiki/Blog-Machine.md) on purpose: none of it is open
+  work, and pulling it here would turn this file into a wish list. The one
+  backlog entry that is also a real route gap, `createContentFromRecording`,
+  already lives in the AI-providers and third-party rows of
+  [Owner decisions](#owner-decisions-and-external-access) — it stays in
+  `.azure/api-surface.json` `notImplemented` until its provider credentials
+  exist.
+
+  **What is open, and exactly what closes it**
+
+  Nothing, as of 2026-09-05. The sections that stood here — `T-726` and `T-518`
+  — moved to [CHANGELOG.md](CHANGELOG.md) with their evidence, including the
+  wave table `T-518` carried. The long-form records below stay as the account
+  of how each was established.
+
+  **Watch out for**
+
+  - **Deployment drift is now measured, not noticed.**
+    `.github/workflows/monitor-deploy-drift.yml` runs every four hours and fails
+    when a service has been behind `main` for **24 hours or more**, emailing the
+    owner the way the other monitors do. A failure names the service, the number
+    of undeployed commits touching its paths, and the subject of the oldest one.
+
+    **The fix is to dispatch that service's deploy.** Both are dispatch-only by a
+    recorded decision, so merging never ships them; this check is the thing that
+    says so. Deploying clears it on the next run.
+
+    It measures AGE, not commit count, and that is the whole design: the manifest
+    404 was **one** commit behind and the frontend was **thirty-five**. No count
+    threshold separates those. Both had sat undeployed for days.
+
+  **The long-form records**
+
+  Everything below is evidence for the items above, not a second list of them.
+  Each carries how the finding was established, what was observed, and the limits
+  of that observation — the part a summary loses and the next reader needs before
+  changing anything.
+
+  **T-518 — 15 of 18 timers are still no-ops; the mechanism is proven**
+
+  **Closed 2026-09-05: all 18 armed.** Kept as the evidence record; the wave
+  table and the closing decision are in [CHANGELOG.md](CHANGELOG.md).
+
+  **Gate: owner** — [TODO.md](TODO.md), *Timers and the availability test*.
+
+  `functions/src/functions/schedulers.js` checks `FEATURE_FLAG_SCHEDULERS` first
+  and skips the handler *before* reading the per-timer flag. Until 2026-08-24 that
+  setting was a hardcoded literal in `main.tf`, which meant `enabled_timers` could
+  not arm anything at all and no document said so; it is now
+  `var.schedulers_master_enabled`. Arming needs **both** it and a name in
+  `enabled_timers`, through the four gates in
+  [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5 — where the acceptance
+  criterion is the observed invocation, not the applied setting.
+
+  **The master switch went `true` on 2026-08-30**, with `CHECK_AGENT_HEALTH` and
+  `CLEANUP_TEMP_STORAGE` in `enabled_timers`. That left sixteen no-ops **at that
+  moment** — see the paragraph below for where the count stands now — so the
+  platform still ran almost no scheduled work, but "nothing is scheduled" was no
+  longer true and the arming mechanism was no longer an assumption.
+
+  **`PUBLISH_SCHEDULED_CONTENT` was armed and then observed on the evening of
+  2026-08-30 Chicago time** — `2026-08-31` in UTC, which is why the surrounding
+  entries and the timestamps below appear to disagree. Every timestamp in this
+  section is CDT (`-05:00`), matching what the host itself writes; the two UTC
+  instants are named as UTC where they appear. The observation is unusually
+  clean, because it straddles the apply:
+
+  ```
+  publishScheduledContent  8 invocations  4 ran  4 skipped
+                           first 2026-08-30 18:30:00 CDT  last 2026-08-30 20:15:00 CDT
+  ```
+
+  Eight invocations at exactly fifteen-minute spacing with no gap. The four at
+  18:30, 18:45, 19:00 and 19:15 skipped; the four at 19:30, 19:45, 20:00 and
+  20:15 ran. The apply that set the flag landed at 00:30 UTC on 2026-08-31, which is
+  19:30 CDT on 2026-08-30 — so the split falls on the boundary rather than near
+  it. That is the same timer,
+  observed skipping and then running, with the flag change as the only variable:
+  a stronger reading than a bare "it fired", because it also proves the gate the
+  flag controls.
+
+  The clock came from the host in the same run: eight `ScheduleStatus` rows, all
+  `-05:00`, firing on :00 :15 :30 :45 **Chicago local**. So both halves hold for
+  this timer independently.
+
+  One honest limit, which the script prints itself: a RAN invocation is one whose
+  traces carry no skip line, and a dropped `.User` trace would look identical.
+  The durable side effect — content actually transitioning to published — is the
+  second witness Cutover-Runbook Gate 4 asks for, and it only appears when
+  something was genuinely due. Nothing was, so the no-op is correct and
+  unwitnessed by that second path.
+
+  So of the eighteen: fifteen remain no-ops, and `CHECK_AGENT_HEALTH`,
+  `CLEANUP_TEMP_STORAGE` and `PUBLISH_SCHEDULED_CONTENT` are armed and observed.
+
+  It gates two other things, which is why it outranks its own blast radius:
+  the Blog Machine's scheduled throughput (`forgeScheduled`,
+  `publishScheduledContent`), and the Cosmos backup-tier change from T-707,
+  which only pays for itself once scheduled work is generating documents. It also
+  gates any meaningful cost measurement — a bill taken while nothing is scheduled
+  prices an idle platform (Migration-Plan §7).
+
+  **Both halves of the gate passed on 2026-08-30.** The clock half needed nothing
+  armed: `app.timer()` registers on the real schedule unconditionally and the flag
+  is checked *inside* the handler, so every timer had been firing since deploy and
+  logging `disabled — skipping`, with the host writing `ScheduleStatus` carrying
+  `WEBSITE_TIME_ZONE` offsets each time. `cleanupTempStorage` reported
+  `"Last":"2026-08-29T00:00:00.005764-05:00"`, `"Next":"2026-08-30T00:00:00-05:00"`
+  — local midnight, offset applied, which is the §7 comparison delivered by the
+  platform rather than computed by a script.
+
+  The handler half came from `checkAgentHealth` after arming: twelve invocations
+  between `04:55:00Z` and `05:50:00Z`, exactly five minutes apart with no gaps, no
+  `disabled — skipping` anywhere in the window, and the handler's own
+  `[checkAgentHealth] 0 agent(s) marked offline` on each one. Host row and `.User`
+  row are separate emitters, which is what "two independent witnesses" means; the
+  zero is a correct no-op, not a missing witness.
+
+  Two departures from the runbook are worth recording. Both timers were armed in a
+  single apply rather than one at a time — safe here only because
+  `TEMP_STORAGE_CLEANUP_DELETE` pins `cleanupTempStorage` to dry-run
+  (`functionapp.tf`), so the second timer could not touch data. And the evidence
+  above was read with direct KQL, not through
+  `scripts/cutover/05-verify-timer.ps1`: that script reported a tally of tens of
+  thousands of invocations for a query returning two rows, and was rewritten the
+  same day to aggregate in the workspace instead.
+
+  **That rewrite treated a symptom, and the miscount was root-caused on
+  2026-08-31 instead.** `az` on Windows is a batch file, which cannot receive an
+  argument containing a newline, so a multi-line query handed to
+  `--analytics-query` arrived truncated at the first line break: `AppTraces`
+  survived and the whole pipeline after it was discarded. The call still exited
+  0. Azure ran the truncated query and returned every unfiltered row in the
+  table, so the script rendered tens of thousands of rows with every projected
+  column blank — and its preflight, truncated the same way, read a missing
+  column as zero and reported "no worker traces" in the same run. The tell was
+  in the record for a week: the count barely moved between `-Hours 1` and
+  `-Hours 24`, and a window that changes 24-fold cannot return the same total
+  unless the window is not being applied. Fixed by flattening every query before
+  it leaves PowerShell, and by asserting that returned rows carry the columns the
+  caller asked for — a truncated query answers a different question rather than
+  failing, which is why nothing in the error handling ever fired.
+
+  **Confirmed end-to-end in the same run** (2026-08-30 CDT / 2026-08-31 UTC), on
+  the Windows host where it failed:
+  the same command that had returned 58,265 blank rows returned one correct
+  summary row, the `ScheduleStatus` section came back filtered to the requested
+  timer and ordered, and the preflight reported 431 worker traces where it had
+  been reporting none. That last number is the one worth remembering — the
+  "telemetry gap" this script reported three times never existed.
+
+  The fifteen that remain go one at a time, each observed firing before the next
+  is added.
+
+  **Owner-gated work, carried from REVIEW.md**
+
+  Everything from here to the end arrived from `REVIEW.md` on 2026-08-29. These
+  need tenant administration, production approval, a credential, external access,
+  or a live confirmation — none of them can be closed from a checkout.
+
+  **One section was deleted rather than carried: "Immediate: restore admin
+  access".** It described a live `403` from `POST /api/bootstrapCurrentUserAdmin`
+  and asked for the Entra `Admin` app role to be assigned. The owner confirmed on
+  2026-08-29 that the admin portal loads and signs in immediately, so the role is
+  assigned and the 403 is gone. It had been sitting at the top of the document
+  marked *Immediate* — the loudest item in the tracker, describing something that
+  was already fixed. The `Admin` app role assignment survives as one clause of the
+  Entra row below, which is where it belongs.
+
+  **Owner decisions and external access**
+
+  | Item | Human action required | Safe repository-side state |
+  | --- | --- | --- |
+  | Entra application | Confirm SPA client ID, tenant ID, API audience/scope, redirect URIs, consent, and the `Admin` app role assignment | `frontend/.env.example` documents names; no client secret is committed |
+  | Frontend release | Approve whether releases remain manual or become push-triggered. **The credential half of this row is closed (T-727, 2026-08-31):** the deploy mints its token from ARM per run under federated identity, and the stored secret is deleted — there is nothing left to provide or rotate | `deploy-azure-frontend.yml` stays dispatch-only |
+  | Production infrastructure | Approve HCP Terraform plan/apply and any DNS, custom-domain, or Cloudflare changes | Terraform remains the infrastructure source of truth |
+  | ~~Timers and the availability test~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | All 18 timers armed by 2026-09-05 (T-518); the reachability alert armed 2026-09-01 (T-519) |
+  | Recovery objectives (decided 2026-08-30) | **RTO 8 hours, RPO 24 hours.** Chosen to match what the estate can actually meet today — periodic Cosmos backup, one operator, no on-call — rather than an aspiration nobody has rehearsed. Deliberately not RPO 1 h: that needs the T-707 continuous-backup tier, which costs money while the platform is still nearly idle and would commit to a drill that has never been run. Revisit once scheduled work is generating documents, which is also when T-707 starts to pay for itself. The remaining work in **[issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)** is now measurement against these numbers — a timed restore — not the numbers themselves | Cosmos carries `Continuous30Days`; content/media storage is RA-GRS with versioning and soft delete; Functions host storage remains LRS with soft delete. No scheduled out-of-account Cosmos export exists, no restore has been timed, and no result is justified against a stated objective |
+  | Key Vault | Provide only the secrets needed by enabled features; never put values in GitHub variables or Vite config. **The approved procedure changed on 2026-08-29**: seeding is now **Admin → Platform → API Keys**, and the desktop script is break-glass rather than the default path | Code reads secrets server-side and degrades optional integrations when absent |
+  | Function App vault write (decided 2026-08-29) | **Approved.** The app may create new secret versions, through a CUSTOM role holding only `Microsoft.KeyVault/vaults/secrets/setSecret/action` — not `Key Vault Secrets Officer`, which would also grant get, list, delete and purge. It may also refresh its own Key Vault references (`Microsoft.Web/sites/config/Write`, scoped to the one site, with `config/list/action` excluded so it cannot read its settings back). Weighed against what it replaces: the previous procedure opened the production vault's firewall to a human IP on every rotation, and left it open once | The app cannot read a secret back out of the vault, cannot delete one, and cannot enumerate its own app settings through ARM. `/api/cms/secrets` is `super_admin` on both verbs and returns no value in any response — asserted by scanning the whole serialised body, not by trusting a field list |
+  | GCP pricing integration | Seed `GCP-BILLING-API-KEY` if the GCP column in the public pricing tool is wanted, or leave it unseeded and that column stays absent. Get it from the GCP console: enable the Cloud Billing API, create an API key, restrict it to that API. **This is not a billing credential** — the Cloud Billing Catalog API serves the public price list, and it is read for the site's comparison tools, not for anything this estate is charged for | No GCP credential is stored in the repository. The service-account JSON this row used to ask for is retired (2026-08-29): the API key is what Google documents for this API, and it removed a vault SDK client, an OAuth library and a bespoke seeding script |
+  | AI providers | Decide which external providers should be enabled and provide their keys through Key Vault | The AI router only enables a provider when its server-side key is present |
+  | Third-party integrations | Provide owner-controlled Publer, Klaviyo, YouTube, Telegram, Hostinger, or other credentials and approve webhook changes before activation | Integration secrets are server-side and optional paths remain gated |
+  | Listen & Learn speech | Nothing to provide: it synthesises with Gemini TTS on the existing `GEMINI-API-KEY`. Audio is billed against that key at roughly $0.17 an episode / $0.87 a certification on the default model; every run is logged to the AI Engine usage tab under "Breakdown by Feature", so the spend is checkable there rather than estimated. Azure AI Speech is a written, tested fallback for the day the preview Gemini TTS models are retired; using it means creating a Cognitive Services resource, which is a spend decision and is not assumed | Provider is chosen by key presence, Gemini first. With no key at all the feature still publishes each episode's transcript, takeaways and videos and records `audioError` instead of failing |
+  | Listen & Learn video links | Seed `YOUTUBE-API-KEY` if the curated "watch next" links are wanted. One certification costs ~505 of the default 10,000 daily quota units | Optional. Without it, episodes generate and publish with an empty video list |
+  | VPS Labs agent | Provide the host operator, Entra client/certificate, API scope, and deployment approval for the Hostinger agent | `vps-agent/` uses the API and holds no database credential |
+  | ~~Static Web App tier~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | Owner decided Free (#341). Both Free limits verified from the repository before the change: exactly two custom domains (apex and www, Free's maximum) and a build of about 117 MB against 250 MB. Two-way door: a third domain or a bandwidth overage is the signal to move back |
+  | ~~`ai_insights` container~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | Dropped by #340's apply, which the owner read and approved at exactly one destroy plus the azapi baseline; #341 restored the container `prevent_destroy` guard in the apply that followed |
+  | ~~Provider-section go-live~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Owner decided all 24 pages ship at once. Every provider page is live; `GUARDED_FILES` in `frontend/scripts/validate-provider-pages.js` is now empty and the guard mechanism is retained for the next page that needs it |
+
+  **Live confirmations completed**
+
+    response in the deployed environment.
+    change.
+  - ~~**Observe an alert actually being delivered.**~~ **Done 2026-08-30.** A
+    sample budget alert from `ag-plat-prod-cus-01` arrived in the `ops-email`
+    receiver's inbox (fired 21:36 UTC; receiver status `Enabled`). The email path
+    is proven end to end, across the subscription boundary, for the first time.
+    **Use the CLI, not the portal button.** The portal's **Test action group**
+    reported *"There was a problem completing this test"* with status **Unknown**
+    on two attempts and delivered nothing. The same operation through the CLI
+    returned `"Status": "Succeeded"` / `"state": "Complete"` and the email arrived
+    a minute later:
+        az monitor action-group test-notifications create \
+          --action-group ag-plat-prod-cus-01 \
+          --resource-group rg-mgmt-plat-prod-cus \
+          --subscription 02dfb8ad-ec22-42e3-8cdc-17fd6e00b17e \
+          --alert-type budget -a email ops-email <address> usecommonalertschema
+    The API response and the inbox are two independent witnesses, which is the
+    standard the Cutover-Runbook asks for and what the portal alone could never
+    supply — its `Unknown` was a verdict on nothing. Note also the argument shape:
+    it is `-a email <name> <address> <schema>`, not a `--email-receiver` flag, and
+    the whole thing is one line — a backtick continuation pasted into Git Bash
+    gets read as a command name.
+    Second, this file named the group `ag-ops-prod-cus` until the same day, which
+    is no resource: `observability.tf:36` builds
+    `ag-plat-${environment}-${region_abbreviation}-${instance}`, `hcw-ops` is only
+    the short name, and it lives in `rg-mgmt-plat-prod-cus` in the **Management**
+    subscription because the action group follows its resource group there.
+    **The SMS channel was proven the same evening** and T-709 is closed. Same
+    command shape, `-a sms <name> <countryCode> <phoneNumber>` in place of
+    `-a email …`; read the values off the action group rather than retyping them.
+    Both channels have now been observed delivering, which is the first time this
+    estate has had a second path to fall back on.
+    approved a real external mutation test.
+  - ~~Apply the Terraform change that creates the `listenandlearn` blob
+    container.~~ **Applied 2026-08-30.** `az storage container-rm show` reports
+    `listenandlearn` with `publicAccess: None` — private, as intended;
+    `PUBLIC_MEDIA_CONTAINERS` in `blob-paths.js` is what makes an episode
+    reachable, not the container ACL. The same apply declares the fallback
+    `AZURE_SPEECH_*` settings, which stay unresolved and inert.
+
+  **Accepted risks that closed**
+
+  | Risk | Accepted | Reasoning |
+  | --- | --- | --- |
+  | ~~**The Static Web Apps deployment token is a Terraform output** (`swa_token`)~~ Raised as T-722, 2026-08-28 | **CLOSED (T-727).** The output was deleted on 2026-08-30 and the owner deleted the `AZURE_STATIC_WEB_APPS_API_TOKEN` secret on 2026-08-31; the deploy mints the token from ARM under federated identity, per run. No stored, non-expiring credential remains in this repository's secrets. Not an accepted risk any more, and kept in this table only so the row does not appear to have been quietly dropped | The token is in state via `azurerm_static_web_app.hcw.api_key` whether or not the output exists, so deleting the output would hide it rather than retire it. `sensitive` keeps it out of logs and plan output; it is still visible on the HCP Terraform Outputs tab to anyone with state read. It is the estate's **last long-lived credential** — everything else a workflow uses is federated OIDC. Compensating control, 2026-08-28: `deploy-azure-frontend.yml` now isolates it in a job that installs nothing, so a compromised build dependency cannot reach it (T-727). Retiring it means moving the SWA deploy to OIDC, or at minimum making this an environment secret on a *protected* `production`; both need owner access. The `outputs.tf` header now names the exception instead of contradicting it |
+
 - **`T-518` closed: all 18 timers are armed (#345).** Owner decisions of
   2026-09-05, in order: the content reaper's delete switch flipped after two
   dry-run firings read `[cleanupSoftDeletedContent] dry-run: would delete

@@ -206,8 +206,8 @@ lists four URIs, and an admin sign-in reaches the UI without a 401 on every call
 **RETIRED 2026-08-30 (T-727). Skip this step.** It read the SWA deploy token
 and stored it as `AZURE_STATIC_WEB_APPS_API_TOKEN`:
 
-```powershell
-./scripts/cutover/02-swa-token.ps1
+```text
+scripts/cutover/02-swa-token.ps1   (removed from the repository on 2026-09-06)
 ```
 
 `deploy-azure-frontend.yml` now mints the token from ARM under federated
