@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Every published page audited, in a browser, with a verdict each (#PR,
+  issue #361).** `frontend/scripts/audit-published-pages.mjs` crawls every
+  URL in the live sitemap with Playwright Chromium and records HTTP status,
+  failed and 4xx/5xx requests (the public API called out separately),
+  console and page errors classified by name, provider identity (title,
+  og:title and theme class against the URL's provider — the #183 class),
+  empty-state copy and main-region size, broken images and unreachable
+  media; verdict works / empty / defect per page, a matrix and a defect-class
+  summary as JSON and Markdown. Failures the repository has already decided
+  to live with (the #175 data snapshots) are notes, not defects, so a decided
+  item is not re-raised every week. `audit-published-pages.yml` runs it
+  Mondays and on demand and uploads the matrix; `npm run audit:pages` runs it
+  locally. The first run — 120 URLs, 0 works, 11 empty, 109 defect — is
+  recorded at `docs/architecture/published-pages-audit-2026-09-06.md`, and
+  its defect classes became five issues: #370 (every prerendered page ships
+  a pending Suspense boundary and the CSP blocks React's completion scripts,
+  so hydration error 419 fires site-wide — the reason 109 pages are
+  "defect"), #371 (twenty landing hero images missing for four providers),
+  #372 (podcast rows with dead PodBean media still served), #373 (six empty
+  section pages in the sitemap) and #374 (curated article bodies hotlinking
+  upstream images). The audit closes when every row has a verdict and every
+  defect has an issue, which is now; fixing them is the issues' work.
 - **`fetchPodcastFeeds` no longer polls a dead feed, and the podcast pages
   no longer advertise PodBean (#365, issue #348).** PodBean's feed returned
   HTTP 410 Gone from 2026-09-05, so every two-hour firing since the timer was
