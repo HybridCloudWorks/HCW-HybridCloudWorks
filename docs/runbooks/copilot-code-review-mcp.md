@@ -4,9 +4,10 @@
 > applied, `COPILOT_REVIEW_CLIENT_ID` and `COPILOT_REVIEW_APP_ID` are set, the
 > App's key is stored, the setup workflow's manual dispatch signed in (run 2,
 > green), and the five servers are pasted into repository settings. The owner
-> steps were
+> steps were tracked in
 > [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369),
-> closed the same day. `.github/copilot-mcp.json` remains the reviewed source
+> which was closed the same day. `.github/copilot-mcp.json` remains the
+> reviewed source
 > of record: GitHub does not read it from the repository, so any change to it
 > is a pull request and then the paste in step 5 again.
 
