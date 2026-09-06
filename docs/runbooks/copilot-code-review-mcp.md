@@ -6,7 +6,7 @@
 > repository's Copilot settings once (procedure below), and again after any
 > change to the file lands on `main`. Two of the five servers need one owner
 > step each before the paste — a Terraform apply for the Azure identity, a
-> fine-grained token for the GitHub server — and the order matters. The owner
+> read-only GitHub App for the GitHub server — and the order matters. The owner
 > steps are tracked in
 > [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369).
 
@@ -65,7 +65,7 @@ sections, because how they authenticate is the whole point.
 | `cloudflare-docs` | Cloudflare — [Cloudflare's own MCP servers](https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/), source at [cloudflare/mcp-server-cloudflare](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search) | Remote HTTP, `https://docs.mcp.cloudflare.com/mcp`, no auth | `edge/availability-probe/` is a Worker on a cron trigger ([ADR 0024](../decisions/0024-edge-availability-probe.md)), and `infra/` manages Cloudflare DNS and the transform rules. This is the public documentation server only — not the account API server at `mcp.cloudflare.com`, which is OAuth and would give the reviewer a live account. Tool: `search_cloudflare_documentation`. |
 | `terraform` | HashiCorp — [Terraform MCP server](https://developer.hashicorp.com/terraform/mcp-server), source at [hashicorp/terraform-mcp-server](https://github.com/hashicorp/terraform-mcp-server) | Local container `hashicorp/terraform-mcp-server:1.3.0@sha256:423a6b8e2ee0…` (digest-pinned; the full digest is in `.github/copilot-mcp.json`), started by the review session | `infra/` is a single Terraform root module against **live production**. Half of what an infra review checks is "does this argument exist on this provider version, and does changing it force replacement" — exactly what `get_provider_details` answers from the Registry. Restricted to the `registry` toolset and eight read tools (the [tools reference](https://developer.hashicorp.com/terraform/mcp-server/reference)); no `TFE_TOKEN` is passed, so the HCP Terraform workspace, runs, plans and state stay out of reach. The image is pinned by digest, not by tag — a tag can be retargeted, a digest cannot; bump both together, as with every other pinned dependency here. |
 | `azure` | Microsoft — [Azure MCP Server](https://learn.microsoft.com/en-us/azure/developer/azure-mcp-server/), source at [microsoft/mcp](https://github.com/microsoft/mcp/tree/main/servers/Azure.Mcp.Server), package [`@azure/mcp`](https://www.npmjs.com/package/@azure/mcp) | Local, `npx @azure/mcp@3.0.0-beta.41`, started by the review session; signs in through the Azure CLI session `copilot-setup-steps.yml` leaves behind | Lets the reviewer check a Terraform or Functions change against what is actually deployed: the role assignments on a resource group, a Function App's current configuration, the activity log for the resource a PR touches, a storage account's network rules. See [The Azure server](#the-azure-server-read-only-federated-no-secret) for the identity and the fourteen tools. |
-| `github-mcp-server` | GitHub — [GitHub MCP Server](https://github.com/github/github-mcp-server), remote endpoint documented in [remote-server.md](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md) | Remote HTTP, `https://api.githubcopilot.com/mcp/readonly`, toolsets pinned by header | Replaces the built-in GitHub server's default toolsets with a wider **read-only** set on **this repository only**: Actions (why did the CI job on this PR fail), code scanning and Dependabot alerts, discussions, plus the default repos, issues and pull requests. See [The GitHub server](#the-github-server-wider-read-only-still-one-repository) for the token and its scope. |
+| `github-mcp-server` | GitHub — [GitHub MCP Server](https://github.com/github/github-mcp-server) | Local container `ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810fa…` (digest-pinned; full digest in `.github/copilot-mcp.json`), `GITHUB_READ_ONLY=1`, toolsets pinned by `GITHUB_TOOLSETS`; authenticates with a one-hour **GitHub App** installation token `copilot-setup-steps.yml` mints per session | Replaces the built-in GitHub server's default toolsets with a wider **read-only** set on **this repository only**: Actions (why did the CI job on this PR fail), code scanning and Dependabot alerts, discussions, plus the default repos, issues and pull requests. No personal access token of any kind. See [The GitHub server](#the-github-server-wider-read-only-still-one-repository) for the App and its ceiling. |
 
 The tool allowlist is applied twice for the Terraform and Azure servers: on
 the server's own command line (`--tools=...` / `--tool ...`, so the process
@@ -141,43 +141,60 @@ The built-in GitHub MCP server already gives the reviewer read-only access to
 this repository with a token GitHub scopes per review. What it does not give
 is the **Actions** toolset (workflow runs and job logs — "why is this PR's CI
 red"), **code scanning** and **Dependabot** alerts, or **discussions**. GitHub's
-documented way to widen it is a personal access token stored as the Agents
-secret `COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN`, which Copilot uses for the
-`github-mcp-server` entry ([Customizing the built-in GitHub MCP server](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/configure-mcp-servers#customizing-the-built-in-github-mcp-server)).
+documented way to widen it ([Customizing the built-in GitHub MCP server](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/configure-mcp-servers#customizing-the-built-in-github-mcp-server))
+is a **personal access token** stored as an Agents secret. This repository
+does not do that. **No personal access token is used, classic or
+fine-grained**: both are bound to a person, both are long-lived, and
+[Variables and secrets](../standards/variables-and-secrets.md) already holds
+that this estate stores no such credential. The one pattern it does sanction
+for GitHub → GitHub — the manifest publisher's — is a **GitHub App** whose
+installation token is minted per run and lives one hour, and that is what
+the reviewer uses too.
 
-Kept narrow in four ways:
+How it works, and what bounds it:
 
-- **Endpoint**: `https://api.githubcopilot.com/mcp/readonly`. The `/readonly`
-  path drops every write tool server-side, whatever the token could do.
-- **Toolsets**: the `X-MCP-Toolsets` header names `context, repos, issues,
-  pull_requests, actions, code_security, dependabot, discussions`. Not
-  `secret_protection` (alert locations and partial values), not `orgs`,
-  `users`, `notifications` or `gists` (the token holder's own account), not
-  `copilot` (would let the reviewer start agent sessions).
-- **Token**: a **fine-grained** personal access token, resource owner
-  `HybridCloudWorks`, repository access **only** `HCW-HybridCloudWorks`, with
-  exactly the read permissions those toolsets need (listed in *Apply*), and a
-  **90-day expiry**. No classic token: a classic `repo` scope is read-write on
-  every repository the holder can reach.
-- **Store**: an Agents secret, which only MCP servers can read (the
-  `COPILOT_MCP_` prefix keeps it out of the agent's own environment). The
-  entry wires it in explicitly, as
-  `"Authorization": "Bearer $COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN"` in
-  its `headers` — GitHub's own example relies on the secret's name alone,
-  but an explicit header is the documented substitution mechanism, works
-  either way, and makes the wiring visible to a reader of the file. While
-  the secret is absent the header carries no usable token and the server
-  fails to authenticate; the built-in per-review token is not a fallback for
-  this entry, which is why step 4 comes before step 5.
+- **A dedicated App, read-only by construction.** *HCW Copilot Review
+  Reader* is a GitHub App owned by the `HybridCloudWorks` organisation and
+  installed on **this repository only**, with eight repository permissions,
+  all **Read**: Actions, Code scanning alerts, Contents, Dependabot alerts,
+  Discussions, Issues, Metadata, Pull requests. No account permissions, no
+  webhook. An App's permissions are the **ceiling** for every token it can
+  ever mint: the private key, if it leaked, could produce nothing but
+  read-only, one-repository, one-hour tokens — the same access the token
+  itself carries. That is the property a personal token cannot offer.
+- **A one-hour token, minted per session.** `copilot-setup-steps.yml` runs
+  `scripts/github-app-token.mjs` — the same minter the manifest publisher
+  uses, which the script's header explains is preferred over the marketplace
+  action — with `GITHUB_APP_PERMISSIONS` narrowing the token again to those
+  eight read permissions, masks it, and writes it as
+  `GITHUB_PERSONAL_ACCESS_TOKEN=…` into `$HOME/.copilot-review/github-mcp.env`
+  with mode 600. (The variable name is the server's; the value is an App
+  token, not a personal one.)
+- **The server runs read-only, in the pinned container.** The
+  `github-mcp-server` entry replaces the built-in server with
+  `ghcr.io/github/github-mcp-server:v1.12.0@sha256:…` (digest-pinned), run
+  with `--env-file` on that file — so the token is never an argument another
+  process could list — plus `GITHUB_READ_ONLY=1`, which drops every write
+  tool before the server registers anything, and `GITHUB_TOOLSETS=context,
+  repos, issues, pull_requests, actions, code_security, dependabot,
+  discussions`. Not `secret_protection` (alert locations and partial
+  values), not `orgs`, `users`, `notifications` or `gists`, not `copilot`
+  (would let the reviewer start agent sessions).
+- **Two stored values, neither a credential that acts alone.**
+  `COPILOT_REVIEW_APP_ID` is a repository **variable** (an identifier, like
+  the manifest App's). `COPILOT_REVIEW_APP_PRIVATE_KEY` is an **Agents
+  secret**, the store Copilot's setup job reads. It is *not* prefixed
+  `COPILOT_MCP_`, because the setup job — not an MCP server — needs it; that
+  means it is also present in the agent's environment, which is exactly why
+  the App is read-only and single-repository: the ceiling above is what
+  makes that exposure acceptable.
 
-**The honest trade-off.** This is the one long-lived, user-bound credential in
-the whole configuration. Reads happen as the token's owner, it must be
-re-issued every 90 days, and GitHub's own docs are the only path to the
-wider toolsets. If that cost is not worth "Copilot can read the failing CI
-job", delete the `github-mcp-server` entry from the file and the built-in
-server continues exactly as today. It is included because the CI-failure
-context is the single most common thing a reviewer of this repository needs
-that it cannot see.
+**What this costs.** A GitHub App to create once (step 4), a private key to
+store, and a token that expires an hour into a session — long enough for any
+review, and the cloud agent simply loses GitHub tools after an hour rather
+than holding a standing credential. If even that is not worth "Copilot can
+read the failing CI job", delete the `github-mcp-server` entry from the file
+and the built-in server continues exactly as today.
 
 ### Deliberately not configured
 
@@ -193,8 +210,11 @@ that it cannot see.
   review, and out of reach for this identity.
 - **Cloudflare account API server** (`https://mcp.cloudflare.com/mcp`). OAuth
   to the live account; the docs server covers the review use.
-- **A classic GitHub token, or a fine-grained one with organisation-wide
-  repository access.**
+- **Any personal access token, classic or fine-grained.** User-bound and
+  long-lived; the GitHub App above replaces the need for one entirely.
+- **Reuse of the manifest publisher's App.** It holds `contents: write` and
+  `pull_requests: write`; a reviewer must run under a principal whose ceiling
+  is read, so it gets its own App.
 
 ## Apply (owner)
 
@@ -255,30 +275,51 @@ output (Outputs tab on the workspace page above); the two `:environment:copilot`
 entries must be there. A login failure complaining about an empty `client-id`
 means step 2 did not land.
 
-### 4. Create the GitHub token and store it
+### 4. Create the GitHub App and store its two values
 
-1. Open <https://github.com/settings/personal-access-tokens/new> and create
-   a **fine-grained** token:
-    - **Resource owner:** `HybridCloudWorks`.
-    - **Expiration:** 90 days. Put the date in a calendar; GitHub also emails
-      a week before.
-    - **Repository access:** *Only select repositories* →
-      `HCW-HybridCloudWorks`.
-    - **Repository permissions**, all **Read-only**: Actions, Code scanning
-      alerts, Contents, Dependabot alerts, Discussions, Issues, Metadata
-      (selected automatically), Pull requests. Nothing under *Account
-      permissions*.
-2. If the organisation restricts fine-grained tokens, approve it at
-   <https://github.com/organizations/HybridCloudWorks/settings/personal-access-tokens>.
-3. Store it as an **Agents** secret named
-   `COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN`. In the repository, **Settings →
+No personal access token is created at any point in this step.
+
+1. Open <https://github.com/organizations/HybridCloudWorks/settings/apps/new>
+   and register the App:
+    - **GitHub App name:** `HCW Copilot Review Reader`.
+    - **Homepage URL:** `https://docs.hybridcloudworks.com/runbooks/copilot-code-review-mcp/`.
+    - **Webhook:** untick *Active*. The App receives nothing.
+    - **Repository permissions**, each set to **Read-only**: Actions, Code
+      scanning alerts, Contents, Dependabot alerts, Discussions, Issues,
+      Metadata (already Read-only), Pull requests. Leave every other
+      repository, organisation and account permission at *No access*.
+    - **Where can this GitHub App be installed?** *Only on this account*.
+    - Click **Create GitHub App**.
+2. On the App's page, note the **App ID** (a short integer near the top),
+   then under *Private keys* click **Generate a private key**. A `.pem` file
+   downloads; it is the only copy GitHub will ever give you.
+3. Install it: in the App's left menu, **Install App** → `HybridCloudWorks`
+   → *Only select repositories* → `HCW-HybridCloudWorks` → **Install**.
+4. Store the App ID as a repository **variable**. PowerShell, with the
+   integer from step 2 in place of the sample value on the right:
+
+    ```powershell
+    gh variable set COPILOT_REVIEW_APP_ID --repo HybridCloudWorks/HCW-HybridCloudWorks --body 123456
+    ```
+
+    (Yes, that line carries a value to replace — it is the one number only
+    the App page knows. Everything else on this page is exact.)
+
+5. Store the private key as an **Agents** secret named
+   `COPILOT_REVIEW_APP_PRIVATE_KEY`, pasting the whole `.pem` file contents
+   including the `BEGIN` and `END` lines. In the repository, **Settings →
    Secrets and variables → Agents → Secrets → New repository secret** (the
    Agents tab sits beside the Actions tab at
    <https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions>).
    `gh secret set` cannot write this store, so this one is a browser step.
+   Then delete the downloaded `.pem`; the secret is its home now.
 
-**Success looks like:** the secret listed under Agents with that exact name.
-The name is load-bearing: Copilot looks for it verbatim.
+**Success looks like:** the App listed at
+<https://github.com/organizations/HybridCloudWorks/settings/installations>
+as installed on one repository; `gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks`
+shows `COPILOT_REVIEW_APP_ID`; and the secret appears under Agents with that
+exact name. Both names are load-bearing: the workflow reads them verbatim and
+reports "not configured" while either is missing.
 
 ### 5. Paste the MCP configuration
 
@@ -329,14 +370,17 @@ so no allowlist entry is needed for `learn.microsoft.com`,
    section.
 
     **Success looks like:** the `copilot-setup-steps` job listed as run with
-    *Azure Login* green, then `microsoft-learn`, `cloudflare-docs`,
-    `terraform`, `azure` and `github-mcp-server` listed as started, each with
-    its tool list beneath — fourteen tools under `azure`. If `terraform` is
-    missing and the rest are present, the runner could not start the
-    container; if `azure` started but the setup job is absent, you are in the
+    *Azure Login* and *Mint a read-only App installation token* green, then
+    `microsoft-learn`, `cloudflare-docs`, `terraform`, `azure` and
+    `github-mcp-server` listed as started, each with its tool list beneath —
+    fourteen tools under `azure`, only read tools under `github-mcp-server`.
+    If `terraform` or `github-mcp-server` is missing and the rest are
+    present, the runner could not start the container; if the setup job is
+    absent, you are in the
     [known uncertainty](#the-azure-server-read-only-federated-no-secret) case
-    and every Azure tool call in the session log will show an authentication
-    failure — nothing is exposed, and the other servers still work.
+    and every Azure and GitHub tool call in the session log will show an
+    authentication failure — nothing is exposed, and the three documentation
+    servers still work.
 
 3. When a review comment used a server, GitHub prints an attribution at the
    bottom of that comment naming the skill or MCP server. Not every comment
@@ -365,10 +409,12 @@ the canonical one) and a `functions/` change (expect Microsoft Learn).
   two credentials, one identity — seven destroys, the plan should show
   nothing else) and delete `COPILOT_REVIEW_CLIENT_ID`. The workflow then
   fails at login and the server fails closed.
-- **Revoke the GitHub token:** delete it at
-  <https://github.com/settings/personal-access-tokens> and delete the Agents
-  secret. The `github-mcp-server` entry then fails to authenticate; remove it
-  from the file to fall back to the built-in server.
+- **Revoke the GitHub access:** uninstall or delete the App at
+  <https://github.com/organizations/HybridCloudWorks/settings/installations>
+  and delete the `COPILOT_REVIEW_APP_PRIVATE_KEY` Agents secret. Every token
+  it ever minted dies with the installation. The `github-mcp-server` entry
+  then fails closed; remove it from the file to fall back to the built-in
+  server.
 - **Remove everything:** clear the MCP configuration box and save. The two
   built-in servers remain.
 

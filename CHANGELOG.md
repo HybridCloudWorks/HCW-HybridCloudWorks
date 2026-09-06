@@ -42,12 +42,17 @@ This project has not cut a tagged release; entries are grouped under
   Copilot's allowlist. It is a third identity rather than a reuse of
   `github_reader`, which holds a config write. The **GitHub MCP server** is
   widened to the Actions, code-scanning, Dependabot and discussions toolsets
-  through the `/readonly` endpoint and a fine-grained, single-repository,
-  read-only, 90-day token in the Agents store — the one stored credential in
-  the configuration, and the only mechanism GitHub documents. The
-  `oidc-subjects` guard learned the new client-id variable,
-  `set-github-variables.ps1` seeds it, and the standards pages record both
-  the variable and the token. The runbook
+  with **no personal access token of any kind**: a dedicated, read-only,
+  single-repository GitHub App (*HCW Copilot Review Reader*) whose one-hour
+  installation token the same setup job mints per session through
+  `scripts/github-app-token.mjs` — now taking a `GITHUB_APP_PERMISSIONS`
+  override so the manifest publisher's write scope and the reviewer's read
+  scope come from one minter — and hands to the digest-pinned
+  `ghcr.io/github/github-mcp-server` container over `--env-file`, running
+  `GITHUB_READ_ONLY=1`. The App's read-only permissions are the ceiling for
+  anything its key could ever mint. The `oidc-subjects` guard learned the new
+  client-id variable, `set-github-variables.ps1` seeds it, and the standards
+  pages record the variables and the private key. The runbook
   [Copilot code review MCP servers](docs/runbooks/copilot-code-review-mcp.md)
   carries the reasoning, the tool table, the owner steps in order (apply,
   seed, prove the sign-in, token, paste) with what success looks like at

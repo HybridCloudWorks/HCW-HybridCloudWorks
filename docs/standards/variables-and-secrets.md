@@ -380,6 +380,7 @@ Everything else there is a default nobody is expected to override.
 | --- | --- | --- |
 | `CLIENT_ID` | §7 | Identifier under WIF; grants nothing without a matching federated subject |
 | `READER_CLIENT_ID`, `COPILOT_REVIEW_CLIENT_ID` | §7 | Identifiers for the read-only identities (`github_reader`; `github_copilot_review`, which Copilot code review signs in as) — same reasoning |
+| `COPILOT_REVIEW_APP_ID` | — | App ID of the read-only GitHub App Copilot code review reads GitHub with. An identifier, exactly like `MANIFEST_APP_ID`; the key is in store 4 |
 | `TENANT_ID` | §7 | Identifier |
 | `SUBSCRIPTION_ID` | §7 | Identifier |
 | `APP_HOSTNAME` | §7 | Public DNS name. Mirrors the `function_hostname` output |
@@ -397,7 +398,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | Value | CHECKLIST | Target system | Justification | Verdict |
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | — | GitHub | Injected per-run by GitHub, scoped by `permissions:`, expires with the job. Not stored by us at all | Correct, and contractual |
-| `COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN` (Agents store, not Actions) | — | GitHub, read-only, this repository | Widens the GitHub MCP server Copilot code review uses to the Actions, code-scanning, Dependabot and discussions toolsets. GitHub documents no federated path for this: the built-in per-review token cannot be given extra toolsets, so a stored token is the only mechanism. Fine-grained, one repository, read-only permissions, 90-day expiry, readable only by MCP servers | Justified, with an expiry — the one stored credential in the Copilot configuration |
+| `COPILOT_REVIEW_APP_PRIVATE_KEY` (Agents store, not Actions) | — | GitHub, read-only, this repository | Authenticates GitHub → *GitHub* for the MCP server Copilot code review uses, to reach the Actions, code-scanning, Dependabot and discussions toolsets the built-in per-review token cannot be given. The same shape as `MANIFEST_APP_PRIVATE_KEY`: a GitHub App's key, from which `copilot-setup-steps.yml` mints a one-hour installation token per session. The App holds eight **read** permissions on one repository and nothing else, so the key's ceiling is read-only — a leaked key mints nothing a leaked token would not already grant. **No personal access token, classic or fine-grained, is used**: those are user-bound and long-lived, and store 4 holds none | Justified — the one stored key in the Copilot configuration, and it can only ever produce read-only, one-hour tokens |
 | `TF_API_TOKEN` | §7 | HCP Terraform | Authenticates GitHub → *Terraform*, the reverse direction from §8. The HCP Terraform CLI credential has no inbound GitHub OIDC path. Use a **team** token, not a user token, so it survives the user leaving | Justified |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned. Must be scoped read-only, and deleted the day the migration completes | Justified, with an expiry |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None available — see below | **Wrong store** |

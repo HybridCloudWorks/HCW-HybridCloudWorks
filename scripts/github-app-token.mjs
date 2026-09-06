@@ -49,6 +49,37 @@ import { pathToFileURL } from 'node:url';
 
 const API = 'https://api.github.com';
 
+/**
+ * What the manifest publisher's token carries, and the default when a caller
+ * names nothing else. copilot-setup-steps.yml overrides it with a read-only set
+ * through GITHUB_APP_PERMISSIONS, for the App Copilot code review reads GitHub
+ * with — same minter, different App, different ceiling.
+ */
+export const DEFAULT_PERMISSIONS = Object.freeze({ contents: 'write', pull_requests: 'write' });
+
+/**
+ * A permissions object is `{ name: 'read' | 'write' | 'admin', ... }` and
+ * nothing else. Anything looser is refused here rather than sent to GitHub,
+ * whose 422 would name the App rather than the typo.
+ */
+export function parsePermissions(json) {
+  let value;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error('GITHUB_APP_PERMISSIONS must be a JSON object such as {"contents":"read"}.');
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length === 0) {
+    throw new Error('GITHUB_APP_PERMISSIONS must be a non-empty JSON object of permission names to levels.');
+  }
+  for (const [name, level] of Object.entries(value)) {
+    if (!/^[a-z_]+$/.test(name) || !['read', 'write', 'admin'].includes(level)) {
+      throw new Error(`GITHUB_APP_PERMISSIONS: "${name}": "${level}" is not a permission name mapped to read, write or admin.`);
+    }
+  }
+  return value;
+}
+
 /** GitHub rejects a JWT with `exp` more than 10 minutes out. */
 const JWT_LIFETIME_SECONDS = 540;
 
@@ -137,6 +168,7 @@ export async function mintInstallationToken({
   repo,
   nowSeconds = Math.floor(Date.now() / 1000),
   fetchImpl = fetch,
+  permissions = DEFAULT_PERMISSIONS,
 }) {
   if (!owner || !repo) throw new Error('mintInstallationToken needs owner and repo');
 
@@ -159,22 +191,25 @@ export async function mintInstallationToken({
   }
   const installationId = parseInstallation(await installationResponse.json());
 
-  // Scoped down twice over: to the one repository, and to the two permissions
-  // the manifest pull request needs. An installation token defaults to
-  // everything the installation was granted, which is more than this job uses.
+  // Scoped down twice over: to the one repository, and to the permissions the
+  // caller names — by default the two the manifest pull request needs. An
+  // installation token defaults to everything the installation was granted,
+  // which is more than any job here uses.
+  const requested = Object.entries(permissions)
+    .map(([name, level]) => `${name}: ${level}`)
+    .join(', ');
   const tokenResponse = await fetchImpl(`${API}/app/installations/${installationId}/access_tokens`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       repositories: [repo],
-      permissions: { contents: 'write', pull_requests: 'write' },
+      permissions,
     }),
   });
   if (!tokenResponse.ok) {
     throw new Error(
       `GitHub answered ${tokenResponse.status} minting an installation token. A 422 here usually ` +
-        'means the App was not granted one of the permissions being requested (contents: write, ' +
-        'pull_requests: write).'
+        `means the App was not granted one of the permissions being requested (${requested}).`
     );
   }
 
@@ -198,7 +233,14 @@ async function main() {
     return 2;
   }
 
-  const { token } = await mintInstallationToken({ appId, privateKey, owner, repo });
+  // Optional. Absent, the manifest publisher's two write permissions apply;
+  // present, it must parse, so a malformed override fails here and not as a
+  // token that quietly carries the default.
+  const permissions = process.env.GITHUB_APP_PERMISSIONS
+    ? parsePermissions(process.env.GITHUB_APP_PERMISSIONS)
+    : DEFAULT_PERMISSIONS;
+
+  const { token } = await mintInstallationToken({ appId, privateKey, owner, repo, permissions });
 
   // The ONLY thing on stdout, because the caller captures stdout as the token
   // and must mask it immediately.

@@ -83,12 +83,12 @@
       ]
     },
     "github-mcp-server": {
-      "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/readonly",
-      "headers": {
-        "Authorization": "Bearer $COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN",
-        "X-MCP-Toolsets": "context,repos,issues,pull_requests,actions,code_security,dependabot,discussions"
-      },
+      "type": "local",
+      "command": "bash",
+      "args": [
+        "-c",
+        "exec docker run -i --rm --env-file \"${HOME:-/home/runner}/.copilot-review/github-mcp.env\" -e GITHUB_READ_ONLY=1 -e GITHUB_TOOLSETS=context,repos,issues,pull_requests,actions,code_security,dependabot,discussions ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33"
+      ],
       "tools": ["*"]
     }
   }
