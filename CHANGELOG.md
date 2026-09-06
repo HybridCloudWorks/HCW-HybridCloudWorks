@@ -19,6 +19,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **ADR 0028 designs the Cosmos out-of-account export (issue #231).** Weekly
+  full export plus daily change-feed deltas, run as a timer that fans one
+  queue message per container onto the existing platform jobs worker, written
+  gzip-NDJSON to a private `cosmos-export` container on the RA-GRS content
+  account at Cool tier with a 35-day lifecycle, monitored by an alert on the
+  *missing* run. The 72 provisioned containers are classified: 43 authored and 10
+  configuration containers get fulls and deltas, 7 operational-record
+  containers get fulls only, 12 regenerable, seed and transient containers are
+  excluded, and a test will hold the classification to the provisioned list.
+  Deletes reach the copy through the weekly full, accepted and written down.
+  Status is Proposed: RPO 24 h / RTO 8 h, the class C policy, the same-
+  subscription copy and the LRS host storage acceptance are the owner's four
+  decisions, listed on #231.
 - **One sitemap entry per URL, and listing pages that say "nothing published
   yet" when that is the truth (#373, part 1).** The content manifest carried
   one slug three times, so the sitemap advertised the same blog URL three
