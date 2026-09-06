@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **Four landing pages no longer request hero images that do not exist
-  (#PR, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
+  (#380, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
   listed five `/images/<provider>-hero/N.png` files that were never added, so
   every visit loaded with seven 404s and six broken image boxes (the audit's
   `broken images` class). The lists are empty until the sets exist — the
