@@ -280,15 +280,25 @@ export function createRecordingDrafter({
     }
     const contentId = result.body.contentId;
 
-    // The link back. RecordingsPage also PATCHes this after the response; both
-    // writes are the same fields, so a client that dies in between leaves the
-    // recording correct rather than orphaned.
-    await store.patchDoc('recordings', input.recordingId, {
-      status: 'routed',
-      contentId,
-      routedAt: stamp,
-      routedContentType: input.contentType,
-    });
+    // The link back, best-effort. RecordingsPage PATCHes the same fields after
+    // the response, so this write is belt-and-braces for a client that dies in
+    // between — and a failure here must not turn a created draft into a 5xx,
+    // which would invite a retry and a duplicate. The response says whether
+    // the link landed.
+    let linked = true;
+    try {
+      await store.patchDoc('recordings', input.recordingId, {
+        status: 'routed',
+        contentId,
+        routedAt: stamp,
+        routedContentType: input.contentType,
+      });
+    } catch (error) {
+      linked = false;
+      log.warn?.(
+        `[createContentFromRecording] draft created but the recording link-back failed (${error?.code || error?.name || 'error'}); the client PATCH will set it`
+      );
+    }
 
     // Content-free: type and provider only. Identifiers stay out of the trace,
     // as everywhere else in this package.
@@ -297,6 +307,7 @@ export function createRecordingDrafter({
     );
     return {
       contentId,
+      linked,
       draft: {
         title: parsed.title || title,
         summary: parsed.summary || '',
@@ -353,10 +364,12 @@ export function createContentFromRecordingHandler({
       const code = error?.code;
       const status =
         code === 'PERSIST_REJECTED' ? error.status || 422 : STATUS_BY_CODE[code] || 502;
+      // Code and status only: messages can carry a recording id (404) or a
+      // provider's error text, and the trace stays content-free.
       if (status >= 500) {
-        context?.error?.(`[createContentFromRecording] ${error?.message || error}`);
+        context?.error?.(`[createContentFromRecording] ${status} ${code || 'GENERATION_FAILED'}`);
       } else {
-        context?.warn?.(`[createContentFromRecording] ${status}: ${error?.message || error}`);
+        context?.warn?.(`[createContentFromRecording] ${status} ${code}`);
       }
       return json(status, {
         ok: false,

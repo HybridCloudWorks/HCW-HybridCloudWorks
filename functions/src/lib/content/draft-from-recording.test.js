@@ -156,6 +156,7 @@ describe('createContentFromRecording', () => {
     expect(res.body).toMatchObject({
       ok: true,
       contentId: 'content-uuid-1',
+      linked: true,
       draft: {
         title: 'Why hub and spoke still wins',
         aiProvider: 'gemini',
@@ -330,6 +331,45 @@ describe('createContentFromRecording', () => {
       user: { email: 'ed@hcw.test' },
       data: { source: 'recording', contentStatus: 'draft' },
     });
+  });
+
+  it('returns 200 with linked:false when the recording link-back fails after the draft exists', async () => {
+    // A 5xx here would invite a retry that creates a second draft; the client
+    // PATCHes the same fields itself, so the link-back is best-effort.
+    const store = memStore({ recordings: [recording] });
+    store.patchDoc.mockImplementation(async () => {
+      const err = new Error('Request rate is large');
+      err.code = 429;
+      throw err;
+    });
+    const { handler, log } = build({ store });
+    const res = parse(
+      await handler(request({ recordingId: 'rec-1', contentType: 'blog_post' }), ctx)
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, contentId: 'content-uuid-1', linked: false });
+    expect(store.data.content.get('content-uuid-1')).toBeDefined();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toMatch(/link-back failed \(429\)/);
+    expect(log.warn.mock.calls[0][0]).not.toContain('rec-1');
+  });
+
+  it('logs the status and code of a failure, never the message', async () => {
+    const c = { error: vi.fn(), warn: vi.fn(), log: vi.fn() };
+    const { handler } = build();
+    await handler(request({ recordingId: 'missing-id-xyz', contentType: 'blog_post' }), c);
+    expect(c.warn).toHaveBeenCalledWith('[createContentFromRecording] 404 RECORDING_NOT_FOUND');
+    expect(JSON.stringify(c.warn.mock.calls)).not.toContain('missing-id-xyz');
+    const boom = build({
+      drafter: {
+        generateDraft: vi.fn(async () => {
+          throw new Error('secret text');
+        }),
+      },
+    });
+    await boom.handler(request({ recordingId: 'rec-1', contentType: 'blog_post' }), c);
+    expect(c.error).toHaveBeenCalledWith('[createContentFromRecording] 502 GENERATION_FAILED');
+    expect(JSON.stringify(c.error.mock.calls)).not.toContain('secret text');
   });
 
   it('treats an empty model answer as a generation failure, not a blank draft', async () => {
