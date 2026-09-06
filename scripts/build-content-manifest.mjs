@@ -270,6 +270,15 @@ export function buildManifest(items) {
       skipped.push(`${slug}: no recognised provider (${item.cloudProvider || 'unset'})`);
       continue;
     }
+    if (Object.prototype.hasOwnProperty.call(data, `article:${slug}`)) {
+      // Two published items with one slug — a re-ingested article, usually.
+      // The route is one URL either way; listing it twice made the sitemap
+      // repeat it (three times, on 2026-09-06: issue #373) and the pre-render
+      // write the same file three times. First one in wins, the rest are
+      // named here so the duplicate is visible in the run log.
+      skipped.push(`${slug}: duplicate slug (item ${item.id}); first occurrence kept`);
+      continue;
+    }
     routes.push(`/${provider}/blog/${slug}`);
     data[`article:${slug}`] = project(item);
   }

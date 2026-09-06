@@ -99,6 +99,16 @@ const HEAD_TAG = /^\s*<(link|meta|title|style|script|base)\b[^>]*?(?:\/>|>[\s\S]
 export const SITE_ORIGIN = 'https://hybridcloudworks.com';
 const DEFAULT_SOCIAL_IMAGE = `${SITE_ORIGIN}/icons/hcw-logo.png`;
 
+/**
+ * One render and one sitemap entry per route, whatever the inputs repeat.
+ * The manifest carried one slug three times on 2026-09-06 (issue #373): the
+ * same file was written three times and the sitemap advertised the URL three
+ * times. Order is preserved, so the sitemap stays stable across builds.
+ */
+export function dedupeRoutes(list) {
+  return [...new Set(list)];
+}
+
 /** `/azure/blog` -> `https://hybridcloudworks.com/azure/blog` (root keeps its slash) */
 export function canonicalFor(route) {
   const clean = String(route).replace(/^\/+|\/+$/g, '');
@@ -517,7 +527,7 @@ async function main() {
   // that boots the SPA, exactly as before.
   writeFileSync(join(dist, 'app-shell.html'), template);
 
-  const targets = routes(manifest);
+  const targets = dedupeRoutes(routes(manifest));
   const failures = [];
   const skipped = [];
   const publishedRoutes = [];

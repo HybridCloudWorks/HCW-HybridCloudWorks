@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **One sitemap entry per URL, and listing pages that say "nothing published
+  yet" when that is the truth (#373, part 1).** The content manifest carried
+  one slug three times, so the sitemap advertised the same blog URL three
+  times and the pre-render wrote the file three times; `buildManifest` now
+  keeps the first occurrence and names the rest in `skipped`, and the
+  pre-render dedupes its route list as a second guard. `ContentListingTemplate`
+  distinguished nothing from filtered-to-nothing only by accident: with zero
+  items it still said "found matching your criteria" and offered a Clear
+  Filters button. It now says "No {type}s published yet." and the published
+  pages audit recognises that copy (and the frameworks page's) as an empty
+  state rather than a defect. Part 2 — dropping zero-item section pages from
+  the sitemap — stays on #373.
 - **The audit report records the post-deploy re-run, and empty-state copy
   no longer marks a full page empty (#384).** After #376, #379 and #380 were
   deployed on 2026-09-06 the crawl went from 0 works / 11 empty / 107 defect
