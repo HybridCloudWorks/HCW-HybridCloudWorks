@@ -390,7 +390,11 @@ resource "azurerm_role_assignment" "github_reader_origin_window" {
 # agent, which shares the configuration) the Azure MCP Server, restricted at
 # the server to fourteen read-only control-plane tools. The server needs an
 # Azure sign-in, and .github/workflows/copilot-setup-steps.yml provides one
-# with azure/login under federated identity — this identity.
+# with azure/login under federated identity — this identity. Verified in
+# Copilot's own runner on 2026-09-06 (PR #382's session): the login succeeds
+# with the client id read from the Agents store, where the owner mirrored the
+# copilot_review_client_id output because that runner resolves no repository
+# variables.
 #
 # A THIRD IDENTITY, not a reuse of github_reader, because github_reader is not
 # read-only: it holds the origin-window role on the Function App (a config
@@ -627,7 +631,7 @@ output "reader_client_id" {
 }
 
 output "copilot_review_client_id" {
-  description = "COPILOT_REVIEW_CLIENT_ID for azure/login in copilot-setup-steps.yml — a repository variable, not a secret"
+  description = "COPILOT_REVIEW_CLIENT_ID for azure/login in copilot-setup-steps.yml — a repository variable, mirrored as an Agents secret of the same name because Copilot's own runner resolves no repository variables (runbook step 2b); an identifier in both stores, not a secret"
   value       = azurerm_user_assigned_identity.github_copilot_review.client_id
 }
 
