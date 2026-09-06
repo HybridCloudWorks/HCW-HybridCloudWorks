@@ -168,7 +168,6 @@ foreach ($markdownFile in $markdownFiles) {
     # document templates used as needed. Both restored 2026-09-06 (owner
     # decision) after #346 removed them in error.
     $relativePath.StartsWith('frontend/.copilot/', [System.StringComparison]::OrdinalIgnoreCase) -or
-    $relativePath.StartsWith('frontend/.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     # GitHub Copilot code review reads agent skills from .github/skills/ —
