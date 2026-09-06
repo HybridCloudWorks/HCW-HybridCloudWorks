@@ -74,19 +74,34 @@ jobs:
       id-token: write
       contents: read
     steps:
-      # Federated OIDC — no stored credential. COPILOT_REVIEW_CLIENT_ID is a
-      # repository VARIABLE, not a secret, like CLIENT_ID and READER_CLIENT_ID:
-      # it identifies the managed identity and grants nothing without a token
-      # from this repository in the copilot environment. Seeded from the
-      # copilot_review_client_id Terraform output by
-      # scripts/set-github-variables.ps1. TENANT_ID and SUBSCRIPTION_ID are the
-      # existing variables every other login here uses.
+      # Federated OIDC — no stored credential. The three values are
+      # IDENTIFIERS: they name the managed identity, tenant and subscription
+      # and grant nothing without a token from this repository in the copilot
+      # environment.
+      #
+      # Each is read from TWO places, because this file runs in two runners
+      # that see different stores. A manual `gh workflow run` is an ordinary
+      # Actions job and resolves repository VARIABLES (COPILOT_REVIEW_CLIENT_ID,
+      # seeded from the copilot_review_client_id Terraform output by
+      # scripts/set-github-variables.ps1; TENANT_ID and SUBSCRIPTION_ID, which
+      # every other login here uses). Copilot's own runner, which executes
+      # these steps before a code review or a cloud-agent session, does NOT
+      # resolve `vars` at all — the first review session on 2026-09-06 (PR
+      # #378) ran azure/login with every `vars.*` input empty — and exposes
+      # only the Agents store, which is what GitHub's own Azure example reads
+      # with `secrets.`. So the same three identifiers are also held as Agents
+      # SECRETS named COPILOT_REVIEW_CLIENT_ID, COPILOT_REVIEW_TENANT_ID and
+      # COPILOT_REVIEW_SUBSCRIPTION_ID, and each `||` prefers that store when
+      # it is present. Identifiers in a secret store is a deliberate exception
+      # to docs/standards/variables-and-secrets.md, made because the Agents
+      # store is the only one Copilot's runner reads; the values are still not
+      # credentials.
       - name: Azure Login
         uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
         with:
-          client-id: ${{ vars.COPILOT_REVIEW_CLIENT_ID }}
-          tenant-id: ${{ vars.TENANT_ID }}
-          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.COPILOT_REVIEW_CLIENT_ID || vars.COPILOT_REVIEW_CLIENT_ID }}
+          tenant-id: ${{ secrets.COPILOT_REVIEW_TENANT_ID || vars.TENANT_ID }}
+          subscription-id: ${{ secrets.COPILOT_REVIEW_SUBSCRIPTION_ID || vars.SUBSCRIPTION_ID }}
 
       # The minter is in the repository, so the repository has to be here.
       # Copilot performs its own checkout afterwards; this one is for the one
@@ -102,14 +117,33 @@ jobs:
         with:
           node-version: '22'
 
+      # Copilot enumerates each MCP server's tools a few seconds after starting
+      # it and drops any server that has none yet. The first review session
+      # (PR #378) kept the Terraform server, whose image was quick to pull, and
+      # dropped the Azure server, whose `npx @azure/mcp` has to download the
+      # package and a platform binary before it can answer — so the download
+      # happens here, ahead of time, and the same pinned command in
+      # .github/copilot-mcp.json then starts from the npm cache. The two
+      # container images are pulled for the same reason. Nothing here changes
+      # what runs; it only moves the wait out of the window that decides
+      # which servers a review can use.
+      - name: Warm the pinned MCP servers
+        run: |
+          set -euo pipefail
+          npx -y @azure/mcp@3.0.0-beta.41 --version
+          docker pull hashicorp/terraform-mcp-server:1.3.0@sha256:423a6b8e2ee06affcf090892f40c86469caba45fd2448ffa8ca5d717a174f7d5
+          docker pull ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33
+
       # Self-arming, like publish-content-manifest.yml: before the App exists
       # this reports honestly that it did not run rather than failing every
       # session. `secrets` is not available to a step-level `if`, so the test
-      # happens inside the step.
+      # happens inside the step. The App ID is read from both stores for the
+      # same reason as the login inputs above: Copilot's runner sees only the
+      # Agents store.
       - name: Is the GitHub App configured?
         id: app
         env:
-          COPILOT_REVIEW_APP_ID: ${{ vars.COPILOT_REVIEW_APP_ID }}
+          COPILOT_REVIEW_APP_ID: ${{ secrets.COPILOT_REVIEW_APP_ID || vars.COPILOT_REVIEW_APP_ID }}
           COPILOT_REVIEW_APP_PRIVATE_KEY: ${{ secrets.COPILOT_REVIEW_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -130,7 +164,7 @@ jobs:
         id: token
         if: steps.app.outputs.armed == 'true'
         env:
-          GITHUB_APP_ID: ${{ vars.COPILOT_REVIEW_APP_ID }}
+          GITHUB_APP_ID: ${{ secrets.COPILOT_REVIEW_APP_ID || vars.COPILOT_REVIEW_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.COPILOT_REVIEW_APP_PRIVATE_KEY }}
           GITHUB_APP_PERMISSIONS: '{"metadata":"read","contents":"read","issues":"read","pull_requests":"read","actions":"read","security_events":"read","vulnerability_alerts":"read","discussions":"read"}'
           GITHUB_REPOSITORY: ${{ github.repository }}

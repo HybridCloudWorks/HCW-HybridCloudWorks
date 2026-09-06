@@ -107,7 +107,11 @@ servers are available only once the owner has applied it there — the
 procedure and rationale are in `docs/runbooks/copilot-code-review-mcp.md`.
 When a server named below is available, use it to verify rather than assert;
 when it is not, say so in the finding and fall back to the evidence in the
-diff and the repository, rather than reporting a tool error as a finding:
+diff and the repository, rather than reporting a tool error as a finding.
+Inside a code review GitHub runs MCP in read-only mode and keeps only tools
+whose own definitions carry `readOnlyHint: true`, so a review session may see
+fewer servers than the file lists — the documentation servers in particular
+depend on how their vendors annotate their tools:
 
 | Component in the diff | Consult | For |
 | --- | --- | --- |

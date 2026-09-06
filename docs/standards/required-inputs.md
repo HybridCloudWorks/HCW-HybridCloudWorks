@@ -164,10 +164,11 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 The **Agents** store (Settings → Secrets and variables → Agents) is separate
 from Actions secrets. Copilot's setup job and agent environment read it; a
 name carrying the `COPILOT_MCP_` prefix is read by MCP servers only. It holds
-one entry:
+the Copilot review identifiers and one key:
 
 | Name | Status | Consumer |
 | --- | --- | --- |
+| `COPILOT_REVIEW_CLIENT_ID`, `COPILOT_REVIEW_TENANT_ID`, `COPILOT_REVIEW_SUBSCRIPTION_ID`, `COPILOT_REVIEW_APP_ID` | **NOT SET** | The same four identifiers the repository variables hold, mirrored into the Agents store because Copilot's own runner resolves no `vars.*` (seen on the first review session, PR #378, 2026-09-06) and reads only this store. `copilot-setup-steps.yml` prefers these and falls back to the variables, so a manual dispatch and a Copilot session both sign in. Identifiers in a secret store is the documented exception in [Variables and secrets](variables-and-secrets.md#subscription-tenant-and-client-ids); runbook step 2b |
 | `COPILOT_REVIEW_APP_PRIVATE_KEY` | **SET 2026-09-06** | PEM private key of *HCW Copilot Review Reader*, the GitHub App installed on this repository only with eight **read** permissions. `copilot-setup-steps.yml` mints a one-hour installation token from it for the `github-mcp-server` entry in `.github/copilot-mcp.json`; the App's read-only permissions are the ceiling for anything the key can mint. **No personal access token, classic or fine-grained, is used anywhere in the configuration.** Not `COPILOT_MCP_`-prefixed because the setup job, not an MCP server, reads it. Justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification); procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
 
 ## 4.4 GitHub environments

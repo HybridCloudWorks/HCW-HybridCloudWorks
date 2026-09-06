@@ -219,6 +219,19 @@ Note the deliberate asymmetry with Terraform, where the same values are marked
 The two do not have to agree, and treating `sensitive` as a synonym for "must be
 a GitHub secret" is how identifiers end up in the last-resort column.
 
+**One documented exception: the Agents store for Copilot's runner.** The job
+GitHub runs before a Copilot code review or cloud-agent session replays
+`copilot-setup-steps.yml` in Copilot's own runner, and that runner resolves
+no `vars.*` — observed on the first review session, PR #378, 2026-09-06,
+where `azure/login` printed a `with:` block with every variable input empty.
+The only store it exposes is **Agents**, and GitHub's own Azure example reads
+its inputs from it with `secrets.`. So the client, tenant, subscription and
+App identifiers are held there too (`COPILOT_REVIEW_CLIENT_ID`,
+`COPILOT_REVIEW_TENANT_ID`, `COPILOT_REVIEW_SUBSCRIPTION_ID`,
+`COPILOT_REVIEW_APP_ID`), and the workflow prefers them with a fallback to
+the variables. They are still identifiers, still not credentials; the store
+is chosen by what the reader can see, not by what the value is.
+
 ### Why OIDC federation means zero long-lived cloud credentials in GitHub
 
 Both cloud handshakes in this estate are federated, and neither has a secret:

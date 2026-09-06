@@ -30,9 +30,22 @@ This project has not cut a tagged release; entries are grouped under
   Reader* registered, installed on this repository only, its App ID and
   private key stored; and the five-server configuration pasted into the
   repository's Copilot settings. The runbook status and the required-inputs
-  rows record the values as set. The remaining proof is a real review whose
-  session log shows the setup job and all five servers, which the runbook's
-  *Verify* section describes.
+  rows record the values as set. The first real review, of #378 itself,
+  then showed two things the documentation had left open. Copilot code review
+  **does** run `copilot-setup-steps.yml`, but in Copilot's own runner, which
+  resolves no `vars.*`: `azure/login` ran with every input empty while the
+  same file dispatched by hand signed in fine. The workflow now reads the
+  client, tenant, subscription and App identifiers as
+  `secrets.COPILOT_REVIEW_… || vars.…`, so the Agents store Copilot exposes is
+  preferred and the repository variables still serve a manual run; the
+  `oidc-subjects` guard reads the variable out of that expression; the
+  standards record the identifiers-in-Agents exception; and mirroring the
+  four values is the owner's step 2b. And a review session runs MCP in
+  read-only mode, keeping only tools whose servers annotate them
+  `readOnlyHint: true` — the session log dropped every server, including the
+  built-in Playwright, as having no allowed tools. The Azure and GitHub
+  servers annotate; the runbook records what that means for the two
+  documentation servers and how to read the next session log.
 - **Every pre-rendered page was a spinner with the real page hidden below
   it; now the page is the page (#376, closes #370).** The audit (#361) found
   React error 419 on every hydration and two inline scripts the CSP blocks.
