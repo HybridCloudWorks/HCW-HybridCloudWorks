@@ -46,6 +46,23 @@ This project has not cut a tagged release; entries are grouped under
   built-in Playwright, as having no allowed tools. The Azure and GitHub
   servers annotate; the runbook records what that means for the two
   documentation servers and how to read the next session log.
+- **The public podcast list hides episodes whose media is gone (#379, closes
+  #372).** PodBean's CDN has answered 404 for every stored episode since
+  2026-09-05, and `/azure/audio` rendered a player for each that played
+  nothing (the audit's `media not served` class). `listPodcasts` now drops a
+  row whose `mediaUrl` host is on `RETIRED_PODCAST_MEDIA_HOSTS`
+  (`mcdn.podbean.com`, `feed.podbean.com`) or that carries a
+  `mediaUnavailableAt` mark, and `total` counts only what it serves; the
+  rows stay in Cosmos until the new host's feed (#349) replaces them, so no
+  data-plane write is needed. The page falls back to its own "No episodes
+  available yet." copy, which is the honest state. A per-run liveness check
+  that sets `mediaUnavailableAt` is deferred until a feed exists again: with
+  the list empty the timer has nothing to check.
+- **`TODO.md` points at the board (#377, closes #362).** The handling rule and
+  the "where the open items live" section name the organization project
+  (https://github.com/orgs/HybridCloudWorks/projects/1) and its Priority
+  field; the owner enabled auto-add on 2026-09-06, so a new issue lands there
+  without a manual step. The index table stays as the offline copy.
 - **Every pre-rendered page was a spinner with the real page hidden below
   it; now the page is the page (#376, closes #370).** The audit (#361) found
   React error 419 on every hydration and two inline scripts the CSP blocks.
