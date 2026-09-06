@@ -1,0 +1,80 @@
+# Published-pages audit (issue #361): crawl every URL in the live sitemap in
+# a real browser and publish the verdict matrix as an artifact.
+#
+# Not a merge gate and not a required context: it reads production, so it
+# runs on a schedule and on demand, never on pull requests. The verdict per
+# page — works / empty / defect — is the input for the child issues #361
+# tracks; the crawl finding a regression before the owner does is the point.
+name: Audit published pages
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, after the overnight content timers have run.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Restrict to paths starting with this prefix (e.g. /azure)
+        required: false
+        default: ''
+        type: string
+      strict:
+        description: Fail the job when any page is a defect
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-published-pages
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Crawl the sitemap
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # Inputs reach the script as quoted argv entries, never interpolated
+      # into the command line: a value with spaces or shell metacharacters is
+      # one literal argument, not a re-tokenized command.
+      - name: Audit
+        working-directory: frontend
+        env:
+          AUDIT_OUT: ${{ github.workspace }}/page-audit
+          AUDIT_ONLY: ${{ inputs.only }}
+          AUDIT_STRICT: ${{ inputs.strict }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${AUDIT_ONLY:-}" ]; then args+=(--only "$AUDIT_ONLY"); fi
+          if [ "${AUDIT_STRICT:-false}" = "true" ]; then args+=(--strict); fi
+          node scripts/audit-published-pages.mjs "${args[@]}"
+
+      - name: Upload the matrix
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: page-audit
+          path: page-audit/
+          retention-days: 90

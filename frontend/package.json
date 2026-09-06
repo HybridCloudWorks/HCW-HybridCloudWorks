@@ -19,6 +19,7 @@
     "lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,md}\"",
+    "audit:pages": "node scripts/audit-published-pages.mjs",
     "validate:routes": "node scripts/validate-routes.js",
     "validate:providers": "node scripts/validate-provider-pages.js",
     "validate:content-matrix": "node scripts/validate-content-matrix.cjs",
