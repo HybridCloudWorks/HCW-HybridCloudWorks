@@ -39,6 +39,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const args = process.argv.slice(2);
@@ -115,6 +116,39 @@ const THIN_MAIN_CHARS = 400;
 
 /** Empty-state copy makes a page "empty" only below this much main text. */
 const EMPTY_COPY_MAX_CHARS = 800;
+
+/**
+ * The emptiness verdict for a page with no defect, as a pure function so the
+ * thresholds are testable (audit-published-pages.test.js):
+ *
+ *   - under THIN_MAIN_CHARS: `empty`, with the copy (when present) recorded
+ *     beside the count — "Coming Soon" is a decision, a bare heading is
+ *     missing content, and the row should say which;
+ *   - from THIN_MAIN_CHARS up to EMPTY_COPY_MAX_CHARS with empty-state copy:
+ *     `empty` — an empty listing with a header and a footer widget;
+ *   - at or above EMPTY_COPY_MAX_CHARS with empty-state copy: `works`, and a
+ *     note — one widget on a full page (the podcast panel on `/azure`, 2,000+
+ *     chars around it). The post-deploy run of 2026-09-06 marked three
+ *     landings "empty" on that alone, which is why the cutoff exists;
+ *   - otherwise `works`.
+ */
+export function decideEmptiness({ mainChars, emptyCopy = [] }) {
+  const copy = emptyCopy.length ? `empty-state copy: ${emptyCopy.join(' | ')}` : null;
+  if (mainChars < THIN_MAIN_CHARS) {
+    return {
+      verdict: 'empty',
+      findings: [`thin main region: ${mainChars} chars`, ...(copy ? [copy] : [])],
+      notes: [],
+    };
+  }
+  if (copy && mainChars < EMPTY_COPY_MAX_CHARS) {
+    return { verdict: 'empty', findings: [copy], notes: [] };
+  }
+  if (copy) {
+    return { verdict: 'works', findings: [], notes: [`a widget shows ${copy}`] };
+  }
+  return { verdict: 'works', findings: [], notes: [] };
+}
 
 /** Console noise that is not a page defect. Keep this list short and named. */
 const CONSOLE_IGNORE = [/Third-party cookie will be blocked/i, /favicon\.ico/i];
@@ -368,24 +402,11 @@ async function auditPage(context, url) {
 
   if (f.length) {
     record.verdict = 'defect';
-  } else if (record.mainChars < THIN_MAIN_CHARS) {
-    // Thin, and the copy (when present) says whether that is intentional —
-    // "Coming Soon" is a decision, a bare heading is missing content — so
-    // both are recorded on the row.
-    record.verdict = 'empty';
-    f.push(`thin main region: ${record.mainChars} chars`);
-    if (record.emptyCopy.length) f.push(`empty-state copy: ${record.emptyCopy.join(' | ')}`);
-  } else if (record.emptyCopy.length && record.mainChars < EMPTY_COPY_MAX_CHARS) {
-    // Between THIN_MAIN_CHARS and EMPTY_COPY_MAX_CHARS the page has some text
-    // but its own copy says it has nothing — an empty listing with a header
-    // and a footer widget. Above the cutoff the same copy is one widget on a
-    // full page (the podcast panel on `/azure`, 2,000+ chars around it) and
-    // is a note, not a verdict — the post-deploy run of 2026-09-06 marked
-    // three landings "empty" on that alone.
-    record.verdict = 'empty';
-    f.push(`empty-state copy: ${record.emptyCopy.join(' | ')}`);
-  } else if (record.emptyCopy.length) {
-    record.notes.push(`a widget shows empty-state copy: ${record.emptyCopy.join(' | ')}`);
+  } else {
+    const decision = decideEmptiness(record);
+    record.verdict = decision.verdict;
+    f.push(...decision.findings);
+    record.notes.push(...decision.notes);
   }
   return record;
 }
@@ -492,7 +513,13 @@ async function main() {
   if (STRICT && counts.defect) process.exit(1);
 }
 
-main().catch((error) => {
-  console.error(`audit failed: ${error?.message || error}`);
-  process.exit(2);
-});
+// Run only when executed directly, so the test file can import the pure
+// helpers without starting a crawl.
+const invokedDirectly =
+  process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(`audit failed: ${error?.message || error}`);
+    process.exit(2);
+  });
+}
