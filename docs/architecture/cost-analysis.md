@@ -195,8 +195,9 @@ uniformly, and would stop working silently the first time someone omits it.
 ## Cosmos backup and export — costed against the measured size (2026-09-06)
 
 Issue #231 waited on one number: how much data the account holds. The owner
-measured it on 2026-09-06 with `az monitor metrics list … --metric DataUsage`
-on `cosmos-site-prod-cus`: **2,386,591,744 bytes, 2.39 GB**, index and all 73
+measured it on 2026-09-06 by reading the account's `DataUsage` metric through
+`az monitor metrics list` on `cosmos-site-prod-cus` (the runnable command is on
+#231): **2,386,591,744 bytes, 2.39 GB**, index and all 73
 containers included. Every figure below is that size against list prices for a
 single Central US region, so the model is the estate's, not a placeholder's.
 
@@ -214,7 +215,7 @@ RA-GRS content account is taken at roughly **$0.037 per GB-month Hot** and
 | --- | ---: | ---: | --- |
 | Cosmos storage for 2.39 GB | $0.14 | $0.60 | Already on the bill; the `$0.68` Cosmos line in the estate table is mostly this |
 | Continuous30Days backup storage | $0.11 | $0.48 | 2.39 GB × $0.20 × 1 region. The 7-day tier was free; ADR 0018's move to 30 days buys three extra weeks of point-in-time restore for under fifty cents |
-| A point-in-time restore, when exercised | — | $0.36 per restore | 2.39 GB × $0.15, billed per restore invocation — the timed restore #231 requires costs less than a coffee |
+| A point-in-time restore, when exercised | — | $0.36 per restore | 2.39 GB × $0.15, billed per restore invocation — the timed restore drill that #231 calls for costs less than a coffee |
 
 ### What the out-of-account export would add
 
@@ -233,9 +234,13 @@ Cool tier, on the RA-GRS content account. Roughly **$4 a month all-in**, against
 **$20 a month** for daily fulls that protect nothing extra under an RPO of 24
 hours. The cost is dominated by the full read, not by storage, which is why
 cadence is the lever and tier is a rounding error. Deletes are the design's
-hard part, not its cost: the change feed does not emit them, so the weekly
-full is also the reconciliation that makes a deleted document disappear from
-the copy.
+hard part, not its cost: the default latest-version change feed mode does not
+emit them, so the weekly full is also the reconciliation that makes a deleted
+document disappear from the copy. Cosmos does offer an all-versions-and-deletes
+change feed mode that captures deletes, but it requires continuous backup on
+the account and a retention window that the delta reader must never fall
+outside; whether the exporter adopts it or keeps the weekly reconciliation is
+a design choice for #231's ADR, and costs the same either way.
 
 **Whole recovery posture, once the exporter runs:** about **$1.20 a week /
 $5 a month** — continuous backup plus export plus one drill a quarter — on a
