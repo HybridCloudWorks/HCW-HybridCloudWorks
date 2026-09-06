@@ -192,6 +192,62 @@ and an expiry date.
 Cost attribution by tag therefore works today because the map is applied
 uniformly, and would stop working silently the first time someone omits it.
 
+## Cosmos backup and export — costed against the measured size (2026-09-06)
+
+Issue #231 waited on one number: how much data the account holds. The owner
+measured it on 2026-09-06 by reading the account's `DataUsage` metric through
+`az monitor metrics list` on `cosmos-site-prod-cus` (the runnable command is on
+#231): **2,386,591,744 bytes, 2.39 GB**, index and all 73
+containers included. Every figure below is that size against list prices for a
+single Central US region, so the model is the estate's, not a placeholder's.
+
+Prices used (Microsoft Learn, read 2026-09-06; the pricing pages render prices
+client-side, so the calculator is the place to re-verify before committing):
+serverless request units **$0.25 per million**; Cosmos transactional storage
+**$0.25 per GB-month**; continuous 30-day backup **$0.20 per GB-month per
+region**; a point-in-time restore **$0.15 per GB restored**. Blob storage on the
+RA-GRS content account is taken at roughly **$0.037 per GB-month Hot** and
+**$0.02 Cool**, the list figures at the time of writing.
+
+### What recovery already costs
+
+| Line | Per week | Per month | Why |
+| --- | ---: | ---: | --- |
+| Cosmos storage for 2.39 GB | $0.14 | $0.60 | Already on the bill; the `$0.68` Cosmos line in the estate table is mostly this |
+| Continuous30Days backup storage | $0.11 | $0.48 | 2.39 GB × $0.20 × 1 region. The 7-day tier was free; ADR 0018's move to 30 days buys three extra weeks of point-in-time restore for under fifty cents |
+| A point-in-time restore, when exercised | — | $0.36 per restore | 2.39 GB × $0.15, billed per restore invocation — the timed restore drill that #231 calls for costs less than a coffee |
+
+### What the out-of-account export would add
+
+The export exists to survive account or region loss, which continuous backup
+does not cover (it lives with the account). Two shapes were on the table; the
+measurement settles which.
+
+| Shape | RU per export | Per week | Per month | Blob storage, 30-day retention |
+| --- | ---: | ---: | ---: | ---: |
+| **Full export every day** | ~2.4 M RU (one read per KB) ≈ $0.60 | $4.20 | $18 | 30 × 2.39 GB ≈ 72 GB → $2.65 Hot / $1.45 Cool per month |
+| **Full export weekly + change-feed deltas daily** | 2.4 M RU once a week; deltas read only changed documents, a few thousand a day ≈ $0.01–0.05 | $0.70–0.95 | $3–4 | 4–5 weekly copies + deltas ≈ 12 GB → $0.45 Hot / $0.25 Cool per month |
+| Restore from the export into a fresh account (the drill) | ~12 M RU of writes (≈5 RU per KB) | — | ≈ $3 per drill | Plus the new account's storage for its lifetime |
+
+**Decision the numbers support:** weekly full plus daily change-feed deltas,
+Cool tier, on the RA-GRS content account. Roughly **$4 a month all-in**, against
+**$20 a month** for daily fulls that protect nothing extra under an RPO of 24
+hours. The cost is dominated by the full read, not by storage, which is why
+cadence is the lever and tier is a rounding error. Deletes are the design's
+hard part, not its cost: the default latest-version change feed mode does not
+emit them, so the weekly full is also the reconciliation that makes a deleted
+document disappear from the copy. Cosmos does offer an all-versions-and-deletes
+change feed mode that captures deletes, but it requires continuous backup on
+the account and a retention window that the delta reader must never fall
+outside; whether the exporter adopts it or keeps the weekly reconciliation is
+a design choice for #231's ADR, and costs the same either way.
+
+**Whole recovery posture, once the exporter runs:** about **$1.20 a week /
+$5 a month** — continuous backup plus export plus one drill a quarter — on a
+workload whose entire bill is in the tens of dollars. The measurement plan
+below gains one line: re-read `DataUsage` when the exporter is armed and again
+after a quarter, since every row here scales linearly with it.
+
 ## Measurement plan
 
 The first baseline now exists, so this is maintenance rather than discovery:
