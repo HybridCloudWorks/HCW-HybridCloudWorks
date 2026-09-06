@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **`fetchPodcastFeeds` no longer polls a dead feed, and the podcast pages
-  no longer advertise PodBean (#PR, issue #348).** PodBean's feed returned
+  no longer advertise PodBean (#365, issue #348).** PodBean's feed returned
   HTTP 410 Gone from 2026-09-05, so every two-hour firing since the timer was
   armed in #332 ended in `feed failed`, and every podcast page offered a
   PodBean subscribe button that led to it. Three changes. The feed list moves
