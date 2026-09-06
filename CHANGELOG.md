@@ -35,6 +35,15 @@ This project has not cut a tagged release; entries are grouped under
   the file), what a successful save and review session look like, and the
   rollback. The code-review skill names which server to consult per
   component. Not yet applied: the paste is the owner's step.
+- **ADR 0027 records the documentation-site decision (#367, issue #360).**
+  The move from the Wiki to `docs/` shipped in #363 with its reasoning spread
+  across the PR, the issue and the CHANGELOG; the ADR puts it in the register
+  where the next reader will look — source layout, MkDocs Material and why
+  not Docusaurus or Jekyll, the root-document hook, the Pages deploy and
+  DNS-only CNAME, the redaction gate, the Wiki retirement, and the accepted
+  consequences (strict builds, the uncurated archive, the one reused ADR
+  number). Closes the last acceptance item on #360 that a session can close;
+  switching the Wiki feature off after a week is the owner's.
 - **Retire Wiki stubs the Home page too (#364).** The dry run on 2026-09-06
   reported `keep (not in map): Home`: Home maps to the site root, whose path
   is the empty string, and the guard tested truthiness instead of presence.
