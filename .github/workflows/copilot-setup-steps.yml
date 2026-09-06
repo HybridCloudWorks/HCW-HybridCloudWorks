@@ -123,7 +123,7 @@ jobs:
             echo "armed=true" >> "$GITHUB_OUTPUT"
           else
             echo "armed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::COPILOT_REVIEW_CLIENT_ID, TENANT_ID or SUBSCRIPTION_ID is not resolvable in this runner, so Azure Login was skipped and the azure MCP server has no credential this session (runbook step 2b: the Agents copies are what Copilot's runner reads)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::notice::An Azure identifier is not resolvable in this runner (Agents secrets COPILOT_REVIEW_CLIENT_ID, COPILOT_REVIEW_TENANT_ID, COPILOT_REVIEW_SUBSCRIPTION_ID; variables COPILOT_REVIEW_CLIENT_ID, TENANT_ID, SUBSCRIPTION_ID), so Azure Login was skipped and the azure MCP server has no credential this session. Copilot's runner reads only the Agents copies (runbook step 2b)." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Azure Login
