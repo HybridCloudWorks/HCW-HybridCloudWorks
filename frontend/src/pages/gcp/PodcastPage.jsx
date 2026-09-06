@@ -120,6 +120,13 @@ export default function PodcastPage() {
     { key: 'amazon', name: 'Amazon Music' },
     { key: 'rss', name: 'RSS feed' },
   ];
+  // Only platforms with a link are offered, and the whole sidebar goes when
+  // there are none: an empty "Subscribe Now" box reads as broken UI (#348).
+  const subscribeUrlFor = (platform) =>
+    platform.key === 'rss'
+      ? podcastConfig?.podcast?.feedUrl
+      : podcastConfig?.podcast?.subscribeLinks?.[platform.key];
+  const availablePlatforms = platforms.filter((platform) => subscribeUrlFor(platform));
 
   return (
     <>
@@ -318,49 +325,46 @@ export default function PodcastPage() {
           </div>
 
           {/* Right Sidebar: Subscribe */}
-          <aside className="h-fit sticky top-28">
-            <div className="bg-gradient-to-br from-red-500/20 to-blue-900/20 backdrop-blur-md border border-red-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <span className="material-symbols-outlined text-red-400 text-[20px]">podcast</span>
-                Subscribe Now
-              </h3>
-              <p className="text-sm text-foreground mb-5">
-                Get new episodes delivered to your favorite podcast app.
-              </p>
-              <div className="space-y-2">
-                {platforms.map((platform) => {
-                  // A platform with no link is not rendered: a button that
-                  // goes to '#' or to a feed that has moved reads as broken
-                  // (#348 — the PodBean button led to a 410 for weeks).
-                  const url =
-                    platform.key === 'rss'
-                      ? podcastConfig?.podcast?.feedUrl
-                      : podcastConfig?.podcast?.subscribeLinks?.[platform.key];
-                  if (!url) return null;
-                  return (
-                    <a
-                      key={platform.key}
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full py-2.5 px-3 bg-card/50 hover:bg-red-500/20 hover:border-red-500/40 border border-card/60 text-foreground rounded-lg transition-all text-sm font-semibold flex items-center gap-3"
-                    >
-                      <img
-                        src={PLATFORM_LOGOS[platform.key]}
-                        alt={platform.name}
-                        loading="lazy"
-                        decoding="async"
-                        width="20"
-                        height="20"
-                        className="w-5 h-5 object-contain rounded-sm flex-shrink-0"
-                      />
-                      {platform.name}
-                    </a>
-                  );
-                })}
+          {availablePlatforms.length > 0 && (
+            <aside className="h-fit sticky top-28">
+              <div className="bg-gradient-to-br from-red-500/20 to-blue-900/20 backdrop-blur-md border border-red-500/30 rounded-2xl p-6">
+                <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-red-400 text-[20px]">
+                    podcast
+                  </span>
+                  Subscribe Now
+                </h3>
+                <p className="text-sm text-foreground mb-5">
+                  Get new episodes delivered to your favorite podcast app.
+                </p>
+                <div className="space-y-2">
+                  {availablePlatforms.map((platform) => {
+                    const url = subscribeUrlFor(platform);
+                    return (
+                      <a
+                        key={platform.key}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-2.5 px-3 bg-card/50 hover:bg-red-500/20 hover:border-red-500/40 border border-card/60 text-foreground rounded-lg transition-all text-sm font-semibold flex items-center gap-3"
+                      >
+                        <img
+                          src={PLATFORM_LOGOS[platform.key]}
+                          alt={platform.name}
+                          loading="lazy"
+                          decoding="async"
+                          width="20"
+                          height="20"
+                          className="w-5 h-5 object-contain rounded-sm flex-shrink-0"
+                        />
+                        {platform.name}
+                      </a>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          </aside>
+            </aside>
+          )}
         </div>
       </main>
     </>
