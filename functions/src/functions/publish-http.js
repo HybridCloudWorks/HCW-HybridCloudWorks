@@ -6,6 +6,7 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createPublishHandlers } from '../lib/cms/publish.js';
+import { createDefaultInlineImageRehoster } from '../lib/cms/inline-images-default.js';
 import { createSnapshotPublishHandlers } from '../lib/snapshots-publish.js';
 
 const store = { queryDocs, readDoc, upsertDoc, patchDoc };
@@ -15,7 +16,12 @@ httpRoute('publishContent', {
   authLevel: 'anonymous',
   route: 'publishContent',
   handler: (request, context) =>
-    createPublishHandlers({ guard: getDefaultGuard(), store }).publishContent(request, context),
+    createPublishHandlers({
+      guard: getDefaultGuard(),
+      store,
+      inlineImages: createDefaultInlineImageRehoster(context),
+      log: context,
+    }).publishContent(request, context),
 });
 
 httpRoute('publishSnapshot', {

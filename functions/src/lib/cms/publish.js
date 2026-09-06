@@ -16,6 +16,15 @@
  *     paths, which belongs to the asset-migration phase. When refs need
  *     archiving the item still publishes and a warning is surfaced in the
  *     batch results, so nothing silently changes.
+ *   - Inline body images ARE re-hosted, since 2026-09-06 (issue #374): every
+ *     external `<img>` / `![](…)` URL in any body field is fetched
+ *     through the guarded fetcher, stored under the article id in the public
+ *     `covers` container and rewritten to the site's media path. A URL that
+ *     fails is left in place and counted in the `inlineImages` summary the
+ *     completed step writes; if the step itself throws, it is logged and the
+ *     article publishes untouched with no summary. Nothing here can fail a
+ *     publish. See ./inline-images.js. Injected as `inlineImages`; absent,
+ *     nothing runs.
  *   - bumpForgeStats' FieldValue.increment becomes read-modify-patch on the
  *     whole totals/formats objects — formatKey is user-influenced text, and
  *     writing whole objects avoids dotted-path escaping entirely.
@@ -28,6 +37,7 @@ import { randomUUID } from 'node:crypto';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { buildContentQualityReport, buildImageReadinessReport } from './content-quality.js';
 import { normalizePublishTarget, SUPPORTED_PUBLISH_TARGETS } from './publish-targets.js';
+import { buildInlineImageUpdate } from './inline-images.js';
 import {
   canPublishFromStatus,
   PUBLISHABLE_NORMALIZED_STATUSES,
@@ -219,7 +229,14 @@ export function accumulatePublishResult(results, contentId, r) {
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
-export function createPublishHandlers({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createPublishHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+  inlineImages = null,
+  log = console,
+}) {
   async function uniqueSlug(baseSlug, id = '') {
     if (!baseSlug) return slugSuffix(id);
     try {
@@ -315,7 +332,8 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
       const rawTitle = contentData.Title || contentData.title || 'Untitled Article';
       const baseSlug = slugify(rawTitle);
       const existingSlug = contentData.slug || contentData.Slug;
-      const slug = isRepublish && existingSlug ? existingSlug : await uniqueSlug(baseSlug, contentId);
+      const slug =
+        isRepublish && existingSlug ? existingSlug : await uniqueSlug(baseSlug, contentId);
 
       const curatedSubpagePath =
         contentData.curatedSubpagePath ||
@@ -347,6 +365,20 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
       }
 
       applyPublishTimeCoverTrigger(contentUpdate, contentData);
+
+      // Inline body images (issue #374). Runs after the gates, so it never
+      // spends a fetch on an article that will not publish, and before the
+      // write, so the rewritten body and its summary land in the same patch
+      // as the status change. Best-effort by construction: a failed image is
+      // left as it was and named on the document.
+      const inlineImageUpdate = await buildInlineImageUpdate({
+        contentData,
+        contentId,
+        rehost: inlineImages,
+        nowIso,
+        log,
+      });
+      if (inlineImageUpdate) Object.assign(contentUpdate, inlineImageUpdate);
 
       // Social caption auto-queue (backlog #1): armed once per document, on a
       // LIVE publish only — a republish or an edit-and-republish must not
@@ -434,7 +466,10 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
           tags: snapToSave.Tags || snapToSave.keyTopics || [],
           sidebarContent: snapToSave.sidebarContent || '',
           publishedDate:
-            snapToSave.publishedDate || snapToSave.datePublished || snapToSave['Published At'] || '',
+            snapToSave.publishedDate ||
+            snapToSave.datePublished ||
+            snapToSave['Published At'] ||
+            '',
           orderedImageUrls: snapToSave.contentImages || snapToSave.orderedImageUrls || [],
           versionCreatedAt: nowIso,
           versionCreatedBy:
@@ -506,7 +541,10 @@ export function createPublishHandlers({ guard, store, now = () => new Date(), uu
         return json(200, { success: true, ...results });
       } catch (error) {
         context.error('publishContent failed:', error);
-        return json(500, { error: 'Failed to publish content', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to publish content',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 

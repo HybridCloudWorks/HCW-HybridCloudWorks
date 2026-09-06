@@ -23,6 +23,7 @@ import { app } from '@azure/functions';
 import * as store from '../lib/cosmos-client.js';
 import * as blobStorage from '../lib/blob-storage.js';
 import { createPublishHandlers } from '../lib/cms/publish.js';
+import { createDefaultInlineImageRehoster } from '../lib/cms/inline-images-default.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { createScheduledPublisher } from '../lib/scheduled-publish.js';
 import { createSnapshotPublishHandlers } from '../lib/snapshots-publish.js';
@@ -123,7 +124,12 @@ timer('forgeScheduled', 'FORGE_SCHEDULED', '0 30 3 * * *', async (context) => {
 // ── Publishing ───────────────────────────────────────────────────────────────
 
 timer('publishScheduledContent', 'PUBLISH_SCHEDULED_CONTENT', '0 */15 * * * *', async (context) => {
-  const publish = createPublishHandlers({ guard: getDefaultGuard(), store });
+  const publish = createPublishHandlers({
+    guard: getDefaultGuard(),
+    store,
+    inlineImages: createDefaultInlineImageRehoster(context),
+    log: context,
+  });
   await createScheduledPublisher({ store, publish }).runScheduledPublish(context);
 });
 
