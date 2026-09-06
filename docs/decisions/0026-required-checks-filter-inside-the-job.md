@@ -60,7 +60,7 @@ Two details of the implementation are the substance of the decision:
 
 - **Each job's filter names its real dependency set, not its directory.**
   The functions tests read `infra/` Terraform source, `.azure/api-surface.json`
-  and the `wiki/Blog-Machine.md` grammar contract, so an infra or contract
+  and the `docs/content/blog-machine.md` grammar contract, so an infra or contract
   change still runs them. The scripts tests pin `.github/workflows/`
   contracts and `infra/roles`, so a workflow edit still runs them. CodeQL
   filters by language extension repository-wide, not by directory. A filter

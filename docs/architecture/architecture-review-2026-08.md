@@ -110,8 +110,8 @@ four hooks reimplement it instead (T-738).
 
 > **Status (2026-08-28):** **FIXED** — moved to **RA-GRS**, not ZRS. Two reasons: the risk is account and regional loss, which zone redundancy does not cover, and LRS→ZRS is not Terraform-expressible (Azure requires a customer-initiated conversion). The TFC plan succeeded with `prevent_destroy` in force, which proves it is an in-place update rather than a replacement.
 
-`infra/main.tf:434` · `wiki/0018-as-built-plan-v02.md:56-57,73-74` ·
-`wiki/0023-migration-estate-retirement.md:79-81`
+`infra/main.tf:434` · `docs/decisions/0018-as-built-plan-v02.md:56-57,73-74` ·
+`docs/decisions/0023-migration-estate-retirement.md:79-81`
 
 ADR 0018 accepted `LRS` explicitly *"while the Firebase source retains the
 authoritative copy,"* recording a revisit trigger of "when Firebase
@@ -134,7 +134,7 @@ rather than a drift.
 
 > **Status (2026-08-28):** **PARTLY FIXED; remainder on [issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231).** Backup tier 7 → 30 days. The out-of-account copy cannot be closed by any account setting, so it belongs with the recovery objectives; it is also gated behind T-518.
 
-`infra/main.tf:284-287,203-217` · `wiki/0023-migration-estate-retirement.md:79-81`
+`infra/main.tf:284-287,203-217` · `docs/decisions/0023-migration-estate-retirement.md:79-81`
 
 The only restore path for all production website data is 7-day point-in-time
 restore whose backup storage is co-located with a single-region serverless
@@ -238,7 +238,7 @@ classes into one visible one.
 
 ### T-721 — Telemetry costs five times the workload it observes (Medium, reported)
 
-`wiki/Cost-Analysis.md:74-84` · `infra/main.tf:138-144,128-133`
+`docs/architecture/cost-analysis.md:74-84` · `infra/main.tf:138-144,128-133`
 
 Neither line is over budget, but together they are roughly 80% of predictable
 Azure spend on a platform that documents cost discipline to the cent.
@@ -295,7 +295,7 @@ through the window) that deploys have presumably satisfied several times since
 > **Status (2026-08-28):** **FIXED** — `prevent_destroy` now covers the database, the container `for_each` and `leases`; the stale "containers are empty" comment is corrected to ~70k documents.
 
 `infra/main.tf:305,365-412,1886-1897` · guards present at `298,516,807,1710` ·
-`wiki/IaC-Repository-Standard.md` ("Stateful resources | `lifecycle { prevent_destroy = true }`")
+`docs/standards/iac-repository-standard.md` ("Stateful resources | `lifecycle { prevent_destroy = true }`")
 
 Verified by enumeration: the guard covers the Cosmos *account*, both storage
 accounts and the Key Vault, and nothing else. `prevent_destroy` on a parent
@@ -361,7 +361,7 @@ risks.
 > **Status (2026-08-28):** **FIXED.** `scripts/assert-expected-plan.mjs` compares a plan against the three azapi ADDRESSES and one attribute, catches a destroy hiding beside the expected three, catches a second setting changing on the resource that is legitimately expected to change, and fails when an expected change STOPS appearing (a strip that is not running is how AzureWebJobsStorage returns). Its test pins EXPECTED against `main.tf` both ways. Not in CI: the plan lives in HCP Terraform and `iac-validate.yml` has no token — owner.
 
 `infra/main.tf:1379-1407,1462-1464,1492-1494,1551-1553` ·
-`wiki/0018-as-built-plan-v02.md:71-72`
+`docs/decisions/0018-as-built-plan-v02.md:71-72`
 
 The read-then-strip design is a correct workaround for azurerm issue #29149
 and is thoroughly documented. Its cost is that a clean plan no longer exists:
@@ -468,7 +468,7 @@ disagree and neither is marked as the loser.
 
 ### T-754 — `main.tf` is a 2,037-line six-concern file (Low, reported)
 
-`infra/main.tf` · `wiki/0020-native-terraform-root-module.md`
+`infra/main.tf` · `docs/decisions/0020-native-terraform-root-module.md`
 
 ADR 0020's revisit triggers — a second repository or environment, ALZ
 module-level policy, a major azurerm migration — have not fired, so the flat
