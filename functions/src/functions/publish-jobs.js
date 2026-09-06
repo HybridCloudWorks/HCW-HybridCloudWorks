@@ -11,6 +11,7 @@
 import * as store from '../lib/cosmos-client.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { createPublishHandlers } from '../lib/cms/publish.js';
+import { createDefaultInlineImageRehoster } from '../lib/cms/inline-images-default.js';
 import { createJobFailureOnComplete } from '../lib/job-failure-notify.js';
 import { registerJobType } from '../lib/jobs.js';
 
@@ -47,7 +48,11 @@ registerJobType('publish-content', {
   maxPayloadBytes: 2048,
   timeoutMs: 5 * 60 * 1000,
   worker: async (payload, { job }) => {
-    const publish = createPublishHandlers({ guard: getDefaultGuard(), store });
+    const publish = createPublishHandlers({
+      guard: getDefaultGuard(),
+      store,
+      inlineImages: createDefaultInlineImageRehoster(),
+    });
     return runPublishContent(payload, { job, publish });
   },
   // A failed approval-from-the-phone must come back to the phone (T-607).

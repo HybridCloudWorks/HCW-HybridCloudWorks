@@ -20,7 +20,9 @@ const context = { log: vi.fn(), error: vi.fn() };
 
 const USER = { oid: 'u1', email: 'pub@hcw.dev' };
 const guardAs = (role) => ({ requireRole: vi.fn(async () => ({ user: USER, role, error: null })) });
-const denyGuard = { requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })) };
+const denyGuard = {
+  requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+};
 const makeRequest = (body) => ({ headers: { get: () => 'vitest' }, json: async () => body ?? {} });
 
 const NOW = new Date('2026-08-07T06:00:00.000Z');
@@ -104,7 +106,11 @@ describe('pure helpers', () => {
     const results = { published: 0, skipped: 0, errors: [], mappings: [], warnings: [] };
     accumulatePublishResult(results, 'a', { error: 'nope' });
     accumulatePublishResult(results, 'b', { blogId: 'b', reused: true, expectedPublicUrl: null });
-    accumulatePublishResult(results, 'c', { blogId: 'c', reused: false, expectedPublicUrl: 'https://x' });
+    accumulatePublishResult(results, 'c', {
+      blogId: 'c',
+      reused: false,
+      expectedPublicUrl: 'https://x',
+    });
     expect(results.published).toBe(1);
     expect(results.skipped).toBe(1);
     expect(results.errors).toHaveLength(1);
@@ -122,7 +128,10 @@ describe('concurrent publish protection (T-301)', () => {
     // theoretical into reachable.
     const store = makeStore(readyDoc({ _etag: '"abc"' }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
 
     const call = store.patchDoc.mock.calls.find(([c]) => c === 'content');
     expect(call[3]).toEqual({ ifMatch: '"abc"' });
@@ -138,8 +147,12 @@ describe('concurrent publish protection (T-301)', () => {
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
     const body = JSON.parse(
-      (await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context))
-        .body
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
     );
 
     expect(body.published).toBe(0);
@@ -160,8 +173,12 @@ describe('concurrent publish protection (T-301)', () => {
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
     const body = JSON.parse(
-      (await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context))
-        .body
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
     );
 
     expect(body.published).toBe(0);
@@ -192,9 +209,7 @@ describe('concurrent publish protection (T-301)', () => {
     ).toBeUndefined();
 
     // Republish of a document that already posted: never a second post.
-    const republished = makeStore(
-      readyDoc({ socialCaptionGeneratedAt: '2026-08-20T00:00:00Z' })
-    );
+    const republished = makeStore(readyDoc({ socialCaptionGeneratedAt: '2026-08-20T00:00:00Z' }));
     const h2 = createPublishHandlers({ guard: guardAs('publisher'), store: republished, ...fixed });
     await h2.processPublishContent('c1', { markLive: true });
     expect(
@@ -207,7 +222,10 @@ describe('publishContent', () => {
   it('publishes a ready item: status, slug, URLs, provider, version row', async () => {
     const store = makeStore();
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    const res = await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+    const res = await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
     const body = JSON.parse(res.body);
     expect(body.published).toBe(1);
     expect(body.errors).toEqual([]);
@@ -233,7 +251,14 @@ describe('publishContent', () => {
   it('refuses non-publishable statuses via the single table', async () => {
     const store = makeStore(readyDoc({ contentStatus: 'in_review' }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    const body = JSON.parse((await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context)).body);
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
     expect(body.errors[0].error).toMatch(/Cannot publish from status 'in_review'/);
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
@@ -243,7 +268,14 @@ describe('publishContent', () => {
     const store = makeStore(thin);
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
 
-    const body = JSON.parse((await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context)).body);
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
     expect(body.errors[0].error).toMatch(/quality gate failed/);
     // The failed report was persisted onto the doc.
     expect(store.patchDoc.mock.calls[0][2]).toHaveProperty('contentQuality');
@@ -254,7 +286,12 @@ describe('publishContent', () => {
     const ok = JSON.parse(
       (
         await h2.publishContent(
-          makeRequest({ contentIds: ['c1'], publishTarget: 'framework', forceQualityBypass: true, forceImageBypass: true }),
+          makeRequest({
+            contentIds: ['c1'],
+            publishTarget: 'framework',
+            forceQualityBypass: true,
+            forceImageBypass: true,
+          }),
           context
         )
       ).body
@@ -265,14 +302,21 @@ describe('publishContent', () => {
   it('republish reuses the stored slug and counts as skipped', async () => {
     const store = makeStore(readyDoc({ contentStatus: 'published', slug: 'existing-slug' }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    const body = JSON.parse((await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context)).body);
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
     expect(body.skipped).toBe(1);
     expect(body.mappings[0].slug).toBe('existing-slug');
     expect(store.queryDocs).not.toHaveBeenCalled(); // no collision probe on republish
     // version row says republished
-    expect(store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1].versionReason).toBe(
-      'republished'
-    );
+    expect(
+      store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1].versionReason
+    ).toBe('republished');
   });
 
   it('suffixes the slug only on a real collision by another doc', async () => {
@@ -280,7 +324,10 @@ describe('publishContent', () => {
       queryDocs: vi.fn(async () => [{ id: 'someone-else' }]),
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
     const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
     expect(patch.slug).toBe('migration-readiness-framework-c1'); // suffixed with id fragment
   });
@@ -288,7 +335,14 @@ describe('publishContent', () => {
   it('surfaces the scrapedImages warning without blocking the publish', async () => {
     const store = makeStore(readyDoc({ scrapedImages: [{ url: 'x', stored: false }] }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    const body = JSON.parse((await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context)).body);
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
     expect(body.published).toBe(1);
     expect(body.warnings.some((w) => /scrapedImages/.test(w.warning))).toBe(true);
   });
@@ -302,7 +356,10 @@ describe('publishContent', () => {
       }),
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
     const statsPatch = store.patchDoc.mock.calls.find(([c]) => c === 'admin_config');
     expect(statsPatch[2].totals.published).toBe(5);
     expect(statsPatch[2].formats['deep dive'].published).toBe(1);
@@ -320,7 +377,10 @@ describe('publishContent', () => {
       }),
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    await h.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context);
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
     const statsUpsert = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_config');
     expect(statsUpsert[1]).toMatchObject({ id: 'forge_stats', configScope: 'admin_config' });
   });
@@ -331,7 +391,101 @@ describe('publishContent', () => {
     expect((await h.publishContent(makeRequest({ contentIds: [] }), context)).status).toBe(400);
 
     const denied = createPublishHandlers({ guard: denyGuard, store, ...fixed });
-    expect((await denied.publishContent(makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }), context)).status).toBe(403);
+    expect(
+      (
+        await denied.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).status
+    ).toBe(403);
     expect(store.readDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('inline body images at publish time (#374)', () => {
+  const UPSTREAM = 'https://devblogs.microsoft.com/foundry/wp-content/uploads/rubric.png';
+  const HOSTED = '/api/public/media/covers/c1/inline/abcdef0123456789.png';
+  const doc = () =>
+    readyDoc({
+      Content: `<p>${paragraph(2)}</p><img src="${UPSTREAM}" alt="Rubric"> ![d](https://cdn.example.org/d.webp)`,
+    });
+
+  it('rewrites the rendered body field and records the summary in the publish patch', async () => {
+    const store = makeStore(doc());
+    const inlineImages = vi.fn(async ({ contentId, body }) => ({
+      body: body.replace(UPSTREAM, HOSTED),
+      rewritten: [{ from: UPSTREAM, to: HOSTED }],
+      failed: [{ url: 'https://cdn.example.org/d.webp', reason: 'HTTP 403' }],
+      contentId,
+    }));
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, inlineImages, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+
+    expect(inlineImages).toHaveBeenCalledWith({ contentId: 'c1', body: doc().Content });
+    const publishPatch = store.patchDoc.mock.calls.find(
+      ([c, , u]) => c === 'content' && u.contentStatus === 'published'
+    );
+    expect(publishPatch[2].Content).toContain(HOSTED);
+    expect(publishPatch[2].Content).not.toContain(UPSTREAM);
+    expect(publishPatch[2].Content).toContain('https://cdn.example.org/d.webp');
+    expect(publishPatch[2].inlineImages).toEqual({
+      field: 'Content',
+      rewritten: 1,
+      failed: 1,
+      failedUrls: ['https://cdn.example.org/d.webp'],
+      at: NOW.toISOString(),
+    });
+    // The version snapshot carries the rewritten body too.
+    const version = store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions');
+    expect(version[1].draft).toContain(HOSTED);
+  });
+
+  it('publishes the body untouched when no rehoster is injected', async () => {
+    const store = makeStore(doc());
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(body.published).toBe(1);
+    const publishPatch = store.patchDoc.mock.calls.find(
+      ([c, , u]) => c === 'content' && u.contentStatus === 'published'
+    );
+    expect(publishPatch[2].Content).toBeUndefined();
+    expect(publishPatch[2].inlineImages).toBeUndefined();
+  });
+
+  it('still publishes when the rehoster throws whole', async () => {
+    const store = makeStore(doc());
+    const inlineImages = vi.fn(async () => {
+      throw new Error('storage unreachable');
+    });
+    const log = { warn: vi.fn(), log: vi.fn(), error: vi.fn() };
+    const h = createPublishHandlers({
+      guard: guardAs('publisher'),
+      store,
+      inlineImages,
+      log,
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(body.published).toBe(1);
+    expect(body.errors).toEqual([]);
+    expect(log.warn).toHaveBeenCalledTimes(1);
   });
 });
