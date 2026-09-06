@@ -204,6 +204,14 @@ order — the paste is last because two servers depend on what comes before.
 The same list, as checkboxes, is
 [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369).
 
+**Steps 1 to 3 need the pull request merged first.** The workspace plans
+from `main`, the client-id output exists only after that apply, and
+`workflow_dispatch` only knows workflows that are on the default branch — so
+before the merge, step 3 answers
+`HTTP 404: workflow copilot-setup-steps.yml not found on the default branch`,
+which is GitHub saying "not yet", not a broken workflow. Step 4 (the token)
+has no such dependency and can be done at any time.
+
 ### 1. Merge, then approve the Terraform apply
 
 Merging the pull request queues a plan on the `hcw-azure` workspace. Approve
