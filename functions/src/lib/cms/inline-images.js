@@ -263,7 +263,9 @@ export async function buildInlineImageUpdate({ contentData, contentId, rehost, n
         fields,
         rewritten: result.rewritten.length,
         failed: result.failed.length,
-        failedUrls: result.failed.map((f) => f.url),
+        // Origin and path, like the blob provenance: a signed or tracking
+        // query string does not belong in Cosmos either.
+        failedUrls: result.failed.map((f) => sourceOf(f.url)),
         at: nowIso,
       },
     };

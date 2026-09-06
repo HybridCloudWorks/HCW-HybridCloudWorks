@@ -282,6 +282,7 @@ describe('buildInlineImageUpdate', () => {
     const rehost = vi.fn(async () => ({
       bodies: { blogDraft: body },
       rewritten: [],
+      // UPSTREAM_A carries a query string; the summary must not.
       failed: [{ url: UPSTREAM_A, reason: 'timeout' }],
     }));
     const update = await buildInlineImageUpdate({
@@ -292,7 +293,9 @@ describe('buildInlineImageUpdate', () => {
     });
     expect(update.blogDraft).toBeUndefined();
     expect(update.inlineImages.failed).toBe(1);
-    expect(update.inlineImages.failedUrls).toEqual([UPSTREAM_A]);
+    expect(update.inlineImages.failedUrls).toEqual([
+      'https://devblogs.microsoft.com/foundry/wp-content/uploads/a.png',
+    ]);
   });
 
   it('swallows a rehoster that throws whole and publishes the body untouched', async () => {
