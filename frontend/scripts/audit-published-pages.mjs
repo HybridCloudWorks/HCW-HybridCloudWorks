@@ -113,6 +113,9 @@ const KNOWN_ACCEPTED = [
 /** Below this many characters of main-region text a page is "thin". */
 const THIN_MAIN_CHARS = 400;
 
+/** Empty-state copy makes a page "empty" only below this much main text. */
+const EMPTY_COPY_MAX_CHARS = 800;
+
 /** Console noise that is not a page defect. Keep this list short and named. */
 const CONSOLE_IGNORE = [/Third-party cookie will be blocked/i, /favicon\.ico/i];
 
@@ -365,13 +368,19 @@ async function auditPage(context, url) {
 
   if (f.length) {
     record.verdict = 'defect';
-  } else if (record.mainChars < THIN_MAIN_CHARS || record.emptyCopy.length) {
+  } else if (record.mainChars < THIN_MAIN_CHARS) {
     record.verdict = 'empty';
-    f.push(
-      record.emptyCopy.length
-        ? `empty-state copy: ${record.emptyCopy.join(' | ')}`
-        : `thin main region: ${record.mainChars} chars`
-    );
+    f.push(`thin main region: ${record.mainChars} chars`);
+  } else if (record.emptyCopy.length && record.mainChars < EMPTY_COPY_MAX_CHARS) {
+    // Empty-state copy on a page that is otherwise thin is the page saying it
+    // has nothing. The same copy on a full landing page is one widget saying
+    // so (the podcast panel on `/azure`, 2,000+ chars of real content around
+    // it) and is a note, not a verdict — the post-deploy run of 2026-09-06
+    // marked three landings "empty" on that alone.
+    record.verdict = 'empty';
+    f.push(`empty-state copy: ${record.emptyCopy.join(' | ')}`);
+  } else if (record.emptyCopy.length) {
+    record.notes.push(`a widget shows empty-state copy: ${record.emptyCopy.join(' | ')}`);
   }
   return record;
 }

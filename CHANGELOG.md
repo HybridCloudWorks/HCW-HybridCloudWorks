@@ -19,6 +19,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The audit report records the post-deploy re-run, and empty-state copy
+  no longer marks a full page empty (#PR).** After #376, #379 and #380 were
+  deployed on 2026-09-06 the crawl went from 0 works / 11 empty / 107 defect
+  to 68 / 48 / 2; the dated report carries both columns. Three of the 48 were
+  landings marked empty because their podcast widget says "No episodes
+  available yet." beside two thousand characters of real content, so the
+  crawler now counts empty-state copy only on a page under 800 characters and
+  notes it otherwise. The rest of the 48 are real: about thirty section pages
+  with nothing published behind them, now the stated scope of #373.
 - **Four landing pages no longer request hero images that do not exist
   (#380, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
   listed five `/images/<provider>-hero/N.png` files that were never added, so

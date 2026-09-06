@@ -41,6 +41,26 @@ The live sitemap itself carried one URL three times (`/azure/blog/enable-ai-powe
 - `/aws/audio`, `/gcp/audio`, `/vmware/audio` — no podcast feed for those providers until #349.
 - `/about` — the two `/data/*.json` snapshots 404 by an accepted decision (#175); the page falls back to the API. Recorded as a note, not a finding.
 
+## Re-run after the fixes, same day
+
+Actions run 34023953833, after #376 (prerender inline), #379 (dead media hidden)
+and #380 (hero references) were deployed at 09:09 UTC:
+
+| Verdict | First run | After deploy |
+| --- | ---: | ---: |
+| works | 0 | 68 |
+| empty | 11 | 48 |
+| defect | 107 | 2 |
+
+The two remaining defects are `/azure/architecture-designs` (title lacks the
+provider name) and one curated article with a hotlinked image (#374). The
+hydration and CSP classes are gone. The *empty* count rose because the
+hydration class no longer masks it: roughly thirty section pages have no
+published content behind them (blog, coder-corner, frameworks and code for
+most providers), which #373 now records in full, and three landings were
+marked empty on a podcast widget's copy alone — a heuristic corrected in the
+crawler after this run (empty-state copy counts only on a thin page).
+
 ## Matrix
 
 | Path | HTTP | Verdict | Findings |
