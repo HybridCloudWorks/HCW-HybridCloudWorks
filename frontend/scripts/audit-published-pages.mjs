@@ -409,7 +409,7 @@ function toMarkdown(records, meta) {
     if (r.verdict !== 'defect') continue;
     for (const finding of r.findings) {
       const key = finding
-        .split(':')[0]
+        .split(': ')[0]
         .replace(/\s+\d+$/, '')
         .replace(/ lacks .*$/, ' lacks provider name');
       if (!classes.has(key)) classes.set(key, []);
