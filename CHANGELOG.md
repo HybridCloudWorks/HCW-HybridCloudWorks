@@ -4,7 +4,8 @@ Completed features, fixes, enhancements, security fixes, and released changes.
 
 **Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
 file records **completed work only**. All outstanding work, including
-owner-gated work, belongs in [TODO.md](TODO.md); required-input references and
+owner-gated work, is a GitHub issue (owner decision 2026-09-05; `TODO.md` keeps
+the accepted risks and an index to the issues); required-input references and
 formats belong in [Required-Inputs](wiki/Required-Inputs.md). `REVIEW.md` was
 retired on 2026-08-29 and must not be recreated.
 
@@ -18,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Open work moved from `TODO.md` to GitHub issues (#PR).** Owner
+  instruction 2026-09-05: the items are worked from the issues list from now
+  on, so the tracker's remaining sections — the five optional seeds, the Labs
+  test-coverage case and the four live confirmations — became issues #350–#358
+  and `TODO.md` keeps only the accepted risks, an index to every open issue,
+  and a handling rule saying an open item is an issue. Three labels were added
+  so the list reads without opening anything: `owner-gated` (a credential,
+  console action or spend decision), `live-check` (needs an authorized operator
+  against the deployed estate) and `podcast`. The three pre-existing issues
+  were re-verified against `main` the same day and each carries a dated
+  comment: #231 (no Cosmos exporter, no timed restore), #180
+  (`createContentFromRecording` still under `rpc.notImplemented`, though #342
+  removed its credential blocker) and #127 (no managed WAF ruleset in
+  Terraform). Found while doing it, and filed rather than fixed here: the
+  Podbean feed `fetchPodcastFeeds` has polled every two hours since #332
+  returns **HTTP 410 Gone**, so the timer has failed on every firing and the
+  five podcast pages still advertise a PodBean subscribe button that leads to
+  it (#348); and the replacement stack the owner asked for — RSS.com hosting,
+  ElevenLabs speech as a third `speech/index.js` provider, StreamYard for live
+  and recorded shows — is evaluated with vendor facts, prices, an
+  integration design and the owner decisions it needs in #349. The
+  `check-todo-changelog-movement` gate passes: no `T-` identifier left the
+  tracker in this change.
 - **The tracker is open work only, and the repository is leaner (#346).**
   Owner instruction 2026-09-06: `TODO.md` keeps four things — the optional
   seeds, the one live test-coverage case, the live confirmations still to

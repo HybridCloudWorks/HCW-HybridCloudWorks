@@ -1,55 +1,48 @@
 # TODO
 
-**The one open-work document for the HybridCloudWorks website.** Engineering
-work, owner decisions, production approvals, credentials, external access and
-live-environment operations live here; verified completion belongs in
-[CHANGELOG.md](CHANGELOG.md), and the required-inputs inventory is
-[Required-Inputs](wiki/Required-Inputs.md) in the Wiki.
+**The accepted-risk record for the HybridCloudWorks website, and the index to
+where the open work lives.** Engineering work, owner decisions, production
+approvals, credentials, external access and live-environment operations are
+GitHub issues; verified completion belongs in [CHANGELOG.md](CHANGELOG.md), and
+the required-inputs inventory is [Required-Inputs](wiki/Required-Inputs.md) in
+the Wiki.
 
-**Nothing is open as of 2026-09-06.** The tracked findings (`T-` items), the
-attack sequence, the owner-decision record and the long-form evidence all
-closed by 2026-09-05 and moved to the changelog. What remains below is not
-work: optional features you may seed, one live check that needs Entra access,
-four confirmations that come due only on an external trigger, and the accepted
-risks, which are decisions to live with something and must stay written down.
+**Open work is tracked in GitHub issues as of 2026-09-05.** Owner decision:
+the remaining items were moved to the issues list so they can be worked from
+there, and this file now holds only what is not work — the accepted risks
+below, which are decisions to live with something and must stay written down —
+plus the pointers that follow. The tracked findings (`T-` items), the attack
+sequence and the owner-decision record all closed by 2026-09-05 and moved to
+the changelog.
 
-## Optional, and only if you want the feature
+## Where the open items live
 
-None of these blocks anything. Each path no-ops when its key is absent; seed at
-**Admin → Platform → API Keys**, which writes straight to Key Vault through a
-role that can create a secret version and cannot read one:
-https://hybridcloudworks.com/admin/api-keys
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues
 
-| Secret or document | What it turns on | Without it |
-| --- | --- | --- |
-| `REPLICATE-API-KEY` | AI-generated hero images | The default-hero fallback covers it, once the covers below exist |
-| ~8 cover images + `admin_config/default_heroes` | A deterministic hero per provider when generation is off or fails | Posts publish with no cover |
-| `admin_config/social_autopost` | Scheduled social posting. Shape: `{ enabled, accountIds: [{ id, provider }], scheduleDelayMinutes }`, with Publer account ids from the Social Hub | No autoposting |
-| `YOUTUBE-API-KEY` | Listen & Learn "watch next" links. ~505 of 10,000 daily quota units per certification | Episodes publish with an empty video list |
-| `GCP-BILLING-API-KEY` | The GCP column in the public pricing tool. GCP console → enable the Cloud Billing API → create an API key → restrict it to that API. **Not a billing credential** — it reads Google's public price list | The GCP column is absent; AWS and Azure still render |
+| Label | Meaning |
+| --- | --- |
+| `owner-gated` | Needs the owner: a credential, a console action, or a spend decision |
+| `live-check` | Needs an authorized operator against the deployed estate; several come due only on an external trigger and stay open as standing checklists |
+| `podcast` | Podcast hosting, generation and the podcast pages |
+
+| Item | Issue |
+| --- | --- |
+| Podbean feed returns 410; `fetchPodcastFeeds` fails every 2 hours; Podbean still on the pages | [#348](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/348) |
+| Replace Podbean: RSS.com hosting, ElevenLabs speech, StreamYard, one audio surface | [#349](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/349) |
+| Optional: `REPLICATE-API-KEY` for AI hero images | [#350](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/350) |
+| Optional: default hero covers, `admin_config/default_heroes` | [#351](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/351) |
+| Optional: `admin_config/social_autopost` | [#352](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/352) |
+| Optional: `YOUTUBE-API-KEY` for Listen & Learn watch-next | [#353](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/353) |
+| Optional: `GCP-BILLING-API-KEY` for the pricing tool | [#354](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/354) |
+| Live check: Entra role claim, API audience, `getCurrentAdminStatus` | [#355](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/355) |
+| Live check: the deployed no-op Labs job path | [#356](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/356) |
+| Live check: public API and custom domain after a DNS or edge change | [#357](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/357) |
+| Live check: third-party webhooks after an approved mutation test | [#358](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/358) |
+| Cosmos recoverability: exporter and a timed restore against RTO 8 h / RPO 24 h | [#231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231) |
+| `createContentFromRecording`, the last unimplemented RPC | [#180](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/180) |
+| Cloudflare Pro and managed WAF rulesets | [#127](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/127) |
 
 `GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
-
-## Test coverage follow-up
-
-One boundary case is left, and it is not resolvable from the repository:
-
-- The deployed no-op Labs job path, after a human supplies the Entra access
-  needed for an authenticated live check (the live prerequisite remains in
-  [TODO.md](TODO.md)).
-
-The API base, public content limit, and partial configuration cases are
-covered; see [CHANGELOG.md](CHANGELOG.md).
-
-## Live confirmation still requiring an authorized operator
-
-- Verify the Entra role claim and API audience in a newly issued access token.
-- Verify the admin registry record and the resulting `getCurrentAdminStatus`
-  response in the deployed environment.
-- Confirm the public API and Static Web App custom domain after any DNS or edge
-  change.
-- Confirm any third-party webhook or scheduled integration after its owner has
-  approved a real external mutation test.
 
 ## Accepted risks
 
@@ -67,6 +60,9 @@ or someone "fixes" it without knowing it was a choice.
 
 - Never paste secret values, private keys, access tokens, or personal data into
   this file, issues, logs, or the Wiki.
+- An open item is an issue. This file does not carry work; when something new
+  is found, open an issue and, if it is a decision to live with a finding,
+  record it under Accepted risks here.
 - A missing credential is not an engineering task. Record its name, owner, and
   approved storage location only.
 - Historical migration pages and the two archived plans are evidence, not
