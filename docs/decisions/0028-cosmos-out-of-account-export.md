@@ -1,7 +1,7 @@
 # ADR 0028: Cosmos recovery is a weekly full export plus daily change-feed deltas, run by the Function App, kept on the RA-GRS content account
 
-**Status:** Proposed — the shape is settled by the measurement; four points
-below are the owner's to approve (issue #231)
+**Status:** Proposed. The measurement settles the shape; four decisions listed
+on issue #231 await the owner's approval.
 **Decision date:** 2026-09-06
 **Owners:** Workload owner and architecture owner
 
