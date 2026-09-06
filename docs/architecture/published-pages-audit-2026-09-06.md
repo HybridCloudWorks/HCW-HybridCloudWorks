@@ -32,7 +32,7 @@ The live sitemap itself carried one URL three times (`/azure/blog/enable-ai-powe
 - #370 — pending Suspense boundary in every prerender + CSP blocks the completion scripts (site-wide, P1)
 - #371 — landing hero image sets missing for GCP, GitHub, Terraform, FinOps (P2)
 - #372 — podcast rows with dead PodBean media still served (P2)
-- #373 — six section pages render empty and sit in the sitemap; one sitemap URL repeated (P3)
+- #373 — seven section pages render empty and sit in the sitemap (frameworks for Azure, AWS, GCP, FinOps and VMware; Ansible code and coder-corner); one sitemap URL repeated (P3)
 - #374 — curated article bodies hotlink upstream images that no longer load (P3)
 
 ## Empty by configuration, not defects
