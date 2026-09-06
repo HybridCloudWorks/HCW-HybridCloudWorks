@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **Copilot code review MCP configuration applied (issue #369, closed
+- **Copilot code review MCP configuration applied (#378; issue #369, closed
   2026-09-06).** The owner completed every step the runbook laid out, in
   order: the `hcw-azure` apply that created `github_copilot_review` and its
   seven resources; `COPILOT_REVIEW_CLIENT_ID` seeded from the new output; the

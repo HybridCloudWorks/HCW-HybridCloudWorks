@@ -96,7 +96,31 @@ jobs:
       # to docs/standards/variables-and-secrets.md, made because the Agents
       # store is the only one Copilot's runner reads; the values are still not
       # credentials.
+      #
+      # Self-arming, like the App step below and the reader workflows: while
+      # any of the three is unresolved in the runner that is executing this
+      # file, the login is skipped with a notice instead of failing the setup
+      # — Copilot then reports the review without Azure context rather than
+      # posting "setup step failed" on every pull request until issue #381 is
+      # done. `secrets` is not available to a step-level `if`, so the test is
+      # a step of its own.
+      - name: Are the Azure identifiers resolvable here?
+        id: azure
+        env:
+          CLIENT_ID: ${{ secrets.COPILOT_REVIEW_CLIENT_ID || vars.COPILOT_REVIEW_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.COPILOT_REVIEW_TENANT_ID || vars.TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.COPILOT_REVIEW_SUBSCRIPTION_ID || vars.SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::COPILOT_REVIEW_CLIENT_ID, TENANT_ID or SUBSCRIPTION_ID is not resolvable in this runner, so Azure Login was skipped and the azure MCP server has no credential this session (runbook step 2b, issue #381)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Azure Login
+        if: steps.azure.outputs.armed == 'true'
         uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
         with:
           client-id: ${{ secrets.COPILOT_REVIEW_CLIENT_ID || vars.COPILOT_REVIEW_CLIENT_ID }}
