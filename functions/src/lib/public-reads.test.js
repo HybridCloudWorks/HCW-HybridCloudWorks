@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  isPodcastMediaRetired,
   createPublicReadHandlers,
   PUBLIC_CONTENT_LIST_FIELDS,
   isSoftDeleted,
@@ -973,9 +974,7 @@ describe('T-319 — the feed endpoint is bounded in items, not just in documents
     const items = Array.from({ length: 30 }, (_, i) => ({ title: `u-${i}` }));
     const [doc] = await getCache([{ id: 'c1', provider: 'azure', items }]);
 
-    expect(doc.items.map((i) => i.title)).toEqual(
-      Array.from({ length: 20 }, (_, i) => `u-${i}`)
-    );
+    expect(doc.items.map((i) => i.title)).toEqual(Array.from({ length: 20 }, (_, i) => `u-${i}`));
   });
 
   it('leaves a malformed document alone rather than inventing an empty feed', async () => {
@@ -1229,5 +1228,60 @@ describe('getListenAndLearn — approval is the only gate', () => {
 
     expect(deps.readDoc.mock.calls[0][0]).toBe(SET_CONTAINER);
     expect(deps.queryDocs.mock.calls[0][0]).toBe(EPISODE_CONTAINER);
+  });
+});
+
+describe('podcast media that is gone (#372)', () => {
+  const handlers = (rows) =>
+    createPublicReadHandlers({
+      store: {
+        queryDocs: vi.fn(async (container) => rows[container] ?? []),
+        readDoc: vi.fn(),
+      },
+    });
+
+  it('names the retired hosts and honours a liveness mark', () => {
+    expect(isPodcastMediaRetired({ mediaUrl: 'https://mcdn.podbean.com/mf/web/x/ep.mp3' })).toBe(
+      true
+    );
+    expect(isPodcastMediaRetired({ mediaUrl: 'https://MCDN.podbean.com/ep.mp3' })).toBe(true);
+    expect(isPodcastMediaRetired({ mediaUrl: 'https://media.rss.com/hcw/ep.mp3' })).toBe(false);
+    expect(
+      isPodcastMediaRetired({
+        mediaUrl: 'https://media.rss.com/hcw/ep.mp3',
+        mediaUnavailableAt: '2026-09-06',
+      })
+    ).toBe(true);
+    expect(isPodcastMediaRetired({ mediaUrl: 'not a url' })).toBe(false);
+    expect(isPodcastMediaRetired({})).toBe(false);
+  });
+
+  it('listPodcasts hides episodes whose media is gone, and counts only what it serves', async () => {
+    const h = handlers({
+      podcasts: [
+        {
+          id: 'dead',
+          title: 'PodBean era',
+          publishedAt: '2026-05-01',
+          mediaUrl: 'https://mcdn.podbean.com/mf/web/x/ep.mp3',
+        },
+        {
+          id: 'marked',
+          title: 'Marked',
+          publishedAt: '2026-06-01',
+          mediaUrl: 'https://media.rss.com/a.mp3',
+          mediaUnavailableAt: '2026-09-06',
+        },
+        {
+          id: 'live',
+          title: 'New host',
+          publishedAt: '2026-07-01',
+          mediaUrl: 'https://media.rss.com/b.mp3',
+        },
+      ],
+    });
+    const body = JSON.parse((await h.listPodcasts(makeRequest(), context)).body);
+    expect(body.items.map((i) => i.id)).toEqual(['live']);
+    expect(body.total).toBe(1);
   });
 });
