@@ -63,8 +63,11 @@ jobs:
               if name == "_Sidebar":
                   page.write_text(f"## Moved\n\nThis Wiki is retired. Documentation lives at [{site}]({site}).\n")
                   continue
+              # `is None`, not falsy: Home maps to "" (the site root) and must
+              # be stubbed like every other page — the dry run of 2026-09-06
+              # kept it because "" is falsy.
               target = redirects.get(name)
-              if not target:
+              if target is None:
                   print(f"keep (not in map): {name}")
                   continue
               url = site + target
