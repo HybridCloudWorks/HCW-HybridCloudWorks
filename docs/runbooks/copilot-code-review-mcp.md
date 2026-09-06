@@ -313,6 +313,8 @@ It is a variable, not a secret — the value is printed on purpose.
 
 ### 2b. Mirror the three identifiers into the Agents store
 
+Tracked as
+[issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381).
 Copilot's own runner reads only Agents secrets (see
 [the Azure server](#the-azure-server-read-only-federated-no-secret)), so the
 same three values the manual run takes from repository variables must also
