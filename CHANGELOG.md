@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Cost Analysis costs Cosmos recovery against the measured account size
+  (#PR, issue #231).** The owner measured `DataUsage` on 2026-09-06: 2.39 GB.
+  The page gains a section pricing what recovery already costs (continuous
+  30-day backup about $0.48 a month, a point-in-time restore $0.36) and the
+  two export shapes from #231 per week and per month: daily full exports at
+  about $18 a month in request units versus weekly full plus change-feed
+  deltas at $3–4, both with 30-day blob retention on the RA-GRS content
+  account. The numbers settle the design — weekly full plus deltas, Cool tier,
+  about $5 a month for the whole recovery posture — and the measurement plan
+  gains a line to re-read the size when the exporter is armed. Prices are
+  Microsoft Learn list prices for one Central US region, with the calculator
+  named as the place to re-verify.
 - **The audit report records the post-deploy re-run, and empty-state copy
   no longer marks a full page empty (#384).** After #376, #379 and #380 were
   deployed on 2026-09-06 the crawl went from 0 works / 11 empty / 107 defect
