@@ -245,9 +245,28 @@ The first review session (PR #378, 2026-09-06) showed the filter at work:
 | `microsoft-learn`, `cloudflare-docs` | dropped | Remote servers that answer quickly, so the only explanation left is that their tools are not annotated `readOnlyHint: true`. Until the vendors annotate them, these two serve the **cloud agent** only; a review has to rely on the Terraform Registry, the live Azure state and the GitHub server. |
 | `playwright` (built-in) | dropped | Its tools drive a browser and are not read-only; expected in every review. |
 
-The next review session's log is the test of the first three rows: look for
-the same "no allowed tools" line and expect it for `playwright` and the two
-documentation servers only.
+**The second session read differently, on the same runtime.** The review of
+the same PR half an hour later (Actions run 34018454760, runtime
+`vendored-93e753b4`, the same as the first) printed no "no allowed tools"
+line at all. Instead the session reported `[mcp] server="…" status=connected`
+for `cloudflare-docs`, `microsoft-learn`, `github-mcp-server`, `azure` and
+`playwright` — and `terraform` did not appear in either form. Its closing
+summary showed `invocations=0` for every server, and `github-mcp-server` was
+"connected" although the setup steps that write its token file had been
+skipped, so a `connected` line is not proof that a server works. Two
+consequences for reading a log:
+
+- The filter's reporting is not stable between sessions, so a row in the
+  table above is evidence from one session, not a rule. What stays true is
+  the mechanism GitHub documents: read-only mode keeps annotated tools only.
+- The evidence that a server worked is a tool **invocation** in the summary
+  line or an attribution under a review comment, not its status line.
+
+The four Agents copies were present in that second session
+(`COPILOT_AGENT_INJECTED_SECRET_NAMES` listed all five names, and "Loaded 5
+secret(s)"), while the login still ran with an empty `with:` block — because
+the step list came from `main`, as the next paragraph explains. The first
+review **after** #378 merges is the test.
 
 **Copilot reads `copilot-setup-steps.yml` from the default branch.** The
 review sessions of PR #378 executed the step list `main` held at the time,
@@ -480,17 +499,23 @@ so no allowlist entry is needed for `learn.microsoft.com`,
    **View session** link. Open it and read the **Setting up environment**
    section.
 
-    **Success looks like:** the `copilot-setup-steps` steps listed as run
-    with *Azure Login* and *Mint a read-only App installation token* green,
-    then `terraform`, `azure` and `github-mcp-server` kept, with fourteen
-    tools under `azure` and thirty-one under `github-mcp-server`. The lines
-    `MCP server "…" has no allowed tools after filtering` are expected for
-    `playwright`, `microsoft-learn` and `cloudflare-docs` — see
-    [What the review runner keeps](#what-the-review-runner-keeps) — and for
-    nothing else. If `azure` or `github-mcp-server` is still dropped with the
-    login green, read the *Warm the pinned MCP servers* step's output first:
-    a download or pull that failed there is the server that will be missing.
-    A red *Azure Login* with an empty `with:` block means step 2b's Agents
+    **Success looks like:** the `copilot-setup-steps` steps listed as run,
+    beginning with *Are the Azure identifiers resolvable here?* and *Warm the
+    pinned MCP servers* (their presence proves the merged file is the one
+    running), with *Azure Login* and *Mint a read-only App installation
+    token* green. Then, in the MCP section, `terraform`, `azure` and
+    `github-mcp-server` neither dropped with `MCP server "…" has no allowed
+    tools after filtering` nor absent; that line, when it appears, is
+    expected for `playwright`, `microsoft-learn` and `cloudflare-docs` — see
+    [What the review runner keeps](#what-the-review-runner-keeps). A
+    `status=connected` line alone proves little; the `[mcp] session=…
+    summary` line's `invocations=` counts and the attributions in step 3 are
+    the evidence a server was used. If `azure` or `github-mcp-server` is
+    dropped with the login green, read the *Warm the pinned MCP servers*
+    step's output first: a download or pull that failed there is the server
+    that will be missing. A red *Azure Login* with an empty `with:` block
+    means the runner is still executing a step list without the Agents
+    reads — the file on `main` is older than this one — or step 2b's Agents
     secrets are absent; nothing is exposed either way.
 
 3. When a review comment used a server, GitHub prints an attribution at the
