@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **The audit report records the post-deploy re-run, and empty-state copy
-  no longer marks a full page empty (#PR).** After #376, #379 and #380 were
+  no longer marks a full page empty (#384).** After #376, #379 and #380 were
   deployed on 2026-09-06 the crawl went from 0 works / 11 empty / 107 defect
   to 68 / 48 / 2; the dated report carries both columns. Three of the 48 were
   landings marked empty because their podcast widget says "No episodes
