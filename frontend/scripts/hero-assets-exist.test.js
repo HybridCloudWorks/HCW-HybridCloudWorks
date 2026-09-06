@@ -33,8 +33,18 @@ describe('landing page image assets', () => {
 
   for (const file of pages) {
     it(`${file.slice(PAGES.length + 1)} references only images that exist under public/`, () => {
-      const source = readFileSync(file, 'utf8');
-      const paths = [...source.matchAll(/['"`](\/images\/[^'"`\s?#]+)['"`]/g)].map((m) => m[1]);
+      // Code only: comment lines are dropped first, and only '…' / "…" string
+      // literals count, so prose that mentions a path is not a reference.
+      // `join(PUBLIC, '/images/x')` is `<public>/images/x` — path.join keeps
+      // every segment (it is path.resolve that would restart at a leading
+      // slash); the azure and aws pages, whose sets exist, prove the lookup.
+      const source = readFileSync(file, 'utf8')
+        .split('
+')
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join('
+');
+      const paths = [...source.matchAll(/['"](\/images\/[^'"\s?#]+)['"]/g)].map((m) => m[1]);
       const missing = paths.filter((p) => !existsSync(join(PUBLIC, p)));
       expect(missing, `referenced but not under public/: ${missing.join(', ')}`).toEqual([]);
     });
