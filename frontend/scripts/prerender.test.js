@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  findStreamedBoundary,
   splitHead,
   injectIntoTemplate,
   canonicalFor,
@@ -467,5 +468,40 @@ describe('the deploy workflow mount-point check', () => {
 
   it('rejects the untouched vite template', () => {
     expect(new RegExp(MOUNT_POINT_PATTERN).test(TEMPLATE)).toBe(false);
+  });
+});
+
+describe('findStreamedBoundary', () => {
+  // The three shapes Fizz emits when a completed boundary is outlined rather
+  // than inlined. On 2026-09-06 every real page carried all three, passed the
+  // shell floor, and was published as a spinner with a hidden copy of the
+  // page (issue #370). Each shape is checked on its own.
+  it('names a pending boundary marker', () => {
+    expect(
+      findStreamedBoundary(
+        '<main><!--$?--><template id="B:0"></template><div>spin</div><!--/$--></main>'
+      )
+    ).toMatch(/pending Suspense boundary/);
+  });
+
+  it('names a hidden completion segment', () => {
+    expect(findStreamedBoundary('<div hidden id="S:0"><main>page</main></div>')).toMatch(
+      /hidden completion segment/
+    );
+  });
+
+  it('names the streaming runtime, in each of its three spellings', () => {
+    for (const script of [
+      '$RC("B:0","S:0")',
+      '$RB=[];$RV=function(a){}',
+      'requestAnimationFrame(function(){$RT=performance.now()})',
+    ]) {
+      expect(findStreamedBoundary(`<script>${script}</script>`)).toMatch(/streaming runtime/);
+    }
+  });
+
+  it('accepts a fully inline document, completed markers included', () => {
+    expect(findStreamedBoundary('<main><!--$--><h1>Page</h1><!--/$--></main>')).toBeNull();
+    expect(findStreamedBoundary('')).toBeNull();
   });
 });
