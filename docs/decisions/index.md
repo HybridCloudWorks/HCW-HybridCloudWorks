@@ -76,6 +76,7 @@ Every ADR includes:
 | [0025](../decisions/0025-cosmos-firewall-datacenter-sentinel.md) | The Cosmos datacenter-IP sentinel — kept, then removed | Accepted; recommendation reversed by its own addendum | Weigh closing T-718 against its cost — then remove the sentinel once a cheaper route appeared |
 | [0026](../decisions/0026-required-checks-filter-inside-the-job.md) | Required checks filter inside the job, not at the trigger | Accepted | Keep every merge gate while paying only for checks that can fail |
 | [0027](../decisions/0027-documentation-site.md) | Documentation is a MkDocs site under `docs/`, published to docs.hybridcloudworks.com | Accepted | One reviewed, validated, redaction-gated source for every page; the Wiki is retired |
+| [0028](../decisions/0028-cosmos-out-of-account-export.md) | Cosmos recovery is a weekly full export plus daily change-feed deltas, run by the Function App, kept on the RA-GRS content account | Proposed | Survive account or region loss for about $4 a month, proven by a timed restore; four points await the owner on #231 |
 
 ## Template
 
