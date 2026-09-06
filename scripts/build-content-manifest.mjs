@@ -270,20 +270,25 @@ export const SECTION_TYPES = Object.freeze({ frameworks: 'framework' });
  * Published items per provider per section, so the pre-render can leave a
  * section page with nothing in it out of the sitemap (issue #373).
  *
- * Returns null when no item carries `type` at all — the deployed manifest route
- * predates the field — so a consumer cannot mistake "unknown" for "zero".
+ * Returns null when no item carries a non-empty string `type` — the deployed
+ * manifest route predates the field, or the corpus carries the field but no
+ * value — so a consumer cannot mistake "unknown" for "zero". A `null` or empty
+ * `type` counts as absent for the same reason.
  * `_unattributed` counts items of the section's type that name no recognised
  * provider; the frameworks page infers a provider from titles and URLs as a
  * last resort, so while that count is non-zero no provider's zero is trusted.
  */
+const hasType = (item) => typeof item?.type === 'string' && item.type.trim() !== '';
+
 export function sectionCounts(items) {
-  if (!items.some((item) => item?.type !== undefined)) return null;
+  if (!items.some(hasType)) return null;
   const sections = {};
   for (const provider of [...PROVIDERS, '_unattributed']) {
     sections[provider] = Object.fromEntries(Object.keys(SECTION_TYPES).map((s) => [s, 0]));
   }
   for (const item of items) {
-    const type = String(item?.type || '').toLowerCase();
+    if (!hasType(item)) continue;
+    const type = item.type.trim().toLowerCase();
     for (const [section, wanted] of Object.entries(SECTION_TYPES)) {
       if (type !== wanted) continue;
       sections[providerOf(item) || '_unattributed'][section] += 1;

@@ -99,6 +99,20 @@ describe('sectionCounts', () => {
     expect(sectionCounts([])).toBeNull();
   });
 
+  it('treats a null, non-string or empty type as absent, not as a type of nothing', () => {
+    // Copilot review of #388: `type: null` used to count as present and return
+    // a map of zeros, which would have dropped every frameworks page.
+    expect(sectionCounts([{ id: 'a', slug: 'a', cloudProvider: 'azure', type: null }])).toBeNull();
+    expect(sectionCounts([{ id: 'b', slug: 'b', cloudProvider: 'azure', type: 7 }])).toBeNull();
+    expect(sectionCounts([{ id: 'c', slug: 'c', cloudProvider: 'azure', type: '  ' }])).toBeNull();
+    const mixed = sectionCounts([
+      { id: 'd', slug: 'd', cloudProvider: 'azure', type: null },
+      doc('aws', 'framework'),
+    ]);
+    expect(mixed.aws.frameworks).toBe(1);
+    expect(mixed.azure.frameworks).toBe(0);
+  });
+
   it('counts framework items per provider, case-insensitively on type', () => {
     const sections = sectionCounts([
       doc('azure', 'framework'),
