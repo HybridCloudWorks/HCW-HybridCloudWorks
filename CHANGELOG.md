@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **`createContentFromRecording` is implemented — the fifteenth and last RPC
-  the admin UI invoked without a route (#PR, closes #180).** RecordingsPage's
+  the admin UI invoked without a route (#366, closes #180).** RecordingsPage's
   "Route to ContentForge Pipeline" has called it since the Firebase days and
   received a 404 on Azure. It now does what the button says: the transcript
   goes through `createDrafter().generateDraft`, the same drafter the forge,
