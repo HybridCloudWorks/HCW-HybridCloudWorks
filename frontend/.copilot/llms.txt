@@ -1,5 +1,3 @@
-````plaintext
-```plaintext
 # Short App Context (canonical)
 
 Hybrid Cloud Works is a static React + Vite website deployed to an Azure Static Web App, with Terraform under `infra/` managing the estate. Key entry points: `src/main.jsx`, `src/App.jsx`, `index.html`. Build: `npm run build` (Vite). Development: `npm run dev`. Serverless code lives in `functions/` (Azure Functions, Node.js) and serves the public read API, the admin CMS, integrations and the scheduled timers, backed by Azure Cosmos DB. Styling is TailwindCSS; design tokens live in `tailwind.config.js` and `src/styles/`.
@@ -39,7 +37,3 @@ Task: Review the changes in `diff` below for security, accessibility, and perfor
 1. Paste the short app context above, then the example prompt closest to the task, filling in the file paths.
 2. For multi-step or repository-changing tasks, ask for a plan first and review it before any code is generated.
 3. Always review generated code and run tests locally before merging.
-
-```
-
-````
