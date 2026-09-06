@@ -304,9 +304,12 @@ export const SERVICE_DOCS = {
       {
         feature: 'createContentFromRecording',
         usage:
-          'Intended to summarize Plaud transcripts into ContentForge drafts; the current Azure API surface still marks this route as not implemented.',
-        files: ['.azure/api-surface.json', 'frontend/src/pages/admin/RecordingsPage.jsx'],
-        status: HCW_STATUS.PLANNED,
+          'Turns a Plaud transcript into a ContentForge draft through the shared drafter and the createContentItem write path, then marks the recording routed (issue #180).',
+        files: [
+          'functions/src/lib/content/draft-from-recording.js',
+          'frontend/src/pages/admin/RecordingsPage.jsx',
+        ],
+        status: HCW_STATUS.ACTIVE,
       },
     ],
     sections: {
@@ -374,7 +377,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Route a recording',
-            body: 'The Recordings page is prepared to send transcripts with provider gemini, but createContentFromRecording is still listed as not implemented in the Azure API surface. Do not describe this action as live until the route is registered.',
+            body: 'Pick a content type and send. The transcript goes through the same drafter as Generate Article Draft, with instructions for the chosen type; the draft lands in the editor as a recording-sourced item and the recording is marked routed with its content id. The provider shown in the request is a hint only: the AI router picks by configured order and the draft records which provider ran.',
             codes: [],
           },
         ],

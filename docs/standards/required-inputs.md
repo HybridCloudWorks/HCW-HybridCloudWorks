@@ -166,7 +166,7 @@ carries the `COPILOT_MCP_` prefix. It is to hold one entry:
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| `COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN` | **NOT SET** | The `github-mcp-server` entry in `.github/copilot-mcp.json`. A fine-grained token, resource owner `HybridCloudWorks`, access to this repository only, read-only permissions matching the pinned toolsets, **90-day expiry** — the one stored, expiring credential in the configuration, justified in [Variables and secrets](variables-and-secrets.md#store-4--github-actions-secrets-with-justification). Procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
+| `COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN` | **NOT SET** | The `github-mcp-server` entry in `.github/copilot-mcp.json`. A fine-grained token, resource owner `HybridCloudWorks`, access to this repository only, read-only permissions matching the pinned toolsets, **90-day expiry** — the one stored, expiring credential in the configuration, justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification). Procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
 
 ## 4.4 GitHub environments
 
