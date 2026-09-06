@@ -108,8 +108,12 @@ describe('parseRecordingRequest', () => {
       'Multi'
     );
     expect(
-      inferProviderFromRecording({ cloudProvider: 'Aws', title: 'Azure', transcript: '' })
+      inferProviderFromRecording({ cloudProvider: 'aws', title: 'Azure', transcript: '' })
     ).toBe('Aws');
+    // An explicit value the pipeline does not know is not persisted verbatim.
+    expect(
+      inferProviderFromRecording({ cloudProvider: 'Nimbus', title: 'Azure', transcript: '' })
+    ).toBe('Azure');
   });
 });
 

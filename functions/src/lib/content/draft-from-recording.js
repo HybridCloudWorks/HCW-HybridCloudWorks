@@ -111,13 +111,24 @@ const json = (status, body) => ({
 });
 
 /**
- * Cloud provider for the draft: the caller's explicit value when it is one the
- * pipeline knows, else inferred from the title and the opening of the
+ * Cloud provider for the draft: the caller's explicit value when it is one of
+ * KNOWN_CLOUD_PROVIDERS (case-insensitive, stored in canonical case), else inferred from the title and the opening of the
  * transcript with the same keyword map the URL path uses, else 'Multi'.
  */
+export const KNOWN_CLOUD_PROVIDERS = Object.freeze([
+  'Azure',
+  'Aws',
+  'Gcp',
+  'Github',
+  'Terraform',
+  'Finops',
+  'Multi',
+]);
+
 export function inferProviderFromRecording({ cloudProvider, title, transcript }) {
   const explicit = String(cloudProvider || '').trim();
-  if (explicit) return explicit;
+  const known = KNOWN_CLOUD_PROVIDERS.find((p) => p.toLowerCase() === explicit.toLowerCase());
+  if (known) return known;
   return inferProviderFromUrl(`${title || ''} ${String(transcript || '').slice(0, 4000)}`);
 }
 
@@ -279,8 +290,10 @@ export function createRecordingDrafter({
       routedContentType: input.contentType,
     });
 
+    // Content-free: type and provider only. Identifiers stay out of the trace,
+    // as everywhere else in this package.
     log.log?.(
-      `[createContentFromRecording] recording ${input.recordingId} → content ${contentId} (${input.contentType}, ${parsed.aiProvider || 'provider unknown'})`
+      `[createContentFromRecording] drafted (${input.contentType}, ${parsed.aiProvider || 'provider unknown'})`
     );
     return {
       contentId,
