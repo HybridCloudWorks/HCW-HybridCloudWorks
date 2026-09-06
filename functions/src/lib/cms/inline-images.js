@@ -126,22 +126,40 @@ export function sourceOf(url) {
   }
 }
 
-/** Replace every occurrence of each `from` with its `to`. Plain text, no regex. */
+/**
+ * Replace every occurrence of each `from` with its `to`. Plain text, no regex.
+ * Longest `from` first: when one URL is a prefix of another
+ * (`…/img.png` and `…/img.png?size=2`), replacing the shorter one first would
+ * also rewrite the head of the longer one and leave an invalid mixed URL.
+ */
 export function rewriteBody(body, replacements) {
   let out = String(body ?? '');
-  for (const { from, to } of replacements) {
+  const ordered = [...replacements].sort((a, b) => String(b.from).length - String(a.from).length);
+  for (const { from, to } of ordered) {
     if (from && to && from !== to) out = out.split(from).join(to);
   }
   return out;
 }
+
+/** Default number of images fetched at once; see createInlineImageRehoster. */
+export const DEFAULT_CONCURRENCY = 4;
 
 /**
  * @param {object} deps
  * @param {{ uploadBlob: Function }} deps.storage
  * @param {Function} deps.fetchImage `(url) => Promise<{ buffer, contentType }>`
  * @param {{ log?: Function, warn?: Function }} [deps.log]
+ * @param {number} [deps.concurrency] images in flight at once. Sequential
+ *   fetching made the worst case N × the 15 s fetch timeout — eleven images on
+ *   a slow origin would have held a publish for nearly three minutes — so a
+ *   small pool bounds that without hammering the origin.
  */
-export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
+export function createInlineImageRehoster({
+  storage,
+  fetchImage,
+  log = {},
+  concurrency = DEFAULT_CONCURRENCY,
+}) {
   /**
    * Re-host every external image across the given body fields. A URL shared
    * by two fields is fetched and stored once.
@@ -162,7 +180,7 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
     }
     const rewritten = [];
     const failed = [];
-    for (const url of urls) {
+    const one = async (url) => {
       try {
         const { buffer, contentType } = await fetchImage(url);
         const blobPath = inlineBlobPath(contentId, url, contentType);
@@ -189,7 +207,21 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
           `[inlineImages] ${contentId}: could not re-host an image from ${host}: ${safeReason}`
         );
       }
-    }
+    };
+    // A small pool: `concurrency` workers each pull the next URL until none
+    // remain. Results are re-ordered to the body's order afterwards so the
+    // summary is deterministic whatever finished first.
+    const queue = [...urls];
+    const workers = Array.from(
+      { length: Math.max(1, Math.min(concurrency, urls.length)) },
+      async () => {
+        while (queue.length) await one(queue.shift());
+      }
+    );
+    await Promise.all(workers);
+    const order = new Map(urls.map((url, i) => [url, i]));
+    rewritten.sort((a, b) => order.get(a.from) - order.get(b.from));
+    failed.sort((a, b) => order.get(a.url) - order.get(b.url));
     const out = {};
     for (const [field, body] of Object.entries(bodies || {}))
       out[field] = rewriteBody(body, rewritten);

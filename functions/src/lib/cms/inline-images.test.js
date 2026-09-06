@@ -85,6 +85,20 @@ describe('inlineBlobPath and rewriteBody', () => {
     expect(out).toContain(UPSTREAM_B);
     expect(rewriteBody(BODY, [])).toBe(BODY);
   });
+
+  it('rewrites the longer of two prefix-related URLs first, so neither is mangled', () => {
+    // Copilot review of #389: `…/img.png` is a prefix of `…/img.png?size=2`.
+    const short = 'https://x.example/img.png';
+    const long = 'https://x.example/img.png?size=2';
+    const body = `<img src="${short}"> <img src="${long}">`;
+    const out = rewriteBody(body, [
+      { from: short, to: '/api/public/media/covers/c1/inline/s.png' },
+      { from: long, to: '/api/public/media/covers/c1/inline/l.png' },
+    ]);
+    expect(out).toBe(
+      '<img src="/api/public/media/covers/c1/inline/s.png"> <img src="/api/public/media/covers/c1/inline/l.png">'
+    );
+  });
 });
 
 describe('createInlineImageRehoster', () => {
@@ -177,6 +191,28 @@ describe('createInlineImageRehoster', () => {
     expect(result.bodies.Content).not.toContain(UPSTREAM_A);
     expect(result.bodies.content).not.toContain(UPSTREAM_A);
     expect(result.bodies.content).not.toContain(UPSTREAM_B);
+  });
+
+  it('fetches at most `concurrency` images at once and reports them in body order', async () => {
+    const urls = Array.from({ length: 7 }, (_, i) => `https://cdn.example.org/${i}.png`);
+    let inFlight = 0;
+    let peak = 0;
+    const fetchImage = vi.fn(async (url) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      // Later URLs resolve sooner, so completion order differs from body order.
+      await new Promise((r) => setTimeout(r, 10 - Number(url.match(/(\d)\.png$/)[1])));
+      inFlight -= 1;
+      return png;
+    });
+    const storage = { uploadBlob: vi.fn(async () => undefined) };
+    const { rehost } = createInlineImageRehoster({ storage, fetchImage, concurrency: 3 });
+    const body = urls.map((u) => `![](${u})`).join(' ');
+    const result = await rehost({ contentId: 'c1', bodies: { content: body } });
+    expect(peak).toBeLessThanOrEqual(3);
+    expect(peak).toBeGreaterThan(1);
+    expect(result.rewritten.map((r) => r.from)).toEqual(urls);
+    expect(result.failed).toEqual([]);
   });
 });
 
