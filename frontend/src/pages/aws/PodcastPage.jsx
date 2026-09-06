@@ -8,7 +8,7 @@ const PLATFORM_LOGOS = {
   spotify: '/icons/logos/spotify.png',
   apple: '/icons/logos/apple-podcast.png',
   amazon: '/icons/logos/AmazonMusic.png',
-  podbean: '/icons/logos/podbean.png',
+  rss: '/icons/logos/rss.svg',
 };
 
 function formatDuration(raw) {
@@ -121,7 +121,7 @@ export default function PodcastPage() {
     { key: 'spotify', name: 'Spotify' },
     { key: 'apple', name: 'Apple Podcasts' },
     { key: 'amazon', name: 'Amazon Music' },
-    { key: 'podbean', name: 'PodBean' },
+    { key: 'rss', name: 'RSS feed' },
   ];
 
   return (
@@ -334,10 +334,14 @@ export default function PodcastPage() {
               </p>
               <div className="space-y-2">
                 {platforms.map((platform) => {
+                  // A platform with no link is not rendered: a button that
+                  // goes to '#' or to a feed that has moved reads as broken
+                  // (#348 — the PodBean button led to a 410 for weeks).
                   const url =
-                    podcastConfig?.podcast?.subscribeLinks?.[platform.key] ||
-                    podcastConfig?.podcast?.feedUrl ||
-                    '#';
+                    platform.key === 'rss'
+                      ? podcastConfig?.podcast?.feedUrl
+                      : podcastConfig?.podcast?.subscribeLinks?.[platform.key];
+                  if (!url) return null;
                   return (
                     <a
                       key={platform.key}

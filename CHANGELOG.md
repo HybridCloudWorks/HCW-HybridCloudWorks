@@ -19,6 +19,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`fetchPodcastFeeds` no longer polls a dead feed, and the podcast pages
+  no longer advertise PodBean (#PR, issue #348).** PodBean's feed returned
+  HTTP 410 Gone from 2026-09-05, so every two-hour firing since the timer was
+  armed in #332 ended in `feed failed`, and every podcast page offered a
+  PodBean subscribe button that led to it. Three changes. The feed list moves
+  out of the code into `admin_config/podcast_feeds` (`{ feeds: [{ provider,
+  url }] }`), read on every run, so the next host (issue #349) is a document
+  write and not a deploy; the constant that used to name PodBean is now an
+  empty fallback, and a run with no feeds says so at Warning instead of
+  staying silent. A 410 is treated as what it is — the host saying gone — and
+  reported at Warning as `feed gone (410)` with the summary carrying
+  `skipped: 'gone'`, rather than as an Error every two hours; other failures
+  still error. On the pages, PodBean's logo and button are gone from the
+  shared, AWS, Azure and GCP podcast pages; a subscribe button now renders only
+  when its link exists, and an **RSS feed** button appears once
+  `podcast.feedUrl` is set. The Azure provider's `feedUrl` is null until the
+  show is re-hosted, and its Apple link — which pointed at the creator
+  dashboard, not a listener page — is removed until the show is resubmitted.
+  Verification once the new feed is seeded: `podcasts.updatedAt` fresh at
+  the 2-hour firing and no `feed failed` rows in `AppTraces` for
+  `Function.fetchPodcastFeeds`.
 - **Documentation moved from the GitHub Wiki to a MkDocs site under `docs/`,
   published to docs.hybridcloudworks.com (#363, issue #360).** Owner decisions
   2026-09-05: MkDocs Material, host name `docs.hybridcloudworks.com`, source
