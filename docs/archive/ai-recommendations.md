@@ -41,8 +41,8 @@ to `google/imagen-4-fast`. Gate behind a new env var so it can be flipped withou
 
 **Files:**
 
-- [`functions/index.js:1916`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1916) — `callReplicateApi`
-- [`functions/cms-functions.js:1934`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/cms-functions.js#L1934) — `generateImageByPrompt`
+- [`functions/index.js:1916`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1916) — `callReplicateApi`
+- [`functions/cms-functions.js:1934`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/cms-functions.js#L1934) — `generateImageByPrompt`
 
 **Plain-English change:**
 
@@ -113,7 +113,7 @@ deleting.
 ### R4 — Refresh Anthropic router defaults
 
 **Change:** Update the four `anthropic` entries in `DEFAULT_MODEL_TABLE`
-([`functions/lib/ai-model-router.js:25-30`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js#L25)) from
+([`functions/lib/ai-model-router.js:25-30`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js#L25)) from
 `claude-3-5-sonnet-latest` (no longer on Anthropic's current pricing table) to current models.
 
 **Plain-English change:**
@@ -154,7 +154,7 @@ precedence over defaults at runtime.
 ### R6 — Refresh OpenAI router defaults
 
 **Change:** Update the four `openai` entries in `DEFAULT_MODEL_TABLE`
-([`functions/lib/ai-model-router.js:19-24`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js#L19)) from
+([`functions/lib/ai-model-router.js:19-24`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js#L19)) from
 `gpt-4o-mini` (removed from current OpenAI pricing page) to current models.
 
 **Plain-English change:**
@@ -262,7 +262,7 @@ cloudProvider, keyTopics, targetAudience, visualTheme — no `postContent`) for 
 
 **Files:**
 
-- [`functions/index.js:1477-1500`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1477) — `analyzeWithGemini` prompt
+- [`functions/index.js:1477-1500`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1477) — `analyzeWithGemini` prompt
 - Admin portal — new "Generate post body" button in article editor
 
 **Plain-English change:**
@@ -310,8 +310,8 @@ calls/mo). At 10×: −$25–$43/mo. Aligns with the same "draft vs. published" 
 
 **Files:**
 
-- [`functions/index.js:1916`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1916) — `callReplicateApi`
-- [`functions/cms-functions.js:1934`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/cms-functions.js#L1934) — `generateImageByPrompt`
+- [`functions/index.js:1916`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1916) — `callReplicateApi`
+- [`functions/cms-functions.js:1934`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/cms-functions.js#L1934) — `generateImageByPrompt`
 
 **Cost delta:** Net neutral vs. R2 alone — hero covers stay at $0.04, curated/admin at $0.02. Adds
 quality differentiation without increasing average spend.
@@ -333,7 +333,7 @@ wrapper. If `callReplicateApi` throws after retries, automatically retry via Ope
 
 **Files:**
 
-- [`functions/index.js`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js) — new `callImageFallback` wrapper around
+- [`functions/index.js`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js) — new `callImageFallback` wrapper around
   `callReplicateApi`
 - New env var: `CONTENTFORGE_IMAGE_FALLBACK_PROVIDER` (`none` | `openai`) — default `none`
 
@@ -361,7 +361,7 @@ Firestore document.
 
 **Files:**
 
-- [`functions/index.js`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js) — new `generateAltTexts(imageUrls)` helper called
+- [`functions/index.js`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js) — new `generateAltTexts(imageUrls)` helper called
   from `inspectAndPopulateArticle`
 
 **Cost delta:** ~$0.0008/image × ~2 images/article × 900 articles/mo = **~$1.44/mo**. High-value
@@ -425,7 +425,7 @@ flag. Captures per-call token counts and inferred cost, written to Cloud Logging
 
 **Files:**
 
-- [`functions/lib/ai-model-router.js`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js) — add to `callVertex`
+- [`functions/lib/ai-model-router.js`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js) — add to `callVertex`
   (line ~91), `callOpenAi` (line ~148), `callAnthropic` (line ~221)
 
 **Plain-English change (per provider):**
@@ -478,12 +478,12 @@ by adding brand voice, editorial standards, and output examples. Then wire
 
 **Files:**
 
-- [`functions/lib/ai-model-router.js:182-224`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js#L182) —
+- [`functions/lib/ai-model-router.js:182-224`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/lib/ai-model-router.js#L182) —
   `callAnthropic` — split `messages[0].content` into a cacheable static block + dynamic content
   block; add `cache_control` to the static block
-- [`functions/index.js:1477-1500`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1477) — `analyzeWithGemini` — expand
+- [`functions/index.js:1477-1500`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1477) — `analyzeWithGemini` — expand
   static instruction header to ≥1,024 tokens
-- [`functions/index.js:1541-1574`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1541) — `analyzeArchitectureDiagram` —
+- [`functions/index.js:1541-1574`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1541) — `analyzeArchitectureDiagram` —
   expand static instruction header to ≥1,024 tokens
 
 **Note:** Currently dormant — Vertex is the active provider. This only takes effect if
@@ -515,7 +515,7 @@ pricing scales with resolution.
 
 **Files:**
 
-- [`functions/index.js:1904`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1904) — `callReplicateApi`
+- [`functions/index.js:1904`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/functions/index.js#L1904) — `callReplicateApi`
 
 **Cost delta:** Minimal at current volume. Relevant if thumbnail/preview slots are added at scale.
 

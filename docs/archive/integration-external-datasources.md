@@ -581,6 +581,6 @@ _Placeholder for additional external data sources (coming soon)_
 - **Nominatim API Docs:** https://nominatim.org/release-docs/latest/api/
 - **CustomSessionizeWidget Code:**
   src/components/CustomSessionizeWidget.jsx *(historical target unavailable)*
-- **About Page Code:** [src/pages/shared/AboutPage.jsx](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
+- **About Page Code:** [src/pages/shared/AboutPage.jsx](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
 - **Firestore Collections:**
   [database-firestore-collections.md](../archive/database-firestore-collections.md)

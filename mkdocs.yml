@@ -109,7 +109,7 @@ nav:
       - 0019 Single Function App: decisions/0019-single-function-app.md
       - 0020 Native Terraform root module: decisions/0020-native-terraform-root-module.md
       - 0021 Key Vault purge protection: decisions/0021-key-vault-purge-protection.md
-      - 0021 Container Apps CI runner (superseded): decisions/0021-container-apps-ci-runner.md
+      - 0021 (number reused) Container Apps CI runner, superseded: decisions/0021-container-apps-ci-runner.md
       - 0022 Alerting fabric: decisions/0022-alerting-fabric.md
       - 0023 Migration estate retirement: decisions/0023-migration-estate-retirement.md
       - 0024 Edge availability probe: decisions/0024-edge-availability-probe.md

@@ -122,7 +122,7 @@ under `../archive/docs/` *(historical target unavailable)*.
 
 ## Live Smoke Tests
 
-- [`live-smoke-tests/`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/frontend/documentation/live-smoke-tests) - `SMOKE-TEST.md` + `SMOKE-TEST-SIGNOFF.md`.
+- [`live-smoke-tests/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/frontend/documentation/live-smoke-tests) - `SMOKE-TEST.md` + `SMOKE-TEST-SIGNOFF.md`.
 
 ## Reports
 

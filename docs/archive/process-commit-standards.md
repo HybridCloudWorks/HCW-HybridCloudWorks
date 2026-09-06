@@ -8,7 +8,7 @@
 
 **Last Updated:** February 12, 2026
 **Status:** Active - Enforced via Husky + Commitlint
-**Config:** [`.commitlintrc.json`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/.commitlintrc.json)
+**Config:** [`.commitlintrc.json`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/.commitlintrc.json)
 
 ---
 
@@ -365,7 +365,7 @@ Commits are validated automatically via:
 
 - **Husky**: Git hooks (pre-commit, commit-msg)
 - **Commitlint**: Conventional commit validation
-- **Configuration**: [`.commitlintrc.json`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/.commitlintrc.json)
+- **Configuration**: [`.commitlintrc.json`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/.commitlintrc.json)
 
 ### If Validation Fails
 

@@ -21,7 +21,7 @@ accessing the Firebase Console directly.
 
 | Collection         | Frontend UI            | Connected Pages                                 | Purpose                                                |
 | ------------------ | ---------------------- | ----------------------------------------------- | ------------------------------------------------------ |
-| **certifications** | ✅ Buildship Dashboard | [About Page](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx) | Professional certifications, credentials, and licenses |
+| **certifications** | ✅ Buildship Dashboard | [About Page](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx) | Professional certifications, credentials, and licenses |
 
 ---
 
@@ -94,7 +94,7 @@ firebase deploy --only firestore:rules
 
 ### Certifications Collection
 
-**Frontend Page:** [About Page](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
+**Frontend Page:** [About Page](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
 
 **Purpose:**
 

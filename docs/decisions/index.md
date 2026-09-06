@@ -66,6 +66,7 @@ Every ADR includes:
 | [0019](../decisions/0019-single-function-app.md) | One Function App execution boundary | Accepted | Ratify least-privilege-by-contract over process separation |
 | [0020](../decisions/0020-native-terraform-root-module.md) | Flat native-provider Terraform root module (no AVM) | Accepted | Keep resource addresses stable on a live state |
 | [0021](../decisions/0021-key-vault-purge-protection.md) | Key Vault purge protection stays disabled | Accepted | Keep teardown-and-recreate available on a single-environment estate |
+| [0021 (number reused)](../decisions/0021-container-apps-ci-runner.md) | Container Apps self-hosted CI runner failover | Superseded — deferred 2026-08-18 before the number was reassigned to Key Vault purge protection | Kept because `infra/ci-runner.tf` still holds the gated-off resources it describes |
 | [0022](../decisions/0022-alerting-fabric.md) | The alerting fabric, and the signal it does not cover | Accepted | Make failure visible without competing with the telemetry that explains it |
 | [0023](../decisions/0023-migration-estate-retirement.md) | Retire the migration-era estate, grants and reverse path | Accepted | Close the decommission gate deliberately rather than by neglect |
 | [0024](../decisions/0024-edge-availability-probe.md) | Reachability probing from a Cloudflare Worker | Proposed | Give T-519's signal a path that runs on the current Cloudflare plan |

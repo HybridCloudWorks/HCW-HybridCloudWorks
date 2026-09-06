@@ -18,19 +18,19 @@ failsafe contrast pipeline catches regressions before they ship.
 3. **Maintain ≥4.5:1 contrast** for normal text in both themes. The CI gate enforces this — no
    exceptions for "it's just a small label."
 4. **Only one theme toggle exists** — the floating button at bottom-right
-   ([src/App.jsx](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/App.jsx)). Do not add others.
+   ([src/App.jsx](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/App.jsx)). Do not add others.
 
 ## How the theme is applied
 
 Theme resolution happens in three layers, in this order:
 
-1. **Pre-hydration script** in [index.html](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/index.html). Runs before React mounts, reads
+1. **Pre-hydration script** in [index.html](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/index.html). Runs before React mounts, reads
    `localStorage['hcw-theme']` (or `prefers-color-scheme` if no saved preference), and sets
    `<html class="dark">` + `data-theme` + `color-scheme`. This is what prevents FOUC.
-2. **`ThemeProvider`** in [src/context/ThemeContext.jsx](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/context/ThemeContext.jsx) takes over
+2. **`ThemeProvider`** in [src/context/ThemeContext.jsx](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/context/ThemeContext.jsx) takes over
    after hydration. It listens for OS-level preference changes and only overrides them if the user
    has explicitly toggled.
-3. **CSS custom properties** in [src/index.css](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/index.css) under `:root` (light) and `.dark`
+3. **CSS custom properties** in [src/index.css](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/index.css) under `:root` (light) and `.dark`
    (dark) define every semantic color. Tailwind utilities like `bg-background` / `text-foreground`
    resolve through these.
 
@@ -95,7 +95,7 @@ not read the `<html>` class directly.
 ### Anti-pattern: low-contrast muted text in dark mode
 
 `text-muted-foreground` is now safe (~10:1 in dark mode) after the token update in
-[src/index.css:173](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/index.css#L173). But `dark:text-slate-500` on `bg-background` is
+[src/index.css:173](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/index.css#L173). But `dark:text-slate-500` on `bg-background` is
 **3.98:1** and will fail the gate. Use `dark:text-slate-400` or `text-muted-foreground` instead.
 
 ## The failsafe pipeline
@@ -104,7 +104,7 @@ Three layers of detection. Anything that passes all three is theme-safe.
 
 ### Layer 1 — ESLint (commit time)
 
-[eslint.config.js](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/eslint.config.js) bans inline `style` color hex values and gradient template
+[eslint.config.js](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/eslint.config.js) bans inline `style` color hex values and gradient template
 literals. Currently `warn`; will flip to `error` after the existing inline-color cases are migrated.
 
 ### Layer 2 — axe-theme-scan (developer-run, full diagnostic)
@@ -124,14 +124,14 @@ Outputs:
 
 ### Layer 3 — Playwright contrast spec (CI gate)
 
-[e2e/contrast.spec.js](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/e2e/contrast.spec.js) runs a smaller route set in both themes and **fails
+[e2e/contrast.spec.js](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/e2e/contrast.spec.js) runs a smaller route set in both themes and **fails
 the build on any `color-contrast` violation**. Run locally with:
 
 ```bash
 npm run a11y:contrast:e2e
 ```
 
-Playwright auto-starts the preview server (see [playwright.config.js](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/playwright.config.js)).
+Playwright auto-starts the preview server (see [playwright.config.js](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/playwright.config.js)).
 
 ### Recommended pre-merge check
 

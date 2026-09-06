@@ -127,7 +127,7 @@ modify data while the frontend app has its own stricter rules.
 }
 ```
 
-**Frontend Component:** [AboutPage.jsx](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
+**Frontend Component:** [AboutPage.jsx](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
 
 **Data Flow:**
 
@@ -1329,7 +1329,7 @@ manage Firestore collections without touching code or the Firebase Console.
 
 Rowy works **only if the Firestore rules allow service account access**.
 
-**Current Rules:** [firestore.rules](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/firestore.rules#L9-L12)
+**Current Rules:** [firestore.rules](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/firestore.rules#L9-L12)
 
 ```firebase-rules
 // Helper function to check if request is from a service account
@@ -1591,7 +1591,7 @@ manage Firestore collections without touching code or the Firebase Console.
 
 Rowy works **only if the Firestore rules allow service account access**.
 
-**Current Rules:** [firestore.rules](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/firestore.rules#L9-L12)
+**Current Rules:** [firestore.rules](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/firestore.rules#L9-L12)
 
 ```firebase-rules
 // Helper function to check if request is from a service account
@@ -1959,10 +1959,10 @@ Display as: Thumbnail (20×20px preview)
 
 ## References
 
-- [Firestore Rules](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/firestore.rules)
-- [Cloud Storage Rules](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/storage.rules)
+- [Firestore Rules](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/firestore.rules)
+- [Cloud Storage Rules](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/platform/firebase/storage.rules)
 - CustomSessionizeWidget *(historical target unavailable)*
-- [AboutPage](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
+- [AboutPage](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/frontend/src/pages/shared/AboutPage.jsx)
 - [Rowy Documentation](https://docs.rowy.io/)
 - [Firebase Firestore Docs](https://firebase.google.com/docs/firestore)
 - [Vendor News Feeds Integration](../archive/integration-vendor-news-feeds.md)

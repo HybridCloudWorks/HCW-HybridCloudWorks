@@ -1345,7 +1345,7 @@ git add .
 git commit -m "Deploy: HCW with AboutPage and ContactPage"
 git push origin main
 
-# Watch workflow at: https://github.com/saulpw/hybridcloudworks/actions
+# Watch workflow at: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions
 ```
 
 ### Step 6: Post-Deployment Verification
@@ -1447,7 +1447,7 @@ After deployment, verify:
 
 ### GitHub Actions
 
-- **URL:** https://github.com/saulpw/hybridcloudworks/actions
+- **URL:** https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions
 - Monitor: frontend-deploy.yml workflow runs
 - Ensure all checks pass
 

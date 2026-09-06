@@ -27,7 +27,7 @@
 > CHANGELOG entry exists.
 
 **Audience:** engineers implementing the Azure platform in
-[HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks). **Status:**
+[HCW-HybridCloudWorks](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks). **Status:**
 recommendation, **now largely built** — see the box below. Written 2026-07-30 against the approved
 `.azure/infrastructure-plan.json` and the measured state of this repository; status box added
 2026-08-20. **Companion:** [Migration-Plan](../history/migration-plan.md) — sequencing and execution.

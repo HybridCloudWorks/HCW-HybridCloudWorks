@@ -322,7 +322,7 @@ VITE_FIREBASE_AUTH_DOMAIN=your_domain_here
 For issues or questions:
 
 - **Email**: `hello@hybridcloudworks.com`
-- **GitHub Issues**: https://github.com/saulpw/hybridcloudworks/issues
+- **GitHub Issues**: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues
 - **Firebase Support**: https://firebase.google.com/support
 
 ## Version Information
