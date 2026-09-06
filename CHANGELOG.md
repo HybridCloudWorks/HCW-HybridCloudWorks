@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Four landing pages no longer request hero images that do not exist
+  (#PR, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
+  listed five `/images/<provider>-hero/N.png` files that were never added, so
+  every visit loaded with seven 404s and six broken image boxes (the audit's
+  `broken images` class). The lists are empty until the sets exist — the
+  carousel renders nothing for an empty list — and
+  `scripts/hero-assets-exist.test.js` now fails the frontend suite on any
+  `/images/…` path a landing page references that is not under `public/`,
+  so a set cannot be referenced before it is added. #371 stays open for the
+  assets themselves (1155×924 RGBA PNG, like `azure-hero/`).
 - **`TODO.md` points at the board (#377, closes #362).** The handling rule and
   the "where the open items live" section name the organization project
   (https://github.com/orgs/HybridCloudWorks/projects/1) and its Priority

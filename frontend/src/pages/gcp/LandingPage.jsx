@@ -5,13 +5,11 @@ import ProviderLandingTemplate from '@/components/shared/ProviderLandingTemplate
 import HeroImageCarousel from '@/components/landing/HeroImageCarousel';
 import usePodcastData from '@/hooks/usePodcastData';
 
-const GCP_HERO_IMAGES = [
-  '/images/gcp-hero/1.png',
-  '/images/gcp-hero/2.png',
-  '/images/gcp-hero/3.png',
-  '/images/gcp-hero/4.png',
-  '/images/gcp-hero/5.png',
-];
+// No gcp hero set exists under public/images/ yet (#371); the carousel renders
+// nothing for an empty list, which beats five 404s and broken <img> boxes.
+// Add the files (1155×924 RGBA PNG like azure-hero/) and list them here;
+// scripts/hero-assets-exist.test.js fails on a path that does not exist.
+const GCP_HERO_IMAGES = [];
 
 const ARCHITECTURE_CARDS = [
   {
