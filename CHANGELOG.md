@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **Cost Analysis costs Cosmos recovery against the measured account size
-  (#PR, issue #231).** The owner measured `DataUsage` on 2026-09-06: 2.39 GB.
+  (#385, issue #231).** The owner measured `DataUsage` on 2026-09-06: 2.39 GB.
   The page gains a section pricing what recovery already costs (continuous
   30-day backup about $0.48 a month, a point-in-time restore $0.36) and the
   two export shapes from #231 per week and per month: daily full exports at
