@@ -65,7 +65,7 @@ sections, because how they authenticate is the whole point.
 | `cloudflare-docs` | Cloudflare — [Cloudflare's own MCP servers](https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/), source at [cloudflare/mcp-server-cloudflare](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search) | Remote HTTP, `https://docs.mcp.cloudflare.com/mcp`, no auth | `edge/availability-probe/` is a Worker on a cron trigger ([ADR 0024](../decisions/0024-edge-availability-probe.md)), and `infra/` manages Cloudflare DNS and the transform rules. This is the public documentation server only — not the account API server at `mcp.cloudflare.com`, which is OAuth and would give the reviewer a live account. Tool: `search_cloudflare_documentation`. |
 | `terraform` | HashiCorp — [Terraform MCP server](https://developer.hashicorp.com/terraform/mcp-server), source at [hashicorp/terraform-mcp-server](https://github.com/hashicorp/terraform-mcp-server) | Local container `hashicorp/terraform-mcp-server:1.3.0@sha256:423a6b8e2ee0…` (digest-pinned; the full digest is in `.github/copilot-mcp.json`), started by the review session | `infra/` is a single Terraform root module against **live production**. Half of what an infra review checks is "does this argument exist on this provider version, and does changing it force replacement" — exactly what `get_provider_details` answers from the Registry. Restricted to the `registry` toolset and eight read tools (the [tools reference](https://developer.hashicorp.com/terraform/mcp-server/reference)); no `TFE_TOKEN` is passed, so the HCP Terraform workspace, runs, plans and state stay out of reach. The image is pinned by digest, not by tag — a tag can be retargeted, a digest cannot; bump both together, as with every other pinned dependency here. |
 | `azure` | Microsoft — [Azure MCP Server](https://learn.microsoft.com/en-us/azure/developer/azure-mcp-server/), source at [microsoft/mcp](https://github.com/microsoft/mcp/tree/main/servers/Azure.Mcp.Server), package [`@azure/mcp`](https://www.npmjs.com/package/@azure/mcp) | Local, `npx @azure/mcp@3.0.0-beta.41`, started by the review session; signs in through the Azure CLI session `copilot-setup-steps.yml` leaves behind | Lets the reviewer check a Terraform or Functions change against what is actually deployed: the role assignments on a resource group, a Function App's current configuration, the activity log for the resource a PR touches, a storage account's network rules. See [The Azure server](#the-azure-server-read-only-federated-no-secret) for the identity and the fourteen tools. |
-| `github-mcp-server` | GitHub — [GitHub MCP Server](https://github.com/github/github-mcp-server) | Local container `ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810fa…` (digest-pinned; full digest in `.github/copilot-mcp.json`), `GITHUB_READ_ONLY=1`, toolsets pinned by `GITHUB_TOOLSETS`; authenticates with a one-hour **GitHub App** installation token `copilot-setup-steps.yml` mints per session | Replaces the built-in GitHub server's default toolsets with a wider **read-only** set on **this repository only**: Actions (why did the CI job on this PR fail), code scanning and Dependabot alerts, discussions, plus the default repos, issues and pull requests. No personal access token of any kind. See [The GitHub server](#the-github-server-wider-read-only-still-one-repository) for the App and its ceiling. |
+| `github-mcp-server` | GitHub — [GitHub MCP Server](https://github.com/github/github-mcp-server) | Local container `ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810fa…` (digest-pinned; full digest in `.github/copilot-mcp.json`), `--read-only`, thirty-one named read tools on its command line and in Copilot's allowlist; authenticates with a one-hour **GitHub App** installation token `copilot-setup-steps.yml` mints per session | Replaces the built-in GitHub server's default toolsets with a wider **read-only** set on **this repository only**: Actions (why did the CI job on this PR fail), code scanning and Dependabot alerts, discussions, plus the default repos, issues and pull requests. No personal access token of any kind. See [The GitHub server](#the-github-server-wider-read-only-still-one-repository) for the App and its ceiling. |
 
 The tool allowlist is applied twice for the Terraform and Azure servers: on
 the server's own command line (`--tools=...` / `--tool ...`, so the process
@@ -170,16 +170,24 @@ How it works, and what bounds it:
   `GITHUB_PERSONAL_ACCESS_TOKEN=…` into `$HOME/.copilot-review/github-mcp.env`
   with mode 600. (The variable name is the server's; the value is an App
   token, not a personal one.)
-- **The server runs read-only, in the pinned container.** The
-  `github-mcp-server` entry replaces the built-in server with
+- **The server runs read-only, in the pinned container, with a named tool
+  list.** The `github-mcp-server` entry replaces the built-in server with
   `ghcr.io/github/github-mcp-server:v1.12.0@sha256:…` (digest-pinned), run
   with `--env-file` on that file — so the token is never an argument another
-  process could list — plus `GITHUB_READ_ONLY=1`, which drops every write
-  tool before the server registers anything, and `GITHUB_TOOLSETS=context,
-  repos, issues, pull_requests, actions, code_security, dependabot,
-  discussions`. Not `secret_protection` (alert locations and partial
-  values), not `orgs`, `users`, `notifications` or `gists`, not `copilot`
-  (would let the reviewer start agent sessions).
+  process could list — plus `--read-only`, which drops every write tool
+  before the server registers anything, and `--tools` naming **thirty-one**
+  read tools, the same list Copilot's `tools` allowlist carries, so a tool
+  GitHub adds to a toolset later is not picked up until someone adds it
+  here. They were chosen by running the pinned binary and reading what it
+  registers: the Actions run, job and log tools; code-scanning and
+  Dependabot alert reads; commits, file contents, branches, tags, releases
+  and labels; issue and pull-request reads and searches; discussions; code
+  and commit search. Left out on purpose: `get_me` (a person's identity —
+  the token has none), `list_repository_collaborators` and the team tools
+  (people, not code), `search_repositories` (the token sees one repository),
+  and every tool in the `secret_protection`, `orgs`, `users`,
+  `notifications`, `gists` and `copilot` toolsets (the last would let the
+  reviewer start agent sessions).
 - **Two stored values, neither a credential that acts alone.**
   `COPILOT_REVIEW_APP_ID` is a repository **variable** (an identifier, like
   the manifest App's). `COPILOT_REVIEW_APP_PRIVATE_KEY` is an **Agents
@@ -373,7 +381,7 @@ so no allowlist entry is needed for `learn.microsoft.com`,
     *Azure Login* and *Mint a read-only App installation token* green, then
     `microsoft-learn`, `cloudflare-docs`, `terraform`, `azure` and
     `github-mcp-server` listed as started, each with its tool list beneath —
-    fourteen tools under `azure`, only read tools under `github-mcp-server`.
+    fourteen tools under `azure`, thirty-one under `github-mcp-server`.
     If `terraform` or `github-mcp-server` is missing and the rest are
     present, the runner could not start the container; if the setup job is
     absent, you are in the

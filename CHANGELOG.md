@@ -49,7 +49,8 @@ This project has not cut a tagged release; entries are grouped under
   override so the manifest publisher's write scope and the reviewer's read
   scope come from one minter — and hands to the digest-pinned
   `ghcr.io/github/github-mcp-server` container over `--env-file`, running
-  `GITHUB_READ_ONLY=1`. The App's read-only permissions are the ceiling for
+  `--read-only` with thirty-one named read tools on its command line and in
+  Copilot's allowlist. The App's read-only permissions are the ceiling for
   anything its key could ever mint. The `oidc-subjects` guard learned the new
   client-id variable, `set-github-variables.ps1` seeds it, and the standards
   pages record the variables and the private key. The runbook

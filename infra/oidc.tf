@@ -407,8 +407,11 @@ resource "azurerm_role_assignment" "github_reader_origin_window" {
 # Key Vault is RBAC-mode and needs a data-plane role for that. Application
 # Insights telemetry IS readable under Reader (query is an ARM action), which
 # is why the MCP tool list excludes every log-query tool and keeps only metrics;
-# and the telemetry is content-free by policy either way
-# (functions/src/lib/telemetry, enforced in review).
+# and the telemetry is content-free by policy either way — correlation
+# identifiers, never paths, query strings or payloads — a rule the pull
+# request template's security review and the code-review skill's
+# cross-cutting checks (.github/skills/code-review/SKILL.md) enforce on every
+# change.
 #
 # SUBJECT IS THE copilot ENVIRONMENT, in both forms, and nothing else. Copilot's
 # setup-steps job declares `environment: copilot`, so GitHub composes
