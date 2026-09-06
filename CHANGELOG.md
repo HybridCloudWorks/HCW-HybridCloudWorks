@@ -19,6 +19,36 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Copilot code review MCP configuration applied (#378; issue #369, closed
+  2026-09-06).** The owner completed every step the runbook laid out, in
+  order: the `hcw-azure` apply that created `github_copilot_review` and its
+  seven resources; `COPILOT_REVIEW_CLIENT_ID` seeded from the new output; the
+  setup workflow dispatched by hand and green on its second run (the first,
+  fifty-eight seconds after the merge, ran before the apply and failed on an
+  empty client id — the runbook now says steps 1 to 3 wait for the merge and
+  what that failure looks like); the read-only GitHub App *HCW Copilot Review
+  Reader* registered, installed on this repository only, its App ID and
+  private key stored; and the five-server configuration pasted into the
+  repository's Copilot settings. The runbook status and the required-inputs
+  rows record the values as set. The first real review, of #378 itself,
+  then showed two things the documentation had left open. Copilot code review
+  **does** run `copilot-setup-steps.yml`, but in Copilot's own runner, which
+  resolves no `vars.*`: `azure/login` ran with every input empty while the
+  same file dispatched by hand signed in fine. The workflow now reads the
+  client, tenant, subscription and App identifiers as
+  `secrets.COPILOT_REVIEW_… || vars.…`, so the Agents store Copilot exposes is
+  preferred and the repository variables still serve a manual run; the
+  `oidc-subjects` guard reads the variable out of that expression; the
+  standards record the identifiers-in-Agents exception; and the owner
+  mirrored the four values the same day (step 2b, issue #381, closed
+  2026-09-06). And a review session runs MCP in read-only mode, keeping only
+  tools whose servers annotate them `readOnlyHint: true` — the session log
+  kept `terraform` and dropped every other server, the built-in Playwright
+  included, as having no allowed tools. The Azure and GitHub servers
+  annotate; the runbook records what that means for the two documentation
+  servers and how to read the next session log. Every review session of
+  #378 itself ran the step list `main` held at the time, so the first review
+  after the merge is the one that shows the new steps.
 - **Four landing pages no longer request hero images that do not exist
   (#380, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
   listed five `/images/<provider>-hero/N.png` files that were never added, so

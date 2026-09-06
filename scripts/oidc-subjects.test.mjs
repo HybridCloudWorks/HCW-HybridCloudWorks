@@ -93,9 +93,13 @@ function azureLoginWorkflows() {
       const envs = [...text.matchAll(/^\s{4}environment:\s*([A-Za-z0-9._-]+)\s*$/gm)].map(
         (m) => m[1]
       );
+      // The variable may sit alone in the expression or after an Agents-secret
+      // fallback (`secrets.X || vars.X`, copilot-setup-steps.yml): only the
+      // `vars.` name is attributed, since it is what a manual run resolves and
+      // the secret carries the same identifier.
       const vars = [
         ...new Set(
-          [...text.matchAll(/client-id:\s*\$\{\{\s*vars\.([A-Z0-9_]+)\s*\}\}/g)].map((m) => m[1])
+          [...text.matchAll(/client-id:\s*\$\{\{[^}]*?\bvars\.([A-Z0-9_]+)\b[^}]*\}\}/g)].map((m) => m[1])
         ),
       ];
       return { file, environments: [...new Set(envs)], clientIdVars: vars };

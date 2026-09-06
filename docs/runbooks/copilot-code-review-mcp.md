@@ -1,14 +1,22 @@
 # Copilot code review — MCP servers
 
-> **Status: configuration written, not yet applied.** The file
-> `.github/copilot-mcp.json` is the reviewed source of record. GitHub does not
-> read it from the repository; the owner pastes its contents into the
-> repository's Copilot settings once (procedure below), and again after any
-> change to the file lands on `main`. Two of the five servers need one owner
-> step each before the paste — a Terraform apply for the Azure identity, a
-> read-only GitHub App for the GitHub server — and the order matters. The owner
-> steps are tracked in
-> [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369).
+> **Status: applied 2026-09-06.** The `github_copilot_review` identity is
+> applied, `COPILOT_REVIEW_CLIENT_ID` and `COPILOT_REVIEW_APP_ID` are set, the
+> App's key is stored, the setup workflow's manual dispatch signed in (run 2,
+> green), and the five servers are pasted into repository settings. The owner
+> steps were tracked in
+> [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369),
+> which was closed the same day. `.github/copilot-mcp.json` remains the
+> reviewed source of record: GitHub does not read it from the repository, so
+> any change to it is a pull request and then the paste in step 5 again.
+>
+> **First review session, same day (PR #378):** Copilot code review *does*
+> run `copilot-setup-steps.yml` — but in its own runner, which resolves no
+> `vars.*` at all, so the Azure login ran with empty inputs. The workflow now
+> reads the four identifiers from Agents secrets first (step 2b below, done
+> the same day as issue #381), and the read-only tool filter described under
+> [What the review runner keeps](#what-the-review-runner-keeps) decides which
+> servers a review can actually call.
 
 Every Copilot review in this repository ends with the hint *"Configure MCP
 servers for context-aware, tailored reviews."* This page is that
@@ -127,13 +135,23 @@ tags, role assignments, metrics, and the activity log. Application Insights
 log-query tool is enabled — and the telemetry is content-free by policy
 regardless (correlation identifiers, no payloads).
 
-**Known uncertainty.** GitHub's documentation says code review reuses
-`copilot-setup-steps.yml`; a community thread from August 2026
-([#203859](https://github.com/orgs/community/discussions/203859)) reports
-the setup steps not running for reviews, unresolved. The failure mode is
-safe: without the sign-in the Azure server starts with no credential and
-every tool call fails closed, and the other four servers are unaffected. The
-*Verify* section says how to tell which case you are in.
+**Resolved on the first real review (PR #378, 2026-09-06).** Copilot code
+review does run `copilot-setup-steps.yml` — the session log shows every step
+by name — but not as an ordinary Actions job. Copilot's runner replays the
+steps itself, and in that runner **`vars.*` resolves to nothing**: the first
+review's `azure/login` printed a `with:` block with no `client-id`,
+`tenant-id` or `subscription-id` at all, while a manual `gh workflow run` of
+the same file, an ordinary Actions job, signed in fine. What the runner does
+expose is the **Agents** store (the session log lists the injected secret
+names), which is why GitHub's own Azure example reads its inputs with
+`secrets.`. The workflow therefore reads each identifier as
+`secrets.COPILOT_REVIEW_… || vars.…`: the Agents secret when present, the
+repository variable otherwise, so both runners work. Holding identifiers in
+a secret store is a documented exception to
+[Variables and secrets](../standards/variables-and-secrets.md): the values
+are still not credentials; the store is simply the only one Copilot reads.
+The failure mode remains safe either way — no sign-in means the Azure server
+has no credential and fails closed.
 
 ### The GitHub server: wider read-only, still one repository
 
@@ -204,6 +222,61 @@ than holding a standing credential. If even that is not worth "Copilot can
 read the failing CI job", delete the `github-mcp-server` entry from the file
 and the built-in server continues exactly as today.
 
+### What the review runner keeps
+
+A Copilot **code review** session runs MCP in read-only mode
+(`COPILOT_MCP_READ_ONLY_MODE=true` in its session log) and keeps only tools
+whose **own definitions** carry the MCP annotation `readOnlyHint: true`. The
+repository's `tools` allowlist cannot add that flag; it has to come from the
+server (community thread
+[#200048](https://github.com/orgs/community/discussions/200048), where
+annotating a custom server's tools fixed the same symptom). A server left
+with no annotated tools is dropped with `MCP server "…" has no allowed tools
+after filtering — omitting from config`. The **cloud agent** shares the
+configuration but not this mode.
+
+The first review session (PR #378, 2026-09-06) showed the filter at work:
+
+| Server | In that session | Why, and what changed |
+| --- | --- | --- |
+| `terraform` | **kept** | Its Registry tools are annotated read-only, and the image was ready in time. |
+| `azure` | dropped | Every one of its fourteen tools is annotated read-only (verified locally), so the likely cause is time: `npx @azure/mcp` downloads a package and a platform binary before it can answer, and the runner enumerates tools seconds after start. The workflow now warms that download and pre-pulls the two container images before the servers start. |
+| `github-mcp-server` | dropped | Never started: the Azure login had failed first, so the setup steps that mint and hand over its token did not run. Step 2b makes the login succeed in Copilot's runner. All thirty-one of its tools are annotated read-only. |
+| `microsoft-learn`, `cloudflare-docs` | dropped | Remote servers that answer quickly, so the only explanation left is that their tools are not annotated `readOnlyHint: true`. Until the vendors annotate them, these two serve the **cloud agent** only; a review has to rely on the Terraform Registry, the live Azure state and the GitHub server. |
+| `playwright` (built-in) | dropped | Its tools drive a browser and are not read-only; expected in every review. |
+
+**The second session read differently, on the same runtime.** The review of
+the same PR half an hour later (Actions run 34018454760, runtime
+`vendored-93e753b4`, the same as the first) printed no "no allowed tools"
+line at all. Instead the session reported `[mcp] server="…" status=connected`
+for `cloudflare-docs`, `microsoft-learn`, `github-mcp-server`, `azure` and
+`playwright` — and `terraform` did not appear in either form. Its closing
+summary showed `invocations=0` for every server, and `github-mcp-server` was
+"connected" although the setup steps that write its token file had been
+skipped, so a `connected` line is not proof that a server works. Two
+consequences for reading a log:
+
+- The filter's reporting is not stable between sessions, so a row in the
+  table above is evidence from one session, not a rule. What stays true is
+  the mechanism GitHub documents: read-only mode keeps annotated tools only.
+- The evidence that a server worked is a tool **invocation** in the summary
+  line or an attribution under a review comment, not its status line.
+
+The four Agents copies were present in that second session
+(`COPILOT_AGENT_INJECTED_SECRET_NAMES` listed all five names, and "Loaded 5
+secret(s)"), while the login still ran with an empty `with:` block — because
+the step list came from `main`, as the next paragraph explains. The first
+review **after** #378 merges is the test.
+
+**Copilot reads `copilot-setup-steps.yml` from the default branch.** The
+review sessions of PR #378 executed the step list `main` held at the time,
+although that PR changed the file — the new steps did not appear in any of
+its own reviews. So a change to the setup steps shows up in a Copilot session
+only after it merges, and the PR that carries it is reviewed with the
+previous version; judge such a change by the first review **after** its
+merge. In Copilot's runner a failed step also skips every step after it,
+which is why a failed login left the GitHub server without its token in
+those sessions.
 ### Deliberately not configured
 
 - **HCP Terraform access** for the Terraform server (`TFE_TOKEN`). Would
@@ -265,6 +338,48 @@ git checkout main; git pull origin main; ./scripts/set-github-variables.ps1
 
 **Success looks like:** a line naming `COPILOT_REVIEW_CLIENT_ID` and a GUID.
 It is a variable, not a secret — the value is printed on purpose.
+
+### 2b. Mirror the four identifiers into the Agents store
+
+Done 2026-09-06 as
+[issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381);
+kept here for a rotation, which has to change both copies. Copilot's own runner reads only Agents secrets (see
+[the Azure server](#the-azure-server-read-only-federated-no-secret)), so the
+four identifiers the workflow reads — three for the Azure login, one for the
+GitHub App — must exist there as well as in the repository variables the
+manual run uses. Nothing to retype: the first line prints the four values the
+variables hold, and the later line copies each to the clipboard in turn for
+the paste.
+
+```powershell
+gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID|COPILOT_REVIEW_APP_ID'
+```
+
+Then, in the repository, **Settings → Secrets and variables → Agents →
+Secrets → New repository secret**, four times (the Agents tab sits beside
+the Actions tab at
+<https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions>);
+`gh secret set` cannot write this store:
+
+| Agents secret | Value: the repository variable |
+| --- | --- |
+| `COPILOT_REVIEW_CLIENT_ID` | `COPILOT_REVIEW_CLIENT_ID` |
+| `COPILOT_REVIEW_TENANT_ID` | `TENANT_ID` |
+| `COPILOT_REVIEW_SUBSCRIPTION_ID` | `SUBSCRIPTION_ID` |
+| `COPILOT_REVIEW_APP_ID` | `COPILOT_REVIEW_APP_ID` (exists once step 4 is done) |
+
+To copy one value without retyping it, PowerShell:
+
+```powershell
+gh variable get COPILOT_REVIEW_CLIENT_ID --repo HybridCloudWorks/HCW-HybridCloudWorks | Set-Clipboard
+```
+
+and the same with `TENANT_ID`, `SUBSCRIPTION_ID` and `COPILOT_REVIEW_APP_ID`
+in place of the variable name.
+
+**Success looks like:** four secrets listed under Agents (five with the App
+key), and the next review session's log showing `azure/login` with a
+`client-id` line and a green *Azure Login* step.
 
 ### 3. Prove the sign-in, before Copilot has to
 
@@ -384,18 +499,24 @@ so no allowlist entry is needed for `learn.microsoft.com`,
    **View session** link. Open it and read the **Setting up environment**
    section.
 
-    **Success looks like:** the `copilot-setup-steps` job listed as run with
-    *Azure Login* and *Mint a read-only App installation token* green, then
-    `microsoft-learn`, `cloudflare-docs`, `terraform`, `azure` and
-    `github-mcp-server` listed as started, each with its tool list beneath —
-    fourteen tools under `azure`, thirty-one under `github-mcp-server`.
-    If `terraform` or `github-mcp-server` is missing and the rest are
-    present, the runner could not start the container; if the setup job is
-    absent, you are in the
-    [known uncertainty](#the-azure-server-read-only-federated-no-secret) case
-    and every Azure and GitHub tool call in the session log will show an
-    authentication failure — nothing is exposed, and the three documentation
-    servers still work.
+    **Success looks like:** the `copilot-setup-steps` steps listed as run,
+    beginning with *Are the Azure identifiers resolvable here?* and *Warm the
+    pinned MCP servers* (their presence proves the merged file is the one
+    running), with *Azure Login* and *Mint a read-only App installation
+    token* green. Then, in the MCP section, `terraform`, `azure` and
+    `github-mcp-server` neither dropped with `MCP server "…" has no allowed
+    tools after filtering` nor absent; that line, when it appears, is
+    expected for `playwright`, `microsoft-learn` and `cloudflare-docs` — see
+    [What the review runner keeps](#what-the-review-runner-keeps). A
+    `status=connected` line alone proves little; the `[mcp] session=…
+    summary` line's `invocations=` counts and the attributions in step 3 are
+    the evidence a server was used. If `azure` or `github-mcp-server` is
+    dropped with the login green, read the *Warm the pinned MCP servers*
+    step's output first: a download or pull that failed there is the server
+    that will be missing. A red *Azure Login* with an empty `with:` block
+    means the runner is still executing a step list without the Agents
+    reads — the file on `main` is older than this one — or step 2b's Agents
+    secrets are absent; nothing is exposed either way.
 
 3. When a review comment used a server, GitHub prints an attribution at the
    bottom of that comment naming the skill or MCP server. Not every comment

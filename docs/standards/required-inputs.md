@@ -121,13 +121,16 @@ list — the three scratch variables that used to sit here were deleted the same
 day (T-525). `READER_CLIENT_ID` was added to the table on 2026-08-29 (T-728) and
 is **not yet set**, so a reader comparing this against `gh variable list` should
 find exactly that one difference until the split is applied. Seeded from
-Terraform outputs by `scripts/set-github-variables.ps1` — never written by hand.
+Terraform outputs by `scripts/set-github-variables.ps1` — never written by
+hand, with one exception: `COPILOT_REVIEW_APP_ID` identifies a GitHub App that
+Terraform does not manage, so it is set by hand from the App page (runbook
+step 4) and its row says so.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
 | `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml` and `heal-computed-properties.yml`. Also arms the healer, which skips while it is unset |
-| `COPILOT_REVIEW_CLIENT_ID` | **NOT SET** | OIDC login in `copilot-setup-steps.yml`, the job GitHub runs before Copilot code review and the Copilot cloud agent start. Identifies `github_copilot_review` (`infra/oidc.tf`): Reader on the four workload groups, nothing else. Seeded from the `copilot_review_client_id` output by `scripts/set-github-variables.ps1`; while unset the login fails closed and the Azure MCP server has no credential — see [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
-| `COPILOT_REVIEW_APP_ID` | **NOT SET** | App ID of *HCW Copilot Review Reader*, the read-only GitHub App `copilot-setup-steps.yml` mints a one-hour installation token from for the GitHub MCP server Copilot code review uses. An identifier, like `MANIFEST_APP_ID`; the key is the Agents secret in §4.3. Set by hand from the App page (runbook step 4) |
+| `COPILOT_REVIEW_CLIENT_ID` | **SET 2026-09-06** | OIDC login in `copilot-setup-steps.yml`, the job GitHub runs before Copilot code review and the Copilot cloud agent start. Identifies `github_copilot_review` (`infra/oidc.tf`): Reader on the four workload groups, nothing else. Seeded from the `copilot_review_client_id` output by `scripts/set-github-variables.ps1`; while unset the login fails closed and the Azure MCP server has no credential — see [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
+| `COPILOT_REVIEW_APP_ID` | **SET 2026-09-06** | App ID of *HCW Copilot Review Reader*, the read-only GitHub App from which `copilot-setup-steps.yml` mints a one-hour installation token for the GitHub MCP server Copilot code review uses. An identifier, like `MANIFEST_APP_ID`; the key is the Agents secret in §4.3. Set by hand from the App page (runbook step 4) |
 | `READER_CLIENT_ID` | **NOT SET** | OIDC login for the workflows that only read — `monitor-functions-registered.yml`, `verify-alert-state.yml`, `publish-content-manifest.yml` (T-728). All three are gated on it and **skip silently while it is unset**, so seed it in the same pass as the apply: an unset value looks like three workflows not running, not like a failure |
 | `TENANT_ID` | **VERIFIED** | OIDC login |
 | `SUBSCRIPTION_ID` | **VERIFIED** | OIDC login, `az rest` calls |
@@ -163,12 +166,13 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 
 The **Agents** store (Settings → Secrets and variables → Agents) is separate
 from Actions secrets. Copilot's setup job and agent environment read it; a
-name carrying the `COPILOT_MCP_` prefix is read by MCP servers only. It is to
-hold one entry:
+name carrying the `COPILOT_MCP_` prefix is read by MCP servers only. It holds
+the Copilot review identifiers and one key:
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| `COPILOT_REVIEW_APP_PRIVATE_KEY` | **NOT SET** | PEM private key of *HCW Copilot Review Reader*, the GitHub App installed on this repository only with eight **read** permissions. `copilot-setup-steps.yml` mints a one-hour installation token from it for the `github-mcp-server` entry in `.github/copilot-mcp.json`; the App's read-only permissions are the ceiling for anything the key can mint. **No personal access token, classic or fine-grained, is used anywhere in the configuration.** Not `COPILOT_MCP_`-prefixed because the setup job, not an MCP server, reads it. Justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification); procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
+| `COPILOT_REVIEW_CLIENT_ID`, `COPILOT_REVIEW_TENANT_ID`, `COPILOT_REVIEW_SUBSCRIPTION_ID`, `COPILOT_REVIEW_APP_ID` | **SET 2026-09-06** — owner step 2b, [issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381) | Copies of the four identifiers the repository variables also hold, because Copilot's own runner resolves no `vars.*` (seen on the first review session, PR #378, 2026-09-06) and reads only this store. `copilot-setup-steps.yml` prefers these and falls back to the variables, so a manual dispatch and a Copilot session both sign in. Rotate them with the variables: a changed client id or App ID has to land in both places. Holding identifiers in a secret store is the documented exception in [Variables and secrets](variables-and-secrets.md#subscription-tenant-and-client-ids) |
+| `COPILOT_REVIEW_APP_PRIVATE_KEY` | **SET 2026-09-06** | PEM private key of *HCW Copilot Review Reader*, the GitHub App installed on this repository only with eight **read** permissions. `copilot-setup-steps.yml` mints a one-hour installation token from it for the `github-mcp-server` entry in `.github/copilot-mcp.json`; the App's read-only permissions are the ceiling for anything the key can mint. **No personal access token, classic or fine-grained, is used anywhere in the configuration.** Not `COPILOT_MCP_`-prefixed because the setup job, not an MCP server, reads it. Justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification); procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
 
 ## 4.4 GitHub environments
 
