@@ -9,9 +9,50 @@
  * is not an empty page.
  */
 import { describe, it, expect } from 'vitest';
-import { decideEmptiness } from './audit-published-pages.mjs';
+import { decideEmptiness, parseOptions } from './audit-published-pages.mjs';
 
 const COPY = ['No episodes available yet.'];
+
+describe('parseOptions', () => {
+  // Importing the module must never read argv or exit; parsing happens here,
+  // on demand, and a usage error is thrown rather than exited.
+  it('applies the defaults', () => {
+    const o = parseOptions([], {});
+    expect(o).toMatchObject({
+      baseUrl: 'https://hybridcloudworks.com',
+      sitemap: 'https://hybridcloudworks.com/sitemap.xml',
+      concurrency: 3,
+      limit: 0,
+      only: '',
+      strict: false,
+      channel: undefined,
+    });
+  });
+
+  it('reads flags and environment, and bounds concurrency', () => {
+    const o = parseOptions(['--only', '/azure', '--limit', '5', '--strict'], {
+      AUDIT_BASE_URL: 'https://example.test/',
+      AUDIT_CONCURRENCY: '40',
+      AUDIT_CHANNEL: 'msedge',
+    });
+    expect(o).toMatchObject({
+      baseUrl: 'https://example.test',
+      sitemap: 'https://example.test/sitemap.xml',
+      concurrency: 8,
+      limit: 5,
+      only: '/azure',
+      strict: true,
+      channel: 'msedge',
+    });
+    expect(parseOptions([], { AUDIT_CONCURRENCY: 'abc' }).concurrency).toBe(3);
+  });
+
+  it('throws on a bad --limit instead of exiting', () => {
+    expect(() => parseOptions(['--limit', 'abc'], {})).toThrow(/--limit expects/);
+    expect(() => parseOptions(['--limit', '-1'], {})).toThrow(/--limit expects/);
+    expect(() => parseOptions(['--limit', '2.5'], {})).toThrow(/--limit expects/);
+  });
+});
 
 describe('decideEmptiness', () => {
   const cases = [

@@ -42,33 +42,41 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 
-const args = process.argv.slice(2);
-const flag = (name) => args.includes(name);
-const opt = (name, fallback) => {
-  const i = args.indexOf(name);
-  return i !== -1 && args[i + 1] ? args[i + 1] : fallback;
-};
-
-const BASE_URL = (process.env.AUDIT_BASE_URL || 'https://hybridcloudworks.com').replace(/\/$/, '');
-const SITEMAP = process.env.AUDIT_SITEMAP || `${BASE_URL}/sitemap.xml`;
-const OUT_DIR = path.resolve(process.env.AUDIT_OUT || 'reports/page-audit');
-const CHANNEL = process.env.AUDIT_CHANNEL || undefined;
-const CONCURRENCY = (() => {
-  const n = Number.parseInt(process.env.AUDIT_CONCURRENCY || '3', 10);
-  return Number.isFinite(n) && n >= 1 ? Math.min(n, 8) : 3;
-})();
-const LIMIT = (() => {
-  // A bad or missing value is a usage error, not "no limit": say so and stop.
-  const raw = opt('--limit', '0');
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0 || String(n) !== String(raw).trim()) {
-    console.error(`--limit expects a non-negative integer, got "${raw}"`);
-    process.exit(2);
+/**
+ * Command line and environment → options. A pure function that throws on a
+ * usage error, called from main(): importing this module (the tests do) must
+ * never read argv or exit the process.
+ */
+export function parseOptions(argv, env) {
+  const flag = (name) => argv.includes(name);
+  const opt = (name, fallback) => {
+    const i = argv.indexOf(name);
+    return i !== -1 && argv[i + 1] ? argv[i + 1] : fallback;
+  };
+  const baseUrl = (env.AUDIT_BASE_URL || 'https://hybridcloudworks.com').replace(/\/$/, '');
+  const concurrencyRaw = Number.parseInt(env.AUDIT_CONCURRENCY || '3', 10);
+  // A bad or missing --limit value is a usage error, not "no limit".
+  const limitRaw = opt('--limit', '0');
+  const limit = Number.parseInt(limitRaw, 10);
+  if (!Number.isFinite(limit) || limit < 0 || String(limit) !== String(limitRaw).trim()) {
+    throw new Error(`--limit expects a non-negative integer, got "${limitRaw}"`);
   }
-  return n;
-})();
-const ONLY = opt('--only', '');
-const STRICT = flag('--strict');
+  return {
+    baseUrl,
+    sitemap: env.AUDIT_SITEMAP || `${baseUrl}/sitemap.xml`,
+    outDir: path.resolve(env.AUDIT_OUT || 'reports/page-audit'),
+    channel: env.AUDIT_CHANNEL || undefined,
+    concurrency:
+      Number.isFinite(concurrencyRaw) && concurrencyRaw >= 1 ? Math.min(concurrencyRaw, 8) : 3,
+    limit,
+    only: opt('--only', ''),
+    strict: flag('--strict'),
+  };
+}
+
+/** Set by main() from parseOptions(); null while the module is merely imported. */
+let options = null;
+
 const API_HOST = 'api-azure.hybridcloudworks.com';
 
 /** Every fetch outside the browser is bounded, so a hung host stalls one
@@ -173,22 +181,22 @@ function classifyConsole(text) {
 }
 
 async function readSitemap() {
-  const res = await fetch(SITEMAP, {
+  const res = await fetch(options.sitemap, {
     headers: { 'User-Agent': 'HCW-page-audit/1.0' },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`sitemap ${SITEMAP} answered ${res.status}`);
+  if (!res.ok) throw new Error(`sitemap ${options.sitemap} answered ${res.status}`);
   const xml = await res.text();
   const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].trim());
-  const all = locs.map((u) => (u.startsWith('http') ? u : `${BASE_URL}${u}`));
+  const all = locs.map((u) => (u.startsWith('http') ? u : `${options.baseUrl}${u}`));
   // The live sitemap has carried repeated <loc> entries; one verdict per URL
   // means one crawl per URL. The duplicate count is reported, because a
   // sitemap with repeats is itself a finding for whoever generates it.
   const unique = [...new Set(all)];
   sitemapStats.total = all.length;
   sitemapStats.duplicates = all.length - unique.length;
-  const urls = unique.filter((u) => !ONLY || new URL(u).pathname.startsWith(ONLY));
-  return LIMIT ? urls.slice(0, LIMIT) : urls;
+  const urls = unique.filter((u) => !options.only || new URL(u).pathname.startsWith(options.only));
+  return options.limit ? urls.slice(0, options.limit) : urls;
 }
 
 const sitemapStats = { total: 0, duplicates: 0 };
@@ -475,12 +483,13 @@ function toMarkdown(records, meta) {
 }
 
 async function main() {
+  options = parseOptions(process.argv.slice(2), process.env);
   const startedAt = new Date().toISOString();
   const urls = await readSitemap();
   if (urls.length === 0) throw new Error('sitemap yielded no URLs');
-  fs.mkdirSync(OUT_DIR, { recursive: true });
+  fs.mkdirSync(options.outDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: true, channel: CHANNEL });
+  const browser = await chromium.launch({ headless: true, channel: options.channel });
   const context = await browser.newContext({
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 HCW-page-audit/1.0',
@@ -488,29 +497,32 @@ async function main() {
   });
   let records;
   try {
-    records = await runPool(urls, (u) => auditPage(context, u), CONCURRENCY);
+    records = await runPool(urls, (u) => auditPage(context, u), options.concurrency);
   } finally {
     await browser.close().catch(() => {});
   }
 
   const meta = {
     startedAt,
-    baseUrl: BASE_URL,
-    sitemap: SITEMAP,
+    baseUrl: options.baseUrl,
+    sitemap: options.sitemap,
     sitemapTotal: sitemapStats.total,
     sitemapDuplicates: sitemapStats.duplicates,
     finishedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(OUT_DIR, 'audit.json'), JSON.stringify({ meta, records }, null, 2));
-  fs.writeFileSync(path.join(OUT_DIR, 'audit.md'), toMarkdown(records, meta));
+  fs.writeFileSync(
+    path.join(options.outDir, 'audit.json'),
+    JSON.stringify({ meta, records }, null, 2)
+  );
+  fs.writeFileSync(path.join(options.outDir, 'audit.md'), toMarkdown(records, meta));
   const counts = records.reduce(
     (acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc),
     {}
   );
   console.log(
-    `\nsitemap ${sitemapStats.total} entries (${sitemapStats.duplicates} duplicate) · works=${counts.works || 0} empty=${counts.empty || 0} defect=${counts.defect || 0} → ${OUT_DIR}`
+    `\nsitemap ${sitemapStats.total} entries (${sitemapStats.duplicates} duplicate) · works=${counts.works || 0} empty=${counts.empty || 0} defect=${counts.defect || 0} → ${options.outDir}`
   );
-  if (STRICT && counts.defect) process.exit(1);
+  if (options.strict && counts.defect) process.exit(1);
 }
 
 // Run only when executed directly, so the test file can import the pure
