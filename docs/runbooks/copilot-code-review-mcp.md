@@ -16,7 +16,10 @@
 > reads the four identifiers from Agents secrets first (step 2b below, done
 > the same day as issue #381), and the read-only tool filter described under
 > [What the review runner keeps](#what-the-review-runner-keeps) decides which
-> servers a review can actually call.
+> servers a review can actually call. **First review after that merge (PR
+> #382, same day):** every setup step green in Copilot's runner — Agents
+> reads, federated login, App token — recorded in the
+> [Verification record](#verification-record).
 
 Every Copilot review in this repository ends with the hint *"Configure MCP
 servers for context-aware, tailored reviews."* This page is that
@@ -529,12 +532,14 @@ the canonical one) and a `functions/` change (expect Microsoft Learn).
 
 ### Verification record
 
-One row per session read against the list above, newest first. A row is
-added when the log has actually been read, not when the review is requested.
+One row per session log read against the list above, newest first. A row
+records what a log showed, so it is written from the log, not from the
+expectation; a pull request that adds a row for its own session opens as a
+draft and fills the row in before it leaves draft.
 
 | Read | Session | Setup steps | Servers | Notes |
 | --- | --- | --- | --- | --- |
-| 2026-09-06 | First review after #378 merged (the pull request that added this table) | pending | pending | Filled in from the session log before that pull request leaves draft. |
+| 2026-09-06 | First review after #378 merged: PR #382, Actions run 34019479901, runtime `vendored-93e753b4` | **All green, and the merged step list.** *Are the Azure identifiers resolvable here?* ran; *Azure Login* `Finished successfully` (8 s); *Warm the pinned MCP servers* warmed all three (`@azure/mcp`, both images) in 6 s; *Is the GitHub App configured?* armed; *Mint a read-only App installation token* green; *Hand the token to the GitHub MCP server* wrote the env file mode 600. `COPILOT_AGENT_INJECTED_SECRET_NAMES` listed the four identifiers and the key. | No "no allowed tools" line. `azure`, `github-mcp-server`, `microsoft-learn`, `cloudflare-docs` and `playwright` reported `connected`; `terraform` appeared in the loaded configuration but in no status line, as in the session before. Summary line: `invocations=0` for every server. | The diff was one Markdown table, so the reviewer had no reason to call a tool; zero invocations is consistent with the skill's per-component table and proves nothing about the servers either way. `terraform`'s silence is unexplained and is the open question for the next `infra/` review. What this session does prove: the Agents reads, the federated login and the App token mint all work in Copilot's runner. |
 
 ## Change or roll back
 
