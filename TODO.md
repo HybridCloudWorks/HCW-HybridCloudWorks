@@ -27,7 +27,6 @@ https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues
 
 | Item | Issue |
 | --- | --- |
-| Apply the Copilot code review MCP configuration: Terraform apply, `COPILOT_REVIEW_CLIENT_ID`, the read-only GitHub App, the settings paste | [#369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369) |
 | Podbean feed returns 410; `fetchPodcastFeeds` fails every 2 hours; Podbean still on the pages | [#348](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/348) |
 | Replace Podbean: RSS.com hosting, ElevenLabs speech, StreamYard, one audio surface | [#349](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/349) |
 | Optional: `REPLICATE-API-KEY` for AI hero images | [#350](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/350) |

@@ -19,6 +19,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Copilot code review MCP configuration applied (issue #369, closed
+  2026-09-06).** The owner completed every step the runbook laid out, in
+  order: the `hcw-azure` apply that created `github_copilot_review` and its
+  seven resources; `COPILOT_REVIEW_CLIENT_ID` seeded from the new output; the
+  setup workflow dispatched by hand and green on its second run (the first,
+  fifty-eight seconds after the merge, ran before the apply and failed on an
+  empty client id — the runbook now says steps 1 to 3 wait for the merge and
+  what that failure looks like); the read-only GitHub App *HCW Copilot Review
+  Reader* registered, installed on this repository only, its App ID and
+  private key stored; and the five-server configuration pasted into the
+  repository's Copilot settings. The runbook status and the required-inputs
+  rows record the values as set. The remaining proof is a real review whose
+  session log shows the setup job and all five servers, which the runbook's
+  *Verify* section describes.
 - **Every pre-rendered page was a spinner with the real page hidden below
   it; now the page is the page (#376, closes #370).** The audit (#361) found
   React error 419 on every hydration and two inline scripts the CSP blocks.

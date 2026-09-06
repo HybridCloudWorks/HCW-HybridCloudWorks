@@ -1,14 +1,14 @@
 # Copilot code review — MCP servers
 
-> **Status: configuration written, not yet applied.** The file
-> `.github/copilot-mcp.json` is the reviewed source of record. GitHub does not
-> read it from the repository; the owner pastes its contents into the
-> repository's Copilot settings once (procedure below), and again after any
-> change to the file lands on `main`. Two of the five servers need one owner
-> step each before the paste — a Terraform apply for the Azure identity, a
-> read-only GitHub App for the GitHub server — and the order matters. The owner
-> steps are tracked in
-> [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369).
+> **Status: applied 2026-09-06.** The `github_copilot_review` identity is
+> applied, `COPILOT_REVIEW_CLIENT_ID` and `COPILOT_REVIEW_APP_ID` are set, the
+> App's key is stored, the setup workflow's manual dispatch signed in (run 2,
+> green), and the five servers are pasted into repository settings. The owner
+> steps were
+> [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369),
+> closed the same day. `.github/copilot-mcp.json` remains the reviewed source
+> of record: GitHub does not read it from the repository, so any change to it
+> is a pull request and then the paste in step 5 again.
 
 Every Copilot review in this repository ends with the hint *"Configure MCP
 servers for context-aware, tailored reviews."* This page is that
