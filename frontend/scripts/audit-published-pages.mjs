@@ -52,7 +52,10 @@ const BASE_URL = (process.env.AUDIT_BASE_URL || 'https://hybridcloudworks.com').
 const SITEMAP = process.env.AUDIT_SITEMAP || `${BASE_URL}/sitemap.xml`;
 const OUT_DIR = path.resolve(process.env.AUDIT_OUT || 'reports/page-audit');
 const CHANNEL = process.env.AUDIT_CHANNEL || undefined;
-const CONCURRENCY = Number(process.env.AUDIT_CONCURRENCY || 3);
+const CONCURRENCY = (() => {
+  const n = Number.parseInt(process.env.AUDIT_CONCURRENCY || '3', 10);
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 8) : 3;
+})();
 const LIMIT = Number(opt('--limit', 0));
 const ONLY = opt('--only', '');
 const STRICT = flag('--strict');
@@ -124,20 +127,40 @@ async function readSitemap() {
   if (!res.ok) throw new Error(`sitemap ${SITEMAP} answered ${res.status}`);
   const xml = await res.text();
   const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].trim());
-  const urls = locs
-    .map((u) => (u.startsWith('http') ? u : `${BASE_URL}${u}`))
-    .filter((u) => !ONLY || new URL(u).pathname.startsWith(ONLY));
+  const all = locs.map((u) => (u.startsWith('http') ? u : `${BASE_URL}${u}`));
+  // The live sitemap has carried repeated <loc> entries; one verdict per URL
+  // means one crawl per URL. The duplicate count is reported, because a
+  // sitemap with repeats is itself a finding for whoever generates it.
+  const unique = [...new Set(all)];
+  sitemapStats.total = all.length;
+  sitemapStats.duplicates = all.length - unique.length;
+  const urls = unique.filter((u) => !ONLY || new URL(u).pathname.startsWith(ONLY));
   return LIMIT ? urls.slice(0, LIMIT) : urls;
 }
+
+const sitemapStats = { total: 0, duplicates: 0 };
 
 function providerOf(url) {
   const seg = new URL(url).pathname.split('/').filter(Boolean)[0] || '';
   return PROVIDER_NAMES[seg] ? seg : null;
 }
 
-async function headStatus(url) {
+/**
+ * Is the media reachable? HEAD first; hosts that refuse HEAD (405/501) or
+ * Range-on-HEAD get one ranged GET, which costs a single byte, so a host
+ * that serves audio fine is never reported as "not served".
+ */
+async function mediaStatus(url) {
   try {
-    const res = await fetch(url, { method: 'HEAD', headers: { Range: 'bytes=0-0' } });
+    const head = await fetch(url, { method: 'HEAD' });
+    if ([200, 206].includes(head.status)) return head.status;
+    if (![405, 501, 403, 416].includes(head.status)) return head.status;
+  } catch {
+    // fall through to the ranged GET
+  }
+  try {
+    const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } });
+    await res.body?.cancel?.();
     return res.status;
   } catch {
     return 0;
@@ -180,15 +203,21 @@ async function auditPage(context, url) {
     record.consoleErrors.push(text.slice(0, 300));
   });
   page.on('pageerror', (err) => record.pageErrors.push(String(err?.message || err).slice(0, 300)));
+  // One shape for every entry in failedRequests / apiFailures:
+  // { url, kind: 'network' | 'http', status: number | null, error: string | null }.
   page.on('requestfailed', (req) => {
-    const u = req.url();
-    record.failedRequests.push({ url: u, error: req.failure()?.errorText || 'failed' });
+    record.failedRequests.push({
+      url: req.url(),
+      kind: 'network',
+      status: null,
+      error: req.failure()?.errorText || 'failed',
+    });
   });
   page.on('response', (res) => {
     const st = res.status();
     if (st < 400) return;
     const u = res.url();
-    const entry = { url: u, status: st };
+    const entry = { url: u, kind: 'http', status: st, error: null };
     const accepted = KNOWN_ACCEPTED.find((k) => k.match(u));
     if (accepted) {
       if (!record.notes.includes(accepted.note)) record.notes.push(accepted.note);
@@ -241,7 +270,7 @@ async function auditPage(context, url) {
     record.media = await Promise.all(
       dom.media.map(async (src) => {
         const abs = new URL(src, url).href;
-        return { url: abs, status: await headStatus(abs) };
+        return { url: abs, status: await mediaStatus(abs) };
       })
     );
   } catch (error) {
@@ -332,7 +361,7 @@ function toMarkdown(records, meta) {
   const lines = [
     `# Published pages audit — ${meta.startedAt.slice(0, 10)}`,
     '',
-    `Base: ${meta.baseUrl} · sitemap URLs: ${records.length} · works ${counts.works} · empty ${counts.empty} · defect ${counts.defect}`,
+    `Base: ${meta.baseUrl} · sitemap entries: ${meta.sitemapTotal} (${meta.sitemapDuplicates} duplicate) · URLs crawled: ${records.length} · works ${counts.works} · empty ${counts.empty} · defect ${counts.defect}`,
     '',
     '| Path | HTTP | Verdict | Findings |',
     '| --- | ---: | --- | --- |',
@@ -391,6 +420,8 @@ async function main() {
     startedAt,
     baseUrl: BASE_URL,
     sitemap: SITEMAP,
+    sitemapTotal: sitemapStats.total,
+    sitemapDuplicates: sitemapStats.duplicates,
     finishedAt: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(OUT_DIR, 'audit.json'), JSON.stringify({ meta, records }, null, 2));
@@ -400,7 +431,7 @@ async function main() {
     {}
   );
   console.log(
-    `\nworks=${counts.works || 0} empty=${counts.empty || 0} defect=${counts.defect || 0} → ${OUT_DIR}`
+    `\nsitemap ${sitemapStats.total} entries (${sitemapStats.duplicates} duplicate) · works=${counts.works || 0} empty=${counts.empty || 0} defect=${counts.defect || 0} → ${OUT_DIR}`
   );
   if (STRICT && counts.defect) process.exit(1);
 }

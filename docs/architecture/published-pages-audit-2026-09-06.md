@@ -2,19 +2,21 @@
 
 The first run of `frontend/scripts/audit-published-pages.mjs` (issue #361) against production: every URL in the live sitemap, in headless Chromium, one verdict each. The crawl re-runs weekly from `.github/workflows/audit-published-pages.yml`; this page is the dated record of what it found the first time and where each finding went.
 
-- Base: `https://hybridcloudworks.com` · sitemap URLs: **120** · started 2026-09-06T05:32Z
-- Verdicts: works **0**, empty **11**, defect **109**
+- Base: `https://hybridcloudworks.com` · sitemap entries: **120** (2 duplicate, dropped) · URLs crawled: **118** · started 2026-09-06T05:32Z
+- Verdicts: works **0**, empty **11**, defect **107**
 
 ## What "defect" mostly means here
 
-One root cause accounts for almost all of it: every prerendered page ships a pending Suspense boundary, and the Content Security Policy blocks the two inline scripts React emits to complete it, so hydration reports error 419 on 109 of 120 pages (#370). Take that class away and the site has a handful of page-specific problems, each with its own issue below.
+One root cause accounts for almost all of it: every prerendered page ships a pending Suspense boundary, and the Content Security Policy blocks the two inline scripts React emits to complete it, so hydration reports error 419 on 107 of 118 pages (#370). Take that class away and the site has a handful of page-specific problems, each with its own issue below.
+
+The live sitemap itself carried one URL three times (`/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio`); the crawler de-duplicates and reports the count, and the repeat is noted on #373 with the other sitemap hygiene items.
 
 ## Finding classes
 
 | Class | Pages | Where it went |
 | --- | ---: | --- |
-| `console csp-inline-script` | 109 | #370 |
-| `console react-hydration-419` | 109 | #370 |
+| `console csp-inline-script` | 107 | #370 |
+| `console react-hydration-419` | 107 | #370 |
 | `thin main region` | 7 | #373 |
 | `console network-failed` | 5 | #371 |
 | `broken images` | 5 | #371 / #374 |
@@ -30,7 +32,7 @@ One root cause accounts for almost all of it: every prerendered page ships a pen
 - #370 — pending Suspense boundary in every prerender + CSP blocks the completion scripts (site-wide, P1)
 - #371 — landing hero image sets missing for GCP, GitHub, Terraform, FinOps (P2)
 - #372 — podcast rows with dead PodBean media still served (P2)
-- #373 — six section pages render empty and sit in the sitemap (P3)
+- #373 — six section pages render empty and sit in the sitemap; one sitemap URL repeated (P3)
 - #374 — curated article bodies hotlink upstream images that no longer load (P3)
 
 ## Empty by configuration, not defects
@@ -144,8 +146,6 @@ One root cause accounts for almost all of it: every prerendered page ships a pen
 | `/azure/blog/enterprise-hub-and-spoke-zero-trust-edge` | 200 | defect | console csp-inline-script; console react-hydration-419 |
 | `/azure/blog/operationalizing-azure-updates-with-microsoft-release-communications-and-proacti` | 200 | defect | console csp-inline-script; console react-hydration-419 |
 | `/azure/blog/autonomous-self-healing-for-azure-vmware-solution-private-clouds` | 200 | defect | console csp-inline-script; console react-hydration-419 |
-| `/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio` | 200 | defect | console csp-inline-script; console react-hydration-419 |
-| `/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio` | 200 | defect | console csp-inline-script; console react-hydration-419 |
 | `/azure/blog/microsoft-foundry-end-to-end-observability-and-roi-for-production-ai-agents` | 200 | defect | console csp-inline-script; console react-hydration-419; broken images: 2 |
 | `/azure/blog/leveraging-ai-for-efficient-azure-update-discovery-with-microsoft-release-commun` | 200 | defect | console csp-inline-script; console react-hydration-419 |
 | `/azure/blog/unveiling-microsofts-secure-future-initiative-sfi-a-blueprint-for-next-generatio-91IWYg` | 200 | defect | console csp-inline-script; console react-hydration-419 |

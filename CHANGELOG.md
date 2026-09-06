@@ -31,11 +31,13 @@ This project has not cut a tagged release; entries are grouped under
   to live with (the #175 data snapshots) are notes, not defects, so a decided
   item is not re-raised every week. `audit-published-pages.yml` runs it
   Mondays and on demand and uploads the matrix; `npm run audit:pages` runs it
-  locally. The first run — 120 URLs, 0 works, 11 empty, 109 defect — is
-  recorded at `docs/architecture/published-pages-audit-2026-09-06.md`, and
-  its defect classes became five issues: #370 (every prerendered page ships
-  a pending Suspense boundary and the CSP blocks React's completion scripts,
-  so hydration error 419 fires site-wide — the reason 109 pages are
+  locally. The first run — 120 sitemap entries, 118 unique URLs (one
+  repeated three times; the crawler de-duplicates and reports the count), 0
+  works, 11 empty, 107 defect — is recorded at
+  `docs/architecture/published-pages-audit-2026-09-06.md`, and its defect
+  classes became five issues: #370 (every prerendered page ships a pending
+  Suspense boundary and the CSP blocks React's completion scripts, so
+  hydration error 419 fires site-wide — the reason 107 pages are
   "defect"), #371 (twenty landing hero images missing for four providers),
   #372 (podcast rows with dead PodBean media still served), #373 (six empty
   section pages in the sitemap) and #374 (curated article bodies hotlinking

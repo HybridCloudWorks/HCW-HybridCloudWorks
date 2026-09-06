@@ -55,14 +55,21 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # Inputs reach the script as quoted argv entries, never interpolated
+      # into the command line: a value with spaces or shell metacharacters is
+      # one literal argument, not a re-tokenized command.
       - name: Audit
         working-directory: frontend
         env:
           AUDIT_OUT: ${{ github.workspace }}/page-audit
-        run: >
-          node scripts/audit-published-pages.mjs
-          ${{ inputs.only != '' && format('--only {0}', inputs.only) || '' }}
-          ${{ inputs.strict == true && '--strict' || '' }}
+          AUDIT_ONLY: ${{ inputs.only }}
+          AUDIT_STRICT: ${{ inputs.strict }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${AUDIT_ONLY:-}" ]; then args+=(--only "$AUDIT_ONLY"); fi
+          if [ "${AUDIT_STRICT:-false}" = "true" ]; then args+=(--strict); fi
+          node scripts/audit-published-pages.mjs "${args[@]}"
 
       - name: Upload the matrix
         if: always()
