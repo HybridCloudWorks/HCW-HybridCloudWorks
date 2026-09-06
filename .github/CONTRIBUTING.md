@@ -8,12 +8,12 @@ review discipline — read this before your first pull request.
 
 | Content | Home |
 | --- | --- |
-| Narrative documentation (architecture, runbooks, ADRs, analysis) | [GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki) — staged in `wiki/` and auto-synced to the Wiki on merge |
+| Narrative documentation (architecture, runbooks, ADRs, analysis) | [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com) — source in `docs/`, built by MkDocs (`mkdocs build --strict` runs on every PR) and deployed to GitHub Pages on merge |
 | Review state (work, blockers, inputs, completed) | `TODO.md`, `CHANGELOG.md` at the root |
 | Tooling-adjacent docs (this file, `infra/README.md`, templates) | Next to the tooling, allowlisted in `scripts/validate-repository-structure.ps1` |
 
 CI enforces this via the Repository Policy workflow. If you add a Markdown
-file and CI rejects it, the fix is usually to move the content to the Wiki —
+file and CI rejects it, the fix is usually to move the content under `docs/` —
 not to extend the allowlist.
 
 ## Workflow
@@ -21,7 +21,7 @@ not to extend the allowlist.
 1. Branch from `main`. No direct pushes to `main`.
 2. Keep the SOP documents true: all new work — engineering and owner-gated
    alike — lands in `TODO.md`, completed work moves to `CHANGELOG.md`, and new
-   required inputs go to `wiki/Required-Inputs.md`.
+   required inputs go to `docs/standards/required-inputs.md`.
 3. Open a PR using the template; fill the verification section with what you
    actually ran.
 4. CI must be green: build/test, CodeQL, repository policy, and — for
@@ -31,8 +31,8 @@ not to extend the allowlist.
 
 The environment is **live production** with state in HCP Terraform Cloud.
 
-- Read `infra/README.md` and the Wiki
-  [Deployment Runbook](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Deployment-Runbook) first.
+- Read `infra/README.md` and the
+  [Deployment Runbook](https://docs.hybridcloudworks.com/runbooks/deployment-runbook/) first.
 - Never rename a resource address without a `moved` block.
 - Never commit state, saved plans, real `tfvars` values, or credentials.
 - Attach the plan output (or TFC run link) to the PR.

@@ -1,0 +1,158 @@
+# Documentation site: https://docs.hybridcloudworks.com (issue #360).
+#
+# docs/ is the reviewed source. It replaced wiki/ on 2026-09-06; the GitHub Wiki
+# is retired by .github/workflows/retire-wiki.yml once the domain is live.
+# Build and deploy: .github/workflows/docs-pages.yml. `mkdocs build --strict`
+# turns every warning below — a broken link, a page missing from nav that is
+# not meant to be, an unknown anchor — into a failed check.
+site_name: HybridCloudWorks Engineering
+site_url: https://docs.hybridcloudworks.com/
+site_description: Architecture decisions, runbooks, standards and the engineering record for the HybridCloudWorks website.
+repo_url: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks
+repo_name: HybridCloudWorks/HCW-HybridCloudWorks
+edit_uri: edit/main/docs/
+copyright: HybridCloudWorks
+
+docs_dir: docs
+site_dir: site
+strict: true
+
+# README.md, CHANGELOG.md and TODO.md stay at the repository root (the
+# repository-structure policy requires them there) and are pulled into the
+# site at build time as repo/*.md, so they are never copied by hand.
+hooks:
+  - scripts/docs/hooks.py
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+
+validation:
+  nav:
+    omitted_files: info
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Decisions:
+      - decisions/index.md
+      - ADR template: decisions/template.md
+      - 0001 Single repository: decisions/0001-single-repository.md
+      - 0002 Cloudflare edge: decisions/0002-cloudflare-edge.md
+      - 0003 Cosmos serverless: decisions/0003-cosmos-serverless.md
+      - 0004 Functions boundaries: decisions/0004-functions-boundaries.md
+      - 0005 GitHub and Terraform delivery: decisions/0005-github-terraform-delivery.md
+      - 0006 Admin identity: decisions/0006-admin-identity.md
+      - 0007 Static-first frontend: decisions/0007-static-first-frontend.md
+      - 0008 Selective Private Link: decisions/0008-selective-private-link.md
+      - 0009 Production state: decisions/0009-production-state.md
+      - 0010 Observability: decisions/0010-observability.md
+      - 0011 Single-region recovery: decisions/0011-single-region-recovery.md
+      - 0012 Asynchronous workflows: decisions/0012-asynchronous-workflows.md
+      - 0013 AI provider strategy: decisions/0013-ai-provider-strategy.md
+      - 0014 Storage and media: decisions/0014-storage-and-media.md
+      - 0015 Cost governance: decisions/0015-cost-governance.md
+      - 0016 Reversible migration: decisions/0016-reversible-migration.md
+      - 0017 Repository history remediation: decisions/0017-repository-history-remediation.md
+      - 0018 As-built plan v0.2: decisions/0018-as-built-plan-v02.md
+      - 0019 Single Function App: decisions/0019-single-function-app.md
+      - 0020 Native Terraform root module: decisions/0020-native-terraform-root-module.md
+      - 0021 Key Vault purge protection: decisions/0021-key-vault-purge-protection.md
+      - 0021 Container Apps CI runner (superseded): decisions/0021-container-apps-ci-runner.md
+      - 0022 Alerting fabric: decisions/0022-alerting-fabric.md
+      - 0023 Migration estate retirement: decisions/0023-migration-estate-retirement.md
+      - 0024 Edge availability probe: decisions/0024-edge-availability-probe.md
+      - 0025 Cosmos firewall datacenter sentinel: decisions/0025-cosmos-firewall-datacenter-sentinel.md
+      - 0026 Required-checks filter inside the job: decisions/0026-required-checks-filter-inside-the-job.md
+  - Runbooks:
+      - Deployment: runbooks/deployment-runbook.md
+      - Alerting and support: runbooks/alerting-and-support.md
+      - Availability probe: runbooks/availability-probe.md
+  - Standards:
+      - IaC repository standard: standards/iac-repository-standard.md
+      - Naming convention: standards/naming-convention.md
+      - Variables and secrets: standards/variables-and-secrets.md
+      - Required inputs: standards/required-inputs.md
+  - Architecture:
+      - Target architecture: architecture/architecture.md
+      - Review 2026-08: architecture/architecture-review-2026-08.md
+      - Well-Architected assessment: architecture/well-architected-assessment.md
+      - Cost analysis: architecture/cost-analysis.md
+      - Resource validation report: architecture/resource-validation-report.md
+  - Content:
+      - Blog machine: content/blog-machine.md
+      - Blog template: content/blog-template.md
+      - Build log 01 infrastructure: content/blog-build-log-01-infrastructure.md
+      - Build log 02 application: content/blog-build-log-02-application.md
+      - FinOps 01 CI refund: content/blog-finops-01-ci-refund.md
+      - How-to 01 infrastructure: content/blog-how-to-01-infrastructure.md
+      - How-to 02 application: content/blog-how-to-02-application.md
+  - Repository:
+      - README: repo/readme.md
+      - CHANGELOG: repo/changelog.md
+      - TODO and accepted risks: repo/todo.md
+  - History:
+      - Architecture plan: history/architecture-plan.md
+      - Migration plan: history/migration-plan.md
+      - Implementation plan: history/implementation-plan.md
+      - Implementation TODO: history/implementation-todo.md
+      - Migration inventory: history/migration-inventory.md
+      - Migration runbook: history/migration-runbook.md
+      - Cutover runbook: history/cutover-runbook.md
+      - Phase 4 data migration: history/phase-4-data-migration.md
+      - Task tracker: history/legacy-azure-migration-task-tracker.md
+      - Smoke test: history/smoke-test.md
+      - Smoke test signoff: history/smoke-test-signoff.md
+      - Landing zone deployment assessment template: history/template-lzdeployment-assessment.md
+  - Archive (Firebase era): archive/index.md

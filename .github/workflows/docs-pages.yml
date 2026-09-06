@@ -1,0 +1,87 @@
+# Documentation site — build on every change, deploy to GitHub Pages on main.
+#
+# Source is docs/ plus the three root documents the hook in scripts/docs/hooks.py
+# pulls in (README.md, CHANGELOG.md, TODO.md). `mkdocs build --strict` fails the
+# job on a broken link, a missing nav target or an unknown anchor, so a PR
+# cannot merge a page that would 404 on the site.
+#
+# Deployment uses the github-pages environment and OIDC: no PAT, no deploy
+# key. The Pages site was created with build_type=workflow on 2026-09-05
+# (issue #360); the custom domain docs.hybridcloudworks.com is set on the site
+# after the Cloudflare CNAME in infra/frontend.tf is applied.
+name: Docs site
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'scripts/docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'TODO.md'
+      - '.github/workflows/docs-pages.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'scripts/docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'TODO.md'
+      - '.github/workflows/docs-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/docs/requirements.txt
+
+      - name: Install MkDocs
+        run: python -m pip install -r scripts/docs/requirements.txt
+
+      - name: Build
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

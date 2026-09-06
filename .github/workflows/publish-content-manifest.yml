@@ -21,7 +21,7 @@ name: Publish Content Manifest
 # App, which reaches Cosmos over the integration subnet the firewall admits, and
 # this job now fetches the result over HTTP through a per-run origin window. It
 # holds no Cosmos role of any kind. See
-# wiki/0025-cosmos-firewall-datacenter-sentinel.md.
+# docs/decisions/0025-cosmos-firewall-datacenter-sentinel.md.
 #
 # Committed rather than passed as an artifact so a build is reproducible from a
 # checkout alone, and so a diff shows what changed about the published set.

@@ -4,7 +4,7 @@
 work, owner decisions, production approvals, credentials, external access and
 live-environment operations live here; verified completion belongs in
 [CHANGELOG.md](CHANGELOG.md), and the required-inputs inventory is
-[Required-Inputs](wiki/Required-Inputs.md) in the Wiki.
+[Required-Inputs](docs/standards/required-inputs.md) on the docs site.
 
 **Nothing is open as of 2026-09-06.** The tracked findings (`T-` items), the
 attack sequence, the owner-decision record and the long-form evidence all

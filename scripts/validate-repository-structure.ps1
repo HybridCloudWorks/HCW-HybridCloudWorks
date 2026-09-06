@@ -28,9 +28,16 @@ $harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 # red on a regenerable cache that CI will never see.
 # `edge` holds Cloudflare Worker source (ADR 0024) — code that runs on the
 # edge rather than in Azure, deployed by the owner with wrangler, unit-tested
-# in CI. Its documentation lives in the Wiki (Availability-Probe) like every
-# other component's; the directory carries only source, config and tests.
-$allowedDirectories = @('.azure', '.github', '.vscode', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'vps-agent', 'wiki') + $harnessDirectories
+# in CI. Its documentation lives on the docs site (runbooks/availability-probe)
+# like every other component's; the directory carries only source, config and
+# tests.
+#
+# `docs` is the documentation source (2026-09-06, issue #360): MkDocs builds it
+# into https://docs.hybridcloudworks.com through docs-pages.yml. It replaced
+# `wiki/`, whose pages were overlaid onto the GitHub Wiki; the Wiki is retired
+# by retire-wiki.yml. `site` is the build output and is gitignored, but this
+# check walks the filesystem, so it is allowed here for local runs.
+$allowedDirectories = @('.azure', '.github', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
@@ -40,8 +47,9 @@ $allowedDirectories = @('.azure', '.github', '.vscode', 'edge', 'frontend', 'fun
 # machine-readable handoff surface an orchestrating agent reads between sessions
 # — TODO.md in particular must exist even when empty, so that "no outstanding
 # work" is a readable state rather than a missing file. They are deliberately
-# exempt from the Wiki policy below: the Wiki holds human-facing narrative
-# documentation, these hold review state.
+# exempt from the docs/ policy below: docs/ holds human-facing narrative
+# documentation, these hold review state. The docs site pulls all three in at
+# build time (scripts/docs/hooks.py), so they are published without moving.
 #
 # This consolidation has now happened twice, for the same reason both times.
 #
@@ -53,7 +61,7 @@ $allowedDirectories = @('.azure', '.github', '.vscode', 'edge', 'frontend', 'fun
 #
 # REVIEW.md itself was retired on 2026-08-29 for the same failure one level up:
 # it restated TODO.md's owner-gated items. Its work sections are now in TODO.md,
-# and its Part 4 inventory is wiki/Required-Inputs.md, which keeps the §4.x
+# and its Part 4 inventory is docs/standards/required-inputs.md, which keeps the §4.x
 # numbering that roughly sixteen code comments cite.
 #
 # Do not recreate any of the three.
@@ -62,13 +70,17 @@ $allowedRootFiles = @(
   '.gitattributes',
   '.editorconfig',
   'README.md',
+  # MkDocs configuration for the docs site (issue #360). MkDocs reads it from
+  # the directory it is run in, so it lives at the root by tool convention.
+  'mkdocs.yml',
   # Three files left the root on 2026-08-29. Architecture_Plan.md and
   # Migration_Plan.md were archived records rather than live documents and moved
-  # to wiki/, so they publish as Wiki pages instead of reading as current work.
+  # to wiki/ (now docs/history/), so they publish as documentation instead of
+  # reading as current work.
   # REVIEW.md held the owner-gated half of the open work, every item of which was
   # already mirrored in TODO.md under "Gate: owner" — a second document restating
   # the first; its work sections are now in TODO.md and its Part 4 inventory is
-  # wiki/Required-Inputs.md.
+  # docs/standards/required-inputs.md.
   #
   # Each is REJECTED here rather than permitted, so none can quietly return.
   # The three left are the ones that are actually maintained.
@@ -126,8 +138,9 @@ foreach ($requiredFile in @('README.md', 'CHANGELOG.md', 'TODO.md')) {
   }
 }
 
+# `docs` left this list on 2026-09-06 when it became the documentation source
+# (issue #360); it is allowlisted above instead.
 $prohibitedDocumentationPaths = @(
-  'docs',
   'frontend/documentation',
   'frontend/docs',
   'frontend/README.md',
@@ -139,7 +152,7 @@ $prohibitedDocumentationPaths = @(
 )
 foreach ($relativePath in $prohibitedDocumentationPaths) {
   if (Test-Path -LiteralPath (Join-Path $repositoryRoot $relativePath)) {
-    $errors.Add("Human-facing documentation must be in the GitHub Wiki: $relativePath")
+    $errors.Add("Human-facing documentation must be under docs/: $relativePath")
   }
 }
 
@@ -179,22 +192,22 @@ foreach ($markdownFile in $markdownFiles) {
     # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING and
     # SECURITY from .github/, and infra/README.md is the Terraform-standard
     # module doc for the deployment source of truth. Narrative documentation
-    # still belongs in the Wiki.
+    # still belongs under docs/.
     $relativePath -eq '.github/CONTRIBUTING.md' -or
     $relativePath -eq '.github/SECURITY.md' -or
     $relativePath -eq 'infra/README.md' -or
-    # Wiki-as-code staging area: pages here ARE Wiki content, reviewed via PR
-    # and overlaid onto the GitHub Wiki by .github/workflows/sync-wiki.yml on
-    # merge to main. This is the one sanctioned in-repo home for narrative
-    # documentation, precisely because its destination is the Wiki.
-    $relativePath.StartsWith('wiki/', [System.StringComparison]::OrdinalIgnoreCase)
+    # Documentation source: pages here are reviewed via PR and published to
+    # https://docs.hybridcloudworks.com by .github/workflows/docs-pages.yml on
+    # merge to main (issue #360; replaced wiki/ on 2026-09-06). This is the one
+    # sanctioned in-repo home for narrative documentation.
+    $relativePath.StartsWith('docs/', [System.StringComparison]::OrdinalIgnoreCase)
   if (-not $isAllowed) {
-    $errors.Add("Unexpected Markdown outside the Wiki: $relativePath")
+    $errors.Add("Unexpected Markdown outside docs/: $relativePath")
   }
 }
 
 $readme = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'README.md')
-foreach ($requiredText in @('/wiki', 'Azure Static Web Apps', 'Azure Functions')) {
+foreach ($requiredText in @('docs.hybridcloudworks.com', 'Azure Static Web Apps', 'Azure Functions')) {
   if (-not $readme.Contains($requiredText)) {
     $errors.Add("README is missing required current-state text: $requiredText")
   }

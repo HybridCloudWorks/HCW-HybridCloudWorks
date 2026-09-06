@@ -32,7 +32,7 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   CLAUDE.md rules: no placeholders, no bash-isms, one line where possible.
 - `validate-repository-structure.ps1` is the Markdown allowlist — a diff
   extending the allowlist deserves scrutiny: the usual right fix is moving
-  the doc to `wiki/`, not growing the allowlist.
+  the doc to `docs/`, not growing the allowlist.
 
 ### Workflows (`.github/workflows/*.yml`)
 - **Permissions**: each workflow declares least-privilege `permissions:`;

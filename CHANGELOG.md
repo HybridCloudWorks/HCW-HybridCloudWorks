@@ -5,7 +5,7 @@ Completed features, fixes, enhancements, security fixes, and released changes.
 **Classification (Code Review SOP, CODE_REVIEW_PROMPT.md v1.0, Phase 10):** this
 file records **completed work only**. All outstanding work, including
 owner-gated work, belongs in [TODO.md](TODO.md); required-input references and
-formats belong in [Required-Inputs](wiki/Required-Inputs.md). `REVIEW.md` was
+formats belong in [Required-Inputs](docs/standards/required-inputs.md). `REVIEW.md` was
 retired on 2026-08-29 and must not be recreated.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -18,6 +18,40 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Documentation moved from the GitHub Wiki to a MkDocs site under `docs/`,
+  published to docs.hybridcloudworks.com (#PR, issue #360).** Owner decisions
+  2026-09-05: MkDocs Material, host name `docs.hybridcloudworks.com`, source
+  is the former `wiki/` folder plus the live Wiki. The live Wiki held 106
+  pages that were never staged in the repository (ADRs 0001–0017, the ADR
+  template, the target-architecture and Well-Architected pages, the migration
+  inventory and smoke-test records, and about eighty Firebase-era guides), so
+  it was cloned and everything came across: 141 pages, arranged as
+  `decisions/`, `runbooks/`, `standards/`, `architecture/`, `content/`,
+  `history/` (the Azure migration record, banner-marked) and `archive/` (the
+  Firebase era, banner-marked, indexed from its own page). Wiki-style links
+  were rewritten to relative paths and `mkdocs build --strict` fails the new
+  `Docs site` check on any broken link or anchor, which is what found the
+  seven stale anchors that the Wiki had been serving as dead links. The
+  duplicate ADR number 0021 (Container Apps CI runner, deferred, versus Key
+  Vault purge protection) is kept as two records with a note on the first.
+  `README.md`, `CHANGELOG.md` and `TODO.md` stay at the root and are pulled
+  into the site at build time by `scripts/docs/hooks.py`, so nothing is
+  copied by hand. Deployment is `docs-pages.yml` with OIDC to the
+  `github-pages` environment; the Pages site was created with the Actions
+  build type on 2026-09-05. `sync-wiki.yml` is replaced by `retire-wiki.yml`,
+  a `workflow_dispatch` that overwrites every Wiki page with a pointer to its
+  new URL (dry-run by default) — to be run once the domain serves, since a
+  pointer to a host that does not resolve is worse than the old page. The
+  repository-structure policy now sanctions `docs/` instead of `wiki/`,
+  allows `mkdocs.yml` at the root, and requires the README to name the docs
+  site. Terraform adds `cloudflare_dns_record.docs_pages`, a DNS-only CNAME
+  to `hybridcloudworks.github.io` (proxying it would leave GitHub unable to
+  issue the certificate); the apply and the Pages custom-domain setting are
+  the owner's, in that order. Every current-state reference to the Wiki in
+  the repository was repointed (README, CONTRIBUTING, `infra/README.md`,
+  the issue-template contact link, the code-review skill, the infrastructure
+  plan's evidence URLs); the historical `wiki/` links in this file were
+  rewritten to their `docs/` paths so they resolve again on GitHub.
 - **The tracker is open work only, and the repository is leaner (#346).**
   Owner instruction 2026-09-06: `TODO.md` keeps four things — the optional
   seeds, the one live test-coverage case, the live confirmations still to
@@ -80,7 +114,7 @@ This project has not cut a tagged release; entries are grouped under
   > **The architecture review is closed.** All 62 findings (`T-701`…`T-762`) are
   > resolved or carried below as owner gates. The per-finding record — method,
   > evidence standard, every failure mode and outcome — is
-  > [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md),
+  > [wiki/Architecture-Review-2026-08.md](docs/architecture/architecture-review-2026-08.md),
   > which is now a dated historical document rather than a live list. Its last
   > three owner-gated findings are all closed — `T-749` on 2026-08-31,
   > `T-719` and `T-721` on 2026-09-02.
@@ -146,20 +180,20 @@ This project has not cut a tagged release; entries are grouped under
   | ---: | --- | --- | --- |
   | 1 | ~~Fix the probe's secret, wait for six `availabilityResults` rows, arm the reachability alert (`T-519`)~~ | **Done 2026-09-01** — record in [CHANGELOG.md](CHANGELOG.md) | Twelve healthy rows, `alert-api-reachability-prod-cus` live in `rg-web-site-prod-cus`, function count 122 before and after the restart |
   | 2 | ~~Settings sweep: delete the three stale workspace variables, set the `production` deployment-branch rule, decide the two ruleset booleans~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Three variable rows deleted; `production` restricted to `main`; ruleset decided: branches must be up to date before merge, thread resolution not required |
-  | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to [Owner decisions](#owner-decisions-and-external-access) |
+  | 3 | ~~Cut the host verbosity at the source (`T-719`), pull `T-721`'s lever~~ | **Done 2026-09-02** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision with #321 merged and the deploy dispatched; the below-cap cap-day reading is expected confirmation, not a gate. The SWA tier question moved to the *Owner decisions and external access* table (Owner decisions, below in this file) |
   | 4 | ~~Arm the remaining timers in three applies — 3a, 3b, then waves 4, 5 and 6 together (`T-518`)~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | All 18 timers armed; the two reapers armed one per apply with the delete switch flipped after two zero dry-runs; the observation reads dropped as a gate by owner decision |
   | 5 | ~~Prove the nightly refresh's App-token path (`T-726`)~~ | **Done 2026-09-05** — record in [CHANGELOG.md](CHANGELOG.md) | Closed by owner decision on the built-and-configured state; the first content change remains the live proof, and the failure signatures (401 = wrong App id, 404 = App not installed) are in the changelog entry |
-  | 6 | Optional features: seed the keys and documents you actually want (the insights-panel decision, `T-765`, was made 2026-09-05: retired) | [Optional, and only if you want the feature](#optional-and-only-if-you-want-the-feature) | Decisions, not repairs — nothing above depends on any of them |
-  | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [Live confirmation still requiring an authorized operator](#live-confirmation-still-requiring-an-authorized-operator) and [Test coverage follow-up](#test-coverage-follow-up) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
+  | 6 | Optional features: seed the keys and documents you actually want (the insights-panel decision, `T-765`, was made 2026-09-05: retired) | [the owner-gated issues](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues?q=is%3Aissue+is%3Aopen+label%3Aowner-gated) | Decisions, not repairs — nothing above depends on any of them |
+  | 7 | Live confirmations as they come due: Entra token claims, the timed restore against RTO 8 h / RPO 24 h ([issue #231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231)), third-party webhooks, the authenticated Labs check | [the live-check issues](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues?q=is%3Aissue+is%3Aopen+label%3Alive-check) and [issue #356](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/356) | Each needs a live environment or a third party on its own schedule; none blocks Phases 1–5 |
 
   The deliberately unscheduled feature backlog — analytics-informed topic
   weighting, the voice-drift monitor, stale-post refresh, A/B titles, the
   duplicate-angle advisor — stays in
-  [Blog-Machine § Backlog](wiki/Blog-Machine.md) on purpose: none of it is open
+  [Blog-Machine § Backlog](docs/content/blog-machine.md) on purpose: none of it is open
   work, and pulling it here would turn this file into a wish list. The one
   backlog entry that is also a real route gap, `createContentFromRecording`,
   already lives in the AI-providers and third-party rows of
-  [Owner decisions](#owner-decisions-and-external-access) — it stays in
+  the *Owner decisions and external access* table (Owner decisions, below in this file) — it stays in
   `.azure/api-surface.json` `notImplemented` until its provider credentials
   exist.
 
@@ -206,7 +240,7 @@ This project has not cut a tagged release; entries are grouped under
   not arm anything at all and no document said so; it is now
   `var.schedulers_master_enabled`. Arming needs **both** it and a name in
   `enabled_timers`, through the four gates in
-  [Cutover-Runbook](wiki/Cutover-Runbook.md) step 5 — where the acceptance
+  [Cutover-Runbook](docs/history/cutover-runbook.md) step 5 — where the acceptance
   criterion is the observed invocation, not the applied setting.
 
   **The master switch went `true` on 2026-08-30**, with `CHECK_AGENT_HEALTH` and
@@ -819,7 +853,7 @@ This project has not cut a tagged release; entries are grouped under
   to `enabled_timers` in the `hcw-azure` workspace in one apply, taking the
   estate from three armed timers of eighteen to five.
 
-  **Two timers in one apply is a departure from [Cutover-Runbook](wiki/Cutover-Runbook.md)
+  **Two timers in one apply is a departure from [Cutover-Runbook](docs/history/cutover-runbook.md)
   step 5, and it was an owner decision rather than a shortcut.** Step 5 reads
   one timer per apply, observed before the next. Taken literally across the
   fifteen that remain that is fifteen applies over roughly five weeks — three
@@ -1127,9 +1161,9 @@ This project has not cut a tagged release; entries are grouped under
   `main` and the weekly CodeQL schedule still run everything, so the merged
   combination and newly published queries are never skipped. The decision,
   its rejected alternatives and its accepted risks are
-  [ADR 0026](wiki/0026-required-checks-filter-inside-the-job.md); a public
+  [ADR 0026](docs/decisions/0026-required-checks-filter-inside-the-job.md); a public
   write-up of the pattern is staged as
-  [Blog-FinOps-01-CI-Refund](wiki/Blog-FinOps-01-CI-Refund.md).
+  [Blog-FinOps-01-CI-Refund](docs/content/blog-finops-01-ci-refund.md).
 
 - **The code-review skill moved to `.github/skills/code-review/`, and its
   consumer is now GitHub Copilot code review.** Owner decision, 2026-09-01:
@@ -2086,7 +2120,7 @@ This project has not cut a tagged release; entries are grouped under
   (Cloudflare Worker, PowerShell scripts, Python harness, VPS agent). Every
   finding carries a `file:line` anchor; the review of record, with each
   finding's failure mode, recommendation and outcome, is
-  [wiki/Architecture-Review-2026-08.md](wiki/Architecture-Review-2026-08.md).
+  [wiki/Architecture-Review-2026-08.md](docs/architecture/architecture-review-2026-08.md).
 
   **All five Critical findings are closed.** An editor could publish content
   live by enqueuing a job, because `registerJobType` defaulted the required role
@@ -2188,7 +2222,7 @@ This project has not cut a tagged release; entries are grouped under
   buildable at all.
 
 - **Reachability gets an alert, from the edge rather than from Azure (T-519
-  repository half, 2026-08-27; #234, [ADR 0024](wiki/0024-edge-availability-probe.md)).**
+  repository half, 2026-08-27; #234, [ADR 0024](docs/decisions/0024-edge-availability-probe.md)).**
   Recorded here on 2026-08-28 — it shipped without a changelog entry, which is
   the gap this documentation pass found. Reachability was the one signal with
   nothing behind it, and it is the signal that matters most: every other alert
@@ -2211,7 +2245,7 @@ This project has not cut a tagged release; entries are grouped under
   `availability_test_enabled`, each defaulting to `false`), so the repository
   ships armed-but-inert; deploying the Worker and seeding its connection string
   are owner actions, and the procedure is
-  [wiki/Availability-Probe.md](wiki/Availability-Probe.md). The web test is kept
+  [wiki/Availability-Probe.md](docs/runbooks/availability-probe.md). The web test is kept
   in Terraform, disarmed, for the day the Cloudflare plan is upgraded.
 
 - **The Blog Machine (T-601–T-607 closed, 2026-08-28; #236–#242 + the
@@ -2221,7 +2255,7 @@ This project has not cut a tagged release; entries are grouped under
   visually rich post in the owner's voice comes out the other end —
   announced on Telegram with a signed staging link, approved with one reply,
   published live through the full gated pipeline. The program of record with
-  per-phase as-built notes is [wiki/Blog-Machine.md](wiki/Blog-Machine.md).
+  per-phase as-built notes is [wiki/Blog-Machine.md](docs/content/blog-machine.md).
 
   What landed, phase by phase: the forge's only entry point fixed (its
   payload key had always been wrong — the test asserted the job type, not
@@ -2707,7 +2741,7 @@ This project has not cut a tagged release; entries are grouped under
   query, requiring two failing periods, raising the threshold, lowering the
   severity from Sev1 — makes the rule detect less, and none of them should be
   pulled before the diagnostic query now in
-  [Alerting and support](wiki/Alerting-And-Support.md) says what is actually
+  [Alerting and support](docs/runbooks/alerting-and-support.md) says what is actually
   throwing. Those levers are documented and ordered there; the thresholds
   themselves remain the first estimates ADR 0022 declared them to be.
 
@@ -2716,7 +2750,7 @@ This project has not cut a tagged release; entries are grouped under
   cannot clear before the 08:00 UTC cap reset, so there is nothing for
   auto-resolution to resolve. The two metric alerts needed no change — metric
   alerts are stateful by default. Recorded as decision 6 in
-  [ADR 0022](wiki/0022-alerting-fabric.md).
+  [ADR 0022](docs/decisions/0022-alerting-fabric.md).
 
 - **The SCM lock is armed, and the per-run window is proven under `Deny`
   (T-520 closed, 2026-08-25).** `functions_scm_lock_enabled` was set to `true`

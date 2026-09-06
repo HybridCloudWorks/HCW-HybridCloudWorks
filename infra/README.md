@@ -5,11 +5,11 @@ production workload. It is the deployment source of truth for every Azure
 resource the platform runs on, plus the Cloudflare DNS records that point at
 them.
 
-Narrative documentation (architecture, ADRs, runbooks, cost analysis) lives in
-the [GitHub Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki).
+Narrative documentation (architecture, ADRs, runbooks, cost analysis) lives on
+the [documentation site](https://docs.hybridcloudworks.com), source `docs/`.
 This README covers only what an engineer needs to work safely in this
 directory. Start with the
-[Deployment Runbook](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Deployment-Runbook)
+[Deployment Runbook](https://docs.hybridcloudworks.com/runbooks/deployment-runbook/)
 before any plan or apply.
 
 ## Posture

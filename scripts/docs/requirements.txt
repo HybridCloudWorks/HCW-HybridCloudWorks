@@ -1,0 +1,5 @@
+# Documentation site build (mkdocs.yml, .github/workflows/docs-pages.yml).
+# Exact pins: the site is built in CI on every merge, and an unpinned theme
+# upgrade would change the published site without a reviewed change.
+mkdocs==1.6.1
+mkdocs-material==9.7.7

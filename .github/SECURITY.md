@@ -17,7 +17,7 @@ details, tokens, endpoints, or tenant identifiers.
 - No static cloud credentials exist in the repository or GitHub secrets;
   deployment uses OIDC federated identities (`infra/oidc.tf`). Anything that
   looks like a credential in history is a finding — report it.
-- Any secret value that appears in a commit, issue, log, or the Wiki is
+- Any secret value that appears in a commit, issue, log, or the docs site is
   treated as disclosed and rotated (`TODO.md` policy).
 - Dependency vulnerabilities are tracked by Dependabot and CodeQL; accepted
   residual risks are recorded in the root `README.md` and `TODO.md`.

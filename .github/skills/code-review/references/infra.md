@@ -31,7 +31,7 @@ Read `infra/README.md` before reviewing anything non-trivial here.
   `terraform.tfvars.example` carries shapes only.
 
 ### Consistency with the rest of the repo
-- Naming follows the Wiki Naming Convention (`rg-<tier>-site-prod-cus`,
+- Naming follows the Naming Convention in `docs/standards/naming-convention.md` (`rg-<tier>-site-prod-cus`,
   `stsiteprodcus01`, `func-site-prod-cus-01`, `kv-site-prod-cus-01`, …).
   Defaults live in `infra/variables.tf` — new resources should thread
   through variables the same way, not hardcode.

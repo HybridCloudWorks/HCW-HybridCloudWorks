@@ -1,0 +1,92 @@
+# Retire the GitHub Wiki: replace every page with a pointer to the docs site.
+#
+# Until 2026-09-06 this file was sync-wiki.yml, which overlaid wiki/*.md onto
+# the Wiki after each merge. The pages now live under docs/ and publish to
+# https://docs.hybridcloudworks.com through docs-pages.yml, so the Wiki's job
+# is to send readers there. This is workflow_dispatch only, run once by the
+# owner after the custom domain is serving, because a stub that points at a
+# domain that does not resolve yet is worse than the old page.
+#
+# scripts/docs/wiki-redirects.json maps every Wiki page name that existed on
+# 2026-09-05 (staged or live-only) to its path on the site. A page the map
+# does not know keeps its content and gets no stub, so nothing is deleted
+# blind. Pass `dry_run: true` to see the stubs without pushing.
+name: Retire Wiki
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: Base URL the stubs point at
+        required: true
+        default: https://docs.hybridcloudworks.com/
+        type: string
+      dry_run:
+        description: Print the stubs, push nothing
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: retire-wiki
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    name: Write pointer pages to the Wiki
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Clone the Wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki
+
+      - name: Write stubs
+        env:
+          SITE_URL: ${{ inputs.site_url }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          site = os.environ["SITE_URL"].rstrip("/") + "/"
+          redirects = json.loads(pathlib.Path("scripts/docs/wiki-redirects.json").read_text())
+          wiki = pathlib.Path("/tmp/wiki")
+          written = 0
+          for page in sorted(wiki.glob("*.md")):
+              name = page.stem
+              if name == "_Sidebar":
+                  page.write_text(f"## Moved\n\nThis Wiki is retired. Documentation lives at [{site}]({site}).\n")
+                  continue
+              target = redirects.get(name)
+              if not target:
+                  print(f"keep (not in map): {name}")
+                  continue
+              url = site + target
+              page.write_text(
+                  f"# Moved\n\nThis page moved to **[{url}]({url})** on 2026-09-06.\n\n"
+                  f"The Wiki is retired; documentation is reviewed in `docs/` and published to {site}\n"
+              )
+              written += 1
+          print(f"stubs written: {written}")
+          PY
+
+      - name: Show the result
+        run: cd /tmp/wiki && git status --short | head -50 && git diff --stat | tail -3
+
+      - name: Push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          cd /tmp/wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "nothing to push"; exit 0; }
+          git commit -m "Retire the Wiki: every page now points at the docs site"
+          git push
