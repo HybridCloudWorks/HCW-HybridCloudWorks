@@ -64,10 +64,11 @@ or someone "fixes" it without knowing it was a choice.
 - Never paste secret values, private keys, access tokens, or personal data into
   this file, issues, logs, or the Wiki.
 - An open item is an issue, and every open issue is on the board at
-  https://github.com/orgs/HybridCloudWorks/projects/1 (auto-added on
-  creation; give it a Priority). This file does not carry work; when
-  something new is found, open an issue and, if it is a decision to live with
-  a finding, record it under Accepted risks here.
+  https://github.com/orgs/HybridCloudWorks/projects/1. The project's
+  auto-add workflow puts each issue on the board when it is opened; the person
+  opening it sets its Priority. This file does not carry work; when something
+  new is found, open an issue and, if it is a decision to live with a finding,
+  record it under Accepted risks here.
 - A missing credential is not an engineering task. Record its name, owner, and
   approved storage location only.
 - Historical migration pages and the two archived plans are evidence, not
