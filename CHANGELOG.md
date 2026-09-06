@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **Retire Wiki stubs the Home page too (#PR).** The dry run on 2026-09-06
+- **Retire Wiki stubs the Home page too (#364).** The dry run on 2026-09-06
   reported `keep (not in map): Home`: Home maps to the site root, whose path
   is the empty string, and the guard tested truthiness instead of presence.
   It now tests `is None`, so 141 pages are stubbed rather than 140 and the
