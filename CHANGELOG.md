@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Every pre-rendered page was a spinner with the real page hidden below
+  it; now the page is the page (#376, closes #370).** The audit (#361) found
+  React error 419 on every hydration and two inline scripts the CSP blocks.
+  The cause was one React default: Fizz outlines any completed Suspense
+  boundary larger than `progressiveChunkSize` (12.8 kB) — the shell gets the
+  route's fallback spinner and a `<template id="B:0">`, the page follows as
+  `<div hidden id="S:0">`, and an inline `$RC` script swaps them in the
+  browser. Every real page is bigger than 12.8 kB, so since the pre-render
+  step shipped (#296) each document has carried a visible spinner in
+  `<main>`, a hidden copy of the page, and a swap script this site's
+  hash-less CSP refuses to run — hydration then threw 419 and re-rendered
+  from scratch, and anything that does not run JavaScript read the fallback.
+  `prerender-entry.jsx` now passes `progressiveChunkSize:
+  Number.MAX_SAFE_INTEGER`, so Fizz inlines every completed boundary and the
+  output has no `$RB`/`$RC` scripts at all; the CSP stays exactly as strict as
+  it was. `prerender.mjs` refuses to write the streamed form
+  (`findStreamedBoundary`, tested for each of its three shapes), because the
+  existing shell floor was blind to it: header, footer and spinner cleared
+  420 characters easily. Verified on a full local build: 120 documents, zero
+  pending markers, zero runtime scripts, the route's `<main>` inline in each.
+  The audit's `console csp-inline-script` and `console react-hydration-419`
+  classes — 107 of the 118 crawled pages — should clear on the next deploy.
 - **Every published page audited, in a browser, with a verdict each (#375,
   issue #361).** `frontend/scripts/audit-published-pages.mjs` crawls every
   URL in the live sitemap with Playwright Chromium and records HTTP status,

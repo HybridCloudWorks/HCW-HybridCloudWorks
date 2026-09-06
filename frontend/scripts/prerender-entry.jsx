@@ -144,6 +144,20 @@ export async function render(url, seededData = null) {
       </PrerenderDataContext.Provider>
     </HelmetProvider>,
     {
+      // THE PAGE MUST BE INLINE, NOT STREAMED. Fizz outlines any completed
+      // Suspense boundary larger than `progressiveChunkSize` (12.8 kB by
+      // default): the shell gets `<!--$?--><template id="B:0">` plus the
+      // route's fallback spinner, the real page follows as
+      // `<div hidden id="S:0">`, and an inline `$RC` script swaps them in the
+      // browser. Every real page here is bigger than that, so until
+      // 2026-09-06 every pre-rendered document was a spinner in `<main>`, a
+      // hidden copy of the page, and two inline scripts the CSP (no hashes,
+      // deliberately) refuses to run — which is React error 419 on every
+      // hydration and a crawler reading the fallback (issue #370). Raising the
+      // threshold makes Fizz inline every completed boundary, which is the
+      // only form a static file should ever carry. prerender.mjs refuses to
+      // write the streamed form, so this cannot silently come back.
+      progressiveChunkSize: Number.MAX_SAFE_INTEGER,
       onError(error, info) {
         errors.push({
           message: error?.message || String(error),

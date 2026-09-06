@@ -197,6 +197,24 @@ export function splitHead(rendered) {
 }
 
 /**
+ * Fizz's streamed form, which a static file must never carry: a pending
+ * boundary marker with its placeholder template, a hidden completion segment,
+ * or the inline runtime that swaps one into the other. Returns a description
+ * of the first thing found, or null for a fully inline document. The three
+ * are checked separately because a future React could emit any subset.
+ */
+export function findStreamedBoundary(html) {
+  const source = String(html || '');
+  if (source.includes('<!--$?-->')) return 'pending Suspense boundary (<!--$?-->) in the output';
+  if (/<div hidden id="S:\d+">/.test(source))
+    return 'hidden completion segment (S:n) in the output';
+  if (/\$RC\(|\$RB=\[\]|\$RT=performance\.now\(\)/.test(source)) {
+    return 'React streaming runtime script in the output';
+  }
+  return null;
+}
+
+/**
  * Put the rendered markup and head tags into the built index.html.
  *
  * The template's own `<title>` is REPLACED, not appended to. Two title elements
@@ -527,6 +545,17 @@ async function main() {
       // An error boundary produces perfectly valid-looking HTML. Without this
       // check the error state would be written out and published as the page.
       failures.push(`${route}: rendered an error — ${rendered.errors[0].message}`);
+      continue;
+    }
+
+    const streamed = findStreamedBoundary(rendered.html);
+    if (streamed) {
+      // A page in Fizz's streamed form passed every check below on 2026-09-06:
+      // the shell had header, footer and a spinner, the page itself sat in a
+      // hidden segment, and the text count was well above the shell floor.
+      // It is not a page — nothing without JavaScript ever sees the content,
+      // and the browser cannot run the swap script under this site's CSP.
+      failures.push(`${route}: ${streamed} (see prerender-entry.jsx progressiveChunkSize)`);
       continue;
     }
 
