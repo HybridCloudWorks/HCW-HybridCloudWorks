@@ -70,7 +70,7 @@ sections, because how they authenticate is the whole point.
 The tool allowlist is applied twice for the Terraform and Azure servers: on
 the server's own command line (`--tools=...` / `--tool ...`, so the process
 never registers anything else) and in Copilot's `tools` array (so Copilot
-never asks for anything else). Either one alone would be enough; both is the
+never asks for anything else). Either one alone would be enough; both are the
 same belt-and-braces the `iac-validate.yml` guard uses.
 
 ### The Azure server: read-only, federated, no secret

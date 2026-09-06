@@ -51,7 +51,7 @@ This project has not cut a tagged release; entries are grouped under
   carries the reasoning, the tool table, the owner steps in order (apply,
   seed, prove the sign-in, token, paste) with what success looks like at
   each, and the rollback; the code-review skill names which server to
-  consult per component. Not yet applied: the owner steps are issue #369.
+  consult per component. The owner steps that turn it on are issue #369.
 - **ADR 0027 records the documentation-site decision (#367, issue #360).**
   The move from the Wiki to `docs/` shipped in #363 with its reasoning spread
   across the PR, the issue and the CHANGELOG; the ADR puts it in the register
