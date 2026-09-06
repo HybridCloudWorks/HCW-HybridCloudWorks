@@ -107,6 +107,15 @@ export function inlineBlobPath(contentId, url, contentType) {
   return `${contentId}/inline/${digest}.${ext}`;
 }
 
+/**
+ * Log-safe text: every http(s) URL replaced by `[url]`. The fetcher's messages
+ * embed the URL they were fetching (and, after a redirect, another one), and
+ * the log must name hosts at most — never what was being read.
+ */
+export function scrubUrls(text) {
+  return String(text ?? '').replace(/https?:\/\/[^\s)"'<>]+/gi, '[url]');
+}
+
 /** Replace every occurrence of each `from` with its `to`. Plain text, no regex. */
 export function rewriteBody(body, replacements) {
   let out = String(body ?? '');
@@ -162,8 +171,8 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
         } catch {
           // keep the placeholder
         }
-        // The fetcher's own messages embed the URL; strip it from the log line.
-        const safeReason = reason.split(url).join('[url]');
+        // The fetcher's own messages embed URLs; the log line carries none.
+        const safeReason = scrubUrls(reason);
         log.warn?.(
           `[inlineImages] ${contentId}: could not re-host an image from ${host}: ${safeReason}`
         );
@@ -215,7 +224,9 @@ export async function buildInlineImageUpdate({ contentData, contentId, rehost, n
       },
     };
   } catch (error) {
-    log.warn?.(`[inlineImages] ${contentId}: re-hosting skipped: ${error?.message || error}`);
+    log.warn?.(
+      `[inlineImages] ${contentId}: re-hosting skipped: ${scrubUrls(error?.message || error)}`
+    );
     return null;
   }
 }

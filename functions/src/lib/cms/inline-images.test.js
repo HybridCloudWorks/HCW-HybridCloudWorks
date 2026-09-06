@@ -10,6 +10,7 @@ import {
   isOwnMediaUrl,
   resolveBodyFields,
   rewriteBody,
+  scrubUrls,
 } from './inline-images.js';
 
 const UPSTREAM_A = 'https://devblogs.microsoft.com/foundry/wp-content/uploads/a.png';
@@ -257,7 +258,7 @@ describe('buildInlineImageUpdate', () => {
   it('swallows a rehoster that throws whole and publishes the body untouched', async () => {
     const log = { warn: vi.fn() };
     const rehost = vi.fn(async () => {
-      throw new Error('storage account unreachable');
+      throw new Error(`storage account unreachable while fetching ${UPSTREAM_A}`);
     });
     const update = await buildInlineImageUpdate({
       contentData: { content: `<img src="${UPSTREAM_A}">` },
@@ -268,5 +269,19 @@ describe('buildInlineImageUpdate', () => {
     });
     expect(update).toBeNull();
     expect(log.warn).toHaveBeenCalledTimes(1);
+    // The whole-step warning is scrubbed like the per-URL one.
+    expect(log.warn.mock.calls[0][0]).toContain('storage account unreachable');
+    expect(log.warn.mock.calls[0][0]).not.toContain('devblogs.microsoft.com');
+    expect(log.warn.mock.calls[0][0]).toContain('[url]');
+  });
+});
+
+describe('scrubUrls', () => {
+  it('replaces every http(s) URL and leaves the rest of the message', () => {
+    expect(scrubUrls(`HTTP 403 fetching ${UPSTREAM_A} then ${UPSTREAM_B}`)).toBe(
+      'HTTP 403 fetching [url] then [url]'
+    );
+    expect(scrubUrls('Request timed out')).toBe('Request timed out');
+    expect(scrubUrls(null)).toBe('');
   });
 });
