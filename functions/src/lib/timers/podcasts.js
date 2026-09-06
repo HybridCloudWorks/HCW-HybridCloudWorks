@@ -13,24 +13,24 @@
  * errored on every firing for as long as the constant named it. The next host
  * (issue #349) is seeded into the document, not written back here.
  */
-import { ADMIN_CONFIG_PARTITION } from "../cosmos-client.js";
+import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 
 export const PODCAST_FEEDS = Object.freeze([]);
 
-export const PODCAST_FEEDS_CONFIG_ID = "podcast_feeds";
+export const PODCAST_FEEDS_CONFIG_ID = 'podcast_feeds';
 
 /** The production parser, with the podcast custom fields. Lazy so tests never load rss-parser. */
 export async function createPodcastParser() {
-  const { default: RssParser } = await import("rss-parser");
+  const { default: RssParser } = await import('rss-parser');
   return new RssParser({
     timeout: 20000,
-    headers: { "User-Agent": "Mozilla/5.0 HybridCloudWorks-Bot/1.0" },
+    headers: { 'User-Agent': 'Mozilla/5.0 HybridCloudWorks-Bot/1.0' },
     customFields: {
       item: [
-        "enclosure",
-        ["itunes:duration", "itunes:duration"],
-        ["itunes:image", "itunes:image"],
-        ["media:content", "media:content"],
+        'enclosure',
+        ['itunes:duration', 'itunes:duration'],
+        ['itunes:image', 'itunes:image'],
+        ['media:content', 'media:content'],
       ],
     },
   });
@@ -51,9 +51,9 @@ export function isFeedGoneError(err) {
 export function isValidFeedEntry(entry) {
   return (
     !!entry &&
-    typeof entry.provider === "string" &&
+    typeof entry.provider === 'string' &&
     /^[a-z0-9-]+$/.test(entry.provider) &&
-    typeof entry.url === "string" &&
+    typeof entry.url === 'string' &&
     /^https:\/\//.test(entry.url)
   );
 }
@@ -64,26 +64,22 @@ export function isValidFeedEntry(entry) {
  * Returns `{ feeds, source }` so the summary line can say which one ran.
  */
 export async function resolvePodcastFeeds(store, fallback = PODCAST_FEEDS) {
-  const doc = await store.readDoc(
-    "admin_config",
-    PODCAST_FEEDS_CONFIG_ID,
-    ADMIN_CONFIG_PARTITION,
-  );
+  const doc = await store.readDoc('admin_config', PODCAST_FEEDS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
   if (doc && Array.isArray(doc.feeds)) {
     return {
       feeds: doc.feeds.filter(isValidFeedEntry),
-      source: "admin_config",
+      source: 'admin_config',
     };
   }
-  return { feeds: [...fallback], source: "default" };
+  return { feeds: [...fallback], source: 'default' };
 }
 
 export function normalizePodcastId(guid, title) {
-  return String(guid || title || "")
+  return String(guid || title || '')
     .toLowerCase()
-    .replace(/https?:\/\//, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(/https?:\/\//, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
     .slice(0, 120);
 }
 
@@ -96,8 +92,8 @@ export function extractPodcastMediaFields(item) {
       fileLength: item.enclosure.length || null,
     };
   }
-  if (item["media:content"]) {
-    const mc = item["media:content"];
+  if (item['media:content']) {
+    const mc = item['media:content'];
     return {
       mediaUrl: (mc.$ && mc.$.url) || mc.url || null,
       mimeType: (mc.$ && mc.$.type) || mc.type || null,
@@ -110,11 +106,9 @@ export function extractPodcastMediaFields(item) {
 export function extractPodcastImage(item) {
   return (
     (item.itunes && item.itunes.image && item.itunes.image.href) ||
-    (item.itunes &&
-      typeof item.itunes.image === "string" &&
-      item.itunes.image) ||
+    (item.itunes && typeof item.itunes.image === 'string' && item.itunes.image) ||
     (item.image && item.image.url) ||
-    (item["itunes:image"] && item["itunes:image"].href) ||
+    (item['itunes:image'] && item['itunes:image'].href) ||
     null
   );
 }
@@ -133,14 +127,13 @@ export function buildPodcastEpisode(provider, item, now) {
   return {
     id: normalizePodcastId(guid, item.title),
     provider,
-    title: item.title || "",
-    description: item.contentSnippet || item.summary || "",
-    longDescription: item["content:encoded"] || item.content || "",
+    title: item.title || '',
+    description: item.contentSnippet || item.summary || '',
+    longDescription: item['content:encoded'] || item.content || '',
     mediaUrl,
     mimeType,
     length: fileLength,
-    duration:
-      (item.itunes && item.itunes.duration) || item["itunes:duration"] || null,
+    duration: (item.itunes && item.itunes.duration) || item['itunes:duration'] || null,
     image: extractPodcastImage(item),
     link: item.link || null,
     guid: guid || null,
@@ -156,13 +149,7 @@ export function buildPodcastEpisode(provider, item, now) {
  * @param {Array<{provider: string, url: string}>} [deps.feeds] Pinned list; when
  *   omitted the run resolves it from `admin_config/podcast_feeds` (see above).
  */
-export function createPodcastIngest({
-  store,
-  parser,
-  feeds,
-  now = () => new Date(),
-  log = {},
-}) {
+export function createPodcastIngest({ store, parser, feeds, now = () => new Date(), log = {} }) {
   async function processFeed(provider, feedUrl) {
     const feed = await parser.parseURL(feedUrl);
     const results = { processed: 0, errors: [] };
@@ -170,12 +157,8 @@ export function createPodcastIngest({
     for (const [index, item] of items.entries()) {
       try {
         const episode = buildPodcastEpisode(provider, item, now());
-        const existing = await store.readDoc(
-          "podcasts",
-          episode.id,
-          episode.id,
-        );
-        await store.upsertDoc("podcasts", {
+        const existing = await store.readDoc('podcasts', episode.id, episode.id);
+        await store.upsertDoc('podcasts', {
           ...(existing || {}),
           ...episode,
           createdAt: existing?.createdAt || episode.updatedAt,
@@ -194,7 +177,7 @@ export function createPodcastIngest({
         // stays content-free. The feed itself is named by its provider —
         // one URL per provider in the feed list.
         log.warn?.(
-          `[fetchPodcastFeeds] ${provider}: episode ${index + 1} of ${items.length} failed: ${message}`,
+          `[fetchPodcastFeeds] ${provider}: episode ${index + 1} of ${items.length} failed: ${message}`
         );
       }
     }
@@ -205,14 +188,12 @@ export function createPodcastIngest({
   }
 
   async function run() {
-    const resolved = feeds
-      ? { feeds, source: "pinned" }
-      : await resolvePodcastFeeds(store);
+    const resolved = feeds ? { feeds, source: 'pinned' } : await resolvePodcastFeeds(store);
     if (resolved.feeds.length === 0) {
       // Warning, so the empty state is distinguishable from a timer that never
       // fired — the same reason the empty-feed case above is a Warning.
       log.warn?.(
-        `[fetchPodcastFeeds] no feeds configured (source: ${resolved.source}) — seed admin_config/${PODCAST_FEEDS_CONFIG_ID} as { feeds: [{ provider, url }] }`,
+        `[fetchPodcastFeeds] no feeds configured (source: ${resolved.source}) — seed admin_config/${PODCAST_FEEDS_CONFIG_ID} as { feeds: [{ provider, url }] }`
       );
       return {};
     }
@@ -223,21 +204,17 @@ export function createPodcastIngest({
       } catch (err) {
         const message = String(err?.message || err);
         if (isFeedGoneError(err)) {
-          summary[cfg.provider] = { processed: 0, skipped: "gone" };
+          summary[cfg.provider] = { processed: 0, skipped: 'gone' };
           log.warn?.(
-            `[fetchPodcastFeeds] ${cfg.provider}: feed gone (410) — remove it from admin_config/${PODCAST_FEEDS_CONFIG_ID} or replace the URL`,
+            `[fetchPodcastFeeds] ${cfg.provider}: feed gone (410) — remove it from admin_config/${PODCAST_FEEDS_CONFIG_ID} or replace the URL`
           );
           continue;
         }
         summary[cfg.provider] = { processed: 0, error: message };
-        log.error?.(
-          `[fetchPodcastFeeds] ${cfg.provider}: feed failed: ${message}`,
-        );
+        log.error?.(`[fetchPodcastFeeds] ${cfg.provider}: feed failed: ${message}`);
       }
     }
-    log.log?.(
-      `[fetchPodcastFeeds] (${resolved.source}) ${JSON.stringify(summary)}`,
-    );
+    log.log?.(`[fetchPodcastFeeds] (${resolved.source}) ${JSON.stringify(summary)}`);
     return summary;
   }
   return { run, processFeed };
