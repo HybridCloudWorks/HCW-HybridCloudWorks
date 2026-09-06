@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  dedupeRoutes,
   findStreamedBoundary,
   splitHead,
   injectIntoTemplate,
@@ -503,5 +504,22 @@ describe('findStreamedBoundary', () => {
   it('accepts a fully inline document, completed markers included', () => {
     expect(findStreamedBoundary('<main><!--$--><h1>Page</h1><!--/$--></main>')).toBeNull();
     expect(findStreamedBoundary('')).toBeNull();
+  });
+});
+
+describe('dedupeRoutes', () => {
+  it('renders and lists each route once, keeping first-seen order', () => {
+    // The manifest carried one slug three times on 2026-09-06 (issue #373), so
+    // the sitemap advertised the same URL three times.
+    expect(dedupeRoutes(['/azure', '/azure/blog/x', '/aws', '/azure/blog/x', '/azure'])).toEqual([
+      '/azure',
+      '/azure/blog/x',
+      '/aws',
+    ]);
+  });
+
+  it('passes an already-unique list through unchanged', () => {
+    expect(dedupeRoutes(['/a', '/b'])).toEqual(['/a', '/b']);
+    expect(dedupeRoutes([])).toEqual([]);
   });
 });

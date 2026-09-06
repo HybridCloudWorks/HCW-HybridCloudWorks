@@ -14,7 +14,7 @@
  * sends a person somewhere else, which is more expensive than no message.
  */
 import { describe, it, expect } from 'vitest';
-import { describeFetchFailure } from './build-content-manifest.mjs';
+import { buildManifest, describeFetchFailure } from './build-content-manifest.mjs';
 
 const URL = 'https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest';
 
@@ -51,5 +51,42 @@ describe('describeFetchFailure', () => {
     for (const status of [403, 404, 500, 502]) {
       expect(describeFetchFailure(status, URL)).toContain(URL);
     }
+  });
+});
+
+describe('buildManifest', () => {
+  const azure = (id, slug) => ({
+    id,
+    slug,
+    cloudProvider: 'azure',
+    title: `Item ${id}`,
+  });
+
+  it('lists one route per slug and names the duplicates it dropped', () => {
+    // The live sitemap of 2026-09-06 carried one blog URL three times because
+    // the published set held the same slug three times (issue #373).
+    const manifest = buildManifest([
+      azure('a1', 'enable-ai-powered-discovery'),
+      azure('a2', 'enable-ai-powered-discovery'),
+      azure('a3', 'another-article'),
+      azure('a4', 'enable-ai-powered-discovery'),
+    ]);
+
+    expect(manifest.routes).toEqual([
+      '/azure/blog/enable-ai-powered-discovery',
+      '/azure/blog/another-article',
+    ]);
+    expect(manifest.skipped).toEqual([
+      'enable-ai-powered-discovery: duplicate slug (item a2); first occurrence kept',
+      'enable-ai-powered-discovery: duplicate slug (item a4); first occurrence kept',
+    ]);
+  });
+
+  it('keeps the first occurrence, not the last', () => {
+    const manifest = buildManifest([
+      { ...azure('a1', 'same'), title: 'first' },
+      { ...azure('a2', 'same'), title: 'second' },
+    ]);
+    expect(manifest.data['article:same'].title).toBe('first');
   });
 });
