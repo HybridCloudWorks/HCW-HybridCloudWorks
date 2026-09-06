@@ -37,7 +37,7 @@ Three facts about the estate shape the runtime:
 - **The app already runs timers that fan work out onto a storage queue and a
   queue-triggered worker** (`jobs-sweeper.js`, `jobs-worker.js`). A 2.39 GB
   read does not fit in one timer invocation with a 30-minute default timeout;
-  73 bounded per-container jobs do.
+  60 bounded per-container jobs — one per exported container — do.
 
 ## Purpose and decision drivers
 
