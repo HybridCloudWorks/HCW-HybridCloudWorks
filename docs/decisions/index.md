@@ -14,7 +14,10 @@ Create an ADR before implementing a decision that changes any of the following:
 - migration, compatibility, cutover, decommission, or repository ownership;
 - external integration contract or irreversible operational behavior.
 
-ADR numbers are never reused. Accepted ADRs are immutable except for spelling, links, and status. A
+ADR numbers are never reused. The register carries one historical exception: 0021 was assigned
+twice, first to the deferred Container Apps CI runner record and then to Key Vault purge protection,
+before this rule was written down; both records are kept and marked so the collision cannot be
+mistaken for a revision. Accepted ADRs are immutable except for spelling, links, and status. A
 changed decision gets a new ADR that supersedes the old one. Pull requests implementing architecture
 must link the applicable ADRs. If no ADR applies, the pull request must say why the change is not
 architecturally significant.
