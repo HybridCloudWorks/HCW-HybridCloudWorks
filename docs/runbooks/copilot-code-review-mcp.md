@@ -249,6 +249,15 @@ The next review session's log is the test of the first three rows: look for
 the same "no allowed tools" line and expect it for `playwright` and the two
 documentation servers only.
 
+**Copilot reads `copilot-setup-steps.yml` from the default branch.** The
+review sessions of PR #378 executed the step list `main` held at the time,
+although that PR changed the file — the new steps did not appear in any of
+its own reviews. So a change to the setup steps shows up in a Copilot session
+only after it merges, and the PR that carries it is reviewed with the
+previous version; judge such a change by the first review **after** its
+merge. In Copilot's runner a failed step also skips every step after it,
+which is why a failed login left the GitHub server without its token in
+those sessions.
 ### Deliberately not configured
 
 - **HCP Terraform access** for the Terraform server (`TFE_TOKEN`). Would

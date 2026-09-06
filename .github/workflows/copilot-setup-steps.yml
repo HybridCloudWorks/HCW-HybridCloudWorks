@@ -39,6 +39,13 @@
 # uses, scripts/github-app-token.mjs, which explains why it is not the
 # marketplace action.
 #
+# COPILOT READS THIS FILE FROM THE DEFAULT BRANCH. The review sessions of PR
+# #378 ran the step list `main` held at the time, not the one on the PR head,
+# even though the PR changed this file — so an edit here shows up in a Copilot
+# session only after it merges, and the PR that carries it is reviewed with
+# the previous version. Judge a change to this file by the first review AFTER
+# its merge, not by the reviews of the PR itself.
+#
 # workflow_dispatch only, on purpose: the docs' Azure example triggers the same
 # way, and a pull_request trigger would sign in on every edit of this file for
 # no reader. Run it by hand to prove the Azure login; Copilot runs it for real.
