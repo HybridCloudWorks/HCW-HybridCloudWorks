@@ -116,6 +116,16 @@ export function scrubUrls(text) {
   return String(text ?? '').replace(/https?:\/\/[^\s)"'<>]+/gi, '[url]');
 }
 
+/** Origin and path of a URL, no query string or fragment; the URL itself if unparsable. */
+export function sourceOf(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return String(url);
+  }
+}
+
 /** Replace every occurrence of each `from` with its `to`. Plain text, no regex. */
 export function rewriteBody(body, replacements) {
   let out = String(body ?? '');
@@ -156,8 +166,10 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
       try {
         const { buffer, contentType } = await fetchImage(url);
         const blobPath = inlineBlobPath(contentId, url, contentType);
+        // Provenance without the query string: enough to say where the copy
+        // came from, not enough to replay a signed or tracking URL.
         await storage.uploadBlob(INLINE_IMAGE_CONTAINER, blobPath, buffer, contentType, {
-          sourceUrl: url,
+          sourceUrl: sourceOf(url),
         });
         rewritten.push({ from: url, to: mediaUrlFor(INLINE_IMAGE_CONTAINER, blobPath) });
       } catch (error) {

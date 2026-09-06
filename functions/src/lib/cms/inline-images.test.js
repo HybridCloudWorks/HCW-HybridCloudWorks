@@ -11,9 +11,10 @@ import {
   resolveBodyFields,
   rewriteBody,
   scrubUrls,
+  sourceOf,
 } from './inline-images.js';
 
-const UPSTREAM_A = 'https://devblogs.microsoft.com/foundry/wp-content/uploads/a.png';
+const UPSTREAM_A = 'https://devblogs.microsoft.com/foundry/wp-content/uploads/a.png?w=600&sig=abc';
 const UPSTREAM_B = 'https://cdn.example.org/diagram.webp';
 
 const BODY = [
@@ -107,7 +108,10 @@ describe('createInlineImageRehoster', () => {
     expect(blobPath).toBe(inlineBlobPath('c1', UPSTREAM_A, 'image/png'));
     expect(buffer).toBe(png.buffer);
     expect(contentType).toBe('image/png');
-    expect(metadata).toEqual({ sourceUrl: UPSTREAM_A });
+    // Provenance keeps origin and path; the query string (a size or a signature) is dropped.
+    expect(metadata).toEqual({
+      sourceUrl: 'https://devblogs.microsoft.com/foundry/wp-content/uploads/a.png',
+    });
 
     expect(result.rewritten).toEqual([
       { from: UPSTREAM_A, to: `/api/public/media/covers/${blobPath}` },
@@ -273,6 +277,13 @@ describe('buildInlineImageUpdate', () => {
     expect(log.warn.mock.calls[0][0]).toContain('storage account unreachable');
     expect(log.warn.mock.calls[0][0]).not.toContain('devblogs.microsoft.com');
     expect(log.warn.mock.calls[0][0]).toContain('[url]');
+  });
+});
+
+describe('sourceOf', () => {
+  it('keeps origin and path and drops query and fragment', () => {
+    expect(sourceOf('https://h.example/a/b.png?x=1#frag')).toBe('https://h.example/a/b.png');
+    expect(sourceOf('not a url')).toBe('not a url');
   });
 });
 

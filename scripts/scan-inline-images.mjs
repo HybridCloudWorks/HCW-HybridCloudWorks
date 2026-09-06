@@ -9,7 +9,8 @@
  * by republishing it.
  *
  * Usage:  node scripts/scan-inline-images.mjs
- * Exit 0 always; the output is the report.
+ * The output is the report. Exits non-zero only when the manifest is missing
+ * or is not valid JSON, which is a checkout problem rather than a finding.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
