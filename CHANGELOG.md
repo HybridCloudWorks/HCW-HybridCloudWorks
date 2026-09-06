@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **Every pre-rendered page was a spinner with the real page hidden below
-  it; now the page is the page (#PR, closes #370).** The audit (#361) found
+  it; now the page is the page (#376, closes #370).** The audit (#361) found
   React error 419 on every hydration and two inline scripts the CSP blocks.
   The cause was one React default: Fizz outlines any completed Suspense
   boundary larger than `progressiveChunkSize` (12.8 kB) — the shell gets the
