@@ -19,6 +19,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Copilot code review gets an MCP configuration (#368).** Every Copilot
+  review had been ending with the hint to configure MCP servers for
+  context-aware reviews. `.github/copilot-mcp.json` is now the reviewed source
+  of record: three official, read-only, credential-free servers chosen for
+  what the repository contains — Microsoft Learn (Azure Functions, Cosmos DB,
+  Key Vault, Static Web Apps, Entra ID), Cloudflare's public documentation
+  server (the edge availability probe and DNS) and the HashiCorp Terraform
+  MCP server, pinned to `1.3.0` and held to the eight Registry read tools on
+  both its command line and Copilot's allowlist, with no HCP Terraform token
+  so the live workspace stays unreachable. The Azure MCP Server and the
+  Cloudflare account API server were left out on purpose; the runbook
+  [Copilot code review MCP servers](docs/runbooks/copilot-code-review-mcp.md)
+  says why, and carries the settings paste GitHub requires (it does not read
+  the file), what a successful save and review session look like, and the
+  rollback. The code-review skill names which server to consult per
+  component. Not yet applied: the paste is the owner's step.
 - **Retire Wiki stubs the Home page too (#364).** The dry run on 2026-09-06
   reported `keep (not in map): Home`: Home maps to the site root, whose path
   is the empty string, and the guard tested truthiness instead of presence.
