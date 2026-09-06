@@ -160,7 +160,15 @@ Kept narrow in four ways:
   **90-day expiry**. No classic token: a classic `repo` scope is read-write on
   every repository the holder can reach.
 - **Store**: an Agents secret, which only MCP servers can read (the
-  `COPILOT_MCP_` prefix keeps it out of the agent's own environment).
+  `COPILOT_MCP_` prefix keeps it out of the agent's own environment). The
+  entry wires it in explicitly, as
+  `"Authorization": "Bearer $COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN"` in
+  its `headers` — GitHub's own example relies on the secret's name alone,
+  but an explicit header is the documented substitution mechanism, works
+  either way, and makes the wiring visible to a reader of the file. While
+  the secret is absent the header carries no usable token and the server
+  fails to authenticate; the built-in per-review token is not a fallback for
+  this entry, which is why step 4 comes before step 5.
 
 **The honest trade-off.** This is the one long-lived, user-bound credential in
 the whole configuration. Reads happen as the token's owner, it must be
