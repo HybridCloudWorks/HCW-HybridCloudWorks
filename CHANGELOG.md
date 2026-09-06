@@ -22,19 +22,35 @@ This project has not cut a tagged release; entries are grouped under
 - **Copilot code review gets an MCP configuration (#368).** Every Copilot
   review had been ending with the hint to configure MCP servers for
   context-aware reviews. `.github/copilot-mcp.json` is now the reviewed source
-  of record: three official, read-only, credential-free servers chosen for
-  what the repository contains — Microsoft Learn (Azure Functions, Cosmos DB,
-  Key Vault, Static Web Apps, Entra ID), Cloudflare's public documentation
-  server (the edge availability probe and DNS) and the HashiCorp Terraform
-  MCP server, pinned to `1.3.0` and held to the eight Registry read tools on
-  both its command line and Copilot's allowlist, with no HCP Terraform token
-  so the live workspace stays unreachable. The Azure MCP Server and the
-  Cloudflare account API server were left out on purpose; the runbook
+  of record: five official, read-only servers chosen for what the repository
+  contains. Three need no credential — Microsoft Learn (Azure Functions,
+  Cosmos DB, Key Vault, Static Web Apps, Entra ID), Cloudflare's public
+  documentation server (the edge availability probe and DNS) and the
+  HashiCorp Terraform MCP server, pinned to `1.3.0` and held to the eight
+  Registry read tools on both its command line and Copilot's allowlist, with
+  no HCP Terraform token so the live workspace stays unreachable. Two reach
+  live systems and are kept read-only by construction. The **Azure MCP
+  Server** signs in with no stored secret: `copilot-setup-steps.yml` runs
+  `azure/login` under OIDC in the `copilot` environment as a new
+  user-assigned identity, `github_copilot_review` in `infra/oidc.tf` —
+  Reader on the four workload resource groups and nothing else, trusting only
+  the `…:environment:copilot` subject in both forms — and the server runs
+  `--read-only` with fourteen hand-picked control-plane tools (no Key Vault,
+  Cosmos or blob content, no log queries), pinned on its command line and in
+  Copilot's allowlist. It is a third identity rather than a reuse of
+  `github_reader`, which holds a config write. The **GitHub MCP server** is
+  widened to the Actions, code-scanning, Dependabot and discussions toolsets
+  through the `/readonly` endpoint and a fine-grained, single-repository,
+  read-only, 90-day token in the Agents store — the one stored credential in
+  the configuration, and the only mechanism GitHub documents. The
+  `oidc-subjects` guard learned the new client-id variable,
+  `set-github-variables.ps1` seeds it, and the standards pages record both
+  the variable and the token. The runbook
   [Copilot code review MCP servers](docs/runbooks/copilot-code-review-mcp.md)
-  says why, and carries the settings paste GitHub requires (it does not read
-  the file), what a successful save and review session look like, and the
-  rollback. The code-review skill names which server to consult per
-  component. Not yet applied: the paste is the owner's step.
+  carries the reasoning, the tool table, the owner steps in order (apply,
+  seed, prove the sign-in, token, paste) with what success looks like at
+  each, and the rollback; the code-review skill names which server to
+  consult per component. Not yet applied: the owner steps are issue #369.
 - **ADR 0027 records the documentation-site decision (#367, issue #360).**
   The move from the Wiki to `docs/` shipped in #363 with its reasoning spread
   across the PR, the issue and the CHANGELOG; the ADR puts it in the register

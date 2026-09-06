@@ -37,6 +37,58 @@
         "search_policies",
         "get_policy_details"
       ]
+    },
+    "azure": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure/mcp@3.0.0-beta.41",
+        "server",
+        "start",
+        "--read-only",
+        "--tool", "subscription_list",
+        "--tool", "group_list",
+        "--tool", "group_resource_list",
+        "--tool", "role_assignment_list",
+        "--tool", "functionapp_get",
+        "--tool", "appservice_webapp_get",
+        "--tool", "appservice_webapp_deployment_get",
+        "--tool", "storage_account_get",
+        "--tool", "storage_blob_container_get",
+        "--tool", "cosmos_list",
+        "--tool", "monitor_activitylog_list",
+        "--tool", "monitor_metrics_definitions",
+        "--tool", "monitor_metrics_query",
+        "--tool", "monitor_webtests_get"
+      ],
+      "env": {
+        "AZURE_TOKEN_CREDENTIALS": "AzureCliCredential"
+      },
+      "tools": [
+        "subscription_list",
+        "group_list",
+        "group_resource_list",
+        "role_assignment_list",
+        "functionapp_get",
+        "appservice_webapp_get",
+        "appservice_webapp_deployment_get",
+        "storage_account_get",
+        "storage_blob_container_get",
+        "cosmos_list",
+        "monitor_activitylog_list",
+        "monitor_metrics_definitions",
+        "monitor_metrics_query",
+        "monitor_webtests_get"
+      ]
+    },
+    "github-mcp-server": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/readonly",
+      "headers": {
+        "X-MCP-Toolsets": "context,repos,issues,pull_requests,actions,code_security,dependabot,discussions"
+      },
+      "tools": ["*"]
     }
   }
 }

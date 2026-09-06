@@ -227,6 +227,7 @@ Both cloud handshakes in this estate are federated, and neither has a secret:
 | --- | --- | --- | --- |
 | HCP Terraform → Azure | `id-plat-terraform-prod-cus-01` | `TFC_AZURE_PROVIDER_AUTH=true` plus federated credentials `tfc-plan` / `tfc-apply`, issuer `https://app.terraform.io` | `scripts/bootstrap-terraform-oidc.ps1`, once, outside Terraform state |
 | GitHub Actions → Azure | the `github_deploy` user-assigned identity | Federated credentials on issuer `https://token.actions.githubusercontent.com`, subject-pinned to the deploy ref AND to the `production` environment, each in both the name and immutable-ID forms — four credentials | `infra/oidc.tf` |
+| GitHub Copilot → Azure (read-only) | the `github_copilot_review` user-assigned identity | The same issuer, pinned to `…:environment:copilot` only, both forms — two credentials, no ref subject, so no branch-triggered workflow can assume it. Reader on the four workload groups and nothing else; the Azure MCP Server runs `--read-only` with fourteen hand-picked tools on top | `infra/oidc.tf` |
 | GitHub Actions → Azure (read-only) | the `github_reader` user-assigned identity | The same issuer, but pinned to the deploy **ref only**, in both forms — two credentials, no environment subject. That asymmetry is load-bearing: a reader workflow that declares `environment:` presents `…:environment:<name>` instead of `…:ref:<ref>` and is refused with AADSTS700213, which is why `verify-alert-state.yml` and `monitor-functions-registered.yml` each carry a header saying not to add one | `infra/oidc.tf` |
 
 Neither mints anything longer-lived than a per-run token. So the **correct count
@@ -378,6 +379,7 @@ Everything else there is a default nobody is expected to override.
 | Value | CHECKLIST | Why store 3 |
 | --- | --- | --- |
 | `CLIENT_ID` | §7 | Identifier under WIF; grants nothing without a matching federated subject |
+| `READER_CLIENT_ID`, `COPILOT_REVIEW_CLIENT_ID` | §7 | Identifiers for the read-only identities (`github_reader`; `github_copilot_review`, which Copilot code review signs in as) — same reasoning |
 | `TENANT_ID` | §7 | Identifier |
 | `SUBSCRIPTION_ID` | §7 | Identifier |
 | `APP_HOSTNAME` | §7 | Public DNS name. Mirrors the `function_hostname` output |
@@ -395,6 +397,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | Value | CHECKLIST | Target system | Justification | Verdict |
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | — | GitHub | Injected per-run by GitHub, scoped by `permissions:`, expires with the job. Not stored by us at all | Correct, and contractual |
+| `COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN` (Agents store, not Actions) | — | GitHub, read-only, this repository | Widens the GitHub MCP server Copilot code review uses to the Actions, code-scanning, Dependabot and discussions toolsets. GitHub documents no federated path for this: the built-in per-review token cannot be given extra toolsets, so a stored token is the only mechanism. Fine-grained, one repository, read-only permissions, 90-day expiry, readable only by MCP servers | Justified, with an expiry — the one stored credential in the Copilot configuration |
 | `TF_API_TOKEN` | §7 | HCP Terraform | Authenticates GitHub → *Terraform*, the reverse direction from §8. The HCP Terraform CLI credential has no inbound GitHub OIDC path. Use a **team** token, not a user token, so it survives the user leaving | Justified |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned. Must be scoped read-only, and deleted the day the migration completes | Justified, with an expiry |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None available — see below | **Wrong store** |

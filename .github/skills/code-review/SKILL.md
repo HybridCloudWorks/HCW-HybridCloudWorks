@@ -100,7 +100,7 @@ These apply regardless of component, and CI enforces most of them:
 
 ## 4. MCP context (Copilot code review)
 
-When this skill runs inside GitHub Copilot code review, three read-only MCP
+When this skill runs inside GitHub Copilot code review, five read-only MCP
 servers are configured for the repository (`.github/copilot-mcp.json`; the
 procedure and rationale are in `docs/runbooks/copilot-code-review-mcp.md`).
 Use them to verify rather than assert:
@@ -110,11 +110,16 @@ Use them to verify rather than assert:
 | `infra/**` | `terraform` — `search_providers`, `get_provider_details` | Whether an `azurerm` / `cloudflare` argument exists on the pinned provider version, and whether changing it forces replacement of a live resource. |
 | `functions/**`, `frontend/**` (MSAL, SWA config), `infra/**` (Azure resources) | `microsoft-learn` — `microsoft_docs_search`, then `microsoft_docs_fetch` | Current Azure Functions, Cosmos DB, Key Vault, Static Web Apps, Entra ID / MSAL and Application Insights behaviour. |
 | `edge/**`, Cloudflare resources in `infra/**` | `cloudflare-docs` — `search_cloudflare_documentation` | Workers, cron triggers, DNS and transform-rule semantics. |
+| `infra/**` (a change to a live resource) | `azure` — `role_assignment_list`, `functionapp_get`, `storage_account_get`, `group_resource_list`, `monitor_activitylog_list` | What is deployed *now*, to judge what the diff would do to it: the role assignments an `oidc.tf` edit adds to or removes from, a Function App's current settings names, a storage account's network rules, who last changed the resource. Control-plane reads under a Reader-only identity; no content, no logs. |
+| Any PR whose CI is red | `github-mcp-server` — Actions tools (`actions_get`, `actions_list`), code-scanning and Dependabot alert tools | Why the failing job failed, and whether an alert already covers a finding, before writing it up. Read-only on this repository. |
 
-Cite the page you used in the finding. None of these servers can reach the
-live Azure estate, the HCP Terraform workspace or the Cloudflare account, so
-"the plan shows" and "the resource currently has" still come from evidence in
-the pull request, not from a tool.
+Cite the page or the resource you read in the finding, with the time for a
+live read. The `azure` server is the only one that sees the live estate, and
+it sees it read-only: it can say what a resource *is*, never what a plan
+*would do* — "the plan shows" still comes from evidence in the pull request.
+None of these servers reaches the HCP Terraform workspace, the Cloudflare
+account, Key Vault contents, Cosmos documents or blob data, and none can write
+anywhere; a review comment that suggests otherwise is wrong about its tools.
 
 ## 5. Report
 

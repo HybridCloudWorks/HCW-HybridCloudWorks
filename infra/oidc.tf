@@ -383,6 +383,73 @@ resource "azurerm_role_assignment" "github_reader_origin_window" {
   principal_id       = azurerm_user_assigned_identity.github_reader.principal_id
 }
 
+# ---------------------------------------------------------------------------
+# github_copilot_review — what GitHub Copilot code review may see in Azure
+# ---------------------------------------------------------------------------
+# .github/copilot-mcp.json gives Copilot code review (and the Copilot cloud
+# agent, which shares the configuration) the Azure MCP Server, restricted at
+# the server to fourteen read-only control-plane tools. The server needs an
+# Azure sign-in, and .github/workflows/copilot-setup-steps.yml provides one
+# with azure/login under federated identity — this identity.
+#
+# A THIRD IDENTITY, not a reuse of github_reader, because github_reader is not
+# read-only: it holds the origin-window role on the Function App (a config
+# WRITE, github_reader_origin_window above) and the app-settings LIST action.
+# An autonomous reviewer that calls tools without asking must hold a principal
+# that can change nothing, so that a prompt-injected review comment has nothing
+# to reach for. This one is Reader, at resource-group scope, and nothing else.
+#
+# WHAT READER CAN AND CANNOT SEE HERE. `*/read` is control plane: resource
+# existence, configuration, tags, role assignments, metrics definitions,
+# activity log. It carries no data action and no `list*/action`, so this
+# identity cannot list storage keys, Cosmos keys, Function App settings or
+# Key Vault secrets, and cannot read a blob, a document or a secret — the
+# Key Vault is RBAC-mode and needs a data-plane role for that. Application
+# Insights telemetry IS readable under Reader (query is an ARM action), which
+# is why the MCP tool list excludes every log-query tool and keeps only metrics;
+# and the telemetry is content-free by policy either way
+# (functions/src/lib/telemetry, enforced in review).
+#
+# SUBJECT IS THE copilot ENVIRONMENT, in both forms, and nothing else. Copilot's
+# setup-steps job declares `environment: copilot`, so GitHub composes
+# `repo:<org>/<repo>:environment:copilot` — the ref form would not match. No
+# ref-form credential, because no branch-triggered workflow should ever be able
+# to assume this identity by accident. The `copilot` environment exists already
+# (docs/standards/required-inputs.md §4.4).
+#
+# Scope is the four workload groups (web, db, stor, sec). Not `conn`: nothing a
+# review asks about lives in the spoke network, and not the Management
+# subscription, so the central Log Analytics workspace is out of reach entirely.
+resource "azurerm_user_assigned_identity" "github_copilot_review" {
+  name                = "id-${var.workload_name}-github-copilot-review-${var.environment}-${var.region_abbreviation}-${var.instance}"
+  location            = azurerm_resource_group.app["web"].location
+  resource_group_name = azurerm_resource_group.app["web"].name
+  tags                = local.tags
+}
+
+resource "azurerm_federated_identity_credential" "github_copilot_review_environment" {
+  name                      = "github-${var.github_repo}-copilot-review-environment"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_copilot_review.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_org}/${var.github_repo}:environment:copilot"
+}
+
+resource "azurerm_federated_identity_credential" "github_copilot_review_environment_immutable" {
+  name                      = "github-${var.github_repo}-copilot-review-environment-immutable"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_copilot_review.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_immutable_prefix}:environment:copilot"
+}
+
+resource "azurerm_role_assignment" "github_copilot_review_reader" {
+  for_each             = toset(["web", "db", "stor", "sec"])
+  scope                = azurerm_resource_group.app[each.key].id
+  role_definition_name = "Reader"
+  principal_id         = azurerm_user_assigned_identity.github_copilot_review.principal_id
+}
+
 # REMOVED 2026-08-29 (T-728): azurerm_role_assignment.github_deploy_alert_reader,
 # Monitoring Reader on rg-web for the deploy identity.
 #
@@ -556,13 +623,19 @@ output "reader_client_id" {
   value       = azurerm_user_assigned_identity.github_reader.client_id
 }
 
+output "copilot_review_client_id" {
+  description = "COPILOT_REVIEW_CLIENT_ID for azure/login in copilot-setup-steps.yml — a repository variable, not a secret"
+  value       = azurerm_user_assigned_identity.github_copilot_review.client_id
+}
+
 output "deploy_principal_id" {
   description = "Principal ID of the GitHub deployment identity — for granting further roles"
   value       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
-# Six entries since 2026-08-29, up from four: the reader identity's ref pair was
-# added (T-728). Keeping this list in step with the resources above is not
+# Eight entries since 2026-09-06, up from six: the Copilot review identity's
+# environment pair was added. Before that, six since 2026-08-29, when the reader
+# identity's ref pair was added (T-728). Keeping this list in step with the resources above is not
 # cosmetic — it is what an operator diffs a failing token's subject against, so
 # it has to name exactly what Entra trusts. Deleting the credentials without
 # deleting the entries is what broke `terraform validate` on PR #230.
@@ -581,5 +654,7 @@ output "federated_subjects" {
     azurerm_federated_identity_credential.github_production_immutable.subject,
     azurerm_federated_identity_credential.github_reader_branch.subject,
     azurerm_federated_identity_credential.github_reader_branch_immutable.subject,
+    azurerm_federated_identity_credential.github_copilot_review_environment.subject,
+    azurerm_federated_identity_credential.github_copilot_review_environment_immutable.subject,
   ]
 }

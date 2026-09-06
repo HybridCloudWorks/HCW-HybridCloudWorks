@@ -1,0 +1,65 @@
+# Copilot's environment — the one step the Azure MCP server needs.
+#
+# GitHub runs the `copilot-setup-steps` job before Copilot cloud agent starts
+# work and, by default, before Copilot code review reviews a pull request
+# (docs: "Customize the agent environment" and "Use code review →
+# Customizing Copilot code review's environment"). The MCP configuration in
+# .github/copilot-mcp.json declares the Azure MCP Server with
+# AZURE_TOKEN_CREDENTIALS=AzureCliCredential, so the only thing this job has to
+# do is leave an Azure CLI sign-in behind. Everything else the reviewer needs
+# (Node for npx, Docker for the Terraform server) is on the runner image.
+#
+# NO STORED CREDENTIAL. azure/login exchanges the job's GitHub OIDC token for
+# an Azure token, exactly as deploy-functions.yml and the monitors do. The
+# identity is `github_copilot_review` in infra/oidc.tf: a user-assigned managed
+# identity holding Reader on the four workload resource groups and nothing
+# else — no data-plane role, no Key Vault access, no write anywhere. Its
+# federated credential trusts the subject `…:environment:copilot`, which is
+# what `environment: copilot` below makes GitHub compose. Change either side
+# alone and azure/login fails with AADSTS700213; scripts/oidc-subjects.test.mjs
+# cross-checks the two on every CI run.
+#
+# workflow_dispatch only, on purpose: the docs' Azure example triggers the same
+# way, and a pull_request trigger would sign in on every edit of this file for
+# no reader. Run it by hand to prove the login works; Copilot runs it for real.
+#
+# If the `Setting up environment` section of a Copilot review session shows
+# this job did NOT run, that is a GitHub-side gap (community discussion
+# #203859, unresolved as of 2026-09) and the failure is safe: the Azure MCP
+# server starts with no credential and every tool call fails closed. The
+# runbook docs/runbooks/copilot-code-review-mcp.md says what to look for.
+name: Copilot setup steps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The job MUST be named copilot-setup-steps or Copilot does not pick it up.
+  copilot-setup-steps:
+    name: Sign in to Azure as the Copilot review identity
+    runs-on: ubuntu-latest
+    # Declaring the environment is what puts `:environment:copilot` in the OIDC
+    # subject (see infra/oidc.tf github_copilot_review_environment).
+    environment: copilot
+    permissions:
+      # id-token: write is what lets the runner request a GitHub OIDC token.
+      # Without it azure/login has nothing to exchange.
+      id-token: write
+      contents: read
+    steps:
+      # Federated OIDC — no stored credential. COPILOT_REVIEW_CLIENT_ID is a
+      # repository VARIABLE, not a secret, like CLIENT_ID and READER_CLIENT_ID:
+      # it identifies the managed identity and grants nothing without a token
+      # from this repository in the copilot environment. Seeded from the
+      # copilot_review_client_id Terraform output by
+      # scripts/set-github-variables.ps1. TENANT_ID and SUBSCRIPTION_ID are the
+      # existing variables every other login here uses.
+      - name: Azure Login
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
+        with:
+          client-id: ${{ vars.COPILOT_REVIEW_CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
