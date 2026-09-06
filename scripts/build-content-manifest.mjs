@@ -208,7 +208,11 @@ export const ARTICLE_FIELDS = Object.freeze([
   'description',
   'excerpt',
   'keyTopics',
-  // taxonomy
+  // taxonomy. `type` is what the section pages select on (framework,
+  // coder_corner); the manifest counts it per provider so the pre-render can
+  // keep a section with nothing in it out of the sitemap (issue #373). No
+  // quoted strings in this comment: the drift test parses this block as text.
+  'type',
   'Category',
   'category',
   'Tags',
@@ -252,10 +256,47 @@ function project(item) {
   return out;
 }
 
+/**
+ * Section pages whose whole data source is the `content` container, keyed by
+ * the `type` their page selects on. Only these can be declared empty from the
+ * manifest alone. `coder-corner` and `code` are deliberately absent: their
+ * pages fall back to the legacy `blogs` container when `content` has nothing
+ * (useCoderCornerData.js), which this manifest does not read, so a zero here
+ * would not mean an empty page.
+ */
+export const SECTION_TYPES = Object.freeze({ frameworks: 'framework' });
+
+/**
+ * Published items per provider per section, so the pre-render can leave a
+ * section page with nothing in it out of the sitemap (issue #373).
+ *
+ * Returns null when no item carries `type` at all — the deployed manifest route
+ * predates the field — so a consumer cannot mistake "unknown" for "zero".
+ * `_unattributed` counts items of the section's type that name no recognised
+ * provider; the frameworks page infers a provider from titles and URLs as a
+ * last resort, so while that count is non-zero no provider's zero is trusted.
+ */
+export function sectionCounts(items) {
+  if (!items.some((item) => item?.type !== undefined)) return null;
+  const sections = {};
+  for (const provider of [...PROVIDERS, '_unattributed']) {
+    sections[provider] = Object.fromEntries(Object.keys(SECTION_TYPES).map((s) => [s, 0]));
+  }
+  for (const item of items) {
+    const type = String(item?.type || '').toLowerCase();
+    for (const [section, wanted] of Object.entries(SECTION_TYPES)) {
+      if (type !== wanted) continue;
+      sections[providerOf(item) || '_unattributed'][section] += 1;
+    }
+  }
+  return sections;
+}
+
 export function buildManifest(items) {
   const routes = [];
   const data = {};
   const skipped = [];
+  const sections = sectionCounts(items);
 
   for (const item of items) {
     const slug = slugOf(item);
@@ -283,7 +324,7 @@ export function buildManifest(items) {
     data[`article:${slug}`] = project(item);
   }
 
-  return { generatedAt: null, routes, data, skipped };
+  return { generatedAt: null, routes, data, skipped, sections };
 }
 
 async function main() {

@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Section pages with nothing published leave the sitemap (#373, part 2).**
+  The content manifest now carries `type` (the field the section pages select
+  on, already public through the content list) and a `sections` map counting
+  framework items per provider, with an `_unattributed` row for items whose
+  provider the page would have to infer. The pre-render omits
+  `/<provider>/frameworks` from `sitemap.xml` when its count is exactly zero
+  and nothing is unattributed; the page is still rendered and served with its
+  empty state. A manifest without `sections` — the deployed route predates the
+  field until the next Functions deploy — drops nothing. Coder-corner and code
+  pages are deliberately not counted: they fall back to the legacy `blogs`
+  container, which the manifest does not read, so their zero would not mean
+  an empty page.
 - **Cost Analysis costs Cosmos recovery against the measured account size
   (#385, issue #231).** The owner measured `DataUsage` on 2026-09-06: 2.39 GB.
   The page gains a section pricing what recovery already costs (continuous

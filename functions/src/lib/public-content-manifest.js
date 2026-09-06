@@ -79,7 +79,11 @@ export const ARTICLE_FIELDS = Object.freeze([
   'description',
   'excerpt',
   'keyTopics',
-  // taxonomy
+  // taxonomy. `type` is what the section pages select on (framework,
+  // coder_corner); the manifest counts it per provider so the pre-render can
+  // keep a section with nothing in it out of the sitemap (issue #373). No
+  // quoted strings in this comment: the drift test parses this block as text.
+  'type',
   'Category',
   'category',
   'Tags',
