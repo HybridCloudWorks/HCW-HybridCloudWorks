@@ -22,12 +22,16 @@ const HTML_IMG_SRC = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
 const MARKDOWN_IMG = /!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
 const OWN_HOSTS = new Set(['hybridcloudworks.com', 'www.hybridcloudworks.com']);
 
-/** The article page's body precedence: blogDraft, Content, content. */
+/**
+ * Every body field joined, because the images are not always in the field
+ * the page renders: the audited article of 2026-09-06 held an RSS stub in
+ * `Content` and its eleven images in `content`. The publish step rewrites
+ * every field, so the scan reads every field.
+ */
 export function bodyOf(article = {}) {
-  for (const field of ['blogDraft', 'Content', 'content']) {
-    if (typeof article[field] === 'string' && article[field].trim()) return article[field];
-  }
-  return '';
+  return ['blogDraft', 'Content', 'content']
+    .map((field) => (typeof article[field] === 'string' ? article[field] : ''))
+    .join('\n');
 }
 
 /** Distinct third-party image hosts referenced by a body, with their URL counts. */

@@ -413,11 +413,12 @@ describe('inline body images at publish time (#374)', () => {
 
   it('rewrites the rendered body field and records the summary in the publish patch', async () => {
     const store = makeStore(doc());
-    const inlineImages = vi.fn(async ({ contentId, body }) => ({
-      body: body.replace(UPSTREAM, HOSTED),
+    const inlineImages = vi.fn(async ({ bodies }) => ({
+      bodies: Object.fromEntries(
+        Object.entries(bodies).map(([f, b]) => [f, b.replace(UPSTREAM, HOSTED)])
+      ),
       rewritten: [{ from: UPSTREAM, to: HOSTED }],
       failed: [{ url: 'https://cdn.example.org/d.webp', reason: 'HTTP 403' }],
-      contentId,
     }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, inlineImages, ...fixed });
     await h.publishContent(
@@ -425,7 +426,10 @@ describe('inline body images at publish time (#374)', () => {
       context
     );
 
-    expect(inlineImages).toHaveBeenCalledWith({ contentId: 'c1', body: doc().Content });
+    expect(inlineImages).toHaveBeenCalledWith({
+      contentId: 'c1',
+      bodies: { Content: doc().Content },
+    });
     const publishPatch = store.patchDoc.mock.calls.find(
       ([c, , u]) => c === 'content' && u.contentStatus === 'published'
     );
@@ -433,7 +437,7 @@ describe('inline body images at publish time (#374)', () => {
     expect(publishPatch[2].Content).not.toContain(UPSTREAM);
     expect(publishPatch[2].Content).toContain('https://cdn.example.org/d.webp');
     expect(publishPatch[2].inlineImages).toEqual({
-      field: 'Content',
+      fields: ['Content'],
       rewritten: 1,
       failed: 1,
       failedUrls: ['https://cdn.example.org/d.webp'],

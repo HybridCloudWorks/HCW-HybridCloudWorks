@@ -20,12 +20,14 @@ This project has not cut a tagged release; entries are grouped under
 ### Changed
 
 - **Article bodies stop hotlinking upstream images (#374).** At publish time
-  every external `<img>` or `![](…)` URL in the rendered body field is fetched
+  every external `<img>` or `![](…)` URL in any body field (`blogDraft`,
+  `Content`, `content` — the audited article kept an RSS stub in one and its
+  eleven images in another) is fetched
   through the guarded fetcher the cover mirror already uses, stored under the
   article id in the public `covers` container and rewritten to the site's
   `/api/public/media/…` path; the version snapshot carries the rewritten body.
   A URL that cannot be fetched is left exactly as it was and named on the
-  document in a new `inlineImages` summary (field, rewritten, failed,
+  document in a new `inlineImages` summary (fields, rewritten, failed,
   failedUrls, at), and no failure of this step can fail a publish. Wired into
   the HTTP publish, the Telegram approve job and the scheduled publisher; a
   republish re-hosts an already-published article. `scripts/scan-inline-images.mjs`

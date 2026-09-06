@@ -8,7 +8,7 @@ import {
   findInlineImageUrls,
   inlineBlobPath,
   isOwnMediaUrl,
-  resolveBodyField,
+  resolveBodyFields,
   rewriteBody,
 } from './inline-images.js';
 
@@ -49,14 +49,18 @@ describe('findInlineImageUrls', () => {
   });
 });
 
-describe('resolveBodyField', () => {
-  it('follows the article page precedence: blogDraft, Content, content', () => {
+describe('resolveBodyFields', () => {
+  it('lists every non-empty body field in the page precedence: blogDraft, Content, content', () => {
     expect(BODY_FIELDS).toEqual(['blogDraft', 'Content', 'content']);
-    expect(resolveBodyField({ content: 'c', Content: 'C', blogDraft: 'd' })).toBe('blogDraft');
-    expect(resolveBodyField({ content: 'c', Content: 'C' })).toBe('Content');
-    expect(resolveBodyField({ content: 'c' })).toBe('content');
-    expect(resolveBodyField({ blogDraft: '   ', content: 'c' })).toBe('content');
-    expect(resolveBodyField({})).toBeNull();
+    expect(resolveBodyFields({ content: 'c', Content: 'C', blogDraft: 'd' })).toEqual([
+      'blogDraft',
+      'Content',
+      'content',
+    ]);
+    expect(resolveBodyFields({ content: 'c', Content: 'C' })).toEqual(['Content', 'content']);
+    expect(resolveBodyFields({ blogDraft: '   ', content: 'c' })).toEqual(['content']);
+    expect(resolveBodyFields({ content: 42 })).toEqual([]);
+    expect(resolveBodyFields({})).toEqual([]);
   });
 });
 
@@ -93,7 +97,7 @@ describe('createInlineImageRehoster', () => {
     const log = { warn: vi.fn() };
     const { rehost } = createInlineImageRehoster({ storage, fetchImage, log });
 
-    const result = await rehost({ contentId: 'c1', body: BODY });
+    const result = await rehost({ contentId: 'c1', bodies: { content: BODY } });
 
     expect(fetchImage).toHaveBeenCalledTimes(2);
     expect(storage.uploadBlob).toHaveBeenCalledTimes(1);
@@ -108,8 +112,8 @@ describe('createInlineImageRehoster', () => {
       { from: UPSTREAM_A, to: `/api/public/media/covers/${blobPath}` },
     ]);
     expect(result.failed).toEqual([{ url: UPSTREAM_B, reason: 'HTTP 403 fetching ' + UPSTREAM_B }]);
-    expect(result.body).not.toContain(UPSTREAM_A);
-    expect(result.body).toContain(`![Diagram](${UPSTREAM_B} "Architecture")`);
+    expect(result.bodies.content).not.toContain(UPSTREAM_A);
+    expect(result.bodies.content).toContain(`![Diagram](${UPSTREAM_B} "Architecture")`);
     // The warning names the host, never the URL or the body.
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn.mock.calls[0][0]).toContain('cdn.example.org');
@@ -124,19 +128,50 @@ describe('createInlineImageRehoster', () => {
       }),
     };
     const { rehost } = createInlineImageRehoster({ storage, fetchImage });
-    const result = await rehost({ contentId: 'c1', body: `<img src="${UPSTREAM_A}">` });
+    const result = await rehost({
+      contentId: 'c1',
+      bodies: { Content: `<img src="${UPSTREAM_A}">` },
+    });
     expect(result.rewritten).toEqual([]);
     expect(result.failed).toEqual([{ url: UPSTREAM_A, reason: '403 on blob' }]);
-    expect(result.body).toBe(`<img src="${UPSTREAM_A}">`);
+    expect(result.bodies).toEqual({ Content: `<img src="${UPSTREAM_A}">` });
   });
 
   it('does nothing for a body with no external images', async () => {
     const fetchImage = vi.fn();
     const storage = { uploadBlob: vi.fn() };
     const { rehost } = createInlineImageRehoster({ storage, fetchImage });
-    const result = await rehost({ contentId: 'c1', body: '<p>text</p> ![x](/local.png)' });
+    const result = await rehost({
+      contentId: 'c1',
+      bodies: { content: '<p>text</p> ![x](/local.png)' },
+    });
     expect(fetchImage).not.toHaveBeenCalled();
-    expect(result).toEqual({ body: '<p>text</p> ![x](/local.png)', rewritten: [], failed: [] });
+    expect(result).toEqual({
+      bodies: { content: '<p>text</p> ![x](/local.png)' },
+      rewritten: [],
+      failed: [],
+    });
+  });
+
+  it('fetches a URL shared by two fields once and rewrites it in both', async () => {
+    // The audited article of 2026-09-06: an RSS stub in `Content`, the real
+    // body with its images in `content`.
+    const fetchImage = vi.fn(async () => png);
+    const storage = { uploadBlob: vi.fn(async () => undefined) };
+    const { rehost } = createInlineImageRehoster({ storage, fetchImage });
+    const result = await rehost({
+      contentId: 'c1',
+      bodies: {
+        Content: `<p>stub</p><img src="${UPSTREAM_A}">`,
+        content: `![a](${UPSTREAM_A}) ![b](${UPSTREAM_B})`,
+      },
+    });
+    expect(fetchImage).toHaveBeenCalledTimes(2);
+    expect(storage.uploadBlob).toHaveBeenCalledTimes(2);
+    expect(result.rewritten).toHaveLength(2);
+    expect(result.bodies.Content).not.toContain(UPSTREAM_A);
+    expect(result.bodies.content).not.toContain(UPSTREAM_A);
+    expect(result.bodies.content).not.toContain(UPSTREAM_B);
   });
 });
 
@@ -144,23 +179,32 @@ describe('buildInlineImageUpdate', () => {
   const nowIso = '2026-09-06T23:00:00.000Z';
 
   it('returns the rewritten body field and a summary the editor can read', async () => {
-    const rehost = vi.fn(async ({ body }) => ({
-      body: body.replace(UPSTREAM_A, '/api/public/media/covers/c1/inline/x.png'),
+    const rehost = vi.fn(async ({ bodies }) => ({
+      bodies: Object.fromEntries(
+        Object.entries(bodies).map(([f, b]) => [
+          f,
+          b.replace(UPSTREAM_A, '/api/public/media/covers/c1/inline/x.png'),
+        ])
+      ),
       rewritten: [{ from: UPSTREAM_A, to: '/api/public/media/covers/c1/inline/x.png' }],
       failed: [{ url: UPSTREAM_B, reason: 'HTTP 403' }],
     }));
     const contentData = {
       Content: `<img src="${UPSTREAM_A}"> ![d](${UPSTREAM_B})`,
-      content: 'older',
+      content: 'older, no images',
     };
     const update = await buildInlineImageUpdate({ contentData, contentId: 'c1', rehost, nowIso });
-    expect(rehost).toHaveBeenCalledWith({ contentId: 'c1', body: contentData.Content });
+    // Only the fields that carry an external image are sent and written back.
+    expect(rehost).toHaveBeenCalledWith({
+      contentId: 'c1',
+      bodies: { Content: contentData.Content },
+    });
     expect(update.Content).toBe(
       `<img src="/api/public/media/covers/c1/inline/x.png"> ![d](${UPSTREAM_B})`
     );
     expect(update.content).toBeUndefined();
     expect(update.inlineImages).toEqual({
-      field: 'Content',
+      fields: ['Content'],
       rewritten: 1,
       failed: 1,
       failedUrls: [UPSTREAM_B],
@@ -195,7 +239,7 @@ describe('buildInlineImageUpdate', () => {
   it('does not rewrite the field when nothing changed, but still records the failures', async () => {
     const body = `<img src="${UPSTREAM_A}">`;
     const rehost = vi.fn(async () => ({
-      body,
+      bodies: { blogDraft: body },
       rewritten: [],
       failed: [{ url: UPSTREAM_A, reason: 'timeout' }],
     }));

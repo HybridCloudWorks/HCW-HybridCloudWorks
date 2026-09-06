@@ -42,7 +42,16 @@ import { MIME_TO_EXT, isExternalUrlString } from '../triggers/fetch-image.js';
 /** Public media container the re-hosted copies live in; the cover trigger's. */
 export const INLINE_IMAGE_CONTAINER = 'covers';
 
-/** The body field the article page renders, in the page's own precedence. */
+/**
+ * The body fields an article can carry, in the page's own precedence
+ * (BlogDetailTemplate: `blogDraft || Content || content`). ALL of them are
+ * rewritten, not just the one that renders today: on 2026-09-06 the audited
+ * article held an RSS stub in `Content` and its eleven images in `content`,
+ * and a step that only looked at the rendering field would have rewritten the
+ * stub and left every image where it was. Rewriting each field an image
+ * appears in is cheap (one fetch per distinct URL, whichever fields share it)
+ * and survives an editor switching which field the page uses.
+ */
 export const BODY_FIELDS = Object.freeze(['blogDraft', 'Content', 'content']);
 
 /** Hosts whose images are already ours and must not be fetched again. */
@@ -54,9 +63,9 @@ const HTML_IMG_SRC = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
 // miss there is a leave-alone, not a wrong rewrite.
 const MARKDOWN_IMG = /!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
 
-/** Which body field the page would render for this document, or null. */
-export function resolveBodyField(doc = {}) {
-  return BODY_FIELDS.find((field) => typeof doc[field] === 'string' && doc[field].trim()) || null;
+/** Every body field this document carries as non-empty text, in precedence order. */
+export function resolveBodyFields(doc = {}) {
+  return BODY_FIELDS.filter((field) => typeof doc[field] === 'string' && doc[field].trim());
 }
 
 /** True for a URL the site already serves itself. */
@@ -115,11 +124,23 @@ export function rewriteBody(body, replacements) {
  */
 export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
   /**
-   * @param {{ contentId: string, body: string }} input
-   * @returns {Promise<{ body: string, rewritten: Array<{from: string, to: string}>, failed: Array<{url: string, reason: string}> }>}
+   * Re-host every external image across the given body fields. A URL shared
+   * by two fields is fetched and stored once.
+   *
+   * @param {{ contentId: string, bodies: Record<string, string> }} input
+   * @returns {Promise<{ bodies: Record<string, string>, rewritten: Array<{from: string, to: string}>, failed: Array<{url: string, reason: string}> }>}
    */
-  async function rehost({ contentId, body }) {
-    const urls = findInlineImageUrls(body);
+  async function rehost({ contentId, bodies }) {
+    const urls = [];
+    const seen = new Set();
+    for (const body of Object.values(bodies || {})) {
+      for (const url of findInlineImageUrls(body)) {
+        if (!seen.has(url)) {
+          seen.add(url);
+          urls.push(url);
+        }
+      }
+    }
     const rewritten = [];
     const failed = [];
     for (const url of urls) {
@@ -148,7 +169,10 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
         );
       }
     }
-    return { body: rewriteBody(body, rewritten), rewritten, failed };
+    const out = {};
+    for (const [field, body] of Object.entries(bodies || {}))
+      out[field] = rewriteBody(body, rewritten);
+    return { bodies: out, rewritten, failed };
   }
 
   return { rehost };
@@ -156,7 +180,7 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
 
 /**
  * The publish-time step: the content-document update that re-hosting the
- * rendered body's images produces, or null when there is nothing to do.
+ * body fields' images produces, or null when there is nothing to do.
  *
  * Never throws. A rehoster that blows up whole (not per-URL) is logged and
  * the article publishes with its body untouched, which is what happened before
@@ -165,16 +189,25 @@ export function createInlineImageRehoster({ storage, fetchImage, log = {} }) {
  * @returns {Promise<null | { [field: string]: string, inlineImages: object }>}
  */
 export async function buildInlineImageUpdate({ contentData, contentId, rehost, nowIso, log = {} }) {
-  const field = resolveBodyField(contentData);
-  if (!field || typeof rehost !== 'function') return null;
-  const body = contentData[field];
-  if (findInlineImageUrls(body).length === 0) return null;
+  if (typeof rehost !== 'function') return null;
+  const fields = resolveBodyFields(contentData).filter(
+    (field) => findInlineImageUrls(contentData[field]).length > 0
+  );
+  if (fields.length === 0) return null;
+  const bodies = Object.fromEntries(fields.map((field) => [field, contentData[field]]));
   try {
-    const result = await rehost({ contentId, body });
+    const result = await rehost({ contentId, bodies });
+    const changed = Object.fromEntries(
+      fields
+        .filter(
+          (field) => result.bodies?.[field] !== undefined && result.bodies[field] !== bodies[field]
+        )
+        .map((field) => [field, result.bodies[field]])
+    );
     return {
-      ...(result.body !== body && { [field]: result.body }),
+      ...changed,
       inlineImages: {
-        field,
+        fields,
         rewritten: result.rewritten.length,
         failed: result.failed.length,
         failedUrls: result.failed.map((f) => f.url),

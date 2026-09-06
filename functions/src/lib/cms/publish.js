@@ -17,7 +17,7 @@
  *     archiving the item still publishes and a warning is surfaced in the
  *     batch results, so nothing silently changes.
  *   - Inline body images ARE re-hosted, since 2026-09-06 (issue #374): every
- *     external `<img>` / `![](…)` URL in the rendered body field is fetched
+ *     external `<img>` / `![](…)` URL in any body field is fetched
  *     through the guarded fetcher, stored under the article id in the public
  *     `covers` container and rewritten to the site's media path; failures are
  *     left in place and summarised on the document (`inlineImages`). See
