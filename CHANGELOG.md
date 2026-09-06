@@ -30,15 +30,17 @@ This project has not cut a tagged release; entries are grouped under
   tree in the same change, each with no remaining consumer: `frontend/.firebaserc`
   (the Firebase project pointer; the site has been on Azure since
   2026-08-21), `scripts/cutover/02-swa-token.ps1` (minted a deploy token
-  that T-727 deleted on 2026-08-30), `frontend/.copilot/` (two
-  certified-architect agent prompts, an instructions file and an `llms.txt`
-  that Copilot never reads from that path), `.github/templates/` (21
-  document templates the Wiki policy superseded), `frontend/scripts/axe-quick-check.mjs`
+  that T-727 deleted on 2026-08-30), `frontend/scripts/axe-quick-check.mjs`
   (an ad-hoc accessibility probe wired to nothing),
   `frontend/.lighthouserc.json` and `frontend/.pre-commit-config.yaml`
   (neither referenced by any script, hook or workflow), and
-  `.azure/insights.json` (an empty array). The repository-structure validator
-  drops the allowlist lines for the removed directories.
+  `.azure/insights.json` (an empty array). #346 also removed
+  `frontend/.copilot/` and `.github/templates/`; that was wrong, and #347
+  restored both the same day at the owner's direction — Copilot is
+  GitHub's tooling and reads `frontend/.copilot/` from the frontend
+  project, and the 21 document templates are kept to be used as needed. The
+  repository-structure validator's allowlist lines for both directories are
+  back with a comment recording why.
 
   **Status — 2026-09-05**
 
