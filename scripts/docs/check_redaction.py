@@ -32,7 +32,15 @@ SCAN_FILES = [ROOT / "README.md", ROOT / "CHANGELOG.md", ROOT / "TODO.md"]
 WIKI_LINK = re.compile(r"github\.com/[^/\s)]+/[^/\s)]+/wiki(?:/|\b)")
 GUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 PLACEHOLDER = re.compile(r"^00000000-0000-0000-0000-0000000000[0-9a-fA-F]{2}$")
-LOCAL_PATH = re.compile(r"[A-Za-z]:\\Users\\|/Users/[A-Za-z]|/home/[A-Za-z]")
+# A user-profile path on any of the three desktop platforms: a drive-letter
+# Windows profile, a macOS /Users/<name>/, or a Linux /home/<name>/. The
+# username is required to be followed by a separator so that prose such as
+# "/home directory" is not a finding while "/home/runner/work/..." is.
+LOCAL_PATH = re.compile(
+    r"[A-Za-z]:\\Users\\[^\\\s`\"']+"
+    r"|/Users/[A-Za-z0-9._-]+/"
+    r"|/home/[A-Za-z0-9._-]+/"
+)
 
 # Public, first-party constants that are the same in every tenant.
 ALLOWED_GUIDS = {
