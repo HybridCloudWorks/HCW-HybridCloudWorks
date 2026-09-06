@@ -101,9 +101,13 @@ These apply regardless of component, and CI enforces most of them:
 ## 4. MCP context (Copilot code review)
 
 When this skill runs inside GitHub Copilot code review, three read-only MCP
-servers are configured for the repository (`.github/copilot-mcp.json`; the
-procedure and rationale are in `docs/runbooks/copilot-code-review-mcp.md`).
-Use them to verify rather than assert:
+servers are defined for the repository in `.github/copilot-mcp.json`. GitHub
+reads that configuration from repository settings, not from the file, so the
+servers are available only once the owner has applied it there — the
+procedure and rationale are in `docs/runbooks/copilot-code-review-mcp.md`.
+When a server named below is available, use it to verify rather than assert;
+when it is not, say so in the finding and fall back to the evidence in the
+diff and the repository, rather than reporting a tool error as a finding:
 
 | Component in the diff | Consult | For |
 | --- | --- | --- |
