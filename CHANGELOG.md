@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **Open work moved from `TODO.md` to GitHub issues (#PR).** Owner
+- **Open work moved from `TODO.md` to GitHub issues (#359).** Owner
   instruction 2026-09-05: the items are worked from the issues list from now
   on, so the tracker's remaining sections — the five optional seeds, the Labs
   test-coverage case and the four live confirmations — became issues #350–#358
