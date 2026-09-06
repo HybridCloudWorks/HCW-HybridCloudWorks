@@ -79,6 +79,8 @@ function trustedSubjectsByIdentity() {
 const IDENTITY_BY_CLIENT_ID_VAR = {
   CLIENT_ID: 'github_deploy',
   READER_CLIENT_ID: 'github_reader',
+  // copilot-setup-steps.yml: the identity Copilot code review signs in as.
+  COPILOT_REVIEW_CLIENT_ID: 'github_copilot_review',
 };
 
 /** Workflows that authenticate to Azure with OIDC: the identity they use, and the environment (if any) they name. */

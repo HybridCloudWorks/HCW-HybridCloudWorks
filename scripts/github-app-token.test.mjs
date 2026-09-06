@@ -18,12 +18,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createVerify, generateKeyPairSync } from 'node:crypto';
-import {
-  buildJwt,
-  mintInstallationToken,
-  parseInstallation,
-  parseTokenResponse,
-} from './github-app-token.mjs';
+import { buildJwt, mintInstallationToken, parseInstallation, parseTokenResponse, parsePermissions, DEFAULT_PERMISSIONS } from './github-app-token.mjs';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 
@@ -147,6 +142,42 @@ describe('mintInstallationToken', () => {
     });
   });
 
+  // The Copilot review App is the second caller, and it must be able to ask
+  // for LESS than the default — a read-only token — without the manifest
+  // publisher's writes riding along.
+  it('sends an explicit permissions set verbatim instead of the default', async () => {
+    const fetchImpl = fakeFetch([ok({ id: 7 }), ok({ token: 'ghs_abc' })]);
+    const permissions = { metadata: 'read', contents: 'read', actions: 'read' };
+    await mintInstallationToken({
+      appId: '1',
+      privateKey,
+      owner: 'HybridCloudWorks',
+      repo: 'HCW-HybridCloudWorks',
+      fetchImpl,
+      permissions,
+    });
+
+    expect(JSON.parse(fetchImpl.calls[1].init.body)).toEqual({
+      repositories: ['HCW-HybridCloudWorks'],
+      permissions,
+    });
+    expect(DEFAULT_PERMISSIONS).toEqual({ contents: 'write', pull_requests: 'write' });
+  });
+
+  it('names the requested permissions when the mint is refused', async () => {
+    const fetchImpl = fakeFetch([ok({ id: 7 }), { ok: false, status: 422, json: async () => ({}) }]);
+    await expect(
+      mintInstallationToken({
+        appId: '1',
+        privateKey,
+        owner: 'o',
+        repo: 'r',
+        fetchImpl,
+        permissions: { actions: 'read' },
+      })
+    ).rejects.toThrow(/actions: read/);
+  });
+
   it('says which failure it is when the installation lookup fails', async () => {
     const fetchImpl = fakeFetch([{ ok: false, status: 404, json: async () => ({}) }]);
     await expect(
@@ -159,5 +190,37 @@ describe('mintInstallationToken', () => {
     await expect(
       mintInstallationToken({ appId: '1', privateKey, owner: 'o', repo: 'r', fetchImpl })
     ).rejects.toThrow(/not granted one of the permissions/);
+  });
+});
+
+describe('parsePermissions', () => {
+  it('reads a JSON object of names to levels', () => {
+    expect(parsePermissions('{"contents":"read","actions":"read"}')).toEqual({
+      contents: 'read',
+      actions: 'read',
+    });
+  });
+
+  it.each([
+    ['not json', 'nope'],
+    ['an array', '["contents"]'],
+    ['an empty object', '{}'],
+    ['a bad level', '{"contents":"rw"}'],
+    ['a bad name', '{"Contents":"read"}'],
+    ['a __proto__ key', '{"__proto__":"read"}'],
+    ['a constructor key', '{"constructor":"read"}'],
+    ['a prototype key', '{"prototype":"read"}'],
+  ])('refuses %s rather than sending it to GitHub', (_label, json) => {
+    expect(() => parsePermissions(json)).toThrow(/GITHUB_APP_PERMISSIONS/);
+  });
+
+  // JSON.parse will mint an object whose keys are prototype names; the parsed
+  // object must never be the one returned, and the copy must carry no
+  // prototype to pollute.
+  it('returns a null-prototype copy, not the parsed object', () => {
+    const parsed = parsePermissions('{"contents":"read"}');
+    expect(Object.getPrototypeOf(parsed)).toBeNull();
+    expect(JSON.stringify(parsed)).toBe('{"contents":"read"}');
+    expect(({}).polluted).toBeUndefined();
   });
 });
