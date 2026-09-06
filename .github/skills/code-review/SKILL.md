@@ -98,7 +98,25 @@ These apply regardless of component, and CI enforces most of them:
   changes a file with a sibling test but not the test is a flag to
   investigate, not an automatic finding.
 
-## 4. Report
+## 4. MCP context (Copilot code review)
+
+When this skill runs inside GitHub Copilot code review, three read-only MCP
+servers are configured for the repository (`.github/copilot-mcp.json`; the
+procedure and rationale are in `docs/runbooks/copilot-code-review-mcp.md`).
+Use them to verify rather than assert:
+
+| Component in the diff | Consult | For |
+| --- | --- | --- |
+| `infra/**` | `terraform` — `search_providers`, `get_provider_details` | Whether an `azurerm` / `cloudflare` argument exists on the pinned provider version, and whether changing it forces replacement of a live resource. |
+| `functions/**`, `frontend/**` (MSAL, SWA config), `infra/**` (Azure resources) | `microsoft-learn` — `microsoft_docs_search`, then `microsoft_docs_fetch` | Current Azure Functions, Cosmos DB, Key Vault, Static Web Apps, Entra ID / MSAL and Application Insights behaviour. |
+| `edge/**`, Cloudflare resources in `infra/**` | `cloudflare-docs` — `search_cloudflare_documentation` | Workers, cron triggers, DNS and transform-rule semantics. |
+
+Cite the page you used in the finding. None of these servers can reach the
+live Azure estate, the HCP Terraform workspace or the Cloudflare account, so
+"the plan shows" and "the resource currently has" still come from evidence in
+the pull request, not from a tool.
+
+## 5. Report
 
 Structure the final report as:
 

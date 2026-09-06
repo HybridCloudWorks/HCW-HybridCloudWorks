@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "microsoft-learn": {
+      "type": "http",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "tools": [
+        "microsoft_docs_search",
+        "microsoft_docs_fetch",
+        "microsoft_code_sample_search"
+      ]
+    },
+    "cloudflare-docs": {
+      "type": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "tools": [
+        "search_cloudflare_documentation"
+      ]
+    },
+    "terraform": {
+      "type": "local",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "hashicorp/terraform-mcp-server:1.3.0",
+        "--toolsets=registry",
+        "--tools=search_providers,get_provider_details,get_latest_provider_version,search_modules,get_module_details,get_latest_module_version,search_policies,get_policy_details"
+      ],
+      "tools": [
+        "search_providers",
+        "get_provider_details",
+        "get_latest_provider_version",
+        "search_modules",
+        "get_module_details",
+        "get_latest_module_version",
+        "search_policies",
+        "get_policy_details"
+      ]
+    }
+  }
+}

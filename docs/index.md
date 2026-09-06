@@ -29,6 +29,7 @@ release records; this site holds the longer narrative.
   recommendation, plus the areas that came back sound
 - [Deployment runbook](runbooks/deployment-runbook.md)
 - [Alerting and support](runbooks/alerting-and-support.md)
+- [Copilot code review MCP servers](runbooks/copilot-code-review-mcp.md)
 - [IaC repository standard](standards/iac-repository-standard.md)
 - [Naming convention](standards/naming-convention.md)
 - [Variables and secrets](standards/variables-and-secrets.md)
