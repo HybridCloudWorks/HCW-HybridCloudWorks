@@ -17,6 +17,7 @@ import {
   buildPodcastEpisode,
   normalizePodcastId,
   resolvePodcastFeeds,
+  dedupeFeedsByProvider,
   isFeedGoneError,
   PODCAST_FEEDS,
 } from './podcasts.js';
@@ -496,6 +497,7 @@ describe('podcasts', () => {
           configScope: 'admin_config',
           feeds: [
             { provider: 'azure', url: 'https://media.rss.com/hcw/feed.xml' },
+            { provider: 'azure', url: 'https://second.example/feed.xml' },
             { provider: 'aws', url: 'http://insecure.example/feed.xml' },
             { provider: 'Bad Slug', url: 'https://x.example/feed.xml' },
             { url: 'https://no-provider.example/feed.xml' },
@@ -504,10 +506,22 @@ describe('podcasts', () => {
         },
       ],
     });
+    // The duplicate azure row is dropped: the summary is keyed by provider, so
+    // two rows would fetch twice and report once.
     expect(await resolvePodcastFeeds(store)).toEqual({
       feeds: [{ provider: 'azure', url: 'https://media.rss.com/hcw/feed.xml' }],
       source: 'admin_config',
     });
+    expect(
+      dedupeFeedsByProvider([
+        { provider: 'a', url: 'https://1' },
+        { provider: 'b', url: 'https://2' },
+        { provider: 'a', url: 'https://3' },
+      ])
+    ).toEqual([
+      { provider: 'a', url: 'https://1' },
+      { provider: 'b', url: 'https://2' },
+    ]);
     expect(store.readDoc).toHaveBeenCalledWith('admin_config', 'podcast_feeds', 'admin_config');
     // The run uses what the document says, not the constant.
     const parser = {

@@ -59,15 +59,30 @@ export function isValidFeedEntry(entry) {
 }
 
 /**
+ * One feed per provider: the summary is keyed by provider, so a second row for
+ * the same provider would be fetched, processed and then overwritten in the
+ * summary — extra work and a misleading log line. First valid row wins.
+ */
+export function dedupeFeedsByProvider(feeds) {
+  const seen = new Set();
+  return feeds.filter((entry) => {
+    if (seen.has(entry.provider)) return false;
+    seen.add(entry.provider);
+    return true;
+  });
+}
+
+/**
  * The feed list for this run: `admin_config/podcast_feeds` when it exists and
- * carries a `feeds` array (invalid rows dropped), else `fallback`.
- * Returns `{ feeds, source }` so the summary line can say which one ran.
+ * carries a `feeds` array (invalid rows dropped, one per provider), else
+ * `fallback`. Returns `{ feeds, source }` so the summary line can say which
+ * one ran.
  */
 export async function resolvePodcastFeeds(store, fallback = PODCAST_FEEDS) {
   const doc = await store.readDoc('admin_config', PODCAST_FEEDS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
   if (doc && Array.isArray(doc.feeds)) {
     return {
-      feeds: doc.feeds.filter(isValidFeedEntry),
+      feeds: dedupeFeedsByProvider(doc.feeds.filter(isValidFeedEntry)),
       source: 'admin_config',
     };
   }
