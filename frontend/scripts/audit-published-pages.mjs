@@ -369,14 +369,19 @@ async function auditPage(context, url) {
   if (f.length) {
     record.verdict = 'defect';
   } else if (record.mainChars < THIN_MAIN_CHARS) {
+    // Thin, and the copy (when present) says whether that is intentional —
+    // "Coming Soon" is a decision, a bare heading is missing content — so
+    // both are recorded on the row.
     record.verdict = 'empty';
     f.push(`thin main region: ${record.mainChars} chars`);
+    if (record.emptyCopy.length) f.push(`empty-state copy: ${record.emptyCopy.join(' | ')}`);
   } else if (record.emptyCopy.length && record.mainChars < EMPTY_COPY_MAX_CHARS) {
-    // Empty-state copy on a page that is otherwise thin is the page saying it
-    // has nothing. The same copy on a full landing page is one widget saying
-    // so (the podcast panel on `/azure`, 2,000+ chars of real content around
-    // it) and is a note, not a verdict — the post-deploy run of 2026-09-06
-    // marked three landings "empty" on that alone.
+    // Between THIN_MAIN_CHARS and EMPTY_COPY_MAX_CHARS the page has some text
+    // but its own copy says it has nothing — an empty listing with a header
+    // and a footer widget. Above the cutoff the same copy is one widget on a
+    // full page (the podcast panel on `/azure`, 2,000+ chars around it) and
+    // is a note, not a verdict — the post-deploy run of 2026-09-06 marked
+    // three landings "empty" on that alone.
     record.verdict = 'empty';
     f.push(`empty-state copy: ${record.emptyCopy.join(' | ')}`);
   } else if (record.emptyCopy.length) {

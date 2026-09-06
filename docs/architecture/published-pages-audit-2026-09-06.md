@@ -59,7 +59,9 @@ hydration class no longer masks it: roughly thirty section pages have no
 published content behind them (blog, coder-corner, frameworks and code for
 most providers), which #373 now records in full, and three landings were
 marked empty on a podcast widget's copy alone — a heuristic corrected in the
-crawler after this run (empty-state copy counts only on a thin page).
+crawler after this run (empty-state copy makes a page *empty* only when its
+main region is under 800 characters; on a fuller page it is recorded as a
+note).
 
 ## Matrix
 
