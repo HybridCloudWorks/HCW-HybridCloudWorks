@@ -7,7 +7,7 @@ import HeroImageCarousel from '@/components/landing/HeroImageCarousel';
 // No finops hero set exists under public/images/ yet (#371); the carousel renders
 // nothing for an empty list, which beats five 404s and broken <img> boxes.
 // Add the files (1155×924 RGBA PNG like azure-hero/) and list them here;
-// scripts/hero-assets-exist.test.js fails on a path that does not exist.
+// frontend/scripts/hero-assets-exist.test.js fails on a path that does not exist.
 const FINOPS_HERO_IMAGES = [];
 
 const ARCHITECTURE_CARDS = [

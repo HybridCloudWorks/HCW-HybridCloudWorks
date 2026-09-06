@@ -25,7 +25,7 @@ This project has not cut a tagged release; entries are grouped under
   every visit loaded with seven 404s and six broken image boxes (the audit's
   `broken images` class). The lists are empty until the sets exist — the
   carousel renders nothing for an empty list — and
-  `scripts/hero-assets-exist.test.js` now fails the frontend suite on any
+  `frontend/scripts/hero-assets-exist.test.js` now fails the frontend suite on any
   `/images/…` path a landing page references that is not under `public/`,
   so a set cannot be referenced before it is added. #371 stays open for the
   assets themselves (1155×924 RGBA PNG, like `azure-hero/`).
