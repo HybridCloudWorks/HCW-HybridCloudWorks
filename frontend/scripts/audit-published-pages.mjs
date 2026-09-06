@@ -56,7 +56,16 @@ const CONCURRENCY = (() => {
   const n = Number.parseInt(process.env.AUDIT_CONCURRENCY || '3', 10);
   return Number.isFinite(n) && n >= 1 ? Math.min(n, 8) : 3;
 })();
-const LIMIT = Number(opt('--limit', 0));
+const LIMIT = (() => {
+  // A bad or missing value is a usage error, not "no limit": say so and stop.
+  const raw = opt('--limit', '0');
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0 || String(n) !== String(raw).trim()) {
+    console.error(`--limit expects a non-negative integer, got "${raw}"`);
+    process.exit(2);
+  }
+  return n;
+})();
 const ONLY = opt('--only', '');
 const STRICT = flag('--strict');
 const API_HOST = 'api-azure.hybridcloudworks.com';
@@ -271,7 +280,11 @@ async function auditPage(context, url) {
             .filter((img) => img.complete && img.naturalWidth === 0 && img.getAttribute('src'))
             .map((img) => img.getAttribute('src'))
             .slice(0, 10),
-          media: [...document.querySelectorAll('audio[src], audio source[src], video[src]')]
+          media: [
+            ...document.querySelectorAll(
+              'audio[src], audio source[src], video[src], video source[src]'
+            ),
+          ]
             .map((el) => el.getAttribute('src'))
             .filter(Boolean)
             .slice(0, 10),
