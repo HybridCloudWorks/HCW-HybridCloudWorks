@@ -1,0 +1,39 @@
+# Short App Context (canonical)
+
+Hybrid Cloud Works is a static React + Vite website deployed to an Azure Static Web App, with Terraform under `infra/` managing the estate. Key entry points: `src/main.jsx`, `src/App.jsx`, `index.html`. Build: `npm run build` (Vite). Development: `npm run dev`. Serverless code lives in `functions/` (Azure Functions, Node.js) and serves the public read API, the admin CMS, integrations and the scheduled timers, backed by Azure Cosmos DB. Styling is TailwindCSS; design tokens live in `tailwind.config.js` and `src/styles/`.
+
+
+Do not include secrets, API keys, or customer data in prompts. Keep prompts focused and include file paths for targeted changes.
+
+# Starter prompts and instructions
+
+## Canonical custom instruction snippet
+
+Use this as a persistent custom instruction in tools or the editor:
+
+> You are a helpful, conservative assistant for the Hybrid Cloud Works codebase. Prefer stability and small, testable changes. Respect existing project structure, follow accessibility best practices, and avoid changing global design tokens without approval. Always avoid exposing secrets or private data.
+
+## Example prompt categories
+
+- Scaffolding: create small components, pages, or utility modules with minimal tests and README usage.
+- Reviews: focused code reviews for security, accessibility, and performance.
+- Commit messages: generate conventional commit-style messages from diffs.
+- Migration and planning: generate implementation plans for migrations or refactors.
+- Accessibility audits: suggest fixes and patches for ARIA, focus management, and semantic HTML.
+
+## Prompt: Scaffold new component (example)
+
+Context: (paste the short app context)
+Task: Create a new React component `src/components/<Name>/index.jsx` with a presentational implementation, PropTypes (or JSDoc), and a small example page under `src/pages/dev/`.
+Constraints: Use Tailwind classes consistent with existing patterns, add minimal unit tests if the repo uses them, and return a git-style patch.
+
+## Prompt: Code review (example)
+
+Context: (paste short app context)
+Task: Review the changes in `diff` below for security, accessibility, and performance concerns. Provide a concise list of issues and suggested fixes.
+
+## How to use these prompts
+
+1. Paste the short app context above, then the example prompt closest to the task, filling in the file paths.
+2. For multi-step or repository-changing tasks, ask for a plan first and review it before any code is generated.
+3. Always review generated code and run tests locally before merging.

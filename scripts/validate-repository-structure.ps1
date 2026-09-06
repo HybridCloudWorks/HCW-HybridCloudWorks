@@ -163,7 +163,13 @@ foreach ($markdownFile in $markdownFiles) {
   $relativePath = [System.IO.Path]::GetRelativePath($repositoryRoot, $markdownFile.FullName).Replace('\', '/')
   $isAllowed = $relativePath -eq 'README.md' -or
     $relativePath -in $allowedRootFiles -or
+    # GitHub Copilot reads frontend/.copilot/ (agent prompts, instructions,
+    # llms.txt) from the frontend project; .github/templates/ holds the
+    # document templates used as needed. Both restored 2026-09-06 (owner
+    # decision) after #346 removed them in error.
+    $relativePath.StartsWith('frontend/.copilot/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath.StartsWith('.github/ISSUE_TEMPLATE/', [System.StringComparison]::OrdinalIgnoreCase) -or
+    $relativePath.StartsWith('.github/templates/', [System.StringComparison]::OrdinalIgnoreCase) -or
     # GitHub Copilot code review reads agent skills from .github/skills/ —
     # the canonical home of the hcw-code-review skill (owner decision,
     # 2026-09-01, relocated from .claude/skills/ which Copilot cannot read).
