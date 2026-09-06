@@ -59,9 +59,11 @@ const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), '..', '.github',
  */
 const ALLOWED = new Map([
   [
-    'sync-wiki.yml',
-    'Publishes wiki/ to the repository wiki. The wiki is a separate git ' +
-      'repository, but the grant is repository-scoped and therefore counts here.',
+    'retire-wiki.yml',
+    'Overwrites every GitHub Wiki page with a pointer to the docs site ' +
+      '(workflow_dispatch, dry-run by default). The wiki is a separate git ' +
+      'repository, but the grant is repository-scoped and therefore counts here. ' +
+      'Replaced sync-wiki.yml on 2026-09-06 when docs/ superseded wiki/ (#360).',
   ],
 ]);
 

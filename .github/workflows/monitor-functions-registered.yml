@@ -22,7 +22,7 @@
 # unmatched route — the same reason AppExceptions cannot fire.
 #
 # So this checks the CONDITION instead, which
-# `wiki/Alerting-And-Support.md` already documents as the detector:
+# `docs/runbooks/alerting-and-support.md` already documents as the detector:
 #
 #   "A function count of 0, or an AzureWebJobsStorage count of 1, is the
 #    condition behind all three recorded incidents."

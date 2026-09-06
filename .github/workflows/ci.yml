@@ -59,7 +59,7 @@ jobs:
             test: npm test
           - name: functions (azure)
             dir: functions
-            filter: '^(functions/|\.azure/api-surface\.json|infra/|wiki/Blog-Machine\.md)'
+            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-machine\.md)'
             test: npm test
           - name: scripts (operations)
             dir: scripts

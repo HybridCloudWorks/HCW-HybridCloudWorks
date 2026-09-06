@@ -4,8 +4,8 @@
 where the open work lives.** Engineering work, owner decisions, production
 approvals, credentials, external access and live-environment operations are
 GitHub issues; verified completion belongs in [CHANGELOG.md](CHANGELOG.md), and
-the required-inputs inventory is [Required-Inputs](wiki/Required-Inputs.md) in
-the Wiki.
+the required-inputs inventory is [Required-Inputs](docs/standards/required-inputs.md) on
+the docs site.
 
 **Open work is tracked in GitHub issues as of 2026-09-05.** Owner decision:
 the remaining items were moved to the issues list so they can be worked from

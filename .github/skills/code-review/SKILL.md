@@ -40,7 +40,7 @@ also needs `references/functions.md` for the contract check, even when
 | `infra/**` | Terraform root module — **live production**, HCP Terraform state | `references/infra.md` |
 | `scripts/**`, `.github/workflows/**` | Operational scripts and CI/CD | `references/scripts-workflows.md` |
 | `vps-agent/**`, `edge/**` | Labs job executor and Cloudflare availability probe | `references/agents-edge.md` |
-| `wiki/**`, `TODO.md`, `CHANGELOG.md`, other `*.md` | Documentation discipline | Section 3 below |
+| `docs/**`, `TODO.md`, `CHANGELOG.md`, other `*.md` | Documentation discipline | Section 3 below |
 
 ## 2. Review each component
 
@@ -85,7 +85,7 @@ These apply regardless of component, and CI enforces most of them:
 - **Documentation discipline.** New Markdown files are rejected by the
   Repository Policy workflow unless allowlisted in
   `scripts/validate-repository-structure.ps1`. Narrative docs belong in
-  `wiki/` (synced to the GitHub Wiki), open work in `TODO.md`, completed work
+  `docs/` (published to docs.hybridcloudworks.com), open work in `TODO.md`, completed work
   in `CHANGELOG.md`. If a change completes tracked work, check that TODO.md
   and CHANGELOG.md moved with it.
 - **Owner-facing instructions** (in docs, TODO items, PR bodies): must follow

@@ -33,7 +33,7 @@ Two small, high-trust components that run *outside* Azure:
 
 - The probe exists to tell "site down" from "monitoring down". Review that
   failure of the probe itself is distinguishable from failure of the site
-  (see ADR-0024 and `wiki/Availability-Probe.md`), that probe targets and
+  (see ADR-0024 and `docs/runbooks/availability-probe.md`), that probe targets and
   thresholds match what `verify-alert-state.yml` / the alert fabric expect,
   and that any secret (API tokens for Cloudflare) stays in the platform's
   secret store, not in code or wrangler config committed to Git.

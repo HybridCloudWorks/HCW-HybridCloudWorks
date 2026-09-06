@@ -153,6 +153,29 @@ resource "cloudflare_dns_record" "azure_functions" {
   comment = "Azure Functions API endpoint"
 }
 
+# Documentation site on GitHub Pages (issue #360): docs.<domain> is a CNAME to
+# the organization's Pages host. DNS-only rather than proxied, deliberately:
+# GitHub issues and renews the certificate for a Pages custom domain by
+# checking the CNAME resolves to *.github.io, and a proxied record answers
+# with Cloudflare's addresses instead, which leaves the domain stuck at
+# "certificate pending". The apex stays with the Static Web App; Pages cannot
+# share it. `ttl` is a real value because `1` (automatic) is only accepted on
+# proxied records.
+#
+# Order of operations: apply this, then set the custom domain on the Pages
+# site (Settings → Pages), then enforce HTTPS once the certificate is issued.
+# The CNAME resolving before the site knows the domain is harmless — GitHub
+# returns 404 for an unknown host.
+resource "cloudflare_dns_record" "docs_pages" {
+  zone_id = var.cloudflare_zone_id
+  name    = "docs.${var.domain}"
+  content = "hybridcloudworks.github.io"
+  type    = "CNAME"
+  proxied = false
+  ttl     = 300
+  comment = "GitHub Pages documentation site"
+}
+
 # The rename is a change of resource ADDRESS, so without these Terraform would
 # destroy and recreate both records — and these two are the API's hostname and
 # the ownership proof Azure reads at bind time. A destroy/create on them is a

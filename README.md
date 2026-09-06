@@ -45,8 +45,8 @@ and retained only in the archived plans and historical Wiki pages.
 | `vps-agent/` | API-authenticated pull-based Labs job executor |
 | `infra/` | Terraform root module for Azure and Cloudflare resources |
 | `scripts/` | Container-spec generation, content-manifest tooling, smoke checks, and operator utilities |
-| `.github/workflows/` | CI, validation, Wiki sync, scheduled maintenance, and manual release workflows |
-| `wiki/` | Wiki-as-code source for reviewed runbooks and engineering records, including the archived planning documents (`Architecture-Plan.md`, `Migration-Plan.md`) and the required-inputs inventory (`Required-Inputs.md`) |
+| `.github/workflows/` | CI, validation, the docs-site build and deploy, scheduled maintenance, and manual release workflows |
+| `docs/` | Documentation source, published to [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com): decisions (ADRs), runbooks, standards (including the required-inputs inventory), architecture records, the historical migration plans and the Firebase-era archive. `mkdocs.yml` at the root builds it |
 | `TODO.md` | **All open work** — engineering, plus owner decisions, approvals, credentials and external access |
 | `CHANGELOG.md` | Verified completed work |
 
@@ -93,9 +93,9 @@ validation as applicable. Azure releases are explicit GitHub Actions dispatches
 and infrastructure changes are reviewed through HCP Terraform. All repository
 workflows use GitHub-hosted runners.
 
-The [Engineering Wiki](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki)
-contains runbooks, ADRs, naming, cost, and operational guidance. The reviewed
-Wiki source is under [`wiki/`](wiki/). Read [CONTRIBUTING](.github/CONTRIBUTING.md)
+The documentation site at [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com)
+contains runbooks, ADRs, naming, cost, and operational guidance; its reviewed
+source is under [`docs/`](docs/). Read [CONTRIBUTING](.github/CONTRIBUTING.md)
 before changing repository structure, deployment, or documentation.
 
 Open work and completed work are kept apart; open work is one file:

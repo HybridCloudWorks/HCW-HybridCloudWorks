@@ -111,3 +111,18 @@ so it is recorded here, where every session reads it.
   recommends changes, or any review thread still unresolved on the head, is
   not that: fix, push, and wait for the next review of the new head. Ready
   for review on its own is still not permission to merge.
+- **Every review conversation is resolved before the merge, including the
+  ones that ask for nothing.** Owner instruction 2026-09-06, after a merge
+  was blocked with `A conversation must be resolved before this pull request
+  can be merged` on a thread that was a validation note rather than a change
+  request. The repository ruleset requires conversation resolution, so an
+  open thread of any kind blocks the merge button the same way a failing
+  check does. The session that owns the PR resolves each thread once it has
+  acted on it: a change request gets the fix pushed and a one-line reply
+  naming the commit; a question gets the answer; a validation or
+  informational comment gets a reply saying it was read and, if it asked
+  for nothing, that nothing changed. Resolve through the API
+  (`resolveReviewThread`) after the reply, never before it — an unexplained
+  resolution reads as dismissal to the next reviewer. Never resolve a thread
+  to get past it: a thread whose ask has not been met stays open and the PR
+  waits.
