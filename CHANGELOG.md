@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **The public podcast list hides episodes whose media is gone (#PR, closes
+- **The public podcast list hides episodes whose media is gone (#379, closes
   #372).** PodBean's CDN has answered 404 for every stored episode since
   2026-09-05, and `/azure/audio` rendered a player for each that played
   nothing (the audit's `media not served` class). `listPodcasts` now drops a
