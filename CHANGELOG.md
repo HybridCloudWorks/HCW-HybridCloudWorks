@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Four landing pages no longer request hero images that do not exist
+  (#380, issue #371).** `/gcp`, `/github`, `/terraform` and `/finops` each
+  listed five `/images/<provider>-hero/N.png` files that were never added, so
+  every visit loaded with seven 404s and six broken image boxes (the audit's
+  `broken images` class). The lists are empty until the sets exist — the
+  carousel renders nothing for an empty list — and
+  `frontend/scripts/hero-assets-exist.test.js` now fails the frontend suite on any
+  `/images/…` path a landing page references that is not under `public/`,
+  so a set cannot be referenced before it is added. #371 stays open for the
+  assets themselves (1155×924 RGBA PNG, like `azure-hero/`).
 - **The public podcast list hides episodes whose media is gone (#379, closes
   #372).** PodBean's CDN has answered 404 for every stored episode since
   2026-09-05, and `/azure/audio` rendered a player for each that played
