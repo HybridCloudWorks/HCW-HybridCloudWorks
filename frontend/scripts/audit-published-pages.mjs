@@ -104,6 +104,8 @@ const EMPTY_COPY = [
   'No articles in this category yet.',
   'No content available.',
   'Check back soon for updates.',
+  'No published frameworks found for',
+  's published yet.',
 ];
 
 /**

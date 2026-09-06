@@ -177,6 +177,18 @@ export function ContentListingTemplate({
       );
     }
 
+    if (items.length === 0) {
+      // Nothing published for this provider and type at all (issue #373).
+      // The filter message below would invite the reader to clear filters
+      // that are not the reason; say the true thing instead.
+      return (
+        <div className="text-center py-20">
+          <p className="text-muted-foreground text-lg">No {itemType}s published yet.</p>
+          <p className="text-muted-foreground text-sm mt-2">Check back soon for updates.</p>
+        </div>
+      );
+    }
+
     return (
       <div className="text-center py-20">
         <p className="text-muted-foreground text-lg">
