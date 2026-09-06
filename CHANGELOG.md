@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The public podcast list hides episodes whose media is gone (#379, closes
+  #372).** PodBean's CDN has answered 404 for every stored episode since
+  2026-09-05, and `/azure/audio` rendered a player for each that played
+  nothing (the audit's `media not served` class). `listPodcasts` now drops a
+  row whose `mediaUrl` host is on `RETIRED_PODCAST_MEDIA_HOSTS`
+  (`mcdn.podbean.com`, `feed.podbean.com`) or that carries a
+  `mediaUnavailableAt` mark, and `total` counts only what it serves; the
+  rows stay in Cosmos until the new host's feed (#349) replaces them, so no
+  data-plane write is needed. The page falls back to its own "No episodes
+  available yet." copy, which is the honest state. A per-run liveness check
+  that sets `mediaUnavailableAt` is deferred until a feed exists again: with
+  the list empty the timer has nothing to check.
 - **`TODO.md` points at the board (#377, closes #362).** The handling rule and
   the "where the open items live" section name the organization project
   (https://github.com/orgs/HybridCloudWorks/projects/1) and its Priority
