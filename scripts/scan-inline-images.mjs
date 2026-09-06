@@ -12,7 +12,7 @@
  * Exit 0 always; the output is the report.
  */
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -71,7 +71,5 @@ function main() {
     console.log('Re-host by republishing each article; the publish step rewrites the body.');
 }
 
-const invokedDirectly =
-  process.argv[1] &&
-  import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, '/')}`).href;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) main();

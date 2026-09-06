@@ -19,9 +19,12 @@
  *   - Inline body images ARE re-hosted, since 2026-09-06 (issue #374): every
  *     external `<img>` / `![](…)` URL in any body field is fetched
  *     through the guarded fetcher, stored under the article id in the public
- *     `covers` container and rewritten to the site's media path; failures are
- *     left in place and summarised on the document (`inlineImages`). See
- *     ./inline-images.js. Injected as `inlineImages`; absent, nothing runs.
+ *     `covers` container and rewritten to the site's media path. A URL that
+ *     fails is left in place and counted in the `inlineImages` summary the
+ *     completed step writes; if the step itself throws, it is logged and the
+ *     article publishes untouched with no summary. Nothing here can fail a
+ *     publish. See ./inline-images.js. Injected as `inlineImages`; absent,
+ *     nothing runs.
  *   - bumpForgeStats' FieldValue.increment becomes read-modify-patch on the
  *     whole totals/formats objects — formatKey is user-influenced text, and
  *     writing whole objects avoids dotted-path escaping entirely.
