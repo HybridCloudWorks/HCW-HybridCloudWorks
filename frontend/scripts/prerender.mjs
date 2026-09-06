@@ -197,20 +197,6 @@ export function splitHead(rendered) {
 }
 
 /**
- * Put the rendered markup and head tags into the built index.html.
- *
- * The template's own `<title>` is REPLACED, not appended to. Two title elements
- * in one document is not a tie a crawler resolves the way you would hope, and
- * the template's is the generic one.
- */
-/**
- * The attribute `main.jsx` reads the seed from. Agreed in two files; changing
- * it in one and not the other turns hydration back into a full client
- * re-render, silently — the page still works, it just throws away the
- * pre-rendered DOM again, which is precisely the bug T-714 was opened for.
- * `prerender.test.js` pins the pair.
- */
-/**
  * Fizz's streamed form, which a static file must never carry: a pending
  * boundary marker with its placeholder template, a hidden completion segment,
  * or the inline runtime that swaps one into the other. Returns a description
@@ -228,6 +214,20 @@ export function findStreamedBoundary(html) {
   return null;
 }
 
+/**
+ * Put the rendered markup and head tags into the built index.html.
+ *
+ * The template's own `<title>` is REPLACED, not appended to. Two title elements
+ * in one document is not a tie a crawler resolves the way you would hope, and
+ * the template's is the generic one.
+ */
+/**
+ * The attribute `main.jsx` reads the seed from. Agreed in two files; changing
+ * it in one and not the other turns hydration back into a full client
+ * re-render, silently — the page still works, it just throws away the
+ * pre-rendered DOM again, which is precisely the bug T-714 was opened for.
+ * `prerender.test.js` pins the pair.
+ */
 export const SEED_ATTRIBUTE = 'data-prerendered-seed';
 
 /**
