@@ -311,7 +311,7 @@ async function runPool(items, worker, size) {
   async function lane() {
     while (next < items.length) {
       const i = next++;
-      results[i] = await worker(items[i], i);
+      results[i] = await worker(items[i]);
       process.stdout.write(
         `${String(i + 1).padStart(3)}/${items.length} ${results[i].verdict.padEnd(6)} ${results[i].path}\n`
       );
@@ -319,6 +319,11 @@ async function runPool(items, worker, size) {
   }
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, lane));
   return results;
+}
+
+/** A table cell: backslashes first, then pipes, so neither breaks the row. */
+function escapeCell(text) {
+  return String(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
 function toMarkdown(records, meta) {
@@ -335,7 +340,7 @@ function toMarkdown(records, meta) {
   for (const r of records) {
     const cells = [...r.findings, ...r.notes.map((n) => `note: ${n}`)];
     lines.push(
-      `| \`${r.path}\` | ${r.status ?? '—'} | **${r.verdict}** | ${cells.join('; ').replace(/\|/g, '\\|') || '—'} |`
+      `| \`${r.path}\` | ${r.status ?? '—'} | **${r.verdict}** | ${escapeCell(cells.join('; ')) || '—'} |`
     );
   }
   lines.push('', '## Defect classes', '');
