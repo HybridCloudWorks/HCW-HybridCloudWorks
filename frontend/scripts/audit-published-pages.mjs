@@ -61,6 +61,10 @@ const ONLY = opt('--only', '');
 const STRICT = flag('--strict');
 const API_HOST = 'api-azure.hybridcloudworks.com';
 
+/** Every fetch outside the browser is bounded, so a hung host stalls one
+ * request, not a lane and not the 40-minute workflow. */
+const FETCH_TIMEOUT_MS = 15000;
+
 /** First path segment → what the title/og:title must mention. */
 const PROVIDER_NAMES = {
   azure: ['Azure'],
@@ -123,7 +127,10 @@ function classifyConsole(text) {
 }
 
 async function readSitemap() {
-  const res = await fetch(SITEMAP, { headers: { 'User-Agent': 'HCW-page-audit/1.0' } });
+  const res = await fetch(SITEMAP, {
+    headers: { 'User-Agent': 'HCW-page-audit/1.0' },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`sitemap ${SITEMAP} answered ${res.status}`);
   const xml = await res.text();
   const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].trim());
@@ -152,14 +159,21 @@ function providerOf(url) {
  */
 async function mediaStatus(url) {
   try {
-    const head = await fetch(url, { method: 'HEAD' });
+    const head = await fetch(url, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if ([200, 206].includes(head.status)) return head.status;
     if (![405, 501, 403, 416].includes(head.status)) return head.status;
   } catch {
     // fall through to the ranged GET
   }
   try {
-    const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } });
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     await res.body?.cancel?.();
     return res.status;
   } catch {
