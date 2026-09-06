@@ -26,9 +26,10 @@ This project has not cut a tagged release; entries are grouped under
   contains. Three need no credential — Microsoft Learn (Azure Functions,
   Cosmos DB, Key Vault, Static Web Apps, Entra ID), Cloudflare's public
   documentation server (the edge availability probe and DNS) and the
-  HashiCorp Terraform MCP server, pinned by image digest at `1.3.0` (a bare
-  tag is mutable) and held to the eight Registry read tools on both its
-  command line and Copilot's allowlist, with
+  HashiCorp Terraform MCP server, pinned by image digest (`@sha256:…`, the
+  immutable reference; the `1.3.0` tag beside it is for readability only,
+  since a tag can be retargeted) and held to the eight Registry read tools on
+  both its command line and Copilot's allowlist, with
   no HCP Terraform token so the live workspace stays unreachable. Two reach
   live systems and are kept read-only by construction. The **Azure MCP
   Server** signs in with no stored secret: `copilot-setup-steps.yml` runs
