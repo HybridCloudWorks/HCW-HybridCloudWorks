@@ -126,6 +126,8 @@ Terraform outputs by `scripts/set-github-variables.ps1` — never written by han
 | Name | Status | Consumer |
 | --- | --- | --- |
 | `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml` and `heal-computed-properties.yml`. Also arms the healer, which skips while it is unset |
+| `COPILOT_REVIEW_CLIENT_ID` | **NOT SET** | OIDC login in `copilot-setup-steps.yml`, the job GitHub runs before Copilot code review and the Copilot cloud agent start. Identifies `github_copilot_review` (`infra/oidc.tf`): Reader on the four workload groups, nothing else. Seeded from the `copilot_review_client_id` output by `scripts/set-github-variables.ps1`; while unset the login fails closed and the Azure MCP server has no credential — see [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
+| `COPILOT_REVIEW_APP_ID` | **NOT SET** | App ID of *HCW Copilot Review Reader*, the read-only GitHub App `copilot-setup-steps.yml` mints a one-hour installation token from for the GitHub MCP server Copilot code review uses. An identifier, like `MANIFEST_APP_ID`; the key is the Agents secret in §4.3. Set by hand from the App page (runbook step 4) |
 | `READER_CLIENT_ID` | **NOT SET** | OIDC login for the workflows that only read — `monitor-functions-registered.yml`, `verify-alert-state.yml`, `publish-content-manifest.yml` (T-728). All three are gated on it and **skip silently while it is unset**, so seed it in the same pass as the apply: an unset value looks like three workflows not running, not like a failure |
 | `TENANT_ID` | **VERIFIED** | OIDC login |
 | `SUBSCRIPTION_ID` | **VERIFIED** | OIDC login, `az rest` calls |
@@ -159,6 +161,15 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 **No stored, non-expiring credential remains in this repository's secrets.**
 `GITHUB_TOKEN` is contractual and injected per run; it is never stored.
 
+The **Agents** store (Settings → Secrets and variables → Agents) is separate
+from Actions secrets. Copilot's setup job and agent environment read it; a
+name carrying the `COPILOT_MCP_` prefix is read by MCP servers only. It is to
+hold one entry:
+
+| Name | Status | Consumer |
+| --- | --- | --- |
+| `COPILOT_REVIEW_APP_PRIVATE_KEY` | **NOT SET** | PEM private key of *HCW Copilot Review Reader*, the GitHub App installed on this repository only with eight **read** permissions. `copilot-setup-steps.yml` mints a one-hour installation token from it for the `github-mcp-server` entry in `.github/copilot-mcp.json`; the App's read-only permissions are the ceiling for anything the key can mint. **No personal access token, classic or fine-grained, is used anywhere in the configuration.** Not `COPILOT_MCP_`-prefixed because the setup job, not an MCP server, reads it. Justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification); procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
+
 ## 4.4 GitHub environments
 
 Enumerated live 2026-08-25.
@@ -166,7 +177,7 @@ Enumerated live 2026-08-25.
 | Name | Status | Notes |
 | --- | --- | --- |
 | `production` | **CONFIRMED — no reviewers, by decision** (owner, 2026-08-29) | Both deploy workflows bind to it, so it records who deployed. **Required reviewers are deliberately NOT configured: this is a single-operator estate, and a required reviewer you approve yourself is not a control — it is a click that produces an audit trail implying oversight that did not happen.** What still matters here is the other half. GitHub auto-creates a missing environment with no protection rules, and the federated credential's subject is environment-scoped (`repo:HybridCloudWorks/HCW-HybridCloudWorks:environment:production`, declared in `infra/oidc.tf`), so it matches from any branch — an unprotected environment leaves `workflow_dispatch` able to ship an unreviewed ref past all 12 required contexts (T-705). A `main`-only **deployment-branch rule** closes that, costs a solo operator nothing, and is not self-approval theatre. ~~**Owner action, reduced to one thing:** Settings → Environments → `production` → Deployment branches → *Selected branches* → `main`.~~ **Done 2026-09-02:** the `main`-only deployment-branch rule is set. The guard step in both workflows stays as the repository-side backstop; belt and braces is correct here because the environment rule is configured outside the repository and nothing in a checkout can prove it is still set |
-| `copilot` | **SET** | Copilot code review agent |
+| `copilot` | **SET** | Copilot cloud agent and Copilot code review. `copilot-setup-steps.yml` declares it, so the OIDC subject is `repo:HybridCloudWorks/HCW-HybridCloudWorks:environment:copilot`, trusted (both forms) only by `github_copilot_review` — a Reader-only identity, so a deployment-branch rule here would gain nothing and would block Copilot's own branches |
 | `data-migration` | **RETIRED** | Its only consumer, `migrate-data.yml`, was deleted in `59e471b`. The two federated credentials that still trusted it were removed on 2026-08-26 (T-524), so nothing in Azure trusts the subject either |
 
 ## 4.5 Function App settings — Terraform-managed

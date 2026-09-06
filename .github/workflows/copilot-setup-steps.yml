@@ -1,0 +1,157 @@
+# Copilot's environment — the two credentials the MCP servers need, minted per
+# run, nothing stored that can act on its own.
+#
+# GitHub runs the `copilot-setup-steps` job before Copilot cloud agent starts
+# work and, by default, before Copilot code review reviews a pull request
+# (docs: "Customize the agent environment" and "Use code review →
+# Customizing Copilot code review's environment"). Two of the servers in
+# .github/copilot-mcp.json need something this job leaves behind:
+#
+#   azure               an Azure CLI sign-in (AZURE_TOKEN_CREDENTIALS pins the
+#                       server to it)
+#   github-mcp-server   a one-hour GitHub App installation token in
+#                       $HOME/.copilot-review/github-mcp.env, which the server's
+#                       docker run reads with --env-file
+#
+# Everything else the reviewer needs (Node for npx, Docker for the Terraform
+# and GitHub servers) is on the runner image.
+#
+# NO STORED CREDENTIAL THAT CAN ACT ON ITS OWN.
+#
+# Azure: azure/login exchanges the job's GitHub OIDC token for an Azure token,
+# exactly as deploy-functions.yml and the monitors do. The identity is
+# `github_copilot_review` in infra/oidc.tf: Reader on the four workload resource
+# groups and nothing else — no data-plane role, no Key Vault access, no write
+# anywhere. Its federated credential trusts the subject `…:environment:copilot`,
+# which is what `environment: copilot` below makes GitHub compose. Change
+# either side alone and azure/login fails with AADSTS700213;
+# scripts/oidc-subjects.test.mjs cross-checks the two on every CI run.
+#
+# GitHub: a dedicated GitHub App, installed on this repository only, whose
+# permissions are all READ. The private key is the one stored secret, and the
+# App's permissions are its ceiling: a key that leaked could mint nothing but
+# read-only, one-repository, one-hour tokens — the same access the token itself
+# grants. No personal access token of any kind, classic or fine-grained: those
+# are user-bound and long-lived, and this estate holds none (see
+# docs/standards/variables-and-secrets.md). The token is narrowed again at
+# mint time to the eight read permissions the pinned toolsets need
+# (GITHUB_APP_PERMISSIONS below) — the same minter the manifest publisher
+# uses, scripts/github-app-token.mjs, which explains why it is not the
+# marketplace action.
+#
+# workflow_dispatch only, on purpose: the docs' Azure example triggers the same
+# way, and a pull_request trigger would sign in on every edit of this file for
+# no reader. Run it by hand to prove the Azure login; Copilot runs it for real.
+# The App step is self-arming: with the variable and secret unset it reports
+# that it did not run rather than failing the job, and a manual dispatch may
+# well report that — Agents secrets are exposed to Copilot's own runs, and
+# whether an ordinary dispatch sees them is GitHub's call, not this file's.
+#
+# If the `Setting up environment` section of a Copilot review session shows
+# this job did NOT run, that is a GitHub-side gap (community discussion
+# #203859, unresolved as of 2026-09) and the failure is safe: both servers
+# start with no credential and every tool call fails closed. The runbook
+# docs/runbooks/copilot-code-review-mcp.md says what to look for.
+name: Copilot setup steps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The job MUST be named copilot-setup-steps or Copilot does not pick it up.
+  copilot-setup-steps:
+    name: Sign in to Azure and mint the GitHub read token
+    runs-on: ubuntu-latest
+    # Declaring the environment is what puts `:environment:copilot` in the OIDC
+    # subject (see infra/oidc.tf github_copilot_review_environment).
+    environment: copilot
+    permissions:
+      # id-token: write is what lets the runner request a GitHub OIDC token.
+      # Without it azure/login has nothing to exchange.
+      id-token: write
+      contents: read
+    steps:
+      # Federated OIDC — no stored credential. COPILOT_REVIEW_CLIENT_ID is a
+      # repository VARIABLE, not a secret, like CLIENT_ID and READER_CLIENT_ID:
+      # it identifies the managed identity and grants nothing without a token
+      # from this repository in the copilot environment. Seeded from the
+      # copilot_review_client_id Terraform output by
+      # scripts/set-github-variables.ps1. TENANT_ID and SUBSCRIPTION_ID are the
+      # existing variables every other login here uses.
+      - name: Azure Login
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
+        with:
+          client-id: ${{ vars.COPILOT_REVIEW_CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      # The minter is in the repository, so the repository has to be here.
+      # Copilot performs its own checkout afterwards; this one is for the one
+      # script below and nothing else.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Pinned Node 22 to match scripts/package.json's engines declaration.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      # Self-arming, like publish-content-manifest.yml: before the App exists
+      # this reports honestly that it did not run rather than failing every
+      # session. `secrets` is not available to a step-level `if`, so the test
+      # happens inside the step.
+      - name: Is the GitHub App configured?
+        id: app
+        env:
+          COPILOT_REVIEW_APP_ID: ${{ vars.COPILOT_REVIEW_APP_ID }}
+          COPILOT_REVIEW_APP_PRIVATE_KEY: ${{ secrets.COPILOT_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${COPILOT_REVIEW_APP_ID}" ] && [ -n "${COPILOT_REVIEW_APP_PRIVATE_KEY}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::COPILOT_REVIEW_APP_ID or COPILOT_REVIEW_APP_PRIVATE_KEY is unset, so no GitHub token was minted; the github-mcp-server entry will fail closed this session (issue #369, step 4)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url and uses
+      # global fetch. The token is narrowed at mint time to the eight READ
+      # permissions the pinned toolsets need — metadata and contents (repos),
+      # issues, pull_requests, actions, security_events (code scanning),
+      # vulnerability_alerts (Dependabot), discussions — on this repository
+      # only, for one hour. It is masked before it is written anywhere.
+      - name: Mint a read-only App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.COPILOT_REVIEW_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.COPILOT_REVIEW_APP_PRIVATE_KEY }}
+          GITHUB_APP_PERMISSIONS: '{"metadata":"read","contents":"read","issues":"read","pull_requests":"read","actions":"read","security_events":"read","vulnerability_alerts":"read","discussions":"read"}'
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # Where the MCP server finds it. --env-file rather than -e on the docker
+      # command line, so the token is never an argument another process on the
+      # runner could list. Mode 600, owner only, in the runner user's home —
+      # the same user Copilot's MCP processes run as.
+      - name: Hand the token to the GitHub MCP server
+        if: steps.app.outputs.armed == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "${HOME}/.copilot-review"
+          printf 'GITHUB_PERSONAL_ACCESS_TOKEN=%s\n' "${TOKEN}" > "${HOME}/.copilot-review/github-mcp.env"
+          echo "Wrote ${HOME}/.copilot-review/github-mcp.env (mode 600)."

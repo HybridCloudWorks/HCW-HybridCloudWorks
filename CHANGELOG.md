@@ -19,54 +19,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **`fetchPodcastFeeds` no longer polls a dead feed, and the podcast pages
-  no longer advertise PodBean (#365, issue #348).** PodBean's feed returned
-  HTTP 410 Gone from 2026-09-05, so every two-hour firing since the timer was
-  armed in #332 ended in `feed failed`, and every podcast page offered a
-  PodBean subscribe button that led to it. Three changes. The feed list moves
-  out of the code into `admin_config/podcast_feeds` (`{ feeds: [{ provider,
-  url }] }`), read on every run, so the next host (issue #349) is a document
-  write and not a deploy; the constant that used to name PodBean is now an
-  empty fallback, and a run with no feeds says so at Warning instead of
-  staying silent. A 410 is treated as what it is — the host saying gone — and
-  reported at Warning as `feed gone (410)` with the summary carrying
-  `skipped: 'gone'`, rather than as an Error every two hours; other failures
-  still error. On the pages, PodBean's logo and button are gone from the
-  shared, AWS, Azure and GCP podcast pages; a subscribe button now renders only
-  when its link exists, and an **RSS feed** button appears once
-  `podcast.feedUrl` is set. The Azure provider's `feedUrl` is null until the
-  show is re-hosted, and its Apple link — which pointed at the creator
-  dashboard, not a listener page — is removed until the show is resubmitted.
-  Verification once the new feed is seeded: `podcasts.updatedAt` fresh at
-  the 2-hour firing and no `feed failed` rows in `AppTraces` for
-  `Function.fetchPodcastFeeds`.
-- **`createContentFromRecording` is implemented — the fifteenth and last RPC
-  the admin UI invoked without a route (#366, closes #180).** RecordingsPage's
-  "Route to ContentForge Pipeline" has called it since the Firebase days and
-  received a 404 on Azure. It now does what the button says: the transcript
-  goes through `createDrafter().generateDraft`, the same drafter the forge,
-  the digest and `generateArticleDraft` use (feature-gated as
-  forgeDrafting), with an instruction block per content type — blog post,
-  technical guide, LinkedIn post, podcast show notes, meeting summary — and
-  the result is persisted through the `createContentItem` write path, so a
-  recording-born draft carries the same dedup, quality report and document
-  shape as every other. To make that reuse literal rather than a copy,
-  `lib/cms/content-create.js` gained `createContentDocument`, the write path
-  without the HTTP wrapper; `createContentItem` now calls it and its twelve
-  tests are unchanged. The recording is patched to `routed` with the content
-  id on the server, so the state is correct even when the browser dies before
-  its own PATCH. Input contract: a recording that exists (404), a transcript
-  of 200–400,000 characters (422/413), a known content type (400); AI
-  disabled or unconfigured is 503, the 75 s budget is 504, and the request's
-  `provider: 'gemini'` is recorded as a hint, never honoured as routing — the
-  router's configured order decides and the draft records what ran. Route
-  file `recording-content-http.js`; `.azure/api-surface.json` moves the name
-  to `implemented` and `notImplemented` is empty for the first time; the
-  client timeout for the call is 90 s like `generateArticleDraft`; the
-  service docs page no longer says the action is not live. Deployed
-  verification, owner-gated: route one real recording from
-  https://hybridcloudworks.com/admin/recordings and confirm the draft in the
-  editor and `status: routed` on the recording.
+- **Copilot code review gets an MCP configuration (#368).** Every Copilot
+  review had been ending with the hint to configure MCP servers for
+  context-aware reviews. `.github/copilot-mcp.json` is now the reviewed source
+  of record: five official, read-only servers chosen for what the repository
+  contains. Three need no credential — Microsoft Learn (Azure Functions,
+  Cosmos DB, Key Vault, Static Web Apps, Entra ID), Cloudflare's public
+  documentation server (the edge availability probe and DNS) and the
+  HashiCorp Terraform MCP server, pinned by image digest (`@sha256:…`, the
+  immutable reference; the `1.3.0` tag beside it is for readability only,
+  since a tag can be retargeted) and held to the eight Registry read tools on
+  both its command line and Copilot's allowlist, with
+  no HCP Terraform token so the live workspace stays unreachable. Two reach
+  live systems and are kept read-only by construction. The **Azure MCP
+  Server** signs in with no stored secret: `copilot-setup-steps.yml` runs
+  `azure/login` under OIDC in the `copilot` environment as a new
+  user-assigned identity, `github_copilot_review` in `infra/oidc.tf` —
+  Reader on the four workload resource groups and nothing else, trusting only
+  the `…:environment:copilot` subject in both forms — and the server runs
+  `--read-only` with fourteen hand-picked control-plane tools (no Key Vault,
+  Cosmos or blob content, no log queries), pinned on its command line and in
+  Copilot's allowlist. It is a third identity rather than a reuse of
+  `github_reader`, which holds a config write. The **GitHub MCP server** is
+  widened to the Actions, code-scanning, Dependabot and discussions toolsets
+  with **no personal access token of any kind**: a dedicated, read-only,
+  single-repository GitHub App (*HCW Copilot Review Reader*) whose one-hour
+  installation token the same setup job mints per session through
+  `scripts/github-app-token.mjs` — now taking a `GITHUB_APP_PERMISSIONS`
+  override so the manifest publisher's write scope and the reviewer's read
+  scope come from one minter — and hands to the digest-pinned
+  `ghcr.io/github/github-mcp-server` container over `--env-file`, running
+  `--read-only` with thirty-one named read tools on its command line and in
+  Copilot's allowlist. The App's read-only permissions are the ceiling for
+  anything its key could ever mint. The `oidc-subjects` guard learned the new
+  client-id variable, `set-github-variables.ps1` seeds it, and the standards
+  pages record the variables and the private key. The runbook
+  [Copilot code review MCP servers](docs/runbooks/copilot-code-review-mcp.md)
+  carries the reasoning, the tool table, the owner steps in order (apply,
+  seed, prove the sign-in, token, paste) with what success looks like at
+  each, and the rollback; the code-review skill names which server to
+  consult per component. The owner steps that turn it on are issue #369.
 - **ADR 0027 records the documentation-site decision (#367, issue #360).**
   The move from the Wiki to `docs/` shipped in #363 with its reasoning spread
   across the PR, the issue and the CHANGELOG; the ADR puts it in the register

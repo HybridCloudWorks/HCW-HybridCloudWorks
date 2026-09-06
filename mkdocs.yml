@@ -120,6 +120,7 @@ nav:
       - Deployment: runbooks/deployment-runbook.md
       - Alerting and support: runbooks/alerting-and-support.md
       - Availability probe: runbooks/availability-probe.md
+      - Copilot code review MCP servers: runbooks/copilot-code-review-mcp.md
   - Standards:
       - IaC repository standard: standards/iac-repository-standard.md
       - Naming convention: standards/naming-convention.md
