@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **`TODO.md` points at the board (#PR, closes #362).** The handling rule and
+- **`TODO.md` points at the board (#377, closes #362).** The handling rule and
   the "where the open items live" section name the organization project
   (https://github.com/orgs/HybridCloudWorks/projects/1) and its Priority
   field; the owner enabled auto-add on 2026-09-06, so a new issue lands there
