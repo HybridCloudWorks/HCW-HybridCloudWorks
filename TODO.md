@@ -17,7 +17,9 @@ the changelog.
 
 ## Where the open items live
 
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues
+The board: https://github.com/orgs/HybridCloudWorks/projects/1 — every open
+issue, with a Priority (`P1 now` / `P2 next` / `P3 later` / `Gated`). The
+issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues
 
 | Label | Meaning |
 | --- | --- |
@@ -61,8 +63,11 @@ or someone "fixes" it without knowing it was a choice.
 
 - Never paste secret values, private keys, access tokens, or personal data into
   this file, issues, logs, or the Wiki.
-- An open item is an issue. This file does not carry work; when something new
-  is found, open an issue and, if it is a decision to live with a finding,
+- An open item is an issue, and every open issue is on the board at
+  https://github.com/orgs/HybridCloudWorks/projects/1. The project's
+  auto-add workflow puts each issue on the board when it is opened; the person
+  opening it sets its Priority. This file does not carry work; when something
+  new is found, open an issue and, if it is a decision to live with a finding,
   record it under Accepted risks here.
 - A missing credential is not an engineering task. Record its name, owner, and
   approved storage location only.
