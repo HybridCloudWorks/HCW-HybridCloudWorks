@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The sixteen already-published articles can be re-hosted from the Publish
+  page (#374, the backfill).** `Admin → Publish` gains an **Images: re-host
+  hotlinked** action: it lists every published article whose body fields
+  still reference a third-party image — counts, hosts and the last run, never
+  a body — with each one selected, and "Re-host selected" runs them through
+  the publish pipeline in batches of five, tabulating rewritten and failed
+  counts and the failed hosts per article. Two routes back it,
+  `GET|POST /api/cms/content/rehost-images` (editor to list, publisher to
+  run, up to 25 ids a request). The write is `processPublishContent` under a
+  new `reason: 'rehost-images'`, which a plain republish of a live article
+  would not have been safe to stand in for: that path re-runs the gates,
+  re-arms cover generation on an article without a cover and the social
+  caption on one that never posted, and rewrites `Live` and the publish
+  dates. Under the reason the patch is the rewritten body field(s), the
+  `inlineImages` summary and `updatedAt`, conditioned on the ETag, with a
+  `rehost-images` version row — and nothing else. Pinned by tests that put
+  the same live article through both paths.
 - **Cosmos exporter infrastructure, inert until armed (#231, ADR 0028).** The
   Azure half of the out-of-account export: a private `cosmos-export`
   container on the RA-GRS content account, a lifecycle rule that deletes its
