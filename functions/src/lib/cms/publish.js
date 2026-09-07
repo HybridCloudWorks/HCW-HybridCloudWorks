@@ -36,8 +36,10 @@
  *   - `params.reason === SET_SLUG_REASON` (issue #400, from POST
  *     cms/content/slug) is the second such reason, and the one the note above
  *     anticipated. It gives a published article the slug an operator asks for
- *     and lets the four URL fields follow in the same patch, writing nothing
- *     else — and it REFUSES a slug another document holds rather than
+ *     and lets the four URL fields follow in the same patch — when a path can
+ *     be resolved at all; see buildSlugPublishUpdate for the case that cannot
+ *     and what is open about it — writing nothing
+ *     else, and it REFUSES a slug another document holds rather than
  *     suffixing it, the one place a set-slug has to be stricter than a
  *     publish. See SET_SLUG_REASON for why a FULL republish cannot do this job
  *     on the very articles that need it.
@@ -322,10 +324,29 @@ export function evaluateSlugChange({
 }
 
 /**
- * Everything a slug change implies, and nothing else: the cased pair and the
- * four URL fields, derived through `resolveCuratedSubpagePath` and
- * `toPublicUrl` — the same two functions the publish write uses, so a corrected
- * URL and a published URL can never be built by different rules.
+ * Everything a slug change implies, and nothing else: the cased pair, and the
+ * four URL fields WHEN A PATH CAN BE RESOLVED, derived through
+ * `resolveCuratedSubpagePath` and `toPublicUrl` — the same two functions the
+ * publish write uses, so a corrected URL and a published URL can never be
+ * built by different rules.
+ *
+ * THE URL FIELDS ARE CONDITIONAL, and saying so matters because the condition
+ * is not always met. `resolveCuratedSubpagePath` returns null when the
+ * document has no stored `curatedSubpagePath` AND no provider can be inferred
+ * from it (`resolvePublishContext` looks at landingProvider, 'Cloud Provider',
+ * cloudProvider, provider and Provider). A published document like that gets
+ * its slug pair written and NO URL fields — the same shape the ordinary
+ * publish write has, since both spread the path conditionally.
+ *
+ * That is a gap, not a design, and it is recorded here rather than smoothed
+ * over: the operator asked to put an article on a URL, and this would write
+ * the slug and leave `expectedPublicUrl` reporting whatever stale
+ * `publishedUrl` the document already carried (see `publicUrlOf`), or nothing
+ * at all. Whether a set-slug should instead REFUSE when it cannot produce a
+ * path is an open question raised on #412 and deliberately not decided here.
+ * It is bounded: it needs a published document with neither a curated path nor
+ * any recognisable provider, which none of the twenty-two published articles
+ * is, and none of the three in #400.
  *
  * BOTH `slug` AND `Slug`, to one value. The probe reads `c.slug OR c.Slug`, so
  * a document holds every distinct value across the pair: writing only `slug`
@@ -535,14 +556,19 @@ export function createPublishHandlers({
   /**
    * The ids of every document holding `slug` in EITHER field, or null when the
    * probe could not answer. Run on every publish — a republish included, which
-   * is the one that was missing (#400). The query itself is
-   * `querySlugHolders` above, shared with the set-slug route so there is one
-   * definition of "who holds this URL?".
+   * is the one that was missing (#400). The query itself is `querySlugHolders`
+   * above, so there is one definition of "who holds this URL?".
    *
-   * Never throws, and that is this wrapper's whole job. A lookup failure
-   * returns null, which resolveSlug reads as "not established" — see there for
-   * what each path does with that. The set-slug route deliberately does NOT
-   * wrap it this way.
+   * BOTH BRANCHES USE THIS WRAPPER — the publish path and the set-slug path
+   * (`republishWithSlug`) — and it never throws, which is its whole job. A
+   * lookup failure becomes null here, and that null is where the two paths
+   * part company: `resolveSlug` reads it as "not established" and carries on,
+   * `evaluateSlugChange` reads it as a refusal. So the strictness a set-slug
+   * needs lives in `evaluateSlugChange`, NOT in a different probe.
+   *
+   * That distinction is worth stating exactly because an earlier revision of
+   * this comment claimed the set-slug route did not wrap the probe at all —
+   * true of a design that was abandoned, and untrue of the code beneath it.
    */
   async function slugHolders(slug) {
     try {
@@ -697,8 +723,12 @@ export function createPublishHandlers({
    * accepted, because assigning a URL to anything else is a first publish
    * wearing a smaller name.
    *
-   * ONE conditional patch carries the slug pair AND the four URL fields, so
-   * there is no window in which an article holds a new slug at its old URL.
+   * ONE conditional patch carries the slug pair AND whatever URL fields
+   * `buildSlugPublishUpdate` could derive, so there is no window in which an
+   * article holds a new slug at its old URL. "Whatever it could derive" is the
+   * honest phrasing: the URL fields need a resolvable path, and that function's
+   * header records when there is none and what is still open about it.
+   *
    * `params.slug` is the operator's raw input; it is normalised HERE, so the
    * value probed, the value written and the value reported are one string.
    */

@@ -1059,6 +1059,51 @@ describe('reason: set-slug — the #400 URL correction', () => {
     expect(version.versionReason).toBe(SET_SLUG_REASON);
   });
 
+  it('writes the slug pair and NO URL fields when no path can be resolved', async () => {
+    // Pins what buildSlugPublishUpdate's header now says, rather than leaving
+    // the comment to be trusted: with no stored curated path and no provider
+    // in any of the five fields resolvePublishContext reads, there is no path
+    // to derive, so the URL fields are absent from the patch.
+    //
+    // This also shows the sharp edge the header calls an OPEN QUESTION: the
+    // slug moves, and `expectedPublicUrl` reports the stale publishedUrl the
+    // document was already carrying, because publicUrlOf prefers it. Whether a
+    // set-slug should refuse outright when it cannot produce a path is raised
+    // on #412 and not decided here — this test says what today's code does, so
+    // whichever way it is decided the change is visible.
+    const stranded = collidedDoc({
+      curatedSubpagePath: '',
+      cloudProvider: '',
+      'Cloud Provider': '',
+      provider: '',
+      Provider: '',
+      landingProvider: '',
+      publishedUrl: 'https://hybridcloudworks.com/azure/frameworks/stale-from-before',
+    });
+    const store = makeStore(stranded);
+    const result = await setSlug(store, WANTED);
+
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    // `Slug` is absent because this fixture already holds WANTED there and the
+    // builder drops keys that would not change — so the whole patch is the one
+    // field that moves plus its timestamp.
+    expect(Object.keys(patch).sort()).toEqual(['slug', 'updatedAt']);
+    for (const key of ['curatedSubpagePath', 'slugPageUrl', 'publishedUrl', 'publicUrl']) {
+      expect(patch).not.toHaveProperty(key);
+    }
+    expect(result.moved).toBe(true);
+    expect(result.curatedSubpagePath).toBeNull();
+    expect(result.expectedPublicUrl).toBe(
+      'https://hybridcloudworks.com/azure/frameworks/stale-from-before'
+    );
+
+    // A provider alone is enough to derive one, which is why this is narrow.
+    const withProvider = makeStore(collidedDoc({ curatedSubpagePath: '' }));
+    expect((await setSlug(withProvider, WANTED)).curatedSubpagePath).toBe(
+      `/azure/frameworks/${WANTED}`
+    );
+  });
+
   it('distinguishes a MOVE from a URL-only REPAIR, and names the fields either way', async () => {
     // Two different outcomes, and the caller has to tell them apart. Asked for
     // a new slug, the article moves. Asked for the slug it already serves, the

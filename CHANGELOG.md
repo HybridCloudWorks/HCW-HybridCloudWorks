@@ -46,15 +46,18 @@ This project has not cut a tagged release; entries are grouped under
   reason on the publish pipeline beside the #374 re-host — the extension point
   `REHOST_IMAGES_REASON`'s own comment anticipated. It `slugify`s the input so
   an operator cannot type a value the pipeline would never produce, probes
-  `c.slug OR c.Slug` through the same `querySlugHolders` a publish uses, and
+  `c.slug OR c.Slug` through the same never-throwing `slugHolders` wrapper an
+  ordinary publish uses, and
   REFUSES a slug another document holds rather than suffixing it — the one
   place a set-slug has to be stricter than a publish, because silently giving
   an operator a different URL than the one they asked for is how a URL
   correction becomes the next URL surprise. An unanswered probe is likewise a
-  refusal, the opposite of what `resolveSlug` does with the same null and for
-  the same reason read the other way round: a publish must not lose an
-  article's URL to a transient query error, but a NEW slug assigned on an
-  unverified probe is how one URL gets two documents.
+  refusal — not because it probes differently, but because `evaluateSlugChange`
+  reads that wrapper's null as a refusal where `resolveSlug` reads it as "not
+  established". Same probe, opposite reading, and for the same reason read the
+  other way round: a publish must not lose an article's URL to a transient
+  query error, but a NEW slug assigned on an unverified probe is how one URL
+  gets two documents.
 
   **It is narrow because a full republish does not merely do more than these
   articles need — it fails.** They arrived from Site-Main already published and
@@ -63,14 +66,20 @@ This project has not cut a tagged release; entries are grouped under
   modules) and carries no hero image, so the quality gate refuses it and the
   image gate refuses it after that, and a set-slug built on the full path would
   write a failed quality report onto the article and leave its URL exactly as
-  broken as it found it. So the branch writes the cased slug pair and
-  `curatedSubpagePath` / `slugPageUrl` / `publishedUrl` / `publicUrl` — derived
+  broken as it found it. So the branch writes the cased slug pair and — when a
+  path can be resolved for the document —
+  `curatedSubpagePath` / `slugPageUrl` / `publishedUrl` / `publicUrl`, derived
   through `resolveCuratedSubpagePath` and `toPublicUrl`, so a corrected URL and
-  a published URL can never be built by different rules — in ONE patch
-  conditioned on the read's ETag, and nothing else: no gates, no cover or
-  social trigger, no dates, no forge stats, no `Live` rewrite, no status
-  change. One patch rather than two steps so there is no window in which an
-  article holds a new slug at its old URL.
+  a published URL can never be built by different rules. One patch, conditioned
+  on the read's ETag, and nothing else: no gates, no cover or social trigger,
+  no dates, no forge stats, no `Live` rewrite, no status change. One patch
+  rather than two steps so there is no window in which an article holds a new
+  slug at its old URL. The URL half is conditional rather than guaranteed: a
+  published document with neither a stored curated path nor an inferable
+  provider gets its slug pair and no URL fields, the same shape the ordinary
+  publish write has. That is recorded at `buildSlugPublishUpdate` as an open
+  question rather than a decided design; it needs a document none of the
+  twenty-two published articles is.
 
   **Both cased fields are written, to one value.** The probe reads
   `c.slug OR c.Slug`, so a document holds every distinct value across the pair:

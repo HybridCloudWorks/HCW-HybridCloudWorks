@@ -23,11 +23,15 @@
  *
  * WHAT IT ACTUALLY DOES is one narrow republish through the publish pipeline
  * (SET_SLUG_REASON in ./publish.js): probe `c.slug OR c.Slug`, refuse a slug
- * another document holds, then write the cased slug pair and
- * curatedSubpagePath / slugPageUrl / publishedUrl / publicUrl in ONE patch
- * conditioned on the read's ETag. The URLs are derived by
- * `resolveCuratedSubpagePath` and `toPublicUrl`, the same two functions the
- * ordinary publish write uses.
+ * another document holds, then write the cased slug pair and — when a path can
+ * be resolved for the document — curatedSubpagePath / slugPageUrl /
+ * publishedUrl / publicUrl, in ONE patch conditioned on the read's ETag. The
+ * URLs are derived by `resolveCuratedSubpagePath` and `toPublicUrl`, the same
+ * two functions the ordinary publish write uses; `buildSlugPublishUpdate`
+ * records when no path can be derived and what is still open about that.
+ *
+ * The `fields` array in the response is therefore the authority on what was
+ * written, not this paragraph — which is why the response carries it.
  *
  * ONE ATOMIC STEP RATHER THAN TWO. Setting the slug and moving the URLs are
  * one operation here on purpose: as two writes there is a window in which the

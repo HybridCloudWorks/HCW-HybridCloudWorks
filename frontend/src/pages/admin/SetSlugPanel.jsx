@@ -21,8 +21,14 @@
  * WHAT COMES BACK is one atomic outcome, not two: the route sets the slug and
  * moves curatedSubpagePath / slugPageUrl / publishedUrl / publicUrl in a single
  * conditional patch. So there is no "half applied" state to render — every
- * response is a change, a truthful no-op, or a refusal that wrote nothing, and
- * all three are shown with their reason.
+ * response is a move, a repair, a truthful no-op, or a refusal that wrote
+ * nothing, and all four are shown with their reason.
+ *
+ * The response's `fields` is what was actually written, and this panel prints
+ * it rather than naming the four URL fields itself: which of them a given
+ * write touches depends on the document (see `buildSlugPublishUpdate` in
+ * functions/src/lib/cms/publish.js), so a fixed list here would be a claim
+ * this page cannot make.
  */
 import React, { useState } from 'react';
 import { Link2, Loader2 } from 'lucide-react';
