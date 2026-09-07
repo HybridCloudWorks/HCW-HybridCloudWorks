@@ -77,6 +77,7 @@ Every ADR includes:
 | [0026](../decisions/0026-required-checks-filter-inside-the-job.md) | Required checks filter inside the job, not at the trigger | Accepted | Keep every merge gate while paying only for checks that can fail |
 | [0027](../decisions/0027-documentation-site.md) | Documentation is a MkDocs site under `docs/`, published to docs.hybridcloudworks.com | Accepted | One reviewed, validated, redaction-gated source for every page; the Wiki is retired |
 | [0028](../decisions/0028-cosmos-out-of-account-export.md) | Cosmos recovery is a weekly full export plus daily change-feed deltas, run by the Function App, kept on the RA-GRS content account | Proposed | Survive account or region loss for about $4 a month, proven by a timed restore; four points await the owner on #231 |
+| [0029](../decisions/0029-podcast-hosting-and-audio-surface.md) | Podcast hosting is RSS.com Free with manual upload, the podcast page is the one audio surface, and the media route serves byte ranges | Accepted | Replace the retired host at zero recurring cost, put both audio systems on one seekable page, and unblock a self-hosted feed for later |
 
 ## Template
 

@@ -19,11 +19,16 @@ import {
   resolveBlobEndpoint,
   resolveAccountName,
   getBlobUrl,
+  headBlobForDelivery,
+  parseContentRangeTotal,
+  readBlobRangeForDelivery,
   resetBlobServiceForTests,
   uploadBlob,
 } from './blob-storage.js';
 
 const uploadSpy = vi.hoisted(() => vi.fn());
+const downloadSpy = vi.hoisted(() => vi.fn());
+const propertiesSpy = vi.hoisted(() => vi.fn());
 
 // Only the service client is replaced. Everything else in the SDK — the SAS
 // helpers this module imports at load time — stays real.
@@ -37,6 +42,10 @@ vi.mock('@azure/storage-blob', async (importOriginal) => {
           getBlockBlobClient: (blobName) => ({
             url: `https://hcwmedia.blob.core.windows.net/c/${blobName}`,
             upload: uploadSpy,
+          }),
+          getBlobClient: () => ({
+            download: downloadSpy,
+            getProperties: propertiesSpy,
           }),
         };
       }
@@ -173,6 +182,150 @@ describe('uploadBlob overwrite conditions', () => {
     expect(content.toString()).toBe('hello');
     expect(length).toBe(5);
     expect(options.blobHTTPHeaders).toEqual({ blobContentType: 'image/png' });
+  });
+});
+
+describe('parseContentRangeTotal', () => {
+  it('reads the total from a ranged response', () => {
+    expect(parseContentRangeTotal('bytes 0-99/1000')).toBe(1000);
+    expect(parseContentRangeTotal('bytes */1000')).toBe(1000);
+  });
+
+  it('is null for an absent or malformed header, never zero', () => {
+    expect(parseContentRangeTotal(undefined)).toBeNull();
+    expect(parseContentRangeTotal('')).toBeNull();
+    expect(parseContentRangeTotal('bytes 0-99/*')).toBeNull();
+    expect(parseContentRangeTotal('items 0-99/1000')).toBeNull();
+  });
+});
+
+describe('ranged delivery reads (#349)', () => {
+  const original = { ...process.env };
+  const FILE = Buffer.from('0123456789abcdef');
+
+  /** A download response the way the SDK shapes it for `download(offset, count)`. */
+  const rangedResponse = (start, end) => ({
+    contentType: 'audio/mpeg',
+    etag: '"0xR"',
+    contentRange: `bytes ${start}-${end}/${FILE.length}`,
+    contentLength: end - start + 1,
+    readableStreamBody: (async function* () {
+      yield FILE.subarray(start, end + 1);
+    })(),
+  });
+
+  beforeEach(() => {
+    downloadSpy.mockReset();
+    propertiesSpy.mockReset();
+    resetBlobServiceForTests();
+    process.env.STORAGE_BLOB_ENDPOINT = 'https://hcwmedia.blob.core.windows.net';
+  });
+
+  afterEach(() => {
+    process.env = { ...original };
+    resetBlobServiceForTests();
+  });
+
+  it('asks the service for exactly the requested bytes, not the whole blob', async () => {
+    downloadSpy.mockResolvedValueOnce(rangedResponse(4, 7));
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 4, end: 7 });
+
+    expect(downloadSpy).toHaveBeenCalledWith(4, 4);
+    expect(out.body.toString()).toBe('4567');
+    expect(out).toMatchObject({ start: 4, end: 7, totalLength: 16, contentType: 'audio/mpeg' });
+    // The size came from Content-Range: a satisfiable range is one round trip.
+    expect(propertiesSpy).not.toHaveBeenCalled();
+  });
+
+  it('reads the true size from properties when Content-Range is missing, at a non-zero start', async () => {
+    // Guessing `start + body.length` here would say 8 for a 16-byte blob and
+    // hand the client a Content-Range total that breaks every later seek.
+    const response = rangedResponse(4, 7);
+    delete response.contentRange;
+    downloadSpy.mockResolvedValueOnce(response);
+    propertiesSpy.mockResolvedValueOnce({
+      contentLength: 16,
+      etag: '"0xR"',
+      contentType: 'audio/mpeg',
+    });
+
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 4, end: 7 });
+    expect(out.totalLength).toBe(16);
+    expect(out).toMatchObject({ start: 4, end: 7 });
+    expect(propertiesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a malformed Content-Range the same way', async () => {
+    downloadSpy.mockResolvedValueOnce({ ...rangedResponse(4, 7), contentRange: 'bytes 4-7/*' });
+    propertiesSpy.mockResolvedValueOnce({
+      contentLength: 16,
+      etag: '"0xR"',
+      contentType: 'audio/mpeg',
+    });
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 4, end: 7 });
+    expect(out.totalLength).toBe(16);
+    expect(propertiesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the count open for a range with no end', async () => {
+    downloadSpy.mockResolvedValueOnce(rangedResponse(12, 15));
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 12 });
+
+    expect(downloadSpy).toHaveBeenCalledWith(12, undefined);
+    expect(out.body.toString()).toBe('cdef');
+    expect(out.end).toBe(15);
+  });
+
+  it('derives the end from the bytes returned, so a clamped range is reported honestly', async () => {
+    // Ask for 12-99 on a 16-byte blob: the service answers 12-15.
+    downloadSpy.mockResolvedValueOnce(rangedResponse(12, 15));
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', {
+      start: 12,
+      end: 99,
+    });
+    expect(out.end).toBe(15);
+    expect(out.totalLength).toBe(16);
+  });
+
+  it('turns the service 416 into an unsatisfiable result carrying the size', async () => {
+    downloadSpy.mockRejectedValueOnce(
+      Object.assign(new Error('InvalidRange'), { statusCode: 416 })
+    );
+    propertiesSpy.mockResolvedValueOnce({
+      contentLength: 16,
+      etag: '"0xR"',
+      contentType: 'audio/mpeg',
+    });
+
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 100 });
+    expect(out).toEqual({ unsatisfiable: true, totalLength: 16 });
+    // The size is fetched only on this path: a satisfiable range never pays
+    // for a second round trip.
+    expect(propertiesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('is null for a missing blob and rethrows anything else', async () => {
+    downloadSpy.mockRejectedValueOnce(Object.assign(new Error('nope'), { statusCode: 404 }));
+    expect(await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 0 })).toBeNull();
+
+    downloadSpy.mockRejectedValueOnce(Object.assign(new Error('denied'), { statusCode: 403 }));
+    await expect(
+      readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 0 })
+    ).rejects.toThrow('denied');
+  });
+
+  it('headBlobForDelivery reads properties only', async () => {
+    propertiesSpy.mockResolvedValueOnce({
+      contentLength: 16,
+      etag: '"0xR"',
+      contentType: 'audio/mpeg',
+    });
+    const out = await headBlobForDelivery('listenandlearn', 'a/b/c.mp3');
+    expect(out).toEqual({ contentLength: 16, etag: '"0xR"', contentType: 'audio/mpeg' });
+    expect(downloadSpy).not.toHaveBeenCalled();
+
+    propertiesSpy.mockRejectedValueOnce(Object.assign(new Error('nope'), { code: 'BlobNotFound' }));
+    expect(await headBlobForDelivery('listenandlearn', 'a/b/c.mp3')).toBeNull();
   });
 });
 

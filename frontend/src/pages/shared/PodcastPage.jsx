@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useLocation } from 'react-router';
-import usePodcastData from '@/hooks/usePodcastData';
+import EpisodePlayer from '@/components/podcast/EpisodePlayer';
+import useAudioEpisodes from '@/hooks/useAudioEpisodes';
 import { useProvider, useProviderConfig } from '@/context/ProviderContext';
+import { formatSeconds, SOURCE, stripHtml } from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 const PLATFORM_LOGOS = {
@@ -13,6 +15,69 @@ const PLATFORM_LOGOS = {
 };
 
 const PROVIDER_META = {
+  // aws, azure and gcp each had a copy of this page with these classes
+  // inlined; #349 folded them here so there is one player and one list.
+  aws: {
+    name: 'AWS',
+    ogName: 'AWS',
+    gradient: 'from-aws-primary via-slate-900 to-aws-primary dark:via-white',
+    accent: 'text-amber-400',
+    border: 'border-amber-500/30',
+    badge: 'bg-amber-500/20 border-amber-500/30 text-amber-400',
+    glow: 'bg-amber-500/5',
+    selectedBg: 'bg-amber-500/10 border-amber-500/40',
+    hoverBorder: 'hover:border-amber-500/20',
+    playBtn:
+      'from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-700 shadow-amber-500/25',
+    subscribeBg: 'from-amber-500/20 to-orange-900/20',
+    subscribeBorder: 'border-amber-500/30',
+    subscribeIcon: 'text-amber-400',
+    subscribeHover: 'hover:bg-amber-500/20 hover:border-amber-500/40',
+    progressBar: 'from-amber-500 to-orange-400',
+    placeholder: 'from-amber-600/30 to-orange-900/40 border-amber-500/20',
+    placeholderIcon: 'text-amber-400/60',
+    sectionIcon: 'text-amber-400',
+  },
+  azure: {
+    name: 'Azure',
+    ogName: 'Azure',
+    gradient: 'from-azure-primary via-slate-900 to-azure-primary dark:via-white',
+    accent: 'text-primary',
+    border: 'border-primary/30',
+    badge: 'bg-primary/20 border-primary/30 text-primary',
+    glow: 'bg-primary/5',
+    selectedBg: 'bg-primary/10 border-primary/40',
+    hoverBorder: 'hover:border-primary/20',
+    playBtn: 'from-primary to-blue-700 hover:from-blue-500 hover:to-blue-800 shadow-primary/25',
+    subscribeBg: 'from-primary/20 to-blue-900/20',
+    subscribeBorder: 'border-primary/30',
+    subscribeIcon: 'text-primary',
+    subscribeHover: 'hover:bg-primary/20 hover:border-primary/40',
+    progressBar: 'from-primary to-blue-400',
+    placeholder: 'from-blue-600/30 to-blue-900/40 border-blue-500/20',
+    placeholderIcon: 'text-blue-400/60',
+    sectionIcon: 'text-primary',
+  },
+  gcp: {
+    name: 'Google Cloud',
+    ogName: 'Google Cloud',
+    gradient: 'from-gcp-primary via-slate-900 to-gcp-primary dark:via-white',
+    accent: 'text-red-400',
+    border: 'border-red-500/30',
+    badge: 'bg-red-500/20 border-red-500/30 text-red-400',
+    glow: 'bg-red-500/5',
+    selectedBg: 'bg-red-500/10 border-red-500/40',
+    hoverBorder: 'hover:border-red-500/20',
+    playBtn: 'from-red-500 to-blue-600 hover:from-red-400 hover:to-blue-700 shadow-red-500/25',
+    subscribeBg: 'from-red-500/20 to-blue-900/20',
+    subscribeBorder: 'border-red-500/30',
+    subscribeIcon: 'text-red-400',
+    subscribeHover: 'hover:bg-red-500/20 hover:border-red-500/40',
+    progressBar: 'from-red-500 to-blue-400',
+    placeholder: 'from-red-600/30 to-blue-900/40 border-red-500/20',
+    placeholderIcon: 'text-red-400/60',
+    sectionIcon: 'text-red-400',
+  },
   github: {
     name: 'GitHub',
     gradient:
@@ -153,30 +218,6 @@ function detectProvider(pathname) {
   return match ? match[1] : null;
 }
 
-function formatDuration(raw) {
-  if (!raw) return '—';
-  const n = Number(raw);
-  if (!isNaN(n) && n > 0) {
-    const m = Math.floor(n / 60);
-    const s = String(n % 60).padStart(2, '0');
-    return `${m}:${s}`;
-  }
-  return String(raw);
-}
-
-function stripHtml(html) {
-  if (!html) return '';
-  // Apply tag removal repeatedly until stable: a single pass leaves residues for
-  // overlapping constructs like `<scr<script>ipt>`.
-  let prev;
-  let out = String(html);
-  do {
-    prev = out;
-    out = out.replace(/<[^>]*>/g, '');
-  } while (out !== prev);
-  return out.trim();
-}
-
 /**
  * The subscribe box. Renders nothing when no platform has a link: an empty
  * "Subscribe Now" box reads as broken UI (#348). Kept out of the page
@@ -227,10 +268,13 @@ function SubscribeSidebar({ meta, platforms, urlFor }) {
 
 function EpisodeImage({ image, title, size = 'md', meta }) {
   const sizeClass = size === 'sm' ? 'w-14 h-14' : 'w-full aspect-square max-w-[200px]';
-  if (image) {
+  // Decide on the sanitised value: an unsafe URL gets the placeholder, not
+  // an <img> with no src.
+  const src = safeUrl(image);
+  if (src) {
     return (
       <img
-        src={safeUrl(image)}
+        src={src}
         alt={title}
         loading="lazy"
         decoding="async"
@@ -247,6 +291,39 @@ function EpisodeImage({ image, title, size = 'md', meta }) {
   );
 }
 
+const SOURCE_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: SOURCE.host, label: 'Podcast feed' },
+  { key: SOURCE.listenAndLearn, label: 'Listen & Learn' },
+];
+
+/**
+ * A source chip on a list row. Listen & Learn rows say which exam; feed rows
+ * say they came from the show. The label is the row's `sourceLabel`, set by
+ * lib/audioEpisodes.js, so the page never inspects a document.
+ */
+function SourceChip({ episode }) {
+  return (
+    <span className="px-2 py-0.5 rounded bg-card/60 border border-card/80 text-[11px] font-semibold text-foreground/80 whitespace-nowrap">
+      {episode.sourceLabel}
+    </span>
+  );
+}
+
+/** The rows a source filter leaves in the list. */
+function visibleFor(episodes, filter) {
+  return filter === 'all' ? episodes : episodes.filter((e) => e.source === filter);
+}
+
+/**
+ * The player follows the list it sits above: a selection the filter hides
+ * gives way to the first visible episode rather than playing something the
+ * list no longer shows.
+ */
+function featuredFor(visible, selectedId) {
+  return (selectedId ? visible.find((e) => e.id === selectedId) : null) ?? visible[0] ?? null;
+}
+
 export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const { pathname } = useLocation();
   const ctxProvider = useProvider();
@@ -257,63 +334,51 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   // provider's name and colours is wrong in a way that looks deliberate.
   const meta = PROVIDER_META[provider] || FALLBACK_META;
   const podcastConfig = useProviderConfig();
-  const { episodes = [], loading } = usePodcastData(provider);
+  // Both audio systems, one list (#349): the host's ingested feed and the
+  // published Listen & Learn episodes for this provider, newest first.
+  const { episodes, feedUrl, loading } = useAudioEpisodes(provider);
 
   const [selectedId, setSelectedId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const audioRef = useRef(null);
+  const [filter, setFilter] = useState('all');
 
-  const featured = selectedId
-    ? (episodes.find((e) => e.id === selectedId) ?? episodes[0] ?? null)
-    : (episodes[0] ?? null);
+  const visible = visibleFor(episodes, filter);
+  const featured = featuredFor(visible, selectedId);
+  const featuredId = featured?.id ?? null;
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.play().catch(() => setIsPlaying(false));
-    } else {
-      audio.pause();
-    }
-  }, [isPlaying]);
-
-  function handleTimeUpdate() {
-    const audio = audioRef.current;
-    if (!audio || !audio.duration) return;
-    setCurrentTime(audio.currentTime);
-    setProgress((audio.currentTime / audio.duration) * 100);
+  // Pin the selection the moment playback starts. The two sources answer
+  // independently (useAudioEpisodes), so the list can re-sort after the page
+  // has settled — and until a row is clicked the featured episode is only
+  // `visible[0]`, so a later arrival at the top would remount the player and
+  // stop the audio under the listener. Before playback a re-sort is free to
+  // move the featured episode; that is what keeps the newest one there.
+  // A plain function, like the two handlers below: a useCallback here reads
+  // `featuredId`, which the React Compiler will not accept as a preservable
+  // manual memoization (react-hooks/preserve-manual-memoization).
+  function onPlayingChange(playing) {
+    setIsPlaying(playing);
+    if (playing) setSelectedId((current) => current ?? featuredId);
   }
 
-  function handleLoadedMetadata() {
-    const audio = audioRef.current;
-    if (audio) setDuration(audio.duration);
-  }
-
+  // The player is stateful and cannot be paused from here, so the page-level
+  // flag is reset only when the featured episode actually changes — that is
+  // when the player remounts paused. A filter that keeps the featured
+  // episode, or a click on the row already playing, leaves audio running and
+  // the indicator with it; otherwise the list would say "stopped" over a
+  // player that is not.
   function selectEpisode(id) {
     setSelectedId(id);
-    setIsPlaying(false);
-    setProgress(0);
-    setCurrentTime(0);
-    setDuration(0);
+    if (id !== featured?.id) setIsPlaying(false);
+  }
+  function selectFilter(key) {
+    const next = featuredFor(visibleFor(episodes, key), selectedId);
+    setFilter(key);
+    if (next?.id !== featured?.id) setIsPlaying(false);
   }
 
-  function handleSeek(e) {
-    const audio = audioRef.current;
-    if (!audio || !audio.duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    audio.currentTime = ratio * audio.duration;
-  }
-
-  function formatTime(secs) {
-    if (!secs || isNaN(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = String(Math.floor(secs % 60)).padStart(2, '0');
-    return `${m}:${s}`;
-  }
+  const hasBothSources =
+    episodes.some((e) => e.source === SOURCE.host) &&
+    episodes.some((e) => e.source === SOURCE.listenAndLearn);
 
   const platforms = [
     { key: 'spotify', name: 'Spotify' },
@@ -323,10 +388,20 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   ];
   // Only platforms with a link are offered, and the whole sidebar goes when
   // there are none: an empty "Subscribe Now" box reads as broken UI (#348).
+  // The RSS link is the feed the ingest timer reads (admin_config/
+  // podcast_feeds, served on GET public/podcasts), so the button and the
+  // list beside it cannot name two different feeds; the static config is a
+  // fallback only.
+  // Sanitised here rather than at the `href`, so one call covers both uses:
+  // the filter below decides which buttons exist, and the sidebar renders the
+  // same value. An unsafe scheme in a provider config or a seeded feed URL
+  // therefore removes the button instead of becoming a clickable link.
   const subscribeUrlFor = (platform) =>
-    platform.key === 'rss'
-      ? podcastConfig?.podcast?.feedUrl
-      : podcastConfig?.podcast?.subscribeLinks?.[platform.key];
+    safeUrl(
+      platform.key === 'rss'
+        ? feedUrl || podcastConfig?.podcast?.feedUrl
+        : podcastConfig?.podcast?.subscribeLinks?.[platform.key]
+    );
   const availablePlatforms = platforms.filter((platform) => subscribeUrlFor(platform));
 
   return (
@@ -336,6 +411,11 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
         <meta
           name="description"
           content={`Expert audio episodes on ${meta.name} architecture, patterns, and enterprise solutions.`}
+        />
+        <meta property="og:title" content={`${meta.ogName || meta.name} Podcast Series`} />
+        <meta
+          property="og:description"
+          content={`Deep-dive podcast discussions on ${meta.name} architecture and design.`}
         />
       </Helmet>
 
@@ -352,110 +432,27 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
           </h1>
           <p className="text-base sm:text-lg text-foreground max-w-3xl relative z-10">
             Deep-dive podcast discussions on {meta.name} architecture, patterns, and enterprise
-            solutions.
+            solutions — the show&apos;s episodes and the Listen &amp; Learn study episodes for{' '}
+            {meta.name} certifications, in one place.
           </p>
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8">
           {/* Left: Featured + Episode List */}
           <div className="space-y-8">
-            {loading && (
+            {loading && !featured && (
               <div
                 className={`bg-card/40 ${meta.border} border rounded-2xl p-8 text-foreground animate-pulse h-64`}
               />
             )}
 
-            {!loading && featured && (
-              <article
-                className={`bg-card/40 backdrop-blur-md border ${meta.border} rounded-2xl overflow-hidden`}
-              >
-                {/* eslint-disable jsx-a11y/media-has-caption */}
-                {featured.mediaUrl && (
-                  <audio
-                    key={featured.id}
-                    ref={audioRef}
-                    src={featured.mediaUrl}
-                    onTimeUpdate={handleTimeUpdate}
-                    onLoadedMetadata={handleLoadedMetadata}
-                    onEnded={() => setIsPlaying(false)}
-                    preload="metadata"
-                  />
-                )}
-                {/* eslint-enable jsx-a11y/media-has-caption */}
-
-                <div className="p-6 sm:p-8">
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className={`px-3 py-1 ${meta.badge} border text-xs font-bold rounded`}>
-                      Now Playing
-                    </span>
-                  </div>
-
-                  <div className="flex gap-6 items-start mb-6">
-                    <EpisodeImage
-                      image={featured.image}
-                      title={featured.title}
-                      size="lg"
-                      meta={meta}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 leading-tight">
-                        {featured.title}
-                      </h2>
-                      <p className="text-sm text-foreground line-clamp-3">
-                        {stripHtml(featured.longDescription || featured.description)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    aria-label="Seek audio"
-                    className="w-full h-2 bg-card/60 rounded-full overflow-hidden cursor-pointer mb-2"
-                    onClick={handleSeek}
-                  >
-                    <div
-                      className={`h-full bg-gradient-to-r ${meta.progressBar} rounded-full transition-all duration-200`}
-                      style={{ width: `${progress}%` }}
-                    />
-                  </button>
-                  <div className="flex justify-between text-xs text-foreground mb-5">
-                    <span>{formatTime(currentTime)}</span>
-                    <span>
-                      {duration ? formatTime(duration) : formatDuration(featured.duration)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setIsPlaying((p) => !p)}
-                      disabled={!featured.mediaUrl}
-                      className={`w-12 h-12 bg-gradient-to-br ${meta.playBtn} rounded-full flex items-center justify-center transition-all shadow-lg disabled:opacity-40`}
-                    >
-                      <span className="material-symbols-outlined text-white text-2xl">
-                        {isPlaying ? 'pause' : 'play_arrow'}
-                      </span>
-                    </button>
-                    <a
-                      href={safeUrl(featured.mediaUrl, '#')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">download</span>
-                      Download
-                    </a>
-                    <a
-                      href={safeUrl(featured.link, '#')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                      Open
-                    </a>
-                  </div>
-                </div>
-              </article>
+            {featured && (
+              <EpisodePlayer
+                key={featured.id}
+                episode={featured}
+                meta={meta}
+                onPlayingChange={onPlayingChange}
+              />
             )}
 
             {!loading && !featured && (
@@ -468,13 +465,34 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
 
             {/* Episode List */}
             <section>
-              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <span className={`material-symbols-outlined ${meta.sectionIcon} text-[22px]`}>
-                  library_music
-                </span>
-                All Episodes
-              </h3>
-              {loading && (
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <span className={`material-symbols-outlined ${meta.sectionIcon} text-[22px]`}>
+                    library_music
+                  </span>
+                  All Episodes
+                </h3>
+                {hasBothSources && (
+                  <div role="group" aria-label="Filter episodes by source" className="flex gap-1">
+                    {SOURCE_FILTERS.map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        aria-pressed={filter === option.key}
+                        onClick={() => selectFilter(option.key)}
+                        className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                          filter === option.key
+                            ? meta.selectedBg
+                            : `bg-card/30 border-card/50 hover:bg-card/50 ${meta.hoverBorder}`
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {loading && visible.length === 0 && (
                 <div className="space-y-3">
                   {[...Array(3)].map((_, i) => (
                     <div
@@ -485,12 +503,14 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                 </div>
               )}
               <div className="space-y-2">
-                {episodes.map((ep) => {
+                {visible.map((ep) => {
                   const isSelected = featured?.id === ep.id;
                   return (
                     <button
                       key={ep.id}
+                      type="button"
                       onClick={() => selectEpisode(ep.id)}
+                      aria-current={isSelected ? 'true' : undefined}
                       className={`w-full text-left flex items-center gap-4 p-3 rounded-xl border transition-all duration-200
                         ${
                           isSelected
@@ -500,11 +520,14 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                     >
                       <EpisodeImage image={ep.image} title={ep.title} size="sm" meta={meta} />
                       <div className="flex-1 min-w-0">
-                        <p
-                          className={`text-sm font-semibold truncate ${isSelected ? meta.accent : 'text-white'}`}
-                        >
-                          {ep.title}
-                        </p>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <p
+                            className={`text-sm font-semibold truncate ${isSelected ? meta.accent : 'text-white'}`}
+                          >
+                            {ep.title}
+                          </p>
+                          <SourceChip episode={ep} />
+                        </div>
                         <p className="text-xs text-foreground line-clamp-1 mt-0.5">
                           {stripHtml(ep.description)}
                         </p>
@@ -512,7 +535,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                       <div className="flex-shrink-0 text-right space-y-1">
                         <p className="text-xs text-foreground flex items-center gap-1 justify-end">
                           <span className="material-symbols-outlined text-[13px]">schedule</span>
-                          {formatDuration(ep.duration)}
+                          {formatSeconds(ep.durationSeconds)}
                         </p>
                         {ep.publishedAtString && (
                           <p className="text-xs text-foreground/60">{ep.publishedAtString}</p>

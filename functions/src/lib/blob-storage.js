@@ -240,6 +240,119 @@ export async function readBlobForDelivery(containerName, blobName) {
   };
 }
 
+const isNotFound = (error) => error?.statusCode === 404 || error?.code === 'BlobNotFound';
+
+/**
+ * Total blob size from a ranged download's `Content-Range` (`bytes 0-99/1000`).
+ * Exported for its test; `null` when the header is absent or malformed so a
+ * caller never mistakes a parse failure for an empty blob.
+ *
+ * @param {string|undefined} contentRange
+ * @returns {number|null}
+ */
+export function parseContentRangeTotal(contentRange) {
+  const match = /^bytes (?:\d+-\d+|\*)\/(\d+)$/.exec(String(contentRange || '').trim());
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Metadata for HTTP delivery without the bytes — what a `HEAD` needs, and what
+ * a suffix range (`bytes=-500`) needs before it can be turned into an offset.
+ *
+ * @param {string} containerName
+ * @param {string} blobName
+ * @returns {Promise<{contentType: string, etag: string, contentLength: number}|null>}
+ */
+export async function headBlobForDelivery(containerName, blobName) {
+  const containerClient = getContainerClient(containerName);
+  const blobClient = containerClient.getBlobClient(blobName);
+
+  let properties;
+  try {
+    properties = await blobClient.getProperties();
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+
+  return {
+    contentType: properties.contentType || 'application/octet-stream',
+    etag: properties.etag || '',
+    contentLength: Number(properties.contentLength) || 0,
+  };
+}
+
+/**
+ * Read one byte range of a blob for HTTP delivery (issue #349).
+ *
+ * `readBlobForDelivery` buffers the whole blob, which is fine for a badge
+ * image and wrong for a nine-minute episode a listener wants to scrub through:
+ * a seek is a `Range` request, and answering it with the whole file means the
+ * browser downloads everything to reach the last minute. This asks the service
+ * for exactly `[start, end]` (inclusive, `end` omitted for "to the end"), so
+ * the function reads and returns only the bytes the response carries.
+ *
+ * The total size comes back on the ranged response's `Content-Range`, so a
+ * satisfiable range costs one round trip. An unsatisfiable one — `start` at or
+ * past the end — is refused by the service with 416, and the size the 416
+ * response needs is fetched then, and only then.
+ *
+ * @param {string} containerName
+ * @param {string} blobName
+ * @param {{start: number, end?: number|null}} range - inclusive byte offsets
+ * @returns {Promise<
+ *   | {body: Buffer, contentType: string, etag: string, start: number, end: number, totalLength: number}
+ *   | {unsatisfiable: true, totalLength: number}
+ *   | null
+ * >}
+ */
+export async function readBlobRangeForDelivery(containerName, blobName, { start, end = null }) {
+  const containerClient = getContainerClient(containerName);
+  const blobClient = containerClient.getBlobClient(blobName);
+  const count = end === null || end === undefined ? undefined : end - start + 1;
+
+  let response;
+  try {
+    response = await blobClient.download(start, count);
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    if (error?.statusCode === 416 || error?.code === 'InvalidRange') {
+      const head = await headBlobForDelivery(containerName, blobName);
+      if (!head) return null;
+      return { unsatisfiable: true, totalLength: head.contentLength };
+    }
+    throw error;
+  }
+
+  const chunks = [];
+  for await (const chunk of response.readableStreamBody) {
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks);
+
+  // The size normally rides on the ranged response's Content-Range, which is
+  // what keeps a seek to one round trip. Without it — absent or malformed —
+  // the size is read from the blob's properties on this path only: guessing
+  // `start + body.length` under-reports it for any non-zero start, and a
+  // wrong Content-Range total is what breaks a client's seeking. The
+  // arithmetic survives only as the last resort for a blob that vanished
+  // between the two calls.
+  let totalLength = parseContentRangeTotal(response.contentRange);
+  if (totalLength === null) {
+    const head = await headBlobForDelivery(containerName, blobName);
+    totalLength = head ? head.contentLength : start + body.length;
+  }
+
+  return {
+    body,
+    contentType: response.contentType || 'application/octet-stream',
+    etag: response.etag || '',
+    start,
+    end: start + body.length - 1,
+    totalLength,
+  };
+}
+
 /**
  * Delete a blob.
  * Equivalent to: bucket.file(path).delete()

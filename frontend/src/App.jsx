@@ -40,7 +40,6 @@ const AWSCertDetailPage = lazyPage(() => import('@/pages/aws/education/CertDetai
 const AWSMicrocredentialDetailPage = lazyPage(
   () => import('@/pages/aws/education/MicrocredentialDetailPage')
 );
-const AWSPodcastPage = lazyPage(() => import('@/pages/aws/PodcastPage'));
 const AWSRssPage = lazyPage(() => import('@/pages/aws/RssPage'));
 
 // Azure
@@ -50,7 +49,6 @@ const AzureFrameworksPage = lazyPage(() => import('@/pages/azure/FrameworksPage'
 const AzureBlogPage = lazyPage(() => import('@/pages/azure/BlogPage'));
 const AzureEducationPage = lazyPage(() => import('@/pages/azure/EducationPage'));
 const AzureCertDetailPage = lazyPage(() => import('@/pages/azure/education/CertDetailPage'));
-const AzurePodcastPage = lazyPage(() => import('@/pages/azure/PodcastPage'));
 const AzureRssPage = lazyPage(() => import('@/pages/azure/RssPage'));
 
 // GCP
@@ -59,7 +57,6 @@ const GCPArchitecturePage = lazyPage(() => import('@/pages/gcp/ArchitecturePage'
 const GCPFrameworksPage = lazyPage(() => import('@/pages/gcp/FrameworksPage'));
 const GCPBlogPage = lazyPage(() => import('@/pages/gcp/BlogPage'));
 const GCPEducationPage = lazyPage(() => import('@/pages/gcp/EducationPage'));
-const GCPPodcastPage = lazyPage(() => import('@/pages/gcp/PodcastPage'));
 const GCPRssPage = lazyPage(() => import('@/pages/gcp/RssPage'));
 
 // FinOps
@@ -96,7 +93,6 @@ const VMwareArchitecturePage = lazyPage(() => import('@/pages/vmware/Architectur
 const VMwareFrameworksPage = lazyPage(() => import('@/pages/vmware/FrameworksPage'));
 const VMwareBlogPage = lazyPage(() => import('@/pages/vmware/BlogPage'));
 const VMwareEducationPage = lazyPage(() => import('@/pages/vmware/EducationPage'));
-const VMwarePodcastPage = lazyPage(() => import('@/pages/vmware/PodcastPage'));
 const VMwareRssPage = lazyPage(() => import('@/pages/vmware/RssPage'));
 
 // Ansible
@@ -631,15 +627,19 @@ function ProviderMicrocredentialDetailDispatcher() {
   return <NotFoundPage />;
 }
 
+// One podcast page for every provider (#349). The aws, azure and gcp copies
+// were the shared page with the colours inlined; they are now rows in its
+// PROVIDER_META, and provider-coverage.test.js checks every provider routed
+// here has one.
 function ProviderAudioDispatcher() {
   const { provider } = useParams();
-  if (provider === 'aws') return <AWSPodcastPage />;
-  if (provider === 'azure') return <AzurePodcastPage />;
-  if (provider === 'gcp') return <GCPPodcastPage />;
+  if (provider === 'aws') return <SharedPodcastPage />;
+  if (provider === 'azure') return <SharedPodcastPage />;
+  if (provider === 'gcp') return <SharedPodcastPage />;
   if (provider === 'github') return <SharedPodcastPage />;
   if (provider === 'terraform') return <SharedPodcastPage />;
   if (provider === 'finops') return <SharedPodcastPage />;
-  if (provider === 'vmware') return <VMwarePodcastPage />;
+  if (provider === 'vmware') return <SharedPodcastPage />;
   if (provider === 'ansible') return <SharedPodcastPage />;
   return <NotFoundPage />;
 }

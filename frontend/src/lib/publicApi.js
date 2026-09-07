@@ -170,13 +170,47 @@ export async function submitPublicContent(body) {
   return data;
 }
 
-/** GET public/podcasts — episodes for a provider, newest first. */
-export async function fetchPublicPodcasts({ provider, limit } = {}) {
+/**
+ * GET public/podcasts — a provider's host-ingested episodes, newest first,
+ * plus the feed they were ingested from (#349).
+ *
+ * `feedUrl` is the provider's row in `admin_config/podcast_feeds`, the same
+ * document the ingest timer reads, so the RSS subscribe button and the list
+ * it sits beside cannot name two different feeds. Null until the owner seeds
+ * the document.
+ *
+ * @returns {Promise<{items: object[], feedUrl: string|null}>}
+ */
+export async function fetchPublicPodcastListing({ provider, limit } = {}) {
   const params = new URLSearchParams();
   if (provider) params.set('provider', provider);
   if (limit) params.set('limit', String(limit));
   const qs = params.toString();
   const body = await publicGet(`public/podcasts${qs ? `?${qs}` : ''}`);
+  return { items: body?.items || [], feedUrl: body?.feedUrl || null };
+}
+
+/** GET public/podcasts — episodes only. Kept for callers that never needed the feed. */
+export async function fetchPublicPodcasts(options = {}) {
+  return (await fetchPublicPodcastListing(options)).items;
+}
+
+/**
+ * GET public/listen-and-learn/episodes — every approved Listen & Learn
+ * episode with audio across a provider's certifications, newest first, for
+ * the provider's podcast page (#349).
+ *
+ * The same `status === 'published'` gate as `fetchPublicListenAndLearn`,
+ * applied server-side; rows are a listing projection (no transcript, no
+ * videos) joined to their certification's title and slug.
+ *
+ * @param {{platform: string}} params
+ * @returns {Promise<object[]>}
+ */
+export async function fetchPublicListenAndLearnEpisodes({ platform } = {}) {
+  if (!platform) return [];
+  const params = new URLSearchParams({ platform });
+  const body = await publicGet(`public/listen-and-learn/episodes?${params}`);
   return body?.items || [];
 }
 

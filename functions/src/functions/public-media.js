@@ -8,13 +8,23 @@
  * container allowlist and path validation that replace them.
  */
 import { httpRoute } from '../lib/auth/http-route.js';
-import { readBlobForDelivery } from '../lib/blob-storage.js';
+import {
+  headBlobForDelivery,
+  readBlobForDelivery,
+  readBlobRangeForDelivery,
+} from '../lib/blob-storage.js';
 import { createPublicMediaHandlers } from '../lib/public-media.js';
 
-const handlers = () => createPublicMediaHandlers({ storage: { readBlobForDelivery } });
+const handlers = () =>
+  createPublicMediaHandlers({
+    storage: { readBlobForDelivery, readBlobRangeForDelivery, headBlobForDelivery },
+  });
 
 httpRoute('publicGetMedia', {
-  methods: ['GET'],
+  // HEAD alongside GET (#349): a player or a directory checks size and range
+  // support before it asks for bytes, and the host only routes the methods
+  // declared here.
+  methods: ['GET', 'HEAD'],
   authLevel: 'anonymous',
   // The wildcard segment is required: blob paths contain slashes
   // ({docId}/images/badge-{ts}.png).

@@ -96,10 +96,11 @@ describe('provider coverage on shared pages', () => {
   });
 
   it('PodcastPage has metadata for every provider routed to it', () => {
-    // NOT every provider: azure, aws and gcp have dedicated podcast pages and
-    // never reach the shared one. Asserting all of VALID_PROVIDERS here would
-    // demand rows nothing reads, so the list is derived from the dispatcher —
-    // which is also the thing that changes when a provider is added.
+    // Derived from the dispatcher rather than VALID_PROVIDERS, so the list is
+    // the thing that changes when a provider is added. Since #349 every
+    // provider is routed here (the aws, azure and gcp copies of the page were
+    // folded into PROVIDER_META), so today the two lists coincide — but the
+    // dispatcher stays the source of truth.
     const routed = providersRoutedTo('ProviderAudioDispatcher', 'SharedPodcastPage');
     expect(routed, 'no providers parsed from the audio dispatcher').not.toEqual([]);
 

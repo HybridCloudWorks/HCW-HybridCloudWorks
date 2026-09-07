@@ -57,12 +57,14 @@ export function useProviderConfig() {
       ],
       blogSource: 'https://azure.microsoft.com/en-us/blog/',
       podcast: {
-        // No feed URL until the show is re-hosted (issue #349): PodBean's
-        // feed returned 410 Gone from 2026-09-05. The RSS button hides itself
-        // while this is null. The Apple link was the creator dashboard
-        // (podcastsconnect), not a listener page, so it is gone until the
-        // show is resubmitted; Spotify and Amazon are the listener pages
-        // that existed on 2026-09-06.
+        // The RSS feed URL is not configured here (issue #349): the podcast
+        // page reads it from `admin_config/podcast_feeds` through
+        // `GET public/podcasts`, the same document the ingest timer uses, so
+        // the button and the ingest cannot name two different feeds. This
+        // stays null and is only a fallback. The Apple link was the creator
+        // dashboard (podcastsconnect), not a listener page, so it is gone
+        // until the show is resubmitted; Spotify and Amazon are the listener
+        // pages that existed on 2026-09-06.
         feedUrl: null,
         subscribeLinks: {
           spotify: 'https://open.spotify.com/show/66tno2OzalMJZOvSDqM77Y',

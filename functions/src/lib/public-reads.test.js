@@ -13,6 +13,7 @@ import {
   isSoftDeleted,
   isPublicDocument,
   resolvePublishedDateValue,
+  resolveFeedUrlForProvider,
   stripInternalFields,
   CURATED_IMAGE_BATCH_MAX,
 } from './public-reads.js';
@@ -891,6 +892,23 @@ describe('listPodcasts', () => {
     expect(query).toContain('c.provider = @provider');
     expect(params).toContainEqual({ name: '@provider', value: 'aws' });
   });
+
+  it('lower-cases the provider, so ?provider=Azure is not an empty section', async () => {
+    // The rows and the feed config are keyed by the canonical slug. Without
+    // this the route answers 200 with no episodes and a null feed URL, which
+    // reads as "nothing published" rather than "wrong casing".
+    const store = {
+      queryDocs: vi.fn(async () => [{ id: 'a', publishedAt: '2026-01-01T00:00:00Z' }]),
+      readDoc: vi.fn(async () => null),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.listPodcasts(makeRequest({ query: { provider: 'AzURe' } }), context);
+
+    expect(res.status).toBe(200);
+    const [, , params] = store.queryDocs.mock.calls[0];
+    expect(params).toContainEqual({ name: '@provider', value: 'azure' });
+    expect(JSON.parse(res.body).items.map((i) => i.id)).toEqual(['a']);
+  });
 });
 
 describe('getFeed', () => {
@@ -1228,6 +1246,271 @@ describe('getListenAndLearn — approval is the only gate', () => {
 
     expect(deps.readDoc.mock.calls[0][0]).toBe(SET_CONTAINER);
     expect(deps.queryDocs.mock.calls[0][0]).toBe(EPISODE_CONTAINER);
+  });
+});
+
+describe('listPodcasts feedUrl (#349)', () => {
+  const handlers = ({ rows = [], config } = {}) =>
+    createPublicReadHandlers({
+      store: {
+        queryDocs: vi.fn(async () => rows),
+        readDoc: vi.fn(async () => config),
+      },
+    });
+
+  it('exposes the provider row of admin_config/podcast_feeds', async () => {
+    const h = handlers({
+      config: {
+        feeds: [
+          { provider: 'aws', url: 'https://example.com/aws.xml' },
+          { provider: 'azure', url: 'https://example.com/azure.xml' },
+        ],
+      },
+    });
+    const res = await h.listPodcasts(makeRequest({ query: { provider: 'azure' } }), context);
+    expect(JSON.parse(res.body).feedUrl).toBe('https://example.com/azure.xml');
+  });
+
+  it('is null when nothing is configured, and the list still answers', async () => {
+    const res = await handlers({ rows: [{ id: 'e1', provider: 'azure' }] }).listPodcasts(
+      makeRequest({ query: { provider: 'azure' } }),
+      context
+    );
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.feedUrl).toBeNull();
+    expect(body.items).toHaveLength(1);
+  });
+
+  it('does not read the config without a provider to look up', async () => {
+    const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
+    await createPublicReadHandlers({ store }).listPodcasts(makeRequest(), context);
+    expect(store.readDoc).not.toHaveBeenCalled();
+  });
+
+  it('degrades to null when the config read fails, warning with a code and no message', async () => {
+    const store = {
+      queryDocs: vi.fn(async () => [{ id: 'e1', provider: 'azure' }]),
+      readDoc: vi.fn(async () => {
+        // The shape of a Cosmos SDK failure: the message names the request.
+        throw Object.assign(
+          new Error('Request to dbs/site/colls/admin_config/docs/podcast_feeds failed'),
+          { statusCode: 503, code: 'ServiceUnavailable' }
+        );
+      }),
+    };
+    const warn = vi.fn();
+    const res = await createPublicReadHandlers({ store }).listPodcasts(
+      makeRequest({ query: { provider: 'azure' } }),
+      { ...context, warn }
+    );
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).feedUrl).toBeNull();
+
+    // Telemetry stays content-free: the status, never the SDK's message,
+    // which carries the container, id and partition key of the request.
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = warn.mock.calls[0].map(String).join(' ');
+    expect(logged).toContain('503');
+    expect(logged).not.toContain('admin_config');
+    expect(logged).not.toContain('podcast_feeds');
+    expect(logged).not.toContain('Request to');
+  });
+
+  it('reads the same document the timer ingests from', async () => {
+    // A second copy of three names, for the same no-imports reason as the
+    // Listen & Learn containers. This is what stops the page's RSS button and
+    // the timer's ingest naming two different feeds.
+    const { PODCAST_FEEDS_CONFIG_ID } = await import('./timers/podcasts.js');
+    const { ADMIN_CONFIG_PARTITION } = await import('./cosmos-client.js');
+    const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn(async () => null) };
+    await createPublicReadHandlers({ store }).listPodcasts(
+      makeRequest({ query: { provider: 'azure' } }),
+      context
+    );
+    expect(store.readDoc).toHaveBeenCalledWith(
+      'admin_config',
+      PODCAST_FEEDS_CONFIG_ID,
+      ADMIN_CONFIG_PARTITION
+    );
+  });
+
+  it('only ever returns an https URL for the asked-for provider', () => {
+    expect(
+      resolveFeedUrlForProvider(
+        { feeds: [{ provider: 'azure', url: 'http://example.com/plain.xml' }] },
+        'azure'
+      )
+    ).toBeNull();
+    expect(
+      resolveFeedUrlForProvider({ feeds: [{ provider: 'aws', url: 'https://x/aws.xml' }] }, 'azure')
+    ).toBeNull();
+    expect(resolveFeedUrlForProvider({ feeds: 'nope' }, 'azure')).toBeNull();
+    expect(resolveFeedUrlForProvider(null, 'azure')).toBeNull();
+  });
+});
+
+describe('listListenAndLearnEpisodes — the provider-wide list (#349)', () => {
+  const published = (over = {}) => ({
+    id: 'area-1',
+    setId: 'azure_az-104',
+    provider: 'azure',
+    examCode: 'AZ-104',
+    areaSlug: 'area-1',
+    areaName: 'Manage identities',
+    order: 0,
+    weightLabel: '20-25%',
+    title: 'Identities',
+    summary: 'A summary',
+    transcript: [{ speaker: 'A', text: 'the whole script' }],
+    videos: [{ url: 'https://youtube.com/x' }],
+    audioUrl: '/api/public/media/listenandlearn/azure/az-104/area-1.mp3',
+    audioBytes: 1000,
+    durationSeconds: 540,
+    status: 'published',
+    approvedAt: '2026-09-01T00:00:00Z',
+    generatedAt: '2026-08-30T00:00:00Z',
+    approvedBy: 'someone@example.com',
+    speechProvider: 'gemini',
+    ...over,
+  });
+
+  const store = ({ episodes = [], sets = [] } = {}) => ({
+    queryDocs: vi.fn(async (container) =>
+      container === 'listen_and_learn_episodes' ? episodes : sets
+    ),
+    readDoc: vi.fn(),
+  });
+
+  const list = (deps, query = { platform: 'azure' }) =>
+    createPublicReadHandlers({ store: deps }).listListenAndLearnEpisodes(
+      makeRequest({ query }),
+      context
+    );
+
+  it('filters to published in SQL, on an equality test, by provider', async () => {
+    const deps = store();
+    await list(deps);
+    const [container, query, params] = deps.queryDocs.mock.calls[0];
+    expect(container).toBe('listen_and_learn_episodes');
+    expect(query).toContain('c.status = @status');
+    expect(query).not.toContain('!=');
+    expect(query).toMatch(/SELECT TOP \d+/);
+    expect(params).toContainEqual({ name: '@status', value: 'published' });
+    expect(params).toContainEqual({ name: '@provider', value: 'azure' });
+  });
+
+  it('orders newest approval first in SQL, on one field, so the cap keeps the newest rows', async () => {
+    // Above the cap an unordered TOP returns an arbitrary subset that no
+    // in-memory sort can recover. One key only: the container declares no
+    // composite index, and a two-key ORDER BY would need one.
+    const deps = store();
+    await list(deps);
+    const query = deps.queryDocs.mock.calls[0][1];
+    expect(query).toMatch(/ORDER BY c\.approvedAt DESC\s*$/);
+    expect(query.match(/ORDER BY/g)).toHaveLength(1);
+    expect(query).not.toMatch(/ORDER BY [^,]+,/);
+  });
+
+  it('projects the allowlist in SQL so the transcript never leaves Cosmos', async () => {
+    const deps = store();
+    await list(deps);
+    const [episodesQuery, setsQuery] = deps.queryDocs.mock.calls.map((call) => call[1]);
+
+    expect(episodesQuery).not.toMatch(/SELECT TOP \d+ \*/);
+    for (const field of ['id', 'setId', 'title', 'audioUrl', 'durationSeconds', 'approvedAt']) {
+      expect(episodesQuery).toContain(`c["${field}"]`);
+    }
+    expect(episodesQuery).not.toContain('transcript');
+    expect(episodesQuery).not.toContain('approvedBy');
+    // The soft-delete markers must come back or isSoftDeleted cannot run.
+    expect(episodesQuery).toContain('c["softDeletedAt"]');
+    expect(episodesQuery).toContain('c["softDeleteExpiresAt"]');
+
+    expect(setsQuery).not.toMatch(/SELECT TOP \d+ \*/);
+    expect(setsQuery).toContain('c["id"], c["certTitle"], c["certSlug"]');
+    expect(setsQuery).toContain('c["softDeletedAt"]');
+    expect(setsQuery).not.toContain('studyGuideUrl');
+  });
+
+  it('projects each row to the listing allowlist and joins the certification', async () => {
+    const deps = store({
+      episodes: [published()],
+      sets: [{ id: 'azure_az-104', certTitle: 'Azure Administrator', certSlug: 'az-104' }],
+    });
+    const body = JSON.parse((await list(deps)).body);
+    expect(body.items).toEqual([
+      {
+        id: 'area-1',
+        setId: 'azure_az-104',
+        provider: 'azure',
+        examCode: 'AZ-104',
+        areaSlug: 'area-1',
+        areaName: 'Manage identities',
+        order: 0,
+        weightLabel: '20-25%',
+        title: 'Identities',
+        summary: 'A summary',
+        audioUrl: '/api/public/media/listenandlearn/azure/az-104/area-1.mp3',
+        audioBytes: 1000,
+        durationSeconds: 540,
+        approvedAt: '2026-09-01T00:00:00Z',
+        generatedAt: '2026-08-30T00:00:00Z',
+        certTitle: 'Azure Administrator',
+        certSlug: 'az-104',
+      },
+    ]);
+    // The transcript is the largest field on the document and the approver
+    // is provenance for the admin page; neither belongs on an anonymous list.
+    expect(JSON.stringify(body)).not.toContain('the whole script');
+    expect(JSON.stringify(body)).not.toContain('someone@example.com');
+  });
+
+  it('omits an episode with no audio: a podcast row must play something', async () => {
+    const deps = store({
+      episodes: [published({ id: 'silent', audioUrl: null }), published({ id: 'sound' })],
+    });
+    const body = JSON.parse((await list(deps)).body);
+    expect(body.items.map((e) => e.id)).toEqual(['sound']);
+    expect(body.total).toBe(1);
+  });
+
+  it('drops soft-deleted episodes and ignores soft-deleted sets', async () => {
+    const deps = store({
+      episodes: [published({ id: 'gone', softDeletedAt: '2026-01-01' }), published({ id: 'kept' })],
+      sets: [{ id: 'azure_az-104', certTitle: 'Old', softDeletedAt: '2026-01-01' }],
+    });
+    const body = JSON.parse((await list(deps)).body);
+    expect(body.items.map((e) => e.id)).toEqual(['kept']);
+    expect(body.items[0].certTitle).toBeNull();
+  });
+
+  it('sorts newest approval first, falling back to generation time', async () => {
+    const deps = store({
+      episodes: [
+        published({ id: 'older', approvedAt: '2026-08-01T00:00:00Z' }),
+        published({ id: 'newest', approvedAt: '2026-09-05T00:00:00Z' }),
+        published({ id: 'unapproved-date', approvedAt: null, generatedAt: '2026-09-03T00:00:00Z' }),
+      ],
+    });
+    const body = JSON.parse((await list(deps)).body);
+    expect(body.items.map((e) => e.id)).toEqual(['newest', 'unapproved-date', 'older']);
+  });
+
+  it('lowercases the platform and requires it', async () => {
+    const deps = store();
+    await list(deps, { platform: 'AZURE' });
+    expect(deps.queryDocs.mock.calls[0][2]).toContainEqual({ name: '@provider', value: 'azure' });
+    expect((await list(store(), {})).status).toBe(400);
+  });
+
+  it('names the same containers the writer does', async () => {
+    const { SET_CONTAINER, EPISODE_CONTAINER } = await import('./listen-and-learn/publish.js');
+    const deps = store();
+    await list(deps);
+    const containers = deps.queryDocs.mock.calls.map((call) => call[0]);
+    expect(containers).toContain(EPISODE_CONTAINER);
+    expect(containers).toContain(SET_CONTAINER);
   });
 });
 

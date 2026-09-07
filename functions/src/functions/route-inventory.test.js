@@ -149,6 +149,9 @@ const PUBLIC_ROUTES = new Set([
   // approval are reachable only through the editor-gated
   // `cms/listen-and-learn/*` routes.
   'public/listen-and-learn',
+  // The provider-wide twin (#349): same `status === 'published'` gate, rows
+  // projected to a listing allowlist with no transcript, for the podcast page.
+  'public/listen-and-learn/episodes',
   // Reads no database, returns four enum values. The reason it is here rather
   // than guarded is that it backs indicators rendered to every anonymous
   // visitor on the landing page; the reason it is safe is that its cache bounds

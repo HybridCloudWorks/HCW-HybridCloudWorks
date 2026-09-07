@@ -8,8 +8,8 @@ vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
 }));
 
-vi.mock('@/hooks/usePodcastData', () => ({
-  default: () => ({ episodes: [] }),
+vi.mock('@/hooks/useAudioEpisodes', () => ({
+  default: () => ({ episodes: [], feedUrl: null, loading: false, error: null }),
 }));
 
 vi.mock('@/hooks/useBlogData', () => ({
