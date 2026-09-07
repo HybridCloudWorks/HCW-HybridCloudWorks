@@ -35,7 +35,7 @@ describe('authedFetch', () => {
 
     expect(acquireApiToken).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = fetch.mock.calls[0];
+    const [[url, init]] = fetch.mock.calls;
     expect(url).toBe('https://api.example.test/api/getCurrentAdminStatus');
     expect(init.headers.Authorization).toBe('Bearer pre-acquired');
     // The option is consumed, not forwarded to fetch as a stray field.
