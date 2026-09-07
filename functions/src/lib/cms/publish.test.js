@@ -14,6 +14,7 @@ import {
   validatePublishMetadata,
   applyPublishTimeCoverTrigger,
   accumulatePublishResult,
+  REHOST_IMAGES_REASON,
 } from './publish.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
@@ -491,5 +492,154 @@ describe('inline body images at publish time (#374)', () => {
     expect(body.published).toBe(1);
     expect(body.errors).toEqual([]);
     expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('reason: rehost-images — the #374 backfill republish', () => {
+  const UPSTREAM = 'https://techcommunity.microsoft.com/t5/image/serverpage/a.png';
+  const HOSTED = '/api/public/media/covers/c1/inline/abcdef0123456789.png';
+  // A live article as the backfill finds it: published, no cover of its own
+  // (so a full republish would arm cover generation), never social-posted
+  // (so a live republish would arm the caption trigger), forged (so a first
+  // publish would bump the stats), and hotlinking one image.
+  const liveDoc = (over = {}) =>
+    readyDoc({
+      contentStatus: 'published',
+      Live: true,
+      slug: 'existing-slug',
+      curatedSubpagePath: '/azure/frameworks/existing-slug',
+      publishedUrl: 'https://hybridcloudworks.com/azure/frameworks/existing-slug',
+      publishedAt: '2026-08-01T00:00:00.000Z',
+      forgeMeta: { formatKey: 'deep dive' },
+      _etag: '"v7"',
+      Content: `<p>${paragraph(2)}</p><img src="${UPSTREAM}" alt="a">`,
+      ...over,
+    });
+  const rehoster = () =>
+    vi.fn(async ({ bodies }) => ({
+      bodies: Object.fromEntries(
+        Object.entries(bodies).map(([f, b]) => [f, b.replace(UPSTREAM, HOSTED)])
+      ),
+      rewritten: [{ from: UPSTREAM, to: HOSTED }],
+      failed: [],
+    }));
+  const handlers = (store, inlineImages = rehoster()) =>
+    createPublishHandlers({ guard: guardAs('publisher'), store, inlineImages, ...fixed });
+
+  it('a plain republish of that article re-arms both triggers — the reason exists to stop that', async () => {
+    const store = makeStore(liveDoc());
+    await handlers(store).processPublishContent('c1', { markLive: true });
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    expect(patch.altCoverImageTrigger).toBe(true);
+    expect(patch.socialCaptionTrigger).toBe(true);
+    expect(patch.contentStatus).toBe('published');
+  });
+
+  it('writes only the rewritten body, the summary and updatedAt, conditioned on the ETag', async () => {
+    const store = makeStore(liveDoc());
+    const result = await handlers(store).processPublishContent('c1', {
+      user: USER,
+      markLive: true,
+      reason: REHOST_IMAGES_REASON,
+    });
+
+    const contentWrites = store.patchDoc.mock.calls.filter(([c]) => c === 'content');
+    expect(contentWrites).toHaveLength(1);
+    const [, id, patch, options] = contentWrites[0];
+    expect(id).toBe('c1');
+    expect(Object.keys(patch).sort()).toEqual(['Content', 'inlineImages', 'updatedAt']);
+    expect(patch.Content).toContain(HOSTED);
+    expect(patch.Content).not.toContain(UPSTREAM);
+    expect(patch.inlineImages).toEqual({
+      fields: ['Content'],
+      rewritten: 1,
+      failed: 0,
+      failedUrls: [],
+      at: NOW.toISOString(),
+    });
+    expect(patch.updatedAt).toBe(NOW.toISOString());
+    expect(options).toEqual({ ifMatch: '"v7"' });
+
+    // No forge stats, no slug probe; the version row names the reason.
+    expect(store.patchDoc.mock.calls.some(([c]) => c === 'admin_config')).toBe(false);
+    expect(store.queryDocs).not.toHaveBeenCalled();
+    const version = store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1];
+    expect(version.versionReason).toBe(REHOST_IMAGES_REASON);
+    expect(version.draft).toContain(HOSTED);
+    expect(version.versionCreatedBy).toBe('pub@hcw.dev');
+
+    // The caller gets the summary and the document's own identity, unchanged.
+    expect(result.rehosted).toBe(true);
+    expect(result.reused).toBe(true);
+    expect(result.inlineImages).toEqual(patch.inlineImages);
+    expect(result.slug).toBe('existing-slug');
+    expect(result.expectedPublicUrl).toBe(
+      'https://hybridcloudworks.com/azure/frameworks/existing-slug'
+    );
+  });
+
+  it('refuses anything that is not already published, without writing', async () => {
+    const store = makeStore(liveDoc({ contentStatus: 'approved', Live: false }));
+    const result = await handlers(store).processPublishContent('c1', {
+      reason: REHOST_IMAGES_REASON,
+    });
+    expect(result.error).toMatch(/Only a published document can be re-hosted/);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('skips an article with nothing to re-host, without writing', async () => {
+    const store = makeStore(liveDoc({ Content: `<p>${paragraph(2)}</p><img src="${HOSTED}">` }));
+    const inlineImages = rehoster();
+    const result = await handlers(store, inlineImages).processPublishContent('c1', {
+      reason: REHOST_IMAGES_REASON,
+    });
+    expect(result).toEqual({
+      skipped: true,
+      reason: 'No third-party image URLs in the body fields',
+    });
+    expect(inlineImages).not.toHaveBeenCalled();
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('errors, rather than reporting a re-host, when no rehoster is wired or it throws whole', async () => {
+    const unwired = createPublishHandlers({
+      guard: guardAs('publisher'),
+      store: makeStore(liveDoc()),
+      ...fixed,
+    });
+    expect(
+      (await unwired.processPublishContent('c1', { reason: REHOST_IMAGES_REASON })).error
+    ).toMatch(/not configured/);
+
+    const store = makeStore(liveDoc());
+    const broken = createPublishHandlers({
+      guard: guardAs('publisher'),
+      store,
+      inlineImages: vi.fn(async () => {
+        throw new Error('storage unreachable');
+      }),
+      log: { warn: vi.fn() },
+      ...fixed,
+    });
+    const result = await broken.processPublishContent('c1', { reason: REHOST_IMAGES_REASON });
+    expect(result.error).toMatch(/Re-hosting failed/);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('reports a lost race as skipped', async () => {
+    const conflict = Object.assign(new Error('precondition failed'), { code: 412 });
+    const store = makeStore(liveDoc(), {
+      patchDoc: vi.fn(async () => {
+        throw conflict;
+      }),
+    });
+    const result = await handlers(store).processPublishContent('c1', {
+      reason: REHOST_IMAGES_REASON,
+    });
+    expect(result).toEqual({
+      skipped: true,
+      reason: 'Content changed while re-hosting; not retried',
+    });
+    expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 });
