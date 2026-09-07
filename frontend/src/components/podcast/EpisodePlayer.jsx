@@ -85,6 +85,14 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
             if (Number.isFinite(d) && d > 0) setDuration(d);
           }}
           onEnded={() => setIsPlaying(false)}
+          // The element is the source of truth, not the button: OS media keys,
+          // headphone controls and the browser's own audio UI move it without
+          // going through our handler, and the indicator on the list above
+          // would otherwise keep saying "playing" over silence. Both handlers
+          // are idempotent against the effect that mirrors this state onto the
+          // element (play() on a playing element, pause() on a paused one).
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           aria-label={`Audio: ${episode.title}`}
         />
       )}

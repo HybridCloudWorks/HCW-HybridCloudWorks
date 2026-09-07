@@ -41,6 +41,26 @@ describe('EpisodePlayer', () => {
     expect(cert).not.toHaveAttribute('target');
   });
 
+  it('follows the audio element when playback is toggled outside the page', () => {
+    // OS media keys, headphone buttons and the browser's own audio UI move
+    // the element without going through the Play button. The control and the
+    // page-level indicator have to follow the element, or the list says
+    // "playing" over silence.
+    const onPlayingChange = vi.fn();
+    const { container } = render(
+      <EpisodePlayer episode={episode} meta={meta} onPlayingChange={onPlayingChange} />
+    );
+    const audio = container.querySelector('audio');
+
+    fireEvent.play(audio);
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(onPlayingChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.pause(audio);
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
+    expect(onPlayingChange).toHaveBeenLastCalledWith(false);
+  });
+
   it('opens a host episode page in a new tab', () => {
     render(
       <EpisodePlayer
