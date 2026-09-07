@@ -43,6 +43,12 @@ describe('entry-point guards fire when the script is invoked directly', () => {
     expect(got.stdout + got.stderr).toContain('Usage: node smoke-deployed.mjs');
   });
 
+  it('report-slug-collisions.mjs prints its report from the committed manifest', () => {
+    const got = run('report-slug-collisions.mjs', [], process.env);
+    expect(got.code).toBe(0);
+    expect(got.stdout).toContain('### Slug collisions in the published set');
+  });
+
   it('build-content-manifest.mjs fails loudly without FUNCTION_ORIGIN', () => {
     const env = { ...process.env };
     delete env.FUNCTION_ORIGIN;
