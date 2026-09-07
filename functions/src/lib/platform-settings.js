@@ -291,6 +291,11 @@ export const PLATFORM_SETTINGS = Object.freeze({
 
 export const PLATFORM_SETTING_NAMES = Object.freeze(Object.keys(PLATFORM_SETTINGS));
 
+/** Keys this module writes beside the value; not part of the shape. */
+const PRESENTATION_METADATA = new Set(['id', 'configScope', 'updatedAt', 'updatedBy']);
+/** Cosmos's own fields, by exact name (the set jobs.js strips too). */
+const COSMOS_SYSTEM_FIELDS = new Set(['_rid', '_self', '_etag', '_attachments', '_ts']);
+
 /**
  * What a stored document looks like through this page: the normalized shape
  * when it normalizes, else the empty shape. A hand-seeded document that does
@@ -302,10 +307,24 @@ export function presentSetting(name, doc) {
   const spec = PLATFORM_SETTINGS[name];
   if (!spec) throw new Error(`Unknown platform setting: ${name}`);
   if (!doc) return { value: spec.empty(), exists: false, stored: null, updatedAt: null };
-  const { id: _id, configScope: _scope, updatedAt, updatedBy: _by, ...rest } = doc;
-  const candidate = Object.fromEntries(
-    Object.entries(rest).filter(([key]) => !key.startsWith('_'))
-  );
+  const updatedAt = doc.updatedAt;
+  // A null-prototype object, filled by defineProperty from the document's OWN
+  // keys: a hand-seeded document carrying `__proto__` or `constructor` (a
+  // JSON.parse'd document holds those as ordinary own keys) becomes an own
+  // key here too — never a prototype write — and is then refused by the
+  // normalizer as unknown, the same as any other key the shape does not name.
+  // Only Cosmos's own system fields are stripped, by exact name; a stray
+  // `_foo` is reported, not hidden.
+  const candidate = Object.create(null);
+  for (const key of Object.keys(doc)) {
+    if (PRESENTATION_METADATA.has(key) || COSMOS_SYSTEM_FIELDS.has(key)) continue;
+    Object.defineProperty(candidate, key, {
+      value: doc[key],
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
   try {
     return {
       value: spec.normalize(candidate),

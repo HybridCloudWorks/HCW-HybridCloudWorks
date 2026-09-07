@@ -268,6 +268,37 @@ describe('presentSetting', () => {
     expect(shown.problem).toMatch(/enabled must be true or false/);
   });
 
+  it('a hand-seeded document with __proto__ or constructor keys is invalid, and nothing is polluted', () => {
+    // An object literal `{ __proto__: … }` would set the prototype rather than
+    // an own key; JSON.parse holds it as an ordinary own key, which is exactly
+    // how a Cosmos document arrives.
+    const poisoned = JSON.parse(
+      '{"id":"default_heroes","configScope":"admin_config","heroes":{"Azure":"/a.png"},"__proto__":{"polluted":true}}'
+    );
+    expect(Object.keys(poisoned)).toContain('__proto__');
+    const shown = presentSetting('default-heroes', poisoned);
+    expect(shown.stored).toBe('invalid');
+    expect(shown.problem).toMatch(/Unknown field\(s\) in body: __proto__/);
+    expect(shown.value).toEqual({ heroes: {} });
+    expect({}.polluted).toBeUndefined();
+    expect(Object.prototype.polluted).toBeUndefined();
+
+    const viaConstructor = JSON.parse(
+      '{"id":"podcast_feeds","feeds":[],"constructor":{"prototype":{"polluted":true}}}'
+    );
+    expect(presentSetting('podcast-feeds', viaConstructor)).toMatchObject({
+      stored: 'invalid',
+      problem: expect.stringMatching(/Unknown field\(s\) in body: constructor/),
+    });
+    expect({}.polluted).toBeUndefined();
+  });
+
+  it('reports a stray underscore key rather than hiding it', () => {
+    const shown = presentSetting('podcast-feeds', { id: 'podcast_feeds', feeds: [], _legacy: 1 });
+    expect(shown.stored).toBe('invalid');
+    expect(shown.problem).toMatch(/Unknown field\(s\) in body: _legacy/);
+  });
+
   it('strips Cosmos system fields and the partition from a valid document', () => {
     const shown = presentSetting('default-heroes', {
       id: DEFAULT_HEROES_CONFIG_ID,
