@@ -83,6 +83,9 @@ export const bundledDefaultHeroes = () =>
 const SELECT_CLASS =
   'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
+/** Publer reports a network name in its own casing; the trigger keys on lowercase. */
+const providerOf = (account) => String(account?.provider || '').toLowerCase();
+
 const relativeTime = (iso) => {
   if (!iso) return null;
   const then = Date.parse(iso);
@@ -295,23 +298,25 @@ export function SocialAutopostCard({ value, onChange, onSave, saving, meta, publ
     update({ accountIds: accountIds.filter((_row, i) => i !== index) });
   const addAccount = (row) => update({ accountIds: [...accountIds, row] });
 
-  // Accounts the Social Hub already lists, minus the ones already chosen.
-  const pickable = useMemo(
-    () =>
-      (publerAccounts ?? []).filter(
-        (account) => account?.id && !accountIds.some((row) => row.id === String(account.id))
-      ),
-    [publerAccounts, accountIds]
-  );
+  // Accounts the Social Hub already lists, minus the ones already chosen, and
+  // minus any on a network the trigger cannot post to. Those are counted, not
+  // offered: quietly rewriting an unsupported provider to another network
+  // would schedule the post somewhere the owner did not choose.
+  const { pickable, unsupported } = useMemo(() => {
+    const listed = (publerAccounts ?? []).filter(
+      (account) => account?.id && !accountIds.some((row) => row.id === String(account.id))
+    );
+    const supported = (account) => SOCIAL_PROVIDERS.includes(providerOf(account));
+    return {
+      pickable: listed.filter(supported),
+      unsupported: listed.filter((account) => !supported(account)),
+    };
+  }, [publerAccounts, accountIds]);
 
   const addPicked = () => {
     const account = pickable.find((candidate) => String(candidate.id) === pick);
     if (!account) return;
-    const provider = String(account.provider || '').toLowerCase();
-    addAccount({
-      id: String(account.id),
-      provider: SOCIAL_PROVIDERS.includes(provider) ? provider : 'linkedin',
-    });
+    addAccount({ id: String(account.id), provider: providerOf(account) });
     setPick('');
   };
 
@@ -445,6 +450,12 @@ export function SocialAutopostCard({ value, onChange, onSave, saving, meta, publ
                 <Plus className="mr-2 h-3.5 w-3.5" /> Add account by id
               </Button>
             </div>
+            {unsupported.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {unsupported.length} Publer account{unsupported.length === 1 ? '' : 's'} hidden:
+                autoposting supports {SOCIAL_PROVIDERS.join(', ')} only.
+              </p>
+            ) : null}
           </div>
 
           <SaveRow saving={saving} />

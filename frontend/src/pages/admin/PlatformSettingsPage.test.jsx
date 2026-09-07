@@ -207,7 +207,7 @@ describe('SocialAutopostCard', () => {
     expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
   });
 
-  it('adds a Publer account with its provider, hiding ones already chosen', () => {
+  it('adds a Publer account with its own provider, hiding chosen and unsupported ones', () => {
     const onChange = vi.fn();
     render(
       <SocialAutopostCard
@@ -227,11 +227,10 @@ describe('SocialAutopostCard', () => {
     const options = within(picker)
       .getAllByRole('option')
       .map((option) => option.textContent);
-    expect(options).toEqual([
-      'Pick a Publer account…',
-      'HCW on X · Twitter',
-      'Odd network · mastodon',
-    ]);
+    // acc-1 is already chosen; mastodon is a network the trigger cannot post
+    // to, and it must not be offered and then silently rewritten to another.
+    expect(options).toEqual(['Pick a Publer account…', 'HCW on X · Twitter']);
+    expect(screen.getByText(/1 Publer account hidden/)).toBeTruthy();
 
     fireEvent.change(picker, { target: { value: 'acc-2' } });
     fireEvent.click(screen.getByRole('button', { name: /Add from Publer/ }));
