@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The audit stops calling a cancelled request a failure, the Azure
+  architecture page names its provider, and the 2026-09-07 crawl is on the
+  record (#361, #371, #373, #374).** The run against the deployed batch reads
+  70 works / 40 empty / 3 defect over 113 sitemap URLs, from 68 / 48 / 2 over
+  118: the eight empty frameworks pages left the sitemap and the repeated blog
+  URL appears once. Of the three defects one was the crawler's own: Chromium
+  reports a request the browser cancelled (`net::ERR_ABORTED`) exactly as it
+  reports one the network failed, which made the home page a defect for a
+  health route that answered 200 when asked directly. `/azure/architecture-designs`
+  had kept the title it was copied with and never said "Azure". The third is
+  real and stays open on #374: the article's `<img>` points at an `.mp4`, which
+  re-hosting will store but cannot make render.
 - **The content-manifest job can actually open its pull request (found by the
   first run that had a change to push).** `actions/checkout` persists the job's
   `GITHUB_TOKEN` as an `http.extraheader` in `.git/config`, and that header

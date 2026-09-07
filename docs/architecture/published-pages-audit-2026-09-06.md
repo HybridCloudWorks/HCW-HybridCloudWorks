@@ -63,6 +63,39 @@ crawler after this run (empty-state copy makes a page *empty* only when its
 main region is under 800 characters; on a fuller page it is recorded as a
 note).
 
+## Re-run after the batch of 2026-09-07
+
+Actions run 34111155605, against the site as deployed that morning with #386,
+#388, #389, #390, #391, #392, #395, #396 and the refreshed content manifest
+(#399):
+
+| Verdict | First run | After 09-06 deploy | After 09-07 deploy |
+| --- | ---: | ---: | ---: |
+| works | 0 | 68 | 70 |
+| empty | 11 | 48 | 40 |
+| defect | 107 | 2 | 3 |
+
+The sitemap itself went from 118 URLs to 113 with zero duplicates: the eight
+`/<provider>/frameworks` pages left it, because the manifest now counts the
+published items per section and the pre-render omits a section with none
+(#373), and the blog URL that appeared three times appears once (#386).
+
+The *empty* count fell by eight for the same reason — those pages are no
+longer advertised, so they are no longer crawled — and the pages that remain
+empty now say so in the site's own words rather than inviting the reader to
+clear filters that were not the cause.
+
+Three defects, none of them the two from the previous run:
+
+| Page | Finding | Disposition |
+| --- | --- | --- |
+| `/` | `net::ERR_ABORTED` on `public/platform-health` | Not a defect. The route answered 200 with a valid body when asked directly a minute later; Chromium reports a request the browser cancelled the same way it reports one the network failed. The crawler now ignores that error text. |
+| `/azure/architecture-designs` | title and og:title lack the provider name | Fixed: the page now titles itself *Azure Architecture Designs*, matching the AWS page it was copied from. |
+| `/azure/blog/microsoft-foundry-end-to-end-observability-and-roi-for-production-ai-agents` | one broken image | Real, and not what it looks like: the `<img>` points at an **`.mp4`** on the source publisher's CDN. Re-hosting it (#374) will store the file and rewrite the URL, but a video in an image tag does not render either way. The article body needs the tag corrected or the reference removed. |
+
+The hero images this run confirms serving: `/gcp`, `/github`, `/terraform` and
+`/finops` all answer 200 for `1.png` (#371, #390).
+
 ## Matrix
 
 | Path | HTTP | Verdict | Findings |
