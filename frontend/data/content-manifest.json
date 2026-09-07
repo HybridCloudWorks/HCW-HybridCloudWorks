@@ -1,13 +1,11 @@
 {
-  "generatedAt": "2026-08-23T19:55:22.929Z",
+  "generatedAt": "2026-09-07T07:01:12.492Z",
   "routes": [
     "/azure/blog/azure-foundry-hosted-agents-accelerating-ai-agent-deployment-optimization-featur",
     "/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
     "/azure/blog/enterprise-hub-and-spoke-zero-trust-edge",
     "/azure/blog/operationalizing-azure-updates-with-microsoft-release-communications-and-proacti",
     "/azure/blog/autonomous-self-healing-for-azure-vmware-solution-private-clouds",
-    "/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
-    "/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
     "/azure/blog/microsoft-foundry-end-to-end-observability-and-roi-for-production-ai-agents",
     "/azure/blog/leveraging-ai-for-efficient-azure-update-discovery-with-microsoft-release-commun",
     "/azure/blog/unveiling-microsofts-secure-future-initiative-sfi-a-blueprint-for-next-generatio-91IWYg",
@@ -46,6 +44,7 @@
         "AI Agent Optimization",
         "Real-time AI"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [
         "Microsoft Foundry",
@@ -62,40 +61,40 @@
       "CD Url": "https://devblogs.microsoft.com/foundry/hosted-agents-build26/"
     },
     "article:enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio": {
-      "id": "7ZCmiOEIlWMg99xQHY0A",
+      "id": "1k5ayjbEdYdo7NzvXIWW",
       "slug": "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
-      "Slug": "launched-generally-available-agent-kit-for-azure-cosmos-db",
+      "Slug": "in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code",
       "cloudProvider": "Azure",
       "Cloud Provider": "Azure",
-      "Content": "Your AI coding agents just got smarter about building high-performance database applications. The Azure Cosmos DB Agent Kit is now generally available, bringing proven best practices directly into your development workflow. Whether you're designing data m",
+      "Content": "Microsoft Foundry brings code-first observability to agent developers in public preview, delivered as an observe skill inside the Foundry Plugin for VS Code Copilot Chat. Developers run the full evaluation-driven optimization loop from the editor through ",
       "content": " \n\nEnable AI-powered discovery of Azure Updates using Microsoft Release Communications MCP server.\n\n[Explore MRC MCP server​](https://go.microsoft.com/fwlink/?linkid=2360302&clcid=0x409)\n\n![](https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/ACOM-Roadmap-hero?resMode=sharp2&op_usm=1.5,0.65,15,0&wid=1600&hei=635&qlt=85&fit=constrain)\n\n# Azure Updates\n\nGet the latest updates on Azure products and features to meet your cloud investment needs. Subscribe to notifications to stay informed.\n\n[\n\n](https://go.microsoft.com/fwlink/?linkid=2289891&clcid=0x409)[\n\n](https://www.microsoft.com/releasecommunications/api/v2/azure/rss)[\n\n![](https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/MCP-icon?resMode=sharp2&op_usm=1.5,0.65,15,0&wid=40&hei=40&qlt=100&fmt=png-alpha&fit=constrain)\n\n\n\n](https://go.microsoft.com/fwlink/?linkid=2360302&clcid=0x409)\n\nFilter\n\nSave filters\n\nClear filters\n\nApply filters\n\nFilter\n\nFilter\n\nSort\n\n*   RECENTLY MODIFIED\n    \n*    Newest to oldest\n    \n*    Oldest to newest\n    \n\nFilter\n\nProducts\n\nStatus\n\nUpdate type\n\nNew or updated\n\nSave filters\n\nClear filters\n\nApply filters\n\nIn development\n\nLimited offering to select customers for non-production use and testing.\n\nIn preview\n\nAvailable to all Azure customers for non-production use and testing.\n\nLaunched\n\nFully released, production-ready product available to all Azure customers.\n\n\"test2\"\n\n\"test3\"\n\nSort by\n\nRecently Modified: Newest to oldest\n\n*   RECENTLY MODIFIED\n    \n*    Newest to oldest\n    \n*    Oldest to newest\n    \n\n0 Updates found\n\nPlease update your selections\n\n## Additional Resources\n\n![](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/icon-blog-darkblue?resMode=sharp2&op_usm=1.5,0.65,15,0&qlt=85)\n\n### Microsoft Azure Blog\n\nLearn about the latest Microsoft Security solutions.\n\n[Learn more](https://azure.microsoft.com/en-us/blog)\n\n![](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/icon-security-darkblue?resMode=sharp2&op_usm=1.5,0.65,15,0&qlt=85)\n\n### Community support\n\nGet answers to your questions from Microsoft and Community experts.\n\n[Learn more](https://azure.microsoft.com/en-us/support/community/)\n\n![](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/icon-documentation-darkblue?resMode=sharp2&op_usm=1.5,0.65,15,0&qlt=85)\n\n### Provide feedback\n\nTell us what you think of Azure and what you want to see in the future.\n\n[Learn more](https://go.microsoft.com/fwlink/?linkid=2295127&clcid=0x409)\n\n![](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/icon-roadmap-darkblue?resMode=sharp2&op_usm=1.5,0.65,15,0&qlt=85)\n\n### Product availability by region\n\nAzure is available in more regions than any other cloud provider.\n\n[Learn more](https://azure.microsoft.com/en-us/explore/global-infrastructure/products-by-region)\n\n*    [![](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/acom_social_icon_azure)Get the Azure mobile app](https://azure.microsoft.com/en-us/get-started/azure-portal/mobile-app)\n\n*   [![Twitter](https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/Twitter-2x-New-3?scl=1 \" \")](https://go.microsoft.com/fwlink/?linkid=2275431)\n*   [![Instagram](https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/Instagram%202x-3?scl=1 \" \")](https://go.microsoft.com/fwlink/?linkid=2275352)\n*   [![LinkedIn](https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/LinkedIn-29-1?scl=1 \" \")](https://go.microsoft.com/fwlink/?linkid=2268687)\n*   [![YouTube](https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/YouTube%202x-3?scl=1 \" \")](https://go.microsoft.com/fwlink/?linkid=2239941)",
-      "Title": "[Launched] Generally Available: Agent kit for Azure Cosmos DB",
+      "Title": "[In preview] Public Preview: Code-first observability for Foundry Agents in VS Code ",
       "title": "Enable AI-Powered Discovery of Azure Updates with Microsoft Release Communications MCP Server",
-      "Summary": "Your AI coding agents just got smarter about building high-performance database applications. The Azure Cosmos DB Agent Kit is now generally available, bringing proven best practices directly into your development workflow. Whether you're designing data m",
-      "summary": "The rapid evolution of cloud platforms like Azure presents a significant challenge for senior practitioners to keep pace with an incessant stream of product updates, feature releases, and deprecations, often impacting architectural decisions and operational stability. This article introduces the capability for AI-powered discovery of Azure Updates via the Microsoft Release Communications (MRC) MCP server, aiming to streamline the traditionally manual and time-consuming process of monitoring cloud changes. The core insight is that integrating advanced AI capabilities into update notification systems can proactively surface relevant information, allowing enterprise teams to anticipate changes and optimize their cloud investments more effectively. This is particularly relevant for Cloud Architects and Platform Engineers responsible for maintaining robust, up-to-date, and secure Azure environments. It's crucial to note that this communication serves as an announcement for the capability, directing users to an external link for exploration rather than providing intricate technical implementation details.",
+      "Summary": "Microsoft Foundry brings code-first observability to agent developers in public preview, delivered as an observe skill inside the Foundry Plugin for VS Code Copilot Chat. Developers run the full evaluation-driven optimization loop from the editor through",
+      "summary": "Staying abreast of the continuous stream of new Azure products, features, and updates is a critical challenge for enterprises operating multi-cloud or hybrid environments. This article introduces the Microsoft Release Communications (MRC) MCP server as a dedicated platform designed to streamline this process through AI-powered discovery. The primary insight is that leveraging such a specialized communication channel allows senior cloud practitioners to efficiently track and filter relevant updates, moving beyond traditional RSS feeds or manual review of release notes. This is most relevant for Cloud Architects, Platform Engineers, and FinOps Analysts who need to strategically plan for new services, adapt their infrastructure, or identify cost optimization opportunities presented by evolving Azure capabilities. A prerequisite for full utilization is access to and familiarity with the MRC MCP server.",
       "keyTopics": [
         "Azure Updates",
-        "AI-Powered Discovery",
         "Microsoft Release Communications",
-        "Cloud Notification Systems",
-        "Change Management"
+        "AI-powered Discovery",
+        "Cloud Governance",
+        "Feature Tracking"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [
-        "Launched",
-        "Databases",
-        "Internet of Things",
-        "Azure Cosmos DB",
+        "In preview",
+        "AI + machine learning",
+        "Microsoft Foundry",
         "Microsoft Build",
         "Feature"
       ],
       "Author": "Microsoft Azure Updates API",
-      "Published At": "2026-06-02T22:30:49.000Z",
+      "Published At": "2026-06-02T23:15:29.000Z",
       "publishedAt": "2026-06-18T07:31:52.771Z",
       "readTime": "1 min",
       "contentImageUrl": "",
-      "sourceUrl": "https://azure.microsoft.com/updates?id=563022",
-      "CD Url": "https://azure.microsoft.com/updates?id=563022"
+      "sourceUrl": "https://azure.microsoft.com/updates?id=563197",
+      "CD Url": "https://azure.microsoft.com/updates?id=563197"
     },
     "article:enterprise-hub-and-spoke-zero-trust-edge": {
       "id": "2loI8BH7BqRnikYdfPYa",
@@ -108,6 +107,7 @@
       "Summary": "A production-grade Azure landing zone pattern that centralizes connectivity, policy, and security controls while enabling autonomous workload subscriptions at scale.",
       "summary": "A production-grade Azure landing zone pattern that centralizes connectivity, policy, and security controls while enabling autonomous workload subscriptions at scale.",
       "description": "A production-grade Azure landing zone pattern that centralizes connectivity, policy, and security controls while enabling autonomous workload subscriptions at scale.",
+      "type": "architecture",
       "category": "Networking",
       "Tags": [
         "CAF",
@@ -143,6 +143,7 @@
         "Azure Governance",
         "Proactive Operations"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [
         "Launched",
@@ -181,6 +182,7 @@
         "Cloud Automation",
         "Incident Management"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [],
       "Author": "RohanB",
@@ -210,6 +212,7 @@
         "OpenTelemetry",
         "AI Governance"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [
         "Microsoft Build",
@@ -246,6 +249,7 @@
         "Microsoft Release Communications",
         "Cloud Governance"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [
         "In preview",
@@ -297,6 +301,7 @@
         "Microsoft Partners",
         "Cloud Security"
       ],
+      "type": "blog",
       "Tags": [
         "Secure Future Initiative",
         "Cybersecurity",
@@ -354,6 +359,7 @@
         "Edge AI",
         "On-Prem AI"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [],
       "Author": "moran_assaf",
@@ -383,6 +389,7 @@
         "SMB/NFS",
         "Assessment & Discovery"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [],
       "Author": "ankitsurkar",
@@ -412,6 +419,7 @@
         "Generative AI",
         "Responsible AI"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [],
       "Author": "LibertyMunson",
@@ -441,6 +449,7 @@
         "AI Model Evaluation",
         "Fireworks AI"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [
         "Microsoft Foundry",
@@ -479,6 +488,7 @@
         "Vector Databases",
         "Retrieval-Augmented Generation (RAG)"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [],
       "Author": "LibertyMunson",
@@ -508,6 +518,7 @@
         "Microsoft Foundry",
         "AI Certification"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [],
       "Author": "LibertyMunson",
@@ -537,6 +548,7 @@
         "Cloud Governance",
         "Release Management"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [
         "In preview",
@@ -572,6 +584,7 @@
         "Configuration Management",
         "Machine Extensions"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [],
       "Author": "alinetran",
@@ -601,6 +614,7 @@
         "Machine Configuration",
         "Hybrid Cloud Management"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [],
       "Author": "alinetran",
@@ -630,6 +644,7 @@
         "License Management",
         "PowerShell Automation"
       ],
+      "type": "blog",
       "category": "Security",
       "Tags": [],
       "Author": "TomClaes",
@@ -660,6 +675,7 @@
         "FinOps",
         "Migration Assessment"
       ],
+      "type": "blog",
       "category": "AI/ML",
       "Tags": [
         "migration",
@@ -717,6 +733,7 @@
         "Hybrid Cloud Security",
         "NIST vs. Microsoft"
       ],
+      "type": "blog",
       "Tags": [
         "ZTA",
         "Zero Trust",
@@ -776,6 +793,7 @@
         "Security",
         "Hybrid Cloud"
       ],
+      "type": "blog",
       "Tags": [
         "Microsoft Sovereign Cloud",
         "Disconnected Operations",
@@ -846,6 +864,7 @@
         "Cloud Security",
         "Digital Transformation"
       ],
+      "type": "blog",
       "Tags": [
         "Microsoft Sovereign Cloud",
         "Data Sovereignty",
@@ -890,5 +909,37 @@
       "CD Url": "https://blogs.microsoft.com/blog/2025/06/16/announcing-comprehensive-sovereign-solutions-empowering-european-organizations/"
     }
   },
-  "skipped": []
+  "skipped": [
+    "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio: duplicate slug (item 7MCkl1cSf7GGCgJxlCwZ); first occurrence kept",
+    "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio: duplicate slug (item 7ZCmiOEIlWMg99xQHY0A); first occurrence kept"
+  ],
+  "sections": {
+    "azure": {
+      "frameworks": 0
+    },
+    "aws": {
+      "frameworks": 0
+    },
+    "gcp": {
+      "frameworks": 0
+    },
+    "github": {
+      "frameworks": 0
+    },
+    "terraform": {
+      "frameworks": 0
+    },
+    "finops": {
+      "frameworks": 0
+    },
+    "vmware": {
+      "frameworks": 0
+    },
+    "ansible": {
+      "frameworks": 0
+    },
+    "_unattributed": {
+      "frameworks": 0
+    }
+  }
 }
