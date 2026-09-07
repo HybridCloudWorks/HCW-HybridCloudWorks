@@ -136,24 +136,36 @@ const etagMatches = (request, etag) => {
 };
 
 /**
+ * All three readers are required: the route registers HEAD and honours
+ * Range, and `functions/public-media.js` wires all three. A storage that
+ * lacks one — an older test double, say — degrades to the behaviour the
+ * route had before ranges existed rather than throwing: a Range request is
+ * ignored and served in full (RFC 9110 permits ignoring the header), and a
+ * HEAD is answered from the full read with the body dropped.
+ *
  * @param {object} deps
  * @param {{
  *   readBlobForDelivery: Function,
- *   readBlobRangeForDelivery?: Function,
- *   headBlobForDelivery?: Function,
+ *   readBlobRangeForDelivery: Function,
+ *   headBlobForDelivery: Function,
  * }} deps.storage
  */
 export function createPublicMediaHandlers({ storage }) {
+  const canRange = typeof storage.readBlobRangeForDelivery === 'function';
+  const canHead = typeof storage.headBlobForDelivery === 'function';
+
   /** HEAD: the 200's headers, sized for the whole blob, and no body. */
   async function head(container, blobPath, request) {
-    const blob = await storage.headBlobForDelivery(container, blobPath);
+    const blob = canHead
+      ? await storage.headBlobForDelivery(container, blobPath)
+      : await storage.readBlobForDelivery(container, blobPath);
     if (!blob) return json(404, { error: 'Not found' });
     if (etagMatches(request, blob.etag)) return notModified(blob.etag);
     return {
       status: 200,
       headers: {
         ...deliveryHeaders(blob),
-        'Content-Length': String(blob.contentLength),
+        'Content-Length': String(blob.contentLength ?? blob.body?.length ?? 0),
       },
     };
   }
@@ -233,10 +245,16 @@ export function createPublicMediaHandlers({ storage }) {
 
       try {
         if (String(request.method || '').toUpperCase() === 'HEAD') {
+          if (!canHead) context.warn?.('getMedia: no headBlobForDelivery; HEAD via full read');
           return await head(container, blobPath, request);
         }
         const range = parseRangeHeader(request.headers?.get?.('range'));
-        if (range) return await partial(container, blobPath, request, range);
+        if (range) {
+          // The ranged path needs both readers: bytes from one, and the size
+          // and ETag a suffix or a conditional needs from the other.
+          if (canRange && canHead) return await partial(container, blobPath, request, range);
+          context.warn?.('getMedia: ranged readers not wired; Range ignored, serving in full');
+        }
         return await full(container, blobPath, request);
       } catch (error) {
         if (error?.statusCode === 404 || error?.code === 'BlobNotFound') {

@@ -436,6 +436,56 @@ describe('byte ranges (#349)', () => {
     expect(storage.headBlobForDelivery).not.toHaveBeenCalled();
   });
 
+  describe('a storage without the ranged readers degrades, with a warning, never a throw', () => {
+    // The type requires all three readers and production wires all three;
+    // an older double that offers only readBlobForDelivery gets the
+    // behaviour the route had before ranges existed.
+    it('ignores Range and serves the whole file as 200', async () => {
+      const storage = okStorage();
+      const warn = vi.fn();
+      const res = await createPublicMediaHandlers({ storage }).getMedia(
+        makeRequest({ headers: { range: 'bytes=0-3' } }),
+        { ...context, warn }
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers['Content-Range']).toBeUndefined();
+      expect(res.body.toString()).toBe('png-bytes');
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers HEAD from the full read with the body dropped', async () => {
+      const storage = okStorage();
+      const warn = vi.fn();
+      const res = await createPublicMediaHandlers({ storage }).getMedia(
+        { ...makeRequest(), method: 'HEAD' },
+        { ...context, warn }
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toBeUndefined();
+      expect(res.headers['Content-Length']).toBe('9');
+      expect(res.headers['Accept-Ranges']).toBe('bytes');
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not warn when both readers are wired', async () => {
+      const warn = vi.fn();
+      await get({ ...rangeStorage() }, { range: 'bytes=0-3' });
+      const res = await createPublicMediaHandlers({ storage: rangeStorage() }).getMedia(
+        {
+          ...makeRequest({
+            container: 'listenandlearn',
+            blobPath: 'a/b/c.mp3',
+            headers: { range: 'bytes=0-3' },
+          }),
+          method: 'GET',
+        },
+        { ...context, warn }
+      );
+      expect(res.status).toBe(206);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('HEAD', () => {
     it('answers the size and range support with no body and no byte read', async () => {
       const storage = rangeStorage();
