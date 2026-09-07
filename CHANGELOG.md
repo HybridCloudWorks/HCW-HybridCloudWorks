@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Three hand-seeded `admin_config` documents get an admin screen (#351,
+  #352, and the feed list from #348/#349).** Admin → Platform Settings
+  (`/admin/platform`) reads and writes `default_heroes` (the per-provider
+  cover a post gets when AI generation is off or fails), `social_autopost`
+  (the enabled switch, the Publer accounts and the undo-window delay the
+  publish trigger schedules against) and `podcast_feeds` (one RSS URL per
+  provider for the two-hourly timer). Until now each could only be written by
+  an operator holding a Cosmos data-plane role, typing the JSON by hand. The
+  new `GET|PUT /api/cms/platform-settings/{setting}` (editor) normalizes every
+  save to exactly the shape its consumer reads — hero keys resolve to the
+  eight canonical providers and values must be a same-origin path or https
+  URL, `enabled` must be a real boolean and the delay a whole number of
+  minutes, podcast rows pass the timer's own `isValidFeedEntry` — and refuses
+  unknown keys rather than dropping them, so the document can no longer drift
+  from the code. A document seeded by hand that does not validate is shown
+  empty with the reason, and saving replaces it. "Use bundled defaults" fills
+  the covers with `/images/default-heroes/<provider>.png`; the Social card
+  offers the accounts the Social Hub already lists from Publer, with a
+  free-text id as the fallback. Every save is audited as
+  `platform_setting_updated` with counts only: the route answers with the
+  normalized document, as the page needs it to, but no log line or audit row
+  ever carries document contents.
 - **The sixteen already-published articles can be re-hosted from the Publish
   page (#374, the backfill).** `Admin → Publish` gains an **Images: re-host
   hotlinked** action: it lists every published article whose body fields
