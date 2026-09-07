@@ -993,9 +993,9 @@ describe('reason: set-slug — the #400 URL correction', () => {
     // And a stored path is normalised to absolute, so the three frontend hooks
     // that read `split('/')[1]` as the provider still infer it correctly.
     const relative = collidedDoc({ curatedSubpagePath: 'aws/blog/old-slug' });
-    expect(
-      buildSlugPublishUpdate({ contentData: relative, slug: WANTED }).curatedSubpagePath
-    ).toBe(`/aws/blog/${WANTED}`);
+    expect(buildSlugPublishUpdate({ contentData: relative, slug: WANTED }).curatedSubpagePath).toBe(
+      `/aws/blog/${WANTED}`
+    );
 
     // With no stored path at all there is one to derive, from the document's
     // own provider and its target's section.
@@ -1111,6 +1111,32 @@ describe('reason: set-slug — the #400 URL correction', () => {
       error: expect.stringContaining('Only a published article'),
     });
     expect(staged.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('a missing document is a 404 to the route, and still a plain error to the batch', async () => {
+    // The status rides on the shared not-found return so a single-id caller
+    // can answer 404 instead of 500. The batch callers read `.error` alone, so
+    // this must not disturb what they report — both halves are asserted.
+    const store = makeStore(collidedDoc());
+    expect(await setSlug(store, WANTED, 'no-such-id')).toEqual({
+      status: 404,
+      error: 'Content not found',
+    });
+
+    const results = { published: 0, skipped: 0, errors: [], mappings: [], warnings: [] };
+    accumulatePublishResult(results, 'no-such-id', { status: 404, error: 'Content not found' });
+    expect(results.errors).toEqual([{ contentId: 'no-such-id', error: 'Content not found' }]);
+    expect(results.published).toBe(0);
+
+    const batch = JSON.parse(
+      (
+        await handlers(store).publishContent(
+          makeRequest({ contentIds: ['no-such-id'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(batch.errors).toEqual([{ contentId: 'no-such-id', error: 'Content not found' }]);
   });
 
   it('reports a no-op rather than writing one', async () => {

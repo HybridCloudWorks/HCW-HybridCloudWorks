@@ -19,9 +19,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **An editor can give a published article the right slug, from the row where
-  they already look at its URL (#400).** #403 made new collisions impossible
-  and made a republish move an article off a slug another document holds. It
+- **A publisher can give a published article the right slug, from the row where
+  they already look at its URL (#400).** Publisher, not editor: this changes
+  the URL a live article is served at, which is the same authority
+  `publishContent` and the #374 re-host backfill require, and the reason
+  `updateContentItem` — an editor route — no longer accepts a slug at all.
+
+  #403 made new collisions impossible and made a republish move an article off
+  a slug another document holds. It
   could not give an article the RIGHT slug, and three articles need exactly
   that: they share one title, so they were published onto one URL and two of
   them are unreachable. Nothing in the admin UI edited a slug, so the only fix

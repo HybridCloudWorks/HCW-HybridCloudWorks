@@ -244,13 +244,24 @@ describe('setContentSlug', () => {
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
 
-  it('reports a missing document and an unpublished one distinctly', async () => {
-    const staged = { ...COLLIDED, id: 'staged-doc', contentStatus: 'approved' };
-    const { handlers, store } = makeHandlers([staged]);
-
+  it('answers 404 for a missing document, not 500', async () => {
+    // A stale id in the operator's hand is a 404, and a caller has to be able
+    // to tell it from a server fault. It answered 500 until the pipeline's
+    // not-found carried a status, because toSetSlugResponse's default caught
+    // it — the default is for error paths that do not exist yet, not this one.
+    const { handlers, store } = makeHandlers([COLLIDED]);
     expect(
       parse(await handlers.setContentSlug(makeRequest({ contentId: 'nope', slug: 'x' }), context))
-    ).toMatchObject({ status: 500, body: { error: 'Content not found' } });
+    ).toEqual({ status: 404, body: { error: 'Content not found' } });
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('answers 409, not 404, for a document that exists but is not published', async () => {
+    // Distinct from the case above on purpose: the document is there, and what
+    // is wrong is its state, so "not found" would send the operator looking
+    // for the wrong problem.
+    const staged = { ...COLLIDED, id: 'staged-doc', contentStatus: 'approved' };
+    const { handlers, store } = makeHandlers([staged]);
 
     const refused = parse(
       await handlers.setContentSlug(makeRequest({ contentId: staged.id, slug: 'x' }), context)
@@ -258,6 +269,25 @@ describe('setContentSlug', () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/Only a published article/);
     expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('every status the branch can answer is one it chose, never the 500 default', async () => {
+    // The rule the 500 default depends on: a refusal that forgets its status
+    // silently becomes "the server is broken". Enumerated here so adding one
+    // without a status fails rather than degrading quietly.
+    const other = { id: 'holder', Slug: 'taken-slug', contentStatus: 'published' };
+    const { handlers } = makeHandlers([
+      COLLIDED,
+      other,
+      { ...COLLIDED, id: 'staged', contentStatus: 'approved' },
+    ]);
+    const statusFor = async (body) =>
+      parse(await handlers.setContentSlug(makeRequest(body), context)).status;
+
+    expect(await statusFor({ contentId: COLLIDED.id, slug: '  !!!  ' })).toBe(400);
+    expect(await statusFor({ contentId: 'nope', slug: 'x' })).toBe(404);
+    expect(await statusFor({ contentId: COLLIDED.id, slug: 'taken-slug' })).toBe(409);
+    expect(await statusFor({ contentId: 'staged', slug: 'x' })).toBe(409);
   });
 
   it('answers a no-op truthfully instead of reporting a change', async () => {

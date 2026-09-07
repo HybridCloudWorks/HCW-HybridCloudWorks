@@ -769,7 +769,14 @@ export function createPublishHandlers({
   async function processPublishContent(contentId, params) {
     try {
       const contentData = await store.readDoc('content', contentId, contentId);
-      if (!contentData) return { error: 'Content not found' };
+      // `status` rides along for the callers that answer HTTP directly about
+      // ONE id (POST cms/content/slug). A missing document is a 404 there, and
+      // without this it reached toSetSlugResponse's default and answered 500 —
+      // telling an operator with a stale id that the server is broken. The
+      // batch callers read `.error` alone (accumulatePublishResult,
+      // toRehostResult, the scheduled publisher, the Telegram worker), so the
+      // extra field changes nothing for them.
+      if (!contentData) return { status: 404, error: 'Content not found' };
 
       const currentStatus = normalizeCurrentStatusForBlogOnly(
         contentData.contentStatus || 'ingested'

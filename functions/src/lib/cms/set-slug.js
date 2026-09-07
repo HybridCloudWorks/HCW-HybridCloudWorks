@@ -57,11 +57,20 @@ const json = (status, body) => ({
  * response. Pure, so every branch is pinned by a test rather than by reading
  * the handler.
  *
- * A refusal carries its own `status` from `evaluateSlugChange`; anything else
- * that reports an error is a 500, because the branch's remaining error paths
- * are store failures. A `skipped` result is a 200 — it is the truthful answer
- * to "set it to what it already is", and reporting it as a failure would train
- * an operator to ignore the panel.
+ * EVERY ERROR THE BRANCH CAN REACH CARRIES ITS OWN `status`: 400 (the slug
+ * normalises to nothing), 404 (no such document), 409 (another document holds
+ * the slug, or this one is not published) and 503 (the probe could not
+ * answer). The `= 500` default is therefore for an error path that does not
+ * exist yet, not for any of these — which is the point of naming them. It read
+ * as a nicety until it was not: a missing document arrived here without a
+ * status and answered 500, telling an operator who pasted a stale id that the
+ * server was broken. Any new refusal added to the branch must bring its status
+ * with it, or it inherits the same lie.
+ *
+ * A `skipped` result is a 200 — the truthful answer to "set it to what it
+ * already is", and to a lost ETag race, which the publish pipeline has always
+ * reported as a skip rather than an error. Reporting either as a failure would
+ * train an operator to ignore the panel.
  */
 export function toSetSlugResponse(result = {}, { contentId, requested }) {
   if (result.error) {
