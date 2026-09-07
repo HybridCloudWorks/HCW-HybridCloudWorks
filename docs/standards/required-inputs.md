@@ -82,7 +82,7 @@ ignored and the run fails claiming no credentials were supplied.
 | `ARM_TENANT_ID` | **SET** (sensitive) | Same value as the `entra_tenant_id` Terraform variable — see the exceptions table in [Variables and secrets](variables-and-secrets.md) |
 | `ARM_SUBSCRIPTION_ID` | **SET** (sensitive) | Provider fallback only; every provider pins `subscription_id` in HCL, so it never decides where resources land |
 
-**Terraform variables — required.** Eight of the configuration's 58 variables
+**Terraform variables — required.** Eight of the configuration's 62 variables
 have no default, so an unset one fails the plan rather than picking something.
 That is deliberate for the subscriptions in particular: a wrong guess would
 silently deploy the workload into a platform landing zone.
