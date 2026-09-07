@@ -36,6 +36,26 @@ This project has not cut a tagged release; entries are grouped under
   `inlineImages` summary and `updatedAt`, conditioned on the ETag, with a
   `rehost-images` version row — and nothing else. Pinned by tests that put
   the same live article through both paths.
+- **Cosmos exporter infrastructure, inert until armed (#231, ADR 0028).** The
+  Azure half of the out-of-account export: a private `cosmos-export`
+  container on the RA-GRS content account, a lifecycle rule that deletes its
+  `full/` and `delta/` run blobs 35 days after creation (five weekly fulls
+  plus their deltas, about 12 GB; the `state/` change-feed tokens are never
+  under it), a `FEATURE_FLAG_COSMOS_EXPORT` app setting on the Function
+  App, and two scheduled-query alert rules that fire on the *absence* of a
+  `cosmosExportCompleted` custom event — one daily for any completed run in
+  the trailing two days, one on Mondays for the Sunday full. All of it hangs
+  on one new workspace variable, `cosmos_export_enabled`, default `false`:
+  the merge applies an empty container, a lifecycle rule and a `"false"`
+  setting and creates no alert rule, so nothing runs and nothing can page
+  until the owner sets the variable in HCP Terraform and confirms that second
+  run. The rules are shaped around two Azure limits met while writing them: a
+  log alert's query time range is capped at two days, so "no full in eight
+  days" became "no full on the Sunday just gone", checked each Monday; and a
+  rule evaluated daily cannot be stateful, so both are stateless and their
+  descriptions say what that means. No new role assignment — the Function App
+  identity already holds Storage Blob Data Contributor on the account and
+  Cosmos Built-in Data Contributor on the database account.
 - **Landing hero rotations and default covers are generated art (#371, #351).**
   The four landing pages whose hero sets never existed (`/gcp`, `/github`,
   `/terraform`, `/finops`, twenty 404s per the audit) get their five images
