@@ -44,16 +44,7 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const OUT_PATH = join(ROOT, 'frontend', 'data', 'content-manifest.json');
 
 /** Providers with a `/:provider/blog/:slug` route. Mirrors VALID_PROVIDERS. */
-const PROVIDERS = [
-  'azure',
-  'aws',
-  'gcp',
-  'github',
-  'terraform',
-  'finops',
-  'vmware',
-  'ansible',
-];
+const PROVIDERS = ['azure', 'aws', 'gcp', 'github', 'terraform', 'finops', 'vmware', 'ansible'];
 
 /**
  * Fetch the published corpus from the Function App's origin (T-718).
@@ -155,7 +146,9 @@ async function fetchPublished() {
   if (!body?.success || !Array.isArray(body.items)) {
     throw new Error(`${url} returned an unexpected body: ${JSON.stringify(body).slice(0, 200)}`);
   }
-  return body.items;
+  // `sections` is optional: a deployed revision that predates it simply does
+  // not send one, and `buildManifest` then counts what it can itself.
+  return { items: body.items, sections: body.sections };
 }
 
 /** The provider segment an article's URL lives under. */
@@ -257,12 +250,27 @@ function project(item) {
 }
 
 /**
- * Section pages whose whole data source is the `content` container, keyed by
- * the `type` their page selects on. Only these can be declared empty from the
- * manifest alone. `coder-corner` and `code` are deliberately absent: their
- * pages fall back to the legacy `blogs` container when `content` has nothing
- * (useCoderCornerData.js), which this manifest does not read, so a zero here
- * would not mean an empty page.
+ * Sections countable from the corpus this script is handed, keyed by the `type`
+ * their page selects on.
+ *
+ * THIS IS THE FALLBACK PATH, not the main one, and it is approximate. The
+ * manifest route counts every countable section across every container a
+ * section page reads (functions/src/lib/public-section-counts.js) and
+ * `buildManifest` prefers its answer. What is below runs only when the deployed
+ * revision predates that field, so that merging the route and deploying it can
+ * happen in either order without the five frameworks pages returning to the
+ * sitemap in between.
+ *
+ * Approximate in a specific, measured way. `useFrameworkData` does NOT read the
+ * `content` container alone: like useBlogData and useCoderCornerData it falls
+ * back to the legacy `blogs` container when `content` yields nothing for a
+ * provider, and this script is handed `content` only. That gap is survivable
+ * rather than harmless — on 2026-09-07 `blogs` held five published documents,
+ * all `type: blog` and all slug-duplicates of `content` documents, so it puts
+ * nothing on any page and no framework in any count. `coder-corner` and `code`
+ * are still absent here despite reading the same two containers, because their
+ * pages had nothing in `content` at all, so this path's zero for them would
+ * rest entirely on a container it cannot see.
  */
 export const SECTION_TYPES = Object.freeze({ frameworks: 'framework' });
 
@@ -297,11 +305,63 @@ export function sectionCounts(items) {
   return sections;
 }
 
-export function buildManifest(items) {
+/**
+ * A `sections` map the route sent, or null when it sent nothing usable.
+ *
+ * Anything that is not a plain object is treated as absent rather than
+ * repaired: the consumer reads `sections[provider][section]`, and a value that
+ * is not that shape must not be allowed to answer `undefined` and be mistaken
+ * for a section this build simply has no count for.
+ */
+function serverSections(sections) {
+  if (!sections || typeof sections !== 'object' || Array.isArray(sections)) return null;
+  return sections;
+}
+
+/**
+ * The run-log line saying where the section counts came from — or that there
+ * are none.
+ *
+ * THREE OUTCOMES, NOT TWO, and the third is the one worth a function. The
+ * first version of this line printed "counted frameworks locally" whenever the
+ * route sent nothing, but `sectionCounts()` returns null when no item carries a
+ * `type` at all, and then nothing was counted: `manifest.sections` is null and
+ * the pre-render drops no route. That is a plausible state during exactly the
+ * upgrade window this message exists to narrate — an older deployed revision
+ * that sends neither `sections` nor `type` — so the message would have claimed
+ * a count that did not happen, in the one situation someone reads it.
+ *
+ * Worth asserting rather than trusting, for the same reason
+ * `describeFetchFailure` is: nobody watches this run, they read the line it
+ * leaves behind, and a wrong line sends them somewhere else.
+ *
+ * The per-provider figure is read off whichever provider the map happens to
+ * carry first rather than off `azure` by name, so a map that never mentions
+ * Azure still reports its real width.
+ *
+ * @param {object|null} sections the counts that ended up on the manifest
+ * @param {boolean} fromRoute whether the route supplied them
+ */
+export function describeSectionCounts(sections, fromRoute) {
+  if (fromRoute) {
+    const providers = Object.keys(sections || {});
+    const width = providers.length ? Object.keys(sections[providers[0]] || {}).length : 0;
+    return `sections: from the route — ${width} per provider, across every container a section page reads`;
+  }
+  if (sections) {
+    return 'sections: route sent none — counted frameworks locally from the corpus; deploy Functions for the rest';
+  }
+  return 'sections: none — the route sent none and no item carries a type, so no section page leaves the sitemap this build';
+}
+
+export function buildManifest(items, sectionsFromRoute = null) {
   const routes = [];
   const data = {};
   const skipped = [];
-  const sections = sectionCounts(items);
+  // The route's counts win. They see every container a section page reads;
+  // sectionCounts() sees only the `content` corpus, so it can speak for
+  // frameworks and nothing else.
+  const sections = serverSections(sectionsFromRoute) ?? sectionCounts(items);
 
   for (const item of items) {
     const slug = slugOf(item);
@@ -337,9 +397,9 @@ async function main() {
   // — the query just lives in the app now
   // (functions/src/lib/public-content-manifest.js), where it is pinned by an
   // exact-match test for that reason.
-  const resources = await fetchPublished();
+  const { items: resources, sections } = await fetchPublished();
 
-  const manifest = buildManifest(resources);
+  const manifest = buildManifest(resources, sections);
   manifest.generatedAt = new Date().toISOString();
 
   mkdirSync(dirname(OUT_PATH), { recursive: true });
@@ -369,6 +429,7 @@ async function main() {
   console.log(
     `[content-manifest] ${manifest.routes.length} routes, ${resources.length} published items`
   );
+  console.log(`  ${describeSectionCounts(manifest.sections, serverSections(sections) !== null)}`);
   for (const reason of manifest.skipped) console.log(`  skipped ${reason}`);
 }
 
@@ -376,8 +437,7 @@ async function main() {
 // parses to a URL with host `C` that never matches import.meta.url, so the
 // build would exit 0 without writing the manifest. Same fix as
 // check-deploy-drift.mjs.
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly || process.env.FORCE_RUN === '1') {
   main().catch((error) => {
     console.error(`[content-manifest] FAILED: ${error?.message || error}`);

@@ -19,6 +19,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Thirty-three empty section pages leave the sitemap, and the counts that
+  decide it now come from every container a section page reads (#373).** Part 2
+  could speak for one section: `frameworks` reads the `content` container and
+  the manifest builder was handed that corpus. Every other section reads
+  something the builder cannot see — `blog`, `coder-corner` and `code` fall
+  back to the legacy `blogs` container when `content` has nothing for a
+  provider, which is precisely the case being declared empty, and `audio` and
+  `audio-architecture` read `podcasts` and `listen_and_learn_episodes`, which
+  are not content at all. So the counting moved into the app, where the Cosmos
+  access already is: `GET /api/public/content-manifest` returns a `sections`
+  map beside `items`, computed over all four containers under the same public
+  filter `GET /api/public/content` applies, and the builder prefers it —
+  falling back to its own frameworks-only count when the deployed revision
+  predates the field, so merging this and deploying Functions can happen in
+  either order without the five frameworks pages returning to the sitemap in
+  between. `sitemapRoutes` in the pre-render is unchanged: it never named a
+  section, so it drops the new ones the moment the counts arrive. Measured
+  against the live containers and the 2026-09-07 crawl, the sitemap goes from
+  113 URLs to 80, and all thirty-three that leave are pages the crawl calls
+  empty; nothing the crawl calls `works` is dropped. Two rules are the reason
+  a count is trusted: only a section whose page *infers* a provider from
+  titles and URLs (`blog`, `frameworks`) lets an unattributable item block its
+  zeros — the rest match a stored provider field in SQL, so such an item is
+  fetched by no page and blocking sixteen audio pages on behalf of two
+  provider-less podcast rows would be wrong — and a read that fills its window
+  returns null rather than a truncated count, because the rows past the window
+  are indistinguishable from rows that do not exist. `architecture-designs` is
+  deliberately not counted: its pages merge `staticBlueprints` hardcoded in
+  each `ArchitecturePage.jsx`, so four of the five render fine on a corpus
+  holding one architecture document and an API zero would drop working URLs.
+  Every dropped route still renders and still serves its empty state; this
+  changes what is advertised, not what exists.
 - **Every publish now checks whether another article already holds its URL,
   and the collisions already in the corpus have a report of their own
   (#400).** One case is deliberately left open and is named below: two
