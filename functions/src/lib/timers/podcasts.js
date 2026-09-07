@@ -6,18 +6,50 @@
  * here (the public list sorts on it — public-reads.js listPodcasts).
  *
  * Which feeds (#348): `admin_config/podcast_feeds`, shape
- * `{ feeds: [{ provider, url }] }`, read on every run so a new host is a
- * document write rather than a deploy. `PODCAST_FEEDS` below is the fallback
- * when the document is absent. It is empty on purpose: the one feed it used
- * to hold, PodBean's, returned HTTP 410 Gone from 2026-09-05 and the timer
- * errored on every firing for as long as the constant named it. The next host
- * (issue #349) is seeded into the document, not written back here.
+ * `{ mainFeedUrl, feeds: [{ provider, url }] }`, read on every run so a new
+ * host is a document write rather than a deploy. `PODCAST_FEEDS` below is the
+ * fallback when the document is absent. It is empty on purpose: the one feed
+ * it used to hold, PodBean's, returned HTTP 410 Gone from 2026-09-05 and the
+ * timer errored on every firing for as long as the constant named it. The next
+ * host (issue #349) is seeded into the document, not written back here.
+ *
+ * `mainFeedUrl` is the site's own show (#349 follow-up): one feed that belongs
+ * to hybridcloudworks.com rather than to any provider. It is a SEPARATE FIELD
+ * rather than a row in `feeds` for two reasons. A document written before it
+ * existed still reads correctly — `feeds` is untouched and a revision that
+ * predates this code ignores the new key rather than fetching it as a provider
+ * — and a provider row can never be mistaken for it, or it for one, because
+ * they are not the same kind of value: `feeds` is keyed by provider and the
+ * show has no provider.
+ *
+ * Inside a run, though, it IS one: `resolvePodcastFeeds` returns it as an
+ * ordinary entry under the reserved provider `main`, so the ingest loop, the
+ * dedupe, the 410 handling and the summary all work on it unchanged, and the
+ * episodes it writes carry `provider: 'main'`. See MAIN_FEED_PROVIDER.
  */
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 
 export const PODCAST_FEEDS = Object.freeze([]);
 
 export const PODCAST_FEEDS_CONFIG_ID = 'podcast_feeds';
+
+/**
+ * The `provider` an episode of the site's own show is filed under.
+ *
+ * A reserved value rather than an absent provider, because every consumer of
+ * `podcasts` already keys on the field: the container's composite index is
+ * `provider + publishedAt`, the public list filters `c.provider = @provider`
+ * in SQL, and `public-section-counts.js` reads the same field. A row with no
+ * provider would be fetched by no query and counted by nothing — invisible in
+ * exactly the way the eight empty audio pages were. A reserved value keeps
+ * every one of those paths working and makes the row say what it is.
+ *
+ * `main` is not a provider slug and cannot become one: `PODCAST_PROVIDERS` in
+ * platform-settings.js lists the eight, `normalizePodcastFeeds` refuses it as
+ * a provider row, and the read side matches it by name (public-reads.js
+ * MAIN_PODCAST_PROVIDER, asserted equal to this one by public-reads.test.js).
+ */
+export const MAIN_FEED_PROVIDER = 'main';
 
 /** The production parser, with the podcast custom fields. Lazy so tests never load rss-parser. */
 export async function createPodcastParser() {
@@ -73,16 +105,42 @@ export function dedupeFeedsByProvider(feeds) {
 }
 
 /**
+ * The site's own show as a feed entry, or null when the document names none.
+ *
+ * Validated by `isValidFeedEntry`, the same test every provider row passes, so
+ * a main feed this returns is a feed the run will fetch and a URL the public
+ * list is willing to publish as a subscribe link.
+ */
+export function resolveMainFeedEntry(doc) {
+  const url = typeof doc?.mainFeedUrl === 'string' ? doc.mainFeedUrl.trim() : '';
+  const entry = { provider: MAIN_FEED_PROVIDER, url };
+  return isValidFeedEntry(entry) ? entry : null;
+}
+
+/**
  * The feed list for this run: `admin_config/podcast_feeds` when it exists and
- * carries a `feeds` array (invalid rows dropped, one per provider), else
- * `fallback`. Returns `{ feeds, source }` so the summary line can say which
- * one ran.
+ * carries either a `feeds` array (invalid rows dropped, one per provider) or a
+ * usable `mainFeedUrl`, else `fallback`. Returns `{ feeds, source }` so the
+ * summary line can say which one ran.
+ *
+ * The main feed leads the list, which is not cosmetic: `dedupeFeedsByProvider`
+ * keeps the FIRST row for a provider, so a hand-seeded `{ provider: 'main' }`
+ * row left in `feeds` cannot displace the field the admin page writes. The
+ * page refuses to create that row (normalizePodcastFeeds), but this document
+ * was seedable by hand before the page existed.
+ *
+ * A document carrying ONLY `mainFeedUrl` counts as configured. Anything the
+ * admin page writes carries `feeds` too, even empty — this is for the
+ * hand-seeded case, where falling through to `fallback` would silently ingest
+ * nothing while the document plainly names a feed.
  */
 export async function resolvePodcastFeeds(store, fallback = PODCAST_FEEDS) {
   const doc = await store.readDoc('admin_config', PODCAST_FEEDS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
-  if (doc && Array.isArray(doc.feeds)) {
+  const main = resolveMainFeedEntry(doc);
+  const rows = Array.isArray(doc?.feeds) ? doc.feeds.filter(isValidFeedEntry) : null;
+  if (main || rows) {
     return {
-      feeds: dedupeFeedsByProvider(doc.feeds.filter(isValidFeedEntry)),
+      feeds: dedupeFeedsByProvider([...(main ? [main] : []), ...(rows ?? [])]),
       source: 'admin_config',
     };
   }
@@ -208,7 +266,7 @@ export function createPodcastIngest({ store, parser, feeds, now = () => new Date
       // Warning, so the empty state is distinguishable from a timer that never
       // fired — the same reason the empty-feed case above is a Warning.
       log.warn?.(
-        `[fetchPodcastFeeds] no feeds configured (source: ${resolved.source}) — seed admin_config/${PODCAST_FEEDS_CONFIG_ID} as { feeds: [{ provider, url }] }`
+        `[fetchPodcastFeeds] no feeds configured (source: ${resolved.source}) — seed admin_config/${PODCAST_FEEDS_CONFIG_ID} as { mainFeedUrl, feeds: [{ provider, url }] }`
       );
       return {};
     }

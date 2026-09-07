@@ -24,6 +24,7 @@ import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
 import { DEFAULT_HEROES_CONFIG_ID } from './triggers/ai-cover.js';
 import { AUTOPOST_CONFIG_ID } from './triggers/social-caption-trigger.js';
 import {
+  MAIN_FEED_PROVIDER,
   PODCAST_FEEDS_CONFIG_ID,
   dedupeFeedsByProvider,
   isValidFeedEntry,
@@ -220,15 +221,45 @@ export const PODCAST_PROVIDERS = Object.freeze([
 const MAX_FEEDS = 50;
 
 /**
- * `{ feeds: [{ provider, url }] }` → the document timers/podcasts.js reads.
- * A row with a blank URL means "no feed for this provider" and is dropped.
- * Every kept row passes the timer's own `isValidFeedEntry` (lowercase slug
- * provider, https URL) and the list is deduplicated the way the timer would
- * dedupe it, so what is stored is exactly what will run.
+ * `{ mainFeedUrl, feeds: [{ provider, url }] }` → the document
+ * timers/podcasts.js reads.
+ *
+ * `mainFeedUrl` is the site's own show — one feed that belongs to the site
+ * rather than to a provider, ingested under the reserved provider `main` and
+ * shown on every provider's audio page. Blank means the site has no show yet
+ * and the key is omitted, which is what `resolveMainFeedEntry` treats as none.
+ *
+ * A `feeds` row with a blank URL means "no feed for this provider" and is
+ * dropped. Every kept row passes the timer's own `isValidFeedEntry` (lowercase
+ * slug provider, https URL) and the list is deduplicated the way the timer
+ * would dedupe it, so what is stored is exactly what will run.
+ *
+ * Two rules exist only because the main feed does:
+ *
+ *   - `main` is not accepted as a provider row. There is one way to name the
+ *     site's show, so the page cannot write a document that says it twice.
+ *   - No provider row may repeat the main feed's URL. Both ingests would build
+ *     the same episode ids from the same guids and each run would overwrite
+ *     the other's `provider`, so the same episode would flip between the show
+ *     and a provider from one firing to the next — a duplicate that never
+ *     appears as two rows, only as a page that changes under the reader.
  */
 export function normalizePodcastFeeds(body) {
   if (!isPlainObject(body)) fail('Body must be a JSON object');
-  assertOnlyKeys(body, ['feeds'], 'body');
+  assertOnlyKeys(body, ['mainFeedUrl', 'feeds'], 'body');
+
+  const mainRaw = body.mainFeedUrl ?? '';
+  if (typeof mainRaw !== 'string') fail('mainFeedUrl must be a string');
+  const mainFeedUrl = mainRaw.trim();
+  if (mainFeedUrl !== '') {
+    if (mainFeedUrl.length > MAX_URL_LENGTH || /[\s<>"'`\\]/.test(mainFeedUrl)) {
+      fail('mainFeedUrl is not a valid URL');
+    }
+    if (!isValidFeedEntry({ provider: MAIN_FEED_PROVIDER, url: mainFeedUrl })) {
+      fail('mainFeedUrl must be an https URL');
+    }
+  }
+
   const feedsRaw = body.feeds ?? [];
   if (!Array.isArray(feedsRaw)) fail('feeds must be an array of { provider, url }');
   if (feedsRaw.length > MAX_FEEDS) fail(`feeds may hold at most ${MAX_FEEDS} entries`);
@@ -245,8 +276,14 @@ export function normalizePodcastFeeds(body) {
     if (!/^[a-z0-9-]+$/.test(provider)) {
       fail(`feeds[${index}].provider must be a lowercase slug (letters, digits, dashes)`);
     }
+    if (provider === MAIN_FEED_PROVIDER) {
+      fail(`feeds[${index}].provider is reserved — the site's show is the Main feed field`);
+    }
     if (url.length > MAX_URL_LENGTH || /[\s<>"'`\\]/.test(url)) {
       fail(`feeds[${index}].url is not a valid URL`);
+    }
+    if (mainFeedUrl !== '' && url === mainFeedUrl) {
+      fail(`feeds[${index}].url is already the main feed — one feed cannot be both`);
     }
     const row = { provider, url };
     if (!isValidFeedEntry(row)) fail(`feeds[${index}].url must be an https URL`);
@@ -257,7 +294,7 @@ export function normalizePodcastFeeds(body) {
   if (deduped.length !== feeds.length) {
     fail('Each provider may have only one feed');
   }
-  return { feeds: deduped };
+  return mainFeedUrl === '' ? { feeds: deduped } : { mainFeedUrl, feeds: deduped };
 }
 
 // ── the catalogue ──────────────────────────────────────────────────────────
@@ -397,7 +434,9 @@ export function createPlatformSettingsHandlers({
           scheduleDelayMinutes: value.scheduleDelayMinutes,
         };
       case 'podcast-feeds':
-        return { feeds: value.feeds.length };
+        // Whether a main feed is set, never which one: the audit row records
+        // counts, and a URL is content.
+        return { feeds: value.feeds.length, mainFeed: Boolean(value.mainFeedUrl) };
       default:
         return {};
     }

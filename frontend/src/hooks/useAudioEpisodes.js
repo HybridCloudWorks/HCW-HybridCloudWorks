@@ -8,7 +8,11 @@
  * one must not blank a list the other can still fill.
  *
  * `feedUrl` rides along from the podcasts response so the page's RSS button
- * names the feed the timer actually ingests.
+ * names the feed the timer actually ingests: the provider's own feed when it
+ * has one, and otherwise the site's show. A reader subscribing from a page
+ * whose provider has no feed should reach the show whose episodes they are
+ * looking at, not nothing at all — and on those pages the show is the whole
+ * list.
  */
 import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
@@ -38,7 +42,7 @@ export function useAudioEpisodes(provider) {
 
   return {
     episodes,
-    feedUrl: host.data?.feedUrl || null,
+    feedUrl: host.data?.feedUrl || host.data?.mainFeedUrl || null,
     loading: host.loading || listenAndLearn.loading,
     error: host.error || listenAndLearn.error || null,
   };

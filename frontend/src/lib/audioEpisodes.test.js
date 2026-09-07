@@ -12,6 +12,7 @@ vi.mock('@/lib/functionsBase', () => ({
 
 import {
   formatSeconds,
+  MAIN_FEED_PROVIDER,
   mergeAudioEpisodes,
   normalizeHostEpisode,
   normalizeListenAndLearnEpisode,
@@ -84,6 +85,21 @@ describe('normalizeHostEpisode', () => {
     const out = normalizeHostEpisode({ ...row, publishedAt: 'junk' });
     expect(out.publishedAtISO).toBeNull();
     expect(out.publishedAtString).toBeNull();
+  });
+
+  it("reads the row's own provider to tell the site's show from a provider feed", () => {
+    // The row is the only thing that knows: `GET public/podcasts` returns the
+    // show to every provider, so the page cannot infer it from the URL it is
+    // on. Same container, same shape, one field apart.
+    expect(normalizeHostEpisode({ ...row, provider: MAIN_FEED_PROVIDER })).toMatchObject({
+      id: 'host:ep-42',
+      source: SOURCE.main,
+      sourceLabel: 'The show',
+    });
+    expect(normalizeHostEpisode({ ...row, provider: 'azure' })).toMatchObject({
+      source: SOURCE.host,
+      sourceLabel: 'Podcast feed',
+    });
   });
 });
 
@@ -167,6 +183,33 @@ describe('mergeAudioEpisodes', () => {
       listenAndLearn: [{ id: 'same', setId: 'same' }],
     });
     expect(new Set(out.map((e) => e.id)).size).toBe(2);
+  });
+
+  it("leads with the site's show, however old its episodes are", () => {
+    // The owner's ask: the show is central to the page, not a row somewhere
+    // down a date-sorted list. The page renders `visible[0]` in the player, so
+    // this ordering is what puts the show under the play button — including on
+    // a provider whose own feed is newer.
+    const out = mergeAudioEpisodes({
+      host: [
+        { id: 'p-new', provider: 'azure', publishedAt: '2026-09-05T00:00:00Z' },
+        { id: 's-old', provider: 'main', publishedAt: '2026-01-01T00:00:00Z' },
+        { id: 's-new', provider: 'main', publishedAt: '2026-06-01T00:00:00Z' },
+      ],
+      listenAndLearn: [{ id: 'll', setId: 's', approvedAt: '2026-09-09T00:00:00Z' }],
+    });
+    expect(out.map((e) => e.id)).toEqual([
+      'host:s-new',
+      'host:s-old',
+      'listen-and-learn:s/ll',
+      'host:p-new',
+    ]);
+    expect(out.map((e) => e.source)).toEqual([
+      SOURCE.main,
+      SOURCE.main,
+      SOURCE.listenAndLearn,
+      SOURCE.host,
+    ]);
   });
 
   it('is empty for nothing', () => {

@@ -171,15 +171,15 @@ export async function submitPublicContent(body) {
 }
 
 /**
- * GET public/podcasts — a provider's host-ingested episodes, newest first,
- * plus the feed they were ingested from (#349).
+ * GET public/podcasts — a provider's host-ingested episodes and the site's
+ * own show, plus the feeds they were ingested from (#349).
  *
- * `feedUrl` is the provider's row in `admin_config/podcast_feeds`, the same
- * document the ingest timer reads, so the RSS subscribe button and the list
- * it sits beside cannot name two different feeds. Null until the owner seeds
- * the document.
+ * `feedUrl` is the provider's row in `admin_config/podcast_feeds` and
+ * `mainFeedUrl` is the site's show in the same document — the one the ingest
+ * timer reads — so the RSS subscribe button and the list it sits beside
+ * cannot name two different feeds. Either is null until the owner seeds it.
  *
- * @returns {Promise<{items: object[], feedUrl: string|null}>}
+ * @returns {Promise<{items: object[], feedUrl: string|null, mainFeedUrl: string|null}>}
  */
 export async function fetchPublicPodcastListing({ provider, limit } = {}) {
   const params = new URLSearchParams();
@@ -187,7 +187,11 @@ export async function fetchPublicPodcastListing({ provider, limit } = {}) {
   if (limit) params.set('limit', String(limit));
   const qs = params.toString();
   const body = await publicGet(`public/podcasts${qs ? `?${qs}` : ''}`);
-  return { items: body?.items || [], feedUrl: body?.feedUrl || null };
+  return {
+    items: body?.items || [],
+    feedUrl: body?.feedUrl || null,
+    mainFeedUrl: body?.mainFeedUrl || null,
+  };
 }
 
 /** GET public/podcasts — episodes only. Kept for callers that never needed the feed. */

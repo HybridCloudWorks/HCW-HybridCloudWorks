@@ -486,16 +486,29 @@ const LISTEN_AND_LEARN_SET_PROJECTION = ['id', 'certTitle', 'certSlug', ...SOFT_
 
 /**
  * Where the podcast timer reads its feed list (`fetchPodcastFeeds`, #348):
- * `admin_config/podcast_feeds`, shape `{ feeds: [{ provider, url }] }`. The
- * public podcasts list exposes the matching provider's URL as `feedUrl` so
- * the page's RSS subscribe button and the timer's ingest cannot name two
- * different feeds (#349). Copied here for the same reason as the container
- * names above — this module has no imports — and public-reads.test.js
- * asserts the copies agree with timers/podcasts.js and cosmos-client.js.
+ * `admin_config/podcast_feeds`, shape
+ * `{ mainFeedUrl, feeds: [{ provider, url }] }`. The public podcasts list
+ * exposes the matching provider's URL as `feedUrl`, and the site's own show as
+ * `mainFeedUrl`, so the page's RSS subscribe button and the timer's ingest
+ * cannot name two different feeds (#349). Copied here for the same reason as
+ * the container names above — this module has no imports — and
+ * public-reads.test.js asserts the copies agree with timers/podcasts.js and
+ * cosmos-client.js.
  */
 const PODCAST_FEEDS_CONFIG_CONTAINER = 'admin_config';
 const PODCAST_FEEDS_CONFIG_ID = 'podcast_feeds';
 const PODCAST_FEEDS_CONFIG_PARTITION = 'admin_config';
+
+/**
+ * The `provider` the site's own show is filed under — a fourth copy of a name
+ * this module may not import, asserted equal to `MAIN_FEED_PROVIDER` in
+ * timers/podcasts.js by public-reads.test.js.
+ *
+ * It is exported because the SQL below and `public-section-counts.js` both
+ * match on it: those rows are the site's show, they belong on every provider's
+ * audio page, and a page they appear on must not be counted as empty.
+ */
+export const MAIN_PODCAST_PROVIDER = 'main';
 
 /**
  * The configured feed URL for one provider, or null. Only an https URL is
@@ -513,6 +526,15 @@ export function resolveFeedUrlForProvider(doc, provider) {
       /^https:\/\//.test(entry.url)
   );
   return row ? row.url : null;
+}
+
+/**
+ * The site's show, or null. Same https-only rule as the provider rows above,
+ * for the same reason: it is published to anonymous readers as a link.
+ */
+export function resolveMainFeedUrl(doc) {
+  const url = typeof doc?.mainFeedUrl === 'string' ? doc.mainFeedUrl.trim() : '';
+  return /^https:\/\//.test(url) ? url : null;
 }
 
 /**
@@ -917,7 +939,17 @@ export function createPublicReadHandlers({ store }) {
       }
     },
 
-    /** GET /api/public/podcasts?provider=&limit= (hooks/useAudioEpisodes.js) */
+    /**
+     * GET /api/public/podcasts?provider=&limit= (hooks/useAudioEpisodes.js)
+     *
+     * A provider's rows AND the site's show. The show is not a provider's
+     * content, it is the site's, so it belongs on every provider's audio page
+     * — which is also what stops those pages being empty when a provider has
+     * no feed of its own. Each row carries its own `provider`, so the page can
+     * tell the show from the provider's episodes without asking twice, and a
+     * show episode appears exactly once in the list: `main` is a value
+     * `c.provider` takes, not a second copy of a provider's row.
+     */
     async listPodcasts(request, context) {
       try {
         // Lower-cased like every other public read in this module: the rows
@@ -935,8 +967,14 @@ export function createPublicReadHandlers({ store }) {
         let query = `SELECT TOP ${FETCH_WINDOW} * FROM c`;
         const parameters = [];
         if (provider) {
-          query += ' WHERE c.provider = @provider';
-          parameters.push({ name: '@provider', value: provider });
+          // IN, not two round trips: one query over the same
+          // `provider + publishedAt` index the equality used, and the rows
+          // arrive already interleaved for the date sort below.
+          query += ' WHERE c.provider IN (@provider, @mainProvider)';
+          parameters.push(
+            { name: '@provider', value: provider },
+            { name: '@mainProvider', value: MAIN_PODCAST_PROVIDER }
+          );
         }
         const rows = await store.queryDocs('podcasts', query, parameters);
         // Soft-delete only: podcasts have no publication workflow, so
@@ -948,10 +986,15 @@ export function createPublicReadHandlers({ store }) {
           .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a));
         const items = matching.slice(0, limit).map(stripInternalFields);
 
-        // The provider's configured feed (#349), for the RSS subscribe button.
-        // One point read; a failure here degrades to "no button", because the
-        // episode list is the page and the button is not.
+        // The provider's configured feed and the site's show (#349), for the
+        // RSS subscribe button. One point read; a failure here degrades to
+        // "no button", because the episode list is the page and the button is
+        // not. Both are returned rather than one resolved value: which feed a
+        // reader is offered is the page's decision, and `feedUrl` keeps
+        // meaning the same thing it did — the feed THESE provider rows were
+        // ingested from.
         let feedUrl = null;
+        let mainFeedUrl = null;
         if (provider) {
           try {
             const config = await store.readDoc(
@@ -960,6 +1003,7 @@ export function createPublicReadHandlers({ store }) {
               PODCAST_FEEDS_CONFIG_PARTITION
             );
             feedUrl = resolveFeedUrlForProvider(config, provider);
+            mainFeedUrl = resolveMainFeedUrl(config);
           } catch (error) {
             // Status or code only. A Cosmos SDK message can carry the
             // container, id and partition key of the request, and telemetry
@@ -970,7 +1014,11 @@ export function createPublicReadHandlers({ store }) {
         }
 
         // Counted before the slice — see listContent above (TODO.md T-407).
-        return json(200, { success: true, items, total: matching.length, feedUrl }, 300);
+        return json(
+          200,
+          { success: true, items, total: matching.length, feedUrl, mainFeedUrl },
+          300
+        );
       } catch (error) {
         context.error('publicListPodcasts failed:', error);
         return json(500, { error: 'Failed to list podcasts' });

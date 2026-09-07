@@ -4,7 +4,7 @@ import { useLocation } from 'react-router';
 import EpisodePlayer from '@/components/podcast/EpisodePlayer';
 import useAudioEpisodes from '@/hooks/useAudioEpisodes';
 import { useProvider, useProviderConfig } from '@/context/ProviderContext';
-import { formatSeconds, SOURCE, stripHtml } from '@/lib/audioEpisodes';
+import { formatSeconds, SOURCE, SOURCE_LABELS, stripHtml } from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 const PLATFORM_LOGOS = {
@@ -291,11 +291,69 @@ function EpisodeImage({ image, title, size = 'md', meta }) {
   );
 }
 
-const SOURCE_FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: SOURCE.host, label: 'Podcast feed' },
-  { key: SOURCE.listenAndLearn, label: 'Listen & Learn' },
-];
+/**
+ * Filter order, which is also the order the list itself leads with: the site's
+ * show, then this provider's feed, then the study episodes.
+ */
+const FILTER_ORDER = [SOURCE.main, SOURCE.host, SOURCE.listenAndLearn];
+
+/**
+ * The filter chips this list needs: none at all below two sources, otherwise
+ * `All` and one chip per source PRESENT.
+ *
+ * Present, not possible. A chip for a source with no rows filters the list to
+ * nothing and reads as a page that lost its episodes — and which sources a
+ * page has is now a real question rather than a fixed pair, since a provider
+ * with no feed of its own still shows the site's show.
+ */
+export function sourceFilters(episodes) {
+  const present = FILTER_ORDER.filter((key) => episodes.some((episode) => episode.source === key));
+  if (present.length < 2) return [];
+  return [
+    { key: 'all', label: 'All' },
+    ...present.map((key) => ({ key, label: SOURCE_LABELS[key] })),
+  ];
+}
+
+/** The sources this page has, named in the order the list leads with them. */
+function heroSources(episodes, providerName) {
+  const phrases = {
+    [SOURCE.main]: "the site's show",
+    [SOURCE.host]: `the ${providerName} feed`,
+    [SOURCE.listenAndLearn]: `the Listen & Learn study episodes for ${providerName} certifications`,
+  };
+  return FILTER_ORDER.filter((key) => episodes.some((episode) => episode.source === key)).map(
+    (key) => phrases[key]
+  );
+}
+
+/** `a`, `a and b`, `a, b, and c`. */
+function joinPhrases(phrases) {
+  if (phrases.length <= 1) return phrases[0] ?? '';
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(', ')}, and ${phrases.at(-1)}`;
+}
+
+/**
+ * The sentence under the title, naming the sources the page ACTUALLY has.
+ *
+ * It used to name the provider's feed unconditionally, which was true of every
+ * page only for as long as a provider feed was the only thing a page could
+ * hold. It is not any more, and the page it is wrong on is the one this whole
+ * change exists to produce: a provider with no feed of its own, showing the
+ * site's show. Promising a reader an "{Azure} feed" that no row on the page
+ * came from is the same class of mistake as an empty Subscribe box (#348) —
+ * copy describing a page other than the one being rendered.
+ *
+ * "in one place" goes with more than one source, for the same reason: it is a
+ * claim about bringing things together, and one thing is not gathered.
+ */
+export function heroBlurb(episodes, providerName) {
+  const base = `Deep-dive podcast discussions on ${providerName} architecture, patterns, and enterprise solutions`;
+  const sources = heroSources(episodes, providerName);
+  if (sources.length === 0) return `${base}.`;
+  return `${base} — ${joinPhrases(sources)}${sources.length > 1 ? ', in one place' : ''}.`;
+}
 
 /**
  * A source chip on a list row. Listen & Learn rows say which exam; feed rows
@@ -376,9 +434,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
     if (next?.id !== featured?.id) setIsPlaying(false);
   }
 
-  const hasBothSources =
-    episodes.some((e) => e.source === SOURCE.host) &&
-    episodes.some((e) => e.source === SOURCE.listenAndLearn);
+  const filters = sourceFilters(episodes);
 
   const platforms = [
     { key: 'spotify', name: 'Spotify' },
@@ -391,7 +447,9 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   // The RSS link is the feed the ingest timer reads (admin_config/
   // podcast_feeds, served on GET public/podcasts), so the button and the
   // list beside it cannot name two different feeds; the static config is a
-  // fallback only.
+  // fallback only. `feedUrl` is already this provider's feed or, where it has
+  // none, the site's show — useAudioEpisodes resolves that, because it is the
+  // hook that knows which rows the list is showing.
   // Sanitised here rather than at the `href`, so one call covers both uses:
   // the filter below decides which buttons exist, and the sidebar renders the
   // same value. An unsafe scheme in a provider config or a seeded feed URL
@@ -431,9 +489,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
             </span>
           </h1>
           <p className="text-base sm:text-lg text-foreground max-w-3xl relative z-10">
-            Deep-dive podcast discussions on {meta.name} architecture, patterns, and enterprise
-            solutions — the show&apos;s episodes and the Listen &amp; Learn study episodes for{' '}
-            {meta.name} certifications, in one place.
+            {heroBlurb(episodes, meta.name)}
           </p>
         </section>
 
@@ -472,9 +528,9 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                   </span>
                   All Episodes
                 </h3>
-                {hasBothSources && (
+                {filters.length > 0 && (
                   <div role="group" aria-label="Filter episodes by source" className="flex gap-1">
-                    {SOURCE_FILTERS.map((option) => (
+                    {filters.map((option) => (
                       <button
                         key={option.key}
                         type="button"
