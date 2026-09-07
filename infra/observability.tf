@@ -956,3 +956,159 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
     azurerm_role_assignment.alerts_app_component,
   ]
 }
+
+# ---------------------------------------------------------------------------
+# Cosmos export — the missing-run alerts (ADR 0028 §5, #231)
+# ---------------------------------------------------------------------------
+#
+# The exporter behind FEATURE_FLAG_COSMOS_EXPORT (functionapp.tf) runs at
+# 03:00 UTC every day: a full read of every exported container on Sunday, the
+# change feed since the previous run on the other six. A run that completes
+# emits one Application Insights custom event named cosmosExportCompleted
+# with customDimensions.mode set to "full" or "delta" — nothing else about
+# the run is in the event, and nothing in these queries wants more. Success
+# is silent and only absence pages, for the reason the edge-probe rule above
+# gives: a dead timer, a flag left off, a poisoned queue and a failed write
+# all produce NO rows, and a rule that counted failures reads every one of
+# them as health.
+#
+# TWO DAYS IS AS FAR BACK AS A LOG ALERT CAN LOOK, and both rules are shaped
+# by that. Azure caps a log search alert's query time range at two days —
+# the window and the override alike — and says so plainly: "even if the query
+# contains an ago command with a time range of longer than two days, the
+# two-day maximum time range is applied". "No full in eight days" therefore
+# cannot be written as an eight-day lookback. What can be written:
+#
+#   alert-cosmos-export-daily asks, once a day, whether ANY run completed in
+#   the last two days. Any run, not delta alone as the ADR's shorthand has it:
+#   Sunday's run is a full, so the gap between Saturday's delta and Monday's
+#   is 48 hours — exactly the window — and an evaluation landing in the
+#   minutes between those two completions would page about a healthy week.
+#   Counting both modes makes the widest healthy gap 24 hours against 48.
+#
+#   alert-cosmos-export-full asks, on Mondays only, whether a full completed
+#   in the last two days. A window that ends anywhere on Monday contains the
+#   whole of Sunday, so a full that ran on schedule is inside it whatever
+#   hour Azure evaluates at; on the other six days the query returns 0 and
+#   the rule is quiet. The ADR's eight days of tolerance becomes "the Sunday
+#   just gone" — stricter, and the reading the cap permits.
+#
+# STATELESS, unlike every other rule in this file, and not by choice. Azure
+# does not allow auto-mitigation on a rule evaluated less often than every
+# twelve hours ("Stateful alert rules can be configured with a frequency of
+# up to 12 hours"), and these evaluate daily because what they watch happens
+# daily. Each description states the consequence: the daily rule mails once
+# a day until a run completes, the Monday rule once per missed Sunday.
+# Neither resolves itself, and neither should — a late run is not the
+# incident, a stale copy is, and it stays stale until the next good run.
+#
+# GATED ON cosmos_export_enabled, the variable that also sets the app flag,
+# so the rules cannot exist while the exporter is off — the "created before
+# the first row, fires on the first evaluation" trap the probe rule above
+# describes. One variable closes most of it; the variable's description in
+# variables.tf names the residue (the first evaluation may precede the first
+# 03:00 UTC run, and a flag that arrives on a Sunday after 03:00 has no full
+# for Monday to find).
+#
+# customEvents, not AppEvents: the scope is the component, which resolves the
+# classic schema, exactly as the exceptions rule explains. customDimensions
+# is a dynamic column, hence the tostring() before comparing.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_delta_missing" {
+  count               = var.cosmos_export_enabled ? 1 : 0
+  name                = "alert-cosmos-export-daily-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "No Cosmos export run (full or delta) completed in the last 2 days — the 03:00 UTC exporter is not finishing and the out-of-account copy is going stale. Stateless: mails once a day until a run completes. ADR 0028."
+  severity            = 2
+
+  evaluation_frequency = "P1D"
+  window_duration      = "P2D"
+
+  # Stateful is refused above a 12-hour frequency; see the block comment.
+  auto_mitigation_enabled = false
+
+  criteria {
+    query                   = "customEvents | where name == \"cosmosExportCompleted\" | where tostring(customDimensions.mode) in (\"full\", \"delta\")"
+    time_aggregation_method = "Count"
+    operator                = "LessThan"
+    threshold               = 1
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_full_missing" {
+  count               = var.cosmos_export_enabled ? 1 : 0
+  name                = "alert-cosmos-export-full-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "No full Cosmos export completed on Sunday, checked each Monday over the trailing 2 days. Deltas since the last full keep accumulating and deletes stay unreconciled until the next full lands. Stateless: one mail per missed Sunday. ADR 0028."
+  severity            = 2
+
+  evaluation_frequency = "P1D"
+  window_duration      = "P2D"
+
+  auto_mitigation_enabled = false
+
+  criteria {
+    # A measured column rather than a row count, because the condition has a
+    # day-of-week term the count form cannot express: the rule must be TRUE
+    # only on a Monday with no full in the window, and FALSE — not merely
+    # empty — on the other six days. `summarize count()` with no `by` returns
+    # one row of 0 on empty input, so `missing` is always exactly one value.
+    # dayofweek() is a timespan from Sunday; 1d is Monday.
+    query                   = <<-KQL
+      customEvents
+      | where name == "cosmosExportCompleted"
+      | where tostring(customDimensions.mode) == "full"
+      | summarize fulls = count()
+      | project missing = iff(dayofweek(now()) == 1d and fulls == 0, 1, 0)
+    KQL
+    time_aggregation_method = "Maximum"
+    metric_measure_column   = "missing"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
+}

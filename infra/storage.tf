@@ -189,6 +189,32 @@ resource "azurerm_storage_container" "listenandlearn" {
   container_access_type = "private" # episode MP3s, served via the media route
 }
 
+# Cosmos out-of-account export (ADR 0028, #231). The Function App's exporter
+# writes here: one prefix per run (`full/<date>/`, `delta/<date>/`) of
+# gzip-compressed NDJSON block blobs at the Cool tier, plus `state/` for the
+# change-feed continuation tokens. Private like every container above, and it
+# must never join PUBLIC_MEDIA_CONTAINERS in blob-paths.js — it holds a copy
+# of every authored and configuration document in the Cosmos account.
+#
+# On THIS account rather than a new one, on purpose. It is already RA-GRS
+# with versioning and soft delete, already Deny by default at the network,
+# and the Function App identity already holds Storage Blob Data Contributor
+# on it (azurerm_role_assignment.func_blob below) — so the copy lands in a
+# different resource, in a different resource group, replicated to the
+# paired region, with no new identity and no new credential. That covers
+# account loss and region loss of Cosmos, the two failures continuous backup
+# does not survive. A separate subscription is the ADR's recorded revisit
+# path, not this.
+#
+# Created disarmed: nothing writes here until cosmos_export_enabled is true
+# (variables.tf). The apply that adds this adds an empty container and the
+# expire-cosmos-export lifecycle rule below, and changes nothing that runs.
+resource "azurerm_storage_container" "cosmos_export" {
+  name                  = "cosmos-export"
+  storage_account_id    = azurerm_storage_account.hcw.id
+  container_access_type = "private" # Cosmos export runs and change-feed state; never served
+}
+
 # Storage lifecycle management for generated and uploaded website media.
 #
 # KNOWN INERT as written. Azure matches `prefix_match` against
@@ -241,6 +267,51 @@ resource "azurerm_storage_management_policy" "cleanup" {
     actions {
       version {
         delete_after_days_since_creation = 30
+      }
+    }
+  }
+
+  # Retention for the Cosmos export (ADR 0028 §4, #231): base blobs under
+  # cosmos-export/ are deleted 35 days after creation. The exporter writes a
+  # full every Sunday and a delta on the other six days, so 35 days holds
+  # five weekly fulls and the deltas between them — about 12 GB at the
+  # measured 2.39 GB account size, under fifty cents a month at the Cool
+  # tier. Longer buys nothing a restore needs: a restore is the latest full
+  # plus its deltas, and the account's own Continuous30Days backup already
+  # covers the point-in-time case inside the account.
+  #
+  # days_since_creation, not days_since_modification as the articles/ rule
+  # uses: an export blob is written once and never touched again, so its
+  # creation is its run date and the retention counts from the run.
+  #
+  # Unlike the articles/ rule, this prefix names a container that exists.
+  # Azure matches prefix_match against `<container>/<blob>`, so
+  # "cosmos-export/" is exactly azurerm_storage_container.cosmos_export and
+  # nothing else on the account. The ADR scopes the rule to the whole
+  # container, so the `state/` continuation tokens are under it too. Whether
+  # Azure counts an in-place overwrite as a new creation for this condition
+  # is not something the lifecycle documentation states, so a token that must
+  # outlive 35 days needs the exporter to re-create its blob rather than
+  # overwrite it — or this list narrows to "cosmos-export/full/" and
+  # "cosmos-export/delta/". That is the functions/ half's call; until it is
+  # made, the ADR's scope stands and a lost token costs one full read, which
+  # the next Sunday does anyway.
+  #
+  # The expire-noncurrent-versions rule above applies here as well — an
+  # overwritten marker or token keeps its previous version 30 days, bounded
+  # like every other container.
+  rule {
+    name    = "expire-cosmos-export"
+    enabled = true
+
+    filters {
+      prefix_match = ["cosmos-export/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_creation_greater_than = 35
       }
     }
   }
