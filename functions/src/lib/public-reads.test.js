@@ -892,6 +892,23 @@ describe('listPodcasts', () => {
     expect(query).toContain('c.provider = @provider');
     expect(params).toContainEqual({ name: '@provider', value: 'aws' });
   });
+
+  it('lower-cases the provider, so ?provider=Azure is not an empty section', async () => {
+    // The rows and the feed config are keyed by the canonical slug. Without
+    // this the route answers 200 with no episodes and a null feed URL, which
+    // reads as "nothing published" rather than "wrong casing".
+    const store = {
+      queryDocs: vi.fn(async () => [{ id: 'a', publishedAt: '2026-01-01T00:00:00Z' }]),
+      readDoc: vi.fn(async () => null),
+    };
+    const h = createPublicReadHandlers({ store });
+    const res = await h.listPodcasts(makeRequest({ query: { provider: 'AzURe' } }), context);
+
+    expect(res.status).toBe(200);
+    const [, , params] = store.queryDocs.mock.calls[0];
+    expect(params).toContainEqual({ name: '@provider', value: 'azure' });
+    expect(JSON.parse(res.body).items.map((i) => i.id)).toEqual(['a']);
+  });
 });
 
 describe('getFeed', () => {

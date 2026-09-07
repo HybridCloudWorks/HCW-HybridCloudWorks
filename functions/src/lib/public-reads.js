@@ -912,7 +912,13 @@ export function createPublicReadHandlers({ store }) {
     /** GET /api/public/podcasts?provider=&limit= (hooks/useAudioEpisodes.js) */
     async listPodcasts(request, context) {
       try {
-        const provider = String(request.query.get('provider') || '').trim();
+        // Lower-cased like every other public read in this module: the rows
+        // and the feed config are both keyed by the canonical slug, so
+        // `?provider=Azure` would otherwise answer 200 with an empty list and
+        // a null feed URL — a wrong answer that looks like an empty section.
+        const provider = String(request.query.get('provider') || '')
+          .trim()
+          .toLowerCase();
         const limit = Math.min(
           Math.max(Number(request.query.get('limit')) || LIST_DEFAULT_LIMIT, 1),
           LIST_MAX_LIMIT
