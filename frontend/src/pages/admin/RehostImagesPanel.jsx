@@ -89,9 +89,15 @@ export function toResultRow(result, titleById = new Map()) {
   };
 }
 
-function shortDate(iso) {
+/**
+ * `YYYY-MM-DD` of an ISO timestamp, or a dash. Guarded before `Date` sees the
+ * value: `new Date(null)` is the epoch, not invalid, and the API's `lastRun.at`
+ * can be null, so an unguarded version rendered `1970-01-01` for "unknown".
+ */
+export function shortDate(iso) {
+  if (typeof iso !== 'string' || !iso.trim()) return '—';
   const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? String(iso || '') : parsed.toISOString().slice(0, 10);
+  return Number.isNaN(parsed.getTime()) ? '—' : parsed.toISOString().slice(0, 10);
 }
 
 export default function RehostImagesPanel() {

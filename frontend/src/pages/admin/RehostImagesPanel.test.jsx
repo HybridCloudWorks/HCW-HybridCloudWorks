@@ -5,6 +5,7 @@ import RehostImagesPanel, {
   REHOST_BATCH_SIZE,
   REHOST_ROUTE,
   failedHostsOf,
+  shortDate,
   splitBatches,
   toResultRow,
 } from './RehostImagesPanel';
@@ -51,6 +52,17 @@ describe('pure helpers', () => {
       ['c1', 'c2', 'c3', 'c4', 'c5'],
       ['c6', 'c7'],
     ]);
+  });
+
+  it('renders a dash, not the epoch, for a missing or invalid last-run date', () => {
+    // new Date(null) is 1970-01-01T00:00:00Z, a valid date; the guard has to
+    // run before Date is consulted or "unknown" renders as the epoch.
+    expect(shortDate('2026-09-06T10:00:00.000Z')).toBe('2026-09-06');
+    expect(shortDate(null)).toBe('—');
+    expect(shortDate(undefined)).toBe('—');
+    expect(shortDate('')).toBe('—');
+    expect(shortDate('not a date')).toBe('—');
+    expect(shortDate(0)).toBe('—');
   });
 
   it('reduces failed URLs to distinct sorted hosts, never the URL', () => {
