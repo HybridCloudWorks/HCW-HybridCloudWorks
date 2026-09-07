@@ -16,9 +16,11 @@ import {
   createPodcastIngest,
   buildPodcastEpisode,
   normalizePodcastId,
+  resolveMainFeedEntry,
   resolvePodcastFeeds,
   dedupeFeedsByProvider,
   isFeedGoneError,
+  MAIN_FEED_PROVIDER,
   PODCAST_FEEDS,
 } from './podcasts.js';
 
@@ -534,6 +536,102 @@ describe('podcasts', () => {
     expect(log.log.mock.calls[0][0]).toMatch(/^\[fetchPodcastFeeds\] \(admin_config\) /);
   });
 
+  it("ingests the site's show under the reserved provider, ahead of the provider feeds", async () => {
+    // The shape decision: the show is a separate FIELD in the document and an
+    // ordinary ENTRY in the run, so nothing downstream of resolvePodcastFeeds
+    // learns a second code path — and the episodes it writes carry
+    // `provider: 'main'`, which is what puts them on every provider's page.
+    const store = memStore({
+      admin_config: [
+        {
+          id: 'podcast_feeds',
+          configScope: 'admin_config',
+          mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+          feeds: [{ provider: 'azure', url: 'https://example.com/azure.xml' }],
+        },
+      ],
+    });
+    expect(await resolvePodcastFeeds(store)).toEqual({
+      feeds: [
+        {
+          provider: MAIN_FEED_PROVIDER,
+          url: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+        },
+        { provider: 'azure', url: 'https://example.com/azure.xml' },
+      ],
+      source: 'admin_config',
+    });
+
+    const parser = {
+      parseURL: vi.fn(async () => ({ items: [{ guid: 'g1', title: 'Ep 1' }] })),
+    };
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const r = await createPodcastIngest({ store, parser, now, log }).run();
+    expect(r).toEqual({
+      main: { processed: 1, errors: [] },
+      azure: { processed: 1, errors: [] },
+    });
+    const written = store.upsertDoc.mock.calls.map(([, doc]) => doc.provider);
+    expect(written).toEqual([MAIN_FEED_PROVIDER, 'azure']);
+  });
+
+  it('takes a document that names only the main feed as configured', async () => {
+    // A hand-seeded document need not carry `feeds` at all. Falling through to
+    // the empty default would ingest nothing while the document plainly names
+    // a feed — silent, and indistinguishable from a timer that never fired.
+    const store = memStore({
+      admin_config: [
+        {
+          id: 'podcast_feeds',
+          configScope: 'admin_config',
+          mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+        },
+      ],
+    });
+    expect(await resolvePodcastFeeds(store)).toEqual({
+      feeds: [
+        {
+          provider: MAIN_FEED_PROVIDER,
+          url: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+        },
+      ],
+      source: 'admin_config',
+    });
+  });
+
+  it('will not let a hand-seeded main row displace the main feed field', async () => {
+    // dedupeFeedsByProvider keeps the FIRST row for a provider and the field
+    // is prepended, so the document's own `mainFeedUrl` wins. The admin page
+    // refuses to write such a row, but this document was seedable by hand
+    // before the page existed.
+    const store = memStore({
+      admin_config: [
+        {
+          id: 'podcast_feeds',
+          configScope: 'admin_config',
+          mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+          feeds: [{ provider: MAIN_FEED_PROVIDER, url: 'https://impostor.example/feed.xml' }],
+        },
+      ],
+    });
+    const { feeds } = await resolvePodcastFeeds(store);
+    expect(feeds).toEqual([
+      { provider: MAIN_FEED_PROVIDER, url: 'https://media.rss.com/hybrid-cloud-insights/feed.xml' },
+    ]);
+  });
+
+  it('holds the main feed to the same https rule as every provider row', () => {
+    expect(resolveMainFeedEntry({ mainFeedUrl: ' https://x.example/feed.xml ' })).toEqual({
+      provider: MAIN_FEED_PROVIDER,
+      url: 'https://x.example/feed.xml',
+    });
+    expect(resolveMainFeedEntry({ mainFeedUrl: 'http://insecure.example/feed.xml' })).toBeNull();
+    expect(resolveMainFeedEntry({ mainFeedUrl: '' })).toBeNull();
+    expect(resolveMainFeedEntry({ mainFeedUrl: 42 })).toBeNull();
+    expect(resolveMainFeedEntry({})).toBeNull();
+    expect(resolveMainFeedEntry(null)).toBeNull();
+  });
+
   it('with no document and an empty default, says so at Warning and writes nothing', async () => {
     // The default is empty on purpose: the dead PodBean feed must not come
     // back as a fallback. Silence here would be indistinguishable from a
@@ -551,7 +649,7 @@ describe('podcasts', () => {
     expect(parser.parseURL).not.toHaveBeenCalled();
     expect(store.upsertDoc).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledWith(
-      '[fetchPodcastFeeds] no feeds configured (source: default) — seed admin_config/podcast_feeds as { feeds: [{ provider, url }] }'
+      '[fetchPodcastFeeds] no feeds configured (source: default) — seed admin_config/podcast_feeds as { mainFeedUrl, feeds: [{ provider, url }] }'
     );
     expect(log.error).not.toHaveBeenCalled();
   });

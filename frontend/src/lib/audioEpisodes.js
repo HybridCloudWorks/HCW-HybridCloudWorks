@@ -12,15 +12,32 @@
  * `source` is the label's key, not a rendering hint: `host` rows link out to
  * the host's episode page, `listen-and-learn` rows link to the certification
  * the episode teaches.
+ *
+ * A third source arrived with the site's own show: `podcasts` rows the ingest
+ * filed under the reserved provider `main` are the site's show rather than any
+ * provider's, `GET public/podcasts` returns them to every provider, and
+ * `mergeAudioEpisodes` puts them at the head of the list so the page leads
+ * with them. They are `podcasts` rows in every other respect, which is why
+ * `normalizeHostEpisode` reads both and only the label differs.
  */
 import { resolveMediaUrl } from '@/lib/functionsBase';
 
+/**
+ * The `provider` the API files the site's show under. A copy of
+ * `MAIN_FEED_PROVIDER` in functions/src/lib/timers/podcasts.js — the browser
+ * cannot import from the Functions app, and the value travels between them on
+ * every episode row.
+ */
+export const MAIN_FEED_PROVIDER = 'main';
+
 export const SOURCE = Object.freeze({
+  main: 'main',
   host: 'host',
   listenAndLearn: 'listen-and-learn',
 });
 
 export const SOURCE_LABELS = Object.freeze({
+  [SOURCE.main]: 'The show',
   [SOURCE.host]: 'Podcast feed',
   [SOURCE.listenAndLearn]: 'Listen & Learn',
 });
@@ -75,17 +92,26 @@ function publishedFields(raw) {
 }
 
 /**
- * A `podcasts` row (timers/podcasts.js `buildPodcastEpisode`) as the page's shape.
+ * A `podcasts` row (timers/podcasts.js `buildPodcastEpisode`) as the page's
+ * shape, from either feed.
+ *
+ * The row's own `provider` decides which: `main` is the site's show, anything
+ * else is that provider's feed. The id keeps the `host:` prefix for both,
+ * because it exists to keep the two CONTAINERS' ids apart — a `podcasts` id
+ * and a `listen_and_learn_episodes` id can collide, two `podcasts` ids cannot
+ * — and re-prefixing by source would change the id of every episode already
+ * rendered for no gain.
  *
  * @param {object} doc
  * @returns {object}
  */
 export function normalizeHostEpisode(doc) {
   const dates = publishedFields(doc?.publishedAt);
+  const source = doc?.provider === MAIN_FEED_PROVIDER ? SOURCE.main : SOURCE.host;
   return {
     id: `host:${doc?.id ?? ''}`,
-    source: SOURCE.host,
-    sourceLabel: SOURCE_LABELS[SOURCE.host],
+    source,
+    sourceLabel: SOURCE_LABELS[source],
     title: doc?.title || '',
     description: stripHtml(doc?.description),
     longDescription: stripHtml(doc?.longDescription),
@@ -165,16 +191,32 @@ export function sortNewestFirst(episodes) {
 }
 
 /**
- * Both sources as one date-sorted list.
+ * Every source as one list: the site's show first, then everything else,
+ * each group newest first.
+ *
+ * The show leads rather than taking its place in the dates, and that is the
+ * owner's decision, not a tidiness one — it is the site's own programme and
+ * the reason a provider with no feed of its own has an audio page worth
+ * visiting at all. The page renders `visible[0]` in the player, so leading the
+ * list is also what puts the newest episode of the show under the play button
+ * on every provider page.
+ *
+ * Within each group the order is unchanged, so a provider's own episodes still
+ * read newest first below the show.
  *
  * @param {{host?: object[], listenAndLearn?: object[]}} sources
  * @returns {object[]}
  */
 export function mergeAudioEpisodes({ host = [], listenAndLearn = [] } = {}) {
-  return sortNewestFirst([
+  const all = [
     ...host.map(normalizeHostEpisode),
     ...listenAndLearn.map(normalizeListenAndLearnEpisode),
-  ]);
+  ];
+  const isMain = (episode) => episode.source === SOURCE.main;
+  return [
+    ...sortNewestFirst(all.filter(isMain)),
+    ...sortNewestFirst(all.filter((e) => !isMain(e))),
+  ];
 }
 
 /** `9:00` / `1:02:03` for a player's time labels; `—` when unknown. */

@@ -91,6 +91,46 @@ This project has not cut a tagged release; entries are grouped under
   silently no-op: a change, a truthful no-op and a refusal that wrote nothing
   each render with their reason, and a refusal names the document holding the
   URL.
+- **The site has a show of its own, and every audio page leads with it
+  (#349).** `admin_config/podcast_feeds` could only describe feeds that belong
+  to a provider — every row is `{ provider, url }` — so the RSS.com show the
+  owner created, Hybrid Cloud Insights, had nowhere to go: seeding it under one
+  provider would have hidden it from the other seven pages and mislabelled it
+  on the eighth. The document grows one field, `mainFeedUrl`, above the
+  provider rows and visibly the primary one on Admin → Platform settings; the
+  provider rows stay as optional extras. A document stored today normalizes
+  unchanged and a Functions revision predating the field ignores it, so the
+  merge and the deploy can happen in either order.
+
+  Inside a run the show is an ordinary feed entry under the reserved provider
+  `main`, returned first by `resolvePodcastFeeds`, so the ingest loop, the
+  dedupe, the 410 handling and the summary line work on it unchanged and the
+  episodes it writes carry `provider: 'main'`. A reserved value rather than an
+  absent one because every consumer of `podcasts` already keys on that field —
+  the container's composite index, the public list's SQL filter, the section
+  counts — and a row with no provider would be fetched by no query and counted
+  by nothing.
+
+  `GET /api/public/podcasts?provider=` now filters
+  `c.provider IN (@provider, @mainProvider)`: one query, so a show episode
+  arrives once, appears on every provider's page and is duplicated on none. The
+  page orders the show first as a group, so the featured player on every
+  provider page plays the show's newest episode; the source filter is built
+  from the sources a page actually has rather than a fixed pair; and the RSS
+  subscribe button falls back from the provider's feed to the show, since a
+  reader subscribing from a page with no provider feed is looking at the show.
+  Two writes are refused rather than resolved — `main` as a provider row, and a
+  provider row repeating the main feed's URL, which would have both ingests
+  build the same episode ids and flip an episode's `provider` every two hours.
+
+  **The sitemap follows.** `countPodcastDocs` counts a show episode for every
+  provider's `audio` and `audio-architecture`, by name rather than through
+  `_unattributed` — that bucket means "we do not know which pages this
+  reaches", and here we do. So the sixteen audio URLs #404 dropped return the
+  moment one show episode is ingested and the manifest is refreshed; a page
+  with content that is not advertised is the mirror image of the bug #373
+  fixed. Recorded in ADR 0029 §1a, which the hosting decision it amends
+  already owned.
 
 - **Thirty-three empty section pages leave the sitemap, and the counts that
   decide it now come from every container a section page reads (#373).** Part 2

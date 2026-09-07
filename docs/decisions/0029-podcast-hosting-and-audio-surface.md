@@ -73,6 +73,66 @@ The owner seeds the feed URL into `admin_config/podcast_feeds` through the
 admin platform page. `PODCAST_FEEDS` in `timers/podcasts.js` stays empty;
 the host is data, not code.
 
+#### 1a. The show is the site's, not a provider's — amended 2026-09-07
+
+The show that exists is **Hybrid Cloud Insights**
+(`https://media.rss.com/hybrid-cloud-insights/feed.xml`), and it belongs to
+hybridcloudworks.com rather than to Azure or AWS. The document had no place to
+say that: every row in `feeds` is keyed by provider, so seeding the show under
+one provider would have hidden it from the other seven pages and mislabelled it
+on the one.
+
+**The document grows a field, the run grows a reserved provider.**
+`admin_config/podcast_feeds` becomes
+`{ mainFeedUrl, feeds: [{ provider, url }] }`. `mainFeedUrl` is a separate
+field, not a row, because the two are not the same kind of value and because a
+document written before it existed still reads correctly — `feeds` is
+untouched, and a Functions revision that predates this change ignores the new
+key rather than fetching it as a provider. Inside a run, though, it is an
+ordinary entry: `resolvePodcastFeeds` returns it first, under the reserved
+provider `main`, so the ingest loop, the dedupe, the 410 handling and the
+summary line all work on it unchanged, and the episodes it writes carry
+`provider: 'main'`.
+
+A reserved value rather than a new field on the episode, because every
+consumer of `podcasts` already keys on `provider`: the container's composite
+index is `provider + publishedAt`, the public list filters on it in SQL, and
+the section counts read it. A row with no provider would be fetched by no query
+and counted by nothing — invisible in exactly the way the empty audio pages
+were.
+
+**Consequences that had to be decided rather than discovered:**
+
+- `GET /api/public/podcasts?provider=` returns
+  `c.provider IN (@provider, @mainProvider)` — one query, so a show episode
+  arrives once. It appears on every provider's page and is duplicated on none,
+  because `main` is a value `c.provider` takes rather than a copy of a
+  provider's row.
+- The page leads with it. `mergeAudioEpisodes` orders the show first as a
+  group, each group newest first, so the featured player on every provider page
+  plays the newest episode of the show. Source chips and the source filter gain
+  a third entry, built from the sources a page actually has rather than a fixed
+  pair.
+- The RSS subscribe button falls back: the provider's own feed where it has
+  one, the show otherwise. `GET public/podcasts` returns both URLs and
+  `useAudioEpisodes` chooses, because the hook is what knows which rows the
+  list is showing.
+- **The section counts had to move with it (#373, #404).** A show episode is
+  counted for EVERY provider's `audio` and `audio-architecture`, because every
+  provider's audio page shows it. It is not put in `_unattributed`: that bucket
+  means "we do not know which pages this reaches", and here we do. So the
+  sixteen audio URLs #404 dropped from the sitemap return the moment one show
+  episode is ingested and the manifest is refreshed — a page with content that
+  is not advertised is the mirror image of the bug #373 fixed.
+- Two writes are refused rather than resolved: `main` as a provider row, and a
+  provider row repeating the main feed's URL. The second matters more than it
+  looks — both ingests build the same episode ids from the same guids, so each
+  run would overwrite the other's `provider` and an episode would flip between
+  the show and a provider every two hours.
+
+Nothing about hosting changes: the upload is still manual, the API is still not
+integrated, and the feed is still the integration boundary.
+
 ### 2. Speech: Gemini first, Azure AI Speech second, ElevenLabs deferred
 
 `speech/index.js` keeps its order: Gemini TTS when `GEMINI-API-KEY` is
@@ -146,11 +206,14 @@ ever run, is a YouTube embed on a page, not an integration.
 - **`If-Range` is not evaluated.** Safe only because a media URL never changes
   content — the path carries the timestamp. If that ever stops being true the
   route must evaluate `If-Range` before answering 206.
-- **Two copies of three names.** `public-reads.js` has no imports by design,
-  so the feed-config container, document id and partition are copied there;
-  `public-reads.test.js` asserts the copies agree with `timers/podcasts.js`
-  and `cosmos-client.js`, the same guard the Listen & Learn container names
-  already had.
+- **Two copies of four names.** `public-reads.js` has no imports by design,
+  so the feed-config container, document id and partition are copied there —
+  and, with 1a, the reserved provider `main`; `public-reads.test.js` asserts
+  the copies agree with `timers/podcasts.js` and `cosmos-client.js`, the same
+  guard the Listen & Learn container names already had. The browser holds a
+  copy of the reserved provider too (`frontend/src/lib/audioEpisodes.js`),
+  which no test can tie to the server's: it travels on every episode row
+  instead, and the page tests pin what a row carrying it renders as.
 
 ## Alternatives considered
 
@@ -186,6 +249,12 @@ ever run, is a YouTube embed on a page, not an integration.
   hours of the seed; `/azure/podcast` lists feed and Listen & Learn rows
   together; a seek into a Listen & Learn episode produces a 206 in the
   Function App's request log rather than a 200 of the whole file.
+- Validated for the main feed (1a) when: the Main feed field on
+  `/admin/platform` holds the show's URL; within two hours `podcasts` carries
+  rows with `provider: 'main'`; every provider's `/…/audio` page leads with a
+  show episode and offers an RSS button pointing at the show; and the next
+  `publish-content-manifest` run reports non-zero `audio` counts for all eight
+  providers, which is what returns those URLs to `sitemap.xml`.
 - **Revisit toward self-hosting (option 3)** when any of these holds: the
   manual upload is missed for more than one episode; the owner wants
   generated episodes on the public feed without the upload step; RSS.com's
