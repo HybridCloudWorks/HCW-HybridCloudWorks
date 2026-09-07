@@ -82,6 +82,24 @@ const json = (status, body) => ({
  * already is", and to a lost ETag race, which the publish pipeline has always
  * reported as a skip rather than an error. Reporting either as a failure would
  * train an operator to ignore the panel.
+ *
+ * A SUCCESS RESULT MUST CARRY `moved` AND `fields`, AND THAT IS ASSERTED, NOT
+ * COERCED. `republishWithSlug` has exactly one non-error, non-skip return and
+ * it always sets both — `moved` from `decision.from !== slug`, `fields` from
+ * `Object.keys(update)` — so an absent one is not a case to tolerate, it is a
+ * future branch that forgot. This used to read `Boolean(result.moved)`, which
+ * turned that mistake into a silent lie: a MOVE reported as a repair, on the
+ * one field an operator uses to tell those apart. Third instance of the same
+ * lesson in this change (after the 404 that arrived without a status, and the
+ * row override that blanked absent URL fields): an absent value is not a false
+ * one, and coercing it destroys the distinction the caller needs.
+ *
+ * The throw is deliberately not a graceful degrade. It cannot fire without a
+ * code change that also fails this module's tests, and a 500 naming a broken
+ * invariant is worth more than a 200 that misreports what happened to a URL.
+ * Note this is NOT what protects the frontend's `previousSlug !== slug`
+ * fallback: that exists for an OLD SERVER answering without the field, which
+ * would not be running this function at all.
  */
 export function toSetSlugResponse(result = {}, { contentId, requested }) {
   if (result.error) {
@@ -99,6 +117,14 @@ export function toSetSlugResponse(result = {}, { contentId, requested }) {
       publicUrl: result.expectedPublicUrl || null,
     });
   }
+  // The invariant, checked rather than papered over — see the header.
+  if (typeof result.moved !== 'boolean' || !Array.isArray(result.fields)) {
+    throw new Error(
+      'set-slug: the pipeline returned a successful result without a boolean `moved` ' +
+        'and an array `fields`. Both are how the caller tells a slug MOVE from a ' +
+        'URL-only REPAIR; a branch that omits either must not report success.'
+    );
+  }
   return json(200, {
     contentId,
     requested,
@@ -108,8 +134,8 @@ export function toSetSlugResponse(result = {}, { contentId, requested }) {
     // with `slug`, or URL fields that were never written — is changed but not
     // moved, and an operator correcting a live URL has to be able to tell
     // those apart. `fields` names what was actually written.
-    moved: Boolean(result.moved),
-    fields: Array.isArray(result.fields) ? result.fields : [],
+    moved: result.moved,
+    fields: result.fields,
     previousSlug: result.previousSlug || null,
     slug: result.slug || null,
     curatedSubpagePath: result.curatedSubpagePath || null,

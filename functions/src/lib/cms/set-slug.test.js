@@ -111,6 +111,35 @@ describe('toSetSlugResponse', () => {
       slug: 'same',
     });
   });
+
+  it('throws on a success result missing `moved` or `fields`, rather than coercing', () => {
+    // republishWithSlug has exactly one non-error, non-skip return and it
+    // always sets both, so an absent one is a future branch that forgot — not
+    // a case to tolerate. Coercing `moved` to false reported a MOVE as a
+    // repair, on the one field an operator uses to tell them apart.
+    const complete = { moved: true, fields: ['slug'], slug: 's' };
+    expect(() => toSetSlugResponse(complete, meta)).not.toThrow();
+
+    const { moved: _m, ...noMoved } = complete;
+    expect(() => toSetSlugResponse(noMoved, meta)).toThrow(/without a boolean `moved`/);
+
+    const { fields: _f, ...noFields } = complete;
+    expect(() => toSetSlugResponse(noFields, meta)).toThrow(/array `fields`/);
+
+    // Not merely "falsy" — a wrong TYPE is the same broken invariant, and
+    // `moved: false` is a legitimate value that must still pass.
+    expect(() => toSetSlugResponse({ ...complete, moved: 'yes' }, meta)).toThrow();
+    expect(() => toSetSlugResponse({ ...complete, fields: 'slug' }, meta)).toThrow();
+    expect(() => toSetSlugResponse({ ...complete, moved: false }, meta)).not.toThrow();
+    expect(() => toSetSlugResponse({ ...complete, fields: [] }, meta)).not.toThrow();
+  });
+
+  it('leaves error and skip results alone — they legitimately carry neither', () => {
+    // The invariant is on SUCCESS only. A refusal and a skip never set `moved`
+    // or `fields`, and turning those into throws would break every refusal.
+    expect(parse(toSetSlugResponse({ status: 409, error: 'held' }, meta)).status).toBe(409);
+    expect(parse(toSetSlugResponse({ skipped: true, reason: 'no-op' }, meta)).status).toBe(200);
+  });
 });
 
 /** A store over an in-memory map of content documents. */
@@ -241,6 +270,26 @@ describe('setContentSlug', () => {
     expect(after.slugPageUrl).toBe(body.publicUrl);
     expect(after.publishedUrl).toBe(body.publicUrl);
     expect(after.publicUrl).toBe(body.publicUrl);
+  });
+
+  it('a branch that reports success without `moved` fails loudly, not silently', async () => {
+    // The end of the invariant: through the handler it is a logged 500 naming
+    // the broken contract, not a 200 quietly claiming the URL did not move.
+    const context2 = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const handlers = createSetSlugHandlers({
+      guard: guardAs('publisher'),
+      store: makeStore([COLLIDED]),
+      processPublishContent: vi.fn(async () => ({ slug: 'x', previousSlug: 'y' })),
+      uuid: () => 'uuid-1',
+      log: context2,
+    });
+
+    const { status, body } = parse(
+      await handlers.setContentSlug(makeRequest({ contentId: COLLIDED.id, slug: 'x' }), context2)
+    );
+    expect(status).toBe(500);
+    expect(body.message).toMatch(/without a boolean `moved`/);
+    expect(context2.error).toHaveBeenCalled();
   });
 
   it('reports a URL repair as changed but NOT moved, and names the fields', async () => {
