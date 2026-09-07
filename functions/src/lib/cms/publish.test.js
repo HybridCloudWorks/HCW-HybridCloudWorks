@@ -1059,18 +1059,12 @@ describe('reason: set-slug — the #400 URL correction', () => {
     expect(version.versionReason).toBe(SET_SLUG_REASON);
   });
 
-  it('writes the slug pair and NO URL fields when no path can be resolved', async () => {
-    // Pins what buildSlugPublishUpdate's header now says, rather than leaving
-    // the comment to be trusted: with no stored curated path and no provider
-    // in any of the five fields resolvePublishContext reads, there is no path
-    // to derive, so the URL fields are absent from the patch.
-    //
-    // This also shows the sharp edge the header calls an OPEN QUESTION: the
-    // slug moves, and `expectedPublicUrl` reports the stale publishedUrl the
-    // document was already carrying, because publicUrlOf prefers it. Whether a
-    // set-slug should refuse outright when it cannot produce a path is raised
-    // on #412 and not decided here — this test says what today's code does, so
-    // whichever way it is decided the change is visible.
+  it('REFUSES when it cannot compute the published path, and writes nothing', async () => {
+    // Owner decision on #412, 2026-09-07. Before it, this wrote the slug and
+    // left expectedPublicUrl reporting whatever stale publishedUrl the
+    // document carried — a move announced beside a link to the old URL, which
+    // is the state the route was built to remove. A set-slug that cannot
+    // compute the URL stops instead of writing half of it.
     const stranded = collidedDoc({
       curatedSubpagePath: '',
       cloudProvider: '',
@@ -1083,23 +1077,33 @@ describe('reason: set-slug — the #400 URL correction', () => {
     const store = makeStore(stranded);
     const result = await setSlug(store, WANTED);
 
-    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
-    // `Slug` is absent because this fixture already holds WANTED there and the
-    // builder drops keys that would not change — so the whole patch is the one
-    // field that moves plus its timestamp.
-    expect(Object.keys(patch).sort()).toEqual(['slug', 'updatedAt']);
-    for (const key of ['curatedSubpagePath', 'slugPageUrl', 'publishedUrl', 'publicUrl']) {
-      expect(patch).not.toHaveProperty(key);
-    }
-    expect(result.moved).toBe(true);
-    expect(result.curatedSubpagePath).toBeNull();
-    expect(result.expectedPublicUrl).toBe(
-      'https://hybridcloudworks.com/azure/frameworks/stale-from-before'
-    );
+    // Same shape as the held-slug refusal: a 409 on a well-formed request.
+    expect(result.status).toBe(409);
+    expect(result.error).toMatch(/Cannot determine the published path/);
+    expect(result.error).toMatch(/nothing was changed/i);
+    // Actionable: it names both of the things that would make it determinable.
+    expect(result.error).toMatch(/cloud provider/i);
+    expect(result.error).toMatch(/curatedSubpagePath/);
+    // A refusal that still patched would be worse than the gap it replaced.
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
 
-    // A provider alone is enough to derive one, which is why this is narrow.
+    // Narrow: either half is enough to make the path determinable, so an
+    // ordinary article never meets this refusal.
     const withProvider = makeStore(collidedDoc({ curatedSubpagePath: '' }));
     expect((await setSlug(withProvider, WANTED)).curatedSubpagePath).toBe(
+      `/azure/frameworks/${WANTED}`
+    );
+    const withStoredPath = makeStore(
+      collidedDoc({
+        cloudProvider: '',
+        'Cloud Provider': '',
+        provider: '',
+        Provider: '',
+        landingProvider: '',
+      })
+    );
+    expect((await setSlug(withStoredPath, WANTED)).curatedSubpagePath).toBe(
       `/azure/frameworks/${WANTED}`
     );
   });

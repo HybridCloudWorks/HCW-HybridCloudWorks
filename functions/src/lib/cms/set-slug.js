@@ -23,15 +23,22 @@
  *
  * WHAT IT ACTUALLY DOES is one narrow republish through the publish pipeline
  * (SET_SLUG_REASON in ./publish.js): probe `c.slug OR c.Slug`, refuse a slug
- * another document holds, then write the cased slug pair and — when a path can
- * be resolved for the document — curatedSubpagePath / slugPageUrl /
- * publishedUrl / publicUrl, in ONE patch conditioned on the read's ETag. The
- * URLs are derived by `resolveCuratedSubpagePath` and `toPublicUrl`, the same
- * two functions the ordinary publish write uses; `buildSlugPublishUpdate`
- * records when no path can be derived and what is still open about that.
+ * another document holds, refuse an article whose published path cannot be
+ * computed, then write the cased slug pair and curatedSubpagePath /
+ * slugPageUrl / publishedUrl / publicUrl in ONE patch conditioned on the
+ * read's ETag. The URLs are derived by `resolveCuratedSubpagePath` and
+ * `toPublicUrl`, the same two functions the ordinary publish write uses.
  *
- * The `fields` array in the response is therefore the authority on what was
- * written, not this paragraph — which is why the response carries it.
+ * IT REFUSES RATHER THAN HALF-COMPLETING. Owner decision on #412: this route
+ * exists to make a live URL correct, so an article with neither a curated path
+ * nor an inferable provider is a 409 — writing the slug and no URLs would
+ * leave a panel reporting a move beside a link still pointing at the old URL,
+ * which is the state the route was built to remove. See
+ * `resolveSlugPublishPath` for why that diverges from the publish write on
+ * purpose.
+ *
+ * The `fields` array in the response is still the authority on what a given
+ * write touched, since keys already holding the right value are dropped.
  *
  * ONE ATOMIC STEP RATHER THAN TWO. Setting the slug and moving the URLs are
  * one operation here on purpose: as two writes there is a window in which the

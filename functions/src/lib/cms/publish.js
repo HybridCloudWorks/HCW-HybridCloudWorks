@@ -36,11 +36,12 @@
  *   - `params.reason === SET_SLUG_REASON` (issue #400, from POST
  *     cms/content/slug) is the second such reason, and the one the note above
  *     anticipated. It gives a published article the slug an operator asks for
- *     and lets the four URL fields follow in the same patch — when a path can
- *     be resolved at all; see buildSlugPublishUpdate for the case that cannot
- *     and what is open about it — writing nothing
- *     else, and it REFUSES a slug another document holds rather than
- *     suffixing it, the one place a set-slug has to be stricter than a
+ *     and lets the four URL fields follow in the same patch, writing nothing
+ *     else, and it REFUSES rather than half-completing: a slug another
+ *     document holds is refused rather than suffixed, and an article whose
+ *     published path cannot be computed at all is refused rather than given a
+ *     slug with no URL (resolveSlugPublishPath). Those are the two places a
+ *     set-slug has to be stricter than a
  *     publish. See SET_SLUG_REASON for why a FULL republish cannot do this job
  *     on the very articles that need it.
  *   - bumpForgeStats' FieldValue.increment becomes read-modify-patch on the
@@ -324,29 +325,46 @@ export function evaluateSlugChange({
 }
 
 /**
- * Everything a slug change implies, and nothing else: the cased pair, and the
- * four URL fields WHEN A PATH CAN BE RESOLVED, derived through
- * `resolveCuratedSubpagePath` and `toPublicUrl` — the same two functions the
- * publish write uses, so a corrected URL and a published URL can never be
- * built by different rules.
+ * The curated path a set-slug would write, or null when none can be computed —
+ * which happens when the document has no stored `curatedSubpagePath` AND no
+ * provider can be inferred from it (`resolvePublishContext` reads
+ * landingProvider, 'Cloud Provider', cloudProvider, provider and Provider).
  *
- * THE URL FIELDS ARE CONDITIONAL, and saying so matters because the condition
- * is not always met. `resolveCuratedSubpagePath` returns null when the
- * document has no stored `curatedSubpagePath` AND no provider can be inferred
- * from it (`resolvePublishContext` looks at landingProvider, 'Cloud Provider',
- * cloudProvider, provider and Provider). A published document like that gets
- * its slug pair written and NO URL fields — the same shape the ordinary
- * publish write has, since both spread the path conditionally.
+ * Split out so `republishWithSlug` can ask that question BEFORE it writes
+ * anything, and refuse. Owner decision on #412, 2026-09-07: a set-slug that
+ * cannot compute the path has not done the thing it was asked to do, and
+ * completing halfway leaves exactly the state this route was built to remove —
+ * a panel reporting a move beside a link still pointing at the old URL. The
+ * ordinary publish write keeps its conditional spread, and that divergence is
+ * intended rather than an inconsistency to iron out: a publish is best-effort
+ * on a document being published, where a missing path is one incomplete field
+ * among many, while a set-slug is a surgical correction to a URL, and a
+ * surgical correction that cannot compute the URL should stop and say so.
  *
- * That is a gap, not a design, and it is recorded here rather than smoothed
- * over: the operator asked to put an article on a URL, and this would write
- * the slug and leave `expectedPublicUrl` reporting whatever stale
- * `publishedUrl` the document already carried (see `publicUrlOf`), or nothing
- * at all. Whether a set-slug should instead REFUSE when it cannot produce a
- * path is an open question raised on #412 and deliberately not decided here.
- * It is bounded: it needs a published document with neither a curated path nor
- * any recognisable provider, which none of the twenty-two published articles
- * is, and none of the three in #400.
+ * The builder below shares this so the value the branch checks and the value
+ * it writes are one computation's answer.
+ */
+export function resolveSlugPublishPath({ contentData = {}, slug = '' }) {
+  const ctx = resolvePublishContext(contentData, {});
+  return resolveCuratedSubpagePath({
+    stored: contentData.curatedSubpagePath,
+    provider: ctx.resolvedLandingProvider,
+    section: ctx.curatedSection,
+    slug,
+  });
+}
+
+/**
+ * Everything a slug change implies, and nothing else: the cased pair and the
+ * four URL fields, derived through `resolveCuratedSubpagePath` and
+ * `toPublicUrl` — the same two functions the publish write uses, so a
+ * corrected URL and a published URL can never be built by different rules.
+ *
+ * The spread is still guarded, because this function is pure and a direct
+ * caller may hand it a document with no resolvable path. On the set-slug path
+ * that guard is unreachable: `republishWithSlug` refuses such a document
+ * before it gets here (see `resolveSlugPublishPath`), so every update this
+ * produces for that route carries all four.
  *
  * BOTH `slug` AND `Slug`, to one value. The probe reads `c.slug OR c.Slug`, so
  * a document holds every distinct value across the pair: writing only `slug`
@@ -360,13 +378,7 @@ export function evaluateSlugChange({
  * tell a real change from a no-op by looking at what is left.
  */
 export function buildSlugPublishUpdate({ contentData = {}, slug = '' }) {
-  const ctx = resolvePublishContext(contentData, {});
-  const curatedSubpagePath = resolveCuratedSubpagePath({
-    stored: contentData.curatedSubpagePath,
-    provider: ctx.resolvedLandingProvider,
-    section: ctx.curatedSection,
-    slug,
-  });
+  const curatedSubpagePath = resolveSlugPublishPath({ contentData, slug });
   const update = {
     slug,
     Slug: slug,
@@ -723,11 +735,10 @@ export function createPublishHandlers({
    * accepted, because assigning a URL to anything else is a first publish
    * wearing a smaller name.
    *
-   * ONE conditional patch carries the slug pair AND whatever URL fields
-   * `buildSlugPublishUpdate` could derive, so there is no window in which an
-   * article holds a new slug at its old URL. "Whatever it could derive" is the
-   * honest phrasing: the URL fields need a resolvable path, and that function's
-   * header records when there is none and what is still open about it.
+   * ONE conditional patch carries the slug pair AND the four URL fields, so
+   * there is no window in which an article holds a new slug at its old URL.
+   * All four, not "whatever could be derived": the path is resolved and
+   * REFUSED ON first, below, so by the time anything is written there is one.
    *
    * `params.slug` is the operator's raw input; it is normalised HERE, so the
    * value probed, the value written and the value reported are one string.
@@ -751,6 +762,26 @@ export function createPublishHandlers({
       holders: slug ? await slugHolders(slug) : [],
     });
     if (!decision.ok) return decision;
+
+    // NO PATH, NO WRITE. Owner decision on #412, 2026-09-07: this route exists
+    // to make a live URL correct, so if it cannot compute the path it has not
+    // done what it was asked, and writing the slug anyway leaves the state the
+    // route was built to remove — a panel reporting a move beside a link still
+    // pointing at the old URL, because `expectedPublicUrl` would fall back
+    // through publicUrlOf to whatever stale publishedUrl the document carried.
+    // A refusal of a well-formed request, so it takes the same 409 shape as
+    // the held-slug refusal above rather than a 500, and it names what would
+    // make the path determinable. Reasoning in full at resolveSlugPublishPath.
+    const curatedSubpagePath = resolveSlugPublishPath({ contentData, slug });
+    if (!curatedSubpagePath) {
+      return {
+        status: 409,
+        error:
+          'Cannot determine the published path for this article, so nothing was changed. ' +
+          'Give it a cloud provider (Aws, Azure, Gcp, Github, Terraform or Finops) or an ' +
+          'existing curatedSubpagePath, then set the slug again.',
+      };
+    }
 
     const update = buildSlugPublishUpdate({ contentData, slug });
     if (Object.keys(update).length === 0) {

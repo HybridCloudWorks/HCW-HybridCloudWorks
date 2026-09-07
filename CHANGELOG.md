@@ -66,20 +66,28 @@ This project has not cut a tagged release; entries are grouped under
   modules) and carries no hero image, so the quality gate refuses it and the
   image gate refuses it after that, and a set-slug built on the full path would
   write a failed quality report onto the article and leave its URL exactly as
-  broken as it found it. So the branch writes the cased slug pair and — when a
-  path can be resolved for the document —
-  `curatedSubpagePath` / `slugPageUrl` / `publishedUrl` / `publicUrl`, derived
+  broken as it found it. So the branch writes the cased slug pair and
+  `curatedSubpagePath` / `slugPageUrl` / `publishedUrl` / `publicUrl` — derived
   through `resolveCuratedSubpagePath` and `toPublicUrl`, so a corrected URL and
-  a published URL can never be built by different rules. One patch, conditioned
-  on the read's ETag, and nothing else: no gates, no cover or social trigger,
-  no dates, no forge stats, no `Live` rewrite, no status change. One patch
-  rather than two steps so there is no window in which an article holds a new
-  slug at its old URL. The URL half is conditional rather than guaranteed: a
-  published document with neither a stored curated path nor an inferable
-  provider gets its slug pair and no URL fields, the same shape the ordinary
-  publish write has. That is recorded at `buildSlugPublishUpdate` as an open
-  question rather than a decided design; it needs a document none of the
-  twenty-two published articles is.
+  a published URL can never be built by different rules — in ONE patch
+  conditioned on the read's ETag, and nothing else: no gates, no cover or
+  social trigger, no dates, no forge stats, no `Live` rewrite, no status
+  change. One patch rather than two steps so there is no window in which an
+  article holds a new slug at its old URL.
+
+  **It refuses rather than half-completing, in two places.** A slug another
+  document holds is refused rather than suffixed — and so is an article whose
+  published path cannot be computed at all, meaning it has neither a stored
+  `curatedSubpagePath` nor a provider recognisable in any of the five fields
+  `resolvePublishContext` reads. Writing the slug for such an article and no
+  URLs would leave the panel reporting a move beside a link still pointing at
+  the old URL, which is precisely the state this route was built to remove.
+  Both are a 409 naming what would fix them. That diverges from the ordinary
+  publish write, which spreads the path conditionally, and the divergence is
+  the point: a publish is best-effort on a document being published, where a
+  missing path is one incomplete field among many, while a set-slug is a
+  surgical correction to a URL, and one that cannot compute the URL should
+  stop and say so.
 
   **Both cased fields are written, to one value.** The probe reads
   `c.slug OR c.Slug`, so a document holds every distinct value across the pair:

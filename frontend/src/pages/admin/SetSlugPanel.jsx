@@ -25,10 +25,16 @@
  * nothing, and all four are shown with their reason.
  *
  * The response's `fields` is what was actually written, and this panel prints
- * it rather than naming the four URL fields itself: which of them a given
- * write touches depends on the document (see `buildSlugPublishUpdate` in
- * functions/src/lib/cms/publish.js), so a fixed list here would be a claim
+ * it rather than naming the four URL fields itself: keys already holding the
+ * right value are dropped from the patch, so which of them a given write
+ * touches depends on the document (see `buildSlugPublishUpdate` in
+ * functions/src/lib/cms/publish.js) and a fixed list here would be a claim
  * this page cannot make.
+ *
+ * A refusal always means nothing was written — including the one an operator
+ * is most likely to meet by surprise, an article whose published path cannot
+ * be computed. Its message names what would fix it, so it is rendered as-is
+ * rather than reworded here.
  */
 import React, { useState } from 'react';
 import { Link2, Loader2 } from 'lucide-react';
