@@ -31,6 +31,7 @@ import './legacy-blogs-telemetry-http.js';
 import './manual-images-http.js';
 import './ops-health-http.js';
 import './platform-health-http.js';
+import './platform-settings-http.js';
 import './public-media.js';
 import './public-preview.js';
 import './public-content-manifest.js';

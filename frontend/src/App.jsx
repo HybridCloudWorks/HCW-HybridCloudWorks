@@ -157,6 +157,7 @@ const AdminImageGalleryPage = lazyPage(() => import('@/pages/admin/ImageGalleryP
 const AdminOpsHealthPage = lazyPage(() => import('@/pages/admin/OpsHealthPage'));
 const AdminApiKeysPage = lazyPage(() => import('@/pages/admin/ApiKeysPage'));
 const AdminDiagnosticsPage = lazyPage(() => import('@/pages/admin/DiagnosticsPage'));
+const AdminPlatformSettingsPage = lazyPage(() => import('@/pages/admin/PlatformSettingsPage'));
 const AdminFrameworksPage = lazyPage(() => import('@/pages/admin/FrameworksPage'));
 const AdminCoderCornerPage = lazyPage(() => import('@/pages/admin/CoderCornerPage'));
 const AdminSpeakingEventsPage = lazyPage(() => import('@/pages/admin/SpeakingEventsPage'));
@@ -408,6 +409,7 @@ function App() {
                 <Route path="ops-health" element={<AdminOpsHealthPage />} />
                 <Route path="api-keys" element={<AdminApiKeysPage />} />
                 <Route path="diagnostics" element={<AdminDiagnosticsPage />} />
+                <Route path="platform" element={<AdminPlatformSettingsPage />} />
                 <Route path="social" element={<AdminSocialHubPage />} />
                 <Route path="recordings" element={<AdminRecordingsPage />} />
                 <Route path="forge-studio" element={<AdminForgeStudioPage />} />

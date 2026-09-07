@@ -30,6 +30,7 @@ import {
   Flame,
   Headphones,
   Stethoscope,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { signOutUser } from '@/lib/entraAuth';
 
@@ -89,6 +90,7 @@ const NAV_GROUPS = [
       { to: '/admin/ops-health', icon: Activity, label: 'Ops Health' },
       { to: '/admin/connections', icon: Plug, label: 'Connections' },
       { to: '/admin/api-keys', icon: KeyRound, label: 'API Keys' },
+      { to: '/admin/platform', icon: SlidersHorizontal, label: 'Platform Settings' },
       { to: '/admin/labs', icon: FlaskConical, label: 'Labs', pill: 'VPS' },
       { to: '/admin/diagnostics', icon: Stethoscope, label: 'Diagnostics' },
     ],
