@@ -34,7 +34,7 @@
  * attached anywhere on that path.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { authedFetch, getEndpoint, getJSON, postJSON } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -677,24 +677,53 @@ export default function DiagnosticsPage() {
   const [unauth, setUnauth] = useState(null);
   const [unauthBusy, setUnauthBusy] = useState(false);
 
-  // First run: nothing is set until the checks have actually completed, so a
-  // teardown before then (a route change mid-flight) leaves nothing behind.
+  // One identity run at a time. The first run and a re-run go through the
+  // same gate: a click while a run is in flight is ignored rather than
+  // starting a second run whose result would race the first (last to resolve
+  // would win). Each run carries a sequence number, so a result from a run
+  // that was superseded — or torn down by a route change — is discarded
+  // instead of being applied over a newer one.
+  const identitySeq = useRef(0);
+  const identityInFlight = useRef(false);
+
+  const runIdentity = useCallback(async () => {
+    if (identityInFlight.current) return false;
+    identityInFlight.current = true;
+    identitySeq.current += 1;
+    const seq = identitySeq.current;
+    try {
+      const result = await collectIdentity();
+      if (seq === identitySeq.current) setIdentity(result);
+    } finally {
+      if (seq === identitySeq.current) identityInFlight.current = false;
+    }
+    return true;
+  }, []);
+
   useEffect(() => {
     if (!authReady) return undefined;
-    let cancelled = false;
-    collectIdentity().then((result) => {
-      if (!cancelled) setIdentity(result);
-    });
+    runIdentity();
     return () => {
-      cancelled = true;
+      // Supersede whatever is in flight: its result is dropped and the gate
+      // reopens for the next mount.
+      identitySeq.current += 1;
+      identityInFlight.current = false;
     };
-  }, [authReady]);
+  }, [authReady, runIdentity]);
 
   const rerunIdentity = useCallback(async () => {
+    if (identityInFlight.current) return;
     setIdentityBusy(true);
-    setIdentity(await collectIdentity());
-    setIdentityBusy(false);
-  }, []);
+    try {
+      await runIdentity();
+    } finally {
+      setIdentityBusy(false);
+    }
+  }, [runIdentity]);
+
+  // The first run has no busy flag of its own — `identity === null` is that
+  // state — so the button reads both.
+  const identityRunning = identityBusy || identity === null;
 
   const runLabs = useCallback(async () => {
     setLabsBusy(true);
@@ -751,7 +780,7 @@ export default function DiagnosticsPage() {
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex gap-2">
-            <ProbeButton busy={identityBusy} icon={RefreshCw} onClick={rerunIdentity}>
+            <ProbeButton busy={identityRunning} icon={RefreshCw} onClick={rerunIdentity}>
               Re-run identity checks
             </ProbeButton>
             <Button

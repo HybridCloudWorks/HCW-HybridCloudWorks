@@ -471,6 +471,37 @@ describe('the page', () => {
     expect(screen.queryByText(/Checks still running/)).toBeNull();
   });
 
+  it('does not start a second identity run when Re-run is clicked during the first', async () => {
+    // Hold the first run open. A second run started now would race it, and
+    // whichever resolved last would win — so the click must be a no-op.
+    let releaseToken;
+    acquireApiToken.mockReturnValue(new Promise((resolve) => (releaseToken = resolve)));
+    render(<DiagnosticsPage />);
+    // The token is acquired after the dynamic entraAuth import resolves, so
+    // the first call is a tick away from render.
+    await waitFor(() => expect(acquireApiToken).toHaveBeenCalledTimes(1));
+
+    const rerun = screen.getByText('Re-run identity checks').closest('button');
+    expect(rerun.disabled).toBe(true);
+    // Even if the disabled attribute were bypassed, the in-flight gate holds.
+    fireEvent.click(screen.getByText('Re-run identity checks'));
+    fireEvent.click(screen.getByText('Re-run identity checks'));
+    expect(acquireApiToken).toHaveBeenCalledTimes(1);
+    expect(getJSON).not.toHaveBeenCalled();
+
+    releaseToken(TOKEN);
+    await identityLoaded();
+    expect(acquireApiToken).toHaveBeenCalledTimes(1);
+    expect(rerun.disabled).toBe(false);
+
+    // Once settled, a click does run again — exactly once — and is gated while it runs.
+    fireEvent.click(screen.getByText('Re-run identity checks'));
+    await waitFor(() => expect(acquireApiToken).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByText('Re-run identity checks'));
+    expect(acquireApiToken).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(rerun.disabled).toBe(false));
+  });
+
   it('disables Copy report again while a probe is in flight', async () => {
     let releaseEnqueue;
     authedFetch.mockImplementation(async (name) => {
