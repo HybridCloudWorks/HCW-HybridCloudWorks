@@ -92,7 +92,12 @@ describe('buildManifest', () => {
 });
 
 describe('sectionCounts', () => {
-  const doc = (provider, type) => ({ id: `${provider}-${type}`, slug: `${provider}-${type}`, cloudProvider: provider, type });
+  const doc = (provider, type) => ({
+    id: `${provider}-${type}`,
+    slug: `${provider}-${type}`,
+    cloudProvider: provider,
+    type,
+  });
 
   it('is null when no item carries type — unknown must not read as zero', () => {
     expect(sectionCounts([{ id: 'a', slug: 'a', cloudProvider: 'azure' }])).toBeNull();
@@ -140,5 +145,50 @@ describe('sectionCounts', () => {
     const manifest = buildManifest([doc('azure', 'framework')]);
     expect(manifest.sections.azure.frameworks).toBe(1);
     expect(buildManifest([{ id: 'a', slug: 'a', cloudProvider: 'azure' }]).sections).toBeNull();
+  });
+});
+
+describe('sections the manifest route computed (issue #373)', () => {
+  const doc = (provider, type) => ({
+    id: `${provider}-${type}`,
+    slug: `${provider}-${type}`,
+    cloudProvider: provider,
+    type,
+  });
+
+  /** The route's answer: every section, across containers this script never sees. */
+  const fromRoute = {
+    azure: { blog: 21, frameworks: 0, 'coder-corner': 0, code: 0, audio: 0 },
+    aws: { blog: 1, frameworks: 0, 'coder-corner': 0, code: 0, audio: 0 },
+    _unattributed: { blog: 0, frameworks: 0, 'coder-corner': 0, code: 0, audio: 0 },
+  };
+
+  it('is preferred over the local count, which can only speak for frameworks', () => {
+    // The local count sees the `content` corpus this script was handed and
+    // nothing else — not the legacy `blogs` container the listing hooks fall
+    // back to, not `podcasts`, not Listen & Learn. Its zero for those sections
+    // would be a zero about the wrong set of documents.
+    const manifest = buildManifest([doc('azure', 'framework')], fromRoute);
+    expect(manifest.sections).toBe(fromRoute);
+    expect(manifest.sections.aws.blog).toBe(1);
+    expect(manifest.sections.azure.frameworks).toBe(0);
+  });
+
+  it('falls back to the local frameworks count when the route sent none', () => {
+    // The route is deployed by hand and this script runs nightly, so the two
+    // are briefly out of step every time. In that window the five frameworks
+    // pages must not return to the sitemap.
+    for (const absent of [undefined, null]) {
+      expect(buildManifest([doc('azure', 'framework')], absent).sections.azure.frameworks).toBe(1);
+    }
+  });
+
+  it('rejects a body that is not a map of counts rather than half-reading it', () => {
+    // `sections[provider][section]` on a string or an array answers undefined,
+    // which the pre-render reads as "no count for this section" — the same
+    // answer as a healthy older manifest, and therefore invisible.
+    for (const wrong of ['sections', 42, [], true]) {
+      expect(buildManifest([doc('azure', 'framework')], wrong).sections.azure.frameworks).toBe(1);
+    }
   });
 });

@@ -155,7 +155,9 @@ async function fetchPublished() {
   if (!body?.success || !Array.isArray(body.items)) {
     throw new Error(`${url} returned an unexpected body: ${JSON.stringify(body).slice(0, 200)}`);
   }
-  return body.items;
+  // `sections` is optional: a deployed revision that predates it simply does
+  // not send one, and `buildManifest` then counts what it can itself.
+  return { items: body.items, sections: body.sections };
 }
 
 /** The provider segment an article's URL lives under. */
@@ -259,10 +261,18 @@ function project(item) {
 /**
  * Section pages whose whole data source is the `content` container, keyed by
  * the `type` their page selects on. Only these can be declared empty from the
- * manifest alone. `coder-corner` and `code` are deliberately absent: their
- * pages fall back to the legacy `blogs` container when `content` has nothing
- * (useCoderCornerData.js), which this manifest does not read, so a zero here
- * would not mean an empty page.
+ * corpus this script is handed. `coder-corner` and `code` are deliberately
+ * absent: their pages fall back to the legacy `blogs` container when `content`
+ * has nothing (useCoderCornerData.js), which this corpus does not include, so
+ * a zero here would not mean an empty page.
+ *
+ * THIS IS THE FALLBACK PATH, not the main one. The manifest route computes
+ * counts for every countable section — including the ones reading `blogs`,
+ * `podcasts` and Listen & Learn, which only the app can see
+ * (functions/src/lib/public-section-counts.js) — and `buildManifest` prefers
+ * those. What is below runs when the deployed revision predates them, so that
+ * merging the route and deploying it can happen in either order without the
+ * five frameworks pages returning to the sitemap in between.
  */
 export const SECTION_TYPES = Object.freeze({ frameworks: 'framework' });
 
@@ -297,11 +307,27 @@ export function sectionCounts(items) {
   return sections;
 }
 
-export function buildManifest(items) {
+/**
+ * A `sections` map the route sent, or null when it sent nothing usable.
+ *
+ * Anything that is not a plain object is treated as absent rather than
+ * repaired: the consumer reads `sections[provider][section]`, and a value that
+ * is not that shape must not be allowed to answer `undefined` and be mistaken
+ * for a section this build simply has no count for.
+ */
+function serverSections(sections) {
+  if (!sections || typeof sections !== 'object' || Array.isArray(sections)) return null;
+  return sections;
+}
+
+export function buildManifest(items, sectionsFromRoute = null) {
   const routes = [];
   const data = {};
   const skipped = [];
-  const sections = sectionCounts(items);
+  // The route's counts win. They see every container a section page reads;
+  // sectionCounts() sees only the `content` corpus, so it can speak for
+  // frameworks and nothing else.
+  const sections = serverSections(sectionsFromRoute) ?? sectionCounts(items);
 
   for (const item of items) {
     const slug = slugOf(item);
@@ -337,9 +363,9 @@ async function main() {
   // — the query just lives in the app now
   // (functions/src/lib/public-content-manifest.js), where it is pinned by an
   // exact-match test for that reason.
-  const resources = await fetchPublished();
+  const { items: resources, sections } = await fetchPublished();
 
-  const manifest = buildManifest(resources);
+  const manifest = buildManifest(resources, sections);
   manifest.generatedAt = new Date().toISOString();
 
   mkdirSync(dirname(OUT_PATH), { recursive: true });
@@ -368,6 +394,14 @@ async function main() {
   writeFileSync(OUT_PATH, next);
   console.log(
     `[content-manifest] ${manifest.routes.length} routes, ${resources.length} published items`
+  );
+  // Which path produced the counts, because the two answer different sets of
+  // sections and the difference is thirty-three URLs in the sitemap. Read this
+  // line before believing a sitemap that did not shrink.
+  console.log(
+    serverSections(sections)
+      ? `  sections: from the route, ${Object.keys(manifest.sections.azure || {}).length} per provider`
+      : '  sections: route sent none — counted frameworks locally (deploy Functions to get the rest)'
   );
   for (const reason of manifest.skipped) console.log(`  skipped ${reason}`);
 }

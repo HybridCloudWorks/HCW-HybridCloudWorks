@@ -41,7 +41,16 @@
  * unreachable from a runner hitting the origin directly. `/api/health` is
  * reachable through `deploy-functions.yml`'s existing window for exactly this
  * reason. This route follows it.
+ *
+ * ## What else it carries
+ *
+ * `sections` — how many published items each `/<provider>/<section>` page has,
+ * so the pre-render can leave an empty one out of `sitemap.xml` (issue #373).
+ * It is computed here rather than in the builder because three of the five
+ * sections read containers the builder cannot see; see
+ * `public-section-counts.js`, which owns every rule.
  */
+import { countSections } from './public-section-counts.js';
 
 /**
  * The fields the manifest keeps, and therefore the only fields this returns.
@@ -172,11 +181,28 @@ export function createPublicContentManifestHandlers({ store }) {
     /** GET /api/public/content-manifest */
     async getManifest(_request, context) {
       try {
-        const rows = await store.queryDocs('content', PUBLISHED_QUERY, []);
+        // Side by side: the corpus and the section counts read different
+        // containers and neither waits on the other.
+        //
+        // ONE try/catch over both, so a failure counting sections fails the
+        // whole route. That is deliberate. The alternative — answer 200 with
+        // the corpus and no counts — is a quiet degradation whose visible
+        // effect is thirty-three empty pages returning to the sitemap on the
+        // next frontend deploy. A 500 fails `publish-content-manifest.yml`
+        // loudly, leaves the committed manifest and its counts in place, and
+        // is fixed by re-running.
+        const [rows, sections] = await Promise.all([
+          store.queryDocs('content', PUBLISHED_QUERY, []),
+          countSections({ store }),
+        ]);
         const items = (Array.isArray(rows) ? rows : []).map(projectArticle);
         return {
           status: 200,
-          jsonBody: { success: true, items, count: items.length },
+          // `sections` is null when a counting read filled its window; the
+          // builder treats anything but an object as "no counts from the
+          // route" and falls back, which drops no route it would not have
+          // dropped before.
+          jsonBody: { success: true, items, count: items.length, sections },
           // The build reads this once a day and commits the result; a cached
           // copy would silently pre-render yesterday's corpus.
           headers: { 'Cache-Control': 'no-store' },
