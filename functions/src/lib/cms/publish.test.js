@@ -370,6 +370,35 @@ describe('slug assignment (#400)', () => {
     );
   });
 
+  it('resolveCuratedSubpagePath returns an absolute path, so provider inference stays right', () => {
+    // Exactly what useBlogData.js, useFrameworkData.js and
+    // useProviderLandingContent.js do with the stored path. Index 1 is the
+    // provider only while the path starts with a slash: on a relative `aws/x`
+    // it reads the second segment and the article lands under the wrong
+    // provider with nothing to show for it.
+    const providerOf = (path) => String(path || '').split('/')[1];
+
+    const absolute = resolveCuratedSubpagePath({
+      stored: '/aws/architecture-designs/old',
+      slug: 's',
+    });
+    expect(absolute).toBe('/aws/architecture-designs/s');
+    expect(providerOf(absolute)).toBe('aws');
+
+    // A stored path with no leading slash: rebuilt absolute, not left relative.
+    const relative = resolveCuratedSubpagePath({
+      stored: 'aws/architecture-designs/old',
+      slug: 's',
+    });
+    expect(relative).toBe('/aws/architecture-designs/s');
+    expect(providerOf(relative)).toBe('aws');
+
+    // ...and on the paths that are echoed rather than rebuilt, which carry the
+    // same defect: already naming the slug, and no slug to reconcile against.
+    expect(providerOf(resolveCuratedSubpagePath({ stored: 'aws/blog/s', slug: 's' }))).toBe('aws');
+    expect(providerOf(resolveCuratedSubpagePath({ stored: 'aws/blog/s' }))).toBe('aws');
+  });
+
   it('a republish reads its slug from Slug when the document has no lowercase slug', async () => {
     const store = makeStore(readyDoc({ contentStatus: 'published', Slug: 'legacy-slug' }), {
       queryDocs: vi.fn(async () => [{ id: 'c1' }, { id: 'other' }]),

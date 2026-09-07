@@ -161,6 +161,15 @@ export function resolveSlug({ candidate = '', contentId = '', reuse = false, hol
  * path sitting under some other prefix keeps that prefix. With neither a stored
  * path nor a provider to derive one from there is no path at all, exactly as
  * before.
+ *
+ * ALWAYS ABSOLUTE. Three frontend hooks infer an article's provider with
+ * `String(doc.curatedSubpagePath || '').split('/')[1]` — useBlogData.js,
+ * useFrameworkData.js and useProviderLandingContent.js — and that index is the
+ * provider only when the path starts with a slash. On a relative `aws/x` it
+ * reads the SECOND segment instead and the article lands under the wrong
+ * provider, silently. So every path returned here is normalised, not only the
+ * one whose last segment was replaced: a stored relative path echoed back
+ * unchanged mis-infers exactly the same way.
  */
 export function resolveCuratedSubpagePath({
   stored = '',
@@ -168,13 +177,12 @@ export function resolveCuratedSubpagePath({
   section = '',
   slug = '',
 } = {}) {
-  const current = String(stored || '').replace(/\/+$/, '');
-  if (!current) {
+  const raw = String(stored || '').replace(/\/+$/, '');
+  if (!raw) {
     return provider && slug ? `/${String(provider).toLowerCase()}/${section}/${slug}` : null;
   }
-  if (!slug) return current;
-  const segments = current.split('/');
-  if (segments[segments.length - 1] === slug) return current;
+  const segments = (raw.startsWith('/') ? raw : `/${raw}`).split('/');
+  if (!slug || segments[segments.length - 1] === slug) return segments.join('/');
   segments[segments.length - 1] = slug;
   return segments.join('/');
 }
