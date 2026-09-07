@@ -49,6 +49,10 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
   // Decide on the sanitised value: an unsafe URL (javascript:, data:, control
   // characters) gets the placeholder, not an <img> with no src.
   const image = safeUrl(episode.image);
+  // Same decision for the audio: the element is rendered only from a safe
+  // URL, Play is disabled and Download withheld otherwise. A feed can carry
+  // anything in an enclosure.
+  const mediaUrl = safeUrl(episode.mediaUrl);
   const known = duration ?? episode.durationSeconds ?? null;
   const sliderMax = known && known > 0 ? known : 0;
 
@@ -65,10 +69,10 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
       data-testid="episode-player"
     >
       {/* eslint-disable jsx-a11y/media-has-caption */}
-      {episode.mediaUrl && (
+      {mediaUrl && (
         <audio
           ref={audioRef}
-          src={episode.mediaUrl}
+          src={mediaUrl}
           preload="metadata"
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime || 0)}
           onLoadedMetadata={(e) => {
@@ -144,7 +148,7 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
             step="1"
             value={Math.min(currentTime, sliderMax)}
             onChange={handleSeek}
-            disabled={!episode.mediaUrl || !sliderMax}
+            disabled={!mediaUrl || !sliderMax}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-default"
           />
         </div>
@@ -157,7 +161,7 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
           <button
             type="button"
             onClick={() => setIsPlaying((p) => !p)}
-            disabled={!episode.mediaUrl}
+            disabled={!mediaUrl}
             aria-label={isPlaying ? 'Pause' : 'Play'}
             className={`w-12 h-12 bg-gradient-to-br ${meta.playBtn} rounded-full flex items-center justify-center transition-all shadow-lg disabled:opacity-40`}
           >
@@ -165,9 +169,9 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
               {isPlaying ? 'pause' : 'play_arrow'}
             </span>
           </button>
-          {episode.mediaUrl && (
+          {mediaUrl && (
             <a
-              href={safeUrl(episode.mediaUrl, '#')}
+              href={mediaUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
@@ -175,6 +179,11 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
               <span className="material-symbols-outlined text-[16px]">download</span>
               Download
             </a>
+          )}
+          {episode.mediaUrl && !mediaUrl && (
+            <span className="text-xs text-foreground/70" role="note">
+              Media URL not playable
+            </span>
           )}
           {episode.link && (
             <a

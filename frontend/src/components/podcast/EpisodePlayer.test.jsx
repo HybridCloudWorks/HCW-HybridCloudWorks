@@ -136,6 +136,30 @@ describe('EpisodePlayer', () => {
     expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
   });
 
+  it('renders no <audio>, disables Play and withholds Download for an unsafe media URL', () => {
+    // An enclosure URL is third-party text; the decision is made once, on
+    // the sanitised value, and every control follows it.
+    const { container } = render(
+      <EpisodePlayer episode={{ ...episode, mediaUrl: 'javascript:alert(1)' }} meta={meta} />
+    );
+    expect(container.querySelector('audio')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
+    expect(screen.queryByRole('link', { name: /Download/ })).toBeNull();
+    expect(screen.getByRole('note')).toHaveTextContent('Media URL not playable');
+    expect(container.innerHTML).not.toContain('javascript:');
+  });
+
+  it('keeps a valid https media URL on the element and the Download link', () => {
+    const { container } = render(<EpisodePlayer episode={episode} meta={meta} />);
+    expect(container.querySelector('audio')).toHaveAttribute('src', episode.mediaUrl);
+    expect(screen.getByRole('link', { name: /Download/ })).toHaveAttribute(
+      'href',
+      episode.mediaUrl
+    );
+    expect(screen.getByRole('button', { name: 'Play' })).not.toBeDisabled();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
   it('disables play and seek when there is nothing to play', () => {
     render(<EpisodePlayer episode={{ ...episode, mediaUrl: null }} meta={meta} />);
     expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
