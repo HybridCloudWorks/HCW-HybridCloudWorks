@@ -318,6 +318,42 @@ function serverSections(sections) {
   return sections;
 }
 
+/**
+ * The run-log line saying where the section counts came from — or that there
+ * are none.
+ *
+ * THREE OUTCOMES, NOT TWO, and the third is the one worth a function. The
+ * first version of this line printed "counted frameworks locally" whenever the
+ * route sent nothing, but `sectionCounts()` returns null when no item carries a
+ * `type` at all, and then nothing was counted: `manifest.sections` is null and
+ * the pre-render drops no route. That is a plausible state during exactly the
+ * upgrade window this message exists to narrate — an older deployed revision
+ * that sends neither `sections` nor `type` — so the message would have claimed
+ * a count that did not happen, in the one situation someone reads it.
+ *
+ * Worth asserting rather than trusting, for the same reason
+ * `describeFetchFailure` is: nobody watches this run, they read the line it
+ * leaves behind, and a wrong line sends them somewhere else.
+ *
+ * The per-provider figure is read off whichever provider the map happens to
+ * carry first rather than off `azure` by name, so a map that never mentions
+ * Azure still reports its real width.
+ *
+ * @param {object|null} sections the counts that ended up on the manifest
+ * @param {boolean} fromRoute whether the route supplied them
+ */
+export function describeSectionCounts(sections, fromRoute) {
+  if (fromRoute) {
+    const providers = Object.keys(sections || {});
+    const width = providers.length ? Object.keys(sections[providers[0]] || {}).length : 0;
+    return `sections: from the route — ${width} per provider, across every container a section page reads`;
+  }
+  if (sections) {
+    return 'sections: route sent none — counted frameworks locally from the corpus; deploy Functions for the rest';
+  }
+  return 'sections: none — the route sent none and no item carries a type, so no section page leaves the sitemap this build';
+}
+
 export function buildManifest(items, sectionsFromRoute = null) {
   const routes = [];
   const data = {};
@@ -393,14 +429,7 @@ async function main() {
   console.log(
     `[content-manifest] ${manifest.routes.length} routes, ${resources.length} published items`
   );
-  // Which path produced the counts, because the two answer different sets of
-  // sections and the difference is thirty-three URLs in the sitemap. Read this
-  // line before believing a sitemap that did not shrink.
-  console.log(
-    serverSections(sections)
-      ? `  sections: from the route, ${Object.keys(manifest.sections.azure || {}).length} per provider`
-      : '  sections: route sent none — counted frameworks locally (deploy Functions to get the rest)'
-  );
+  console.log(`  ${describeSectionCounts(manifest.sections, serverSections(sections) !== null)}`);
   for (const reason of manifest.skipped) console.log(`  skipped ${reason}`);
 }
 

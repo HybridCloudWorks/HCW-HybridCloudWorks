@@ -14,7 +14,20 @@
  * sends a person somewhere else, which is more expensive than no message.
  */
 import { describe, it, expect } from 'vitest';
-import { buildManifest, describeFetchFailure, sectionCounts } from './build-content-manifest.mjs';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  buildManifest,
+  describeFetchFailure,
+  describeSectionCounts,
+  sectionCounts,
+} from './build-content-manifest.mjs';
+
+// `dirname(fileURLToPath(...))` rather than `new URL('..', import.meta.url)`:
+// this file declares its own `const URL` below, which shadows the global and
+// puts it in the temporal dead zone up here. The suite failed to import at all.
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const URL = 'https://func-site-prod-cus-01.azurewebsites.net/api/public/content-manifest';
 
@@ -156,12 +169,53 @@ describe('sections the manifest route computed (issue #373)', () => {
     type,
   });
 
+  /**
+   * The sections the route's contract declares, read as TEXT from `functions/`.
+   *
+   * `scripts/` and `functions/` are independent npm packages with no workspace
+   * between them, so this cannot import the constant — the same trade
+   * `functions/src/lib/public-content-manifest.test.js` makes in the other
+   * direction when it parses ARTICLE_FIELDS out of this package.
+   *
+   * Derived rather than restated because restating it failed exactly once and
+   * silently: the fixture below was written out by hand, called itself "every
+   * section", and omitted `audio-architecture` — so a section dropped from the
+   * response would have passed this suite.
+   */
+  function routeSectionNames() {
+    const source = readFileSync(
+      join(REPO, 'functions', 'src', 'lib', 'public-section-counts.js'),
+      'utf8'
+    );
+    const block = source.match(/SECTIONS = Object\.freeze\(\{([\s\S]*?)\}\);/);
+    if (!block) {
+      throw new Error('SECTIONS not found in functions/src/lib/public-section-counts.js');
+    }
+    return [...block[1].matchAll(/^\s*'?([a-z-]+)'?:\s*\{/gm)].map((m) => m[1]);
+  }
+
+  /** One provider's counts, every declared section present, zero unless named. */
+  const counts = (values = {}) =>
+    Object.fromEntries(routeSectionNames().map((section) => [section, values[section] ?? 0]));
+
   /** The route's answer: every section, across containers this script never sees. */
   const fromRoute = {
-    azure: { blog: 21, frameworks: 0, 'coder-corner': 0, code: 0, audio: 0 },
-    aws: { blog: 1, frameworks: 0, 'coder-corner': 0, code: 0, audio: 0 },
-    _unattributed: { blog: 0, frameworks: 0, 'coder-corner': 0, code: 0, audio: 0 },
+    azure: counts({ blog: 21 }),
+    aws: counts({ blog: 1 }),
+    _unattributed: counts(),
   };
+
+  it('is shaped like the real response, section for section', () => {
+    // The guard on the parse comes first: a regex that silently matched
+    // nothing would make every assertion below vacuous, which is the failure
+    // mode a derived fixture introduces in exchange for the one it removes.
+    const names = routeSectionNames();
+    expect(names.length).toBeGreaterThan(4);
+    expect(names).toContain('audio-architecture');
+    for (const provider of Object.keys(fromRoute)) {
+      expect(Object.keys(fromRoute[provider]).sort()).toEqual([...names].sort());
+    }
+  });
 
   it('is preferred over the local count, which can only speak for frameworks', () => {
     // The local count sees the `content` corpus this script was handed and
@@ -190,5 +244,49 @@ describe('sections the manifest route computed (issue #373)', () => {
     for (const wrong of ['sections', 42, [], true]) {
       expect(buildManifest([doc('azure', 'framework')], wrong).sections.azure.frameworks).toBe(1);
     }
+  });
+});
+
+describe('describeSectionCounts', () => {
+  const doc = (provider, type) => ({
+    id: `${provider}-${type}`,
+    slug: `${provider}-${type}`,
+    cloudProvider: provider,
+    type,
+  });
+
+  it('says the route counted them, and how wide the map is', () => {
+    const sections = { gcp: { blog: 0, frameworks: 0, audio: 2 } };
+    const line = describeSectionCounts(sections, true);
+    expect(line).toContain('from the route');
+    expect(line).toContain('3 per provider');
+  });
+
+  it('reads the width off whatever provider it has, not off azure by name', () => {
+    // Hardcoding `azure` reported 0 for a perfectly good map that happened not
+    // to mention it — a zero-width claim about a map with counts in it.
+    expect(describeSectionCounts({ vmware: { blog: 0, audio: 0 } }, true)).toContain(
+      '2 per provider'
+    );
+  });
+
+  it('says the local count ran only when it produced something', () => {
+    const local = buildManifest([doc('azure', 'framework')]).sections;
+    expect(local).not.toBeNull();
+    expect(describeSectionCounts(local, false)).toContain('counted frameworks locally');
+  });
+
+  it('does not claim a local count when there was none', () => {
+    // THE CASE THIS FUNCTION EXISTS FOR. `sectionCounts()` returns null when no
+    // item carries a `type`, which is exactly what an older deployed revision
+    // sends during the upgrade window this line is read in — and the message
+    // used to say "counted frameworks locally" regardless.
+    const none = buildManifest([{ id: 'a', slug: 'a', cloudProvider: 'azure' }]).sections;
+    expect(none).toBeNull();
+    const line = describeSectionCounts(none, false);
+    expect(line).not.toContain('counted frameworks locally');
+    expect(line).toContain('no item carries a type');
+    // And it says what follows from that, which is the part a reader acts on.
+    expect(line).toContain('no section page leaves the sitemap');
   });
 });
