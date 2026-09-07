@@ -60,9 +60,28 @@ export function hostOf(url) {
 }
 
 /**
+ * The document's last `inlineImages` summary reduced to what the page shows:
+ * when, how many, and the HOSTS that failed. The summary itself keeps
+ * `failedUrls` (origin and path, for the editor who opens the document);
+ * returning it here would make the candidates list a second way to read
+ * third-party URLs out of the CMS, which the list exists not to be.
+ */
+export function summarizeLastRun(inlineImages) {
+  if (!inlineImages || typeof inlineImages !== 'object') return null;
+  const failedUrls = Array.isArray(inlineImages.failedUrls) ? inlineImages.failedUrls : [];
+  return {
+    at: inlineImages.at ?? null,
+    rewritten: Number(inlineImages.rewritten) || 0,
+    failed: Number(inlineImages.failed) || 0,
+    failedHosts: [...new Set(failedUrls.map(hostOf))].sort(),
+  };
+}
+
+/**
  * One candidate row, or null when the document hotlinks nothing. Carries no
- * body text: the page shows counts and hosts, and the response must not be a
- * second way to read an article out of the CMS.
+ * body text and no URL of a third party: the page shows counts and hosts,
+ * and the response must not be a second way to read an article out of the
+ * CMS.
  */
 export function summarizeCandidate(doc = {}) {
   const fields = [];
@@ -88,7 +107,7 @@ export function summarizeCandidate(doc = {}) {
     fields,
     urlCount: seen.size,
     hosts: [...hosts].sort(),
-    lastRun: doc.inlineImages && typeof doc.inlineImages === 'object' ? doc.inlineImages : null,
+    lastRun: summarizeLastRun(doc.inlineImages),
   };
 }
 

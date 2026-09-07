@@ -247,47 +247,55 @@ export default function RehostImagesPanel() {
 
                 <ul className="space-y-2">
                   {candidates.map((row) => (
-                    <li key={row.id}>
-                      <label className="flex items-start gap-3 rounded-lg border p-2 text-sm hover:bg-muted/40 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(row.id)}
-                          onChange={() => toggle(row.id)}
-                          disabled={running}
-                          aria-label={`Select ${row.title}`}
-                          className="mt-1 h-4 w-4 rounded border-border accent-primary"
-                        />
-                        <span className="flex-1 min-w-0">
-                          <span className="block font-medium truncate">{row.title}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {row.urlCount} {row.urlCount === 1 ? 'image' : 'images'} ·{' '}
-                            {(row.hosts || []).join(', ')} · in {(row.fields || []).join(', ')}
-                          </span>
-                          {row.lastRun && (
-                            <span className="block text-xs text-muted-foreground">
-                              Last run {shortDate(row.lastRun.at)}: {row.lastRun.rewritten}{' '}
-                              re-hosted, {row.lastRun.failed} failed
-                            </span>
-                          )}
+                    <li
+                      key={row.id}
+                      className="flex items-start gap-3 rounded-lg border p-2 text-sm hover:bg-muted/40"
+                    >
+                      <input
+                        id={`rehost-${row.id}`}
+                        type="checkbox"
+                        checked={selected.has(row.id)}
+                        onChange={() => toggle(row.id)}
+                        disabled={running}
+                        aria-label={`Select ${row.title}`}
+                        className="mt-1 h-4 w-4 rounded border-border accent-primary"
+                      />
+                      {/* The label covers the title and its facts only: a link
+                          inside it would toggle the checkbox on every click. */}
+                      <label htmlFor={`rehost-${row.id}`} className="flex-1 min-w-0 cursor-pointer">
+                        <span className="block font-medium truncate">{row.title}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {row.urlCount} {row.urlCount === 1 ? 'image' : 'images'} ·{' '}
+                          {(row.hosts || []).join(', ')} · in {(row.fields || []).join(', ')}
                         </span>
-                        {row.live ? (
-                          <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                            Live
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Staged</Badge>
-                        )}
-                        {row.publicUrl && (
-                          <a
-                            href={row.publicUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs underline shrink-0"
-                          >
-                            View
-                          </a>
+                        {row.lastRun && (
+                          <span className="block text-xs text-muted-foreground">
+                            Last run {shortDate(row.lastRun.at)}: {row.lastRun.rewritten} re-hosted,{' '}
+                            {row.lastRun.failed} failed
+                            {row.lastRun.failedHosts?.length
+                              ? ` (${row.lastRun.failedHosts.join(', ')})`
+                              : ''}
+                          </span>
                         )}
                       </label>
+                      {row.live ? (
+                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                          Live
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">Staged</Badge>
+                      )}
+                      {row.publicUrl && (
+                        <a
+                          href={row.publicUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`View ${row.title}`}
+                          className="text-xs underline shrink-0"
+                        >
+                          View
+                        </a>
+                      )}
                     </li>
                   ))}
                 </ul>

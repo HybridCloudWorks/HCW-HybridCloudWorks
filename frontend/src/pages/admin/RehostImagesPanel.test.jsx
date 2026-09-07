@@ -121,6 +121,47 @@ describe('RehostImagesPanel', () => {
     expect(screen.getByRole('button', { name: 'Re-host selected (7)' })).toBeEnabled();
   });
 
+  it('opening an article’s View link leaves its checkbox as it was', async () => {
+    // The link sat inside the row's <label> once, so a click on it also
+    // toggled the checkbox; a reviewer opening a page deselected it.
+    getJSON.mockResolvedValue({
+      success: true,
+      candidates: seven.slice(0, 2).map((c) =>
+        c.id === 'c1'
+          ? {
+              ...c,
+              lastRun: {
+                at: '2026-09-06T10:00:00.000Z',
+                rewritten: 1,
+                failed: 1,
+                failedHosts: ['cdn-dynmedia-1.microsoft.com'],
+              },
+            }
+          : c
+      ),
+      scanned: 22,
+    });
+    render(<RehostImagesPanel />);
+    openPanel();
+    const box = await screen.findByRole('checkbox', { name: 'Select Article 1' });
+    expect(box).toBeChecked();
+
+    fireEvent.click(screen.getByRole('link', { name: 'View Article 1' }));
+    expect(box).toBeChecked();
+
+    // The label still toggles the box: clicking the title is the row's gesture.
+    fireEvent.click(screen.getByText('Article 1'));
+    expect(box).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Re-host selected (1)' })).toBeEnabled();
+
+    // The last run reads as counts and hosts, as the API now sends it.
+    expect(
+      screen.getByText(
+        /Last run 2026-09-06: 1 re-hosted, 1 failed \(cdn-dynmedia-1\.microsoft\.com\)/
+      )
+    ).toBeInTheDocument();
+  });
+
   it('re-hosts the selected articles in batches and tabulates the outcome per article', async () => {
     getJSON.mockResolvedValue({ success: true, candidates: seven, scanned: 22, total: 7 });
     postJSON.mockImplementation(async (route, body) => {

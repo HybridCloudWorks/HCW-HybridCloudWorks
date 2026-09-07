@@ -49,10 +49,38 @@ describe('summarizeCandidate', () => {
       fields: ['Content', 'content'],
       urlCount: 2,
       hosts: ['cdn-dynmedia-1.microsoft.com', 'techcommunity.microsoft.com'],
-      lastRun: { fields: ['content'], rewritten: 0, failed: 2, failedUrls: [], at: 'x' },
+      lastRun: { at: 'x', rewritten: 0, failed: 2, failedHosts: [] },
     });
     expect(JSON.stringify(row)).not.toContain('stub');
     expect(JSON.stringify(row)).not.toContain(UPSTREAM_A);
+  });
+
+  it('reduces the last run to hosts — the summary’s failedUrls never leave the document', () => {
+    const row = summarizeCandidate({
+      id: 'c4',
+      Title: 'Failed before',
+      content: `![a](${UPSTREAM_A})`,
+      inlineImages: {
+        fields: ['content'],
+        rewritten: 1,
+        failed: 2,
+        failedUrls: [
+          'https://cdn-dynmedia-1.microsoft.com/is/image/one',
+          'https://cdn-dynmedia-1.microsoft.com/is/image/two',
+          'not a url',
+        ],
+        at: '2026-09-06T10:00:00.000Z',
+      },
+    });
+    expect(row.lastRun).toEqual({
+      at: '2026-09-06T10:00:00.000Z',
+      rewritten: 1,
+      failed: 2,
+      failedHosts: ['cdn-dynmedia-1.microsoft.com', 'invalid-url'],
+    });
+    const wire = JSON.stringify(row);
+    expect(wire).not.toContain('failedUrls');
+    expect(wire).not.toMatch(/https?:/);
   });
 
   it('is null for a document whose images are already the site’s own', () => {
@@ -100,6 +128,13 @@ describe('GET candidates', () => {
       Title: 'Two images',
       contentStatus: 'published_both',
       Content: `<img src="${UPSTREAM_A}"><img src='${UPSTREAM_B}'>`,
+      inlineImages: {
+        fields: ['Content'],
+        rewritten: 0,
+        failed: 2,
+        failedUrls: [UPSTREAM_A, UPSTREAM_B],
+        at: '2026-09-06T10:00:00.000Z',
+      },
     },
   ];
 
@@ -125,7 +160,13 @@ describe('GET candidates', () => {
       'cdn-dynmedia-1.microsoft.com',
       'techcommunity.microsoft.com',
     ]);
-    expect(res.body).not.toContain(UPSTREAM_A);
+    expect(body.candidates[0].lastRun.failedHosts).toEqual([
+      'cdn-dynmedia-1.microsoft.com',
+      'techcommunity.microsoft.com',
+    ]);
+    // The wire form carries no body and no third-party URL, last run included.
+    expect(res.body).not.toContain('failedUrls');
+    expect(res.body).not.toMatch(/https?:/);
   });
 
   it('denies without reading and 500s a failed query', async () => {
