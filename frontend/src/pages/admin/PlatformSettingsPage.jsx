@@ -39,6 +39,11 @@ import {
   Wand2,
 } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
+import {
+  describePublerFailure,
+  publerAccountsStatus,
+  unwrapPublerAccounts,
+} from '@/lib/publerAccounts';
 
 // The same lists the server allowlists (functions/src/lib/platform-settings.js).
 export const HERO_PROVIDERS = Object.freeze([
@@ -115,26 +120,6 @@ export function HeroPreview({ src, provider }) {
       onError={() => setFailed(true)}
     />
   );
-}
-
-export const PUBLER_NOT_CONFIGURED = 'INTEGRATION_NOT_CONFIGURED';
-
-/**
- * The publerProxy envelope (functions/src/lib/integrations/rest-proxy.js):
- * `{ ok: true, status, data }` with `data` the parsed Publer body, or
- * `{ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' }` when no key is seeded.
- * Publer's accounts list is a bare array; an `accounts` or `data` wrapper is
- * tolerated in case the upstream shape shifts. A bare array is accepted too,
- * so a caller that already unwrapped is not punished.
- */
-export function unwrapPublerAccounts(response) {
-  if (response && response.ok === false) {
-    return { accounts: [], notConfigured: response.code === PUBLER_NOT_CONFIGURED };
-  }
-  const body =
-    response && typeof response === 'object' && 'data' in response ? response.data : response;
-  const list = [body, body?.accounts, body?.data].find(Array.isArray) ?? [];
-  return { accounts: list.filter((account) => account && account.id), notConfigured: false };
 }
 
 /** Publer reports a network name in its own casing; the trigger keys on lowercase. */
@@ -339,6 +324,7 @@ export function SocialAutopostCard({
   meta,
   publerAccounts,
   publerStatus = 'ready',
+  publerError = '',
 }) {
   const enabled = Boolean(value?.enabled);
   const accountIds = useMemo(() => value?.accountIds ?? [], [value]);
@@ -514,8 +500,10 @@ export function SocialAutopostCard({
               </p>
             ) : null}
             {publerStatus === 'error' ? (
-              <p className="text-xs text-muted-foreground">
-                Publer did not answer; add accounts by id.
+              <p className="text-xs text-destructive">
+                Publer accounts could not be loaded — {publerError || 'the call failed'}. The picker
+                is empty because the call did not succeed, not because the workspace is; add
+                accounts by id, or fix the connection in the Social Hub.
               </p>
             ) : null}
             {unsupported.length > 0 ? (
@@ -628,24 +616,31 @@ export default function PlatformSettingsPage() {
   const [publerAccounts, setPublerAccounts] = useState([]);
   // 'loading' | 'ready' | 'not_configured' | 'error' — the card says which.
   const [publerStatus, setPublerStatus] = useState('loading');
+  const [publerError, setPublerError] = useState('');
 
   // Best effort: the same proxied call the Social Hub makes, unwrapped from
   // the proxy envelope. Not configured, or any failure, means the free-text
   // id field is the whole picker.
+  //
+  // The proxy answers HTTP 200 whatever happens, so Publer refusing the key
+  // resolves rather than rejects; without `failed` it would land in the `ready`
+  // branch and read as a workspace with no accounts.
   useEffect(() => {
     if (!authReady) return undefined;
     let cancelled = false;
     postJSON('publerProxy', { path: '/accounts', method: 'GET' })
       .then((response) => {
         if (cancelled) return;
-        const { accounts, notConfigured } = unwrapPublerAccounts(response);
-        setPublerAccounts(accounts);
-        setPublerStatus(notConfigured ? 'not_configured' : 'ready');
+        const unwrapped = unwrapPublerAccounts(response);
+        setPublerAccounts(unwrapped.accounts);
+        setPublerStatus(publerAccountsStatus(unwrapped));
+        setPublerError(unwrapped.failed ? describePublerFailure(unwrapped) : '');
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
         setPublerAccounts([]);
         setPublerStatus('error');
+        setPublerError(err?.message || 'the request failed');
       });
     return () => {
       cancelled = true;
@@ -686,6 +681,7 @@ export default function PlatformSettingsPage() {
             saving={s.saving}
             publerAccounts={publerAccounts}
             publerStatus={publerStatus}
+            publerError={publerError}
             onChange={s.setValue}
             onSave={() => s.save(s.value)}
           />

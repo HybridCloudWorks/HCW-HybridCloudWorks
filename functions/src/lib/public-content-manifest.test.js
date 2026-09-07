@@ -157,3 +157,55 @@ describe('getManifest', () => {
     ).resolves.toMatchObject({ status: 200 });
   });
 });
+
+describe('the section counts it carries (issue #373)', () => {
+  /** A store that answers per container, as the real one does. */
+  const storeOf = (byContainer) => vi.fn(async (container) => byContainer[container] ?? []);
+
+  const published = (fields) => ({ contentStatus: 'published', ...fields });
+
+  it('counts what the section pages read, across every container they read', async () => {
+    const queryDocs = storeOf({
+      content: [published({ id: '1', slug: 'a', type: 'blog', cloudProvider: 'Azure' })],
+      blogs: [published({ id: '2', slug: 'b', type: 'blog', cloudProvider: 'Aws' })],
+      podcasts: [{ provider: 'gcp', mediaUrl: 'https://cdn.example/a.mp3' }],
+      listen_and_learn_episodes: [
+        { provider: 'gcp', status: 'published', audioUrl: '/api/public/media/x.mp3' },
+      ],
+    });
+    const res = await createPublicContentManifestHandlers({ store: { queryDocs } }).getManifest(
+      {},
+      {}
+    );
+
+    expect(res.status).toBe(200);
+    // The corpus is still only `content` — the counts read wider, the items
+    // do not.
+    expect(res.jsonBody.count).toBe(1);
+    expect(res.jsonBody.sections.azure.blog).toBe(1);
+    // The legacy `blogs` container is reached by the listing hooks on exactly
+    // the providers with nothing in `content` — the ones about to be declared
+    // empty — so it has to be in the count.
+    expect(res.jsonBody.sections.aws.blog).toBe(1);
+    expect(res.jsonBody.sections.gcp.audio).toBe(2);
+    expect(res.jsonBody.sections.ansible['coder-corner']).toBe(0);
+  });
+
+  it('fails the whole route when a counting read fails', async () => {
+    // Deliberate: answering 200 with no counts is a quiet degradation whose
+    // only visible effect is empty pages returning to the sitemap a deploy
+    // later. A 500 fails the manifest workflow and leaves the committed
+    // manifest — counts included — exactly where it was.
+    const error = vi.fn();
+    const queryDocs = vi.fn(async (container) => {
+      if (container === 'podcasts') throw new Error('cosmos exploded');
+      return [];
+    });
+    const res = await createPublicContentManifestHandlers({ store: { queryDocs } }).getManifest(
+      {},
+      { error }
+    );
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.jsonBody)).not.toContain('cosmos exploded');
+  });
+});

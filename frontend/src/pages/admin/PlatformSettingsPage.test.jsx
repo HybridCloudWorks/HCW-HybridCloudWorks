@@ -18,7 +18,6 @@ import PlatformSettingsPage, {
   bundledDefaultHeroes,
   isAcceptableHeroUrl,
   settingRoute,
-  unwrapPublerAccounts,
 } from './PlatformSettingsPage';
 
 // The Radix Switch measures its thumb with ResizeObserver, which jsdom lacks.
@@ -348,40 +347,9 @@ describe('PodcastFeedsCard', () => {
   });
 });
 
-describe('unwrapPublerAccounts', () => {
-  it('reads the proxy envelope, not a bare array', () => {
-    const accounts = [{ id: 'acc-1', name: 'HCW', provider: 'linkedin' }];
-    expect(unwrapPublerAccounts({ ok: true, status: 200, data: accounts })).toEqual({
-      accounts,
-      notConfigured: false,
-    });
-    // Tolerated nestings, and a bare array from a caller that already unwrapped.
-    expect(unwrapPublerAccounts({ ok: true, status: 200, data: { accounts } }).accounts).toEqual(
-      accounts
-    );
-    expect(
-      unwrapPublerAccounts({ ok: true, status: 200, data: { data: accounts } }).accounts
-    ).toEqual(accounts);
-    expect(unwrapPublerAccounts(accounts).accounts).toEqual(accounts);
-  });
-
-  it('names the unconfigured case and treats every other failure as empty', () => {
-    expect(unwrapPublerAccounts({ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' })).toEqual({
-      accounts: [],
-      notConfigured: true,
-    });
-    expect(unwrapPublerAccounts({ ok: false, status: 401, data: { error: 'nope' } })).toEqual({
-      accounts: [],
-      notConfigured: false,
-    });
-    expect(unwrapPublerAccounts({ ok: true, status: 200, data: 'not json' }).accounts).toEqual([]);
-    expect(unwrapPublerAccounts(undefined).accounts).toEqual([]);
-    // Rows without an id cannot be chosen and are dropped.
-    expect(
-      unwrapPublerAccounts({ ok: true, status: 200, data: [{ name: 'no id' }, null] }).accounts
-    ).toEqual([]);
-  });
-});
+// unwrapPublerAccounts moved to src/lib/publerAccounts.js with #397; its unit
+// tests moved with it to src/lib/publerAccounts.test.js. What stays here is
+// what this page does with the result.
 
 describe('the page', () => {
   it('offers the accounts a configured Publer returns inside the proxy envelope', async () => {
@@ -406,6 +374,21 @@ describe('the page', () => {
     render(<PlatformSettingsPage />);
     await waitFor(() => expect(screen.getByText(/Publer not configured/)).toBeTruthy());
     expect(screen.queryByLabelText('Publer account to add')).toBeNull();
+    expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
+  });
+
+  it('reports a resolved not-ok envelope as a failure carrying the upstream status', async () => {
+    // Publer refused the key. The proxy answers HTTP 200 with ok:false, so this
+    // resolves — a page that only catches rejections would call it "ready" and
+    // show an empty picker, which is the #397 conflation one layer down.
+    postJSON.mockResolvedValue({ ok: false, status: 401, data: { error: 'Invalid API key' } });
+    render(<PlatformSettingsPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/Publer accounts could not be loaded/)).toBeTruthy()
+    );
+    expect(screen.getByText(/Publer answered 401/)).toBeTruthy();
+    // Not the unconfigured message: the key is present, it is being rejected.
+    expect(screen.queryByText(/Publer not configured/)).toBeNull();
     expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
   });
 

@@ -1,13 +1,16 @@
 /**
  * The publish pipeline — pinned to processPublishContent (:1383-1600) and
  * publishContent (:6696). Load-bearing: the publishable-status table, both
- * gates persisting their failed reports, republish slug reuse vs
- * collision-only suffixing, metadata validation on new publishes only, the
- * cover trigger, and the batch accumulator's published/skipped/warning math.
+ * gates persisting their failed reports, slug assignment (see the
+ * 'slug assignment (#400)' block), metadata validation on new publishes only,
+ * the cover trigger, and the batch accumulator's published/skipped/warning
+ * math.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
   createPublishHandlers,
+  resolveSlug,
+  resolveCuratedSubpagePath,
   slugify,
   toPublicUrl,
   getPublicSectionForPublishTarget,
@@ -219,6 +222,239 @@ describe('concurrent publish protection (T-301)', () => {
   });
 });
 
+describe('slug assignment (#400)', () => {
+  const ID = 'abcdef123';
+
+  it('resolveSlug: bare on a clean probe, suffixed on a clash, and null read per path', () => {
+    // A clean probe keeps the bare slug — the readable URL is the point, and
+    // what a clean probe cannot prove is documented at resolveSlug and caught
+    // by scripts/report-slug-collisions.mjs.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [] })).toBe('a-title');
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [ID] })).toBe('a-title');
+
+    // Another document holds it: suffixed with the document id, either path.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [ID, 'other'] })).toBe(
+      'a-title-abcdef'
+    );
+
+    // `holders: null` — the probe could not answer — is read differently by
+    // the two paths, on purpose.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: null })).toBe(
+      'a-title-abcdef' // first assignment: ugly but always unique, never blocked
+    );
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, reuse: true, holders: null })).toBe(
+      'a-title' // republish: a failed lookup must not move a live URL
+    );
+
+    // No candidate at all: the id is the whole slug (unchanged behaviour).
+    expect(resolveSlug({ candidate: '', contentId: ID })).toBe('abcdef');
+  });
+
+  it('a first publish keeps its bare slug when the probe finds no other holder', async () => {
+    const store = makeStore(); // queryDocs returns [] — a clean probe
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+    expect(store.queryDocs).toHaveBeenCalledTimes(1);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe(
+      'migration-readiness-framework'
+    );
+  });
+
+  it('a second document with the same title is suffixed, because the probe now sees the first', async () => {
+    // The shape of #400: the generator wrote one site title onto more than one
+    // article. The second publish probes, finds the first, and moves off.
+    const docs = [
+      readyDoc({ id: 'aaa111', Title: 'One Shared Title' }),
+      readyDoc({ id: 'bbb222', Title: 'One Shared Title' }),
+    ];
+    const taken = [];
+    const store = makeStore(docs[0], {
+      readDoc: vi.fn(async (c, id) => (c === 'content' ? docs.find((d) => d.id === id) : null)),
+      queryDocs: vi.fn(async () => taken.map((id) => ({ id }))),
+      patchDoc: vi.fn(async (c, id, u) => {
+        if (c === 'content' && u.slug === 'one-shared-title') taken.push(id);
+        return { id, ...u };
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['aaa111', 'bbb222'], publishTarget: 'framework' }),
+      context
+    );
+    const slugs = store.patchDoc.mock.calls
+      .filter(([c]) => c === 'content')
+      .map(([, , u]) => u.slug);
+    expect(slugs).toEqual(['one-shared-title', 'one-shared-title-bbb222']);
+  });
+
+  it('probes the same string it writes, so a padded stored slug still finds its holder', async () => {
+    // The probe answers about whatever string it is handed, and resolveSlug
+    // trims. Left unnormalised, a stored `'  shared-slug  '` is probed padded,
+    // matches nothing, and the trimmed `shared-slug` is then written onto a URL
+    // another article holds — the read says free while the write says taken.
+    // The store answers like Cosmos: an exact match on the value queried.
+    const store = makeStore(readyDoc({ contentStatus: 'published', slug: '  shared-slug  ' }), {
+      queryDocs: vi.fn(async (_container, _query, params) =>
+        params[0].value === 'shared-slug' ? [{ id: 'c1' }, { id: 'other-doc' }] : []
+      ),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([{ name: '@slug', value: 'shared-slug' }]);
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    expect(patch.slug).toBe('shared-slug-c1');
+    expect(patch.slug).not.toBe('shared-slug'); // the contested URL, not taken
+  });
+
+  it('a first publish takes the always-unique slug when the probe throws', async () => {
+    // The source's rule, kept: a lookup failure must not block a publish, and
+    // with nothing established the suffixed slug is the only safe answer.
+    const store = makeStore(readyDoc(), {
+      queryDocs: vi.fn(async () => {
+        throw new Error('Cosmos unavailable');
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(body.published).toBe(1);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe(
+      'migration-readiness-framework-c1'
+    );
+  });
+
+  it('a republish moves off a slug another document holds, probing Slug as well as slug', async () => {
+    // The stored curated path matters here: it is what the article advertises
+    // as its URL, and taking it unconditionally is how the slug could move
+    // while `publishedUrl` stayed on the contested URL.
+    const published = readyDoc({
+      contentStatus: 'published',
+      slug: 'shared-slug',
+      curatedSubpagePath: '/azure/frameworks/shared-slug',
+    });
+    const store = makeStore(published, {
+      queryDocs: vi.fn(async () => [{ id: 'c1' }, { id: '7MCkl1cSf7GGCgJxlCwZ' }]),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+    const [, query, params] = store.queryDocs.mock.calls[0];
+    // Both fields. `slug` and `Slug` carry different values on ten of the
+    // twenty-two published articles, and the manifest routes on `slug || Slug`.
+    expect(query).toBe('SELECT TOP 2 c.id FROM c WHERE c.slug = @slug OR c.Slug = @slug');
+    expect(params).toEqual([{ name: '@slug', value: 'shared-slug' }]);
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    expect(patch.slug).toBe('shared-slug-c1');
+    expect(patch.Slug).toBe('shared-slug-c1');
+    // ...and the URLs move with it. A stored curatedSubpagePath taken
+    // unconditionally would leave the article advertising the contested URL
+    // while its slug said otherwise.
+    expect(patch.curatedSubpagePath).toBe('/azure/frameworks/shared-slug-c1');
+    expect(patch.publishedUrl).toBe('https://hybridcloudworks.com/azure/frameworks/shared-slug-c1');
+    expect(patch.publicUrl).toBe(patch.publishedUrl);
+    expect(patch.slugPageUrl).toBe(patch.publishedUrl);
+  });
+
+  it('resolveCuratedSubpagePath keeps a curated path but never one naming another slug', () => {
+    const base = { provider: 'Azure', section: 'frameworks' };
+    // Nothing stored: derived from the provider, or nothing at all.
+    expect(resolveCuratedSubpagePath({ ...base, slug: 's' })).toBe('/azure/frameworks/s');
+    expect(resolveCuratedSubpagePath({ section: 'frameworks', slug: 's' })).toBeNull();
+    // Stored and already naming this slug: kept byte for byte, prefix included.
+    expect(resolveCuratedSubpagePath({ ...base, stored: '/curated/deep/path/s', slug: 's' })).toBe(
+      '/curated/deep/path/s'
+    );
+    // Stored but naming a different slug: the last segment moves, the prefix
+    // stays — including when there is no provider to derive a path from.
+    expect(resolveCuratedSubpagePath({ ...base, stored: '/azure/frameworks/old', slug: 's' })).toBe(
+      '/azure/frameworks/s'
+    );
+    expect(resolveCuratedSubpagePath({ stored: '/curated/deep/old/', slug: 's' })).toBe(
+      '/curated/deep/s'
+    );
+    // No slug to write: nothing to reconcile against, so the path is untouched.
+    expect(resolveCuratedSubpagePath({ ...base, stored: '/azure/frameworks/old' })).toBe(
+      '/azure/frameworks/old'
+    );
+  });
+
+  it('resolveCuratedSubpagePath returns an absolute path, so provider inference stays right', () => {
+    // Exactly what useBlogData.js, useFrameworkData.js and
+    // useProviderLandingContent.js do with the stored path. Index 1 is the
+    // provider only while the path starts with a slash: on a relative `aws/x`
+    // it reads the second segment and the article lands under the wrong
+    // provider with nothing to show for it.
+    const providerOf = (path) => String(path || '').split('/')[1];
+
+    const absolute = resolveCuratedSubpagePath({
+      stored: '/aws/architecture-designs/old',
+      slug: 's',
+    });
+    expect(absolute).toBe('/aws/architecture-designs/s');
+    expect(providerOf(absolute)).toBe('aws');
+
+    // A stored path with no leading slash: rebuilt absolute, not left relative.
+    const relative = resolveCuratedSubpagePath({
+      stored: 'aws/architecture-designs/old',
+      slug: 's',
+    });
+    expect(relative).toBe('/aws/architecture-designs/s');
+    expect(providerOf(relative)).toBe('aws');
+
+    // ...and on the paths that are echoed rather than rebuilt, which carry the
+    // same defect: already naming the slug, and no slug to reconcile against.
+    expect(providerOf(resolveCuratedSubpagePath({ stored: 'aws/blog/s', slug: 's' }))).toBe('aws');
+    expect(providerOf(resolveCuratedSubpagePath({ stored: 'aws/blog/s' }))).toBe('aws');
+  });
+
+  it('a republish reads its slug from Slug when the document has no lowercase slug', async () => {
+    const store = makeStore(readyDoc({ contentStatus: 'published', Slug: 'legacy-slug' }), {
+      queryDocs: vi.fn(async () => [{ id: 'c1' }, { id: 'other' }]),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([{ name: '@slug', value: 'legacy-slug' }]);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe('legacy-slug-c1');
+  });
+
+  it('a probe that throws leaves a republished URL alone and still publishes', async () => {
+    const store = makeStore(readyDoc({ contentStatus: 'published', slug: 'existing-slug' }), {
+      queryDocs: vi.fn(async () => {
+        throw new Error('Cosmos unavailable');
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(body.errors).toEqual([]);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe('existing-slug');
+  });
+});
+
 describe('publishContent', () => {
   it('publishes a ready item: status, slug, URLs, provider, version row', async () => {
     const store = makeStore();
@@ -313,24 +549,10 @@ describe('publishContent', () => {
     );
     expect(body.skipped).toBe(1);
     expect(body.mappings[0].slug).toBe('existing-slug');
-    expect(store.queryDocs).not.toHaveBeenCalled(); // no collision probe on republish
     // version row says republished
     expect(
       store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1].versionReason
     ).toBe('republished');
-  });
-
-  it('suffixes the slug only on a real collision by another doc', async () => {
-    const store = makeStore(readyDoc(), {
-      queryDocs: vi.fn(async () => [{ id: 'someone-else' }]),
-    });
-    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    await h.publishContent(
-      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
-      context
-    );
-    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
-    expect(patch.slug).toBe('migration-readiness-framework-c1'); // suffixed with id fragment
   });
 
   it('surfaces the scrapedImages warning without blocking the publish', async () => {

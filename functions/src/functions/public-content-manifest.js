@@ -1,6 +1,11 @@
 /**
  * public-content-manifest.js — the pre-render manifest source (T-718).
- * Registration only; semantics live in lib/public-content-manifest.js.
+ * Registration only; semantics live in lib/public-content-manifest.js and, for
+ * the per-section counts it also returns, lib/public-section-counts.js.
+ *
+ * The store is the same `queryDocs` for every container: the counts read
+ * `blogs`, `podcasts` and `listen_and_learn_episodes` beside `content`,
+ * because that is where the section pages read from (issue #373).
  *
  * No guard, and no rate limit. Both are deliberate and explained at length in
  * the lib: the route serves only published documents projected to an explicit
