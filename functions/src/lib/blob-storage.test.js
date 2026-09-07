@@ -233,6 +233,38 @@ describe('ranged delivery reads (#349)', () => {
     expect(downloadSpy).toHaveBeenCalledWith(4, 4);
     expect(out.body.toString()).toBe('4567');
     expect(out).toMatchObject({ start: 4, end: 7, totalLength: 16, contentType: 'audio/mpeg' });
+    // The size came from Content-Range: a satisfiable range is one round trip.
+    expect(propertiesSpy).not.toHaveBeenCalled();
+  });
+
+  it('reads the true size from properties when Content-Range is missing, at a non-zero start', async () => {
+    // Guessing `start + body.length` here would say 8 for a 16-byte blob and
+    // hand the client a Content-Range total that breaks every later seek.
+    const response = rangedResponse(4, 7);
+    delete response.contentRange;
+    downloadSpy.mockResolvedValueOnce(response);
+    propertiesSpy.mockResolvedValueOnce({
+      contentLength: 16,
+      etag: '"0xR"',
+      contentType: 'audio/mpeg',
+    });
+
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 4, end: 7 });
+    expect(out.totalLength).toBe(16);
+    expect(out).toMatchObject({ start: 4, end: 7 });
+    expect(propertiesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a malformed Content-Range the same way', async () => {
+    downloadSpy.mockResolvedValueOnce({ ...rangedResponse(4, 7), contentRange: 'bytes 4-7/*' });
+    propertiesSpy.mockResolvedValueOnce({
+      contentLength: 16,
+      etag: '"0xR"',
+      contentType: 'audio/mpeg',
+    });
+    const out = await readBlobRangeForDelivery('listenandlearn', 'a/b/c.mp3', { start: 4, end: 7 });
+    expect(out.totalLength).toBe(16);
+    expect(propertiesSpy).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the count open for a range with no end', async () => {

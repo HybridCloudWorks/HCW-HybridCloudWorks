@@ -319,9 +319,18 @@ export async function readBlobRangeForDelivery(containerName, blobName, { start,
   }
   const body = Buffer.concat(chunks);
 
-  // A range that reaches past the end is clamped by the service, so the end
-  // the response actually carries is derived from the bytes, not the request.
-  const totalLength = parseContentRangeTotal(response.contentRange) ?? start + body.length;
+  // The size normally rides on the ranged response's Content-Range, which is
+  // what keeps a seek to one round trip. Without it — absent or malformed —
+  // the size is read from the blob's properties on this path only: guessing
+  // `start + body.length` under-reports it for any non-zero start, and a
+  // wrong Content-Range total is what breaks a client's seeking. The
+  // arithmetic survives only as the last resort for a blob that vanished
+  // between the two calls.
+  let totalLength = parseContentRangeTotal(response.contentRange);
+  if (totalLength === null) {
+    const head = await headBlobForDelivery(containerName, blobName);
+    totalLength = head ? head.contentLength : start + body.length;
+  }
 
   return {
     body,
