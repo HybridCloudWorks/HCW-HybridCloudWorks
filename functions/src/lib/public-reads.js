@@ -461,6 +461,22 @@ const LISTEN_AND_LEARN_LIST_FIELDS = [
 const LISTEN_AND_LEARN_MAX_LISTED = 200;
 
 /**
+ * The allowlist as a SQL projection, so the transcript never leaves Cosmos
+ * for this route — projecting in JS after `SELECT *` still paid to read and
+ * ship the largest field on every row. The soft-delete markers ride along
+ * because `isSoftDeleted` reads them before the JS allowlist drops them; the
+ * sets projection carries only what the join uses. Same `c["…"]` quoting as
+ * LIST_PROJECTION above.
+ */
+const SOFT_DELETE_MARKERS = ['softDeletedAt', 'softDeleteExpiresAt'];
+const LISTEN_AND_LEARN_LIST_PROJECTION = [...LISTEN_AND_LEARN_LIST_FIELDS, ...SOFT_DELETE_MARKERS]
+  .map((f) => `c["${f}"]`)
+  .join(', ');
+const LISTEN_AND_LEARN_SET_PROJECTION = ['id', 'certTitle', 'certSlug', ...SOFT_DELETE_MARKERS]
+  .map((f) => `c["${f}"]`)
+  .join(', ');
+
+/**
  * Where the podcast timer reads its feed list (`fetchPodcastFeeds`, #348):
  * `admin_config/podcast_feeds`, shape `{ feeds: [{ provider, url }] }`. The
  * public podcasts list exposes the matching provider's URL as `feedUrl` so
@@ -1085,7 +1101,7 @@ export function createPublicReadHandlers({ store }) {
         const [episodes, sets] = await Promise.all([
           store.queryDocs(
             LISTEN_AND_LEARN_EPISODE_CONTAINER,
-            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} * FROM c WHERE c.provider = @provider AND c.status = @status ORDER BY c.approvedAt DESC`,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} ${LISTEN_AND_LEARN_LIST_PROJECTION} FROM c WHERE c.provider = @provider AND c.status = @status ORDER BY c.approvedAt DESC`,
             [
               { name: '@provider', value: provider },
               { name: '@status', value: 'published' },
@@ -1093,7 +1109,7 @@ export function createPublicReadHandlers({ store }) {
           ),
           store.queryDocs(
             LISTEN_AND_LEARN_SET_CONTAINER,
-            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} * FROM c WHERE c.provider = @provider`,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} ${LISTEN_AND_LEARN_SET_PROJECTION} FROM c WHERE c.provider = @provider`,
             [{ name: '@provider', value: provider }]
           ),
         ]);

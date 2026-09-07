@@ -1381,6 +1381,27 @@ describe('listListenAndLearnEpisodes — the provider-wide list (#349)', () => {
     expect(query).not.toMatch(/ORDER BY [^,]+,/);
   });
 
+  it('projects the allowlist in SQL so the transcript never leaves Cosmos', async () => {
+    const deps = store();
+    await list(deps);
+    const [episodesQuery, setsQuery] = deps.queryDocs.mock.calls.map((call) => call[1]);
+
+    expect(episodesQuery).not.toMatch(/SELECT TOP \d+ \*/);
+    for (const field of ['id', 'setId', 'title', 'audioUrl', 'durationSeconds', 'approvedAt']) {
+      expect(episodesQuery).toContain(`c["${field}"]`);
+    }
+    expect(episodesQuery).not.toContain('transcript');
+    expect(episodesQuery).not.toContain('approvedBy');
+    // The soft-delete markers must come back or isSoftDeleted cannot run.
+    expect(episodesQuery).toContain('c["softDeletedAt"]');
+    expect(episodesQuery).toContain('c["softDeleteExpiresAt"]');
+
+    expect(setsQuery).not.toMatch(/SELECT TOP \d+ \*/);
+    expect(setsQuery).toContain('c["id"], c["certTitle"], c["certSlug"]');
+    expect(setsQuery).toContain('c["softDeletedAt"]');
+    expect(setsQuery).not.toContain('studyGuideUrl');
+  });
+
   it('projects each row to the listing allowlist and joins the certification', async () => {
     const deps = store({
       episodes: [published()],

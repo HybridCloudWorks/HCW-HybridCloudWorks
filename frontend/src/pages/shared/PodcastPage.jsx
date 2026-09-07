@@ -340,9 +340,11 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const onPlayingChange = useCallback((playing) => setIsPlaying(playing), []);
 
   const visible = filter === 'all' ? episodes : episodes.filter((e) => e.source === filter);
-  const featured = selectedId
-    ? (episodes.find((e) => e.id === selectedId) ?? visible[0] ?? null)
-    : (visible[0] ?? null);
+  // The player follows the list it sits above: a selection the filter hides
+  // gives way to the first visible episode rather than playing something the
+  // list no longer shows.
+  const featured =
+    (selectedId ? visible.find((e) => e.id === selectedId) : null) ?? visible[0] ?? null;
 
   const hasBothSources =
     episodes.some((e) => e.source === SOURCE.host) &&
