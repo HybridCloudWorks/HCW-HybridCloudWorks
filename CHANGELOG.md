@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The content-manifest job can actually open its pull request (found by the
+  first run that had a change to push).** `actions/checkout` persists the job's
+  `GITHUB_TOKEN` as an `http.extraheader` in `.git/config`, and that header
+  outranks a token embedded in the remote URL, so the App installation token
+  the job mints was never the credential git used. The push authenticated as
+  `github-actions[bot]`, which holds `contents: read` in that job by design,
+  and the remote answered 403. `persist-credentials: false` on the checkout
+  leaves the App token as the only credential. The job had reported success on
+  every run since it was rewritten to open a pull request, because the
+  published set had not changed since 2026-08-23 and the push step never ran.
 - **The podcast page is the one audio surface, and the media route serves
   byte ranges (#349, ADR 0029).** A provider's podcast page now lists the
   host's ingested episodes *and* the published Listen & Learn episodes for
