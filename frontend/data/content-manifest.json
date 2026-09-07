@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-07T07:01:12.492Z",
+  "generatedAt": "2026-09-07T21:02:20.677Z",
   "routes": [
     "/azure/blog/azure-foundry-hosted-agents-accelerating-ai-agent-deployment-optimization-featur",
     "/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
@@ -914,32 +914,77 @@
     "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio: duplicate slug (item 7ZCmiOEIlWMg99xQHY0A); first occurrence kept"
   ],
   "sections": {
-    "azure": {
-      "frameworks": 0
-    },
     "aws": {
-      "frameworks": 0
+      "blog": 2,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
+    },
+    "azure": {
+      "blog": 26,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
     },
     "gcp": {
-      "frameworks": 0
-    },
-    "github": {
-      "frameworks": 0
-    },
-    "terraform": {
-      "frameworks": 0
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
     },
     "finops": {
-      "frameworks": 0
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
+    },
+    "github": {
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
+    },
+    "terraform": {
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
     },
     "vmware": {
-      "frameworks": 0
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
     },
     "ansible": {
-      "frameworks": 0
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
     },
     "_unattributed": {
-      "frameworks": 0
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 0,
+      "audio-architecture": 0
     }
   }
 }
