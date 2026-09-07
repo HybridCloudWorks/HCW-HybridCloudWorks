@@ -19,8 +19,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **A publish can no longer put two articles on one URL, and the collisions
-  already in the corpus have a report of their own (#400).** Three published
+- **Every publish now checks whether another article already holds its URL,
+  and the collisions already in the corpus have a report of their own
+  (#400).** One case is deliberately left open and is named below: two
+  first-publishes racing on the same title can still both probe clean and take
+  the same bare slug. Closing it would mean suffixing every new URL with a
+  document id, which is not worth doing to a site's whole URL space for a
+  collision that is rare, recoverable and now reported. Three published
   articles share
   `enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio`,
   so two of them are published with no URL at all and the third's identity
