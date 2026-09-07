@@ -160,6 +160,50 @@ describe('EpisodePlayer', () => {
     expect(screen.queryByRole('note')).toBeNull();
   });
 
+  describe('the episode link comes from feed data and is decided on the sanitised value', () => {
+    const noLinkRendered = () =>
+      screen.queryByRole('link', { name: /Certification|Open/ }) === null;
+
+    it('renders without a link, and without throwing, when link is null', () => {
+      expect(() =>
+        render(<EpisodePlayer episode={{ ...episode, link: null }} meta={meta} />)
+      ).not.toThrow();
+      expect(noLinkRendered()).toBe(true);
+    });
+
+    it('renders without a link when link is not a string at all', () => {
+      expect(() =>
+        render(<EpisodePlayer episode={{ ...episode, link: { href: '/x' } }} meta={meta} />)
+      ).not.toThrow();
+      expect(noLinkRendered()).toBe(true);
+    });
+
+    it('renders no link for a javascript: value', () => {
+      const { container } = render(
+        <EpisodePlayer episode={{ ...episode, link: 'javascript:alert(1)' }} meta={meta} />
+      );
+      expect(noLinkRendered()).toBe(true);
+      expect(container.innerHTML).not.toContain('javascript:');
+    });
+
+    it('keeps an internal path as a same-tab Certification link', () => {
+      render(<EpisodePlayer episode={{ ...episode, link: '/azure/podcast/x' }} meta={meta} />);
+      const cert = screen.getByRole('link', { name: /Certification/ });
+      expect(cert).toHaveAttribute('href', '/azure/podcast/x');
+      expect(cert).not.toHaveAttribute('target');
+    });
+
+    it('keeps an https link as a new-tab Open link', () => {
+      render(
+        <EpisodePlayer episode={{ ...episode, link: 'https://host.example/ep' }} meta={meta} />
+      );
+      const open = screen.getByRole('link', { name: /Open/ });
+      expect(open).toHaveAttribute('href', 'https://host.example/ep');
+      expect(open).toHaveAttribute('target', '_blank');
+      expect(open).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+  });
+
   it('disables play and seek when there is nothing to play', () => {
     render(<EpisodePlayer episode={{ ...episode, mediaUrl: null }} meta={meta} />);
     expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();

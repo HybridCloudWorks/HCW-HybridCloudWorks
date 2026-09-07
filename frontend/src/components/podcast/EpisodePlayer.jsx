@@ -53,6 +53,11 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
   // URL, Play is disabled and Download withheld otherwise. A feed can carry
   // anything in an enclosure.
   const mediaUrl = safeUrl(episode.mediaUrl);
+  // And for the episode link: `link` is `item.link || null` from a feed, so
+  // it can be null or not a string at all. Decide internal-vs-external on the
+  // sanitised string and render the link only when there is one.
+  const link = safeUrl(episode.link);
+  const internalLink = Boolean(link && link.startsWith('/'));
   const known = duration ?? episode.durationSeconds ?? null;
   const sliderMax = known && known > 0 ? known : 0;
 
@@ -185,18 +190,16 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
               Media URL not playable
             </span>
           )}
-          {episode.link && (
+          {link && (
             <a
-              href={safeUrl(episode.link, '#')}
-              {...(episode.link.startsWith('/')
-                ? {}
-                : { target: '_blank', rel: 'noopener noreferrer' })}
+              href={link}
+              {...(internalLink ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
               className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
             >
               <span className="material-symbols-outlined text-[16px]">
-                {episode.link.startsWith('/') ? 'school' : 'open_in_new'}
+                {internalLink ? 'school' : 'open_in_new'}
               </span>
-              {episode.link.startsWith('/') ? 'Certification' : 'Open'}
+              {internalLink ? 'Certification' : 'Open'}
             </a>
           )}
         </div>
