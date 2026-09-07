@@ -93,9 +93,9 @@ This project has not cut a tagged release; entries are grouped under
   and a test holds it to `infra/cosmos-containers.json`: every one of the 72
   provisioned containers exactly once, nothing unprovisioned, 60 on a full
   and 53 on a delta. Logs and telemetry carry container names, counts and
-  durations, never a document. Inert until the `FEATURE_FLAG_COSMOS_EXPORT`
-  app setting is `1`; the container, lifecycle rule, alert rules and setting
-  are the Terraform half. The app gains its first custom-event emitter
+  durations, never a document. Inert until `FEATURE_FLAG_COSMOS_EXPORT` is
+  `true` (or `1`), which Terraform writes from `cosmos_export_enabled`; the
+  container, lifecycle rule, alert rules and setting are the Terraform half. The app gains its first custom-event emitter
   (`lib/telemetry.js`, the edge probe's envelope shape, no SDK), and
   `uploadBlobFromStream` accepts an access tier and metadata. A restore
   runbook (`docs/runbooks/cosmos-restore.md`) gives the quarterly drill from

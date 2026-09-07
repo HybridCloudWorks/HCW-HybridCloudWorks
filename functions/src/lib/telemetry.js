@@ -66,14 +66,17 @@ export function stringifyProperties(properties = {}) {
  * @param {{ iKey: string, name: string, properties?: Record<string, unknown>, time?: Date }} args
  */
 export function buildEventEnvelope({ iKey, name, properties = {}, time = new Date() }) {
-  if (typeof name !== 'string' || !name.trim()) throw new Error('event name is required');
+  // Normalised once and sent normalised: the alert query matches the event
+  // name exactly, and a padded name would be validated here and then miss.
+  const eventName = typeof name === 'string' ? name.trim() : '';
+  if (!eventName) throw new Error('event name is required');
   return {
     name: 'Microsoft.ApplicationInsights.Event',
     time: new Date(time).toISOString(),
     iKey,
     data: {
       baseType: 'EventData',
-      baseData: { ver: 2, name, properties: stringifyProperties(properties) },
+      baseData: { ver: 2, name: eventName, properties: stringifyProperties(properties) },
     },
   };
 }

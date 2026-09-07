@@ -48,8 +48,13 @@ describe('buildEventEnvelope', () => {
     });
   });
 
-  it('requires a name', () => {
+  it('requires a name, and sends a padded one trimmed so the alert query matches it', () => {
     expect(() => buildEventEnvelope({ iKey: 'k', name: '' })).toThrow(/name is required/);
+    expect(() => buildEventEnvelope({ iKey: 'k', name: '   ' })).toThrow(/name is required/);
+    expect(() => buildEventEnvelope({ iKey: 'k', name: 42 })).toThrow(/name is required/);
+    expect(
+      buildEventEnvelope({ iKey: 'k', name: '  cosmosExportCompleted \n' }).data.baseData.name
+    ).toBe('cosmosExportCompleted');
   });
 
   it('stringifyProperties drops null and undefined and keeps strings as they are', () => {

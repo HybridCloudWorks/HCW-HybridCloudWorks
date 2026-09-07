@@ -2,8 +2,9 @@
 
 > **Status: exporter merged, not yet armed; no drill run yet.** The exporter
 > (`cosmosExportScheduler` and the `cosmos-export-container` job,
-> `functions/src/lib/backup/`) is inert until the `FEATURE_FLAG_COSMOS_EXPORT`
-> app setting is `1`; the private `cosmos-export` container, its 35-day
+> `functions/src/lib/backup/`) is inert until `FEATURE_FLAG_COSMOS_EXPORT` is
+> `true` (or `1`), which Terraform writes from the `cosmos_export_enabled`
+> workspace variable; the private `cosmos-export` container, its 35-day
 > lifecycle rule and the two missing-run alert rules are the Terraform half of
 > issue #231. The Drills table at the end is empty until the first drill is
 > run. This page records what was **restored** and how long it took, not what

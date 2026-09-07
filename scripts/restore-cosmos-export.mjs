@@ -104,7 +104,8 @@ export function parseOptions(argv) {
     storageAccount,
     targetEndpoint: targetEndpoint || null,
     database,
-    asOf: options['as-of'],
+    // Trimmed like the other string options; selectRestoreSet validates the shape.
+    asOf: options['as-of'] === undefined ? undefined : options['as-of'].trim(),
     containers: splitList(options.containers),
     concurrency: parseConcurrency(options.concurrency),
     dryRun: flags['dry-run'],

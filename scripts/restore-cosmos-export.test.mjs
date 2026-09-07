@@ -284,6 +284,9 @@ describe('parseOptions', () => {
     expect(
       parseOptions(['--storage-account', 's', '--dry-run', '--database', ' drill ']).database
     ).toBe('drill');
+    expect(
+      parseOptions(['--storage-account', 's', '--dry-run', '--as-of', '2026-09-14 ']).asOf
+    ).toBe('2026-09-14');
     for (const blank of ['', '   ']) {
       expect(() =>
         parseOptions(['--storage-account', 's', '--dry-run', '--database', blank])
