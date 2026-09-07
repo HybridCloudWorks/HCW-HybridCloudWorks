@@ -211,7 +211,15 @@ const FETCH_WINDOW = 1000;
  * PUBLIC_STATUSES is inlined as literals rather than parameterized because the
  * values are this module's own constants, not caller input.
  */
-const SQL_PUBLIC_CLAUSE =
+/**
+ * EXPORTED so `public-section-counts.js` can ask the same question of the same
+ * containers. Those counts decide whether a section page is advertised in
+ * `sitemap.xml` (issue #373), and a count taken through a different filter than
+ * the page's own would be a number about a different set of documents — the
+ * failure being that a page showing articles is dropped from the sitemap
+ * because something else called them unpublished.
+ */
+export const SQL_PUBLIC_CLAUSE =
   '(c.Live = true OR c.Status = "Live" OR c.contentStatus IN ' +
   `(${[...PUBLIC_STATUSES].map((s) => `"${s}"`).join(', ')}))`;
 
@@ -219,7 +227,7 @@ const SQL_PUBLIC_CLAUSE =
 const sqlNotTruthy = (field) =>
   `(NOT IS_DEFINED(c.${field}) OR IS_NULL(c.${field}) OR c.${field} = "" OR c.${field} = false OR c.${field} = 0)`;
 
-const SQL_NOT_SOFT_DELETED = `${sqlNotTruthy('softDeletedAt')} AND ${sqlNotTruthy('softDeleteExpiresAt')}`;
+export const SQL_NOT_SOFT_DELETED = `${sqlNotTruthy('softDeletedAt')} AND ${sqlNotTruthy('softDeleteExpiresAt')}`;
 
 /**
  * What the public LIST endpoint returns per document (TODO.md T-206).
