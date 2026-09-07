@@ -947,7 +947,11 @@ export function createPublicReadHandlers({ store }) {
             );
             feedUrl = resolveFeedUrlForProvider(config, provider);
           } catch (error) {
-            context.warn?.('publicListPodcasts: feed config unreadable:', error?.message);
+            // Status or code only. A Cosmos SDK message can carry the
+            // container, id and partition key of the request, and telemetry
+            // here stays content-free.
+            const code = error?.statusCode ?? error?.code ?? 'unknown';
+            context.warn?.(`publicListPodcasts: feed config unreadable (${code})`);
           }
         }
 

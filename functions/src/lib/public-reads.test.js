@@ -1271,19 +1271,33 @@ describe('listPodcasts feedUrl (#349)', () => {
     expect(store.readDoc).not.toHaveBeenCalled();
   });
 
-  it('degrades to null when the config read fails, rather than failing the list', async () => {
+  it('degrades to null when the config read fails, warning with a code and no message', async () => {
     const store = {
       queryDocs: vi.fn(async () => [{ id: 'e1', provider: 'azure' }]),
       readDoc: vi.fn(async () => {
-        throw new Error('cosmos down');
+        // The shape of a Cosmos SDK failure: the message names the request.
+        throw Object.assign(
+          new Error('Request to dbs/site/colls/admin_config/docs/podcast_feeds failed'),
+          { statusCode: 503, code: 'ServiceUnavailable' }
+        );
       }),
     };
+    const warn = vi.fn();
     const res = await createPublicReadHandlers({ store }).listPodcasts(
       makeRequest({ query: { provider: 'azure' } }),
-      { ...context, warn: vi.fn() }
+      { ...context, warn }
     );
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body).feedUrl).toBeNull();
+
+    // Telemetry stays content-free: the status, never the SDK's message,
+    // which carries the container, id and partition key of the request.
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = warn.mock.calls[0].map(String).join(' ');
+    expect(logged).toContain('503');
+    expect(logged).not.toContain('admin_config');
+    expect(logged).not.toContain('podcast_feeds');
+    expect(logged).not.toContain('Request to');
   });
 
   it('reads the same document the timer ingests from', async () => {
