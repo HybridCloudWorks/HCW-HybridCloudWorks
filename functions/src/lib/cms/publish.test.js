@@ -314,7 +314,15 @@ describe('slug assignment (#400)', () => {
   });
 
   it('a republish moves off a slug another document holds, probing Slug as well as slug', async () => {
-    const store = makeStore(readyDoc({ contentStatus: 'published', slug: 'shared-slug' }), {
+    // The stored curated path matters here: it is what the article advertises
+    // as its URL, and taking it unconditionally is how the slug could move
+    // while `publishedUrl` stayed on the contested URL.
+    const published = readyDoc({
+      contentStatus: 'published',
+      slug: 'shared-slug',
+      curatedSubpagePath: '/azure/frameworks/shared-slug',
+    });
+    const store = makeStore(published, {
       queryDocs: vi.fn(async () => [{ id: 'c1' }, { id: '7MCkl1cSf7GGCgJxlCwZ' }]),
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
