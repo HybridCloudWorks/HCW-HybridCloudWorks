@@ -1013,7 +1013,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
 # customEvents, not AppEvents: the scope is the component, which resolves the
 # classic schema, exactly as the exceptions rule explains. customDimensions
 # is a dynamic column, hence the tostring() before comparing.
-resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_delta_missing" {
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_daily_missing" {
   count               = var.cosmos_export_enabled ? 1 : 0
   name                = "alert-cosmos-export-daily-${var.environment}-${var.region_abbreviation}"
   resource_group_name = azurerm_resource_group.app["web"].name

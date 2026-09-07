@@ -284,18 +284,15 @@ resource "azurerm_storage_management_policy" "cleanup" {
   # uses: an export blob is written once and never touched again, so its
   # creation is its run date and the retention counts from the run.
   #
-  # Unlike the articles/ rule, this prefix names a container that exists.
-  # Azure matches prefix_match against `<container>/<blob>`, so
-  # "cosmos-export/" is exactly azurerm_storage_container.cosmos_export and
-  # nothing else on the account. The ADR scopes the rule to the whole
-  # container, so the `state/` continuation tokens are under it too. Whether
-  # Azure counts an in-place overwrite as a new creation for this condition
-  # is not something the lifecycle documentation states, so a token that must
-  # outlive 35 days needs the exporter to re-create its blob rather than
-  # overwrite it — or this list narrows to "cosmos-export/full/" and
-  # "cosmos-export/delta/". That is the functions/ half's call; until it is
-  # made, the ADR's scope stands and a lost token costs one full read, which
-  # the next Sunday does anyway.
+  # Unlike the articles/ rule, these prefixes name a container that exists.
+  # Azure matches prefix_match against `<container>/<blob>`, so both resolve
+  # inside azurerm_storage_container.cosmos_export and nowhere else on the
+  # account. The two run prefixes, NOT the whole container the ADR names:
+  # `state/` holds the change-feed continuation tokens, which the exporter
+  # overwrites in place every delta, and whether an in-place overwrite resets
+  # the creation time this condition reads is not documented — a token
+  # expired after 35 idle days would turn the next delta into a silent full
+  # or a failure, so `state/` is simply never under this rule.
   #
   # The expire-noncurrent-versions rule above applies here as well — an
   # overwritten marker or token keeps its previous version 30 days, bounded
@@ -305,7 +302,7 @@ resource "azurerm_storage_management_policy" "cleanup" {
     enabled = true
 
     filters {
-      prefix_match = ["cosmos-export/"]
+      prefix_match = ["cosmos-export/full/", "cosmos-export/delta/"]
       blob_types   = ["blockBlob"]
     }
 

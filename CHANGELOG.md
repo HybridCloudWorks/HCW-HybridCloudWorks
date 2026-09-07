@@ -22,8 +22,9 @@ This project has not cut a tagged release; entries are grouped under
 - **Cosmos exporter infrastructure, inert until armed (#231, ADR 0028).** The
   Azure half of the out-of-account export: a private `cosmos-export`
   container on the RA-GRS content account, a lifecycle rule that deletes its
-  base blobs 35 days after creation (five weekly fulls plus their deltas,
-  about 12 GB), a `FEATURE_FLAG_COSMOS_EXPORT` app setting on the Function
+  `full/` and `delta/` run blobs 35 days after creation (five weekly fulls
+  plus their deltas, about 12 GB; the `state/` change-feed tokens are never
+  under it), a `FEATURE_FLAG_COSMOS_EXPORT` app setting on the Function
   App, and two scheduled-query alert rules that fire on the *absence* of a
   `cosmosExportCompleted` custom event — one daily for any completed run in
   the trailing two days, one on Mondays for the Sunday full. All of it hangs

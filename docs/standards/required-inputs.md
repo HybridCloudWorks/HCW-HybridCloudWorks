@@ -99,9 +99,11 @@ silently deploy the workload into a platform landing zone.
 | `budget_alert_email` | no | Budget alert action group |
 
 **Terraform variables — defaulted.** The other 54 carry defaults and need no
-workspace entry. Eight are posture switches rather than settings, and every one
-defaults to the estate as it stands or to the safer value, so an apply never
-changes behaviour without a workspace edit first:
+workspace entry. The table below lists the eight that are posture switches
+rather than settings — every one defaults to the estate as it stands or to the
+safer value, so an apply never changes behaviour without a workspace edit
+first — plus `cloudflare_origin_secret`, which is a defaulted input rather than
+a switch and is here because it must match a Key Vault secret exactly:
 
 | Name | Default | What arming it does |
 | --- | --- | --- |
@@ -109,7 +111,7 @@ changes behaviour without a workspace edit first:
 | `enabled_timers` | `[]` | Per-timer allow-list, armed one name at a time |
 | `availability_test_enabled` | `false` | Standard web test and its alert. Stays `false`: Bot Fight Mode still 403s Azure's availability agents, and the reachability signal is served by the ADR 0024 Worker probe instead |
 | `availability_probe_alert_enabled` | `false` in code, **set `true` in the workspace 2026-09-01 (T-519 closed)** | Arms `edge_probe_availability` (`alert-api-reachability-prod-cus`) on the Worker probe's `availabilityResults` rows. Armed only after a full 30-minute window held 6 healthy rows |
-| `cosmos_export_enabled` | `false` | Arms the Cosmos exporter (`FEATURE_FLAG_COSMOS_EXPORT`) and creates `cosmos_export_delta_missing` and `cosmos_export_full_missing` (`alert-cosmos-export-daily-prod-cus`, `alert-cosmos-export-full-prod-cus`) together — ADR 0028. Arm only after the exporter is deployed and a `cosmosExportCompleted` event has been seen, and not on a Sunday after 03:00 UTC |
+| `cosmos_export_enabled` | `false` | Arms the Cosmos exporter (`FEATURE_FLAG_COSMOS_EXPORT`) and creates `cosmos_export_daily_missing` and `cosmos_export_full_missing` (`alert-cosmos-export-daily-prod-cus`, `alert-cosmos-export-full-prod-cus`) together — ADR 0028. Arm only after the exporter is deployed and a `cosmosExportCompleted` event has been seen, and not on a Sunday after 03:00 UTC |
 | `functions_scm_lock_enabled` | `false` in code, **set `true` in the workspace 2026-08-25** | Denies SCM/Kudu by default; `deploy-functions.yml` opens a per-run window. Proven under `Deny` by run 32902534458 |
 | `functions_origin_lock_enabled` | `true` | Restricts the origin to Cloudflare ranges. Already on |
 | `purge_protection_enabled` | `false` | Key Vault purge protection. Off as an accepted risk — see [Accepted risks](../repo/todo.md#accepted-risks) |
