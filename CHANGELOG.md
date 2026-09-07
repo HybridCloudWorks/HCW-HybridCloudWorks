@@ -19,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The two live checks that need an admin's token run from Admin →
+  Diagnostics (#355, #356).** Both issues had the owner copying a bearer
+  token out of developer tools and decoding it by hand. `/admin/diagnostics`
+  does the checks in the signed-in session: it acquires the access token the
+  way every API call does, decodes it locally, and keeps only claim names plus
+  `aud`, `roles` and `exp` — the token, `oid`, `sub` and email never reach
+  React state, the DOM or the clipboard, and the registry comparison is a
+  boolean computed in the browser. The values it compares against come from
+  a new `GET /api/getAuthExpectations` (admin-identity-http.js), which
+  returns the audience and tenant the verifier is configured with and the App
+  Role value the guard checks, so the page tests the API as deployed rather
+  than a constant built into the frontend; it sits behind `requireUser`
+  rather than `requireRole` because the caller being diagnosed may hold the
+  role and be missing from the registry, and it discloses nothing a valid
+  token does not already carry. The Labs panel submits one `shell-echo` job
+  exactly as the Labs console does, reads the `lab_jobs` document back and
+  cancels it so nothing is left queued for the next agent, then judges the
+  result against the documented `{ jobId, type, status: 'queued' }`
+  response; a second button repeats the request through a plain `fetch`
+  with no Authorization header and passes only on 401/403. Copy report puts
+  a Markdown summary — names, booleans, statuses and job ids — on the
+  clipboard for the closing comments on #355 and #356. Registered in
+  `.azure/api-surface.json`; handler and page tests beside each module.
 - **Landing hero rotations and default covers are generated art (#371, #351).**
   The four landing pages whose hero sets never existed (`/gcp`, `/github`,
   `/terraform`, `/finops`, twenty 404s per the audit) get their five images

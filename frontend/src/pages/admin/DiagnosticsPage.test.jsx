@@ -1,0 +1,443 @@
+/**
+ * The page's promise is negative: the token and the person are never shown.
+ * So most of what is held here is absence — the raw token, `oid`, `sub` and
+ * `email` never reach the DOM, the report, or the clipboard — alongside the
+ * pass/fail lines #355 and #356 define.
+ */
+import React from 'react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+import DiagnosticsPage, {
+  LABS_PROBE_JOB,
+  buildReport,
+  decodeJwtPayload,
+  evaluateLabsProbe,
+  evaluateUnauthenticatedProbe,
+  relativeExpiry,
+  summarizeAdminStatus,
+  summarizeToken,
+} from './DiagnosticsPage';
+
+const authedFetch = vi.fn();
+const getJSON = vi.fn();
+const postJSON = vi.fn();
+const acquireApiToken = vi.fn();
+const toast = vi.fn();
+
+vi.mock('@/lib/api', () => ({
+  authedFetch: (...args) => authedFetch(...args),
+  getJSON: (...args) => getJSON(...args),
+  postJSON: (...args) => postJSON(...args),
+  getEndpoint: (name) => `https://api.example.test/api/${name}`,
+}));
+vi.mock('@/lib/entraAuth', () => ({ acquireApiToken: (...args) => acquireApiToken(...args) }));
+vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
+vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
+
+// ── A token that would be a disclosure if any of it leaked ───────────────────
+
+const OID = 'a1b2c3d4-oid-of-the-person';
+const EMAIL = 'owner@hcw.example';
+const NOW_SECONDS = 1_800_000_000;
+
+const b64url = (obj) =>
+  Buffer.from(JSON.stringify(obj))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+const CLAIMS = {
+  aud: 'api://api-app-id',
+  iss: 'https://login.microsoftonline.com/tenant-1/v2.0',
+  tid: 'tenant-1',
+  oid: OID,
+  sub: 'sub-pairwise-id',
+  email: EMAIL,
+  preferred_username: EMAIL,
+  name: 'The Owner',
+  roles: ['Admin'],
+  exp: NOW_SECONDS + 3600,
+  iat: NOW_SECONDS,
+};
+const TOKEN = `${b64url({ alg: 'RS256', typ: 'JWT' })}.${b64url(CLAIMS)}.signature-bytes`;
+
+const EXPECTATIONS = {
+  expectedAudience: 'api://api-app-id',
+  tenantId: 'tenant-1',
+  adminAppRole: 'Admin',
+  registryContainer: 'admins',
+};
+
+const ADMIN_STATUS = {
+  isAdmin: true,
+  uid: OID,
+  email: EMAIL,
+  role: 'super_admin',
+  permissions: ['read:content', 'manage:admins'],
+  active: true,
+};
+
+const jsonResponse = (status, body) => ({ status, ok: status < 400, json: async () => body });
+
+/** Every string that must never appear on screen or in the report. */
+const SECRETS = [TOKEN, OID, EMAIL, 'sub-pairwise-id', 'The Owner'];
+const expectNoSecrets = (text) => {
+  for (const secret of SECRETS) expect(text).not.toContain(secret);
+};
+
+beforeEach(() => {
+  acquireApiToken.mockReset().mockResolvedValue(TOKEN);
+  getJSON.mockReset().mockResolvedValue(EXPECTATIONS);
+  authedFetch.mockReset().mockImplementation(async (name) => {
+    if (name === 'getCurrentAdminStatus') return jsonResponse(200, ADMIN_STATUS);
+    if (name === 'enqueueLabJob') {
+      return jsonResponse(200, { jobId: 'job-123', type: 'shell-echo', status: 'queued' });
+    }
+    throw new Error(`unexpected authedFetch ${name}`);
+  });
+  postJSON.mockReset().mockImplementation(async (name, body) => {
+    if (name === 'getLabJob') return { job: { id: body.jobId, status: postJSON.jobStatus } };
+    if (name === 'cancelLabJob') {
+      postJSON.jobStatus = 'cancelled';
+      return { jobId: body.jobId, status: 'cancelled' };
+    }
+    throw new Error(`unexpected postJSON ${name}`);
+  });
+  postJSON.jobStatus = 'queued';
+  toast.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+describe('decodeJwtPayload', () => {
+  it('reads a base64url payload without verifying it', () => {
+    expect(decodeJwtPayload(TOKEN)).toMatchObject({ aud: 'api://api-app-id', roles: ['Admin'] });
+  });
+
+  it('returns null for anything that is not a JWT', () => {
+    expect(decodeJwtPayload('')).toBeNull();
+    expect(decodeJwtPayload('not.a-jwt')).toBeNull();
+    expect(decodeJwtPayload('a.!!!.c')).toBeNull();
+    expect(decodeJwtPayload(undefined)).toBeNull();
+  });
+});
+
+describe('relativeExpiry', () => {
+  it('reads forward and backward', () => {
+    const now = NOW_SECONDS * 1000;
+    expect(relativeExpiry(NOW_SECONDS + 45, now)).toEqual({ label: 'in 45 s', expired: false });
+    expect(relativeExpiry(NOW_SECONDS + 1800, now)).toEqual({ label: 'in 30 min', expired: false });
+    expect(relativeExpiry(NOW_SECONDS + 7200, now)).toEqual({ label: 'in 2.0 h', expired: false });
+    expect(relativeExpiry(NOW_SECONDS - 120, now)).toEqual({ label: '2 min ago', expired: true });
+    expect(relativeExpiry(undefined, now)).toEqual({ label: 'no exp claim', expired: null });
+  });
+});
+
+describe('summarizeToken', () => {
+  it('keeps claim names and the four checked values, and drops the person', () => {
+    const summary = summarizeToken(CLAIMS, EXPECTATIONS, NOW_SECONDS * 1000);
+    expect(summary.claimNames).toEqual(Object.keys(CLAIMS).sort());
+    expect(summary).toMatchObject({
+      aud: 'api://api-app-id',
+      audienceMatches: true,
+      roleNames: ['Admin'],
+      hasAdminRole: true,
+      tenantMatches: true,
+      expiresLabel: 'in 1.0 h',
+      expired: false,
+    });
+    expectNoSecrets(JSON.stringify(summary));
+  });
+
+  it('compares exactly, the way the verifier does', () => {
+    const drifted = summarizeToken(
+      { ...CLAIMS, aud: 'api-app-id', roles: ['admin'] },
+      EXPECTATIONS
+    );
+    expect(drifted.audienceMatches).toBe(false);
+    expect(drifted.hasAdminRole).toBe(false);
+  });
+
+  it('reports unknown rather than guessing when the API gave no expectations', () => {
+    const summary = summarizeToken(CLAIMS, null);
+    expect(summary.audienceMatches).toBeNull();
+    expect(summary.hasAdminRole).toBeNull();
+    expect(summary.tenantMatches).toBeNull();
+    expect(summary.aud).toBe('api://api-app-id'); // the value is still shown
+  });
+
+  it('is null without a payload', () => {
+    expect(summarizeToken(null, EXPECTATIONS)).toBeNull();
+  });
+});
+
+describe('summarizeAdminStatus', () => {
+  it('compares the uid to the token and keeps only the verdict', () => {
+    const summary = summarizeAdminStatus(ADMIN_STATUS, OID);
+    expect(summary).toEqual({
+      isAdmin: true,
+      role: 'super_admin',
+      active: true,
+      permissions: ['read:content', 'manage:admins'],
+      uidPresent: true,
+      uidMatchesToken: true,
+      emailPresent: true,
+    });
+    expectNoSecrets(JSON.stringify(summary));
+  });
+
+  it('flags a registry keyed on a different principal', () => {
+    expect(
+      summarizeAdminStatus({ ...ADMIN_STATUS, uid: 'someone-else' }, OID).uidMatchesToken
+    ).toBe(false);
+    expect(summarizeAdminStatus({ isAdmin: false }, OID).uidMatchesToken).toBeNull();
+  });
+});
+
+describe('evaluateLabsProbe', () => {
+  const good = {
+    enqueue: { httpStatus: 200, jobId: 'job-1', type: 'shell-echo', status: 'queued' },
+    read: { found: true, status: 'queued' },
+    cancel: { httpStatus: 200, status: 'cancelled' },
+    final: { status: 'cancelled' },
+  };
+
+  it('passes on the documented response with a settled document', () => {
+    expect(evaluateLabsProbe(good)).toEqual({
+      pass: true,
+      reason: 'documented no-op response; document cancelled',
+    });
+  });
+
+  it('also passes when an agent claimed the job before the cancel — not a hang', () => {
+    expect(
+      evaluateLabsProbe({
+        ...good,
+        cancel: { error: 'Job is no longer queued' },
+        final: { status: 'running' },
+      }).pass
+    ).toBe(true);
+  });
+
+  it('fails on a 500, a missing document, or a job left queued', () => {
+    expect(evaluateLabsProbe({ ...good, enqueue: { httpStatus: 500, error: 'boom' } }).pass).toBe(
+      false
+    );
+    expect(evaluateLabsProbe({ ...good, read: { found: false } }).pass).toBe(false);
+    expect(evaluateLabsProbe({ ...good, final: { status: 'queued' } })).toEqual({
+      pass: false,
+      reason: 'lab_jobs/job-1 is still "queued"',
+    });
+  });
+
+  it('is unknown before it has run', () => {
+    expect(evaluateLabsProbe(null).pass).toBeNull();
+  });
+});
+
+describe('evaluateUnauthenticatedProbe', () => {
+  it('accepts only 401 and 403', () => {
+    expect(evaluateUnauthenticatedProbe({ httpStatus: 401 }).pass).toBe(true);
+    expect(evaluateUnauthenticatedProbe({ httpStatus: 403 }).pass).toBe(true);
+    expect(evaluateUnauthenticatedProbe({ httpStatus: 200 }).pass).toBe(false);
+    expect(evaluateUnauthenticatedProbe({ httpStatus: null, error: 'network' }).pass).toBe(false);
+    expect(evaluateUnauthenticatedProbe(null).pass).toBeNull();
+  });
+});
+
+describe('buildReport', () => {
+  it('names claims, verdicts and job ids, and nothing that identifies the person', () => {
+    const report = buildReport({
+      generatedAt: '2026-09-07T00:00:00.000Z',
+      token: summarizeToken(CLAIMS, EXPECTATIONS, NOW_SECONDS * 1000),
+      expectations: EXPECTATIONS,
+      admin: summarizeAdminStatus(ADMIN_STATUS, OID),
+      adminHttp: 200,
+      labs: {
+        enqueue: { httpStatus: 200, jobId: 'job-1', type: 'shell-echo', status: 'queued' },
+        read: { found: true, status: 'queued' },
+        cancel: { httpStatus: 200, status: 'cancelled' },
+        final: { status: 'cancelled' },
+      },
+      unauth: { httpStatus: 401 },
+    });
+    expect(report).toContain('### #355');
+    expect(report).toContain(
+      'Claims present (names only): aud, email, exp, iat, iss, name, oid, preferred_username, roles, sub, tid'
+    );
+    expect(report).toContain("`aud` equals the API's ENTRA_API_AUDIENCE: PASS");
+    expect(report).toContain('App Role `Admin` present in `roles`: PASS');
+    expect(report).toContain('Registry uid equals token oid: PASS');
+    expect(report).toContain('- Result: PASS');
+    expect(report).toContain('### #356');
+    expect(report).toContain('jobId job-1');
+    expect(report).toContain('Authenticated no-op path: PASS');
+    expect(report).toContain('no Authorization header: PASS (HTTP 401)');
+    expectNoSecrets(report);
+  });
+
+  it('marks the identity result FAIL when the registry disagrees with the token', () => {
+    const report = buildReport({
+      generatedAt: 'now',
+      token: summarizeToken(CLAIMS, EXPECTATIONS),
+      expectations: EXPECTATIONS,
+      admin: summarizeAdminStatus({ isAdmin: false, uid: OID, email: EMAIL }, OID),
+      adminHttp: 200,
+    });
+    expect(report).toContain('isAdmin false');
+    expect(report).toContain('- Result: FAIL');
+    expect(report).toContain('Authenticated no-op path: UNKNOWN (not run)');
+    expectNoSecrets(report);
+  });
+
+  it('is honest about what could not be read', () => {
+    const report = buildReport({
+      generatedAt: 'now',
+      tokenError: 'Not authenticated. Please sign in.',
+    });
+    expect(report).toContain('Token: could not be read (Not authenticated. Please sign in.)');
+    expect(report).toContain('getCurrentAdminStatus: not called');
+    expect(report).toContain('- Result: UNKNOWN');
+  });
+});
+
+// ── The page ──────────────────────────────────────────────────────────────────
+
+describe('the page', () => {
+  // The report <pre> repeats most of what the rows say, so wait on a verdict
+  // line that appears exactly once rather than on a value.
+  const identityLoaded = () =>
+    waitFor(() => expect(screen.getByText('Caller is an admin per the registry')).toBeTruthy());
+  const seen = (pattern) => expect(screen.getAllByText(pattern).length).toBeGreaterThan(0);
+
+  it('runs the identity checks on load and shows names, verdicts, and no person', async () => {
+    const { container } = render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    expect(acquireApiToken).toHaveBeenCalledTimes(1);
+    expect(getJSON).toHaveBeenCalledWith('getAuthExpectations');
+    expect(authedFetch).toHaveBeenCalledWith('getCurrentAdminStatus', { method: 'GET' });
+
+    seen(/aud, email, exp, iat, iss, name, oid, preferred_username, roles, sub, tid/);
+    expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
+    expect(screen.queryByText('FAIL')).toBeNull();
+    expectNoSecrets(container.textContent);
+  });
+
+  it('reports the API refusing the token as unknown, with the refusal shown', async () => {
+    getJSON.mockRejectedValue(new Error('Authentication required'));
+    authedFetch.mockRejectedValue(new Error('Invalid token'));
+    const { container } = render(<DiagnosticsPage />);
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy());
+    expect(screen.getByRole('status').textContent).toContain('Authentication required');
+    expect(screen.getAllByText('UNKNOWN').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText('Invalid token')).toBeTruthy();
+    expectNoSecrets(container.textContent);
+  });
+
+  it('submits the probe as the Labs console would, reads it back, cancels it, and passes', async () => {
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    fireEvent.click(screen.getByText('Run authenticated probe'));
+    await waitFor(() => seen(/job-123/));
+
+    expect(authedFetch).toHaveBeenCalledWith('enqueueLabJob', {
+      method: 'POST',
+      body: JSON.stringify(LABS_PROBE_JOB),
+    });
+    expect(LABS_PROBE_JOB).toEqual({ type: 'shell-echo', payload: '' });
+    const labCalls = postJSON.mock.calls.map(([name]) => name);
+    expect(labCalls).toEqual(['getLabJob', 'cancelLabJob', 'getLabJob']);
+    expect(
+      screen.getByText(/Authenticated no-op path — documented no-op response; document cancelled/)
+    ).toBeTruthy();
+  });
+
+  it('shows a 500 from enqueue as a failure rather than a crash', async () => {
+    authedFetch.mockImplementation(async (name) => {
+      if (name === 'getCurrentAdminStatus') return jsonResponse(200, ADMIN_STATUS);
+      throw new Error('enqueueLabJob failed with HTTP 500. Try again or check the logs.');
+    });
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    fireEvent.click(screen.getByText('Run authenticated probe'));
+    await waitFor(() => seen(/HTTP 500/));
+    expect(postJSON).not.toHaveBeenCalled();
+    seen(/enqueueLabJob answered no status/);
+  });
+
+  it('sends the unauthenticated probe through plain fetch with no Authorization header', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(401, { ok: false, error: 'Authentication required' })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+    acquireApiToken.mockClear();
+
+    fireEvent.click(screen.getByText('Run unauthenticated probe'));
+    await waitFor(() =>
+      expect(screen.getByText(/HTTP 401 · Authentication required/)).toBeTruthy()
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [[url, init]] = fetchMock.mock.calls;
+    expect(url).toBe('https://api.example.test/api/enqueueLabJob');
+    expect(init.method).toBe('POST');
+    expect(Object.keys(init.headers).map((h) => h.toLowerCase())).not.toContain('authorization');
+    expect(init.body).toBe(JSON.stringify(LABS_PROBE_JOB));
+    // No token was even acquired for this path.
+    expect(acquireApiToken).not.toHaveBeenCalled();
+    expect(screen.getByText(/Unauthenticated request refused — HTTP 401/)).toBeTruthy();
+  });
+
+  it('a 200 on the unauthenticated probe is a FAIL', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { jobId: 'leak' }))
+    );
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+    fireEvent.click(screen.getByText('Run unauthenticated probe'));
+    await waitFor(() =>
+      expect(screen.getByText(/Unauthenticated request refused — HTTP 200/)).toBeTruthy()
+    );
+    expect(screen.getByText('FAIL')).toBeTruthy();
+  });
+
+  it('copies the report — the same summary, never the token', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    fireEvent.click(screen.getByText('Copy report'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const [[copied]] = writeText.mock.calls;
+    expect(copied).toContain('### #355');
+    expect(copied).toContain('### #356');
+    expect(copied).toContain('Registry uid equals token oid: PASS');
+    expectNoSecrets(copied);
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Report copied' }));
+  });
+
+  it('says so when the clipboard is unavailable, and leaves the report on screen', async () => {
+    vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    fireEvent.click(screen.getByText('Copy report'));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'destructive' }))
+    );
+    expect(screen.getByLabelText('Diagnostics report').textContent).toContain('### #355');
+  });
+});
