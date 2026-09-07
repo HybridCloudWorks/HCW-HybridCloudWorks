@@ -61,6 +61,21 @@ vi.mock('@/hooks/useAudioEpisodes', () => ({
   default: () => ({ episodes, feedUrl: 'https://feeds.example/azure.xml', loading: false }),
 }));
 
+// A player that reports state only when played, never on mount. The page
+// must not rely on the real player announcing "paused" after it remounts —
+// that arrives a render late, and the list indicator would flash meanwhile.
+// EpisodePlayer has its own tests.
+vi.mock('@/components/podcast/EpisodePlayer', () => ({
+  default: ({ episode, onPlayingChange }) => (
+    <article data-testid="episode-player">
+      <h2>{episode.title}</h2>
+      <button type="button" onClick={() => onPlayingChange?.(true)}>
+        Play
+      </button>
+    </article>
+  ),
+}));
+
 import SharedPodcastPage from './PodcastPage';
 
 const mount = () =>
@@ -114,6 +129,21 @@ describe('SharedPodcastPage', () => {
     const row = screen.getByRole('button', { name: /Host old/ });
     expect(row.querySelector('img')).toBeNull();
     expect(row.querySelector('.material-symbols-outlined')).toHaveTextContent('podcasts');
+  });
+
+  it('drops the playing indicator the moment a different episode is selected', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+    // The selected row shows the indicator while the player reports playing.
+    const playingRow = screen.getByRole('button', { name: /Host new/ });
+    expect(playingRow).toHaveTextContent('graphic_eq');
+
+    fireEvent.click(screen.getByRole('button', { name: /Identities and governance/ }));
+    // A different episode mounts a paused player; no row may claim otherwise,
+    // not even for the render before the new player reports its state.
+    expect(screen.queryByText('graphic_eq')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
+    expect(playerTitle()).toHaveTextContent('Identities and governance');
   });
 
   it('keeps a selection that survives the filter', () => {

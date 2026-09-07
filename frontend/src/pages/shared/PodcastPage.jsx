@@ -329,6 +329,19 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const [filter, setFilter] = useState('all');
   const onPlayingChange = useCallback((playing) => setIsPlaying(playing), []);
 
+  // A different episode mounts a paused player. The list indicator reads the
+  // page-level flag, so it is reset here rather than a render later when the
+  // new player reports its state — otherwise the indicator flashes on the new
+  // row while nothing is playing.
+  function selectEpisode(id) {
+    setSelectedId(id);
+    setIsPlaying(false);
+  }
+  function selectFilter(key) {
+    setFilter(key);
+    setIsPlaying(false);
+  }
+
   const visible = filter === 'all' ? episodes : episodes.filter((e) => e.source === filter);
   // The player follows the list it sits above: a selection the filter hides
   // gives way to the first visible episode rather than playing something the
@@ -433,7 +446,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                         key={option.key}
                         type="button"
                         aria-pressed={filter === option.key}
-                        onClick={() => setFilter(option.key)}
+                        onClick={() => selectFilter(option.key)}
                         className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
                           filter === option.key
                             ? meta.selectedBg
@@ -463,7 +476,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
                     <button
                       key={ep.id}
                       type="button"
-                      onClick={() => setSelectedId(ep.id)}
+                      onClick={() => selectEpisode(ep.id)}
                       aria-current={isSelected ? 'true' : undefined}
                       className={`w-full text-left flex items-center gap-4 p-3 rounded-xl border transition-all duration-200
                         ${
