@@ -211,6 +211,14 @@ export function evaluateLabsProbe(probe) {
   if (!read?.found) {
     return { pass: false, reason: 'lab_jobs document not found after enqueue' };
   }
+  // A failed final read is not "still queued" — it is unknown, and unknown is
+  // its own failure here: the probe cannot vouch for the document's state.
+  if (final?.error) {
+    return {
+      pass: false,
+      reason: `final getLabJob read failed (${final.error}) — lab_jobs/${enqueue.jobId} state unknown`,
+    };
+  }
   const finalStatus = final?.status ?? read.status;
   if (!SETTLED_JOB_STATUSES.has(finalStatus)) {
     return { pass: false, reason: `lab_jobs/${enqueue.jobId} is still "${finalStatus}"` };
@@ -300,7 +308,12 @@ function labsReportLines({ labs, unauth }) {
         labs.cancel.error || `HTTP ${labs.cancel.httpStatus}, status ${labs.cancel.status}`;
       lines.push(`- cancelLabJob: ${cancel}`);
     }
-    if (labs.final) lines.push(`- lab_jobs/${e.jobId ?? '?'} final status: ${labs.final.status}`);
+    if (labs.final) {
+      const finalState = labs.final.error
+        ? `read failed (${labs.final.error}) — state unknown`
+        : labs.final.status;
+      lines.push(`- lab_jobs/${e.jobId ?? '?'} final status: ${finalState}`);
+    }
   }
   const labsVerdict = evaluateLabsProbe(labs);
   lines.push(`- Authenticated no-op path: ${mark(labsVerdict.pass)} (${labsVerdict.reason})`);
@@ -356,10 +369,10 @@ async function collectIdentity() {
   // force-refreshes for getCurrentAdminStatus so a just-granted role is
   // visible at once; decoding a separately acquired (cached) token could show
   // the role missing while the API call, on a fresh token, succeeded. So the
-  // token is acquired once with that same refresh behaviour, and the status
-  // call carries it explicitly — authedFetch lets a caller-supplied
-  // Authorization header win — so the claims shown and the claims the API
-  // judged are the same bytes.
+  // token is acquired once with that same refresh behaviour and handed to
+  // authedFetch as `token`, which skips its own acquisition — so the claims
+  // shown and the claims the API judged are the same bytes, and there is no
+  // second (forced-refresh) round trip to Entra.
   let payload = null;
   let token = null;
   try {
@@ -379,7 +392,7 @@ async function collectIdentity() {
   try {
     const res = await authedFetch('getCurrentAdminStatus', {
       method: 'GET',
-      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+      ...(token ? { token } : {}),
     });
     result.adminHttp = res.status;
     result.admin = summarizeAdminStatus(await bodyOf(res), payload?.oid ?? payload?.sub ?? null);
@@ -629,7 +642,13 @@ function LabsProbeResult({ labs }) {
           {labs.cancel.error || `HTTP ${labs.cancel.httpStatus} · ${labs.cancel.status}`}
         </Row>
       ) : null}
-      {labs.final ? <Row label="final status">{labs.final.status ?? '?'}</Row> : null}
+      {labs.final ? (
+        <Row label="final status">
+          {labs.final.error
+            ? `read failed (${labs.final.error}) — state unknown`
+            : (labs.final.status ?? '?')}
+        </Row>
+      ) : null}
       <div className="pt-2">
         <Verdict pass={verdict.pass}>Authenticated no-op path — {verdict.reason}</Verdict>
       </div>

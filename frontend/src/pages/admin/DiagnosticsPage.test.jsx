@@ -256,6 +256,30 @@ describe('evaluateLabsProbe', () => {
   it('is unknown before it has run', () => {
     expect(evaluateLabsProbe(null).pass).toBeNull();
   });
+
+  it('reports a failed final read as its own failure, not as "still queued"', () => {
+    // The read-back before the cancel said queued; the read after it failed.
+    // Falling back to the earlier status would assert a state nobody observed.
+    const verdict = evaluateLabsProbe({
+      ...good,
+      final: { status: null, error: 'getLabJob timed out after 20s' },
+    });
+    expect(verdict).toEqual({
+      pass: false,
+      reason:
+        'final getLabJob read failed (getLabJob timed out after 20s) — lab_jobs/job-1 state unknown',
+    });
+
+    const report = buildReport({
+      generatedAt: 'now',
+      labs: { ...good, final: { status: null, error: 'getLabJob timed out after 20s' } },
+    });
+    expect(report).toContain(
+      'lab_jobs/job-1 final status: read failed (getLabJob timed out after 20s) — state unknown'
+    );
+    expect(report).toContain('Authenticated no-op path: FAIL (final getLabJob read failed');
+    expect(report).not.toContain('still "queued"');
+  });
 });
 
 describe('evaluateUnauthenticatedProbe', () => {
@@ -357,7 +381,7 @@ describe('the page', () => {
     expect(getJSON).toHaveBeenCalledWith('getAuthExpectations');
     expect(authedFetch).toHaveBeenCalledWith('getCurrentAdminStatus', {
       method: 'GET',
-      headers: { Authorization: `Bearer ${TOKEN}` },
+      token: TOKEN,
     });
 
     seen(/aud, email, exp, iat, iss, name, oid, preferred_username, roles, sub, tid/);
@@ -379,10 +403,12 @@ describe('the page', () => {
     // call itself would have asked for.
     expect(acquireApiToken).toHaveBeenCalledTimes(1);
     expect(acquireApiToken).toHaveBeenCalledWith({ forceRefresh: true });
-    // The bytes sent are the bytes decoded — not whatever a second call gave.
+    // The bytes sent are the bytes decoded — handed to authedFetch as `token`,
+    // which skips its own acquisition, so there is no second call at all.
     const [, init] = authedFetch.mock.calls.find(([name]) => name === 'getCurrentAdminStatus');
-    expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
-    expect(init.headers.Authorization).not.toBe(`Bearer ${STALE}`);
+    expect(init.token).toBe(TOKEN);
+    expect(init.token).not.toBe(STALE);
+    expect(init.headers).toBeUndefined();
     // And the claims panel reflects that same token: Admin present.
     expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText('FAIL')).toBeNull();
@@ -420,6 +446,26 @@ describe('the page', () => {
     expect(
       screen.getByText(/Authenticated no-op path — documented no-op response; document cancelled/)
     ).toBeTruthy();
+  });
+
+  it('shows a failed final read in the panel as unknown state, and fails the probe', async () => {
+    let reads = 0;
+    postJSON.mockImplementation(async (name, body) => {
+      if (name === 'getLabJob') {
+        reads += 1;
+        if (reads === 2) throw new Error('getLabJob timed out after 20s');
+        return { job: { id: body.jobId, status: 'queued' } };
+      }
+      if (name === 'cancelLabJob') return { jobId: body.jobId, status: 'cancelled' };
+      throw new Error(`unexpected postJSON ${name}`);
+    });
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    fireEvent.click(screen.getByText('Run authenticated probe'));
+    await waitFor(() => seen(/read failed \(getLabJob timed out after 20s\) — state unknown/));
+    expect(screen.getByText('FAIL')).toBeTruthy();
+    expect(screen.queryByText(/still "queued"/)).toBeNull();
   });
 
   it('shows a 500 from enqueue as a failure rather than a crash', async () => {
