@@ -117,6 +117,7 @@ nav:
       - 0026 Required-checks filter inside the job: decisions/0026-required-checks-filter-inside-the-job.md
       - 0027 Documentation site: decisions/0027-documentation-site.md
       - 0028 Cosmos out-of-account export: decisions/0028-cosmos-out-of-account-export.md
+      - 0029 Podcast hosting and audio surface: decisions/0029-podcast-hosting-and-audio-surface.md
   - Runbooks:
       - Deployment: runbooks/deployment-runbook.md
       - Alerting and support: runbooks/alerting-and-support.md

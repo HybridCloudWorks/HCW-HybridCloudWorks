@@ -430,6 +430,68 @@ const LISTEN_AND_LEARN_EPISODE_CONTAINER = 'listen_and_learn_episodes';
 const LISTEN_AND_LEARN_MAX_EPISODES = 50;
 
 /**
+ * The provider-wide episode list (#349) is a *listing*, so it carries what a
+ * player and a list row need and nothing else. The per-certification read
+ * above returns whole documents because its page renders the transcript and
+ * the videos; the podcast page renders neither, and a transcript is the
+ * largest field on the document by an order of magnitude. Allowlisted rather
+ * than denylisted so a field added to the writer later is withheld here
+ * until someone decides it belongs on an anonymous list.
+ *
+ * Twenty sets of up to eight areas is far more than exists; the cap is a
+ * runaway guard on a cross-partition query, not a page size.
+ */
+const LISTEN_AND_LEARN_LIST_FIELDS = [
+  'id',
+  'setId',
+  'provider',
+  'examCode',
+  'areaSlug',
+  'areaName',
+  'order',
+  'weightLabel',
+  'title',
+  'summary',
+  'audioUrl',
+  'audioBytes',
+  'durationSeconds',
+  'approvedAt',
+  'generatedAt',
+];
+const LISTEN_AND_LEARN_MAX_LISTED = 200;
+
+/**
+ * Where the podcast timer reads its feed list (`fetchPodcastFeeds`, #348):
+ * `admin_config/podcast_feeds`, shape `{ feeds: [{ provider, url }] }`. The
+ * public podcasts list exposes the matching provider's URL as `feedUrl` so
+ * the page's RSS subscribe button and the timer's ingest cannot name two
+ * different feeds (#349). Copied here for the same reason as the container
+ * names above — this module has no imports — and public-reads.test.js
+ * asserts the copies agree with timers/podcasts.js and cosmos-client.js.
+ */
+const PODCAST_FEEDS_CONFIG_CONTAINER = 'admin_config';
+const PODCAST_FEEDS_CONFIG_ID = 'podcast_feeds';
+const PODCAST_FEEDS_CONFIG_PARTITION = 'admin_config';
+
+/**
+ * The configured feed URL for one provider, or null. Only an https URL is
+ * ever returned: the document is editor-written, but the value lands in an
+ * anonymous response as a link, and the timer applies the same test before
+ * it will fetch a row (`isValidFeedEntry`).
+ */
+export function resolveFeedUrlForProvider(doc, provider) {
+  const feeds = Array.isArray(doc?.feeds) ? doc.feeds : [];
+  const row = feeds.find(
+    (entry) =>
+      entry &&
+      entry.provider === provider &&
+      typeof entry.url === 'string' &&
+      /^https:\/\//.test(entry.url)
+  );
+  return row ? row.url : null;
+}
+
+/**
  * Newest-first by `pubDate`, with undated items last in their stored order.
  *
  * Undated items sort to the tail rather than to "now": an item with no date is
@@ -831,7 +893,7 @@ export function createPublicReadHandlers({ store }) {
       }
     },
 
-    /** GET /api/public/podcasts?provider=&limit= (usePodcastData.js) */
+    /** GET /api/public/podcasts?provider=&limit= (hooks/useAudioEpisodes.js) */
     async listPodcasts(request, context) {
       try {
         const provider = String(request.query.get('provider') || '').trim();
@@ -855,8 +917,26 @@ export function createPublicReadHandlers({ store }) {
           .filter((doc) => !isSoftDeleted(doc) && !isPodcastMediaRetired(doc))
           .sort((a, b) => resolvePublishedDateValue(b) - resolvePublishedDateValue(a));
         const items = matching.slice(0, limit).map(stripInternalFields);
+
+        // The provider's configured feed (#349), for the RSS subscribe button.
+        // One point read; a failure here degrades to "no button", because the
+        // episode list is the page and the button is not.
+        let feedUrl = null;
+        if (provider) {
+          try {
+            const config = await store.readDoc(
+              PODCAST_FEEDS_CONFIG_CONTAINER,
+              PODCAST_FEEDS_CONFIG_ID,
+              PODCAST_FEEDS_CONFIG_PARTITION
+            );
+            feedUrl = resolveFeedUrlForProvider(config, provider);
+          } catch (error) {
+            context.warn?.('publicListPodcasts: feed config unreadable:', error?.message);
+          }
+        }
+
         // Counted before the slice — see listContent above (TODO.md T-407).
-        return json(200, { success: true, items, total: matching.length }, 300);
+        return json(200, { success: true, items, total: matching.length, feedUrl }, 300);
       } catch (error) {
         context.error('publicListPodcasts failed:', error);
         return json(500, { error: 'Failed to list podcasts' });
@@ -967,6 +1047,75 @@ export function createPublicReadHandlers({ store }) {
       } catch (error) {
         context.error('publicGetListenAndLearn failed:', error);
         return json(500, { error: 'Failed to get Listen & Learn episodes' });
+      }
+    },
+
+    /**
+     * GET /api/public/listen-and-learn/episodes?platform= — every approved
+     * episode with audio across a provider's certifications, newest first,
+     * for the provider's podcast page (#349, hooks/useAudioEpisodes.js).
+     *
+     * Same gate as the per-certification read: `status === 'published'` as
+     * an equality test in SQL, soft-deletes dropped afterwards. Two things
+     * differ because this is a list for a player rather than a study page:
+     * an episode without audio is omitted — a podcast row that plays nothing
+     * is the defect #372 hid on the host side — and each row is projected to
+     * the listing allowlist, joined to its set for the certification title
+     * and slug the row links to.
+     *
+     * Newest by approval, not by study-guide order: this list interleaves
+     * with feed episodes on a date-sorted page, and approval is the moment an
+     * episode became public.
+     */
+    async listListenAndLearnEpisodes(request, context) {
+      try {
+        const provider = String(request.query.get('platform') || '')
+          .trim()
+          .toLowerCase();
+        if (!provider) return json(400, { error: 'platform is required' });
+
+        const [episodes, sets] = await Promise.all([
+          store.queryDocs(
+            LISTEN_AND_LEARN_EPISODE_CONTAINER,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} * FROM c WHERE c.provider = @provider AND c.status = @status`,
+            [
+              { name: '@provider', value: provider },
+              { name: '@status', value: 'published' },
+            ]
+          ),
+          store.queryDocs(
+            LISTEN_AND_LEARN_SET_CONTAINER,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} * FROM c WHERE c.provider = @provider`,
+            [{ name: '@provider', value: provider }]
+          ),
+        ]);
+
+        const setsById = new Map(
+          sets.filter((set) => !isSoftDeleted(set)).map((set) => [set.id, set])
+        );
+
+        const items = episodes
+          .filter((doc) => !isSoftDeleted(doc) && typeof doc.audioUrl === 'string' && doc.audioUrl)
+          .map((doc) => {
+            const row = {};
+            for (const field of LISTEN_AND_LEARN_LIST_FIELDS) {
+              if (doc[field] !== undefined) row[field] = doc[field];
+            }
+            const set = setsById.get(doc.setId);
+            row.certTitle = set?.certTitle || null;
+            row.certSlug = set?.certSlug || null;
+            return row;
+          })
+          .sort(
+            (a, b) =>
+              resolvePublishedDateValue({ publishedAt: b.approvedAt || b.generatedAt }) -
+              resolvePublishedDateValue({ publishedAt: a.approvedAt || a.generatedAt })
+          );
+
+        return json(200, { success: true, items, total: items.length }, 300);
+      } catch (error) {
+        context.error('publicListListenAndLearnEpisodes failed:', error);
+        return json(500, { error: 'Failed to list Listen & Learn episodes' });
       }
     },
   };

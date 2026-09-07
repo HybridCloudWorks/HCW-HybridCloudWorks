@@ -53,6 +53,15 @@ httpRoute('publicGetListenAndLearn', {
   handler: (request, context) => handlers().getListenAndLearn(request, context),
 });
 
+// Provider-wide twin of the route above (#349): every approved episode with
+// audio, for the podcast page. Same gate, listing projection.
+httpRoute('publicListListenAndLearnEpisodes', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/listen-and-learn/episodes',
+  handler: (request, context) => handlers().listListenAndLearnEpisodes(request, context),
+});
+
 httpRoute('publicGetCuratedImage', {
   methods: ['GET'],
   authLevel: 'anonymous',

@@ -1,5 +1,5 @@
 /**
- * Anonymous media delivery — `GET public/media/{container}/{*blobPath}`.
+ * Anonymous media delivery — `GET|HEAD public/media/{container}/{*blobPath}`.
  *
  * The delivery model this implements, and why (TODO.md T-105):
  *
@@ -29,12 +29,27 @@
  * function entirely, which is what makes the arithmetic work for a content
  * site. Blob paths carry a timestamp already ({docId}/images/badge-{ts}.png),
  * so content is genuinely immutable per URL.
+ *
+ * Byte ranges (issue #349, ADR 0029). Listen & Learn episodes are served from
+ * this route too, and an `<audio>` element seeks by sending `Range:
+ * bytes=start-end`. Until 2026-09-07 the route ignored the header and answered
+ * every seek with the whole file, so scrubbing to minute eight downloaded
+ * minutes one to seven first. The route now honours a single byte range with
+ * `206 Partial Content`, refuses one that starts past the end with `416`, and
+ * advertises `Accept-Ranges: bytes` on every success — which is also what a
+ * podcast directory requires of an enclosure host, so a self-hosted feed
+ * (option 3 on #349) is no longer blocked here. Multiple ranges in one request
+ * are ignored and answered with the full 200, which RFC 9110 permits and every
+ * browser accepts; `If-Range` is not evaluated, which is safe only because a
+ * URL here never changes content — the path carries the timestamp.
  */
 
 import { isValidBlobPath, PUBLIC_MEDIA_CONTAINERS } from './blob-paths.js';
 
 /** One year. The path is content-addressed by timestamp, so this is safe. */
 const MAX_AGE_SECONDS = 31536000;
+
+const CACHE_CONTROL = `public, max-age=${MAX_AGE_SECONDS}, immutable`;
 
 const json = (status, body) => ({
   status,
@@ -43,12 +58,158 @@ const json = (status, body) => ({
 });
 
 /**
+ * Parse a `Range` request header.
+ *
+ * Returns `null` for anything the route should ignore and answer in full: no
+ * header, a unit other than `bytes`, more than one range, or a range that does
+ * not parse (RFC 9110 §14.2: a server MAY ignore the header). The distinction
+ * that matters is between *ignore* and *refuse*: `bytes=abc` is a malformed
+ * header and gets the whole file; `bytes=999999-` is a well-formed request for
+ * bytes that do not exist and gets a 416 — that decision needs the size, so it
+ * belongs to `resolveRange`.
+ *
+ * @param {string|null|undefined} value
+ * @returns {{start: number, end: number|null}|{suffix: number}|null}
+ */
+export function parseRangeHeader(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = /^bytes=(.*)$/i.exec(raw);
+  if (!match) return null;
+  const spec = match[1].trim();
+  if (!spec || spec.includes(',')) return null;
+
+  const suffix = /^-(\d+)$/.exec(spec);
+  if (suffix) return { suffix: Number(suffix[1]) };
+
+  const pair = /^(\d+)-(\d*)$/.exec(spec);
+  if (!pair) return null;
+  const start = Number(pair[1]);
+  const end = pair[2] === '' ? null : Number(pair[2]);
+  if (end !== null && end < start) return null;
+  return { start, end };
+}
+
+/**
+ * Turn a parsed range into inclusive offsets against a known size, or `null`
+ * when nothing in it can be satisfied: a start at or past the end, a suffix
+ * of zero bytes, or an empty blob. An end past the last byte is clamped, not
+ * refused — that is what `bytes=0-` and a browser's optimistic `bytes=0-1023`
+ * on a smaller file both rely on.
+ *
+ * @param {{start: number, end: number|null}|{suffix: number}} range
+ * @param {number} totalLength
+ * @returns {{start: number, end: number}|null}
+ */
+export function resolveRange(range, totalLength) {
+  if (!Number.isInteger(totalLength) || totalLength <= 0) return null;
+  const last = totalLength - 1;
+  if ('suffix' in range) {
+    if (range.suffix <= 0) return null;
+    return { start: Math.max(0, totalLength - range.suffix), end: last };
+  }
+  if (range.start > last) return null;
+  return { start: range.start, end: range.end === null ? last : Math.min(range.end, last) };
+}
+
+/** The headers every successful answer carries, body or not. */
+function deliveryHeaders({ contentType, etag }) {
+  return {
+    'Content-Type': contentType || 'application/octet-stream',
+    'Cache-Control': CACHE_CONTROL,
+    'Accept-Ranges': 'bytes',
+    ...(etag ? { ETag: etag } : {}),
+    // The bytes are already public; this only stops a browser from sniffing
+    // them into something executable.
+    'X-Content-Type-Options': 'nosniff',
+  };
+}
+
+const notModified = (etag) => ({
+  status: 304,
+  headers: { ETag: etag, 'Cache-Control': CACHE_CONTROL, 'Accept-Ranges': 'bytes' },
+});
+
+const etagMatches = (request, etag) => {
+  const ifNoneMatch = request.headers?.get?.('if-none-match') || '';
+  return Boolean(etag && ifNoneMatch && ifNoneMatch === etag);
+};
+
+/**
  * @param {object} deps
- * @param {{ readBlobForDelivery: Function }} deps.storage
+ * @param {{
+ *   readBlobForDelivery: Function,
+ *   readBlobRangeForDelivery?: Function,
+ *   headBlobForDelivery?: Function,
+ * }} deps.storage
  */
 export function createPublicMediaHandlers({ storage }) {
+  /** HEAD: the 200's headers, sized for the whole blob, and no body. */
+  async function head(container, blobPath, request) {
+    const blob = await storage.headBlobForDelivery(container, blobPath);
+    if (!blob) return json(404, { error: 'Not found' });
+    if (etagMatches(request, blob.etag)) return notModified(blob.etag);
+    return {
+      status: 200,
+      headers: {
+        ...deliveryHeaders(blob),
+        'Content-Length': String(blob.contentLength),
+      },
+    };
+  }
+
+  /** A single satisfiable-or-not byte range: 206, 416, or 304. */
+  async function partial(container, blobPath, request, range) {
+    let offsets = range;
+    if ('suffix' in range) {
+      // A suffix is relative to a size this route does not know yet.
+      const blob = await storage.headBlobForDelivery(container, blobPath);
+      if (!blob) return json(404, { error: 'Not found' });
+      offsets = resolveRange(range, blob.contentLength);
+      if (!offsets) return unsatisfiable(blob.contentLength);
+    }
+
+    const chunk = await storage.readBlobRangeForDelivery(container, blobPath, offsets);
+    if (!chunk) return json(404, { error: 'Not found' });
+    if (chunk.unsatisfiable) return unsatisfiable(chunk.totalLength);
+    if (etagMatches(request, chunk.etag)) return notModified(chunk.etag);
+
+    return {
+      status: 206,
+      headers: {
+        ...deliveryHeaders(chunk),
+        'Content-Range': `bytes ${chunk.start}-${chunk.end}/${chunk.totalLength}`,
+        'Content-Length': String(chunk.body.length),
+      },
+      body: chunk.body,
+    };
+  }
+
+  function unsatisfiable(totalLength) {
+    return {
+      status: 416,
+      headers: {
+        'Content-Range': `bytes */${totalLength}`,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-store',
+      },
+    };
+  }
+
+  /** The whole blob, exactly as before ranges existed, plus `Accept-Ranges`. */
+  async function full(container, blobPath, request) {
+    const blob = await storage.readBlobForDelivery(container, blobPath);
+    if (!blob) return json(404, { error: 'Not found' });
+    if (etagMatches(request, blob.etag)) return notModified(blob.etag);
+    return {
+      status: 200,
+      headers: deliveryHeaders(blob),
+      body: blob.body,
+    };
+  }
+
   return {
-    /** GET /api/public/media/{container}/{*blobPath} */
+    /** GET|HEAD /api/public/media/{container}/{*blobPath} */
     async getMedia(request, context) {
       const container = String(request.params?.container || '').trim();
       const blobPath = String(request.params?.blobPath || '').trim();
@@ -64,35 +225,12 @@ export function createPublicMediaHandlers({ storage }) {
       }
 
       try {
-        const blob = await storage.readBlobForDelivery(container, blobPath);
-        if (!blob) {
-          return json(404, { error: 'Not found' });
+        if (String(request.method || '').toUpperCase() === 'HEAD') {
+          return await head(container, blobPath, request);
         }
-
-        const etag = blob.etag || '';
-        const ifNoneMatch = request.headers?.get?.('if-none-match') || '';
-        if (etag && ifNoneMatch && ifNoneMatch === etag) {
-          return {
-            status: 304,
-            headers: {
-              ETag: etag,
-              'Cache-Control': `public, max-age=${MAX_AGE_SECONDS}, immutable`,
-            },
-          };
-        }
-
-        return {
-          status: 200,
-          headers: {
-            'Content-Type': blob.contentType || 'application/octet-stream',
-            'Cache-Control': `public, max-age=${MAX_AGE_SECONDS}, immutable`,
-            ...(etag ? { ETag: etag } : {}),
-            // The bytes are already public; this only stops a browser from
-            // sniffing them into something executable.
-            'X-Content-Type-Options': 'nosniff',
-          },
-          body: blob.body,
-        };
+        const range = parseRangeHeader(request.headers?.get?.('range'));
+        if (range) return await partial(container, blobPath, request, range);
+        return await full(container, blobPath, request);
       } catch (error) {
         if (error?.statusCode === 404 || error?.code === 'BlobNotFound') {
           return json(404, { error: 'Not found' });

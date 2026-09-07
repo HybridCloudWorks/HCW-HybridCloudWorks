@@ -19,6 +19,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The podcast page is the one audio surface, and the media route serves
+  byte ranges (#349, ADR 0029).** A provider's podcast page now lists the
+  host's ingested episodes *and* the published Listen & Learn episodes for
+  that provider in one date-sorted list, each row labelled with its source,
+  played by one component with a keyboard-operable seek slider. The aws,
+  azure and gcp copies of the page (the shared page with colours inlined)
+  are gone; every provider routes to the shared page and the coverage test
+  demands a metadata row for each. New `GET /api/public/listen-and-learn/
+  episodes?platform=` returns every approved episode with audio across a
+  provider's certifications, projected to a listing allowlist (no
+  transcript) and joined to its certification; `GET /api/public/podcasts`
+  now carries `feedUrl` from `admin_config/podcast_feeds` — the document the
+  ingest timer reads — so the RSS subscribe button and the ingest cannot
+  name two different feeds. `GET|HEAD /api/public/media/…` honours a single
+  `Range: bytes=…` with `206` and `Content-Range`, reading only the requested
+  bytes through the SDK's ranged download; a start past the end answers
+  `416`; every success carries `Accept-Ranges: bytes`; caching is unchanged.
+  Seeking into a Listen & Learn episode no longer downloads the whole file,
+  and the range support is what a self-hosted feed would need from an
+  enclosure host. ADR 0029 records the owner's no-paid-services decisions:
+  RSS.com Free with manual upload and feed ingest, Gemini then Azure AI
+  Speech with ElevenLabs deferred, StreamYard as a manual studio with the
+  feed as the boundary. Nothing named after the previous host remains in
+  `frontend/`.
 - **Article bodies stop hotlinking upstream images (#374).** At publish time
   every external `<img>` or `![](…)` URL in any body field (`blogDraft`,
   `Content`, `content` — the audited article kept an RSS stub in one and its
