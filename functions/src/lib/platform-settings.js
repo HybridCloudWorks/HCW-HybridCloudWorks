@@ -84,12 +84,16 @@ const MAX_URL_LENGTH = 2048;
 /**
  * A hero URL: a same-origin path (`/images/…`, `/api/public/media/…`) or an
  * https URL. `//host/path` is protocol-relative — an off-origin reference in
- * a path's clothing — and is refused with the rest.
+ * a path's clothing — and is refused with the rest. No query string or
+ * fragment on either form: this value is copied onto content documents and
+ * served publicly (ai-cover.js writes it to `altCoverImage` and
+ * `contentImageUrl`), so a SAS token or signature in a `?` would be
+ * published with the post.
  */
 export function isAcceptableHeroUrl(value) {
   if (typeof value !== 'string') return false;
   if (value.length === 0 || value.length > MAX_URL_LENGTH) return false;
-  if (/[\s<>"'`\\]/.test(value)) return false;
+  if (/[\s<>"'`\\?#]/.test(value)) return false;
   if (value.startsWith('/')) return !value.startsWith('//');
   return /^https:\/\/[^/]+/.test(value);
 }
@@ -118,7 +122,7 @@ export function normalizeDefaultHeroes(body) {
     if (value === '') continue;
     if (!isAcceptableHeroUrl(value)) {
       fail(
-        `heroes.${canonical} must be a same-origin path (/images/… or /api/public/media/…) or an https URL`
+        `heroes.${canonical} must be a same-origin path (/images/… or /api/public/media/…) or an https URL, with no query string or fragment`
       );
     }
     if (canonical in out) fail(`heroes.${canonical} given more than once`);

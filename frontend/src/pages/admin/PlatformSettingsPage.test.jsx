@@ -16,6 +16,7 @@ import PlatformSettingsPage, {
   PodcastFeedsCard,
   SocialAutopostCard,
   bundledDefaultHeroes,
+  isAcceptableHeroUrl,
   settingRoute,
 } from './PlatformSettingsPage';
 
@@ -135,6 +136,65 @@ describe('DefaultCoversCard', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Save/ }));
     expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('previews only what the server would store, and shows again once corrected', () => {
+    // The page-side rule mirrors the server's: no scheme other than https, no
+    // protocol-relative host, no query string or fragment (a SAS token there
+    // would be published with the post).
+    expect(isAcceptableHeroUrl('/images/default-heroes/azure.png')).toBe(true);
+    expect(isAcceptableHeroUrl('https://cdn.example.com/a.png')).toBe(true);
+    expect(isAcceptableHeroUrl('javascript:alert(1)')).toBe(false);
+    expect(isAcceptableHeroUrl('data:image/png;base64,AAAA')).toBe(false);
+    expect(isAcceptableHeroUrl('//evil.example.com/a.png')).toBe(false);
+    expect(isAcceptableHeroUrl('/a.png?sig=token')).toBe(false);
+    expect(isAcceptableHeroUrl('https://cdn.example.com/a.png#x')).toBe(false);
+
+    const props = { meta, saving: false, onChange: vi.fn(), onSave: vi.fn() };
+    const { container, rerender } = render(
+      <DefaultCoversCard
+        value={{
+          heroes: {
+            Azure: 'javascript:alert(1)',
+            AWS: 'data:image/png;base64,AAAA',
+            GCP: '/api/public/media/covers/gcp.png?sv=2024&sig=abc',
+          },
+        }}
+        {...props}
+      />
+    );
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+
+    rerender(
+      <DefaultCoversCard
+        value={{ heroes: { Azure: '/images/default-heroes/azure.png' } }}
+        {...props}
+      />
+    );
+    const img = screen.getByRole('img', { name: 'Azure cover preview' });
+    expect(img.getAttribute('src')).toBe('/images/default-heroes/azure.png');
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+  });
+
+  it('hides a preview that failed to load only until the value changes', () => {
+    const props = { meta, saving: false, onChange: vi.fn(), onSave: vi.fn() };
+    const { rerender } = render(
+      <DefaultCoversCard value={{ heroes: { Azure: '/images/missing.png' } }} {...props} />
+    );
+    fireEvent.error(screen.getByRole('img', { name: 'Azure cover preview' }));
+    expect(screen.queryByRole('img', { name: 'Azure cover preview' })).toBeNull();
+
+    // Same broken value: stays hidden rather than retrying on every render.
+    rerender(<DefaultCoversCard value={{ heroes: { Azure: '/images/missing.png' } }} {...props} />);
+    expect(screen.queryByRole('img', { name: 'Azure cover preview' })).toBeNull();
+
+    rerender(
+      <DefaultCoversCard
+        value={{ heroes: { Azure: '/images/default-heroes/azure.png' } }}
+        {...props}
+      />
+    );
+    expect(screen.getByRole('img', { name: 'Azure cover preview' })).toBeTruthy();
   });
 
   it('says when the stored document failed validation and shows the reason', () => {

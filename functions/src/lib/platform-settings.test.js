@@ -93,6 +93,16 @@ describe('default heroes', () => {
     expect(isAcceptableHeroUrl('/a b.png')).toBe(false);
     expect(isAcceptableHeroUrl('/a"onerror="x')).toBe(false);
     expect(isAcceptableHeroUrl(`/${'x'.repeat(2048)}`)).toBe(false);
+    // A query string or fragment could carry a SAS token or signature, and
+    // this value is copied onto published content documents.
+    expect(isAcceptableHeroUrl('/api/public/media/covers/a.png?sv=2024&sig=abc')).toBe(false);
+    expect(isAcceptableHeroUrl('/images/default-heroes/a.png#x')).toBe(false);
+    expect(isAcceptableHeroUrl('https://cdn.example.com/a.png?sig=abc')).toBe(false);
+    expect(isAcceptableHeroUrl('https://cdn.example.com/a.png#frag')).toBe(false);
+    expectRejects(
+      () => normalizeDefaultHeroes({ heroes: { AWS: 'https://cdn.example.com/a.png?sig=abc' } }),
+      /no query string or fragment/
+    );
     expectRejects(
       () => normalizeDefaultHeroes({ heroes: { Azure: 'http://x/a.png' } }),
       /heroes.Azure must be a same-origin path/

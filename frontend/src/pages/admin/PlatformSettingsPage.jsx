@@ -83,6 +83,40 @@ export const bundledDefaultHeroes = () =>
 const SELECT_CLASS =
   'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
+/**
+ * Mirrors the server's rule (functions/src/lib/platform-settings.js
+ * isAcceptableHeroUrl): a same-origin path or an https URL, nothing
+ * protocol-relative, and no query string or fragment — the value is copied
+ * onto published content documents, so a token in a `?` would be published.
+ * The preview loads only what the server would store.
+ */
+export function isAcceptableHeroUrl(value) {
+  if (typeof value !== 'string') return false;
+  if (value.length === 0 || value.length > 2048) return false;
+  if (/[\s<>"'`\\?#]/.test(value)) return false;
+  if (value.startsWith('/')) return !value.startsWith('//');
+  return /^https:\/\/[^/]+/.test(value);
+}
+
+/**
+ * Thumbnail for one cover. Rendered with `key={src}` by the caller, so a
+ * changed value is a fresh instance: a URL that failed to load hides only
+ * until the field changes, and a corrected one shows again.
+ */
+export function HeroPreview({ src, provider }) {
+  const [failed, setFailed] = useState(false);
+  if (!isAcceptableHeroUrl(src) || failed) return null;
+  return (
+    <img
+      src={src}
+      alt={`${provider} cover preview`}
+      className="h-10 w-16 shrink-0 rounded border object-cover"
+      onLoad={() => setFailed(false)}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /** Publer reports a network name in its own casing; the trigger keys on lowercase. */
 const providerOf = (account) => String(account?.provider || '').toLowerCase();
 
@@ -247,16 +281,11 @@ export function DefaultCoversCard({ value, onChange, onSave, saving, meta }) {
                   onChange={(event) => setHero(provider, event.target.value)}
                   className="font-mono text-xs"
                 />
-                {heroes[provider] ? (
-                  <img
-                    src={heroes[provider]}
-                    alt=""
-                    className="h-10 w-16 shrink-0 rounded border object-cover"
-                    onError={(event) => {
-                      event.currentTarget.style.visibility = 'hidden';
-                    }}
-                  />
-                ) : null}
+                <HeroPreview
+                  key={heroes[provider] ?? ''}
+                  src={heroes[provider] ?? ''}
+                  provider={provider}
+                />
               </div>
             </div>
           ))}
