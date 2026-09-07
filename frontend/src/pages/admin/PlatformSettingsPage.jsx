@@ -117,6 +117,32 @@ export function HeroPreview({ src, provider }) {
   );
 }
 
+export const PUBLER_NOT_CONFIGURED = 'INTEGRATION_NOT_CONFIGURED';
+
+/**
+ * The publerProxy envelope (functions/src/lib/integrations/rest-proxy.js):
+ * `{ ok: true, status, data }` with `data` the parsed Publer body, or
+ * `{ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' }` when no key is seeded.
+ * Publer's accounts list is a bare array; an `accounts` or `data` wrapper is
+ * tolerated in case the upstream shape shifts. A bare array is accepted too,
+ * so a caller that already unwrapped is not punished.
+ */
+export function unwrapPublerAccounts(response) {
+  if (response && response.ok === false) {
+    return { accounts: [], notConfigured: response.code === PUBLER_NOT_CONFIGURED };
+  }
+  const body =
+    response && typeof response === 'object' && 'data' in response ? response.data : response;
+  const list = Array.isArray(body)
+    ? body
+    : Array.isArray(body?.accounts)
+      ? body.accounts
+      : Array.isArray(body?.data)
+        ? body.data
+        : [];
+  return { accounts: list.filter((account) => account && account.id), notConfigured: false };
+}
+
 /** Publer reports a network name in its own casing; the trigger keys on lowercase. */
 const providerOf = (account) => String(account?.provider || '').toLowerCase();
 
@@ -311,7 +337,15 @@ export function DefaultCoversCard({ value, onChange, onSave, saving, meta }) {
 
 // ── Social autoposting ─────────────────────────────────────────────────────
 
-export function SocialAutopostCard({ value, onChange, onSave, saving, meta, publerAccounts }) {
+export function SocialAutopostCard({
+  value,
+  onChange,
+  onSave,
+  saving,
+  meta,
+  publerAccounts,
+  publerStatus = 'ready',
+}) {
   const enabled = Boolean(value?.enabled);
   const accountIds = useMemo(() => value?.accountIds ?? [], [value]);
   const delay = value?.scheduleDelayMinutes ?? 60;
@@ -479,6 +513,17 @@ export function SocialAutopostCard({ value, onChange, onSave, saving, meta, publ
                 <Plus className="mr-2 h-3.5 w-3.5" /> Add account by id
               </Button>
             </div>
+            {publerStatus === 'not_configured' ? (
+              <p className="text-xs text-muted-foreground">
+                Publer not configured — connect it in the Social Hub&apos;s Connection Settings tab
+                to pick accounts here; until then, add them by id.
+              </p>
+            ) : null}
+            {publerStatus === 'error' ? (
+              <p className="text-xs text-muted-foreground">
+                Publer did not answer; add accounts by id.
+              </p>
+            ) : null}
             {unsupported.length > 0 ? (
               <p className="text-xs text-muted-foreground">
                 {unsupported.length} Publer account{unsupported.length === 1 ? '' : 's'} hidden:
@@ -587,18 +632,26 @@ export default function PlatformSettingsPage() {
   const autopost = useSetting('social-autopost', authReady);
   const podcasts = useSetting('podcast-feeds', authReady);
   const [publerAccounts, setPublerAccounts] = useState([]);
+  // 'loading' | 'ready' | 'not_configured' | 'error' — the card says which.
+  const [publerStatus, setPublerStatus] = useState('loading');
 
-  // Best effort: the same call the Social Hub makes. Not configured, or any
-  // failure, means the free-text id field is the whole picker.
+  // Best effort: the same proxied call the Social Hub makes, unwrapped from
+  // the proxy envelope. Not configured, or any failure, means the free-text
+  // id field is the whole picker.
   useEffect(() => {
     if (!authReady) return undefined;
     let cancelled = false;
     postJSON('publerProxy', { path: '/accounts', method: 'GET' })
-      .then((data) => {
-        if (!cancelled) setPublerAccounts(Array.isArray(data) ? data : []);
+      .then((response) => {
+        if (cancelled) return;
+        const { accounts, notConfigured } = unwrapPublerAccounts(response);
+        setPublerAccounts(accounts);
+        setPublerStatus(notConfigured ? 'not_configured' : 'ready');
       })
       .catch(() => {
-        if (!cancelled) setPublerAccounts([]);
+        if (cancelled) return;
+        setPublerAccounts([]);
+        setPublerStatus('error');
       });
     return () => {
       cancelled = true;
@@ -638,6 +691,7 @@ export default function PlatformSettingsPage() {
             meta={s.meta}
             saving={s.saving}
             publerAccounts={publerAccounts}
+            publerStatus={publerStatus}
             onChange={s.setValue}
             onSave={() => s.save(s.value)}
           />

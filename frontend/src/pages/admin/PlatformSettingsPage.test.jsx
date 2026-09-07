@@ -18,6 +18,7 @@ import PlatformSettingsPage, {
   bundledDefaultHeroes,
   isAcceptableHeroUrl,
   settingRoute,
+  unwrapPublerAccounts,
 } from './PlatformSettingsPage';
 
 // The Radix Switch measures its thumb with ResizeObserver, which jsdom lacks.
@@ -69,7 +70,8 @@ beforeEach(() => {
     stored: 'valid',
     updatedAt: '2026-09-07T12:00:00.000Z',
   }));
-  postJSON.mockReset().mockResolvedValue({ ok: false, error: 'INTEGRATION_NOT_CONFIGURED' });
+  // The proxy envelope for an unseeded key (rest-proxy.js), not a bare array.
+  postJSON.mockReset().mockResolvedValue({ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' });
   toast.mockReset();
 });
 
@@ -346,7 +348,67 @@ describe('PodcastFeedsCard', () => {
   });
 });
 
+describe('unwrapPublerAccounts', () => {
+  it('reads the proxy envelope, not a bare array', () => {
+    const accounts = [{ id: 'acc-1', name: 'HCW', provider: 'linkedin' }];
+    expect(unwrapPublerAccounts({ ok: true, status: 200, data: accounts })).toEqual({
+      accounts,
+      notConfigured: false,
+    });
+    // Tolerated nestings, and a bare array from a caller that already unwrapped.
+    expect(unwrapPublerAccounts({ ok: true, status: 200, data: { accounts } }).accounts).toEqual(
+      accounts
+    );
+    expect(
+      unwrapPublerAccounts({ ok: true, status: 200, data: { data: accounts } }).accounts
+    ).toEqual(accounts);
+    expect(unwrapPublerAccounts(accounts).accounts).toEqual(accounts);
+  });
+
+  it('names the unconfigured case and treats every other failure as empty', () => {
+    expect(unwrapPublerAccounts({ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' })).toEqual({
+      accounts: [],
+      notConfigured: true,
+    });
+    expect(unwrapPublerAccounts({ ok: false, status: 401, data: { error: 'nope' } })).toEqual({
+      accounts: [],
+      notConfigured: false,
+    });
+    expect(unwrapPublerAccounts({ ok: true, status: 200, data: 'not json' }).accounts).toEqual([]);
+    expect(unwrapPublerAccounts(undefined).accounts).toEqual([]);
+    // Rows without an id cannot be chosen and are dropped.
+    expect(
+      unwrapPublerAccounts({ ok: true, status: 200, data: [{ name: 'no id' }, null] }).accounts
+    ).toEqual([]);
+  });
+});
+
 describe('the page', () => {
+  it('offers the accounts a configured Publer returns inside the proxy envelope', async () => {
+    // The regression: the envelope is { ok, status, data }, and treating it as
+    // a bare array left the picker permanently empty on a configured estate.
+    postJSON.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [{ id: 'acc-9', name: 'HCW on LinkedIn', provider: 'linkedin' }],
+    });
+    render(<PlatformSettingsPage />);
+    const picker = await screen.findByLabelText('Publer account to add');
+    expect(
+      within(picker)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Pick a Publer account…', 'HCW on LinkedIn · linkedin']);
+    expect(screen.queryByText(/Publer not configured/)).toBeNull();
+  });
+
+  it('says Publer is not configured and falls back to adding by id', async () => {
+    render(<PlatformSettingsPage />);
+    await waitFor(() => expect(screen.getByText(/Publer not configured/)).toBeTruthy());
+    expect(screen.queryByLabelText('Publer account to add')).toBeNull();
+    expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
+  });
+
   it('loads all three settings once auth is ready and asks Publer for accounts', async () => {
     render(<PlatformSettingsPage />);
     await waitFor(() => expect(screen.getByText('Podcast feeds')).toBeTruthy());
