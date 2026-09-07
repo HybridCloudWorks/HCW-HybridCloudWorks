@@ -115,9 +115,12 @@ export function relativeExpiry(expSeconds, nowMs = Date.now()) {
  * Reduce a decoded token to what may be shown. Claim names, and the values of
  * `aud`, `roles`, `exp` and `tid` — nothing that identifies the person.
  *
- * Every comparison is exact equality, because that is what the verifier does:
- * an `aud` that differs from ENTRA_API_AUDIENCE by so much as a scheme prefix
- * is a 401, and the App Role value is compared as a case-sensitive string.
+ * Every comparison is exact equality on each value, because that is what the
+ * verifier does: an `aud` that differs from ENTRA_API_AUDIENCE by so much as
+ * a scheme prefix is a 401, and the App Role value is compared as a
+ * case-sensitive string. `aud` may be a string or an array (RFC 7519 §4.1.3);
+ * jsonwebtoken accepts an array when any element equals the expected
+ * audience, so the check here is membership, not equality on a joined string.
  *
  * @param {object|null} payload
  * @param {{ expectedAudience?: string, tenantId?: string, adminAppRole?: string }|null} expectations
@@ -125,7 +128,9 @@ export function relativeExpiry(expSeconds, nowMs = Date.now()) {
  */
 export function summarizeToken(payload, expectations, nowMs = Date.now()) {
   if (!payload) return null;
-  const aud = Array.isArray(payload.aud) ? payload.aud.join(', ') : (payload.aud ?? null);
+  const audiences = (Array.isArray(payload.aud) ? payload.aud : [payload.aud])
+    .filter((value) => value !== null && value !== undefined)
+    .map(String);
   const roleNames = Array.isArray(payload.roles) ? payload.roles.map(String) : [];
   const tid = typeof payload.tid === 'string' ? payload.tid : null;
   const expiry = relativeExpiry(Number(payload.exp), nowMs);
@@ -133,8 +138,10 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
 
   return {
     claimNames: Object.keys(payload).sort(),
-    aud: aud === null || aud === undefined ? null : String(aud),
-    audienceMatches: expected.expectedAudience ? aud === expected.expectedAudience : null,
+    aud: audiences.length ? audiences.join(', ') : null,
+    audienceMatches: expected.expectedAudience
+      ? audiences.includes(expected.expectedAudience)
+      : null,
     roleNames,
     hasAdminRole: expected.adminAppRole ? roleNames.includes(expected.adminAppRole) : null,
     tenantMatches: expected.tenantId ? tid === expected.tenantId : null,

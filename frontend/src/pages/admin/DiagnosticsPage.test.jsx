@@ -164,6 +164,22 @@ describe('summarizeToken', () => {
     expect(drifted.hasAdminRole).toBe(false);
   });
 
+  it('accepts an array aud the way the verifier does — membership, not a joined string', () => {
+    // RFC 7519 allows `aud` to be an array; jsonwebtoken passes when any
+    // element equals the expected audience. Joining and comparing would show
+    // FAIL for a token the API had just accepted.
+    const multi = summarizeToken(
+      { ...CLAIMS, aud: ['api://api-app-id', 'api://another-app'] },
+      EXPECTATIONS
+    );
+    expect(multi.audienceMatches).toBe(true);
+    expect(multi.aud).toBe('api://api-app-id, api://another-app');
+
+    const absent = summarizeToken({ ...CLAIMS, aud: ['api://another-app'] }, EXPECTATIONS);
+    expect(absent.audienceMatches).toBe(false);
+    expect(summarizeToken({ ...CLAIMS, aud: [] }, EXPECTATIONS).aud).toBeNull();
+  });
+
   it('reports unknown rather than guessing when the API gave no expectations', () => {
     const summary = summarizeToken(CLAIMS, null);
     expect(summary.audienceMatches).toBeNull();
