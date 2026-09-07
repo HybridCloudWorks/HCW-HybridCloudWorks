@@ -416,8 +416,45 @@ describe('handlers', () => {
     ).toBe(400);
   });
 
-  it('a store failure is a 500 whose log line names the setting, not the document', async () => {
-    const log = { log: vi.fn(), error: vi.fn() };
+  it('a failed audit row is a warning, not a 500: the setting was saved', async () => {
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    // The config write (first upsert) succeeds; the audit write (second) fails.
+    const store = makeStore({
+      upsertDoc: vi.fn(async (container, doc) => {
+        if (container === 'admin_audit_logs') throw new Error('audit container throttled');
+        return doc;
+      }),
+    });
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({
+        params: { setting: 'podcast-feeds' },
+        body: { feeds: [{ provider: 'azure', url: 'https://x.example/private-feed' }] },
+      }),
+      log
+    );
+    expect(res.status).toBe(200);
+    expect(parse(res)).toMatchObject({
+      success: true,
+      setting: 'podcast-feeds',
+      value: { feeds: [{ provider: 'azure', url: 'https://x.example/private-feed' }] },
+      stored: 'valid',
+    });
+    expect(store.upsertDoc.mock.calls.map(([container]) => container)).toEqual([
+      'admin_config',
+      'admin_audit_logs',
+    ]);
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    const line = String(log.warn.mock.calls[0][0]);
+    expect(line).toContain('"feeds":1');
+    expect(line).toContain('audit container throttled');
+    expect(line).not.toContain('private-feed');
+  });
+
+  it('a failed config write is a 500 whose log line names the setting, not the document', async () => {
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    // The first upsert is the config document itself; nothing was saved.
     const store = makeStore({
       upsertDoc: vi.fn(async () => {
         throw new Error('cosmos down');
@@ -432,6 +469,8 @@ describe('handlers', () => {
       log
     );
     expect(res.status).toBe(500);
+    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+    expect(log.warn).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(log.error.mock.calls[0])).not.toContain('private-feed');
   });

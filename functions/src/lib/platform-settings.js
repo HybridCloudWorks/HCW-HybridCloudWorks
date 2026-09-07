@@ -420,10 +420,17 @@ export function createPlatformSettingsHandlers({
           updatedAt,
           updatedBy: auth.user?.oid || auth.user?.sub || null,
         });
-        await audit('platform_setting_updated', auth.user, {
-          setting: name,
-          ...summarize(name, value),
-        });
+        // Best effort, like forge-stats bumps: the setting is already saved,
+        // so a failed audit row must not turn into a 500 that makes the page
+        // report a failure (and the owner retry) for a write that took.
+        const details = { setting: name, ...summarize(name, value) };
+        try {
+          await audit('platform_setting_updated', auth.user, details);
+        } catch (auditError) {
+          context.warn?.(
+            `putPlatformSetting(${name}) saved but the audit row failed (${JSON.stringify(details)}): ${auditError?.message || auditError}`
+          );
+        }
         return json(200, {
           success: true,
           setting: name,
