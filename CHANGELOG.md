@@ -38,8 +38,9 @@ This project has not cut a tagged release; entries are grouped under
   the covers with `/images/default-heroes/<provider>.png`; the Social card
   offers the accounts the Social Hub already lists from Publer, with a
   free-text id as the fallback. Every save is audited as
-  `platform_setting_updated` with counts only; no route, log line or audit
-  row carries document contents.
+  `platform_setting_updated` with counts only: the route answers with the
+  normalized document, as the page needs it to, but no log line or audit row
+  ever carries document contents.
 - **Landing hero rotations and default covers are generated art (#371, #351).**
   The four landing pages whose hero sets never existed (`/gcp`, `/github`,
   `/terraform`, `/finops`, twenty 404s per the audit) get their five images
