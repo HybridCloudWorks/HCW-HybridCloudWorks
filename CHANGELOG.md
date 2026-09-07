@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **A publish can no longer put two articles on one URL, and the collisions
+  already in the corpus have a report of their own (#400).** Three published
+  articles share
+  `enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio`,
+  so two of them are published with no URL at all and the third's identity
+  changes with the order Cosmos returns rows — visible in #399's diff, where
+  the body under that key moved from `7ZCmiOEIlWMg99xQHY0A` to
+  `1k5ayjbEdYdo7NzvXIWW`. None of the three was ever assigned that slug by this
+  pipeline: `processPublishContent` writes `slug` and `Slug` to the same value
+  in one patch, and on all three — and on ten of the twenty-two published
+  articles — the two differ. They arrived from Site-Main already
+  `contentStatus: published`, which takes the branch that reuses the stored
+  slug, and that branch never probed. `uniqueSlug` is replaced by `resolveSlug`
+  (pure) plus a `slugHolders` probe: a first assignment now always ends in the
+  document id, because an empty `SELECT … WHERE c.slug = @slug` is not proof —
+  it reads one of the two fields the site routes on, it cannot see a concurrent
+  publish from the scheduled publisher or the Telegram approve worker, and it
+  can throw. A republish keeps the URL it already serves unless the probe —
+  now `c.slug OR c.Slug` — shows another document holding it, in which case it
+  moves off. A probe that throws still never blocks a publish and never moves a
+  live URL. New `scripts/report-slug-collisions.mjs` prints the contested URLs
+  from the committed manifest, no credential needed.
 - **The audit stops calling a cancelled request a failure, the Azure
   architecture page names its provider, and the 2026-09-07 crawl is on the
   record (#361, #371, #373, #374).** The run against the deployed batch reads

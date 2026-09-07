@@ -1,13 +1,15 @@
 /**
  * The publish pipeline — pinned to processPublishContent (:1383-1600) and
  * publishContent (:6696). Load-bearing: the publishable-status table, both
- * gates persisting their failed reports, republish slug reuse vs
- * collision-only suffixing, metadata validation on new publishes only, the
- * cover trigger, and the batch accumulator's published/skipped/warning math.
+ * gates persisting their failed reports, slug assignment (see the
+ * 'slug assignment (#400)' block), metadata validation on new publishes only,
+ * the cover trigger, and the batch accumulator's published/skipped/warning
+ * math.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
   createPublishHandlers,
+  resolveSlug,
   slugify,
   toPublicUrl,
   getPublicSectionForPublishTarget,
@@ -219,6 +221,108 @@ describe('concurrent publish protection (T-301)', () => {
   });
 });
 
+describe('slug assignment (#400)', () => {
+  const ID = 'abcdef123';
+
+  it('resolveSlug: a first assignment carries the id, a republish keeps the URL it serves', () => {
+    // A first assignment never depends on the probe. An empty probe result is
+    // not proof of anything durable: two callers publishing two documents with
+    // one title both see empty, and both would write the bare slug.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID })).toBe('a-title-abcdef');
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [] })).toBe(
+      'a-title-abcdef'
+    );
+
+    // A republish keeps what it already serves when nothing contradicts it —
+    // including when the probe could not answer at all (holders null), because
+    // a failed lookup is not evidence of a clash and must not move a live URL.
+    const reuse = { candidate: 'a-title', contentId: ID, reuse: true };
+    expect(resolveSlug({ ...reuse, holders: [ID] })).toBe('a-title');
+    expect(resolveSlug({ ...reuse, holders: [] })).toBe('a-title');
+    expect(resolveSlug({ ...reuse, holders: null })).toBe('a-title');
+
+    // ...and moves off it the moment another document is shown to hold it.
+    expect(resolveSlug({ ...reuse, holders: [ID, 'someone-else'] })).toBe('a-title-abcdef');
+
+    // No candidate at all: the id is the whole slug (unchanged behaviour).
+    expect(resolveSlug({ candidate: '', contentId: ID })).toBe('abcdef');
+  });
+
+  it('two documents with one title get two slugs, and neither needed a probe', async () => {
+    // The shape of #400: the generator wrote the same site title onto more
+    // than one article. Under the old rule both probes came back empty and
+    // both documents took the same slug.
+    const docs = [
+      readyDoc({ id: 'aaa111', Title: 'One Shared Title' }),
+      readyDoc({ id: 'bbb222', Title: 'One Shared Title' }),
+    ];
+    const store = makeStore(docs[0], {
+      readDoc: vi.fn(async (c, id) => (c === 'content' ? docs.find((d) => d.id === id) : null)),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['aaa111', 'bbb222'], publishTarget: 'framework' }),
+      context
+    );
+    const slugs = store.patchDoc.mock.calls
+      .filter(([c]) => c === 'content')
+      .map(([, , u]) => u.slug);
+    expect(slugs).toEqual(['one-shared-title-aaa111', 'one-shared-title-bbb222']);
+    expect(store.queryDocs).not.toHaveBeenCalled();
+  });
+
+  it('a republish moves off a slug another document holds, probing Slug as well as slug', async () => {
+    const store = makeStore(readyDoc({ contentStatus: 'published', slug: 'shared-slug' }), {
+      queryDocs: vi.fn(async () => [{ id: 'c1' }, { id: '7MCkl1cSf7GGCgJxlCwZ' }]),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+    const [, query, params] = store.queryDocs.mock.calls[0];
+    // Both fields. `slug` and `Slug` carry different values on ten of the
+    // twenty-two published articles, and the manifest routes on `slug || Slug`.
+    expect(query).toBe('SELECT TOP 2 c.id FROM c WHERE c.slug = @slug OR c.Slug = @slug');
+    expect(params).toEqual([{ name: '@slug', value: 'shared-slug' }]);
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    expect(patch.slug).toBe('shared-slug-c1');
+    expect(patch.Slug).toBe('shared-slug-c1');
+  });
+
+  it('a republish reads its slug from Slug when the document has no lowercase slug', async () => {
+    const store = makeStore(readyDoc({ contentStatus: 'published', Slug: 'legacy-slug' }), {
+      queryDocs: vi.fn(async () => [{ id: 'c1' }, { id: 'other' }]),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([{ name: '@slug', value: 'legacy-slug' }]);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe('legacy-slug-c1');
+  });
+
+  it('a probe that throws leaves a republished URL alone and still publishes', async () => {
+    const store = makeStore(readyDoc({ contentStatus: 'published', slug: 'existing-slug' }), {
+      queryDocs: vi.fn(async () => {
+        throw new Error('Cosmos unavailable');
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(body.errors).toEqual([]);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe('existing-slug');
+  });
+});
+
 describe('publishContent', () => {
   it('publishes a ready item: status, slug, URLs, provider, version row', async () => {
     const store = makeStore();
@@ -236,10 +340,10 @@ describe('publishContent', () => {
     expect(patch.Live).toBe(true); // markLive defaults true
     // A live publish arms the social-caption auto-queue trigger (backlog #1).
     expect(patch.socialCaptionTrigger).toBe(true);
-    expect(patch.slug).toBe('migration-readiness-framework');
-    expect(patch.curatedSubpagePath).toBe('/azure/frameworks/migration-readiness-framework');
+    expect(patch.slug).toBe('migration-readiness-framework-c1'); // first assignment carries the id
+    expect(patch.curatedSubpagePath).toBe('/azure/frameworks/migration-readiness-framework-c1');
     expect(patch.publicUrl).toBe(
-      'https://hybridcloudworks.com/azure/frameworks/migration-readiness-framework'
+      'https://hybridcloudworks.com/azure/frameworks/migration-readiness-framework-c1'
     );
     expect(patch['Published At']).toBe('2026-08-01T00:00:00.000Z');
     expect(patch['Cloud Provider']).toBe('Azure');
@@ -313,24 +417,10 @@ describe('publishContent', () => {
     );
     expect(body.skipped).toBe(1);
     expect(body.mappings[0].slug).toBe('existing-slug');
-    expect(store.queryDocs).not.toHaveBeenCalled(); // no collision probe on republish
     // version row says republished
     expect(
       store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1].versionReason
     ).toBe('republished');
-  });
-
-  it('suffixes the slug only on a real collision by another doc', async () => {
-    const store = makeStore(readyDoc(), {
-      queryDocs: vi.fn(async () => [{ id: 'someone-else' }]),
-    });
-    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
-    await h.publishContent(
-      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
-      context
-    );
-    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
-    expect(patch.slug).toBe('migration-readiness-framework-c1'); // suffixed with id fragment
   });
 
   it('surfaces the scrapedImages warning without blocking the publish', async () => {
