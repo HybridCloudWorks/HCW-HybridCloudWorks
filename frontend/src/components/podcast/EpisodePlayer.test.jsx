@@ -111,6 +111,18 @@ describe('EpisodePlayer', () => {
     expect(track.className).toMatch(/focus-within:ring-2/);
   });
 
+  it('renders the placeholder, not an <img>, for an unsafe image URL', () => {
+    // The decision is made on the sanitised value: a javascript: URL must not
+    // become an <img> with no src.
+    const { container } = render(
+      <EpisodePlayer episode={{ ...episode, image: 'javascript:alert(1)' }} meta={meta} />
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('article .material-symbols-outlined')).toHaveTextContent(
+      'podcasts'
+    );
+  });
+
   it('asks for metadata only until play is pressed', () => {
     const { container } = render(<EpisodePlayer episode={episode} meta={meta} />);
     expect(container.querySelector('audio')).toHaveAttribute('preload', 'metadata');

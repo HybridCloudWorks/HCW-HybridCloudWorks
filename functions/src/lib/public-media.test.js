@@ -9,7 +9,12 @@
  * private containers.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createPublicMediaHandlers, parseRangeHeader, resolveRange } from './public-media.js';
+import {
+  createPublicMediaHandlers,
+  ifNoneMatchMatches,
+  parseRangeHeader,
+  resolveRange,
+} from './public-media.js';
 import {
   GENERATED_MEDIA_CONTAINERS,
   mediaUrlFor,
@@ -193,6 +198,46 @@ describe('missing and failing blobs', () => {
 
     expect(res.status).toBe(500);
     expect(error).toHaveBeenCalled();
+  });
+});
+
+describe('ifNoneMatchMatches (RFC 9110 §13.1.2)', () => {
+  const ETAG = '"0x8DABCDEF"';
+
+  it.each([
+    ['the exact tag', '"0x8DABCDEF"'],
+    ['a weak tag', 'W/"0x8DABCDEF"'],
+    ['a list containing the tag', '"other", "0x8DABCDEF", "another"'],
+    ['a list with a weak match', '"other",W/"0x8DABCDEF"'],
+    ['the wildcard', '*'],
+  ])('matches %s', (_label, header) => {
+    expect(ifNoneMatchMatches(header, ETAG)).toBe(true);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', ''],
+    ['a different tag', '"stale"'],
+    ['a list without the tag', '"stale", W/"older"'],
+    ['an unquoted lookalike', '0x8DABCDEF'],
+  ])('does not match %s', (_label, header) => {
+    expect(ifNoneMatchMatches(header, ETAG)).toBe(false);
+  });
+
+  it('never matches when the blob has no ETag, wildcard included', () => {
+    expect(ifNoneMatchMatches('*', '')).toBe(false);
+    expect(ifNoneMatchMatches('"x"', undefined)).toBe(false);
+  });
+
+  it('answers 304 on the route for a list, a weak tag and the wildcard', async () => {
+    for (const header of ['"stale", "0x8DABCDEF"', 'W/"0x8DABCDEF"', '*']) {
+      const storage = okStorage();
+      const res = await createPublicMediaHandlers({ storage }).getMedia(
+        makeRequest({ headers: { 'if-none-match': header } }),
+        context
+      );
+      expect(res.status, header).toBe(304);
+    }
   });
 });
 

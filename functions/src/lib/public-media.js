@@ -130,10 +130,32 @@ const notModified = (etag) => ({
   headers: { ETag: etag, 'Cache-Control': CACHE_CONTROL, 'Accept-Ranges': 'bytes' },
 });
 
-const etagMatches = (request, etag) => {
-  const ifNoneMatch = request.headers?.get?.('if-none-match') || '';
-  return Boolean(etag && ifNoneMatch && ifNoneMatch === etag);
-};
+/**
+ * Does an `If-None-Match` header match this ETag? RFC 9110 §13.1.2: the
+ * header is `*` (matches any current representation) or a comma-separated
+ * list of entity tags, any of which may be weak (`W/"…"`). Comparison for
+ * `If-None-Match` is the weak one, so `W/` is stripped before comparing
+ * quoted tags. Strict string equality missed a list or a weak tag and forced
+ * a byte read the client would then discard.
+ *
+ * @param {string|null|undefined} header
+ * @param {string} etag - the blob's ETag, quoted, as the SDK returns it
+ * @returns {boolean}
+ */
+export function ifNoneMatchMatches(header, etag) {
+  const value = String(header || '').trim();
+  if (!value || !etag) return false;
+  if (value === '*') return true;
+  const normalise = (tag) => tag.trim().replace(/^W\//i, '');
+  const wanted = normalise(etag);
+  return value
+    .split(',')
+    .map(normalise)
+    .some((tag) => tag && tag === wanted);
+}
+
+const etagMatches = (request, etag) =>
+  ifNoneMatchMatches(request.headers?.get?.('if-none-match'), etag);
 
 /**
  * All three readers are required: the route registers HEAD and honours

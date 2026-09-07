@@ -49,6 +49,7 @@ const episodes = [
     sourceLabel: 'Podcast feed',
     title: 'Host old',
     description: 'Older feed episode',
+    image: 'javascript:alert(1)',
     mediaUrl: 'https://cdn.example/old.mp3',
     durationSeconds: 300,
     publishedAtISO: '2026-08-01T00:00:00.000Z',
@@ -102,6 +103,17 @@ describe('SharedPodcastPage', () => {
     // Widening the filter again restores the selection, which is still held.
     fireEvent.click(screen.getByRole('button', { name: 'All' }));
     expect(playerTitle()).toHaveTextContent('Host old');
+  });
+
+  it('renders the placeholder rather than an <img> for a row whose image URL is unsafe', () => {
+    // `Host old` carries a javascript: image in the fixture; nothing on the
+    // page may turn it into an <img>, with or without a src.
+    const { container } = mount();
+    const imgs = [...container.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+    expect(imgs.some((src) => !src || /^javascript:/i.test(src))).toBe(false);
+    const row = screen.getByRole('button', { name: /Host old/ });
+    expect(row.querySelector('img')).toBeNull();
+    expect(row.querySelector('.material-symbols-outlined')).toHaveTextContent('podcasts');
   });
 
   it('keeps a selection that survives the filter', () => {

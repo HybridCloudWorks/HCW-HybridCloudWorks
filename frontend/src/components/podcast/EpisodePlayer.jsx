@@ -46,6 +46,9 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
     }
   }, [isPlaying]);
 
+  // Decide on the sanitised value: an unsafe URL (javascript:, data:, control
+  // characters) gets the placeholder, not an <img> with no src.
+  const image = safeUrl(episode.image);
   const known = duration ?? episode.durationSeconds ?? null;
   const sliderMax = known && known > 0 ? known : 0;
 
@@ -89,9 +92,9 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
         </div>
 
         <div className="flex gap-6 items-start mb-6">
-          {episode.image ? (
+          {image ? (
             <img
-              src={safeUrl(episode.image)}
+              src={image}
               alt={episode.title}
               loading="lazy"
               decoding="async"

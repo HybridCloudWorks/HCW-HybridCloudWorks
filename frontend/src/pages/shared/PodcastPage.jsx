@@ -268,10 +268,13 @@ function SubscribeSidebar({ meta, platforms, urlFor }) {
 
 function EpisodeImage({ image, title, size = 'md', meta }) {
   const sizeClass = size === 'sm' ? 'w-14 h-14' : 'w-full aspect-square max-w-[200px]';
-  if (image) {
+  // Decide on the sanitised value: an unsafe URL gets the placeholder, not
+  // an <img> with no src.
+  const src = safeUrl(image);
+  if (src) {
     return (
       <img
-        src={safeUrl(image)}
+        src={src}
         alt={title}
         loading="lazy"
         decoding="async"
