@@ -52,7 +52,13 @@ This project has not cut a tagged release; entries are grouped under
   slug now (`resolveCuratedSubpagePath`, found by Copilot's review): it was
   taken from the stored value unconditionally, so an article leaving a
   contested slug would have kept advertising the contested URL in
-  `slugPageUrl`, `publishedUrl` and `publicUrl` while `slug` said otherwise.
+  `slugPageUrl`, `publishedUrl` and `publicUrl` while `slug` said otherwise,
+  and it is normalised to a leading slash because three frontend hooks read the
+  provider out of `curatedSubpagePath.split('/')[1]`. The slug is normalised
+  once before the probe for the same reason the URL is: `resolveSlug` trimmed
+  while `slugHolders` probed the raw value, so a stored `'  shared-slug  '` —
+  migrated or hand-edited, which is this corpus — matched no holder and the
+  trimmed form was then written onto a URL another article held.
 - **The Social Hub lists Publer accounts again, and when it cannot it says
   which of three things is wrong (#397).** Both of its call sites tested the
   `publerProxy` response with `Array.isArray`, and the proxy answers with an
