@@ -308,8 +308,24 @@ describe('buildReport', () => {
     });
     expect(report).toContain('isAdmin false');
     expect(report).toContain('- Result: FAIL');
-    expect(report).toContain('Authenticated no-op path: UNKNOWN (not run)');
+    expect(report).toContain(
+      'Authenticated no-op path: UNKNOWN (NOT RUN — press "Run authenticated probe")'
+    );
+    expect(report).toContain(
+      'no Authorization header: UNKNOWN (NOT RUN — press "Run unauthenticated probe")'
+    );
     expectNoSecrets(report);
+  });
+
+  it('says the identity checks are still running rather than that the token failed', () => {
+    // Before the first run settles, "could not be read" would be a lie about
+    // work that has not happened yet — and it is what would be pasted on #355.
+    const report = buildReport({ generatedAt: 'now', identityPending: true });
+    expect(report).toContain('Identity checks: STILL RUNNING — this report is not final');
+    expect(report).not.toContain('could not be read');
+    expect(report).not.toContain('Result:');
+    expect(report).toContain('NOT RUN — press "Run authenticated probe"');
+    expect(report).toContain('NOT RUN — press "Run unauthenticated probe"');
   });
 
   it('is honest about what could not be read', () => {
@@ -350,8 +366,12 @@ describe('the page', () => {
     getJSON.mockRejectedValue(new Error('Authentication required'));
     authedFetch.mockRejectedValue(new Error('Invalid token'));
     const { container } = render(<DiagnosticsPage />);
-    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy());
-    expect(screen.getByRole('status').textContent).toContain('Authentication required');
+    // While the first run settles a second role="status" ("Checks still
+    // running") is on screen; getByRole throws on two, so this only passes once
+    // the run has settled and the refusal note is the one left.
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toContain('Authentication required')
+    );
     expect(screen.getAllByText('UNKNOWN').length).toBeGreaterThanOrEqual(3);
     expect(screen.getByText('Invalid token')).toBeTruthy();
     expectNoSecrets(container.textContent);
@@ -427,6 +447,48 @@ describe('the page', () => {
       expect(screen.getByText(/Unauthenticated request refused — HTTP 200/)).toBeTruthy()
     );
     expect(screen.getByText('FAIL')).toBeTruthy();
+  });
+
+  it('keeps Copy report disabled until the identity checks have settled', async () => {
+    // Hold the token acquisition open so the first run cannot settle.
+    let releaseToken;
+    acquireApiToken.mockReturnValue(new Promise((resolve) => (releaseToken = resolve)));
+    render(<DiagnosticsPage />);
+
+    const copy = screen.getByText('Copy report').closest('button');
+    expect(copy.disabled).toBe(true);
+    expect(screen.getByText(/Checks still running/)).toBeTruthy();
+    // The on-screen report says the same thing, so a manual select-and-copy
+    // cannot produce a false "could not be read" either.
+    expect(screen.getByLabelText('Diagnostics report').textContent).toContain('STILL RUNNING');
+    expect(screen.getByLabelText('Diagnostics report').textContent).not.toContain(
+      'could not be read'
+    );
+
+    releaseToken(TOKEN);
+    await identityLoaded();
+    expect(copy.disabled).toBe(false);
+    expect(screen.queryByText(/Checks still running/)).toBeNull();
+  });
+
+  it('disables Copy report again while a probe is in flight', async () => {
+    let releaseEnqueue;
+    authedFetch.mockImplementation(async (name) => {
+      if (name === 'getCurrentAdminStatus') return jsonResponse(200, ADMIN_STATUS);
+      return new Promise((resolve) => (releaseEnqueue = resolve));
+    });
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+    const copy = screen.getByText('Copy report').closest('button');
+    expect(copy.disabled).toBe(false);
+
+    fireEvent.click(screen.getByText('Run authenticated probe'));
+    await waitFor(() => expect(copy.disabled).toBe(true));
+    expect(screen.getByText(/Checks still running/)).toBeTruthy();
+
+    releaseEnqueue(jsonResponse(200, { jobId: 'job-123', type: 'shell-echo', status: 'queued' }));
+    await waitFor(() => expect(copy.disabled).toBe(false));
+    seen(/job-123/);
   });
 
   it('copies the report — the same summary, never the token', async () => {

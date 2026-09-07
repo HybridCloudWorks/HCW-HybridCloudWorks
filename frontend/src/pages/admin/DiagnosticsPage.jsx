@@ -198,7 +198,7 @@ export function evaluateIdentity(token, admin) {
  * @returns {{ pass: boolean|null, reason: string }}
  */
 export function evaluateLabsProbe(probe) {
-  if (!probe) return { pass: null, reason: 'not run' };
+  if (!probe) return { pass: null, reason: 'NOT RUN — press "Run authenticated probe"' };
   const { enqueue, read, final } = probe;
   if (!enqueue || enqueue.httpStatus !== 200) {
     return { pass: false, reason: `enqueueLabJob answered ${enqueue?.httpStatus ?? 'no status'}` };
@@ -218,7 +218,7 @@ export function evaluateLabsProbe(probe) {
 
 /** The #356 verdict for the unauthenticated probe: a 401 or 403, nothing else. */
 export function evaluateUnauthenticatedProbe(result) {
-  if (!result) return { pass: null, reason: 'not run' };
+  if (!result) return { pass: null, reason: 'NOT RUN — press "Run unauthenticated probe"' };
   if (result.error) return { pass: false, reason: result.error };
   const pass = result.httpStatus === 401 || result.httpStatus === 403;
   return { pass, reason: `HTTP ${result.httpStatus}` };
@@ -234,6 +234,7 @@ const list = (values) => (values && values.length ? values.join(', ') : '(none)'
 
 /** The #355 half of the report. */
 function identityReportLines({
+  identityPending,
   token,
   tokenError,
   expectations,
@@ -243,6 +244,12 @@ function identityReportLines({
   adminError,
 }) {
   const lines = ['### #355 — token claims and admin registry', ''];
+  // Before the first run has settled there is nothing to report, and saying
+  // "could not be read" here would be false — the check has not happened yet.
+  if (identityPending) {
+    lines.push('- Identity checks: STILL RUNNING — this report is not final', '');
+    return lines;
+  }
   if (token) {
     lines.push(`- Claims present (names only): ${list(token.claimNames)}`);
     lines.push(`- \`aud\`: ${token.aud ?? '(absent)'}`);
@@ -701,8 +708,14 @@ export default function DiagnosticsPage() {
     setUnauthBusy(false);
   }, []);
 
+  // Nothing may be copied while a check is in flight: a report taken mid-run
+  // would say a token "could not be read" or a probe was "not run" for work
+  // that is merely pending, and that is what would end up on #355/#356.
+  const settling = identity === null || identityBusy || labsBusy || unauthBusy;
+
   const report = buildReport({
     generatedAt: new Date().toISOString(),
+    identityPending: identity === null,
     ...(identity || {}),
     labs,
     unauth,
@@ -736,13 +749,26 @@ export default function DiagnosticsPage() {
             reduced to claim names; it is never displayed, and only the summary below is copied.
           </p>
         </div>
-        <div className="flex gap-2">
-          <ProbeButton busy={identityBusy} icon={RefreshCw} onClick={rerunIdentity}>
-            Re-run identity checks
-          </ProbeButton>
-          <Button size="sm" onClick={copyReport}>
-            <ClipboardCopy className="mr-2 h-3.5 w-3.5" /> Copy report
-          </Button>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-2">
+            <ProbeButton busy={identityBusy} icon={RefreshCw} onClick={rerunIdentity}>
+              Re-run identity checks
+            </ProbeButton>
+            <Button
+              size="sm"
+              onClick={copyReport}
+              disabled={settling}
+              title={settling ? 'Checks still running' : 'Copy the Markdown report'}
+            >
+              <ClipboardCopy className="mr-2 h-3.5 w-3.5" /> Copy report
+            </Button>
+          </div>
+          {settling ? (
+            <p className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
+              <Loader2 className="h-3 w-3 animate-spin" /> Checks still running — the report is not
+              final
+            </p>
+          ) : null}
         </div>
       </div>
 
