@@ -38,7 +38,13 @@ describe('summarizeCandidate', () => {
       publishedUrl: 'https://hybridcloudworks.com/azure/blog/arc-updates',
       Content: `<p>stub</p><img src="${UPSTREAM_A}">`,
       content: `![a](${UPSTREAM_A}) ![b](${UPSTREAM_B}) ![own](${HOSTED})`,
-      inlineImages: { fields: ['content'], rewritten: 0, failed: 2, failedUrls: [], at: 'x' },
+      inlineImages: {
+        fields: ['content'],
+        rewritten: 0,
+        failed: 2,
+        failedUrls: [UPSTREAM_A, UPSTREAM_B],
+        at: 'x',
+      },
     });
     expect(row).toEqual({
       id: 'c1',
@@ -49,10 +55,20 @@ describe('summarizeCandidate', () => {
       fields: ['Content', 'content'],
       urlCount: 2,
       hosts: ['cdn-dynmedia-1.microsoft.com', 'techcommunity.microsoft.com'],
-      lastRun: { at: 'x', rewritten: 0, failed: 2, failedHosts: [] },
+      lastRun: {
+        at: 'x',
+        rewritten: 0,
+        failed: 2,
+        failedHosts: ['cdn-dynmedia-1.microsoft.com', 'techcommunity.microsoft.com'],
+      },
     });
-    expect(JSON.stringify(row)).not.toContain('stub');
-    expect(JSON.stringify(row)).not.toContain(UPSTREAM_A);
+    // Neither the body nor the last run's URLs reach the row, in any field.
+    const wire = JSON.stringify(row);
+    expect(wire).not.toContain('stub');
+    expect(wire).not.toContain('failedUrls');
+    expect(wire).not.toContain(UPSTREAM_A);
+    expect(wire).not.toContain(UPSTREAM_B);
+    expect(wire.replace(row.publicUrl, '')).not.toMatch(/https?:/);
   });
 
   it('reduces the last run to hosts — the summary’s failedUrls never leave the document', () => {
