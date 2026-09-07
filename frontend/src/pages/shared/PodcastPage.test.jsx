@@ -89,7 +89,7 @@ vi.mock('@/components/podcast/EpisodePlayer', () => ({
   ),
 }));
 
-import SharedPodcastPage, { sourceFilters } from './PodcastPage';
+import SharedPodcastPage, { heroBlurb, sourceFilters } from './PodcastPage';
 
 const page = () => (
   <MemoryRouter initialEntries={['/azure/podcast']}>
@@ -115,6 +115,10 @@ beforeEach(() => {
 
 const playerTitle = () =>
   within(screen.getByTestId('episode-player')).getByRole('heading', { level: 2 });
+
+/** The sentence under the page title — the hero's only paragraph. */
+const heroText = () =>
+  screen.getByRole('heading', { level: 1 }).parentElement.querySelector('p').textContent;
 
 describe('SharedPodcastPage', () => {
   it('lists both sources newest first and plays the newest by default', () => {
@@ -290,6 +294,49 @@ describe("the site's show on a provider page", () => {
     expect(playerTitle()).toHaveTextContent('Hybrid Cloud Insights 01');
     expect(screen.queryByRole('group', { name: 'Filter episodes by source' })).toBeNull();
     expect(screen.queryByText('No episodes available yet.')).toBeNull();
+  });
+
+  it('promises the provider feed only on a page that has one', () => {
+    // The hero named "the Azure feed" unconditionally, which was true only
+    // while a provider feed was the only thing a page could hold. A show-only
+    // page is now the ordinary case, and copy describing a page other than the
+    // one being rendered is the same defect as an empty Subscribe box (#348).
+    episodesNow = [showEpisode];
+    const showOnly = mount();
+    expect(heroText()).toContain("the site's show");
+    expect(heroText()).not.toContain('the Azure feed');
+    expect(heroText()).not.toContain('Listen & Learn study episodes');
+    // One source is not "gathered", so the page does not claim to have.
+    expect(heroText()).not.toContain('in one place');
+    showOnly.unmount();
+
+    episodesNow = [showEpisode, ...episodes];
+    mount();
+    expect(heroText()).toContain("the site's show");
+    expect(heroText()).toContain('the Azure feed');
+    expect(heroText()).toContain('the Listen & Learn study episodes for Azure certifications');
+    expect(heroText()).toContain('in one place');
+  });
+
+  it('names one, two or three sources as a sentence, and none as none', () => {
+    const [host, learn] = episodes;
+    expect(heroBlurb([showEpisode], 'Azure')).toBe(
+      'Deep-dive podcast discussions on Azure architecture, patterns, and enterprise solutions — ' +
+        "the site's show."
+    );
+    expect(heroBlurb([showEpisode, learn], 'Azure')).toBe(
+      'Deep-dive podcast discussions on Azure architecture, patterns, and enterprise solutions — ' +
+        "the site's show and the Listen & Learn study episodes for Azure certifications, in one place."
+    );
+    expect(heroBlurb([showEpisode, host, learn], 'Google Cloud')).toBe(
+      'Deep-dive podcast discussions on Google Cloud architecture, patterns, and enterprise ' +
+        "solutions — the site's show, the Google Cloud feed, and the Listen & Learn study " +
+        'episodes for Google Cloud certifications, in one place.'
+    );
+    // A page with nothing on it promises nothing, and still reads as a sentence.
+    expect(heroBlurb([], 'Azure')).toBe(
+      'Deep-dive podcast discussions on Azure architecture, patterns, and enterprise solutions.'
+    );
   });
 
   it('filters to the show, and back', () => {

@@ -315,6 +315,46 @@ export function sourceFilters(episodes) {
   ];
 }
 
+/** The sources this page has, named in the order the list leads with them. */
+function heroSources(episodes, providerName) {
+  const phrases = {
+    [SOURCE.main]: "the site's show",
+    [SOURCE.host]: `the ${providerName} feed`,
+    [SOURCE.listenAndLearn]: `the Listen & Learn study episodes for ${providerName} certifications`,
+  };
+  return FILTER_ORDER.filter((key) => episodes.some((episode) => episode.source === key)).map(
+    (key) => phrases[key]
+  );
+}
+
+/** `a`, `a and b`, `a, b, and c`. */
+function joinPhrases(phrases) {
+  if (phrases.length <= 1) return phrases[0] ?? '';
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(', ')}, and ${phrases.at(-1)}`;
+}
+
+/**
+ * The sentence under the title, naming the sources the page ACTUALLY has.
+ *
+ * It used to name the provider's feed unconditionally, which was true of every
+ * page only for as long as a provider feed was the only thing a page could
+ * hold. It is not any more, and the page it is wrong on is the one this whole
+ * change exists to produce: a provider with no feed of its own, showing the
+ * site's show. Promising a reader an "{Azure} feed" that no row on the page
+ * came from is the same class of mistake as an empty Subscribe box (#348) —
+ * copy describing a page other than the one being rendered.
+ *
+ * "in one place" goes with more than one source, for the same reason: it is a
+ * claim about bringing things together, and one thing is not gathered.
+ */
+export function heroBlurb(episodes, providerName) {
+  const base = `Deep-dive podcast discussions on ${providerName} architecture, patterns, and enterprise solutions`;
+  const sources = heroSources(episodes, providerName);
+  if (sources.length === 0) return `${base}.`;
+  return `${base} — ${joinPhrases(sources)}${sources.length > 1 ? ', in one place' : ''}.`;
+}
+
 /**
  * A source chip on a list row. Listen & Learn rows say which exam; feed rows
  * say they came from the show. The label is the row's `sourceLabel`, set by
@@ -449,9 +489,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
             </span>
           </h1>
           <p className="text-base sm:text-lg text-foreground max-w-3xl relative z-10">
-            Deep-dive podcast discussions on {meta.name} architecture, patterns, and enterprise
-            solutions — the site&apos;s show, the {meta.name} feed, and the Listen &amp; Learn study
-            episodes for {meta.name} certifications, in one place.
+            {heroBlurb(episodes, meta.name)}
           </p>
         </section>
 
