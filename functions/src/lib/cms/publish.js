@@ -25,6 +25,15 @@
  *     article publishes untouched with no summary. Nothing here can fail a
  *     publish. See ./inline-images.js. Injected as `inlineImages`; absent,
  *     nothing runs.
+ *   - `params.reason === REHOST_IMAGES_REASON` (the #374 backfill, from
+ *     POST cms/content/rehost-images) is a republish that touches NOTHING but
+ *     the body fields and their `inlineImages` summary. A full republish of a
+ *     live article would also re-run the gates, re-arm the cover trigger on an
+ *     article without one, re-arm the social-caption trigger on one that never
+ *     posted, rewrite Live from the caller's markLive, and re-stamp the
+ *     publish dates and URLs — none of which sixteen articles need for their
+ *     images to stop hotlinking. The branch shares the read, the status table,
+ *     the ETag precondition and the version snapshot, and nothing else.
  *   - bumpForgeStats' FieldValue.increment becomes read-modify-patch on the
  *     whole totals/formats objects — formatKey is user-influenced text, and
  *     writing whole objects avoids dotted-path escaping entirely.
@@ -37,7 +46,7 @@ import { randomUUID } from 'node:crypto';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { buildContentQualityReport, buildImageReadinessReport } from './content-quality.js';
 import { normalizePublishTarget, SUPPORTED_PUBLISH_TARGETS } from './publish-targets.js';
-import { buildInlineImageUpdate } from './inline-images.js';
+import { buildInlineImageUpdate, findInlineImageUrls, resolveBodyFields } from './inline-images.js';
 import {
   canPublishFromStatus,
   PUBLISHABLE_NORMALIZED_STATUSES,
@@ -54,6 +63,14 @@ const json = (status, body) => ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
+
+/**
+ * `params.reason` value that turns processPublishContent into the narrow
+ * re-host-only republish described in the module header. A string rather than
+ * a boolean so a future narrow republish (a related-posts refresh, say) is a
+ * second named reason and not a second flag that interacts with this one.
+ */
+export const REHOST_IMAGES_REASON = 'rehost-images';
 
 export function slugify(text = '') {
   return String(text)
@@ -282,6 +299,114 @@ export function createPublishHandlers({
     }
   }
 
+  /** Version history is best-effort, exactly as the source: a failed row never fails the write it records. */
+  async function snapshotVersion(contentId, snapToSave, nowIso, params, versionReason) {
+    try {
+      await store.upsertDoc('content_versions', {
+        id: uuid(),
+        contentId,
+        title: snapToSave.Title || snapToSave.title || '',
+        summary: snapToSave.Summary || snapToSave.summary || '',
+        draft:
+          snapToSave.blogDraft ||
+          snapToSave.content ||
+          snapToSave.Content ||
+          snapToSave.postContent ||
+          '',
+        authorName:
+          snapToSave.editorAuthor ||
+          snapToSave.siteAuthor ||
+          snapToSave.publishedByName ||
+          snapToSave.createdByName ||
+          '',
+        tags: snapToSave.Tags || snapToSave.keyTopics || [],
+        sidebarContent: snapToSave.sidebarContent || '',
+        publishedDate:
+          snapToSave.publishedDate || snapToSave.datePublished || snapToSave['Published At'] || '',
+        orderedImageUrls: snapToSave.contentImages || snapToSave.orderedImageUrls || [],
+        versionCreatedAt: nowIso,
+        versionCreatedBy:
+          params.user?.email || params.user?.preferred_username || params.user?.oid || 'system',
+        versionReason,
+      });
+    } catch {
+      // Best-effort, see above.
+    }
+  }
+
+  /**
+   * The re-host-only republish (module header, REHOST_IMAGES_REASON). Reached
+   * from processPublishContent once the document is read and its status has
+   * passed the one publishable table; from here on only a document that is
+   * already published is accepted, because on anything else "re-host" would
+   * be a first publish wearing a smaller name.
+   *
+   * The patch carries the rewritten body field(s), the `inlineImages` summary
+   * and `updatedAt` — never contentStatus, Live, the slug, the URLs, the
+   * dates, the quality reports or either trigger. Conditioned on the ETag
+   * like the publish write; a lost race is a skip, not a retry.
+   */
+  async function rehostInlineImages(contentId, contentData, currentStatus, nowIso, params) {
+    if (currentStatus !== 'published') {
+      return { error: `Only a published document can be re-hosted; status is '${currentStatus}'` };
+    }
+    if (typeof inlineImages !== 'function') {
+      return { error: 'Inline image re-hosting is not configured on this deployment' };
+    }
+    const hasExternal = resolveBodyFields(contentData).some(
+      (field) => findInlineImageUrls(contentData[field]).length > 0
+    );
+    if (!hasExternal) {
+      return { skipped: true, reason: 'No third-party image URLs in the body fields' };
+    }
+
+    const update = await buildInlineImageUpdate({
+      contentData,
+      contentId,
+      rehost: inlineImages,
+      nowIso,
+      log,
+    });
+    // Null here cannot mean "nothing to do" (checked above); it means the
+    // rehoster threw whole and the step logged it. Say so instead of
+    // reporting a re-host that did not happen.
+    if (!update) {
+      return { error: 'Re-hosting failed before any image was stored; see the function log' };
+    }
+
+    const contentUpdate = { ...update, updatedAt: nowIso };
+    try {
+      await store.patchDoc('content', contentId, contentUpdate, { ifMatch: contentData._etag });
+    } catch (error) {
+      if (error?.code === 412 || error?.statusCode === 412) {
+        return { skipped: true, reason: 'Content changed while re-hosting; not retried' };
+      }
+      throw error;
+    }
+
+    await snapshotVersion(
+      contentId,
+      { ...contentData, ...contentUpdate },
+      nowIso,
+      params,
+      REHOST_IMAGES_REASON
+    );
+
+    const slug = contentData.slug || contentData.Slug || null;
+    return {
+      blogId: contentId,
+      reused: true,
+      rehosted: true,
+      slug,
+      curatedSubpagePath: contentData.curatedSubpagePath || null,
+      expectedPublicUrl: publicUrlOf(contentData) || null,
+      sourceUrl: contentData.sourceUrl || contentData.url || contentData['CD Url'] || null,
+      landingProvider: contentData.landingProvider || null,
+      publishTarget: normalizePublishTarget(contentData.publishTarget, contentData.type) || null,
+      inlineImages: update.inlineImages,
+    };
+  }
+
   async function processPublishContent(contentId, params) {
     try {
       const contentData = await store.readDoc('content', contentId, contentId);
@@ -297,6 +422,10 @@ export function createPublishHandlers({
       }
 
       const nowIso = now().toISOString();
+      if (params.reason === REHOST_IMAGES_REASON) {
+        return await rehostInlineImages(contentId, contentData, currentStatus, nowIso, params);
+      }
+
       const resolvedTarget = normalizePublishTarget(
         params.publishTarget || contentData.publishTarget,
         contentData.type || contentData.contentType
@@ -444,41 +573,13 @@ export function createPublishHandlers({
         await bumpForgeStats(contentData.forgeMeta.formatKey);
       }
 
-      try {
-        const snapToSave = { ...contentData, ...contentUpdate };
-        await store.upsertDoc('content_versions', {
-          id: uuid(),
-          contentId,
-          title: snapToSave.Title || snapToSave.title || '',
-          summary: snapToSave.Summary || snapToSave.summary || '',
-          draft:
-            snapToSave.blogDraft ||
-            snapToSave.content ||
-            snapToSave.Content ||
-            snapToSave.postContent ||
-            '',
-          authorName:
-            snapToSave.editorAuthor ||
-            snapToSave.siteAuthor ||
-            snapToSave.publishedByName ||
-            snapToSave.createdByName ||
-            '',
-          tags: snapToSave.Tags || snapToSave.keyTopics || [],
-          sidebarContent: snapToSave.sidebarContent || '',
-          publishedDate:
-            snapToSave.publishedDate ||
-            snapToSave.datePublished ||
-            snapToSave['Published At'] ||
-            '',
-          orderedImageUrls: snapToSave.contentImages || snapToSave.orderedImageUrls || [],
-          versionCreatedAt: nowIso,
-          versionCreatedBy:
-            params.user?.email || params.user?.preferred_username || params.user?.oid || 'system',
-          versionReason: isRepublish ? 'republished' : 'published',
-        });
-      } catch {
-        // Version history is best-effort, exactly as the source.
-      }
+      await snapshotVersion(
+        contentId,
+        { ...contentData, ...contentUpdate },
+        nowIso,
+        params,
+        isRepublish ? 'republished' : 'published'
+      );
 
       return {
         blogId: contentId,
@@ -548,11 +649,11 @@ export function createPublishHandlers({
       }
     },
 
-    // Not a route. Exposed so the scheduled publisher runs the same pipeline
-    // rather than a second implementation of it — the status gate, quality and
-    // image gates, slug resolution and version snapshot are the publish
-    // semantics, and a timer that reimplemented them would drift
-    // (TODO.md T-301).
+    // Not a route. Exposed so the scheduled publisher (TODO.md T-301) and the
+    // re-host route (lib/cms/rehost-images.js) run the same pipeline rather
+    // than a second implementation of it — the status gate, quality and image
+    // gates, slug resolution and version snapshot are the publish semantics,
+    // and a caller that reimplemented them would drift.
     processPublishContent,
   };
 }
