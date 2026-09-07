@@ -24,7 +24,11 @@ const guardWith = (over = {}) => ({
   clearCache: vi.fn(),
   ...over,
 });
-const denyUser = { requireUser: vi.fn(async () => ({ user: null, role: null, error: { status: 401, body: '{}' } })), requireRole: vi.fn(), clearCache: vi.fn() };
+const denyUser = {
+  requireUser: vi.fn(async () => ({ user: null, role: null, error: { status: 401, body: '{}' } })),
+  requireRole: vi.fn(),
+  clearCache: vi.fn(),
+};
 
 const makeRequest = (body) => ({
   method: 'POST',
@@ -67,10 +71,14 @@ describe('helpers', () => {
   });
 
   it('speaker date normalizer handles Date, epoch, string, Timestamp-like, junk', () => {
-    expect(normalizeSpeakerEventDate(new Date('2026-01-01T00:00:00Z'))).toBe('2026-01-01T00:00:00.000Z');
+    expect(normalizeSpeakerEventDate(new Date('2026-01-01T00:00:00Z'))).toBe(
+      '2026-01-01T00:00:00.000Z'
+    );
     expect(normalizeSpeakerEventDate(1767225600000)).toBe('2026-01-01T00:00:00.000Z');
     expect(normalizeSpeakerEventDate('2026-01-01')).toMatch(/^2026-01-01T/);
-    expect(normalizeSpeakerEventDate({ seconds: 1767225600, nanoseconds: 0 })).toBe('2026-01-01T00:00:00.000Z');
+    expect(normalizeSpeakerEventDate({ seconds: 1767225600, nanoseconds: 0 })).toBe(
+      '2026-01-01T00:00:00.000Z'
+    );
     expect(normalizeSpeakerEventDate({ _seconds: 1767225600 })).toBe('2026-01-01T00:00:00.000Z');
     expect(normalizeSpeakerEventDate('junk')).toBeNull();
     expect(normalizeSpeakerEventDate('')).toBeNull();
@@ -87,7 +95,12 @@ describe('getCurrentAdminStatus', () => {
 
   it('answers from the registry record, not token claims', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'oid-1', role: 'PUBLISHER', active: true, permissions: null })),
+      readDoc: vi.fn(async () => ({
+        id: 'oid-1',
+        role: 'PUBLISHER',
+        active: true,
+        permissions: null,
+      })),
     });
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
     const body = JSON.parse((await h.getCurrentAdminStatus(makeRequest(), context)).body);
@@ -97,12 +110,64 @@ describe('getCurrentAdminStatus', () => {
   });
 
   it('an inactive or missing record is not an admin', async () => {
-    const inactive = makeStore({ readDoc: vi.fn(async () => ({ id: 'oid-1', role: 'editor', active: false })) });
+    const inactive = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'oid-1', role: 'editor', active: false })),
+    });
     const h1 = createAdminIdentityHandlers({ guard: guardWith(), store: inactive, ...fixed });
-    expect(JSON.parse((await h1.getCurrentAdminStatus(makeRequest(), context)).body).isAdmin).toBe(false);
+    expect(JSON.parse((await h1.getCurrentAdminStatus(makeRequest(), context)).body).isAdmin).toBe(
+      false
+    );
 
     const h2 = createAdminIdentityHandlers({ guard: guardWith(), store: makeStore(), ...fixed });
-    expect(JSON.parse((await h2.getCurrentAdminStatus(makeRequest(), context)).body).isAdmin).toBe(false);
+    expect(JSON.parse((await h2.getCurrentAdminStatus(makeRequest(), context)).body).isAdmin).toBe(
+      false
+    );
+  });
+});
+
+describe('getAuthExpectations', () => {
+  const env = { ENTRA_API_AUDIENCE: 'api://api-app-id', ENTRA_TENANT_ID: 'tenant-1' };
+  // The route is registered GET-only; the shared makeRequest builds a POST.
+  const getRequest = () => ({ ...makeRequest(), method: 'GET' });
+
+  it('refuses an unauthenticated caller with the guard’s own response', async () => {
+    const h = createAdminIdentityHandlers({ guard: denyUser, store: makeStore(), env, ...fixed });
+    const res = await h.getAuthExpectations(getRequest(), context);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns what the guard enforces, and no registry read is needed to say so', async () => {
+    const store = makeStore();
+    const h = createAdminIdentityHandlers({ guard: guardWith(), store, env, ...fixed });
+    const res = await h.getAuthExpectations(getRequest(), context);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({
+      expectedAudience: 'api://api-app-id',
+      tenantId: 'tenant-1',
+      adminAppRole: 'Admin',
+      registryContainer: 'admins',
+    });
+    expect(store.readDoc).not.toHaveBeenCalled();
+  });
+
+  it('does not need the admin role — a role-holder missing from the registry can still ask', async () => {
+    const guard = guardWith();
+    const h = createAdminIdentityHandlers({ guard, store: makeStore(), env, ...fixed });
+    await h.getAuthExpectations(getRequest(), context);
+    expect(guard.requireUser).toHaveBeenCalled();
+    expect(guard.requireRole).not.toHaveBeenCalled();
+  });
+
+  it('reports an unset audience as null rather than inventing one', async () => {
+    const h = createAdminIdentityHandlers({
+      guard: guardWith(),
+      store: makeStore(),
+      env: {},
+      ...fixed,
+    });
+    const body = JSON.parse((await h.getAuthExpectations(getRequest(), context)).body);
+    expect(body.expectedAudience).toBeNull();
+    expect(body.tenantId).toBeNull();
   });
 });
 
@@ -110,7 +175,9 @@ describe('bootstrapCurrentUserAdmin', () => {
   it('rejects an invalid role before any store access', async () => {
     const store = makeStore();
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
-    expect((await h.bootstrapCurrentUserAdmin(makeRequest({ role: 'godmode' }), context)).status).toBe(400);
+    expect(
+      (await h.bootstrapCurrentUserAdmin(makeRequest({ role: 'godmode' }), context)).status
+    ).toBe(400);
     expect(store.queryDocs).not.toHaveBeenCalled();
   });
 
@@ -122,14 +189,24 @@ describe('bootstrapCurrentUserAdmin', () => {
 
     const res = await h.bootstrapCurrentUserAdmin(makeRequest({}), context);
     const body = JSON.parse(res.body);
-    expect(body).toMatchObject({ success: true, uid: 'oid-1', role: 'super_admin', initialBootstrap: true });
+    expect(body).toMatchObject({
+      success: true,
+      uid: 'oid-1',
+      role: 'super_admin',
+      initialBootstrap: true,
+    });
     const doc = store.upsertDoc.mock.calls[0][1];
     expect(doc).toMatchObject({ id: 'oid-1', role: 'super_admin', active: true });
     expect(doc.permissions).toContain('manage:admins');
     expect(guard.clearCache).toHaveBeenCalled(); // stale 60s cache must not survive
     expect(guard.requireRole).not.toHaveBeenCalled(); // no admins yet — allowlist path
 
-    const locked = createAdminIdentityHandlers({ guard: guardWith(), store: makeStore(), env: {}, ...fixed });
+    const locked = createAdminIdentityHandlers({
+      guard: guardWith(),
+      store: makeStore(),
+      env: {},
+      ...fixed,
+    });
     expect((await locked.bootstrapCurrentUserAdmin(makeRequest({}), context)).status).toBe(503);
   });
 
@@ -152,7 +229,11 @@ describe('bootstrapCurrentUserAdmin', () => {
   it('denies a non-super_admin when admins already exist', async () => {
     const store = makeStore({ queryDocs: vi.fn(async () => [{ id: 'a' }]) });
     const guard = guardWith({
-      requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+      requireRole: vi.fn(async () => ({
+        user: null,
+        role: null,
+        error: { status: 403, body: '{}' },
+      })),
     });
     const h = createAdminIdentityHandlers({ guard, store, env: {}, ...fixed });
     expect((await h.bootstrapCurrentUserAdmin(makeRequest({}), context)).status).toBe(403);
@@ -165,8 +246,12 @@ describe('recordAdminAudit', () => {
   it('validates action and details like the source', async () => {
     const h = createAdminIdentityHandlers({ guard: guardWith(), store: makeStore(), ...fixed });
     expect((await h.recordAdminAudit(makeRequest({}), context)).status).toBe(400);
-    expect((await h.recordAdminAudit(makeRequest({ action: 'x'.repeat(121) }), context)).status).toBe(400);
-    expect((await h.recordAdminAudit(makeRequest({ action: 'ok', details: [1] }), context)).status).toBe(400);
+    expect(
+      (await h.recordAdminAudit(makeRequest({ action: 'x'.repeat(121) }), context)).status
+    ).toBe(400);
+    expect(
+      (await h.recordAdminAudit(makeRequest({ action: 'ok', details: [1] }), context)).status
+    ).toBe(400);
   });
 
   it('writes the audit row with the source shape', async () => {
@@ -223,12 +308,18 @@ describe('speaker events', () => {
 
   it('delete 404s a missing event and reports deletedBy on success', async () => {
     const h404 = createAdminIdentityHandlers({ guard: guardWith(), store: makeStore(), ...fixed });
-    expect((await h404.deleteSpeakerEvent(makeRequest({ docId: 'nope' }), context)).status).toBe(404);
+    expect((await h404.deleteSpeakerEvent(makeRequest({ docId: 'nope' }), context)).status).toBe(
+      404
+    );
 
     const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'ev1' })) });
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
     const res = await h.deleteSpeakerEvent(makeRequest({ docId: 'ev1' }), context);
-    expect(JSON.parse(res.body)).toEqual({ success: true, docId: 'ev1', deletedBy: 'first@hcw.dev' });
+    expect(JSON.parse(res.body)).toEqual({
+      success: true,
+      docId: 'ev1',
+      deletedBy: 'first@hcw.dev',
+    });
     expect(store.deleteDoc).toHaveBeenCalledWith('speakerevents', 'ev1');
   });
 
@@ -236,7 +327,9 @@ describe('speaker events', () => {
     const store = makeStore();
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
     expect((await h.upsertSpeakerEvent(makeRequest({ data: {} }), context)).status).toBe(400);
-    expect((await h.upsertSpeakerEvent(makeRequest({ docId: 'x', data: [1] }), context)).status).toBe(400);
+    expect(
+      (await h.upsertSpeakerEvent(makeRequest({ docId: 'x', data: [1] }), context)).status
+    ).toBe(400);
     expect((await h.deleteSpeakerEvent(makeRequest({}), context)).status).toBe(400);
     expect(store.upsertDoc).not.toHaveBeenCalled();
     expect(store.deleteDoc).not.toHaveBeenCalled();
