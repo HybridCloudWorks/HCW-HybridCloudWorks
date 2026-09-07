@@ -93,21 +93,37 @@ async function fetchWithTimeout(url, options, timeoutMs, fnName) {
  * Retries once on transient 429/5xx failures with a 2-second backoff.
  *
  * @param {string} fnName - Azure Functions route name
- * @param {object} options - fetch options (method, body, etc.)
+ * @param {object} options - fetch options (method, body, etc.), plus an
+ *   optional `token`: a bearer token the caller has ALREADY acquired. When
+ *   given, no acquisition happens here — the Admin Diagnostics page needs the
+ *   token it decodes and the token it sends to be one acquisition, and a
+ *   caller-supplied Authorization header alone did not achieve that (the
+ *   acquisition still ran, and was a forced refresh). Nothing else should
+ *   need this; every other caller wants the acquisition.
  * @returns {Promise<Response>}
  */
-export async function authedFetch(fnName, options = {}) {
-  // Throws 'Not authenticated. Please sign in.' with no active account —
-  // same contract as the Firebase version. getCurrentAdminStatus keeps its
-  // forced refresh so a just-granted role is visible immediately.
-  const { acquireApiToken } = await import('@/lib/entraAuth');
-  const token = await acquireApiToken({ forceRefresh: fnName === 'getCurrentAdminStatus' });
+export async function authedFetch(fnName, { token: presetToken, ...options } = {}) {
+  let token = presetToken;
+  if (!token) {
+    // Throws 'Not authenticated. Please sign in.' with no active account —
+    // same contract as the Firebase version. getCurrentAdminStatus keeps its
+    // forced refresh so a just-granted role is visible immediately.
+    const { acquireApiToken } = await import('@/lib/entraAuth');
+    token = await acquireApiToken({ forceRefresh: fnName === 'getCurrentAdminStatus' });
+  }
   const url = getEndpoint(fnName);
 
+  // Caller headers first, Authorization LAST, and any Authorization the caller
+  // supplied is dropped on the way in. The previous order let a caller's
+  // header silently replace the token this function had just acquired; the
+  // only sanctioned way to change what is sent is the `token` option above.
+  const callerHeaders = Object.fromEntries(
+    Object.entries(options.headers || {}).filter(([name]) => name.toLowerCase() !== 'authorization')
+  );
   const headers = {
     'Content-Type': 'application/json',
+    ...callerHeaders,
     Authorization: `Bearer ${token}`,
-    ...(options.headers || {}),
   };
 
   const timeoutMs = timeoutForFunction(fnName);
@@ -159,8 +175,10 @@ export async function postJSON(fnName, body) {
  * @param {string} fnName - route path after the API base
  * @returns {Promise<object>} Parsed JSON response
  */
-export async function getJSON(fnName) {
-  const res = await authedFetch(fnName, { method: 'GET' });
+export async function getJSON(fnName, options = {}) {
+  // `options` reaches authedFetch unchanged, so `token` (a pre-acquired
+  // bearer token — see authedFetch) works here too.
+  const res = await authedFetch(fnName, { ...options, method: 'GET' });
   return res.json();
 }
 

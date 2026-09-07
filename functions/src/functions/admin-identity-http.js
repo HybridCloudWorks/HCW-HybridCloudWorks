@@ -21,6 +21,13 @@ httpRoute('getCurrentAdminStatus', {
   handler: (request, context) => handlers().getCurrentAdminStatus(request, context),
 });
 
+httpRoute('getAuthExpectations', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'getAuthExpectations',
+  handler: (request, context) => handlers().getAuthExpectations(request, context),
+});
+
 httpRoute('bootstrapCurrentUserAdmin', {
   methods: ['POST'],
   authLevel: 'anonymous',

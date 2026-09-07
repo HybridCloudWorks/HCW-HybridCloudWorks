@@ -24,7 +24,7 @@
  *     where a "uid" is now an Entra object id.
  */
 import { randomUUID } from 'node:crypto';
-import { ADMIN_ROLES } from './auth/roles.js';
+import { ADMIN_ROLES, ENTRA_ADMIN_APP_ROLE } from './auth/roles.js';
 
 const json = (status, body) => ({
   status,
@@ -165,6 +165,34 @@ export function createAdminIdentityHandlers({
       }
     },
 
+    /**
+     * GET /api/getAuthExpectations — what the guard actually enforces, for
+     * the Admin → Diagnostics page (#355).
+     *
+     * The page decodes the caller's own access token in the browser and needs
+     * something to compare `aud`, `tid` and `roles` against. Building those
+     * values into the frontend would only prove the frontend agrees with
+     * itself; this returns the audience and tenant the verifier is configured
+     * with and the App Role value `requireRole` looks for, so the comparison
+     * is against the API as deployed.
+     *
+     * requireUser, not requireRole: the whole point is diagnosing a caller
+     * who holds the App Role but is missing from the registry, and that caller
+     * would be refused by the role guard before learning anything. Nothing
+     * here is secret — the audience is in every token's `aud`, the tenant is
+     * in the SPA's build, and the role value is in this repository.
+     */
+    async getAuthExpectations(request) {
+      const auth = await guard.requireUser(request);
+      if (auth.error) return auth.error;
+      return json(200, {
+        expectedAudience: env.ENTRA_API_AUDIENCE || null,
+        tenantId: env.ENTRA_TENANT_ID || null,
+        adminAppRole: ENTRA_ADMIN_APP_ROLE,
+        registryContainer: 'admins',
+      });
+    },
+
     /** POST /api/bootstrapCurrentUserAdmin — first admin, or self role update. */
     async bootstrapCurrentUserAdmin(request, context) {
       const auth = await guard.requireUser(request);
@@ -287,7 +315,10 @@ export function createAdminIdentityHandlers({
         return json(200, { success: true, auditId });
       } catch (error) {
         context.error('recordAdminAudit failed:', error);
-        return json(500, { error: 'Failed to record audit', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to record audit',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -339,7 +370,10 @@ export function createAdminIdentityHandlers({
         return json(200, { success: true, docId });
       } catch (error) {
         context.error('upsertSpeakerEvent failed:', error);
-        return json(500, { error: 'Failed to save speaker event', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to save speaker event',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
@@ -364,7 +398,10 @@ export function createAdminIdentityHandlers({
         return json(200, { success: true, docId, deletedBy: actor(auth.user) });
       } catch (error) {
         context.error('deleteSpeakerEvent failed:', error);
-        return json(500, { error: 'Failed to delete speaker event', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to delete speaker event',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
   };
