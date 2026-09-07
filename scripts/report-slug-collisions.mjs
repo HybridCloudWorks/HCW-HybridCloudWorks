@@ -16,10 +16,12 @@
  * editing anything — that is exactly what #399's diff showed. The fix is data:
  * give each a different slug in the CMS, or unpublish the duplicates.
  *
- * Publishing cannot add to this list any more — a first publish now writes a
- * slug ending in the document id (functions/src/lib/cms/publish.js,
- * resolveSlug), and a republish moves off a slug another document holds. What
- * is listed here predates that.
+ * The publish pipeline probes for a clash on every publish now, a republish
+ * included, and across both `slug` and `Slug` (functions/src/lib/cms/publish.js,
+ * resolveSlug) — which is what let these three through. One window a read
+ * cannot close remains: two publishers writing one title at the same instant
+ * can both probe clean. This report is how that is caught, so run it after a
+ * manifest refresh rather than only when something looks wrong.
  *
  * Usage:  node scripts/report-slug-collisions.mjs
  * The output is the report, in markdown, ready to paste into the issue. Exits

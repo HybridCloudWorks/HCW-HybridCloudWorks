@@ -31,16 +31,19 @@ This project has not cut a tagged release; entries are grouped under
   in one patch, and on all three — and on ten of the twenty-two published
   articles — the two differ. They arrived from Site-Main already
   `contentStatus: published`, which takes the branch that reuses the stored
-  slug, and that branch never probed. `uniqueSlug` is replaced by `resolveSlug`
-  (pure) plus a `slugHolders` probe: a first assignment now always ends in the
-  document id, because an empty `SELECT … WHERE c.slug = @slug` is not proof —
-  it reads one of the two fields the site routes on, it cannot see a concurrent
-  publish from the scheduled publisher or the Telegram approve worker, and it
-  can throw. A republish keeps the URL it already serves unless the probe —
-  now `c.slug OR c.Slug` — shows another document holding it, in which case it
-  moves off. A probe that throws still never blocks a publish and never moves a
-  live URL. New `scripts/report-slug-collisions.mjs` prints the contested URLs
-  from the committed manifest, no credential needed.
+  slug, and that branch never probed. `uniqueSlug` becomes pure `resolveSlug`
+  plus a `slugHolders` probe, keeping its shape — bare slug when nothing else
+  holds it, suffixed with the document id when something does, and a lookup
+  failure never blocking a publish — with both gaps closed: the probe now reads
+  `c.slug OR c.Slug`, because the two fields carry different values on ten of
+  the twenty-two published articles and the manifest routes on `slug || Slug`;
+  and every publish probes, a republish included, moving off a slug another
+  document holds instead of re-asserting it. A probe that throws still yields
+  the always-unique suffixed slug on a first publish and now leaves a live URL
+  untouched on a republish. What a read cannot establish — two publishers
+  racing on one title — is documented at `resolveSlug` and caught by the new
+  `scripts/report-slug-collisions.mjs`, which prints the contested URLs from the
+  committed manifest with no credential.
 - **The audit stops calling a cancelled request a failure, the Azure
   architecture page names its provider, and the 2026-09-07 crawl is on the
   record (#361, #371, #373, #374).** The run against the deployed batch reads

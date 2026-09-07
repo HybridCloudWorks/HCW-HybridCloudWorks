@@ -37,12 +37,14 @@
  *     whole totals/formats objects — formatKey is user-influenced text, and
  *     writing whole objects avoids dotted-path escaping entirely.
  *   - Timestamps/publish markers are ISO strings (the migrated shape).
- *   - The source's uniqueSlug — probe for a clash, keep the bare slug when
- *     the probe finds none — is REPLACED by resolveSlug (issue #400). The
- *     source rule made the bare slug depend on a read, and a read cannot
- *     prove a slug is free at the moment of the write. What survives of it
- *     is the rule it was written for: a lookup failure never blocks a
- *     publish.
+ *   - The source's uniqueSlug becomes pure `resolveSlug` plus the
+ *     `slugHolders` probe (issue #400). Same shape — keep the bare slug when
+ *     the probe finds no other holder, suffix with the document id otherwise,
+ *     and never let a lookup failure block a publish — with the two gaps that
+ *     put three articles on one URL closed: the probe now reads `c.Slug` as
+ *     well as `c.slug`, and a republish runs it instead of reusing its stored
+ *     slug unexamined. The residual a read cannot close is documented at
+ *     resolveSlug.
  */
 import { randomUUID } from 'node:crypto';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
@@ -88,29 +90,45 @@ const slugSuffix = (id = '') => (id ? String(id).slice(0, 6) : Date.now().toStri
 /**
  * The slug a publish writes. Pure: the caller runs the probe, this decides.
  *
- * WHY THE FIRST ASSIGNMENT IS ALWAYS SUFFIXED (issue #400). The rule this
- * replaces kept the bare slug whenever a `SELECT … WHERE c.slug = @slug`
- * probe came back empty. Three published articles ended up on one URL anyway,
- * because an empty probe is not proof of anything durable:
+ * WHAT WENT WRONG (issue #400). Three published articles share one slug, so
+ * two of them have no URL. None of the three was assigned that slug here: they
+ * arrived from Site-Main already `contentStatus: published`, and the branch
+ * that reuses a stored slug never probed at all. Two things follow, and both
+ * are the rules below:
  *
- *   - it reads one field. `slug` and `Slug` are two fields with two different
- *     values on ten of the twenty-two published articles, and the manifest
- *     routes on `slug || Slug`, so a document whose site slug lives in `Slug`
- *     alone holds a URL the probe cannot see;
- *   - it is a read, and three independent callers publish concurrently (the
- *     batch route, the scheduled publisher and the Telegram approve worker),
- *     so two documents with one title can both probe empty and both write;
- *   - it can throw, and then there is nothing to reason from at all.
+ *   - EVERY publish probes, republishes included. Keeping the URL an article
+ *     already serves is right; keeping one another document holds is not.
+ *   - The probe reads `c.slug` AND `c.Slug`. They are two fields with two
+ *     different values on ten of the twenty-two published articles, and the
+ *     manifest routes on `slug || Slug` (scripts/build-content-manifest.mjs),
+ *     so a document whose site slug lives in `Slug` alone holds a URL that
+ *     `c.slug` on its own cannot see.
  *
- * A slug that ends in the document id needs none of that to be true. It is
- * unique because ids are, whatever the probe said, whichever field the clash
- * was in, and however many publishes were in flight. Existing articles keep
- * their URLs: a republish reuses what it already serves.
+ * WHAT THIS STILL DOES NOT PROVE, said plainly. A clean probe is a read, and a
+ * read cannot establish that a slug is free at the moment of the write. Three
+ * callers publish independently — the batch route, the scheduled publisher
+ * (lib/scheduled-publish.js) and the Telegram approve worker
+ * (functions/publish-jobs.js) — so two first publishes of two documents whose
+ * titles slugify alike can both probe clean and both write the bare slug. That
+ * residual is deliberate and it is bounded: the manifest build refuses to route
+ * the duplicate (#386), so one article is temporarily unreachable rather than
+ * two articles being served at one URL, and `scripts/report-slug-collisions.mjs`
+ * names it from a checkout. Renaming one article in the CMS recovers it.
+ * Suffixing every slug instead would close that window and cost every future
+ * URL its readable form — and once articles are indexed at suffixed URLs, going
+ * back breaks links, which is the harm that does not recover. If that trade is
+ * ever wanted, it is one line here: return the suffixed slug unconditionally
+ * when `reuse` is false.
  *
- * `holders` is what the probe found, or `null` when it was not run or threw.
- * On a republish `null` means "keep the URL this article already serves" — a
- * failed lookup is not evidence of a clash, and inventing a new URL out of one
- * would break every inbound link to an article that was fine.
+ * `holders` is what the probe found, or `null` when it could not answer. The
+ * two paths read `null` differently, on purpose:
+ *
+ *   - a FIRST assignment treats it as "not established" and takes the
+ *     always-suffixed slug — ugly but always unique, and the publish is never
+ *     blocked by a lookup failure (the source's rule, kept);
+ *   - a REPUBLISH keeps the URL the article already serves, because a failed
+ *     lookup is not evidence of a clash and inventing a new URL out of one
+ *     would break every inbound link to an article that was fine.
  *
  * @param {object} args
  * @param {string} args.candidate slugify(title) on a first publish, the stored slug on a republish
@@ -121,9 +139,10 @@ const slugSuffix = (id = '') => (id ? String(id).slice(0, 6) : Date.now().toStri
 export function resolveSlug({ candidate = '', contentId = '', reuse = false, holders = null }) {
   const base = String(candidate || '').trim();
   if (!base) return slugSuffix(contentId);
-  if (!reuse) return `${base}-${slugSuffix(contentId)}`;
   const heldByAnother = Array.isArray(holders) && holders.some((id) => id && id !== contentId);
-  return heldByAnother ? `${base}-${slugSuffix(contentId)}` : base;
+  if (heldByAnother) return `${base}-${slugSuffix(contentId)}`;
+  if (!reuse && !Array.isArray(holders)) return `${base}-${slugSuffix(contentId)}`;
+  return base;
 }
 
 export function toPublicUrl(pathValue) {
@@ -299,8 +318,8 @@ export function createPublishHandlers({
 }) {
   /**
    * The ids of every document holding `slug` in EITHER field, or null when the
-   * probe could not answer. Only a republish asks: a first publish is suffixed
-   * with its own id and has nothing to look up (resolveSlug).
+   * probe could not answer. Run on every publish — a republish included, which
+   * is the one that was missing (#400).
    *
    * BOTH FIELDS. Cosmos property lookup is case-sensitive, so `c.slug` alone
    * cannot see a document whose site slug is in `Slug` — and the manifest
@@ -311,7 +330,7 @@ export function createPublishHandlers({
    * are enough to establish that somebody else holds it.
    *
    * Never throws. A lookup failure returns null, which resolveSlug reads as
-   * "not established" and answers by leaving the slug alone.
+   * "not established" — see there for what each path does with that.
    */
   async function slugHolders(slug) {
     try {
@@ -521,14 +540,14 @@ export function createPublishHandlers({
       // manifest routed on — see slugHolders.
       const reuse = Boolean(isRepublish && existingSlug);
       const candidate = reuse ? existingSlug : slugify(rawTitle);
-      // Probed on a republish only, and only to answer one question: does
-      // another document already hold this URL? Three of them did (#400), and
-      // the branch that reused the stored slug never asked.
+      // Probed on EVERY publish, to answer one question: does another document
+      // already hold this URL? Three did (#400), and the branch that reused a
+      // stored slug never asked.
       const slug = resolveSlug({
         candidate,
         contentId,
         reuse,
-        holders: reuse ? await slugHolders(candidate) : null,
+        holders: await slugHolders(candidate),
       });
 
       const curatedSubpagePath =

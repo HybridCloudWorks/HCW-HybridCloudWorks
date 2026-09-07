@@ -224,40 +224,59 @@ describe('concurrent publish protection (T-301)', () => {
 describe('slug assignment (#400)', () => {
   const ID = 'abcdef123';
 
-  it('resolveSlug: a first assignment carries the id, a republish keeps the URL it serves', () => {
-    // A first assignment never depends on the probe. An empty probe result is
-    // not proof of anything durable: two callers publishing two documents with
-    // one title both see empty, and both would write the bare slug.
-    expect(resolveSlug({ candidate: 'a-title', contentId: ID })).toBe('a-title-abcdef');
-    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [] })).toBe(
+  it('resolveSlug: bare on a clean probe, suffixed on a clash, and null read per path', () => {
+    // A clean probe keeps the bare slug — the readable URL is the point, and
+    // what a clean probe cannot prove is documented at resolveSlug and caught
+    // by scripts/report-slug-collisions.mjs.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [] })).toBe('a-title');
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [ID] })).toBe('a-title');
+
+    // Another document holds it: suffixed with the document id, either path.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: [ID, 'other'] })).toBe(
       'a-title-abcdef'
     );
 
-    // A republish keeps what it already serves when nothing contradicts it —
-    // including when the probe could not answer at all (holders null), because
-    // a failed lookup is not evidence of a clash and must not move a live URL.
-    const reuse = { candidate: 'a-title', contentId: ID, reuse: true };
-    expect(resolveSlug({ ...reuse, holders: [ID] })).toBe('a-title');
-    expect(resolveSlug({ ...reuse, holders: [] })).toBe('a-title');
-    expect(resolveSlug({ ...reuse, holders: null })).toBe('a-title');
-
-    // ...and moves off it the moment another document is shown to hold it.
-    expect(resolveSlug({ ...reuse, holders: [ID, 'someone-else'] })).toBe('a-title-abcdef');
+    // `holders: null` — the probe could not answer — is read differently by
+    // the two paths, on purpose.
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, holders: null })).toBe(
+      'a-title-abcdef' // first assignment: ugly but always unique, never blocked
+    );
+    expect(resolveSlug({ candidate: 'a-title', contentId: ID, reuse: true, holders: null })).toBe(
+      'a-title' // republish: a failed lookup must not move a live URL
+    );
 
     // No candidate at all: the id is the whole slug (unchanged behaviour).
     expect(resolveSlug({ candidate: '', contentId: ID })).toBe('abcdef');
   });
 
-  it('two documents with one title get two slugs, and neither needed a probe', async () => {
-    // The shape of #400: the generator wrote the same site title onto more
-    // than one article. Under the old rule both probes came back empty and
-    // both documents took the same slug.
+  it('a first publish keeps its bare slug when the probe finds no other holder', async () => {
+    const store = makeStore(); // queryDocs returns [] — a clean probe
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+    expect(store.queryDocs).toHaveBeenCalledTimes(1);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe(
+      'migration-readiness-framework'
+    );
+  });
+
+  it('a second document with the same title is suffixed, because the probe now sees the first', async () => {
+    // The shape of #400: the generator wrote one site title onto more than one
+    // article. The second publish probes, finds the first, and moves off.
     const docs = [
       readyDoc({ id: 'aaa111', Title: 'One Shared Title' }),
       readyDoc({ id: 'bbb222', Title: 'One Shared Title' }),
     ];
+    const taken = [];
     const store = makeStore(docs[0], {
       readDoc: vi.fn(async (c, id) => (c === 'content' ? docs.find((d) => d.id === id) : null)),
+      queryDocs: vi.fn(async () => taken.map((id) => ({ id }))),
+      patchDoc: vi.fn(async (c, id, u) => {
+        if (c === 'content' && u.slug === 'one-shared-title') taken.push(id);
+        return { id, ...u };
+      }),
     });
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
     await h.publishContent(
@@ -267,8 +286,30 @@ describe('slug assignment (#400)', () => {
     const slugs = store.patchDoc.mock.calls
       .filter(([c]) => c === 'content')
       .map(([, , u]) => u.slug);
-    expect(slugs).toEqual(['one-shared-title-aaa111', 'one-shared-title-bbb222']);
-    expect(store.queryDocs).not.toHaveBeenCalled();
+    expect(slugs).toEqual(['one-shared-title', 'one-shared-title-bbb222']);
+  });
+
+  it('a first publish takes the always-unique slug when the probe throws', async () => {
+    // The source's rule, kept: a lookup failure must not block a publish, and
+    // with nothing established the suffixed slug is the only safe answer.
+    const store = makeStore(readyDoc(), {
+      queryDocs: vi.fn(async () => {
+        throw new Error('Cosmos unavailable');
+      }),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+          context
+        )
+      ).body
+    );
+    expect(body.published).toBe(1);
+    expect(store.patchDoc.mock.calls.find(([c]) => c === 'content')[2].slug).toBe(
+      'migration-readiness-framework-c1'
+    );
   });
 
   it('a republish moves off a slug another document holds, probing Slug as well as slug', async () => {
@@ -340,10 +381,10 @@ describe('publishContent', () => {
     expect(patch.Live).toBe(true); // markLive defaults true
     // A live publish arms the social-caption auto-queue trigger (backlog #1).
     expect(patch.socialCaptionTrigger).toBe(true);
-    expect(patch.slug).toBe('migration-readiness-framework-c1'); // first assignment carries the id
-    expect(patch.curatedSubpagePath).toBe('/azure/frameworks/migration-readiness-framework-c1');
+    expect(patch.slug).toBe('migration-readiness-framework');
+    expect(patch.curatedSubpagePath).toBe('/azure/frameworks/migration-readiness-framework');
     expect(patch.publicUrl).toBe(
-      'https://hybridcloudworks.com/azure/frameworks/migration-readiness-framework-c1'
+      'https://hybridcloudworks.com/azure/frameworks/migration-readiness-framework'
     );
     expect(patch['Published At']).toBe('2026-08-01T00:00:00.000Z');
     expect(patch['Cloud Provider']).toBe('Azure');
