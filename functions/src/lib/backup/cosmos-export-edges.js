@@ -45,11 +45,17 @@ export function createCosmosReader({ getContainer = defaultGetContainer } = {}) 
           ? ChangeFeedStartFrom.Continuation(continuation)
           : ChangeFeedStartFrom.Beginning(),
       });
+      // Only 304 ends the loop. The pull model legitimately answers an empty
+      // 200 page while more changes remain (a feed range with nothing new
+      // before the next range is read), so an empty page is not "caught up"
+      // — stopping there would skip changes and, worse, store a continuation
+      // past them. Every response's token is yielded; the core keeps the
+      // last one it saw, which after 304 is the caught-up position.
       while (iterator.hasMoreResults) {
         const response = await iterator.readNext();
         const items = Array.isArray(response.result) ? response.result : [];
         yield { items, continuationToken: response.continuationToken };
-        if (response.statusCode === StatusCodes.NotModified || items.length === 0) return;
+        if (response.statusCode === StatusCodes.NotModified) return;
       }
     },
 

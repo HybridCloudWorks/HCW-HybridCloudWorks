@@ -72,6 +72,31 @@ describe('createCosmosReader', () => {
     expect(JSON.stringify(opts.changeFeedStartFrom)).toContain('tok-0');
   });
 
+  it('an empty 200 page does not end the feed: only 304 does, and the last token is the one kept', async () => {
+    // The pull model can answer an empty 200 while more changes remain
+    // (Copilot review on #394, Microsoft Learn change-feed-pull-model).
+    const container = fakeContainer({
+      feed: [
+        { statusCode: 200, result: [{ id: 'a' }], continuationToken: 't1' },
+        { statusCode: 200, result: [], continuationToken: 't2' },
+        { statusCode: 200, result: [{ id: 'b' }, { id: 'c' }], continuationToken: 't3' },
+        { statusCode: StatusCodes.NotModified, result: [], continuationToken: 't4' },
+        { statusCode: 200, result: [{ id: 'never' }], continuationToken: 't5' },
+      ],
+    });
+    const reader = createCosmosReader({ getContainer: () => container });
+    const pages = [];
+    for await (const page of reader.changeFeedPages(
+      'blogs',
+      { continuation: 'tok-0' },
+      { maxItemCount: 2 }
+    ))
+      pages.push(page);
+    expect(pages.flatMap((p) => p.items.map((d) => d.id))).toEqual(['a', 'b', 'c']);
+    expect(pages.map((p) => p.continuationToken)).toEqual(['t1', 't2', 't3', 't4']);
+    expect(pages[pages.length - 1].continuationToken).toBe('t4');
+  });
+
   it('changeFeedPages with no continuation starts from the beginning', async () => {
     const container = fakeContainer({
       feed: [{ statusCode: StatusCodes.NotModified, result: [], continuationToken: 't' }],

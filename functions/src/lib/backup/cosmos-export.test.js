@@ -339,6 +339,33 @@ describe('createContainerExporter — delta run', () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
+  it('exports every item across an empty mid-feed page and stores the final (304) continuation', async () => {
+    const cosmos = memCosmos({
+      feed: [
+        { items: [{ id: 'a', _ts: 1 }], continuationToken: 't1' },
+        { items: [], continuationToken: 't2' },
+        {
+          items: [
+            { id: 'b', _ts: 2 },
+            { id: 'c', _ts: 3 },
+          ],
+          continuationToken: 't3',
+        },
+        { items: [], continuationToken: 't4' },
+      ],
+    });
+    const blobs = memBlobs({ 'state/blogs.json': JSON.stringify({ continuation: 'tok-0' }) });
+    const exporter = createContainerExporter({ cosmos, blobs, now: () => MONDAY });
+    const marker = await exporter.exportContainer({
+      runId: '2026-09-14',
+      mode: 'delta',
+      container: 'blogs',
+    });
+    expect(ndjson(blobs.uploads[0].text).map((d) => d.id)).toEqual(['a', 'b', 'c']);
+    expect(marker).toMatchObject({ docs: 3, tsHighWater: 3 });
+    expect(await blobs.readJson('state/blogs.json')).toMatchObject({ continuation: 't4' });
+  });
+
   it('with no stored state it reads from the beginning and says so', async () => {
     const cosmos = memCosmos({ feed: [{ items: [{ id: 'a' }], continuationToken: 'tok-1' }] });
     const blobs = memBlobs();
