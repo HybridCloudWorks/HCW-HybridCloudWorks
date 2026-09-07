@@ -17,6 +17,7 @@ import {
   normalizePodcastFeeds,
   normalizeSocialAutopost,
   presentSetting,
+  resolveSetting,
 } from './platform-settings.js';
 import { pickDefaultHero, DEFAULT_HEROES_CONFIG_ID } from './triggers/ai-cover.js';
 import { AUTOPOST_CONFIG_ID } from './triggers/social-caption-trigger.js';
@@ -347,6 +348,34 @@ describe('handlers', () => {
     ).toBe(404);
     expect(store.readDoc).not.toHaveBeenCalled();
     expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('404s inherited-key segments (__proto__, constructor, prototype) with no store call or side effect', async () => {
+    // On a plain object PLATFORM_SETTINGS['constructor'] is Object and
+    // PLATFORM_SETTINGS['__proto__'] is Object.prototype — both truthy — so a
+    // bare bracket lookup would have carried an undefined docId to Cosmos.
+    expect(resolveSetting('__proto__')).toBeNull();
+    expect(resolveSetting('constructor')).toBeNull();
+    expect(resolveSetting('prototype')).toBeNull();
+    expect(resolveSetting('default-heroes')).not.toBeNull();
+
+    const store = makeStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    for (const setting of ['__proto__', 'constructor', 'prototype']) {
+      const get = await h.getSetting(makeRequest({ params: { setting } }), context);
+      expect(get.status, `GET ${setting}`).toBe(404);
+      const put = await h.putSetting(
+        makeRequest({ params: { setting }, body: { polluted: true } }),
+        context
+      );
+      expect(put.status, `PUT ${setting}`).toBe(404);
+      expect(() => presentSetting(setting, { id: 'x' })).toThrow(/Unknown platform setting/);
+    }
+    expect(store.readDoc).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect({}.polluted).toBeUndefined();
+    expect(Object.prototype.polluted).toBeUndefined();
+    expect(typeof Object.prototype.docId).toBe('undefined');
   });
 
   it('GET reads the document at the admin_config partition', async () => {

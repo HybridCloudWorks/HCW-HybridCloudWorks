@@ -291,6 +291,19 @@ export const PLATFORM_SETTINGS = Object.freeze({
 
 export const PLATFORM_SETTING_NAMES = Object.freeze(Object.keys(PLATFORM_SETTINGS));
 
+/**
+ * The setting spec for a route segment, or null. An OWN-key lookup: on a
+ * plain object, `PLATFORM_SETTINGS['constructor']` is `Object` and
+ * `PLATFORM_SETTINGS['__proto__']` is `Object.prototype` — both truthy — so a
+ * bracket lookup alone would treat those segments as known settings and
+ * carry an undefined docId to Cosmos. Frozen, so nothing can be written
+ * through it either; this is the read-side half of that.
+ */
+export function resolveSetting(name) {
+  const key = String(name ?? '');
+  return Object.hasOwn(PLATFORM_SETTINGS, key) ? PLATFORM_SETTINGS[key] : null;
+}
+
 /** Keys this module writes beside the value; not part of the shape. */
 const PRESENTATION_METADATA = new Set(['id', 'configScope', 'updatedAt', 'updatedBy']);
 /** Cosmos's own fields, by exact name (the set jobs.js strips too). */
@@ -304,7 +317,7 @@ const COSMOS_SYSTEM_FIELDS = new Set(['_rid', '_self', '_etag', '_attachments', 
  * whatever is there until they do. `stored` says which happened.
  */
 export function presentSetting(name, doc) {
-  const spec = PLATFORM_SETTINGS[name];
+  const spec = resolveSetting(name);
   if (!spec) throw new Error(`Unknown platform setting: ${name}`);
   if (!doc) return { value: spec.empty(), exists: false, stored: null, updatedAt: null };
   const updatedAt = doc.updatedAt;
@@ -359,7 +372,7 @@ export function createPlatformSettingsHandlers({
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
 }) {
-  const resolve = (request) => PLATFORM_SETTINGS[String(request.params?.setting || '')] ?? null;
+  const resolve = (request) => resolveSetting(request.params?.setting);
 
   async function audit(action, user, details) {
     await store.upsertDoc('admin_audit_logs', {
