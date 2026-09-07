@@ -43,6 +43,27 @@ This project has not cut a tagged release; entries are grouped under
   Speech with ElevenLabs deferred, StreamYard as a manual studio with the
   feed as the boundary. Nothing named after the previous host remains in
   `frontend/`.
+- **Landing hero rotations and default covers are generated art (#371, #351).**
+  The four landing pages whose hero sets never existed (`/gcp`, `/github`,
+  `/terraform`, `/finops`, twenty 404s per the audit) get their five images
+  each under `frontend/public/images/<provider>-hero/`, and the eight default
+  social covers #351 needs land at
+  `frontend/public/images/default-heroes/{azure,aws,gcp,github,terraform,ansible,vmware,multi}.png`
+  (1200×630). Nothing was bought and nothing is stock: a new dev script,
+  `frontend/scripts/generate-brand-art.mjs` (`npm run art:generate`), draws
+  each file from an SVG template — five distinct compositions per set
+  (diagonal bands, concentric rings, isometric cubes, a node graph, layered
+  waves) in the provider palette from `src/index.css`, with the provider name
+  as low-contrast typography in the site's own Goldman face — and rasterizes
+  it with `@resvg/resvg-js`, a devDependency only. Rendering is seeded and
+  uses no system font, so the same script yields byte-identical PNGs on any
+  machine (`--check` proves it against the committed files). Every PNG is
+  1155×924 8-bit RGBA like `azure-hero/` and under 240 KB. The emptied hero
+  arrays from PR #380 are restored; `hero-assets-exist.test.js` stays green,
+  and `generate-brand-art.test.js` pins each committed file's dimensions,
+  colour type and size. The owner can replace any file one-for-one with real
+  artwork; nothing keys on it being generated, and the generator is not part
+  of the build.
 - **Article bodies stop hotlinking upstream images (#374).** At publish time
   every external `<img>` or `![](…)` URL in any body field (`blogDraft`,
   `Content`, `content` — the audited article kept an RSS stub in one and its
