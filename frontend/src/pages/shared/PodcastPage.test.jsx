@@ -14,9 +14,13 @@ vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
 }));
 
+// The subscribe links a provider config offers on the next render; a `let`
+// so one test can hand the page an unsafe one.
+let subscribeLinks = {};
+
 vi.mock('@/context/ProviderContext', () => ({
   useProvider: () => 'azure',
-  useProviderConfig: () => ({ podcast: { feedUrl: null, subscribeLinks: {} } }),
+  useProviderConfig: () => ({ podcast: { feedUrl: null, subscribeLinks } }),
 }));
 
 const episodes = [
@@ -106,6 +110,7 @@ const newest = {
 
 beforeEach(() => {
   episodesNow = episodes;
+  subscribeLinks = {};
 });
 
 const playerTitle = () =>
@@ -154,6 +159,19 @@ describe('SharedPodcastPage', () => {
       'href',
       'https://feeds.example/azure.xml'
     );
+  });
+
+  it('offers no subscribe button for a platform whose configured URL is unsafe', () => {
+    // The values go straight into an href, so an unsafe scheme in a provider
+    // config must remove the button rather than become a clickable link.
+    subscribeLinks = { spotify: 'javascript:alert(1)', apple: 'https://apple.example/show' };
+    const { container } = mount();
+    expect(screen.queryByRole('link', { name: /Spotify/ })).toBeNull();
+    expect(screen.getByRole('link', { name: /Apple Podcasts/ })).toHaveAttribute(
+      'href',
+      'https://apple.example/show'
+    );
+    expect(container.innerHTML).not.toContain('javascript:');
   });
 
   it('moves the player to the first visible episode when the filter hides the selection', () => {

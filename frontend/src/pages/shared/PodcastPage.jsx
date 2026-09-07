@@ -392,10 +392,16 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   // podcast_feeds, served on GET public/podcasts), so the button and the
   // list beside it cannot name two different feeds; the static config is a
   // fallback only.
+  // Sanitised here rather than at the `href`, so one call covers both uses:
+  // the filter below decides which buttons exist, and the sidebar renders the
+  // same value. An unsafe scheme in a provider config or a seeded feed URL
+  // therefore removes the button instead of becoming a clickable link.
   const subscribeUrlFor = (platform) =>
-    platform.key === 'rss'
-      ? feedUrl || podcastConfig?.podcast?.feedUrl
-      : podcastConfig?.podcast?.subscribeLinks?.[platform.key];
+    safeUrl(
+      platform.key === 'rss'
+        ? feedUrl || podcastConfig?.podcast?.feedUrl
+        : podcastConfig?.podcast?.subscribeLinks?.[platform.key]
+    );
   const availablePlatforms = platforms.filter((platform) => subscribeUrlFor(platform));
 
   return (
