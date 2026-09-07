@@ -133,13 +133,7 @@ export function unwrapPublerAccounts(response) {
   }
   const body =
     response && typeof response === 'object' && 'data' in response ? response.data : response;
-  const list = Array.isArray(body)
-    ? body
-    : Array.isArray(body?.accounts)
-      ? body.accounts
-      : Array.isArray(body?.data)
-        ? body.data
-        : [];
+  const list = [body, body?.accounts, body?.data].find(Array.isArray) ?? [];
   return { accounts: list.filter((account) => account && account.id), notConfigured: false };
 }
 
