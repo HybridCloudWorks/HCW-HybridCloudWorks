@@ -45,6 +45,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { postJSON, getJSON, sendJSON } from '@/lib/api';
+import {
+  describePublerFailure,
+  publerAccountsStatus,
+  unwrapPublerAccounts,
+} from '@/lib/publerAccounts';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import { toMillis } from '@/lib/dateUtils';
 
@@ -223,6 +228,48 @@ async function publerFetch(path, options = {}) {
 
 const publerListAccounts = () => publerFetch('/accounts');
 
+/**
+ * Load the account list for one tab and settle it into exactly one of three
+ * outcomes. Both tabs used to read the response with `Array.isArray`, which the
+ * proxy envelope never satisfies, so a connected workspace and an unseeded
+ * integration and a failed call all rendered as "no accounts" (#397).
+ * `unwrapPublerAccounts` is the same reader the Platform settings page uses.
+ *
+ * Note the two ways a call can fail. The proxy answers HTTP 200 whatever
+ * happens, so Publer refusing the key arrives here as a *resolved* envelope
+ * with `ok: false` — the `.catch()` below never sees it, and only `failed`
+ * keeps it from being read as an empty workspace.
+ *
+ * @param {(settled: { accounts: Array<object>, status: 'ready' | 'not_configured' | 'error', error: string, reason: string }) => void} settle
+ * @returns {() => void} cancel — safe to use as an effect cleanup
+ */
+function loadPublerAccounts(settle) {
+  let cancelled = false;
+  publerListAccounts()
+    .then((response) => {
+      if (cancelled) return;
+      const unwrapped = unwrapPublerAccounts(response);
+      settle({
+        accounts: unwrapped.accounts,
+        status: publerAccountsStatus(unwrapped),
+        error: unwrapped.failed ? describePublerFailure(unwrapped) : '',
+        reason: unwrapped.notConfigured ? unwrapped.reason : '',
+      });
+    })
+    .catch((err) => {
+      if (cancelled) return;
+      settle({
+        accounts: [],
+        status: 'error',
+        error: err?.message || 'the request failed',
+        reason: '',
+      });
+    });
+  return () => {
+    cancelled = true;
+  };
+}
+
 const publerListPosts = (state = 'scheduled', extra = {}) => {
   const qs = new URLSearchParams({ state, per_page: '50', ...extra }).toString();
   return publerFetch(`/posts?${qs}`);
@@ -311,15 +358,78 @@ function AccountToggle({ account, selected, onToggle }) {
   );
 }
 
+// ── Publer account states ─────────────────────────────────────────────────────
+
+/**
+ * What the account list says when it has nothing to show. An unseeded
+ * integration, a failed call and a genuinely empty workspace are three
+ * different problems with three different fixes, and until #397 all three
+ * rendered as the same "No accounts found."
+ *
+ * `atConnectionSettings` is true on the tab that holds the fix, where "go to
+ * the Connection Settings tab" would be pointing at itself.
+ */
+function PublerAccountsNotice({ status, error, reason, atConnectionSettings = false }) {
+  if (status === 'loading') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading accounts…
+      </div>
+    );
+  }
+  if (status === 'not_configured') {
+    return (
+      <p className="text-sm text-muted-foreground">
+        <strong>Publer is not connected.</strong>{' '}
+        {/* The proxy returns one code for a missing key and for a missing
+            workspace id, so naming only the key would be a guess. Its `error`
+            names the setting when it sends one; otherwise say both. */}
+        {reason
+          ? `${reason}, so Publer was never asked for accounts.`
+          : 'PUBLER_API_KEY or PUBLER_WORKSPACE_ID is not set on the function app, so Publer was never asked for accounts.'}{' '}
+        {atConnectionSettings
+          ? 'Set both on the function app — as Key Vault references — then reload this page.'
+          : 'Connect it in the Connection Settings tab.'}
+      </p>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <p className="text-sm text-destructive">
+        <strong>Publer accounts could not be loaded</strong> — {error || 'the call failed'}. The
+        list is empty because the call did not succeed, not because the workspace is.
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm text-muted-foreground">
+      No accounts found. Add social accounts in{' '}
+      <a
+        href="https://app.publer.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-primary underline"
+      >
+        Publer
+      </a>
+      .
+    </p>
+  );
+}
+
 // ── Compose Tab ───────────────────────────────────────────────────────────────
 
-function ComposeTab({ recentContent, initialContentId }) {
+export function ComposeTab({ recentContent, initialContentId }) {
   const { toast } = useToast();
   const ready = publerReady();
 
   // Publer accounts
   const [accounts, setAccounts] = useState([]);
-  const [loadingAccounts, setLoadingAccounts] = useState(publerReady());
+  // 'loading' | 'ready' | 'not_configured' | 'error' — PublerAccountsNotice
+  // says which, so an unseeded key never reads as an empty workspace (#397).
+  const [accountsStatus, setAccountsStatus] = useState('loading');
+  const [accountsError, setAccountsError] = useState('');
+  const [accountsReason, setAccountsReason] = useState('');
 
   // Form state
   const [selectedContent, setSelectedContent] = useState(null);
@@ -331,11 +441,13 @@ function ComposeTab({ recentContent, initialContentId }) {
   const [jobStatus, setJobStatus] = useState(null); // null | 'polling' | 'done' | 'error'
 
   useEffect(() => {
-    if (!ready) return;
-    publerListAccounts()
-      .then((data) => setAccounts(Array.isArray(data) ? data : []))
-      .catch(() => setAccounts([]))
-      .finally(() => setLoadingAccounts(false));
+    if (!ready) return undefined;
+    return loadPublerAccounts(({ accounts: list, status, error, reason }) => {
+      setAccounts(list);
+      setAccountsStatus(status);
+      setAccountsError(error);
+      setAccountsReason(reason);
+    });
   }, [ready]);
 
   // Preselect content when deep-linked from the publish flow
@@ -493,38 +605,23 @@ function ComposeTab({ recentContent, initialContentId }) {
         {/* Step 2 — Account picker */}
         <div>
           <Label className="text-sm font-semibold block mb-2">2. Choose Publer accounts</Label>
-          {loadingAccounts ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading accounts…
+          {accounts.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {accounts.map((a) => (
+                <AccountToggle
+                  key={a.id}
+                  account={a}
+                  selected={selectedAccountIds}
+                  onToggle={toggleAccount}
+                />
+              ))}
             </div>
           ) : (
-            <>
-              {accounts.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  No accounts found. Connect them in{' '}
-                  <a
-                    href="https://app.publer.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary underline"
-                  >
-                    Publer
-                  </a>
-                  .
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {accounts.map((a) => (
-                    <AccountToggle
-                      key={a.id}
-                      account={a}
-                      selected={selectedAccountIds}
-                      onToggle={toggleAccount}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
+            <PublerAccountsNotice
+              status={accountsStatus}
+              error={accountsError}
+              reason={accountsReason}
+            />
           )}
         </div>
 
@@ -1050,19 +1147,51 @@ function PublishedTab({ recentContent }) {
 
 // ── Settings Tab ──────────────────────────────────────────────────────────────
 
-function SettingsTab() {
-  const ready = publerReady();
-  const [accounts, setAccounts] = useState([]);
-  const [loadingAccounts, setLoadingAccounts] = useState(publerReady());
-  const [accountsError, setAccountsError] = useState('');
+/**
+ * Everything the browser can honestly say about the Publer credential, keyed by
+ * the outcome of the one call that uses it.
+ *
+ * It cannot say more. FINDING-04 moved the key into Key Vault and the proxy
+ * never returns it, so the accounts call is the only evidence this page has.
+ * The card used to claim otherwise by calling `publerKey()` and `publerWsId()`,
+ * which are defined nowhere in the bundle — reaching this tab threw a
+ * ReferenceError before it could render (found while fixing #397).
+ */
+const PUBLER_CONNECTION = {
+  loading: { dot: 'bg-muted-foreground/40', detail: 'Checking…' },
+  ready: {
+    dot: 'bg-emerald-500',
+    detail: 'Connected — the proxy resolved its credentials and Publer answered.',
+  },
+  not_configured: {
+    // One code covers a missing key and a missing workspace id, so the tile
+    // names neither; the notice below reports whichever the server named.
+    dot: 'bg-amber-500',
+    detail: 'Not configured — a required app setting is missing.',
+  },
+  error: { dot: 'bg-destructive', detail: 'The accounts call failed' },
+};
 
-  useEffect(() => {
-    if (!ready) return;
-    publerListAccounts()
-      .then((data) => setAccounts(Array.isArray(data) ? data : []))
-      .catch((err) => setAccountsError(err.message))
-      .finally(() => setLoadingAccounts(false));
-  }, [ready]);
+export function SettingsTab() {
+  const [accounts, setAccounts] = useState([]);
+  // 'loading' | 'ready' | 'not_configured' | 'error' — the same three outcomes
+  // the Compose tab shows, from the same reader (#397).
+  const [accountsStatus, setAccountsStatus] = useState('loading');
+  const [accountsError, setAccountsError] = useState('');
+  const [accountsReason, setAccountsReason] = useState('');
+
+  useEffect(
+    () =>
+      loadPublerAccounts(({ accounts: list, status, error, reason }) => {
+        setAccounts(list);
+        setAccountsStatus(status);
+        setAccountsError(error);
+        setAccountsReason(reason);
+      }),
+    []
+  );
+
+  const connection = PUBLER_CONNECTION[accountsStatus] ?? PUBLER_CONNECTION.loading;
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -1071,32 +1200,20 @@ function SettingsTab() {
         <CardHeader>
           <CardTitle className="text-base">Publer API Connection</CardTitle>
           <CardDescription>
-            Connect Hybrid Cloud Works to Publer for social media scheduling.
+            The API key and workspace id live in Key Vault and are injected by the publerProxy
+            function; the browser never sees them, so this card reports whether the proxy could use
+            them rather than what they are.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-              <div
-                className={`h-2.5 w-2.5 rounded-full ${publerKey() ? 'bg-emerald-500' : 'bg-amber-500'}`}
-              />
-              <div>
-                <p className="text-xs font-semibold">API Key</p>
-                <p className="text-xs text-muted-foreground">
-                  {publerKey() ? `${publerKey().slice(0, 8)}…` : 'Not set'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-              <div
-                className={`h-2.5 w-2.5 rounded-full ${publerWsId() ? 'bg-emerald-500' : 'bg-amber-500'}`}
-              />
-              <div>
-                <p className="text-xs font-semibold">Workspace ID</p>
-                <p className="text-xs text-muted-foreground">
-                  {publerWsId() ? `${publerWsId().slice(0, 8)}…` : 'Not set'}
-                </p>
-              </div>
+          <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+            <div className={`h-2.5 w-2.5 rounded-full ${connection.dot}`} />
+            <div>
+              <p className="text-xs font-semibold">Credentials</p>
+              <p className="text-xs text-muted-foreground">
+                {connection.detail}
+                {accountsStatus === 'error' ? ` — ${accountsError || 'no reason given'}.` : ''}
+              </p>
             </div>
           </div>
 
@@ -1118,32 +1235,7 @@ function SettingsTab() {
           <CardDescription>Social accounts connected to your Publer workspace.</CardDescription>
         </CardHeader>
         <CardContent>
-          {!ready && (
-            <p className="text-sm text-muted-foreground">
-              Configure API credentials above to see connected accounts.
-            </p>
-          )}
-          {loadingAccounts && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading accounts…
-            </div>
-          )}
-          {accountsError && <p className="text-sm text-destructive">{accountsError}</p>}
-          {!loadingAccounts && !accountsError && accounts.length === 0 && ready && (
-            <p className="text-sm text-muted-foreground">
-              No accounts found. Add social accounts in{' '}
-              <a
-                href="https://app.publer.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline"
-              >
-                Publer
-              </a>
-              .
-            </p>
-          )}
-          {accounts.length > 0 && (
+          {accounts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {accounts.map((a) => {
                 const meta = PLATFORM_META[a.provider?.toLowerCase()] || {};
@@ -1163,6 +1255,13 @@ function SettingsTab() {
                 );
               })}
             </div>
+          ) : (
+            <PublerAccountsNotice
+              status={accountsStatus}
+              error={accountsError}
+              reason={accountsReason}
+              atConnectionSettings
+            />
           )}
         </CardContent>
       </Card>
@@ -1176,7 +1275,7 @@ function SettingsTab() {
               .filter((id) => id && PLATFORM_META[id])
           )
         );
-        if (!ready || connectedIds.length === 0) return null;
+        if (connectedIds.length === 0) return null;
         return (
           <Card>
             <CardHeader>
