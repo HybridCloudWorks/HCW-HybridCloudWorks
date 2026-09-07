@@ -47,7 +47,7 @@ import {
   parseLine,
   assertLayerBlobPresent,
   requireBody,
-  countRestore,
+  createRestoreTally,
   formatRow,
   parseConcurrency,
   forEachConcurrent,
@@ -184,42 +184,43 @@ export async function main(argv = process.argv.slice(2), out = console) {
   }
 
   const db = opts.dryRun ? null : await targetDatabase(opts.targetEndpoint, opts.database);
-  const widths = [32, 10, 10, 10, 10, 10];
+  const widths = [32, 10, 10, 10, 10, 10, 10];
   out.log(
     formatRow(
-      ['container', 'full', 'deltas', 'distinct', opts.verify ? 'target' : '', 'ms'],
+      ['container', 'full', 'deltas', 'created', 'replaced', opts.verify ? 'target' : '', 'ms'],
       widths
     )
   );
 
-  let totalDistinct = 0;
-  let totalWritten = 0;
+  let totalDocuments = 0;
+  let totalCreated = 0;
+  let totalReplaced = 0;
   let mismatches = 0;
   for (const name of containers) {
     const t0 = Date.now();
-    const layerIds = [];
-    let written = 0;
+    const tally = createRestoreTally();
     const target = db ? db.container(name) : null;
     for (const layer of layers) {
+      const layerName = `${layer.mode}/${layer.runId}`;
       const blob = dataBlobName(layer.mode, layer.runId, name);
       // Every layer was selected because its manifest exists, and the manifest
       // is written only once every container's marker is present — so a
       // missing data blob is a corrupted or expired set, never an empty
       // container (those still have a blob). Loud, in --dry-run too.
       assertLayerBlobPresent(await blobExists(exportBlobs, blob), blob);
-      const ids = [];
+      tally.touch(layerName);
       if (target) {
+        // Nothing per document is kept: the upsert's status code says whether
+        // the id was new (201) or already restored by an earlier layer (200).
         await forEachConcurrent(readDocuments(exportBlobs, blob), opts.concurrency, async (doc) => {
-          await target.items.upsert(doc);
-          ids.push(doc.id);
-          written += 1;
+          const { statusCode } = await target.items.upsert(doc);
+          tally.add(layerName, statusCode);
         });
       } else {
-        for await (const doc of readDocuments(exportBlobs, blob)) ids.push(doc.id);
+        for await (const _doc of readDocuments(exportBlobs, blob)) tally.add(layerName);
       }
-      layerIds.push({ layer: `${layer.mode}/${layer.runId}`, ids });
     }
-    const counts = countRestore(layerIds);
+    const counts = tally.result();
     const fullCount = counts.perLayer[`full/${set.full}`] ?? 0;
     const deltaCount = Object.entries(counts.perLayer)
       .filter(([layer]) => layer.startsWith('delta/'))
@@ -228,25 +229,42 @@ export async function main(argv = process.argv.slice(2), out = console) {
     if (target && opts.verify) {
       const { resources } = await target.items.query('SELECT VALUE COUNT(1) FROM c').fetchAll();
       const inTarget = Number(resources[0]) || 0;
-      verified = inTarget === counts.distinct ? String(inTarget) : `${inTarget} MISMATCH`;
-      if (inTarget !== counts.distinct) mismatches += 1;
+      verified = inTarget === counts.created ? String(inTarget) : `${inTarget} MISMATCH`;
+      if (inTarget !== counts.created) mismatches += 1;
     }
-    totalDistinct += counts.distinct;
-    totalWritten += written;
+    totalDocuments += counts.documents;
+    totalCreated += counts.created ?? 0;
+    totalReplaced += counts.replaced ?? 0;
     out.log(
-      formatRow([name, fullCount, deltaCount, counts.distinct, verified, Date.now() - t0], widths)
+      formatRow(
+        [
+          name,
+          fullCount,
+          deltaCount,
+          counts.created ?? '',
+          counts.replaced ?? '',
+          verified,
+          Date.now() - t0,
+        ],
+        widths
+      )
     );
   }
 
   const elapsedMs = Date.now() - startedAt;
-  out.log(
-    `${opts.dryRun ? 'Would restore' : 'Restored'} ${totalDistinct} distinct document(s)` +
-      (opts.dryRun ? '' : ` (${totalWritten} upserts)`) +
-      ` across ${containers.length} container(s) in ${elapsedMs} ms (${(elapsedMs / 60000).toFixed(1)} min)`
-  );
+  const minutes = (elapsedMs / 60000).toFixed(1);
+  if (opts.dryRun) {
+    out.log(
+      `Would restore ${totalDocuments} document(s) across ${containers.length} container(s) in ${elapsedMs} ms (${minutes} min) — distinct and overwritten counts come from the upsert responses and are computed only on a real run`
+    );
+  } else {
+    out.log(
+      `Restored ${totalDocuments} document(s): ${totalCreated} created (distinct), ${totalReplaced} replaced by a later layer, across ${containers.length} container(s) in ${elapsedMs} ms (${minutes} min)`
+    );
+  }
   if (mismatches) {
     out.log(
-      `${mismatches} container(s) MISMATCH between the target count and the export — investigate before calling the drill passed`
+      `${mismatches} container(s) MISMATCH between the target count and the documents created — investigate before calling the drill passed`
     );
     return 1;
   }

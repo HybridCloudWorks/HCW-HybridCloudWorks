@@ -144,10 +144,10 @@ Success looks like:
 
 ```text
 DRY RUN — counting full/2026-09-13 + 3 delta(s) (2026-09-14 … 2026-09-16) — 60 container(s)
-container                         full        deltas      distinct                ms
-admin_audit_logs                  412         0           412                     310
+container                         full        deltas      created     replaced                ms
+admin_audit_logs                  412         0                                               310
 …
-Would restore 69874 distinct document(s) across 60 container(s) in 41207 ms (0.7 min)
+Would restore 70112 document(s) across 60 container(s) in 41207 ms (0.7 min) — distinct and overwritten counts come from the upsert responses and are computed only on a real run
 ```
 
 Read two things off it. **RPO**: the newest run id on the first line is the
@@ -211,12 +211,15 @@ az cosmosdb sql role assignment create -a cosmos-site-sbx-cus -g rg-db-site-sbx-
 node scripts/restore-cosmos-export.mjs --storage-account stsiteprodcus01 --target-endpoint https://cosmos-site-sbx-cus.documents.azure.com:443/ --verify
 ```
 
-Success looks like the dry run with a `target` column equal to `distinct` on
-every row and a last line reading
-`Restored 69874 distinct document(s) (70112 upserts) across 60 container(s) in 1834201 ms (30.6 min)`,
+Success looks like the dry run with `created` and `replaced` filled in — the
+upsert answers 201 for a document the target had not seen and 200 for one an
+earlier layer already wrote, so `created` is the distinct count and
+`replaced` the documents a delta superseded — a `target` column equal to
+`created` on every row, and a last line reading
+`Restored 70112 document(s): 69874 created (distinct), 238 replaced by a later layer, across 60 container(s) in 1834201 ms (30.6 min)`,
 exit code 0. A row ending `MISMATCH` is a container whose count in the target
-does not equal the distinct ids the export carried; the script exits 1 and the
-drill has not passed until the cause is known. The cost of this step is about
+does not equal the documents created there; the script exits 1 and the drill
+has not passed until the cause is known. The cost of this step is about
 $3 in write request units (cost analysis, #385).
 
 ### 5. Spot-check the site's public reads against the restored account

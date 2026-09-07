@@ -15,7 +15,8 @@ import {
   assertLayerBlobPresent,
   requireBody,
   stripSystemFields,
-  countRestore,
+  classifyUpsert,
+  createRestoreTally,
   formatRow,
   parseConcurrency,
   forEachConcurrent,
@@ -143,17 +144,40 @@ describe('documents', () => {
     expect(stripSystemFields({ id: 'a', _ts: 1, keep: true })).toEqual({ id: 'a', keep: true });
   });
 
-  it('countRestore counts per layer and distinct ids across layers', () => {
-    expect(
-      countRestore([
-        { layer: 'full/2026-09-13', ids: ['a', 'b', 'c'] },
-        { layer: 'delta/2026-09-14', ids: ['b', 'd'] },
-        { layer: 'delta/2026-09-15', ids: [] },
-      ])
-    ).toEqual({
+  it('classifyUpsert maps 201 to created and 200 to replaced, and refuses anything else', () => {
+    expect(classifyUpsert(201)).toBe('created');
+    expect(classifyUpsert(200)).toBe('replaced');
+    expect(() => classifyUpsert(204)).toThrow(/HTTP 204/);
+    expect(() => classifyUpsert(undefined)).toThrow(/neither a create/);
+  });
+
+  it('the tally counts per layer and, on a real run, created (distinct) and replaced from status codes without keeping ids', () => {
+    const tally = createRestoreTally();
+    tally.touch('full/2026-09-13');
+    for (const code of [201, 201, 201]) tally.add('full/2026-09-13', code);
+    tally.touch('delta/2026-09-14');
+    tally.add('delta/2026-09-14', 200);
+    tally.add('delta/2026-09-14', 201);
+    tally.touch('delta/2026-09-15');
+    expect(tally.result()).toEqual({
       perLayer: { 'full/2026-09-13': 3, 'delta/2026-09-14': 2, 'delta/2026-09-15': 0 },
-      distinct: 4,
-      overwritten: 1,
+      documents: 5,
+      created: 4,
+      replaced: 1,
+    });
+  });
+
+  it('on a dry run the tally reports document counts only; created and replaced are null', () => {
+    const tally = createRestoreTally();
+    tally.touch('full/2026-09-13');
+    tally.add('full/2026-09-13');
+    tally.add('full/2026-09-13');
+    tally.touch('delta/2026-09-14');
+    expect(tally.result()).toEqual({
+      perLayer: { 'full/2026-09-13': 2, 'delta/2026-09-14': 0 },
+      documents: 2,
+      created: null,
+      replaced: null,
     });
   });
 });

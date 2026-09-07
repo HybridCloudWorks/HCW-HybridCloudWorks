@@ -174,26 +174,58 @@ export function stripSystemFields(doc) {
 }
 
 /**
- * Count what a set of layers would restore for one container, without
- * writing anything. Later layers overwrite earlier ones by id.
+ * Which of the two things an upsert did, from its status code: Cosmos answers
+ * 201 for a create and 200 for a replace. Anything else is not an upsert
+ * outcome the SDK resolves with, so it is refused rather than miscounted.
  *
- * @param {Array<{ layer: string, ids: Iterable<string> }>} layers
- * @returns {{ perLayer: Record<string, number>, distinct: number, overwritten: number }}
+ * @param {number} statusCode
+ * @returns {'created'|'replaced'}
  */
-export function countRestore(layers) {
+export function classifyUpsert(statusCode) {
+  if (statusCode === 201) return 'created';
+  if (statusCode === 200) return 'replaced';
+  throw new Error(
+    `upsert answered HTTP ${statusCode}, which is neither a create (201) nor a replace (200)`
+  );
+}
+
+/**
+ * A streaming tally for one container's restore: per-layer document counts,
+ * plus created/replaced from the upsert responses on a real run. Nothing per
+ * document is retained — the earlier version kept every id to compute the
+ * distinct count, so peak memory grew with the corpus while everything else
+ * streamed. On a real run `created` IS the distinct count (a second write to
+ * an id is a replace) and `replaced` is the overwritten count; on a dry run
+ * there is no upsert to read, so both stay null and the report says so.
+ */
+export function createRestoreTally() {
   const perLayer = {};
-  const seen = new Set();
-  let overwritten = 0;
-  for (const { layer, ids } of layers) {
-    let n = 0;
-    for (const id of ids) {
-      n += 1;
-      if (seen.has(id)) overwritten += 1;
-      seen.add(id);
-    }
-    perLayer[layer] = n;
-  }
-  return { perLayer, distinct: seen.size, overwritten };
+  let created = 0;
+  let replaced = 0;
+  let sawUpsert = false;
+  return {
+    /** One document read from `layer`; `statusCode` is the upsert's, absent on a dry run. */
+    add(layer, statusCode) {
+      perLayer[layer] = (perLayer[layer] || 0) + 1;
+      if (statusCode === undefined) return;
+      sawUpsert = true;
+      if (classifyUpsert(statusCode) === 'created') created += 1;
+      else replaced += 1;
+    },
+    /** Zero rows for a layer that was read and held nothing. */
+    touch(layer) {
+      perLayer[layer] ??= 0;
+    },
+    result() {
+      const documents = Object.values(perLayer).reduce((n, c) => n + c, 0);
+      return {
+        perLayer: { ...perLayer },
+        documents,
+        created: sawUpsert ? created : null,
+        replaced: sawUpsert ? replaced : null,
+      };
+    },
+  };
 }
 
 /** A fixed-width report row; the report is the script's output. */
