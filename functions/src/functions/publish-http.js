@@ -1,7 +1,8 @@
 /**
  * publish-http.js — the publish pipeline RPCs at the frontend's route names,
- * and the #374 backfill route that is a narrow form of the same pipeline.
- * Semantics in lib/cms/publish.js, lib/cms/rehost-images.js and
+ * plus the two routes that are narrower forms of the same pipeline: the #374
+ * image backfill and the #400 set-slug-and-republish. Semantics in
+ * lib/cms/publish.js, lib/cms/rehost-images.js, lib/cms/set-slug.js and
  * lib/snapshots-publish.js.
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
@@ -10,6 +11,7 @@ import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js
 import { createPublishHandlers } from '../lib/cms/publish.js';
 import { createDefaultInlineImageRehoster } from '../lib/cms/inline-images-default.js';
 import { createRehostImageHandlers } from '../lib/cms/rehost-images.js';
+import { createSetSlugHandlers } from '../lib/cms/set-slug.js';
 import { createSnapshotPublishHandlers } from '../lib/snapshots-publish.js';
 
 const store = { queryDocs, readDoc, upsertDoc, patchDoc };
@@ -46,6 +48,24 @@ httpRouteByMethod('cmsContentRehostImages', {
     GET: (request, context) => rehostHandlers(context).listCandidates(request, context),
     POST: (request, context) => rehostHandlers(context).rehostImages(request, context),
   },
+});
+
+// #400: the operator path for giving an article the right slug. Same pipeline
+// instance again, for the same reason as the re-host route above — the
+// republish that makes curatedSubpagePath / slugPageUrl / publishedUrl /
+// publicUrl follow the new slug is the real publish, not a second copy of
+// resolveCuratedSubpagePath.
+httpRoute('cmsContentSetSlug', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/content/slug',
+  handler: (request, context) =>
+    createSetSlugHandlers({
+      guard: getDefaultGuard(),
+      store,
+      processPublishContent: publishHandlers(context).processPublishContent,
+      log: context,
+    }).setContentSlug(request, context),
 });
 
 httpRoute('publishSnapshot', {

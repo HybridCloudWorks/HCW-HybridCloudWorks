@@ -22,6 +22,7 @@ import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { getOrderedContentImages } from '@/lib/contentImages';
 import PipelineStepper from '@/components/admin/PipelineStepper';
 import RehostImagesPanel from './RehostImagesPanel';
+import SetSlugPanel, { SetSlugButton } from './SetSlugPanel';
 
 // ── Pre-publish validation ────────────────────────────────────────────────────
 // Client-side checklist run before publishContent is invoked. `item` is
@@ -50,6 +51,47 @@ export function getPrePublishFailures(item) {
     failures.push('Slug is missing.');
   }
   return failures;
+}
+
+/**
+ * The row fields a set-slug response justifies changing — ONLY the ones it
+ * actually carried (#400).
+ *
+ * This used to spread every field with `|| ''`, so a response that omitted the
+ * URLs wrote empty strings over the ones the row already had: the row lost its
+ * `curatedSubpagePath`, `getPublicUrl` fell through to the client-derived
+ * `getContentPublicPath`, and "View Live" either vanished or pointed at a URL
+ * built by rules the server does not use. That is the same mistake as the
+ * server-side bug this PR fixes — reacting to an ABSENT value as though it
+ * were a NEW value — so it is fixed the same way: an absent field means "no
+ * information", and the row keeps what it had.
+ *
+ * It matters most across a deploy: a Functions app that predates the
+ * no-path refusal can still answer `changed: true` with no URL fields at all,
+ * and that is precisely the response that must not blank a live row.
+ *
+ * A refusal never reaches here — the panel only calls this on a `changed`
+ * response, and a refusal throws — but an empty override is returned rather
+ * than assumed, so nothing repaints if it ever does.
+ */
+export function slugRowOverride(result = {}) {
+  const override = {};
+  const slug = typeof result.slug === 'string' ? result.slug.trim() : '';
+  if (slug) {
+    override.slug = slug;
+    override.Slug = slug;
+  }
+  const path =
+    typeof result.curatedSubpagePath === 'string' ? result.curatedSubpagePath.trim() : '';
+  if (path) override.curatedSubpagePath = path;
+
+  const url = typeof result.publicUrl === 'string' ? result.publicUrl.trim() : '';
+  if (url) {
+    override.slugPageUrl = url;
+    override.publishedUrl = url;
+    override.publicUrl = url;
+  }
+  return override;
 }
 
 function getReviewPath(contentId) {
@@ -393,6 +435,11 @@ export default function PublishedPage() {
   const [expandedImagesId, setExpandedImagesId] = useState('');
   const [savingImageId, setSavingImageId] = useState('');
   const [imageError, setImageError] = useState('');
+  // #400: which published row has its slug control open, and the fields a
+  // successful set-slug returned, so the row's "View Live" link points at the
+  // new URL without waiting for a snapshot refetch.
+  const [expandedSlugId, setExpandedSlugId] = useState('');
+  const [slugOverrides, setSlugOverrides] = useState({});
 
   useEffect(() => {
     if (!authReady) return;
@@ -438,6 +485,21 @@ export default function PublishedPage() {
     .sort(sortByPublishedAtDesc);
   const withImageOverride = (item) =>
     imageOverrides[item.id] ? { ...item, ...imageOverrides[item.id] } : item;
+
+  const withSlugOverride = (item) =>
+    slugOverrides[item.id] ? { ...item, ...slugOverrides[item.id] } : item;
+
+  const applySlugResult = (contentId, result) => {
+    const override = slugRowOverride(result);
+    if (Object.keys(override).length === 0) return;
+    // Merged onto whatever this row already carried, not substituted for it —
+    // see slugRowOverride. A second apply that reports fewer fields than the
+    // first must not drop the first's.
+    setSlugOverrides((prev) => ({
+      ...prev,
+      [contentId]: { ...(prev[contentId] || {}), ...override },
+    }));
+  };
 
   const {
     publishingId,
@@ -690,54 +752,67 @@ export default function PublishedPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {published.map((blog) => {
+          {published.map((row) => {
+            const blog = withSlugOverride(row);
             const coverUrl = getCoverImageUrl(blog);
             const publicUrl = getPublicUrl(blog);
 
             return (
-              <div
-                key={blog.id}
-                className="flex items-center gap-4 p-4 rounded-lg border hover:bg-muted/50 transition-colors"
-              >
-                {coverUrl ? (
-                  <img
-                    src={coverUrl}
-                    alt=""
-                    className="h-14 w-20 object-cover rounded-md shrink-0"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="h-14 w-20 rounded-md bg-muted shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{blog.Title || blog.title}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Badge variant="outline" className="text-xs">
-                      {getItemProvider(blog)}
+              <div key={blog.id} className="rounded-lg border hover:bg-muted/50 transition-colors">
+                <div className="flex items-center gap-4 p-4">
+                  {coverUrl ? (
+                    <img
+                      src={coverUrl}
+                      alt=""
+                      className="h-14 w-20 object-cover rounded-md shrink-0"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="h-14 w-20 rounded-md bg-muted shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{blog.Title || blog.title}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="outline" className="text-xs">
+                        {getItemProvider(blog)}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {formatPostDate(blog.blogPublishedAt)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {publicUrl && (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href={publicUrl} target="_blank" rel="noreferrer">
+                          View Live
+                        </a>
+                      </Button>
+                    )}
+                    {/* #400: the URL control, beside the link it changes. */}
+                    <SetSlugButton
+                      open={expandedSlugId === blog.id}
+                      onToggle={() =>
+                        setExpandedSlugId((current) => (current === blog.id ? '' : blog.id))
+                      }
+                    />
+                    <Button size="sm" variant="outline" asChild>
+                      <Link to={`${getReviewPath(blog.id)}?source=content`}>
+                        <PenSquare className="h-4 w-4 mr-2" />
+                        Review
+                      </Link>
+                    </Button>
+                    <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                      {blog.contentStatus.replace(/_/g, ' ')}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {formatPostDate(blog.blogPublishedAt)}
-                    </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {publicUrl && (
-                    <Button size="sm" variant="outline" asChild>
-                      <a href={publicUrl} target="_blank" rel="noreferrer">
-                        View Live
-                      </a>
-                    </Button>
-                  )}
-                  <Button size="sm" variant="outline" asChild>
-                    <Link to={`${getReviewPath(blog.id)}?source=content`}>
-                      <PenSquare className="h-4 w-4 mr-2" />
-                      Review
-                    </Link>
-                  </Button>
-                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                    {blog.contentStatus.replace(/_/g, ' ')}
-                  </Badge>
-                </div>
+
+                {expandedSlugId === blog.id && (
+                  <div className="px-4 pb-4">
+                    <SetSlugPanel item={blog} onApplied={applySlugResult} />
+                  </div>
+                )}
               </div>
             );
           })}

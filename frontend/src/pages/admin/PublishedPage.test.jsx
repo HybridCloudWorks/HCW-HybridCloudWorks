@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import PublishedPage, { getPrePublishFailures } from './PublishedPage';
+import PublishedPage, { getPrePublishFailures, slugRowOverride } from './PublishedPage';
 
 const postJSON = vi.fn();
 const getJSON = vi.fn();
@@ -107,6 +107,50 @@ describe('getPrePublishFailures — the modal gate', () => {
     expect(getPrePublishFailures({ ...passing, Summary: '' }).join()).toMatch(/summary/i);
     expect(getPrePublishFailures({ ...passing, blogDraft: 'short' }).join()).toMatch(/too short/i);
     expect(getPrePublishFailures({ ...passing, slug: '' }).join()).toMatch(/slug/i);
+  });
+});
+
+describe('slugRowOverride — an absent field is not a new value (#400)', () => {
+  const FULL = {
+    changed: true,
+    slug: 'new-slug',
+    curatedSubpagePath: '/aws/blog/new-slug',
+    publicUrl: 'https://hybridcloudworks.com/aws/blog/new-slug',
+  };
+
+  it('applies every field the response carried', () => {
+    expect(slugRowOverride(FULL)).toEqual({
+      slug: 'new-slug',
+      Slug: 'new-slug',
+      curatedSubpagePath: '/aws/blog/new-slug',
+      slugPageUrl: FULL.publicUrl,
+      publishedUrl: FULL.publicUrl,
+      publicUrl: FULL.publicUrl,
+    });
+  });
+
+  it('omits the fields the response did not carry, rather than blanking them', () => {
+    // The bug: `|| ''` wrote empty strings over URLs the row already had, so
+    // getPublicUrl fell through to the client-derived path and "View Live"
+    // vanished or pointed somewhere the server never said.
+    expect(slugRowOverride({ changed: true, slug: 'new-slug' })).toEqual({
+      slug: 'new-slug',
+      Slug: 'new-slug',
+    });
+    expect(slugRowOverride({ changed: true, slug: 'new-slug', publicUrl: null })).toEqual({
+      slug: 'new-slug',
+      Slug: 'new-slug',
+    });
+    expect(slugRowOverride({ changed: true, slug: 'new-slug', curatedSubpagePath: '' })).toEqual({
+      slug: 'new-slug',
+      Slug: 'new-slug',
+    });
+  });
+
+  it('returns nothing at all for a response that carried nothing usable', () => {
+    expect(slugRowOverride({})).toEqual({});
+    expect(slugRowOverride()).toEqual({});
+    expect(slugRowOverride({ changed: false, reason: 'Already on that slug' })).toEqual({});
   });
 });
 
@@ -288,5 +332,180 @@ describe('PublishedPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Select Existing live article' })).toBeChecked();
     expect(screen.getByRole('button', { name: 'Re-host selected (1)' })).toBeEnabled();
+  });
+
+  it("sets a published article's slug from its own row, and the row's live link follows (#400)", async () => {
+    // The placement decision, pinned: the control is in the ALREADY-LIVE list,
+    // beside the "View Live" link it changes — not in the editor, and not in
+    // the staged list where the article is not yet on a URL at all.
+    postJSON.mockImplementation(async (endpoint, body) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/content/slug') {
+        expect(body).toEqual({ contentId: 'content-2', slug: 'existing-live-article' });
+        return {
+          contentId: 'content-2',
+          requested: 'existing-live-article',
+          changed: true,
+          moved: true,
+          fields: ['slug', 'Slug', 'curatedSubpagePath'],
+          previousSlug: 'stale-slug',
+          slug: 'existing-live-article',
+          curatedSubpagePath: '/aws/blog/existing-live-article',
+          publicUrl: 'https://hybridcloudworks.com/aws/blog/existing-live-article',
+        };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Slug' }));
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    expect(await screen.findByText(/Moved from "stale-slug"/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole('link', { name: 'View Live' })
+          .some(
+            (link) =>
+              link.getAttribute('href') ===
+              'https://hybridcloudworks.com/aws/blog/existing-live-article'
+          )
+      ).toBe(true)
+    );
+  });
+
+  /** Every "View Live" href on the page, for the row-repaint assertions. */
+  const liveHrefs = () =>
+    screen.getAllByRole('link', { name: 'View Live' }).map((link) => link.getAttribute('href'));
+
+  it("a response with no URL fields leaves the row's existing ones intact (#400)", async () => {
+    // A Functions app that predates the no-path refusal can still answer
+    // `changed: true` with no URL fields. Before this, the row took that as
+    // "the URLs are now empty", lost its curatedSubpagePath, and fell through
+    // to the client-derived path — so the live link moved somewhere the server
+    // never said. An absent field is no information, not a new value.
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/content/slug') {
+        // Deliberately the OLDER shape: no `moved`, no `fields`, no URLs —
+        // what a Functions app predating this PR's later commits still sends.
+        return {
+          contentId: 'content-2',
+          requested: 'existing-live-article',
+          changed: true,
+          previousSlug: 'existing-live-article',
+          slug: 'existing-live-article',
+        };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+    const before = liveHrefs();
+    expect(before).toContain('https://hybridcloudworks.com/aws/blog/existing-live-article');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Slug' }));
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    // The panel reported something, so the click was handled…
+    expect(await screen.findByText(/Slug unchanged/)).toBeInTheDocument();
+    // …and the row kept the URL it already had.
+    expect(liveHrefs()).toEqual(before);
+  });
+
+  it('a later, thinner response does not drop what an earlier one applied (#400)', async () => {
+    // The override is merged onto the row's existing one, not substituted for
+    // it: the first set-slug supplies the URL, the second reports only the
+    // slug, and the URL from the first has to survive.
+    let call = 0;
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/content/slug') {
+        call += 1;
+        return call === 1
+          ? {
+              contentId: 'content-2',
+              changed: true,
+              moved: true,
+              previousSlug: 'existing-live-article',
+              slug: 'renamed-once',
+              curatedSubpagePath: '/aws/blog/renamed-once',
+              publicUrl: 'https://hybridcloudworks.com/aws/blog/renamed-once',
+            }
+          : {
+              contentId: 'content-2',
+              changed: true,
+              moved: true,
+              previousSlug: 'renamed-once',
+              slug: 'renamed-twice',
+            };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Slug' }));
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+    await waitFor(() =>
+      expect(liveHrefs()).toContain('https://hybridcloudworks.com/aws/blog/renamed-once')
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+    await waitFor(() => expect(postJSON).toHaveBeenCalledTimes(3));
+    // Replacing rather than merging would blank the URL the first call set.
+    expect(liveHrefs()).toContain('https://hybridcloudworks.com/aws/blog/renamed-once');
+  });
+
+  it('a refusal repaints nothing in the row (#400)', async () => {
+    // The client half of the server's no-path refusal: the two must agree that
+    // a refusal changed nothing, or the page would show a move the CMS never
+    // made. authedFetch turns a non-2xx into a throw carrying the API's error.
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/content/slug') {
+        throw new Error(
+          'Cannot determine the published path for this article, so nothing was changed. ' +
+            'Give it a cloud provider (Aws, Azure, Gcp, Github, Terraform or Finops) or an ' +
+            'existing curatedSubpagePath, then set the slug again.'
+        );
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+    const before = liveHrefs();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Slug' }));
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    // The refusal is shown, verbatim and actionable…
+    expect(await screen.findByText(/Cannot determine the published path/)).toBeInTheDocument();
+    expect(screen.getByText(/cloud provider/)).toBeInTheDocument();
+    // …and nothing about the row moved.
+    expect(liveHrefs()).toEqual(before);
+    expect(screen.queryByText(/Moved from/)).not.toBeInTheDocument();
   });
 });

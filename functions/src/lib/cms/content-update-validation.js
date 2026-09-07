@@ -10,6 +10,9 @@
  *   - Workflow state (contentStatus, Live, approvedForNews, review*) and
  *     backend-owned identity/timestamps are FORBIDDEN — the transition
  *     handler is the state machine's single writer.
+ *   - slug/Slug are FORBIDDEN too, added here rather than ported: the site
+ *     URL's single writer is POST cms/content/slug (#400). See the note on
+ *     the denylist itself for what this route did with a slug before that.
  *   - Field-name and payload-size ceilings (80 fields, 120-char names,
  *     12k/120k string caps, 500-item arrays, 120k JSON payloads).
  *   - Dual-casing fields (title/Title, summary/Summary, tags/Tags,
@@ -129,6 +132,19 @@ export const FORBIDDEN_CONTENT_UPDATE_KEYS = new Set([
   'updatedBy',
   'publishedAt',
   'Published At',
+  // The site URL has ONE writer, POST cms/content/slug (../cms/set-slug.js).
+  // Added 2026-09-07 with that route (#400) after establishing what this file
+  // did with a slug before it: nothing. `slug` matches no normalizer above, so
+  // it fell through to normalizeGenericField and was stored EXACTLY as sent —
+  // '  Hello World!!  ' kept its spaces, its capitals and its punctuation —
+  // and no caller here probes whether another document already holds the
+  // value. Three articles sharing one URL is what that costs, so an editor
+  // reaching this route can no longer assign one: the dedicated route
+  // slugifies and probes `c.slug OR c.Slug` before it writes, and republishes
+  // so the URLs follow. The publish pipeline patches slug/Slug directly and is
+  // unaffected — it never passes through this validator.
+  'slug',
+  'Slug',
 ]);
 
 // Per-field-type normalizers used by validateAndNormalizeUpdateContentItemUpdates.

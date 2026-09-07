@@ -29,6 +29,19 @@ describe('validateAndNormalizeUpdateContentItemUpdates', () => {
     }
   });
 
+  it('refuses to assign a site URL — that is POST cms/content/slug (#400)', () => {
+    // Before this, `slug` matched no normalizer here and fell through to the
+    // generic string branch, so it was stored EXACTLY as sent and no caller
+    // probed whether another document already held it. Both halves of that
+    // are how three published articles ended up on one URL.
+    for (const field of ['slug', 'Slug']) {
+      expect(FORBIDDEN_CONTENT_UPDATE_KEYS.has(field)).toBe(true);
+      expect(() =>
+        validateAndNormalizeUpdateContentItemUpdates({ [field]: '  Hello World!!  ' })
+      ).toThrow(/protected field/);
+    }
+  });
+
   it('writes dual-cased pairs for title, summary, tags, and cloud provider', () => {
     const out = validateAndNormalizeUpdateContentItemUpdates({
       title: '  Hello  ',
@@ -88,7 +101,11 @@ describe('validateAndNormalizeUpdateContentItemUpdates', () => {
   });
 
   it('passes null through and skips undefined, like the source', () => {
-    const out = validateAndNormalizeUpdateContentItemUpdates({ heroPrompt: null, gone: undefined, kept: 1 });
+    const out = validateAndNormalizeUpdateContentItemUpdates({
+      heroPrompt: null,
+      gone: undefined,
+      kept: 1,
+    });
     expect(out).toEqual({ heroPrompt: null, kept: 1 });
   });
 });
@@ -103,10 +120,12 @@ describe('normalizeContentUpdatesForBlogOnly', () => {
   });
 
   it('collapses news-era statuses and forces approvedForNews off', () => {
-    expect(normalizeContentUpdatesForBlogOnly({ contentStatus: 'published_news' }).contentStatus).toBe(
-      'published'
+    expect(
+      normalizeContentUpdatesForBlogOnly({ contentStatus: 'published_news' }).contentStatus
+    ).toBe('published');
+    expect(normalizeContentUpdatesForBlogOnly({ approvedForNews: true }).approvedForNews).toBe(
+      false
     );
-    expect(normalizeContentUpdatesForBlogOnly({ approvedForNews: true }).approvedForNews).toBe(false);
   });
 });
 
