@@ -247,4 +247,46 @@ describe('PublishedPage', () => {
       )
     ).toBeInTheDocument();
   });
+
+  it('carries the "Images: re-host hotlinked" action, which reads its candidates only when opened (#374)', async () => {
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    getJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'cms/content/rehost-images') {
+        return {
+          success: true,
+          scanned: 22,
+          candidates: [
+            {
+              id: 'content-2',
+              title: 'Existing live article',
+              live: true,
+              fields: ['content'],
+              urlCount: 8,
+              hosts: ['techcommunity.microsoft.com'],
+              lastRun: null,
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+    expect(getJSON).not.toHaveBeenCalledWith('cms/content/rehost-images');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Images: re-host hotlinked' }));
+    expect(
+      await screen.findByText('1 of 22 published articles hotlink third-party images.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select Existing live article' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Re-host selected (1)' })).toBeEnabled();
+  });
 });
