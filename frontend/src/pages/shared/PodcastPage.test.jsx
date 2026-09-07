@@ -146,6 +146,31 @@ describe('SharedPodcastPage', () => {
     expect(playerTitle()).toHaveTextContent('Identities and governance');
   });
 
+  it('keeps the playing indicator when a filter leaves the featured episode in place', () => {
+    // The player is stateful and cannot be paused from the page: if the
+    // filter does not remount it, audio keeps playing and the list must say so.
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Podcast feed' }));
+    expect(playerTitle()).toHaveTextContent('Host new');
+    expect(screen.getByRole('button', { name: /Host new/ })).toHaveTextContent('graphic_eq');
+  });
+
+  it('clears the playing indicator when a filter switches the featured episode', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Listen & Learn' }));
+    expect(playerTitle()).toHaveTextContent('Identities and governance');
+    expect(screen.queryByText('graphic_eq')).toBeNull();
+  });
+
+  it('keeps the indicator when the row already playing is clicked again', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+    fireEvent.click(screen.getByRole('button', { name: /Host new/ }));
+    expect(screen.getByRole('button', { name: /Host new/ })).toHaveTextContent('graphic_eq');
+  });
+
   it('keeps a selection that survives the filter', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: /Identities and governance/ }));

@@ -310,6 +310,20 @@ function SourceChip({ episode }) {
   );
 }
 
+/** The rows a source filter leaves in the list. */
+function visibleFor(episodes, filter) {
+  return filter === 'all' ? episodes : episodes.filter((e) => e.source === filter);
+}
+
+/**
+ * The player follows the list it sits above: a selection the filter hides
+ * gives way to the first visible episode rather than playing something the
+ * list no longer shows.
+ */
+function featuredFor(visible, selectedId) {
+  return (selectedId ? visible.find((e) => e.id === selectedId) : null) ?? visible[0] ?? null;
+}
+
 export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const { pathname } = useLocation();
   const ctxProvider = useProvider();
@@ -329,25 +343,24 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const [filter, setFilter] = useState('all');
   const onPlayingChange = useCallback((playing) => setIsPlaying(playing), []);
 
-  // A different episode mounts a paused player. The list indicator reads the
-  // page-level flag, so it is reset here rather than a render later when the
-  // new player reports its state — otherwise the indicator flashes on the new
-  // row while nothing is playing.
+  const visible = visibleFor(episodes, filter);
+  const featured = featuredFor(visible, selectedId);
+
+  // The player is stateful and cannot be paused from here, so the page-level
+  // flag is reset only when the featured episode actually changes — that is
+  // when the player remounts paused. A filter that keeps the featured
+  // episode, or a click on the row already playing, leaves audio running and
+  // the indicator with it; otherwise the list would say "stopped" over a
+  // player that is not.
   function selectEpisode(id) {
     setSelectedId(id);
-    setIsPlaying(false);
+    if (id !== featured?.id) setIsPlaying(false);
   }
   function selectFilter(key) {
+    const next = featuredFor(visibleFor(episodes, key), selectedId);
     setFilter(key);
-    setIsPlaying(false);
+    if (next?.id !== featured?.id) setIsPlaying(false);
   }
-
-  const visible = filter === 'all' ? episodes : episodes.filter((e) => e.source === filter);
-  // The player follows the list it sits above: a selection the filter hides
-  // gives way to the first visible episode rather than playing something the
-  // list no longer shows.
-  const featured =
-    (selectedId ? visible.find((e) => e.id === selectedId) : null) ?? visible[0] ?? null;
 
   const hasBothSources =
     episodes.some((e) => e.source === SOURCE.host) &&
