@@ -375,7 +375,7 @@ dictated by HashiCorp and Microsoft and are contractual.
 | `admin_ip_rules`, `cosmos_admin_ip_rules`, `functions_storage_admin_ip_rules` | Populated only for a seeding or inspection window; empty is the steady state | no |
 
 Most of the rest of `infra/variables.tf` has a default and needs no workspace
-entry. Four are the exception, and they are the ones an operator actually
+entry. Six are the exception, and they are the ones an operator actually
 reaches for. Each carries the *safe* value as its default, so the unsafe or
 armed value is a deliberate workspace edit and the default is the rollback:
 
@@ -385,6 +385,7 @@ armed value is a deliberate workspace edit and the default is the rollback:
 | `enabled_timers` | `[]` | Which timers are armed, by flag suffix. Arming one needs **both** this and the master switch. An unrecognised name fails the plan rather than silently arming nothing |
 | `availability_test_enabled` | `false` | Runs the `/api/health` availability test. Off until the Cloudflare side is settled: Bot Fight Mode serves datacenter clients a 403, so arming it first would create a permanently-firing alert |
 | `availability_probe_alert_enabled` | `false` | The alert on the Cloudflare Worker reachability probe ([ADR 0024](../decisions/0024-edge-availability-probe.md)). It fires on *missing* probe successes, so flipping it before the Worker is deployed and observed writing `success == 1` rows creates a rule that fires immediately and permanently |
+| `cosmos_export_enabled` | `false` | Arms the Cosmos exporter timer (`FEATURE_FLAG_COSMOS_EXPORT`) and creates its two missing-run alert rules in one flip ([ADR 0028](../decisions/0028-cosmos-out-of-account-export.md)). One variable for both so the alert cannot exist without the exporter. Flip it Monday to Saturday, after the exporter code is deployed and has been seen emitting `cosmosExportCompleted` |
 | `storage_shared_access_key_enabled` | `false` | Shared-key auth on the content and Functions host accounts. False is the intended posture — both consumers use Entra — and `true` is the one-variable rollback if a key path turns out to be needed |
 
 Everything else there is a default nobody is expected to override.

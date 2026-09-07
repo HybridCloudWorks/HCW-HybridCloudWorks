@@ -714,6 +714,47 @@ variable "availability_probe_alert_enabled" {
   default     = false
 }
 
+# The one switch for the Cosmos exporter (ADR 0028, #231). It sets the
+# FEATURE_FLAG_COSMOS_EXPORT app setting (functionapp.tf) AND creates the two
+# missing-run alert rules (observability.tf), so the exporter and the alert on
+# its absence arm together and disarm together. That pairing is why it is its
+# own variable and not a name in enabled_timers: the alert is not a timer, and
+# a reader of the workspace variables should see one switch called
+# cosmos_export_enabled rather than infer the alert's existence from a set.
+variable "cosmos_export_enabled" {
+  description = <<-EOT
+    Arm the Cosmos out-of-account export (ADR 0028, #231) and its two
+    missing-run alerts.
+
+    True sets FEATURE_FLAG_COSMOS_EXPORT = "true" on the Function App — the
+    string the exporter timer reads, like every other timer flag — and
+    creates alert-cosmos-export-daily and alert-cosmos-export-full in the
+    web resource group. False, the default, writes "false" and creates no
+    rule. The cosmos-export container and its 35-day lifecycle rule exist
+    either way, empty and idle, so the apply that lands this variable
+    changes nothing that runs.
+
+    The alerts fire on ABSENCE of a cosmosExportCompleted custom event, which
+    is why they are bound to the same variable as the flag: a rule created
+    while the exporter is off fires on its first evaluation and never stops.
+    Two residues remain, both bounded. The daily rule's first evaluation can
+    precede the exporter's first 03:00 UTC run, in which case it mails once
+    on the arming apply and is quiet after that run completes. And the full
+    rule checks each Monday for the Sunday just gone, so a flag that arrives
+    on a Sunday after 03:00 UTC has no full to find: flip this Monday to
+    Saturday, or expect one Monday mail.
+
+    Preconditions: the Function App has been deployed with the exporter code
+    (the functions/ half of #231) and has been seen emitting the event —
+    `customEvents | where name == "cosmosExportCompleted"` in Application
+    Insights — and schedulers_master_enabled is true, because a timer
+    registered through schedulers.js is held off by FEATURE_FLAG_SCHEDULERS
+    = "false" whatever this variable says.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "availability_test_frequency_seconds" {
   description = <<-EOT
     How often EACH location runs the test. Azure accepts 300, 600 or 900 only.

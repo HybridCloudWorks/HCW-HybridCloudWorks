@@ -551,6 +551,20 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "CERT_IMAGE_CLEANUP_DELETE"   = "false"
     "CONTENT_HARD_DELETE"         = "true"
 
+    # The Cosmos out-of-account exporter (ADR 0028, #231): a 03:00 UTC timer
+    # that fans one queue message per exported container onto the platform
+    # jobs worker, writing gzip-NDJSON to the cosmos-export container in
+    # storage.tf. Its own variable rather than a name in enabled_timers,
+    # because that variable also creates the two missing-run alert rules in
+    # observability.tf: the exporter and the alert on its absence are one
+    # decision, armed and disarmed together (the variable's comment says why).
+    # "true"/"false" like every FEATURE_FLAG_* above, and not "1"/"0":
+    # schedulers.js and jobs-sweeper.js both compare against the literal
+    # string "true", so any other spelling is a flag that reads as on in
+    # Terraform and off in the app — the hardcoded-"false" failure of
+    # 2026-08-24 in a new coat.
+    "FEATURE_FLAG_COSMOS_EXPORT" = var.cosmos_export_enabled ? "true" : "false"
+
     # Extra browser origins allowed to call the API, comma-separated, on top of
     # the production allowlist compiled into lib/auth/cors.js
     # (hybridcloudworks.com and www). Needed for §6 step 2: the site runs on the
