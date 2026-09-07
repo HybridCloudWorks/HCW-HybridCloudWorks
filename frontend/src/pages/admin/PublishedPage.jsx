@@ -21,6 +21,7 @@ import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { getOrderedContentImages } from '@/lib/contentImages';
 import PipelineStepper from '@/components/admin/PipelineStepper';
+import RehostImagesPanel from './RehostImagesPanel';
 
 // ── Pre-publish validation ────────────────────────────────────────────────────
 // Client-side checklist run before publishContent is invoked. `item` is
@@ -677,6 +678,9 @@ export default function PublishedPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Issue #374 backfill: the bulk re-host of hotlinked body images. */}
+      <RehostImagesPanel />
 
       {published.length === 0 ? (
         <Card>

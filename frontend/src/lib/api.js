@@ -36,6 +36,9 @@ const FUNCTION_TIMEOUT_MS = {
   generateArticleDraft: 90000,
   createContentFromRecording: 90000,
   generatePreviewImages: 30000,
+  // A batch of articles each fetching its body images (15 s per image, four
+  // at a time) — sized with the Function host's 230 s cap, not the default.
+  'cms/content/rehost-images': 200000,
 };
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SAFE_RETRY_FUNCTIONS = new Set([
