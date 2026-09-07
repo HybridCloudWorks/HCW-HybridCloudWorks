@@ -51,6 +51,33 @@ This project has not cut a tagged release; entries are grouped under
   holding one architecture document and an API zero would drop working URLs.
   Every dropped route still renders and still serves its empty state; this
   changes what is advertised, not what exists.
+- **The Social Hub lists Publer accounts again, and when it cannot it says
+  which of three things is wrong (#397).** Both of its call sites tested the
+  `publerProxy` response with `Array.isArray`, and the proxy answers with an
+  envelope — `{ ok, status, data }`, or `{ ok: false, code:
+  'INTEGRATION_NOT_CONFIGURED' }` when no key is seeded — which is never an
+  array. So the check was always false and a fully connected workspace rendered
+  exactly like an empty one, on the Compose tab and on Connection Settings
+  both. The reader the Platform settings page grew for the same bug (#391) has
+  moved to `frontend/src/lib/publerAccounts.js` with its unit tests, and both
+  pages import it rather than keeping two copies to drift apart. The three
+  outcomes are now distinct where they used to be one empty list: an unseeded
+  integration says so and names the Connection Settings tab, a failed call says
+  the call failed and carries the upstream message, and only a proxy that
+  answered with no accounts still reads as an empty workspace. The reader names
+  that third case explicitly, because the proxy answers HTTP 200 whatever
+  happens: Publer refusing the key comes back as a *resolved*
+  `{ ok: false, status: 401 }`, which no `.catch()` will ever see, so both
+  pages showed an authentication failure as an empty workspace until
+  `unwrapPublerAccounts` grew a `failed` outcome carrying Publer's own status.
+  The unconfigured copy no longer blames the API key either — one code covers a
+  missing `PUBLER_API_KEY` *and* a missing `PUBLER_WORKSPACE_ID`, so the page
+  repeats whichever the server named rather than guessing. Reaching
+  Connection Settings had also been throwing a `ReferenceError` before it could
+  paint — its two credential tiles called `publerKey()` and `publerWsId()`,
+  which are defined nowhere in the bundle and cannot be, because FINDING-04
+  moved both values into Key Vault. One tile replaces them and reports the only
+  thing the browser can observe: whether the proxy could use the credential.
 - **The audit stops calling a cancelled request a failure, the Azure
   architecture page names its provider, and the 2026-09-07 crawl is on the
   record (#361, #371, #373, #374).** The run against the deployed batch reads
