@@ -23,6 +23,13 @@
  * on their own terms, from the API path as much as the seed path.
  *
  * ALLOWED: http, https, mailto, and relative references (`/x`, `#x`, `?x`).
+ *
+ * A LEADING SLASH IS NOT A PROMISE OF SAME ORIGIN. `//evil.example` is a
+ * relative reference by the URL grammar and is returned unchanged — correctly,
+ * since it navigates over https — but it leaves this site. A caller deciding
+ * "internal or external" from the returned string must exclude `//` (see
+ * EpisodePlayer and the admin platform-settings page), or a value from a feed
+ * becomes a same-tab cross-origin navigation with no `rel="noopener"`.
  * REFUSED: `javascript:`, `data:`, `vbscript:`, `file:`, and anything else.
  * `data:` is refused deliberately even for images — nothing in this app serves
  * one, and permitting it reopens the sink for SVG payloads.

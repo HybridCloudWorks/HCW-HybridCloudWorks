@@ -206,6 +206,17 @@ describe('EpisodePlayer', () => {
       expect(container.innerHTML).not.toContain('javascript:');
     });
 
+    it('treats a protocol-relative link as external, not as an internal path', () => {
+      // `//evil.example` starts with a slash and passes safeUrl, but it
+      // navigates cross-origin: it must not be labelled Certification or open
+      // in the same tab without rel="noopener".
+      render(<EpisodePlayer episode={{ ...episode, link: '//evil.example/x' }} meta={meta} />);
+      expect(screen.queryByRole('link', { name: /Certification/ })).toBeNull();
+      const open = screen.getByRole('link', { name: /Open/ });
+      expect(open).toHaveAttribute('target', '_blank');
+      expect(open).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+
     it('keeps an internal path as a same-tab Certification link', () => {
       render(<EpisodePlayer episode={{ ...episode, link: '/azure/podcast/x' }} meta={meta} />);
       const cert = screen.getByRole('link', { name: /Certification/ });

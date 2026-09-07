@@ -21,6 +21,19 @@ import React, { useEffect, useRef, useState } from 'react';
 import { formatSeconds, stripHtml } from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
+/**
+ * A sanitised link that stays on this site.
+ *
+ * `//evil.example` also starts with a slash and passes `safeUrl` — it is a
+ * relative reference by the URL grammar — but it navigates cross-origin. A
+ * feed could otherwise put a same-tab link to another site behind the
+ * "Certification" label, with no `rel="noopener"`. Same rule as the admin
+ * platform-settings page.
+ */
+export function isInternalPath(url) {
+  return Boolean(url && url.startsWith('/') && !url.startsWith('//'));
+}
+
 export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
   const audioRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -57,7 +70,7 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
   // it can be null or not a string at all. Decide internal-vs-external on the
   // sanitised string and render the link only when there is one.
   const link = safeUrl(episode.link);
-  const internalLink = Boolean(link && link.startsWith('/'));
+  const internalLink = isInternalPath(link);
   const known = duration ?? episode.durationSeconds ?? null;
   const sliderMax = known && known > 0 ? known : 0;
 
