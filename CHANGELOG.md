@@ -43,7 +43,11 @@ This project has not cut a tagged release; entries are grouped under
   untouched on a republish. What a read cannot establish — two publishers
   racing on one title — is documented at `resolveSlug` and caught by the new
   `scripts/report-slug-collisions.mjs`, which prints the contested URLs from the
-  committed manifest with no credential.
+  committed manifest with no credential. `curatedSubpagePath` moves with the
+  slug now (`resolveCuratedSubpagePath`, found by Copilot's review): it was
+  taken from the stored value unconditionally, so an article leaving a
+  contested slug would have kept advertising the contested URL in
+  `slugPageUrl`, `publishedUrl` and `publicUrl` while `slug` said otherwise.
 - **The Social Hub lists Publer accounts again, and when it cannot it says
   which of three things is wrong (#397).** Both of its call sites tested the
   `publerProxy` response with `Array.isArray`, and the proxy answers with an
