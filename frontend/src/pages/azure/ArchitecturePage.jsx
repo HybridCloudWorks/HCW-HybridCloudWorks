@@ -156,10 +156,10 @@ export default function ArchitecturePage() {
   return (
     <>
       <Helmet>
-        <title>Architecture Designs | Hybrid Cloud Works</title>
+        <title>Azure Architecture Designs | Hybrid Cloud Works</title>
         <meta
           name="description"
-          content="Explore curated architectural patterns and reference designs."
+          content="Explore curated Azure architectural patterns and reference designs."
         />
       </Helmet>
 

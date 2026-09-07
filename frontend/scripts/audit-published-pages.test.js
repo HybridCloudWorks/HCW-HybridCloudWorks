@@ -9,7 +9,7 @@
  * is not an empty page.
  */
 import { describe, it, expect } from 'vitest';
-import { decideEmptiness, parseOptions } from './audit-published-pages.mjs';
+import { CANCELLED_REQUEST, decideEmptiness, parseOptions } from './audit-published-pages.mjs';
 
 const COPY = ['No episodes available yet.'];
 
@@ -85,5 +85,27 @@ describe('decideEmptiness', () => {
     expect(decideEmptiness({ mainChars: 2000, emptyCopy: COPY }).notes).toEqual([
       'a widget shows empty-state copy: No episodes available yet.',
     ]);
+  });
+});
+
+describe('CANCELLED_REQUEST', () => {
+  // The crawler navigating away cancels requests in flight. Chromium reports
+  // that as net::ERR_ABORTED, which is not the network failing to serve the
+  // page: on 2026-09-07 it made the home page a defect for a health route
+  // that answered 200 when asked directly.
+  it('matches an aborted request', () => {
+    expect(CANCELLED_REQUEST.test('net::ERR_ABORTED')).toBe(true);
+  });
+
+  it('does not match a real network failure', () => {
+    for (const e of [
+      'net::ERR_CONNECTION_REFUSED',
+      'net::ERR_NAME_NOT_RESOLVED',
+      'net::ERR_CERT_DATE_INVALID',
+      'net::ERR_TIMED_OUT',
+      'failed',
+    ]) {
+      expect(CANCELLED_REQUEST.test(e)).toBe(false);
+    }
   });
 });

@@ -121,6 +121,12 @@ const KNOWN_ACCEPTED = [
   },
 ];
 
+/**
+ * A request the browser cancelled rather than one the network failed to
+ * serve. See the `requestfailed` handler for why this is not a defect.
+ */
+export const CANCELLED_REQUEST = /net::ERR_ABORTED/i;
+
 /** Below this many characters of main-region text a page is "thin". */
 const THIN_MAIN_CHARS = 400;
 
@@ -277,12 +283,16 @@ async function auditPage(context, url) {
   // One shape for every entry in failedRequests / apiFailures:
   // { url, kind: 'network' | 'http', status: number | null, error: string | null }.
   page.on('requestfailed', (req) => {
-    record.failedRequests.push({
-      url: req.url(),
-      kind: 'network',
-      status: null,
-      error: req.failure()?.errorText || 'failed',
-    });
+    const error = req.failure()?.errorText || 'failed';
+    // A cancelled request is not a failed one. Chromium reports
+    // `net::ERR_ABORTED` when the browser drops a request in flight — the
+    // crawler navigating away, the page closing, or the app's own
+    // AbortController firing on unmount. On 2026-09-07 this made the home page
+    // a defect for `public/platform-health`, which answered 200 with a valid
+    // body when asked directly a minute later. Recording it as a defect hides
+    // the next real one, which is the whole reason KNOWN_ACCEPTED exists.
+    if (CANCELLED_REQUEST.test(error)) return;
+    record.failedRequests.push({ url: req.url(), kind: 'network', status: null, error });
   });
   page.on('response', (res) => {
     const st = res.status();
