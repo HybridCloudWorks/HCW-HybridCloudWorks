@@ -84,6 +84,33 @@ describe('EpisodePlayer', () => {
     expect(screen.getByRole('slider', { name: 'Seek' })).toHaveValue('540');
   });
 
+  it('renders a feed description as text, never as markup', () => {
+    // Host feeds wrap descriptions in <p> and sometimes worse.
+    const { container } = render(
+      <EpisodePlayer
+        episode={{
+          ...episode,
+          longDescription: '<p>Wrapped <b>bold</b></p><scr<script>ipt>alert(1)</script>',
+        }}
+        meta={meta}
+      />
+    );
+    const text = screen.getByText(/Wrapped bold/);
+    expect(text.textContent).not.toContain('<');
+    expect(text.querySelector('b')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+  });
+
+  it('shows keyboard focus on the track even though the input itself is transparent', () => {
+    render(<EpisodePlayer episode={episode} meta={meta} />);
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    slider.focus();
+    expect(document.activeElement).toBe(slider);
+    const track = screen.getByTestId('episode-track');
+    expect(track).toContainElement(slider);
+    expect(track.className).toMatch(/focus-within:ring-2/);
+  });
+
   it('asks for metadata only until play is pressed', () => {
     const { container } = render(<EpisodePlayer episode={episode} meta={meta} />);
     expect(container.querySelector('audio')).toHaveAttribute('preload', 'metadata');

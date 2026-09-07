@@ -18,7 +18,7 @@
  * `key={episode.id}` and every piece of state below resets with the element.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { formatSeconds } from '@/lib/audioEpisodes';
+import { formatSeconds, stripHtml } from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
@@ -111,12 +111,17 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
               {episode.title}
             </h2>
             <p className="text-sm text-foreground line-clamp-3">
-              {episode.longDescription || episode.description}
+              {stripHtml(episode.longDescription || episode.description)}
             </p>
           </div>
         </div>
 
-        <div className="relative w-full h-2 bg-card/60 rounded-full overflow-hidden mb-2">
+        <div
+          // The input inside is transparent so the styled bar shows through;
+          // the ring on the track is what makes keyboard focus visible.
+          className="relative w-full h-2 bg-card/60 rounded-full mb-2 focus-within:ring-2 focus-within:ring-white/80 focus-within:ring-offset-2 focus-within:ring-offset-transparent"
+          data-testid="episode-track"
+        >
           <div
             className={`h-full bg-gradient-to-r ${meta.progressBar} rounded-full transition-all duration-200`}
             style={{

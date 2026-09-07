@@ -4,7 +4,7 @@ import { useLocation } from 'react-router';
 import EpisodePlayer from '@/components/podcast/EpisodePlayer';
 import useAudioEpisodes from '@/hooks/useAudioEpisodes';
 import { useProvider, useProviderConfig } from '@/context/ProviderContext';
-import { formatSeconds, SOURCE } from '@/lib/audioEpisodes';
+import { formatSeconds, SOURCE, stripHtml } from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 const PLATFORM_LOGOS = {
@@ -216,19 +216,6 @@ const FALLBACK_META = {
 function detectProvider(pathname) {
   const match = /^\/([a-z-]+)(?:\/|$)/.exec(pathname || '');
   return match ? match[1] : null;
-}
-
-function stripHtml(html) {
-  if (!html) return '';
-  // Apply tag removal repeatedly until stable: a single pass leaves residues for
-  // overlapping constructs like `<scr<script>ipt>`.
-  let prev;
-  let out = String(html);
-  do {
-    prev = out;
-    out = out.replace(/<[^>]*>/g, '');
-  } while (out !== prev);
-  return out.trim();
 }
 
 /**

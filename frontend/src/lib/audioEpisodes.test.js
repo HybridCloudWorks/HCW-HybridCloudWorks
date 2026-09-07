@@ -66,6 +66,20 @@ describe('normalizeHostEpisode', () => {
     expect(out.publishedAtString).toBeTruthy();
   });
 
+  it('strips feed HTML from both descriptions, repeatedly', () => {
+    const out = normalizeHostEpisode({
+      ...row,
+      description: '<p>Short</p>',
+      longDescription: '<p>Long <scr<script>ipt>x</script></p>',
+    });
+    expect(out.description).toBe('Short');
+    // The overlapping construct leaves a harmless `ipt>` residue; what the
+    // stripper promises is that no `<…>` tag survives, not pretty output.
+    expect(out.longDescription).not.toMatch(/<[^>]*>/);
+    expect(out.longDescription).not.toContain('<');
+    expect(out.longDescription.startsWith('Long ')).toBe(true);
+  });
+
   it('leaves the date fields null when the row has no usable date', () => {
     const out = normalizeHostEpisode({ ...row, publishedAt: 'junk' });
     expect(out.publishedAtISO).toBeNull();

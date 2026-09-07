@@ -47,6 +47,23 @@ export function parseDurationSeconds(raw) {
   return seconds > 0 ? seconds : null;
 }
 
+/**
+ * Plain text from a feed's HTML description. Tag removal repeats until
+ * stable: a single pass leaves residues for overlapping constructs like
+ * `<scr<script>ipt>`. Host feeds wrap descriptions in `<p>`, and both the
+ * list row and the player render them as text.
+ */
+export function stripHtml(html) {
+  if (!html) return '';
+  let prev;
+  let out = String(html);
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, '');
+  } while (out !== prev);
+  return out.trim();
+}
+
 /** ISO string and locale date for a value that may not parse; both null when it does not. */
 function publishedFields(raw) {
   const value = raw?.toDate ? raw.toDate() : raw;
@@ -70,8 +87,8 @@ export function normalizeHostEpisode(doc) {
     source: SOURCE.host,
     sourceLabel: SOURCE_LABELS[SOURCE.host],
     title: doc?.title || '',
-    description: doc?.description || '',
-    longDescription: doc?.longDescription || '',
+    description: stripHtml(doc?.description),
+    longDescription: stripHtml(doc?.longDescription),
     // Host media is an absolute CDN URL and is played as stored; the host
     // answers its own byte ranges.
     mediaUrl: doc?.mediaUrl || null,

@@ -507,10 +507,37 @@ describe('byte ranges (#349)', () => {
       expect(res.status).toBe(304);
     });
 
-    it('404s a missing blob', async () => {
+    it('404s a missing blob with headers only', async () => {
       const storage = { ...rangeStorage(), headBlobForDelivery: vi.fn(async () => null) };
       const res = await get(storage, {}, 'HEAD');
       expect(res.status).toBe(404);
+      expect(res.body).toBeUndefined();
+      expect('body' in res).toBe(false);
+    });
+
+    it('never carries a body on any status, including the allowlist 404 and a 500', async () => {
+      const denied = await createPublicMediaHandlers({ storage: rangeStorage() }).getMedia(
+        { ...makeRequest({ container: 'content' }), method: 'HEAD' },
+        context
+      );
+      expect(denied.status).toBe(404);
+      expect('body' in denied).toBe(false);
+
+      const failing = {
+        ...rangeStorage(),
+        headBlobForDelivery: vi.fn(async () => {
+          throw Object.assign(new Error('AuthorizationFailure'), { statusCode: 403 });
+        }),
+      };
+      const res = await createPublicMediaHandlers({ storage: failing }).getMedia(
+        {
+          ...makeRequest({ container: 'listenandlearn', blobPath: 'a/b/c.mp3' }),
+          method: 'HEAD',
+        },
+        { ...context, error: vi.fn() }
+      );
+      expect(res.status).toBe(500);
+      expect('body' in res).toBe(false);
     });
 
     it('applies the same allowlist and path validation', async () => {

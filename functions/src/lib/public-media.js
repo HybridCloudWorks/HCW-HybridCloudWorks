@@ -227,42 +227,55 @@ export function createPublicMediaHandlers({ storage }) {
     };
   }
 
+  /** Every outcome for one request, body included where the method allows one. */
+  async function dispatch(request, context) {
+    const container = String(request.params?.container || '').trim();
+    const blobPath = String(request.params?.blobPath || '').trim();
+
+    // Order matters: an unknown container must not be distinguishable from a
+    // known-but-empty one by response shape, and neither reveals whether a
+    // private container exists.
+    if (!PUBLIC_MEDIA_CONTAINERS.has(container)) {
+      return json(404, { error: 'Not found' });
+    }
+    if (!isValidBlobPath(blobPath)) {
+      return json(404, { error: 'Not found' });
+    }
+
+    try {
+      if (String(request.method || '').toUpperCase() === 'HEAD') {
+        if (!canHead) context.warn?.('getMedia: no headBlobForDelivery; HEAD via full read');
+        return await head(container, blobPath, request);
+      }
+      const range = parseRangeHeader(request.headers?.get?.('range'));
+      if (range) {
+        // The ranged path needs both readers: bytes from one, and the size
+        // and ETag a suffix or a conditional needs from the other.
+        if (canRange && canHead) return await partial(container, blobPath, request, range);
+        context.warn?.('getMedia: ranged readers not wired; Range ignored, serving in full');
+      }
+      return await full(container, blobPath, request);
+    } catch (error) {
+      if (error?.statusCode === 404 || error?.code === 'BlobNotFound') {
+        return json(404, { error: 'Not found' });
+      }
+      context.error('getMedia failed:', error);
+      return json(500, { error: 'Failed to read media' });
+    }
+  }
+
   return {
     /** GET|HEAD /api/public/media/{container}/{*blobPath} */
     async getMedia(request, context) {
-      const container = String(request.params?.container || '').trim();
-      const blobPath = String(request.params?.blobPath || '').trim();
-
-      // Order matters: an unknown container must not be distinguishable from a
-      // known-but-empty one by response shape, and neither reveals whether a
-      // private container exists.
-      if (!PUBLIC_MEDIA_CONTAINERS.has(container)) {
-        return json(404, { error: 'Not found' });
+      const result = await dispatch(request, context);
+      // A HEAD response carries headers only, on every status: the 404s and
+      // the 500 above are shaped for GET, and a body on a HEAD is a protocol
+      // error the host would otherwise pass through.
+      if (String(request.method || '').toUpperCase() === 'HEAD' && result && 'body' in result) {
+        const { body: _dropped, ...headersOnly } = result;
+        return headersOnly;
       }
-      if (!isValidBlobPath(blobPath)) {
-        return json(404, { error: 'Not found' });
-      }
-
-      try {
-        if (String(request.method || '').toUpperCase() === 'HEAD') {
-          if (!canHead) context.warn?.('getMedia: no headBlobForDelivery; HEAD via full read');
-          return await head(container, blobPath, request);
-        }
-        const range = parseRangeHeader(request.headers?.get?.('range'));
-        if (range) {
-          // The ranged path needs both readers: bytes from one, and the size
-          // and ETag a suffix or a conditional needs from the other.
-          if (canRange && canHead) return await partial(container, blobPath, request, range);
-          context.warn?.('getMedia: ranged readers not wired; Range ignored, serving in full');
-        }
-        return await full(container, blobPath, request);
-      } catch (error) {
-        if (error?.statusCode === 404 || error?.code === 'BlobNotFound') {
-          return json(404, { error: 'Not found' });
-        }
-        context.error('getMedia failed:', error);
-        return json(500, { error: 'Failed to read media' });
-      }
+      return result;
     },
   };
 }
