@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createPublishHandlers,
   resolveSlug,
+  resolveCuratedSubpagePath,
   slugify,
   toPublicUrl,
   getPublicSectionForPublishTarget,
@@ -329,6 +330,36 @@ describe('slug assignment (#400)', () => {
     const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
     expect(patch.slug).toBe('shared-slug-c1');
     expect(patch.Slug).toBe('shared-slug-c1');
+    // ...and the URLs move with it. A stored curatedSubpagePath taken
+    // unconditionally would leave the article advertising the contested URL
+    // while its slug said otherwise.
+    expect(patch.curatedSubpagePath).toBe('/azure/frameworks/shared-slug-c1');
+    expect(patch.publishedUrl).toBe('https://hybridcloudworks.com/azure/frameworks/shared-slug-c1');
+    expect(patch.publicUrl).toBe(patch.publishedUrl);
+    expect(patch.slugPageUrl).toBe(patch.publishedUrl);
+  });
+
+  it('resolveCuratedSubpagePath keeps a curated path but never one naming another slug', () => {
+    const base = { provider: 'Azure', section: 'frameworks' };
+    // Nothing stored: derived from the provider, or nothing at all.
+    expect(resolveCuratedSubpagePath({ ...base, slug: 's' })).toBe('/azure/frameworks/s');
+    expect(resolveCuratedSubpagePath({ section: 'frameworks', slug: 's' })).toBeNull();
+    // Stored and already naming this slug: kept byte for byte, prefix included.
+    expect(resolveCuratedSubpagePath({ ...base, stored: '/curated/deep/path/s', slug: 's' })).toBe(
+      '/curated/deep/path/s'
+    );
+    // Stored but naming a different slug: the last segment moves, the prefix
+    // stays — including when there is no provider to derive a path from.
+    expect(resolveCuratedSubpagePath({ ...base, stored: '/azure/frameworks/old', slug: 's' })).toBe(
+      '/azure/frameworks/s'
+    );
+    expect(resolveCuratedSubpagePath({ stored: '/curated/deep/old/', slug: 's' })).toBe(
+      '/curated/deep/s'
+    );
+    // No slug to write: nothing to reconcile against, so the path is untouched.
+    expect(resolveCuratedSubpagePath({ ...base, stored: '/azure/frameworks/old' })).toBe(
+      '/azure/frameworks/old'
+    );
   });
 
   it('a republish reads its slug from Slug when the document has no lowercase slug', async () => {

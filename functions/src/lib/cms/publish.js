@@ -145,6 +145,40 @@ export function resolveSlug({ candidate = '', contentId = '', reuse = false, hol
   return base;
 }
 
+/**
+ * The curated path a publish writes, and with it `slugPageUrl`,
+ * `publishedUrl` and `publicUrl`.
+ *
+ * The stored path wins, because it is the URL the article already serves and a
+ * hand-curated one has to survive a republish — but only while it still names
+ * the slug being written. When a republish moves off a slug another document
+ * holds (resolveSlug), a stored path taken unconditionally would keep
+ * advertising the contested URL while `slug` said otherwise: the article would
+ * move and its own links would not, which is the bug wearing a different hat.
+ * Found by Copilot's review of #403 on the first revision of this change.
+ *
+ * The LAST SEGMENT is replaced rather than the whole path rebuilt, so a curated
+ * path sitting under some other prefix keeps that prefix. With neither a stored
+ * path nor a provider to derive one from there is no path at all, exactly as
+ * before.
+ */
+export function resolveCuratedSubpagePath({
+  stored = '',
+  provider = '',
+  section = '',
+  slug = '',
+} = {}) {
+  const current = String(stored || '').replace(/\/+$/, '');
+  if (!current) {
+    return provider && slug ? `/${String(provider).toLowerCase()}/${section}/${slug}` : null;
+  }
+  if (!slug) return current;
+  const segments = current.split('/');
+  if (segments[segments.length - 1] === slug) return current;
+  segments[segments.length - 1] = slug;
+  return segments.join('/');
+}
+
 export function toPublicUrl(pathValue) {
   if (!pathValue) return null;
   const path = String(pathValue).startsWith('/') ? String(pathValue) : `/${String(pathValue)}`;
@@ -550,11 +584,12 @@ export function createPublishHandlers({
         holders: await slugHolders(candidate),
       });
 
-      const curatedSubpagePath =
-        contentData.curatedSubpagePath ||
-        (ctx.resolvedLandingProvider
-          ? `/${String(ctx.resolvedLandingProvider).toLowerCase()}/${ctx.curatedSection}/${slug}`
-          : null);
+      const curatedSubpagePath = resolveCuratedSubpagePath({
+        stored: contentData.curatedSubpagePath,
+        provider: ctx.resolvedLandingProvider,
+        section: ctx.curatedSection,
+        slug,
+      });
 
       if (!isRepublish) {
         const metadataErrors = validatePublishMetadata({
