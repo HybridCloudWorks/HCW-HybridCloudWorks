@@ -57,9 +57,14 @@
  *     would block sixteen audio pages on behalf of two podcast rows that no
  *     visitor can reach.
  *   - `countSections` returns null when any query fills its window, because a
- *     truncated read cannot tell an absent item from an unread one. Null
- *     omits `sections` from the response, and the builder then falls back to
- *     its own frameworks-only count.
+ *     truncated read cannot tell an absent item from an unread one. The route
+ *     then answers `sections: null` — the key is present and null, not absent,
+ *     which is the same thing a caller sees either way because the consumer
+ *     tests the VALUE: `serverSections()` in scripts/build-content-manifest.mjs
+ *     treats null, and anything else that is not a plain object, as "no counts
+ *     from the route" and falls back to its own frameworks-only count. A
+ *     deployed revision predating the field omits the key entirely and lands in
+ *     the same branch, which is why the two cases need no telling apart.
  */
 import {
   PROVIDER_ALIASES,

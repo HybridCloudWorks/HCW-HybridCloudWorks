@@ -44,16 +44,7 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const OUT_PATH = join(ROOT, 'frontend', 'data', 'content-manifest.json');
 
 /** Providers with a `/:provider/blog/:slug` route. Mirrors VALID_PROVIDERS. */
-const PROVIDERS = [
-  'azure',
-  'aws',
-  'gcp',
-  'github',
-  'terraform',
-  'finops',
-  'vmware',
-  'ansible',
-];
+const PROVIDERS = ['azure', 'aws', 'gcp', 'github', 'terraform', 'finops', 'vmware', 'ansible'];
 
 /**
  * Fetch the published corpus from the Function App's origin (T-718).
@@ -259,20 +250,27 @@ function project(item) {
 }
 
 /**
- * Section pages whose whole data source is the `content` container, keyed by
- * the `type` their page selects on. Only these can be declared empty from the
- * corpus this script is handed. `coder-corner` and `code` are deliberately
- * absent: their pages fall back to the legacy `blogs` container when `content`
- * has nothing (useCoderCornerData.js), which this corpus does not include, so
- * a zero here would not mean an empty page.
+ * Sections countable from the corpus this script is handed, keyed by the `type`
+ * their page selects on.
  *
- * THIS IS THE FALLBACK PATH, not the main one. The manifest route computes
- * counts for every countable section — including the ones reading `blogs`,
- * `podcasts` and Listen & Learn, which only the app can see
- * (functions/src/lib/public-section-counts.js) — and `buildManifest` prefers
- * those. What is below runs when the deployed revision predates them, so that
- * merging the route and deploying it can happen in either order without the
- * five frameworks pages returning to the sitemap in between.
+ * THIS IS THE FALLBACK PATH, not the main one, and it is approximate. The
+ * manifest route counts every countable section across every container a
+ * section page reads (functions/src/lib/public-section-counts.js) and
+ * `buildManifest` prefers its answer. What is below runs only when the deployed
+ * revision predates that field, so that merging the route and deploying it can
+ * happen in either order without the five frameworks pages returning to the
+ * sitemap in between.
+ *
+ * Approximate in a specific, measured way. `useFrameworkData` does NOT read the
+ * `content` container alone: like useBlogData and useCoderCornerData it falls
+ * back to the legacy `blogs` container when `content` yields nothing for a
+ * provider, and this script is handed `content` only. That gap is survivable
+ * rather than harmless — on 2026-09-07 `blogs` held five published documents,
+ * all `type: blog` and all slug-duplicates of `content` documents, so it puts
+ * nothing on any page and no framework in any count. `coder-corner` and `code`
+ * are still absent here despite reading the same two containers, because their
+ * pages had nothing in `content` at all, so this path's zero for them would
+ * rest entirely on a container it cannot see.
  */
 export const SECTION_TYPES = Object.freeze({ frameworks: 'framework' });
 
@@ -410,8 +408,7 @@ async function main() {
 // parses to a URL with host `C` that never matches import.meta.url, so the
 // build would exit 0 without writing the manifest. Same fix as
 // check-deploy-drift.mjs.
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly || process.env.FORCE_RUN === '1') {
   main().catch((error) => {
     console.error(`[content-manifest] FAILED: ${error?.message || error}`);
