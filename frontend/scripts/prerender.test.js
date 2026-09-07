@@ -565,4 +565,89 @@ describe('sitemapRoutes', () => {
     const manifest = { sections: { azure: { frameworks: 0 } } };
     expect(sitemapRoutes(['/azure/frameworks/x', '/azure/code'], manifest).dropped).toEqual([]);
   });
+
+  /**
+   * Part 3 of issue #373. The rule is unchanged — it never named a section —
+   * so what these pin is that the counts the manifest route now carries for
+   * blog, coder-corner, code and the two audio routes actually reach it, and
+   * that the pages left out of the count are left in the sitemap.
+   */
+  describe('the sections beyond frameworks', () => {
+    const manifest = {
+      sections: {
+        azure: {
+          blog: 21,
+          frameworks: 0,
+          'coder-corner': 0,
+          code: 0,
+          audio: 0,
+          'audio-architecture': 0,
+        },
+        gcp: {
+          blog: 0,
+          frameworks: 0,
+          'coder-corner': 0,
+          code: 0,
+          audio: 0,
+          'audio-architecture': 0,
+        },
+        _unattributed: {
+          blog: 0,
+          frameworks: 0,
+          'coder-corner': 0,
+          code: 0,
+          audio: 0,
+          'audio-architecture': 0,
+        },
+      },
+    };
+
+    it('drops an empty blog, coder-corner, code or audio page', () => {
+      expect(
+        sitemapRoutes(
+          [
+            '/azure/blog',
+            '/gcp/blog',
+            '/gcp/coder-corner',
+            '/gcp/code',
+            '/gcp/audio',
+            '/gcp/audio-architecture',
+          ],
+          manifest
+        )
+      ).toEqual({
+        kept: ['/azure/blog'],
+        dropped: [
+          '/gcp/blog',
+          '/gcp/coder-corner',
+          '/gcp/code',
+          '/gcp/audio',
+          '/gcp/audio-architecture',
+        ],
+      });
+    });
+
+    it('leaves the pages the manifest deliberately does not count', () => {
+      // `/tools/*` are Coming Soon by configuration; architecture-designs
+      // pages merge hardcoded blueprints the API cannot see; `templates` is
+      // not a provider, so its submission forms have no counts at all.
+      const untouched = [
+        '/tools/migration',
+        '/gcp/architecture-designs',
+        '/templates/blog',
+        '/templates/coder-corner',
+      ];
+      expect(sitemapRoutes(untouched, manifest).dropped).toEqual([]);
+    });
+
+    it('still trusts no zero for a section with an unattributed item', () => {
+      const withStray = {
+        sections: {
+          ...manifest.sections,
+          _unattributed: { ...manifest.sections._unattributed, blog: 1 },
+        },
+      };
+      expect(sitemapRoutes(['/gcp/blog', '/gcp/audio'], withStray).dropped).toEqual(['/gcp/audio']);
+    });
+  });
 });
