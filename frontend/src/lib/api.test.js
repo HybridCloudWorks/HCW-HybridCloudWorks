@@ -55,6 +55,40 @@ describe('authedFetch', () => {
     expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer acquired-here');
   });
 
+  it('never lets a caller header replace the Authorization it sends', async () => {
+    const { authedFetch } = await import('@/lib/api');
+    await authedFetch('getLabsSnapshot', {
+      method: 'POST',
+      body: '{}',
+      headers: {
+        Authorization: 'Bearer forged',
+        authorization: 'Bearer forged-too',
+        'X-Trace': 't1',
+      },
+    });
+    const [[, init]] = fetch.mock.calls;
+    // The acquired token wins, exactly once, under the canonical name.
+    expect(init.headers.Authorization).toBe('Bearer acquired-here');
+    expect(Object.keys(init.headers).filter((h) => h.toLowerCase() === 'authorization')).toEqual([
+      'Authorization',
+    ]);
+    // Other caller headers still get through.
+    expect(init.headers['X-Trace']).toBe('t1');
+    expect(init.headers['Content-Type']).toBe('application/json');
+  });
+
+  it('the same holds with a pre-acquired token: only the token option decides', async () => {
+    const { authedFetch } = await import('@/lib/api');
+    await authedFetch('getLabsSnapshot', {
+      method: 'POST',
+      body: '{}',
+      token: 'pre-acquired',
+      headers: { Authorization: 'Bearer forged' },
+    });
+    expect(acquireApiToken).not.toHaveBeenCalled();
+    expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer pre-acquired');
+  });
+
   it('getJSON forwards a pre-acquired token and stays a GET', async () => {
     const { getJSON } = await import('@/lib/api');
     await getJSON('getAuthExpectations', { token: 'pre-acquired' });

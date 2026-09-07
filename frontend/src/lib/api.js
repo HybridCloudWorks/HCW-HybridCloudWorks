@@ -113,10 +113,17 @@ export async function authedFetch(fnName, { token: presetToken, ...options } = {
   }
   const url = getEndpoint(fnName);
 
+  // Caller headers first, Authorization LAST, and any Authorization the caller
+  // supplied is dropped on the way in. The previous order let a caller's
+  // header silently replace the token this function had just acquired; the
+  // only sanctioned way to change what is sent is the `token` option above.
+  const callerHeaders = Object.fromEntries(
+    Object.entries(options.headers || {}).filter(([name]) => name.toLowerCase() !== 'authorization')
+  );
   const headers = {
     'Content-Type': 'application/json',
+    ...callerHeaders,
     Authorization: `Bearer ${token}`,
-    ...(options.headers || {}),
   };
 
   const timeoutMs = timeoutForFunction(fnName);

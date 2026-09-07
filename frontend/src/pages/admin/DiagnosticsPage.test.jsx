@@ -12,6 +12,7 @@ import DiagnosticsPage, {
   LABS_PROBE_JOB,
   buildReport,
   decodeJwtPayload,
+  evaluateIdentity,
   evaluateLabsProbe,
   evaluateUnauthenticatedProbe,
   relativeExpiry,
@@ -348,6 +349,45 @@ describe('buildReport', () => {
     expectNoSecrets(report);
   });
 
+  it('marks the identity result UNKNOWN, not FAIL, when a comparison could not be made', () => {
+    // getAuthExpectations failed, getCurrentAdminStatus succeeded: the two
+    // token comparisons have nothing to compare against. That is a gap to
+    // name, not a failure to score — and not a pass either.
+    const report = buildReport({
+      generatedAt: 'now',
+      token: summarizeToken(CLAIMS, null),
+      expectations: null,
+      expectationsError: 'Authentication required',
+      admin: summarizeAdminStatus(ADMIN_STATUS, OID),
+      adminHttp: 200,
+    });
+    expect(report).toContain(
+      '- Result: UNKNOWN (could not compare: aud matches the API audience; admin App Role present in roles)'
+    );
+    expect(report).not.toContain('- Result: PASS');
+    expect(report).not.toContain('- Result: FAIL');
+    expect(report).toContain('- getAuthExpectations: Authentication required');
+    expectNoSecrets(report);
+
+    // A real failure still outranks an unknown: FAIL names what failed.
+    const mixed = evaluateIdentity(
+      summarizeToken(CLAIMS, null),
+      summarizeAdminStatus({ ...ADMIN_STATUS, isAdmin: false }, OID)
+    );
+    expect(mixed).toEqual({ pass: false, reason: 'failed: registry says isAdmin' });
+    // And everything present and true is a pass that says so.
+    expect(
+      evaluateIdentity(
+        summarizeToken(CLAIMS, EXPECTATIONS),
+        summarizeAdminStatus(ADMIN_STATUS, OID)
+      )
+    ).toEqual({ pass: true, reason: 'all four comparisons hold' });
+    expect(evaluateIdentity(null, null)).toEqual({
+      pass: null,
+      reason: 'token or registry not read',
+    });
+  });
+
   it('marks the identity result FAIL when the registry disagrees with the token', () => {
     const report = buildReport({
       generatedAt: 'now',
@@ -441,6 +481,32 @@ describe('the page', () => {
     // And the claims panel reflects that same token: Admin present.
     expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText('FAIL')).toBeNull();
+  });
+
+  it('names a 200 with no JSON body from the status route instead of rendering a blank', async () => {
+    authedFetch.mockImplementation(async (name) => {
+      if (name === 'getCurrentAdminStatus') {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => {
+            throw new SyntaxError('Unexpected end of JSON input');
+          },
+        };
+      }
+      throw new Error(`unexpected authedFetch ${name}`);
+    });
+    render(<DiagnosticsPage />);
+    await waitFor(() => seen(/status route answered 200 with no JSON body/));
+    // Not an "isAdmin false" and not an empty paragraph — an explicit finding,
+    // on the panel and in the report.
+    expect(screen.queryByText('Caller is an admin per the registry')).toBeNull();
+    expect(screen.getByLabelText('Diagnostics report').textContent).toContain(
+      '- getCurrentAdminStatus: status route answered 200 with no JSON body'
+    );
+    expect(screen.getByLabelText('Diagnostics report').textContent).toContain(
+      '- Result: UNKNOWN (token or registry not read)'
+    );
   });
 
   it('reports the API refusing the token as unknown, with the refusal shown', async () => {

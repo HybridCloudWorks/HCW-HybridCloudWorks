@@ -177,13 +177,21 @@ export function summarizeAdminStatus(body, tokenOid) {
  * until both halves have been read.
  */
 export function evaluateIdentity(token, admin) {
-  if (!token || !admin) return null;
-  return (
-    token.audienceMatches === true &&
-    token.hasAdminRole === true &&
-    admin.isAdmin === true &&
-    admin.uidMatchesToken === true
-  );
+  if (!token || !admin) return { pass: null, reason: 'token or registry not read' };
+  const checks = [
+    ['aud matches the API audience', token.audienceMatches],
+    ['admin App Role present in roles', token.hasAdminRole],
+    ['registry says isAdmin', admin.isAdmin],
+    ['registry uid equals token oid', admin.uidMatchesToken],
+  ];
+  const failed = checks.filter(([, value]) => value === false).map(([name]) => name);
+  if (failed.length) return { pass: false, reason: `failed: ${failed.join('; ')}` };
+  // A comparison that could not be made (the API gave no expectation to
+  // compare against) is not a failure, and must not be scored as one — but it
+  // is not a pass either. Say which one, so the report names the gap.
+  const unknown = checks.filter(([, value]) => value !== true).map(([name]) => name);
+  if (unknown.length) return { pass: null, reason: `could not compare: ${unknown.join('; ')}` };
+  return { pass: true, reason: 'all four comparisons hold' };
 }
 
 /**
@@ -290,7 +298,8 @@ function identityReportLines({
   } else {
     lines.push(`- getCurrentAdminStatus: ${adminError || 'not called'}`);
   }
-  lines.push(`- Result: ${mark(evaluateIdentity(token, admin))}`, '');
+  const verdict = evaluateIdentity(token, admin);
+  lines.push(`- Result: ${mark(verdict.pass)} (${verdict.reason})`, '');
   return lines;
 }
 
@@ -404,7 +413,14 @@ async function collectIdentity() {
       ...(token ? { token } : {}),
     });
     result.adminHttp = res.status;
-    result.admin = summarizeAdminStatus(await bodyOf(res), payload?.oid ?? payload?.sub ?? null);
+    const body = await bodyOf(res);
+    if (body === null) {
+      // A 2xx with nothing parseable is not "no admin" and not a silent blank:
+      // it is its own finding, and it must say so in the panel and the report.
+      result.adminError = `status route answered ${res.status} with no JSON body`;
+    } else {
+      result.admin = summarizeAdminStatus(body, payload?.oid ?? payload?.sub ?? null);
+    }
   } catch (err) {
     result.adminError = messageOf(err, 'getCurrentAdminStatus failed');
   }
