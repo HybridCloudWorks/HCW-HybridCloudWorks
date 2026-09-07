@@ -141,6 +141,23 @@ export function assertLayerBlobPresent(present, blob) {
   );
 }
 
+/**
+ * The Node stream of a blob download. `download()` types `readableStreamBody`
+ * as optional (it is absent in the browser build and on some non-2xx paths),
+ * and a bare `undefined.pipe` names no blob. This names it.
+ *
+ * @param {{ readableStreamBody?: import('node:stream').Readable }} response
+ * @param {string} blob
+ * @returns {import('node:stream').Readable}
+ */
+export function requireBody(response, blob) {
+  const body = response?.readableStreamBody;
+  if (!body || typeof body.pipe !== 'function') {
+    throw new Error(`${blob}: the download returned no readable body`);
+  }
+  return body;
+}
+
 /** One NDJSON line → a document, with Cosmos system fields removed. Blank lines are skipped by the caller. */
 export function parseLine(line) {
   const doc = JSON.parse(line);

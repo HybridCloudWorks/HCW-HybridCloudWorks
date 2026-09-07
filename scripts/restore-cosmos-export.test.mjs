@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -12,6 +13,7 @@ import {
   manifestBlobName,
   parseLine,
   assertLayerBlobPresent,
+  requireBody,
   stripSystemFields,
   countRestore,
   formatRow,
@@ -212,6 +214,21 @@ describe('helpers', () => {
     expect(finished).toBe(2);
   });
 
+  it('requireBody returns the download stream, and names the blob when there is none', () => {
+    const body = Readable.from(['x']);
+    expect(requireBody({ readableStreamBody: body }, 'full/2026-09-13/a.ndjson.gz')).toBe(body);
+    for (const res of [
+      {},
+      { readableStreamBody: undefined },
+      null,
+      { readableStreamBody: 'text' },
+    ]) {
+      expect(() => requireBody(res, 'full/2026-09-13/a.ndjson.gz')).toThrow(
+        /full\/2026-09-13\/a\.ndjson\.gz: the download returned no readable body/
+      );
+    }
+  });
+
   it('assertLayerBlobPresent throws naming the blob when a selected layer has no data blob', () => {
     expect(() => assertLayerBlobPresent(true, 'full/2026-09-13/content.ndjson.gz')).not.toThrow();
     expect(() => assertLayerBlobPresent(false, 'delta/2026-09-14/blogs.ndjson.gz')).toThrow(
@@ -264,6 +281,14 @@ describe('parseOptions', () => {
     expect(() =>
       parseOptions(['--storage-account', 's', '--target-endpoint', 'http://plain.example'])
     ).toThrow(/https/);
+    expect(
+      parseOptions(['--storage-account', 's', '--dry-run', '--database', ' drill ']).database
+    ).toBe('drill');
+    for (const blank of ['', '   ']) {
+      expect(() =>
+        parseOptions(['--storage-account', 's', '--dry-run', '--database', blank])
+      ).toThrow(/--database must name the target database/);
+    }
     expect(() => parseOptions(['--storage-account', 's', '--dry-run', '--bogus'])).toThrow(
       /Unknown argument/
     );

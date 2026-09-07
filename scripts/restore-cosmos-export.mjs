@@ -46,6 +46,7 @@ import {
   manifestBlobName,
   parseLine,
   assertLayerBlobPresent,
+  requireBody,
   countRestore,
   formatRow,
   parseConcurrency,
@@ -94,11 +95,15 @@ export function parseOptions(argv) {
   if (targetEndpoint && !/^https:\/\//.test(targetEndpoint)) {
     throw new Error('--target-endpoint must be an https URL');
   }
+  // An absent --database means hcw; a present-but-blank one is a mistake to
+  // name here, not an SDK error about a resource with no id later.
+  const database = options.database === undefined ? 'hcw' : options.database.trim();
+  if (!database) throw new Error('--database must name the target database (the default is hcw)');
   return {
     help: false,
     storageAccount,
     targetEndpoint: targetEndpoint || null,
-    database: (options.database || 'hcw').trim(),
+    database,
     asOf: options['as-of'],
     containers: splitList(options.containers),
     concurrency: parseConcurrency(options.concurrency),
@@ -133,7 +138,7 @@ async function listNames(container) {
 async function readJson(container, name) {
   const res = await container.getBlobClient(name).download(0);
   const chunks = [];
-  for await (const chunk of res.readableStreamBody) chunks.push(chunk);
+  for await (const chunk of requireBody(res, name)) chunks.push(chunk);
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
@@ -141,7 +146,7 @@ async function readJson(container, name) {
 async function* readDocuments(container, name) {
   const res = await container.getBlobClient(name).download(0);
   const lines = createInterface({
-    input: res.readableStreamBody.pipe(createGunzip()),
+    input: requireBody(res, name).pipe(createGunzip()),
     crlfDelay: Infinity,
   });
   for await (const line of lines) {
