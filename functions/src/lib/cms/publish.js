@@ -137,6 +137,10 @@ const slugSuffix = (id = '') => (id ? String(id).slice(0, 6) : Date.now().toStri
  * @param {string[]|null} [args.holders] ids holding the candidate, or null when not established
  */
 export function resolveSlug({ candidate = '', contentId = '', reuse = false, holders = null }) {
+  // A guard for direct callers, NOT what keeps the read and the write about
+  // one string — processPublishContent normalises before it probes, because a
+  // trim here alone would leave the probe asking about a different value than
+  // the one written. Keep the two in step if either moves.
   const base = String(candidate || '').trim();
   if (!base) return slugSuffix(contentId);
   const heldByAnother = Array.isArray(holders) && holders.some((id) => id && id !== contentId);
@@ -581,7 +585,14 @@ export function createPublishHandlers({
       // assignment. `slug || Slug` because either field can be the one the
       // manifest routed on — see slugHolders.
       const reuse = Boolean(isRepublish && existingSlug);
-      const candidate = reuse ? existingSlug : slugify(rawTitle);
+      // NORMALISED ONCE, HERE, because the probe and the write have to be about
+      // the same string. `slugify` already trims, but a STORED slug need not —
+      // this corpus is migrated and hand-edited, which is the corpus that
+      // produced #400. A `'  shared-slug  '` probed untrimmed matches no holder,
+      // and resolveSlug (which trims) then writes `shared-slug` onto a URL
+      // another article already holds: the read says free, the write says
+      // taken, and nothing in between notices.
+      const candidate = String((reuse ? existingSlug : slugify(rawTitle)) || '').trim();
       // Probed on EVERY publish, to answer one question: does another document
       // already hold this URL? Three did (#400), and the branch that reused a
       // stored slug never asked.

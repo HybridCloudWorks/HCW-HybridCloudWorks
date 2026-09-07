@@ -290,6 +290,29 @@ describe('slug assignment (#400)', () => {
     expect(slugs).toEqual(['one-shared-title', 'one-shared-title-bbb222']);
   });
 
+  it('probes the same string it writes, so a padded stored slug still finds its holder', async () => {
+    // The probe answers about whatever string it is handed, and resolveSlug
+    // trims. Left unnormalised, a stored `'  shared-slug  '` is probed padded,
+    // matches nothing, and the trimmed `shared-slug` is then written onto a URL
+    // another article holds — the read says free while the write says taken.
+    // The store answers like Cosmos: an exact match on the value queried.
+    const store = makeStore(readyDoc({ contentStatus: 'published', slug: '  shared-slug  ' }), {
+      queryDocs: vi.fn(async (_container, _query, params) =>
+        params[0].value === 'shared-slug' ? [{ id: 'c1' }, { id: 'other-doc' }] : []
+      ),
+    });
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    await h.publishContent(
+      makeRequest({ contentIds: ['c1'], publishTarget: 'framework' }),
+      context
+    );
+
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([{ name: '@slug', value: 'shared-slug' }]);
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    expect(patch.slug).toBe('shared-slug-c1');
+    expect(patch.slug).not.toBe('shared-slug'); // the contested URL, not taken
+  });
+
   it('a first publish takes the always-unique slug when the probe throws', async () => {
     // The source's rule, kept: a lookup failure must not block a publish, and
     // with nothing established the suffixed slug is the only safe answer.
