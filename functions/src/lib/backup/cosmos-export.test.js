@@ -204,7 +204,7 @@ describe('createContainerExporter — full run', () => {
     { id: 'c', _ts: 200, title: 'z' },
   ];
 
-  it('pages SELECT * into gzip NDJSON at the Cool tier, writes marker then state, no manifest while markers are missing', async () => {
+  it('pages SELECT * into gzip NDJSON at the Cool tier, writes state before the marker, no manifest while markers are missing', async () => {
     const cosmos = memCosmos({
       pages: [docs.slice(0, 2), docs.slice(2)],
       checkpoint: 'cp-at-start',
