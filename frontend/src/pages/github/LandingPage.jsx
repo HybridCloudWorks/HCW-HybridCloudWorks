@@ -5,11 +5,16 @@ import ProviderLandingTemplate from '@/components/shared/ProviderLandingTemplate
 import HeroImageCarousel from '@/components/landing/HeroImageCarousel';
 import { useCoderCornerData } from '@/hooks/useCoderCornerData';
 
-// No github hero set exists under public/images/ yet (#371); the carousel renders
-// nothing for an empty list, which beats five 404s and broken <img> boxes.
-// Add the files (1155×924 RGBA PNG like azure-hero/) and list them here;
-// frontend/scripts/hero-assets-exist.test.js fails on a path that does not exist.
-const GITHUB_HERO_IMAGES = [];
+// Generated art (#371): scripts/generate-brand-art.mjs draws this set; replace any
+// file one-for-one to swap in real artwork. scripts/hero-assets-exist.test.js
+// fails on a path listed here that is not under public/.
+const GITHUB_HERO_IMAGES = [
+  '/images/github-hero/1.png',
+  '/images/github-hero/2.png',
+  '/images/github-hero/3.png',
+  '/images/github-hero/4.png',
+  '/images/github-hero/5.png',
+];
 
 /*
  * NOTE: links previously pointed at /github/frameworks (404 — GitHub is not
