@@ -6,7 +6,7 @@
  * shows, since a selection the filter hides is invisible in the list and
  * would otherwise play silently from above it.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
@@ -57,8 +57,17 @@ const episodes = [
   },
 ];
 
+// What the hook answers on the next render. A `let`, because the two sources
+// answer independently and the list can re-sort after the page has settled —
+// the case the pinning test below drives.
+let episodesNow = episodes;
+
 vi.mock('@/hooks/useAudioEpisodes', () => ({
-  default: () => ({ episodes, feedUrl: 'https://feeds.example/azure.xml', loading: false }),
+  default: () => ({
+    episodes: episodesNow,
+    feedUrl: 'https://feeds.example/azure.xml',
+    loading: false,
+  }),
 }));
 
 // A player that reports state only when played, never on mount. The page
@@ -78,12 +87,26 @@ vi.mock('@/components/podcast/EpisodePlayer', () => ({
 
 import SharedPodcastPage from './PodcastPage';
 
-const mount = () =>
-  render(
-    <MemoryRouter initialEntries={['/azure/podcast']}>
-      <SharedPodcastPage provider="azure" />
-    </MemoryRouter>
-  );
+const page = () => (
+  <MemoryRouter initialEntries={['/azure/podcast']}>
+    <SharedPodcastPage provider="azure" />
+  </MemoryRouter>
+);
+
+const mount = () => render(page());
+
+/** An episode that sorts above every fixture row, as a late source would. */
+const newest = {
+  ...episodes[0],
+  id: 'host:h-newest',
+  title: 'Host newest',
+  publishedAtISO: '2026-09-09T00:00:00.000Z',
+  publishedAtString: '9/9/2026',
+};
+
+beforeEach(() => {
+  episodesNow = episodes;
+});
 
 const playerTitle = () =>
   within(screen.getByTestId('episode-player')).getByRole('heading', { level: 2 });
@@ -94,6 +117,35 @@ describe('SharedPodcastPage', () => {
     expect(playerTitle()).toHaveTextContent('Host new');
     expect(screen.getAllByText('Podcast feed').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('Listen & Learn · AZ-104').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps the episode being played when a late source re-sorts the list', () => {
+    // Nothing is selected until a row is clicked, so the featured episode is
+    // just the first visible one. A source answering late puts a newer
+    // episode on top; without pinning, the player would follow it, remount,
+    // and stop the audio the listener is hearing.
+    const { rerender } = mount();
+    expect(playerTitle()).toHaveTextContent('Host new');
+    fireEvent.click(
+      within(screen.getByTestId('episode-player')).getByRole('button', { name: 'Play' })
+    );
+
+    episodesNow = [newest, ...episodes];
+    rerender(page());
+
+    // Exact text, not toHaveTextContent: "Host newest" contains "Host new",
+    // so a substring assertion here would pass with the pinning removed.
+    expect(playerTitle().textContent).toBe('Host new');
+    expect(screen.getByRole('button', { name: /Host newest/ })).toBeInTheDocument();
+  });
+
+  it('follows the newest episode when the list re-sorts before anything is played', () => {
+    // The other half of the same rule: with no audio running, the page is
+    // free to feature whatever arrives at the top.
+    const { rerender } = mount();
+    episodesNow = [newest, ...episodes];
+    rerender(page());
+    expect(playerTitle()).toHaveTextContent('Host newest');
   });
 
   it('shows the RSS button with the feed the ingest reads', () => {

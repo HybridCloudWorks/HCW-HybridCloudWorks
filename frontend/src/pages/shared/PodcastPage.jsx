@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useLocation } from 'react-router';
 import EpisodePlayer from '@/components/podcast/EpisodePlayer';
@@ -341,10 +341,24 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
   const [selectedId, setSelectedId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [filter, setFilter] = useState('all');
-  const onPlayingChange = useCallback((playing) => setIsPlaying(playing), []);
 
   const visible = visibleFor(episodes, filter);
   const featured = featuredFor(visible, selectedId);
+  const featuredId = featured?.id ?? null;
+
+  // Pin the selection the moment playback starts. The two sources answer
+  // independently (useAudioEpisodes), so the list can re-sort after the page
+  // has settled — and until a row is clicked the featured episode is only
+  // `visible[0]`, so a later arrival at the top would remount the player and
+  // stop the audio under the listener. Before playback a re-sort is free to
+  // move the featured episode; that is what keeps the newest one there.
+  // A plain function, like the two handlers below: a useCallback here reads
+  // `featuredId`, which the React Compiler will not accept as a preservable
+  // manual memoization (react-hooks/preserve-manual-memoization).
+  function onPlayingChange(playing) {
+    setIsPlaying(playing);
+    if (playing) setSelectedId((current) => current ?? featuredId);
+  }
 
   // The player is stateful and cannot be paused from here, so the page-level
   // flag is reset only when the featured episode actually changes — that is
