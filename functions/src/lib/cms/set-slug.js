@@ -1,0 +1,176 @@
+/**
+ * POST cms/content/slug — give a published article the slug it should have
+ * had, and let its URLs follow (#400).
+ *
+ * WHY THIS EXISTS. #403 made new collisions impossible and made a republish
+ * move an article off a slug another document holds. It cannot give an article
+ * the RIGHT slug, and three published articles need exactly that: they share
+ * one title, so they were published onto one URL and two of them are
+ * unreachable. Nothing in the admin UI edited a slug, so there was no operator
+ * path at all — the fix was a script that would leave nothing behind for the
+ * next time, and there will be a next time.
+ *
+ * WHY NOT updateContentItem, WHICH ALREADY ACCEPTED A SLUG. It would have
+ * "worked", in the worst sense. `slug` was on no denylist there and matched
+ * none of that route's normalizers, so it fell through to the generic string
+ * branch and was stored EXACTLY as sent: `{ slug: '  Hello World!!  ' }`
+ * round-tripped with its spaces, its capitals and its punctuation intact, and
+ * nothing asked whether another document already held the value. A control
+ * built on that route would write a URL the pipeline could never produce, onto
+ * a URL another article is already serving. So the route is fixed rather than
+ * worked around — slug/Slug joined FORBIDDEN_CONTENT_UPDATE_KEYS in the same
+ * change — and a site URL now has exactly one writer, this one.
+ *
+ * WHAT IT ACTUALLY DOES is one narrow republish through the publish pipeline
+ * (SET_SLUG_REASON in ./publish.js): probe `c.slug OR c.Slug`, refuse a slug
+ * another document holds, then write the cased slug pair and
+ * curatedSubpagePath / slugPageUrl / publishedUrl / publicUrl in ONE patch
+ * conditioned on the read's ETag. The URLs are derived by
+ * `resolveCuratedSubpagePath` and `toPublicUrl`, the same two functions the
+ * ordinary publish write uses.
+ *
+ * ONE ATOMIC STEP RATHER THAN TWO. Setting the slug and moving the URLs are
+ * one operation here on purpose: as two writes there is a window in which the
+ * article holds its new slug at its old URL, and the operator's recovery from
+ * a failure in the second write is to reason about a half-applied document.
+ * Nothing is hidden by that choice — every refusal below names its reason and
+ * says that nothing was written, and a success reports the previous slug, the
+ * new slug and the resulting public URL.
+ *
+ * NORMALISATION IS SERVER-SIDE ONLY. `slugify` lives in ./publish.js and there
+ * is no package shared with `frontend/`, so a client-side preview would mean a
+ * second copy of the one function whose output IS the URL. The response names
+ * `requested` beside `slug` instead, so the operator sees what they typed and
+ * what was stored.
+ */
+import { randomUUID } from 'node:crypto';
+import { SET_SLUG_REASON } from './publish.js';
+
+const json = (status, body) => ({
+  status,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+/**
+ * One `processPublishContent` result under SET_SLUG_REASON, as an HTTP
+ * response. Pure, so every branch is pinned by a test rather than by reading
+ * the handler.
+ *
+ * A refusal carries its own `status` from `evaluateSlugChange`; anything else
+ * that reports an error is a 500, because the branch's remaining error paths
+ * are store failures. A `skipped` result is a 200 — it is the truthful answer
+ * to "set it to what it already is", and reporting it as a failure would train
+ * an operator to ignore the panel.
+ */
+export function toSetSlugResponse(result = {}, { contentId, requested }) {
+  if (result.error) {
+    const { status = 500, error, heldBy } = result;
+    return json(status, { error, ...(heldBy && { heldBy }) });
+  }
+  if (result.skipped) {
+    return json(200, {
+      contentId,
+      requested,
+      changed: false,
+      reason: result.reason || 'Nothing to change',
+      slug: result.slug || null,
+      curatedSubpagePath: result.curatedSubpagePath || null,
+      publicUrl: result.expectedPublicUrl || null,
+    });
+  }
+  return json(200, {
+    contentId,
+    requested,
+    changed: true,
+    previousSlug: result.previousSlug || null,
+    slug: result.slug || null,
+    curatedSubpagePath: result.curatedSubpagePath || null,
+    publicUrl: result.expectedPublicUrl || null,
+  });
+}
+
+/**
+ * @param {object} deps
+ * @param {{ requireRole: Function }} deps.guard
+ * @param {{ upsertDoc: Function }} deps.store — for the audit row only; the
+ *   content write belongs to the pipeline.
+ * @param {(contentId: string, params: object) => Promise<object>} deps.processPublishContent
+ *   from createPublishHandlers, so the probe, the ETag precondition, the URL
+ *   derivation and the version snapshot are the publish pipeline's and not a
+ *   second copy of them here.
+ * @param {() => Date} [deps.now]
+ * @param {() => string} [deps.uuid]
+ */
+export function createSetSlugHandlers({
+  guard,
+  store,
+  processPublishContent,
+  now = () => new Date(),
+  uuid = randomUUID,
+  log = console,
+}) {
+  /**
+   * Best-effort, and the ordering is the reason: this runs after the write, and
+   * a thrown audit row would replace the operator's answer — did the slug move,
+   * and to what URL — with a 500 that says neither.
+   */
+  async function auditSlugSet(row) {
+    try {
+      await store.upsertDoc('admin_audit_logs', { id: uuid(), ...row });
+    } catch (error) {
+      log.error?.('setContentSlug: audit row failed', error);
+    }
+  }
+
+  return {
+    /** POST /api/cms/content/slug — publisher. */
+    async setContentSlug(request, context) {
+      const auth = await guard.requireRole(request, 'publisher');
+      if (auth.error) return auth.error;
+      const { user } = auth;
+
+      try {
+        const body = (await request.json().catch(() => null)) || {};
+        const contentId = typeof body.contentId === 'string' ? body.contentId.trim() : '';
+        if (!contentId) return json(400, { error: 'contentId is required' });
+        if (typeof body.slug !== 'string') return json(400, { error: 'slug must be a string' });
+
+        const result = await processPublishContent(contentId, {
+          user,
+          reason: SET_SLUG_REASON,
+          slug: body.slug,
+        });
+        const response = toSetSlugResponse(result, { contentId, requested: body.slug });
+
+        await auditSlugSet({
+          action: 'content_slug_set',
+          userId: user.oid || user.sub || null,
+          userEmail: user.email || null,
+          timestamp: now().toISOString(),
+          contentId,
+          details: {
+            contentId,
+            requested: body.slug,
+            status: response.status,
+            previousSlug: result.previousSlug || null,
+            slug: result.slug || null,
+            changed: Boolean(result.slugChanged),
+            ...(result.error && { error: result.error }),
+            ...(result.skipped && { skipped: result.reason || 'Nothing to change' }),
+          },
+          userAgent: request.headers?.get?.('user-agent') || null,
+          compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+        });
+
+        return response;
+      } catch (error) {
+        context.error('setContentSlug failed:', error);
+        return json(500, {
+          error: 'Failed to set the slug',
+          message: error?.message || 'Unknown error',
+        });
+      }
+    },
+  };
+}

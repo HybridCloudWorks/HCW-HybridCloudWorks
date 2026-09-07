@@ -289,4 +289,49 @@ describe('PublishedPage', () => {
     expect(screen.getByRole('checkbox', { name: 'Select Existing live article' })).toBeChecked();
     expect(screen.getByRole('button', { name: 'Re-host selected (1)' })).toBeEnabled();
   });
+
+  it("sets a published article's slug from its own row, and the row's live link follows (#400)", async () => {
+    // The placement decision, pinned: the control is in the ALREADY-LIVE list,
+    // beside the "View Live" link it changes — not in the editor, and not in
+    // the staged list where the article is not yet on a URL at all.
+    postJSON.mockImplementation(async (endpoint, body) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/content/slug') {
+        expect(body).toEqual({ contentId: 'content-2', slug: 'existing-live-article' });
+        return {
+          contentId: 'content-2',
+          requested: 'existing-live-article',
+          changed: true,
+          previousSlug: 'stale-slug',
+          slug: 'existing-live-article',
+          curatedSubpagePath: '/aws/blog/existing-live-article',
+          publicUrl: 'https://hybridcloudworks.com/aws/blog/existing-live-article',
+        };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Slug' }));
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    expect(await screen.findByText(/Moved from "stale-slug"/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole('link', { name: 'View Live' })
+          .some(
+            (link) =>
+              link.getAttribute('href') ===
+              'https://hybridcloudworks.com/aws/blog/existing-live-article'
+          )
+      ).toBe(true)
+    );
+  });
 });

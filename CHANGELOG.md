@@ -19,6 +19,74 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **An editor can give a published article the right slug, from the row where
+  they already look at its URL (#400).** #403 made new collisions impossible
+  and made a republish move an article off a slug another document holds. It
+  could not give an article the RIGHT slug, and three articles need exactly
+  that: they share one title, so they were published onto one URL and two of
+  them are unreachable. Nothing in the admin UI edited a slug, so the only fix
+  was a script that would leave nothing behind for the next time.
+
+  **The generic route was checked first, and it is what made a dedicated one
+  necessary.** `updateContentItem` accepted a slug — `slug` was on no denylist
+  and matched none of its normalizers, so it fell through to the generic string
+  branch and was stored EXACTLY as sent: `{ slug: '  Hello World!!  ' }`
+  round-tripped with its spaces, its capitals and its punctuation intact, and
+  nothing asked whether another document already held the value. Both halves of
+  that are how three articles ended up on one URL, so the route is fixed rather
+  than worked around: `slug` and `Slug` join `FORBIDDEN_CONTENT_UPDATE_KEYS`,
+  and a site URL now has exactly one writer.
+
+  That writer is **`POST /api/cms/content/slug`** (publisher), a second narrow
+  reason on the publish pipeline beside the #374 re-host — the extension point
+  `REHOST_IMAGES_REASON`'s own comment anticipated. It `slugify`s the input so
+  an operator cannot type a value the pipeline would never produce, probes
+  `c.slug OR c.Slug` through the same `querySlugHolders` a publish uses, and
+  REFUSES a slug another document holds rather than suffixing it — the one
+  place a set-slug has to be stricter than a publish, because silently giving
+  an operator a different URL than the one they asked for is how a URL
+  correction becomes the next URL surprise. An unanswered probe is likewise a
+  refusal, the opposite of what `resolveSlug` does with the same null and for
+  the same reason read the other way round: a publish must not lose an
+  article's URL to a transient query error, but a NEW slug assigned on an
+  unverified probe is how one URL gets two documents.
+
+  **It is narrow because a full republish does not merely do more than these
+  articles need — it fails.** They arrived from Site-Main already published and
+  have never been through this pipeline's gates: the one still serving the
+  contested URL scores 68 against a threshold of 82 (238 words, no inline
+  modules) and carries no hero image, so the quality gate refuses it and the
+  image gate refuses it after that, and a set-slug built on the full path would
+  write a failed quality report onto the article and leave its URL exactly as
+  broken as it found it. So the branch writes the cased slug pair and
+  `curatedSubpagePath` / `slugPageUrl` / `publishedUrl` / `publicUrl` — derived
+  through `resolveCuratedSubpagePath` and `toPublicUrl`, so a corrected URL and
+  a published URL can never be built by different rules — in ONE patch
+  conditioned on the read's ETag, and nothing else: no gates, no cover or
+  social trigger, no dates, no forge stats, no `Live` rewrite, no status
+  change. One patch rather than two steps so there is no window in which an
+  article holds a new slug at its old URL.
+
+  **Both cased fields are written, to one value.** The probe reads
+  `c.slug OR c.Slug`, so a document holds every distinct value across the pair:
+  writing only `slug` would leave the article still holding its old URL in
+  `Slug`, blocking any other article that legitimately wants it, and would
+  leave the pair divergent — the exact shape, on ten of the twenty-two
+  published articles, that hid #400.
+
+  The control is on **Publish**, inside the row of the already-live article
+  being fixed, beside the "View Live" link it changes. It offers the article's
+  own `Slug` field as the suggested value, because for this class of article
+  that field is the source publisher's slug and therefore the only surviving
+  record of what the article actually is. Normalisation stays server-side —
+  `slugify` lives in `functions/` and there is no package shared with
+  `frontend/`, so a live client-side preview would mean a second copy of the
+  one function whose output IS the URL — and the response names `requested`
+  beside `slug`, which the panel shows whenever they differ. Nothing can
+  silently no-op: a change, a truthful no-op and a refusal that wrote nothing
+  each render with their reason, and a refusal names the document holding the
+  URL.
+
 - **Thirty-three empty section pages leave the sitemap, and the counts that
   decide it now come from every container a section page reads (#373).** Part 2
   could speak for one section: `frameworks` reads the `content` container and

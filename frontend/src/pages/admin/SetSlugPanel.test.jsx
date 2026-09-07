@@ -1,0 +1,158 @@
+import React from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import SetSlugPanel, {
+  SET_SLUG_ROUTE,
+  currentSlugOf,
+  describeSetSlugResult,
+  suggestedSlugFor,
+} from './SetSlugPanel';
+
+const postJSON = vi.fn();
+const logAdminAction = vi.fn();
+
+vi.mock('@/lib/api', () => ({
+  postJSON: (...args) => postJSON(...args),
+  getJSON: vi.fn(),
+}));
+
+vi.mock('@/lib/auditLog', () => ({
+  logAdminAction: (...args) => logAdminAction(...args),
+}));
+
+/** One of the three articles from #400, as the publish snapshot carries it. */
+const HELD = 'enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio';
+const WANTED = 'in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code';
+const collided = {
+  id: '1k5ayjbEdYdo7NzvXIWW',
+  Title:
+    'Enable AI-Powered Discovery of Azure Updates with Microsoft Release Communications MCP Server',
+  slug: HELD,
+  Slug: WANTED,
+};
+
+beforeEach(() => {
+  postJSON.mockReset();
+  logAdminAction.mockReset();
+});
+
+describe('pure helpers', () => {
+  it('suggests the Slug field FIRST, which is the #400 answer', () => {
+    // On all three articles `slug` holds the contested URL and `Slug` still
+    // holds the source publisher's — the only record of what each one is. The
+    // other ordering would suggest the broken value back to the operator.
+    expect(suggestedSlugFor(collided)).toBe(WANTED);
+    expect(currentSlugOf(collided)).toBe(HELD);
+  });
+
+  it('falls back to slug, then to nothing to suggest', () => {
+    expect(suggestedSlugFor({ slug: 'only-lower' })).toBe('only-lower');
+    expect(suggestedSlugFor({ Title: 'A Title' })).toBe('');
+    expect(currentSlugOf({ Slug: 'only-upper' })).toBe('only-upper');
+    expect(currentSlugOf({})).toBe('');
+  });
+
+  it('describes a change, a no-op and a normalisation differently', () => {
+    const changed = describeSetSlugResult({
+      changed: true,
+      requested: WANTED,
+      previousSlug: HELD,
+      slug: WANTED,
+      publicUrl: `https://hybridcloudworks.com/azure/blog/${WANTED}`,
+    });
+    expect(changed.tone).toBe('ok');
+    expect(changed.message).toContain(HELD);
+    expect(changed.message).toContain(WANTED);
+    expect(changed.message).not.toContain('normalised');
+
+    const normalised = describeSetSlugResult({
+      changed: true,
+      requested: '  Agent Kit!  ',
+      previousSlug: HELD,
+      slug: 'agent-kit',
+    });
+    expect(normalised.message).toContain('normalised from "Agent Kit!"');
+
+    const noop = describeSetSlugResult({ changed: false, reason: 'Already on that slug' });
+    expect(noop.tone).toBe('muted');
+    expect(noop.message).toContain('Already on that slug');
+  });
+});
+
+describe('SetSlugPanel', () => {
+  it('prefills the suggestion and sends the raw input to the route', async () => {
+    postJSON.mockResolvedValue({
+      contentId: collided.id,
+      requested: WANTED,
+      changed: true,
+      previousSlug: HELD,
+      slug: WANTED,
+      publicUrl: `https://hybridcloudworks.com/azure/blog/${WANTED}`,
+    });
+    const onApplied = vi.fn();
+    render(<SetSlugPanel item={collided} onApplied={onApplied} />);
+
+    expect(screen.getByRole('textbox')).toHaveValue(WANTED);
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    await waitFor(() => expect(postJSON).toHaveBeenCalled());
+    expect(postJSON).toHaveBeenCalledWith(SET_SLUG_ROUTE, {
+      contentId: collided.id,
+      slug: WANTED,
+    });
+    expect(await screen.findByText(new RegExp(`Moved from "${HELD}"`))).toBeInTheDocument();
+    expect(onApplied).toHaveBeenCalledWith(collided.id, expect.objectContaining({ slug: WANTED }));
+    expect(logAdminAction).toHaveBeenCalledWith(
+      'content_slug_set',
+      expect.objectContaining({ contentId: collided.id, changed: true })
+    );
+  });
+
+  it('shows the refusal reason and does not report a change', async () => {
+    // authedFetch turns a non-2xx into a throw carrying the API's own `error`,
+    // which for a clash names the document holding the URL.
+    postJSON.mockRejectedValue(
+      new Error("Slug 'wanted' is already held by 7MCkl1cSf7GGCgJxlCwZ. Nothing was changed.")
+    );
+    const onApplied = vi.fn();
+    render(<SetSlugPanel item={collided} onApplied={onApplied} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    expect(await screen.findByText(/7MCkl1cSf7GGCgJxlCwZ/)).toBeInTheDocument();
+    expect(screen.getByText(/Slug not set/)).toBeInTheDocument();
+    expect(screen.queryByText(/Moved from/)).not.toBeInTheDocument();
+    expect(onApplied).not.toHaveBeenCalled();
+  });
+
+  it('reports a server-side no-op instead of claiming success', async () => {
+    postJSON.mockResolvedValue({
+      contentId: collided.id,
+      changed: false,
+      reason: 'Already on that slug, and its URLs already match',
+      slug: WANTED,
+    });
+    const onApplied = vi.fn();
+    render(<SetSlugPanel item={collided} onApplied={onApplied} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Set slug/ }));
+
+    expect(await screen.findByText(/No change/)).toBeInTheDocument();
+    expect(onApplied).not.toHaveBeenCalled();
+  });
+
+  it('offers the suggestion back once the operator has typed over it', async () => {
+    render(<SetSlugPanel item={collided} onApplied={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Use it' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'something-else' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use it' }));
+    expect(screen.getByRole('textbox')).toHaveValue(WANTED);
+  });
+
+  it('will not submit an empty slug', () => {
+    render(<SetSlugPanel item={{ id: 'c1' }} onApplied={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /Set slug/ })).toBeDisabled();
+    expect(postJSON).not.toHaveBeenCalled();
+  });
+});

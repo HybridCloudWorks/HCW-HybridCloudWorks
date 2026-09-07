@@ -33,6 +33,14 @@
  *     publish dates and URLs — none of which sixteen articles need for their
  *     images to stop hotlinking. The branch shares the read, the status table,
  *     the ETag precondition and the version snapshot, and nothing else.
+ *   - `params.reason === SET_SLUG_REASON` (issue #400, from POST
+ *     cms/content/slug) is the second such reason, and the one the note above
+ *     anticipated. It gives a published article the slug an operator asks for
+ *     and lets the four URL fields follow in the same patch, writing nothing
+ *     else — and it REFUSES a slug another document holds rather than
+ *     suffixing it, the one place a set-slug has to be stricter than a
+ *     publish. See SET_SLUG_REASON for why a FULL republish cannot do this job
+ *     on the very articles that need it.
  *   - bumpForgeStats' FieldValue.increment becomes read-modify-patch on the
  *     whole totals/formats objects — formatKey is user-influenced text, and
  *     writing whole objects avoids dotted-path escaping entirely.
@@ -75,6 +83,34 @@ const json = (status, body) => ({
  * second named reason and not a second flag that interacts with this one.
  */
 export const REHOST_IMAGES_REASON = 'rehost-images';
+
+/**
+ * The second named reason the comment above anticipated (#400): give a
+ * published article a NEW slug and let its URLs follow, writing nothing else.
+ *
+ * WHY IT IS NARROW, AND WHY THAT IS NOT A CONVENIENCE. A full republish of the
+ * three articles on the contested URL does not merely do more than they need —
+ * it FAILS. They arrived from Site-Main already published and have never been
+ * through this pipeline's gates: the one still serving the URL scores 68
+ * against a threshold of 82 (238 words, no inline modules) and carries no hero
+ * image, so the quality gate refuses it and the image gate refuses it after
+ * that. A set-slug built on the full path would therefore write a failed
+ * quality report onto the article and leave its URL exactly as broken as it
+ * found it. Re-litigating an article's body is not what correcting its URL is
+ * for, and the article is already live either way.
+ *
+ * So this branch runs the probe and the two URL rules and nothing else: no
+ * quality gate, no image gate, no cover or social trigger, no dates, no forge
+ * stats, no Live rewrite, no status change. Like the re-host branch it shares
+ * the read, the status table, the ETag precondition and the version snapshot.
+ *
+ * It is also STRICTER than a publish in the one place that matters. A publish
+ * that finds a clash suffixes the slug and carries on, because refusing would
+ * block a publish; a set-slug that finds one REFUSES, because the operator
+ * asked for a specific URL and silently giving them a different one is how a
+ * URL correction becomes the next URL surprise.
+ */
+export const SET_SLUG_REASON = 'set-slug';
 
 export function slugify(text = '') {
   return String(text)
@@ -189,6 +225,140 @@ export function resolveCuratedSubpagePath({
   if (!slug || segments[segments.length - 1] === slug) return segments.join('/');
   segments[segments.length - 1] = slug;
   return segments.join('/');
+}
+
+/**
+ * The one query that answers "who holds this URL?", and the one function that
+ * runs it. Lifted out of the handler closure so it can be tested directly:
+ * reading `c.Slug` as well as `c.slug` is half of what #403 fixed, and it was
+ * previously pinned only through the pipeline that calls it.
+ *
+ * BOTH FIELDS. Cosmos property lookup is case-sensitive, so `c.slug` alone
+ * cannot see a document whose site slug is in `Slug` — and the manifest routes
+ * on `slug || Slug` (scripts/build-content-manifest.mjs), so such a document
+ * does hold the URL.
+ *
+ * TOP 2 is enough: at most one of the rows can be the document asking, so two
+ * rows establish that somebody else holds it.
+ */
+export const SLUG_HOLDERS_QUERY = 'SELECT TOP 2 c.id FROM c WHERE c.slug = @slug OR c.Slug = @slug';
+
+/**
+ * @param {{ queryDocs: Function }} store
+ * @param {string} slug
+ * @returns {Promise<string[]>} ids holding `slug` in either field
+ */
+export async function querySlugHolders(store, slug) {
+  const rows = await store.queryDocs('content', SLUG_HOLDERS_QUERY, [
+    { name: '@slug', value: slug },
+  ]);
+  return (Array.isArray(rows) ? rows : []).map((row) => row?.id).filter(Boolean);
+}
+
+/**
+ * The slug an operator's input would become — `slugify` and nothing else, so
+ * they cannot type a value this pipeline would never produce. `slugify` is
+ * idempotent (its output is `[a-z0-9-]` only, no spaces, already <= 80 chars),
+ * so re-normalising a stored slug is a no-op and a suggestion taken verbatim
+ * survives unchanged.
+ */
+export function normalizeSlugInput(value) {
+  return slugify(String(value ?? ''));
+}
+
+/**
+ * SET_SLUG_REASON's decision, pure. Compare with `resolveSlug`, which is the
+ * publish path's answer to a related question: that one never refuses, because
+ * refusing would block a publish. This one refuses three ways.
+ *
+ * `holders` is what the probe found, or null when it could not answer. NOT AN
+ * ARRAY IS A REFUSAL here, the opposite of what resolveSlug does with the same
+ * value, and the difference is the whole point: a publish must not lose an
+ * article's URL to a transient query error, but assigning a NEW slug on an
+ * unverified probe is how one URL ends up held by two documents. The operator
+ * can simply press the button again.
+ *
+ * It answers only "may this be written?". Whether anything WOULD change is
+ * `buildSlugPublishUpdate`'s empty diff, which is the more exact question: on
+ * these articles the URL fields can be stale even when the slug is already
+ * right, and a slug comparison alone would call that a no-op.
+ *
+ * @param {object} args
+ * @param {object} args.contentData the document, for the slug it is moving off
+ * @param {string} args.contentId
+ * @param {string} args.slug the ALREADY-NORMALISED candidate
+ * @param {string[]|null} args.holders ids holding it, or null when unanswered
+ */
+export function evaluateSlugChange({
+  contentData = {},
+  contentId = '',
+  slug = '',
+  holders = null,
+}) {
+  if (!slug) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'slug must contain at least one letter or digit once normalised',
+    };
+  }
+  if (!Array.isArray(holders)) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'Could not check whether that slug is already in use. Nothing was changed.',
+    };
+  }
+  const heldBy = holders.filter((id) => id && id !== contentId);
+  if (heldBy.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Slug '${slug}' is already held by ${heldBy.join(', ')}. Nothing was changed.`,
+      heldBy,
+    };
+  }
+  return { ok: true, slug, from: contentData.slug || contentData.Slug || null };
+}
+
+/**
+ * Everything a slug change implies, and nothing else: the cased pair and the
+ * four URL fields, derived through `resolveCuratedSubpagePath` and
+ * `toPublicUrl` — the same two functions the publish write uses, so a corrected
+ * URL and a published URL can never be built by different rules.
+ *
+ * BOTH `slug` AND `Slug`, to one value. The probe reads `c.slug OR c.Slug`, so
+ * a document holds every distinct value across the pair: writing only `slug`
+ * would leave the article still holding its old URL in `Slug`, blocking any
+ * other article that legitimately wants it, and would leave the pair divergent
+ * — the exact shape (ten of the twenty-two published articles) that hid #400.
+ * The publish write already sets them as a pair; this keeps that invariant
+ * rather than becoming the one writer that breaks it.
+ *
+ * Keys whose value the document already has are dropped, so the caller can
+ * tell a real change from a no-op by looking at what is left.
+ */
+export function buildSlugPublishUpdate({ contentData = {}, slug = '' }) {
+  const ctx = resolvePublishContext(contentData, {});
+  const curatedSubpagePath = resolveCuratedSubpagePath({
+    stored: contentData.curatedSubpagePath,
+    provider: ctx.resolvedLandingProvider,
+    section: ctx.curatedSection,
+    slug,
+  });
+  const update = {
+    slug,
+    Slug: slug,
+    ...(curatedSubpagePath && {
+      curatedSubpagePath,
+      slugPageUrl: toPublicUrl(curatedSubpagePath),
+      publishedUrl: toPublicUrl(curatedSubpagePath),
+      publicUrl: toPublicUrl(curatedSubpagePath),
+    }),
+  };
+  return Object.fromEntries(
+    Object.entries(update).filter(([key, value]) => contentData[key] !== value)
+  );
 }
 
 export function toPublicUrl(pathValue) {
@@ -365,27 +535,18 @@ export function createPublishHandlers({
   /**
    * The ids of every document holding `slug` in EITHER field, or null when the
    * probe could not answer. Run on every publish — a republish included, which
-   * is the one that was missing (#400).
+   * is the one that was missing (#400). The query itself is
+   * `querySlugHolders` above, shared with the set-slug route so there is one
+   * definition of "who holds this URL?".
    *
-   * BOTH FIELDS. Cosmos property lookup is case-sensitive, so `c.slug` alone
-   * cannot see a document whose site slug is in `Slug` — and the manifest
-   * routes on `slug || Slug` (scripts/build-content-manifest.mjs), so such a
-   * document does hold the URL.
-   *
-   * TOP 2 is enough: at most one of the rows can be this document, so two rows
-   * are enough to establish that somebody else holds it.
-   *
-   * Never throws. A lookup failure returns null, which resolveSlug reads as
-   * "not established" — see there for what each path does with that.
+   * Never throws, and that is this wrapper's whole job. A lookup failure
+   * returns null, which resolveSlug reads as "not established" — see there for
+   * what each path does with that. The set-slug route deliberately does NOT
+   * wrap it this way.
    */
   async function slugHolders(slug) {
     try {
-      const rows = await store.queryDocs(
-        'content',
-        'SELECT TOP 2 c.id FROM c WHERE c.slug = @slug OR c.Slug = @slug',
-        [{ name: '@slug', value: slug }]
-      );
-      return (Array.isArray(rows) ? rows : []).map((row) => row?.id).filter(Boolean);
+      return await querySlugHolders(store, slug);
     } catch {
       return null;
     }
@@ -528,6 +689,83 @@ export function createPublishHandlers({
     };
   }
 
+  /**
+   * The set-slug republish (SET_SLUG_REASON — read the constant's comment for
+   * why it is narrow and why it is stricter). Reached from
+   * processPublishContent once the document is read and its status has passed
+   * the one publishable table; from here only an already-published document is
+   * accepted, because assigning a URL to anything else is a first publish
+   * wearing a smaller name.
+   *
+   * ONE conditional patch carries the slug pair AND the four URL fields, so
+   * there is no window in which an article holds a new slug at its old URL.
+   * `params.slug` is the operator's raw input; it is normalised HERE, so the
+   * value probed, the value written and the value reported are one string.
+   */
+  async function republishWithSlug(contentId, contentData, currentStatus, nowIso, params) {
+    if (currentStatus !== 'published') {
+      return {
+        status: 409,
+        error: `Only a published article can be given a new slug; status is '${currentStatus}'`,
+      };
+    }
+
+    const slug = normalizeSlugInput(params.slug);
+    // slugHolders swallows a lookup failure into null, and evaluateSlugChange
+    // reads null as a refusal — the strict half of the split documented on
+    // both functions. An empty slug is refused before a probe is spent on it.
+    const decision = evaluateSlugChange({
+      contentData,
+      contentId,
+      slug,
+      holders: slug ? await slugHolders(slug) : [],
+    });
+    if (!decision.ok) return decision;
+
+    const update = buildSlugPublishUpdate({ contentData, slug });
+    if (Object.keys(update).length === 0) {
+      return {
+        skipped: true,
+        slug,
+        reason: 'Already on that slug, and its URLs already match',
+        curatedSubpagePath: contentData.curatedSubpagePath || null,
+        expectedPublicUrl: publicUrlOf(contentData) || null,
+      };
+    }
+
+    const contentUpdate = { ...update, updatedAt: nowIso };
+    try {
+      await store.patchDoc('content', contentId, contentUpdate, { ifMatch: contentData._etag });
+    } catch (error) {
+      if (error?.code === 412 || error?.statusCode === 412) {
+        return { skipped: true, reason: 'Content changed while setting the slug; not retried' };
+      }
+      throw error;
+    }
+
+    await snapshotVersion(
+      contentId,
+      { ...contentData, ...contentUpdate },
+      nowIso,
+      params,
+      SET_SLUG_REASON
+    );
+
+    const after = { ...contentData, ...contentUpdate };
+    return {
+      blogId: contentId,
+      reused: true,
+      slugChanged: true,
+      slug,
+      previousSlug: decision.from,
+      curatedSubpagePath: after.curatedSubpagePath || null,
+      expectedPublicUrl: publicUrlOf(after) || null,
+      sourceUrl: contentData.sourceUrl || contentData.url || contentData['CD Url'] || null,
+      landingProvider: contentData.landingProvider || null,
+      publishTarget: normalizePublishTarget(contentData.publishTarget, contentData.type) || null,
+    };
+  }
+
   async function processPublishContent(contentId, params) {
     try {
       const contentData = await store.readDoc('content', contentId, contentId);
@@ -545,6 +783,9 @@ export function createPublishHandlers({
       const nowIso = now().toISOString();
       if (params.reason === REHOST_IMAGES_REASON) {
         return await rehostInlineImages(contentId, contentData, currentStatus, nowIso, params);
+      }
+      if (params.reason === SET_SLUG_REASON) {
+        return await republishWithSlug(contentId, contentData, currentStatus, nowIso, params);
       }
 
       const resolvedTarget = normalizePublishTarget(

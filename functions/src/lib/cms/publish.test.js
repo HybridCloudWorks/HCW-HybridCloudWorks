@@ -18,6 +18,12 @@ import {
   applyPublishTimeCoverTrigger,
   accumulatePublishResult,
   REHOST_IMAGES_REASON,
+  SET_SLUG_REASON,
+  SLUG_HOLDERS_QUERY,
+  querySlugHolders,
+  normalizeSlugInput,
+  evaluateSlugChange,
+  buildSlugPublishUpdate,
 } from './publish.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
@@ -861,6 +867,275 @@ describe('reason: rehost-images — the #374 backfill republish', () => {
     expect(result).toEqual({
       skipped: true,
       reason: 'Content changed while re-hosting; not retried',
+    });
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('the slug probe, on its own', () => {
+  it('asks about BOTH cased fields, and returns the ids', async () => {
+    // Half of what #403 fixed, and previously observable only through the
+    // pipeline that calls it: `c.slug` alone cannot see a document holding the
+    // URL in `Slug`, which is how three articles shared one.
+    const store = {
+      queryDocs: vi.fn(async () => [{ id: 'a' }, { id: null }, { id: 'b' }]),
+    };
+    expect(await querySlugHolders(store, 'wanted')).toEqual(['a', 'b']);
+    expect(SLUG_HOLDERS_QUERY).toContain('c.slug = @slug');
+    expect(SLUG_HOLDERS_QUERY).toContain('c.Slug = @slug');
+    expect(store.queryDocs).toHaveBeenCalledWith('content', SLUG_HOLDERS_QUERY, [
+      { name: '@slug', value: 'wanted' },
+    ]);
+  });
+});
+
+describe('reason: set-slug — the #400 URL correction', () => {
+  const WANTED = 'in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code';
+  const HELD = 'enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio';
+
+  /**
+   * One of the three, in the shape the live manifest reports: published, live,
+   * `slug` on the contested URL and `Slug` still holding the source
+   * publisher's — the pair divergence that hid the collision.
+   */
+  const collidedDoc = (over = {}) =>
+    readyDoc({
+      contentStatus: 'published',
+      Live: true,
+      slug: HELD,
+      Slug: WANTED,
+      curatedSubpagePath: `/azure/frameworks/${HELD}`,
+      publishedUrl: `https://hybridcloudworks.com/azure/frameworks/${HELD}`,
+      publishedAt: '2026-08-01T00:00:00.000Z',
+      forgeMeta: { formatKey: 'deep dive' },
+      _etag: '"v9"',
+      ...over,
+    });
+  const handlers = (store) =>
+    createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+  const setSlug = (store, slug, id = 'c1') =>
+    handlers(store).processPublishContent(id, { user: USER, reason: SET_SLUG_REASON, slug });
+
+  it('normalizeSlugInput is slugify and nothing else, and is idempotent', () => {
+    expect(normalizeSlugInput('  Hello World!! NOT a slug  ')).toBe('hello-world-not-a-slug');
+    expect(normalizeSlugInput(null)).toBe('');
+    expect(normalizeSlugInput('  ')).toBe('');
+    expect(normalizeSlugInput('a'.repeat(120))).toHaveLength(80);
+    // Two of the three #400 suggestions are exactly 80 characters, so a
+    // second pass truncating again would silently change the answer.
+    for (const stable of [WANTED, HELD]) expect(normalizeSlugInput(stable)).toBe(stable);
+  });
+
+  it('evaluateSlugChange refuses empty, refuses a holder, and refuses an unanswered probe', () => {
+    const contentData = { id: 'c1', slug: HELD, Slug: WANTED };
+    expect(evaluateSlugChange({ contentData, contentId: 'c1', slug: '' })).toMatchObject({
+      ok: false,
+      status: 400,
+    });
+    expect(
+      evaluateSlugChange({ contentData, contentId: 'c1', slug: 'x', holders: ['other'] })
+    ).toMatchObject({ ok: false, status: 409, heldBy: ['other'] });
+    // The opposite of resolveSlug's reading of the same null, deliberately: a
+    // publish must not be blocked by a lookup failure, but a NEW slug assigned
+    // on an unverified probe is how one URL gets two documents.
+    expect(
+      evaluateSlugChange({ contentData, contentId: 'c1', slug: 'x', holders: null })
+    ).toMatchObject({ ok: false, status: 503 });
+    expect(resolveSlug({ candidate: 'x', contentId: 'c1', reuse: true, holders: null })).toBe('x');
+  });
+
+  it('evaluateSlugChange allows a slug the document itself holds, in either field', () => {
+    // The #400 shape exactly: the probe returns this document's own id because
+    // `Slug` already holds the target, and self-holding is not a clash.
+    const contentData = { id: 'c1', slug: HELD, Slug: WANTED };
+    expect(
+      evaluateSlugChange({ contentData, contentId: 'c1', slug: WANTED, holders: ['c1'] })
+    ).toEqual({ ok: true, slug: WANTED, from: HELD });
+    expect(
+      evaluateSlugChange({ contentData: { id: 'c1' }, contentId: 'c1', slug: WANTED, holders: [] })
+    ).toEqual({ ok: true, slug: WANTED, from: null });
+  });
+
+  it('buildSlugPublishUpdate writes both cased fields and the four URLs, and drops no-ops', () => {
+    const contentData = collidedDoc();
+    const update = buildSlugPublishUpdate({ contentData, slug: WANTED });
+    expect(update).toEqual({
+      slug: WANTED,
+      // `Slug` is absent: the document already holds this value there, and the
+      // builder drops keys whose value would not change.
+      curatedSubpagePath: `/azure/frameworks/${WANTED}`,
+      slugPageUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+      publishedUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+      publicUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+    });
+    // Asked for the slug this document already serves, only the fields that
+    // genuinely differ come back: `Slug` (which still held the other value)
+    // and the two URL fields this migrated document never had. `slug`,
+    // `curatedSubpagePath` and `publishedUrl` already match and are dropped.
+    expect(buildSlugPublishUpdate({ contentData, slug: HELD })).toEqual({
+      Slug: HELD,
+      slugPageUrl: `https://hybridcloudworks.com/azure/frameworks/${HELD}`,
+      publicUrl: `https://hybridcloudworks.com/azure/frameworks/${HELD}`,
+    });
+  });
+
+  it('buildSlugPublishUpdate keeps a curated prefix, because it goes THROUGH resolveCuratedSubpagePath', () => {
+    // Rebuilding the path from provider + section would land the article on
+    // /azure/frameworks/<slug> and silently move it off the curated prefix it
+    // was placed under. resolveCuratedSubpagePath replaces the LAST SEGMENT
+    // only, which is the rule this must not reimplement.
+    const curated = collidedDoc({ curatedSubpagePath: '/curated/deep/path/old-slug' });
+    expect(buildSlugPublishUpdate({ contentData: curated, slug: WANTED })).toMatchObject({
+      curatedSubpagePath: `/curated/deep/path/${WANTED}`,
+      publishedUrl: `https://hybridcloudworks.com/curated/deep/path/${WANTED}`,
+    });
+
+    // And a stored path is normalised to absolute, so the three frontend hooks
+    // that read `split('/')[1]` as the provider still infer it correctly.
+    const relative = collidedDoc({ curatedSubpagePath: 'aws/blog/old-slug' });
+    expect(
+      buildSlugPublishUpdate({ contentData: relative, slug: WANTED }).curatedSubpagePath
+    ).toBe(`/aws/blog/${WANTED}`);
+
+    // With no stored path at all there is one to derive, from the document's
+    // own provider and its target's section.
+    const bare = collidedDoc({ curatedSubpagePath: '' });
+    expect(buildSlugPublishUpdate({ contentData: bare, slug: WANTED }).curatedSubpagePath).toBe(
+      `/azure/frameworks/${WANTED}`
+    );
+  });
+
+  it('writes the slug pair and the URLs in ONE patch, conditioned on the ETag', async () => {
+    const store = makeStore(collidedDoc());
+    const result = await setSlug(store, `  ${WANTED}  `);
+
+    const contentWrites = store.patchDoc.mock.calls.filter(([c]) => c === 'content');
+    expect(contentWrites).toHaveLength(1);
+    const [, id, patch, options] = contentWrites[0];
+    expect(id).toBe('c1');
+    expect(options).toEqual({ ifMatch: '"v9"' });
+    expect(Object.keys(patch).sort()).toEqual([
+      'curatedSubpagePath',
+      'publicUrl',
+      'publishedUrl',
+      'slug',
+      'slugPageUrl',
+      'updatedAt',
+    ]);
+    expect(patch.slug).toBe(WANTED);
+    expect(patch.curatedSubpagePath).toBe(`/azure/frameworks/${WANTED}`);
+    expect(patch.publishedUrl).toBe(`https://hybridcloudworks.com/azure/frameworks/${WANTED}`);
+
+    expect(result).toMatchObject({
+      blogId: 'c1',
+      slugChanged: true,
+      slug: WANTED,
+      previousSlug: HELD,
+      curatedSubpagePath: `/azure/frameworks/${WANTED}`,
+      expectedPublicUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+    });
+  });
+
+  it('touches nothing a slug change does not imply', async () => {
+    // The reason exists so this is not a full republish: no status, no Live,
+    // no gates, no cover or social trigger, no dates, no forge stats.
+    const store = makeStore(collidedDoc());
+    await setSlug(store, WANTED);
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    for (const key of [
+      'contentStatus',
+      'Live',
+      'contentQuality',
+      'imageReadiness',
+      'altCoverImageTrigger',
+      'socialCaptionTrigger',
+      'publishedAt',
+      'publishedDate',
+    ]) {
+      expect(patch).not.toHaveProperty(key);
+    }
+    expect(store.patchDoc.mock.calls.some(([c]) => c === 'admin_config')).toBe(false);
+    const version = store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1];
+    expect(version.versionReason).toBe(SET_SLUG_REASON);
+  });
+
+  it('completes on an article a FULL republish would refuse', async () => {
+    // The three articles arrived from Site-Main already published and have
+    // never been through this pipeline's gates. This is the load-bearing
+    // reason the branch is narrow rather than a convenience: the same
+    // document, published normally, is refused before it reaches the slug.
+    const thin = collidedDoc({
+      summary: '',
+      overviewHtml: '',
+      frameworkConcepts: [],
+      Content: 'Two hundred words this is not.',
+    });
+    expect(
+      await handlers(makeStore(thin)).processPublishContent('c1', { user: USER })
+    ).toMatchObject({ error: expect.stringContaining('quality gate failed') });
+    expect(await setSlug(makeStore(thin), WANTED)).toMatchObject({ slug: WANTED });
+  });
+
+  it('refuses a slug another document holds instead of suffixing it', async () => {
+    // Where a publish and a set-slug part company: resolveSlug would take
+    // `${slug}-c1` and carry on, which for an operator asking for a specific
+    // URL is a silent substitution.
+    const store = makeStore(collidedDoc(), {
+      queryDocs: vi.fn(async () => [{ id: 'other-doc' }]),
+    });
+    expect(await setSlug(store, WANTED)).toMatchObject({
+      status: 409,
+      heldBy: ['other-doc'],
+      error: expect.stringContaining('other-doc'),
+    });
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unanswered probe, an empty slug, and an unpublished article', async () => {
+    const failing = makeStore(collidedDoc(), {
+      queryDocs: vi.fn(async () => {
+        throw new Error('Cosmos unavailable');
+      }),
+    });
+    expect(await setSlug(failing, WANTED)).toMatchObject({ status: 503 });
+    expect(failing.patchDoc).not.toHaveBeenCalled();
+
+    const empty = makeStore(collidedDoc());
+    expect(await setSlug(empty, '  !!!  ')).toMatchObject({ status: 400 });
+    // No probe is spent on a slug that cannot be written.
+    expect(empty.queryDocs).not.toHaveBeenCalled();
+
+    const staged = makeStore(collidedDoc({ contentStatus: 'approved' }));
+    expect(await setSlug(staged, WANTED)).toMatchObject({
+      status: 409,
+      error: expect.stringContaining('Only a published article'),
+    });
+    expect(staged.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('reports a no-op rather than writing one', async () => {
+    const settled = collidedDoc({
+      slug: WANTED,
+      Slug: WANTED,
+      curatedSubpagePath: `/azure/frameworks/${WANTED}`,
+      slugPageUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+      publishedUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+      publicUrl: `https://hybridcloudworks.com/azure/frameworks/${WANTED}`,
+    });
+    const store = makeStore(settled);
+    expect(await setSlug(store, WANTED)).toMatchObject({ skipped: true, slug: WANTED });
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('skips rather than retries when the document changed under it', async () => {
+    const store = makeStore(collidedDoc(), {
+      patchDoc: vi.fn(async () => {
+        throw Object.assign(new Error('precondition failed'), { code: 412 });
+      }),
+    });
+    expect(await setSlug(store, WANTED)).toEqual({
+      skipped: true,
+      reason: 'Content changed while setting the slug; not retried',
     });
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
