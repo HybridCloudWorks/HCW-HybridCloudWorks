@@ -145,28 +145,39 @@ export async function uploadBlob(
 }
 
 /**
- * Upload a readable stream to Blob Storage.
- * For large files (e.g. high-res Imagen-4 PNGs).
+ * Upload a readable stream to Blob Storage as a block blob.
+ * For bodies whose length is not known up front — the Cosmos export's gzip
+ * stream (lib/backup/cosmos-export.js) is the first caller.
  *
  * @param {string} containerName
  * @param {string} blobName
- * @param {ReadableStream} stream
- * @param {number} streamLength
+ * @param {import('node:stream').Readable} stream
+ * @param {number} [bufferSize] - bytes per uploaded block. This is the SDK's
+ *   `bufferSize`, not the stream's length: the parameter used to be named
+ *   `streamLength`, which is what `uploadStream`'s second positional is NOT.
+ *   Nothing called it under the old name. `undefined` takes the SDK default
+ *   (8 MiB).
  * @param {string} contentType
+ * @param {object} [options]
+ * @param {string} [options.tier] - access tier to write at, e.g. 'Cool'
+ * @param {Record<string, string>} [options.metadata]
  * @returns {Promise<string>} Blob URL
  */
 export async function uploadBlobFromStream(
   containerName,
   blobName,
   stream,
-  streamLength,
-  contentType
+  bufferSize,
+  contentType,
+  options = {}
 ) {
   const containerClient = getContainerClient(containerName);
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-  await blockBlobClient.uploadStream(stream, streamLength, undefined, {
+  await blockBlobClient.uploadStream(stream, bufferSize, undefined, {
     blobHTTPHeaders: { blobContentType: contentType },
+    ...(options.metadata ? { metadata: options.metadata } : {}),
+    ...(options.tier ? { tier: options.tier } : {}),
   });
 
   return blockBlobClient.url;
