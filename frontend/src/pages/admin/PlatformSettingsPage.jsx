@@ -39,6 +39,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
+import { unwrapPublerAccounts } from '@/lib/publerAccounts';
 
 // The same lists the server allowlists (functions/src/lib/platform-settings.js).
 export const HERO_PROVIDERS = Object.freeze([
@@ -115,26 +116,6 @@ export function HeroPreview({ src, provider }) {
       onError={() => setFailed(true)}
     />
   );
-}
-
-export const PUBLER_NOT_CONFIGURED = 'INTEGRATION_NOT_CONFIGURED';
-
-/**
- * The publerProxy envelope (functions/src/lib/integrations/rest-proxy.js):
- * `{ ok: true, status, data }` with `data` the parsed Publer body, or
- * `{ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' }` when no key is seeded.
- * Publer's accounts list is a bare array; an `accounts` or `data` wrapper is
- * tolerated in case the upstream shape shifts. A bare array is accepted too,
- * so a caller that already unwrapped is not punished.
- */
-export function unwrapPublerAccounts(response) {
-  if (response && response.ok === false) {
-    return { accounts: [], notConfigured: response.code === PUBLER_NOT_CONFIGURED };
-  }
-  const body =
-    response && typeof response === 'object' && 'data' in response ? response.data : response;
-  const list = [body, body?.accounts, body?.data].find(Array.isArray) ?? [];
-  return { accounts: list.filter((account) => account && account.id), notConfigured: false };
 }
 
 /** Publer reports a network name in its own casing; the trigger keys on lowercase. */
