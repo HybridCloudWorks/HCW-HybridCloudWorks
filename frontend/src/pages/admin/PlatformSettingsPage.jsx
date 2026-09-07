@@ -39,7 +39,11 @@ import {
   Wand2,
 } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
-import { unwrapPublerAccounts } from '@/lib/publerAccounts';
+import {
+  describePublerFailure,
+  publerAccountsStatus,
+  unwrapPublerAccounts,
+} from '@/lib/publerAccounts';
 
 // The same lists the server allowlists (functions/src/lib/platform-settings.js).
 export const HERO_PROVIDERS = Object.freeze([
@@ -320,6 +324,7 @@ export function SocialAutopostCard({
   meta,
   publerAccounts,
   publerStatus = 'ready',
+  publerError = '',
 }) {
   const enabled = Boolean(value?.enabled);
   const accountIds = useMemo(() => value?.accountIds ?? [], [value]);
@@ -495,8 +500,10 @@ export function SocialAutopostCard({
               </p>
             ) : null}
             {publerStatus === 'error' ? (
-              <p className="text-xs text-muted-foreground">
-                Publer did not answer; add accounts by id.
+              <p className="text-xs text-destructive">
+                Publer accounts could not be loaded — {publerError || 'the call failed'}. The picker
+                is empty because the call did not succeed, not because the workspace is; add
+                accounts by id, or fix the connection in the Social Hub.
               </p>
             ) : null}
             {unsupported.length > 0 ? (
@@ -609,24 +616,31 @@ export default function PlatformSettingsPage() {
   const [publerAccounts, setPublerAccounts] = useState([]);
   // 'loading' | 'ready' | 'not_configured' | 'error' — the card says which.
   const [publerStatus, setPublerStatus] = useState('loading');
+  const [publerError, setPublerError] = useState('');
 
   // Best effort: the same proxied call the Social Hub makes, unwrapped from
   // the proxy envelope. Not configured, or any failure, means the free-text
   // id field is the whole picker.
+  //
+  // The proxy answers HTTP 200 whatever happens, so Publer refusing the key
+  // resolves rather than rejects; without `failed` it would land in the `ready`
+  // branch and read as a workspace with no accounts.
   useEffect(() => {
     if (!authReady) return undefined;
     let cancelled = false;
     postJSON('publerProxy', { path: '/accounts', method: 'GET' })
       .then((response) => {
         if (cancelled) return;
-        const { accounts, notConfigured } = unwrapPublerAccounts(response);
-        setPublerAccounts(accounts);
-        setPublerStatus(notConfigured ? 'not_configured' : 'ready');
+        const unwrapped = unwrapPublerAccounts(response);
+        setPublerAccounts(unwrapped.accounts);
+        setPublerStatus(publerAccountsStatus(unwrapped));
+        setPublerError(unwrapped.failed ? describePublerFailure(unwrapped) : '');
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
         setPublerAccounts([]);
         setPublerStatus('error');
+        setPublerError(err?.message || 'the request failed');
       });
     return () => {
       cancelled = true;
@@ -667,6 +681,7 @@ export default function PlatformSettingsPage() {
             saving={s.saving}
             publerAccounts={publerAccounts}
             publerStatus={publerStatus}
+            publerError={publerError}
             onChange={s.setValue}
             onSave={() => s.save(s.value)}
           />

@@ -377,6 +377,21 @@ describe('the page', () => {
     expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
   });
 
+  it('reports a resolved not-ok envelope as a failure carrying the upstream status', async () => {
+    // Publer refused the key. The proxy answers HTTP 200 with ok:false, so this
+    // resolves — a page that only catches rejections would call it "ready" and
+    // show an empty picker, which is the #397 conflation one layer down.
+    postJSON.mockResolvedValue({ ok: false, status: 401, data: { error: 'Invalid API key' } });
+    render(<PlatformSettingsPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/Publer accounts could not be loaded/)).toBeTruthy()
+    );
+    expect(screen.getByText(/Publer answered 401/)).toBeTruthy();
+    // Not the unconfigured message: the key is present, it is being rejected.
+    expect(screen.queryByText(/Publer not configured/)).toBeNull();
+    expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
+  });
+
   it('loads all three settings once auth is ready and asks Publer for accounts', async () => {
     render(<PlatformSettingsPage />);
     await waitFor(() => expect(screen.getByText('Podcast feeds')).toBeTruthy());

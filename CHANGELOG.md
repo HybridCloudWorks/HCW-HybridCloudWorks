@@ -32,7 +32,15 @@ This project has not cut a tagged release; entries are grouped under
   outcomes are now distinct where they used to be one empty list: an unseeded
   integration says so and names the Connection Settings tab, a failed call says
   the call failed and carries the upstream message, and only a proxy that
-  answered with no accounts still reads as an empty workspace. Reaching
+  answered with no accounts still reads as an empty workspace. The reader names
+  that third case explicitly, because the proxy answers HTTP 200 whatever
+  happens: Publer refusing the key comes back as a *resolved*
+  `{ ok: false, status: 401 }`, which no `.catch()` will ever see, so both
+  pages showed an authentication failure as an empty workspace until
+  `unwrapPublerAccounts` grew a `failed` outcome carrying Publer's own status.
+  The unconfigured copy no longer blames the API key either — one code covers a
+  missing `PUBLER_API_KEY` *and* a missing `PUBLER_WORKSPACE_ID`, so the page
+  repeats whichever the server named rather than guessing. Reaching
   Connection Settings had also been throwing a `ReferenceError` before it could
   paint — its two credential tiles called `publerKey()` and `publerWsId()`,
   which are defined nowhere in the bundle and cannot be, because FINDING-04

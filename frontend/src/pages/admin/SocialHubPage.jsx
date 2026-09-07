@@ -45,7 +45,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { postJSON, getJSON, sendJSON } from '@/lib/api';
-import { unwrapPublerAccounts } from '@/lib/publerAccounts';
+import {
+  describePublerFailure,
+  publerAccountsStatus,
+  unwrapPublerAccounts,
+} from '@/lib/publerAccounts';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import { toMillis } from '@/lib/dateUtils';
 
@@ -231,7 +235,12 @@ const publerListAccounts = () => publerFetch('/accounts');
  * integration and a failed call all rendered as "no accounts" (#397).
  * `unwrapPublerAccounts` is the same reader the Platform settings page uses.
  *
- * @param {(settled: { accounts: Array<object>, status: 'ready' | 'not_configured' | 'error', error: string }) => void} settle
+ * Note the two ways a call can fail. The proxy answers HTTP 200 whatever
+ * happens, so Publer refusing the key arrives here as a *resolved* envelope
+ * with `ok: false` — the `.catch()` below never sees it, and only `failed`
+ * keeps it from being read as an empty workspace.
+ *
+ * @param {(settled: { accounts: Array<object>, status: 'ready' | 'not_configured' | 'error', error: string, reason: string }) => void} settle
  * @returns {() => void} cancel — safe to use as an effect cleanup
  */
 function loadPublerAccounts(settle) {
@@ -239,12 +248,22 @@ function loadPublerAccounts(settle) {
   publerListAccounts()
     .then((response) => {
       if (cancelled) return;
-      const { accounts, notConfigured } = unwrapPublerAccounts(response);
-      settle({ accounts, status: notConfigured ? 'not_configured' : 'ready', error: '' });
+      const unwrapped = unwrapPublerAccounts(response);
+      settle({
+        accounts: unwrapped.accounts,
+        status: publerAccountsStatus(unwrapped),
+        error: unwrapped.failed ? describePublerFailure(unwrapped) : '',
+        reason: unwrapped.notConfigured ? unwrapped.reason : '',
+      });
     })
     .catch((err) => {
       if (cancelled) return;
-      settle({ accounts: [], status: 'error', error: err?.message || 'the request failed' });
+      settle({
+        accounts: [],
+        status: 'error',
+        error: err?.message || 'the request failed',
+        reason: '',
+      });
     });
   return () => {
     cancelled = true;
@@ -350,7 +369,7 @@ function AccountToggle({ account, selected, onToggle }) {
  * `atConnectionSettings` is true on the tab that holds the fix, where "go to
  * the Connection Settings tab" would be pointing at itself.
  */
-function PublerAccountsNotice({ status, error, atConnectionSettings = false }) {
+function PublerAccountsNotice({ status, error, reason, atConnectionSettings = false }) {
   if (status === 'loading') {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -361,10 +380,15 @@ function PublerAccountsNotice({ status, error, atConnectionSettings = false }) {
   if (status === 'not_configured') {
     return (
       <p className="text-sm text-muted-foreground">
-        <strong>Publer is not connected.</strong> No API key is set on the function app, so Publer
-        was never asked for accounts.{' '}
+        <strong>Publer is not connected.</strong>{' '}
+        {/* The proxy returns one code for a missing key and for a missing
+            workspace id, so naming only the key would be a guess. Its `error`
+            names the setting when it sends one; otherwise say both. */}
+        {reason
+          ? `${reason}, so Publer was never asked for accounts.`
+          : 'PUBLER_API_KEY or PUBLER_WORKSPACE_ID is not set on the function app, so Publer was never asked for accounts.'}{' '}
         {atConnectionSettings
-          ? 'Set PUBLER_API_KEY and PUBLER_WORKSPACE_ID on the function app — as Key Vault references — then reload this page.'
+          ? 'Set both on the function app — as Key Vault references — then reload this page.'
           : 'Connect it in the Connection Settings tab.'}
       </p>
     );
@@ -372,9 +396,8 @@ function PublerAccountsNotice({ status, error, atConnectionSettings = false }) {
   if (status === 'error') {
     return (
       <p className="text-sm text-destructive">
-        <strong>Publer accounts could not be loaded</strong> — the call failed
-        {error ? `: ${error}` : ''}. The list is empty because the request did not answer, not
-        because the workspace is.
+        <strong>Publer accounts could not be loaded</strong> — {error || 'the call failed'}. The
+        list is empty because the call did not succeed, not because the workspace is.
       </p>
     );
   }
@@ -406,6 +429,7 @@ export function ComposeTab({ recentContent, initialContentId }) {
   // says which, so an unseeded key never reads as an empty workspace (#397).
   const [accountsStatus, setAccountsStatus] = useState('loading');
   const [accountsError, setAccountsError] = useState('');
+  const [accountsReason, setAccountsReason] = useState('');
 
   // Form state
   const [selectedContent, setSelectedContent] = useState(null);
@@ -418,10 +442,11 @@ export function ComposeTab({ recentContent, initialContentId }) {
 
   useEffect(() => {
     if (!ready) return undefined;
-    return loadPublerAccounts(({ accounts: list, status, error }) => {
+    return loadPublerAccounts(({ accounts: list, status, error, reason }) => {
       setAccounts(list);
       setAccountsStatus(status);
       setAccountsError(error);
+      setAccountsReason(reason);
     });
   }, [ready]);
 
@@ -592,7 +617,11 @@ export function ComposeTab({ recentContent, initialContentId }) {
               ))}
             </div>
           ) : (
-            <PublerAccountsNotice status={accountsStatus} error={accountsError} />
+            <PublerAccountsNotice
+              status={accountsStatus}
+              error={accountsError}
+              reason={accountsReason}
+            />
           )}
         </div>
 
@@ -1132,13 +1161,15 @@ const PUBLER_CONNECTION = {
   loading: { dot: 'bg-muted-foreground/40', detail: 'Checking…' },
   ready: {
     dot: 'bg-emerald-500',
-    detail: 'Connected — the proxy resolved its key and answered.',
+    detail: 'Connected — the proxy resolved its credentials and Publer answered.',
   },
   not_configured: {
+    // One code covers a missing key and a missing workspace id, so the tile
+    // names neither; the notice below reports whichever the server named.
     dot: 'bg-amber-500',
-    detail: 'Not configured — no API key is set on the function app.',
+    detail: 'Not configured — a required app setting is missing.',
   },
-  error: { dot: 'bg-destructive', detail: 'The accounts call failed; see Connected Accounts.' },
+  error: { dot: 'bg-destructive', detail: 'The accounts call failed' },
 };
 
 export function SettingsTab() {
@@ -1147,13 +1178,15 @@ export function SettingsTab() {
   // the Compose tab shows, from the same reader (#397).
   const [accountsStatus, setAccountsStatus] = useState('loading');
   const [accountsError, setAccountsError] = useState('');
+  const [accountsReason, setAccountsReason] = useState('');
 
   useEffect(
     () =>
-      loadPublerAccounts(({ accounts: list, status, error }) => {
+      loadPublerAccounts(({ accounts: list, status, error, reason }) => {
         setAccounts(list);
         setAccountsStatus(status);
         setAccountsError(error);
+        setAccountsReason(reason);
       }),
     []
   );
@@ -1177,7 +1210,10 @@ export function SettingsTab() {
             <div className={`h-2.5 w-2.5 rounded-full ${connection.dot}`} />
             <div>
               <p className="text-xs font-semibold">Credentials</p>
-              <p className="text-xs text-muted-foreground">{connection.detail}</p>
+              <p className="text-xs text-muted-foreground">
+                {connection.detail}
+                {accountsStatus === 'error' ? ` — ${accountsError || 'no reason given'}.` : ''}
+              </p>
             </div>
           </div>
 
@@ -1223,6 +1259,7 @@ export function SettingsTab() {
             <PublerAccountsNotice
               status={accountsStatus}
               error={accountsError}
+              reason={accountsReason}
               atConnectionSettings
             />
           )}
