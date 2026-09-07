@@ -21,7 +21,11 @@ import {
 } from './platform-settings.js';
 import { pickDefaultHero, DEFAULT_HEROES_CONFIG_ID } from './triggers/ai-cover.js';
 import { AUTOPOST_CONFIG_ID } from './triggers/social-caption-trigger.js';
-import { PODCAST_FEEDS_CONFIG_ID, resolvePodcastFeeds } from './timers/podcasts.js';
+import {
+  MAIN_FEED_PROVIDER,
+  PODCAST_FEEDS_CONFIG_ID,
+  resolvePodcastFeeds,
+} from './timers/podcasts.js';
 import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
@@ -238,6 +242,66 @@ describe('podcast feeds', () => {
     const store = { readDoc: vi.fn(async () => ({ id: PODCAST_FEEDS_CONFIG_ID, ...value })) };
     await expect(resolvePodcastFeeds(store)).resolves.toEqual({
       feeds: [{ provider: 'finops', url: 'https://x.example/finops.rss' }],
+      source: 'admin_config',
+    });
+  });
+
+  it('keeps the main feed beside the provider rows, and omits it when blank', () => {
+    // The compatibility rule this shape exists for: a document stored before
+    // the field existed still normalizes, unchanged, and is not reported as
+    // drifted.
+    expect(
+      normalizePodcastFeeds({
+        mainFeedUrl: '  https://media.rss.com/hybrid-cloud-insights/feed.xml  ',
+        feeds: [{ provider: 'azure', url: 'https://x.example/azure.xml' }],
+      })
+    ).toEqual({
+      mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+      feeds: [{ provider: 'azure', url: 'https://x.example/azure.xml' }],
+    });
+    expect(normalizePodcastFeeds({ mainFeedUrl: '   ', feeds: [] })).toEqual({ feeds: [] });
+    expect(normalizePodcastFeeds({ feeds: [] })).toEqual({ feeds: [] });
+    expectRejects(
+      () => normalizePodcastFeeds({ mainFeedUrl: 'http://insecure.example/feed.xml' }),
+      /mainFeedUrl must be an https URL/
+    );
+    expectRejects(() => normalizePodcastFeeds({ mainFeedUrl: 7 }), /mainFeedUrl must be a string/);
+  });
+
+  it('refuses the two ways one feed could become two shows', () => {
+    // `main` as a provider row: two places to say the same thing, one of
+    // which the page cannot edit.
+    expectRejects(
+      () => normalizePodcastFeeds({ feeds: [{ provider: 'main', url: 'https://x.example/f' }] }),
+      /reserved/
+    );
+    // The same URL in both: both ingests build the same episode ids from the
+    // same guids, so each run would overwrite the other's `provider` and the
+    // episode would flip between the show and a provider every two hours.
+    expectRejects(
+      () =>
+        normalizePodcastFeeds({
+          mainFeedUrl: 'https://x.example/f',
+          feeds: [{ provider: 'azure', url: 'https://x.example/f' }],
+        }),
+      /already the main feed/
+    );
+  });
+
+  it('runs the main feed as an ordinary entry under the reserved provider', async () => {
+    const value = normalizePodcastFeeds({
+      mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+      feeds: [{ provider: 'finops', url: 'https://x.example/finops.rss' }],
+    });
+    const store = { readDoc: vi.fn(async () => ({ id: PODCAST_FEEDS_CONFIG_ID, ...value })) };
+    await expect(resolvePodcastFeeds(store)).resolves.toEqual({
+      feeds: [
+        {
+          provider: MAIN_FEED_PROVIDER,
+          url: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+        },
+        { provider: 'finops', url: 'https://x.example/finops.rss' },
+      ],
       source: 'admin_config',
     });
   });

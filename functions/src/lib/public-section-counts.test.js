@@ -25,7 +25,7 @@ import {
   emptySections,
   providersOfContent,
 } from './public-section-counts.js';
-import { SQL_NOT_SOFT_DELETED, SQL_PUBLIC_CLAUSE } from './public-reads.js';
+import { MAIN_PODCAST_PROVIDER, SQL_NOT_SOFT_DELETED, SQL_PUBLIC_CLAUSE } from './public-reads.js';
 
 /** A published `content` row, in the shape isPublicDocument accepts. */
 const published = (fields) => ({ contentStatus: 'published', ...fields });
@@ -205,6 +205,41 @@ describe('countPodcastDocs', () => {
     const sections = count([{ id: 'a', mediaUrl: '' }, { provider: 'Azure' }]);
     expect(sections.azure.audio).toBe(0);
     expect(sections[UNATTRIBUTED].audio).toBe(0);
+  });
+
+  it("counts one episode of the site's show for every provider", () => {
+    // The mirror image of #373: a page that HAS content and is not advertised.
+    // `listPodcasts` returns a `main` row to every provider, so every
+    // provider's audio page shows it — and a count that dropped it as an
+    // unrecognised provider would keep all sixteen audio URLs out of the
+    // sitemap while the pages played the show.
+    const sections = count([{ provider: MAIN_PODCAST_PROVIDER, mediaUrl: 'https://cdn/x.mp3' }]);
+    for (const provider of PROVIDERS) {
+      expect(sections[provider].audio).toBe(1);
+      expect(sections[provider]['audio-architecture']).toBe(1);
+    }
+    // Named, not guessed: the show is not an item of unknown provenance.
+    expect(sections[UNATTRIBUTED].audio).toBe(0);
+  });
+
+  it("applies the listing's filters to the show as well", () => {
+    // A retired-media or soft-deleted show episode is off every page, so it
+    // must not hold sixteen URLs in the sitemap on its own.
+    const sections = count([
+      { provider: MAIN_PODCAST_PROVIDER, softDeletedAt: '2026-09-01' },
+      { provider: MAIN_PODCAST_PROVIDER, mediaUrl: 'https://mcdn.podbean.com/x.mp3' },
+    ]);
+    expect(sections.azure.audio).toBe(0);
+    expect(sections.aws.audio).toBe(0);
+  });
+
+  it('adds the show to a provider that also has its own episodes', () => {
+    const sections = count([
+      { provider: 'azure', mediaUrl: 'https://cdn/a.mp3' },
+      { provider: MAIN_PODCAST_PROVIDER, mediaUrl: 'https://cdn/b.mp3' },
+    ]);
+    expect(sections.azure.audio).toBe(2);
+    expect(sections.aws.audio).toBe(1);
   });
 });
 

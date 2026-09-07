@@ -56,6 +56,13 @@
  *     and is deliberately counted nowhere: putting it in `_unattributed`
  *     would block sixteen audio pages on behalf of two podcast rows that no
  *     visitor can reach.
+ *
+ *     `provider: 'main'` on a `podcasts` row is not such a row and must not be
+ *     mistaken for one. It is the site's own show: the listing returns it to
+ *     every provider and every provider's audio page shows it, so it is
+ *     counted for each of them BY NAME rather than parked in the "could
+ *     surface anywhere" bucket. `_unattributed` says we do not know which
+ *     pages an item reaches; for the show we do.
  *   - `countSections` returns null when any query fills its window, because a
  *     truncated read cannot tell an absent item from an unread one. The route
  *     then answers `sections: null` — the key is present and null, not absent,
@@ -67,6 +74,7 @@
  *     the same branch, which is why the two cases need no telling apart.
  */
 import {
+  MAIN_PODCAST_PROVIDER,
   PROVIDER_ALIASES,
   SQL_NOT_SOFT_DELETED,
   SQL_PUBLIC_CLAUSE,
@@ -104,7 +112,9 @@ export const UNATTRIBUTED = '_unattributed';
  *                         provider (ProviderCodeDispatcher in App.jsx), so they
  *                         carry the same number.
  *   audio,              — useAudioEpisodes: podcasts and Listen & Learn rows
- *   audio-architecture    for that provider. Both routes render
+ *   audio-architecture    for that provider, plus every episode of the site's
+ *                         own show, which the listing returns to all of them.
+ *                         Both routes render
  *                         SharedPodcastPage for the provider in the path, so
  *                         they too carry the same number.
  *
@@ -210,10 +220,22 @@ export function countContentDocs(sections, docs) {
  * Add `podcasts` rows, with the two filters the public listing applies: a
  * soft-deleted row, and a row whose media host has been retired (#372), are
  * both absent from the page and must be absent from the count.
+ *
+ * An episode of the site's own show (`provider === 'main'`) counts for EVERY
+ * provider, because the listing returns it to every provider and the page
+ * leads with it — `c.provider IN (@provider, @mainProvider)` in
+ * `listPodcasts`. This is the one rule here that adds an item to more than one
+ * page without the document naming more than one provider, and it is the same
+ * principle as `providersOfContent` returning a list: the count is of what the
+ * page shows, and this page shows the show.
  */
 export function countPodcastDocs(sections, docs) {
   for (const doc of docs || []) {
     if (isSoftDeleted(doc) || isPodcastMediaRetired(doc)) continue;
+    if (doc?.provider === MAIN_PODCAST_PROVIDER) {
+      for (const provider of PROVIDERS) addAudioRow(sections, provider);
+      continue;
+    }
     addAudioRow(sections, doc?.provider);
   }
   return sections;
@@ -235,10 +257,12 @@ export function countListenAndLearnDocs(sections, docs) {
 }
 
 /**
- * Both audio containers key on `c.provider = @provider` against the lowercase
- * route slug, so an exact match is the whole of the rule — and a row carrying
- * anything else is reachable from no page, which is why it is dropped rather
- * than counted as unattributed.
+ * Both audio containers key on the lowercase route slug in SQL, so an exact
+ * match against a known provider is the whole of the rule here — and a row
+ * carrying anything else is reachable from no page, which is why it is dropped
+ * rather than counted as unattributed. The site's show is the one value that
+ * is neither: `countPodcastDocs` resolves it to every provider before calling
+ * this, so what arrives is always a provider slug.
  */
 function addAudioRow(sections, rawProvider) {
   if (!PROVIDERS.includes(rawProvider)) return;

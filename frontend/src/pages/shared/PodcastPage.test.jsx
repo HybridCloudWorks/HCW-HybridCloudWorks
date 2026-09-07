@@ -89,7 +89,7 @@ vi.mock('@/components/podcast/EpisodePlayer', () => ({
   ),
 }));
 
-import SharedPodcastPage from './PodcastPage';
+import SharedPodcastPage, { sourceFilters } from './PodcastPage';
 
 const page = () => (
   <MemoryRouter initialEntries={['/azure/podcast']}>
@@ -246,5 +246,62 @@ describe('SharedPodcastPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Identities and governance/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Listen & Learn' }));
     expect(playerTitle()).toHaveTextContent('Identities and governance');
+  });
+});
+
+/** An episode of the site's own show, which reaches every provider's page. */
+const showEpisode = {
+  id: 'host:show-1',
+  source: 'main',
+  sourceLabel: 'The show',
+  title: 'Hybrid Cloud Insights 01',
+  description: 'The site show',
+  mediaUrl: 'https://cdn.example/show-1.mp3',
+  durationSeconds: 1800,
+  publishedAtISO: '2026-06-01T00:00:00.000Z',
+  publishedAtString: '6/1/2026',
+};
+
+describe("the site's show on a provider page", () => {
+  it('offers a chip per source present, and none at all below two', () => {
+    // A chip for a source with no rows filters the list to nothing, which
+    // reads as a page that lost its episodes — and which sources a page has
+    // is a real question now that the show reaches providers with no feed.
+    expect(sourceFilters([showEpisode])).toEqual([]);
+    expect(sourceFilters([])).toEqual([]);
+    expect(sourceFilters([...episodes, showEpisode]).map((f) => f.label)).toEqual([
+      'All',
+      'The show',
+      'Podcast feed',
+      'Listen & Learn',
+    ]);
+    expect(sourceFilters([showEpisode, episodes[1]]).map((f) => f.key)).toEqual([
+      'all',
+      'main',
+      'listen-and-learn',
+    ]);
+  });
+
+  it('is the whole page for a provider with no feed and no study episodes', () => {
+    // The eight empty audio pages, filled. No filter row, because filtering
+    // one source by that source is a control that can only do nothing.
+    episodesNow = [showEpisode];
+    mount();
+    expect(playerTitle()).toHaveTextContent('Hybrid Cloud Insights 01');
+    expect(screen.queryByRole('group', { name: 'Filter episodes by source' })).toBeNull();
+    expect(screen.queryByText('No episodes available yet.')).toBeNull();
+  });
+
+  it('filters to the show, and back', () => {
+    episodesNow = [showEpisode, ...episodes];
+    mount();
+    expect(playerTitle()).toHaveTextContent('Hybrid Cloud Insights 01');
+
+    fireEvent.click(screen.getByRole('button', { name: 'The show' }));
+    expect(screen.queryByRole('button', { name: /Host new/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Hybrid Cloud Insights 01/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByRole('button', { name: /Host new/ })).toBeInTheDocument();
   });
 });

@@ -9,11 +9,13 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   isPodcastMediaRetired,
   createPublicReadHandlers,
+  MAIN_PODCAST_PROVIDER,
   PUBLIC_CONTENT_LIST_FIELDS,
   isSoftDeleted,
   isPublicDocument,
   resolvePublishedDateValue,
   resolveFeedUrlForProvider,
+  resolveMainFeedUrl,
   stripInternalFields,
   CURATED_IMAGE_BATCH_MAX,
 } from './public-reads.js';
@@ -889,8 +891,32 @@ describe('listPodcasts', () => {
     const res = await h.listPodcasts(makeRequest({ query: { provider: 'aws' } }), context);
     expect(JSON.parse(res.body).items.map((i) => i.id)).toEqual(['b', 'a']);
     const [, query, params] = store.queryDocs.mock.calls[0];
-    expect(query).toContain('c.provider = @provider');
+    expect(query).toContain('c.provider IN (@provider, @mainProvider)');
     expect(params).toContainEqual({ name: '@provider', value: 'aws' });
+  });
+
+  it("returns the site's show alongside the provider's own episodes", async () => {
+    // The point of the main feed: a provider with no feed of its own is not
+    // an empty page, because the site's show is on it. One query, so a show
+    // episode arrives once — never as a second copy of a provider row.
+    const store = {
+      queryDocs: vi.fn(async () => [
+        { id: 'aws-1', provider: 'aws', publishedAt: '2026-01-01T00:00:00Z' },
+        { id: 'show-1', provider: 'main', publishedAt: '2026-05-01T00:00:00Z' },
+      ]),
+      readDoc: vi.fn(async () => null),
+    };
+    const res = await createPublicReadHandlers({ store }).listPodcasts(
+      makeRequest({ query: { provider: 'aws' } }),
+      context
+    );
+
+    expect(store.queryDocs).toHaveBeenCalledTimes(1);
+    const [, , params] = store.queryDocs.mock.calls[0];
+    expect(params).toContainEqual({ name: '@mainProvider', value: MAIN_PODCAST_PROVIDER });
+    const body = JSON.parse(res.body);
+    expect(body.items.map((i) => i.id)).toEqual(['show-1', 'aws-1']);
+    expect(body.total).toBe(2);
   });
 
   it('lower-cases the provider, so ?provider=Azure is not an empty section', async () => {
@@ -1333,6 +1359,56 @@ describe('listPodcasts feedUrl (#349)', () => {
       PODCAST_FEEDS_CONFIG_ID,
       ADMIN_CONFIG_PARTITION
     );
+  });
+
+  it('files the show under the same provider value the ingest writes', async () => {
+    // A fourth copied name, and the one with the widest blast radius: the SQL
+    // above and public-section-counts.js both match on it, so a drift here
+    // hides every show episode from every page and every count at once.
+    const { MAIN_FEED_PROVIDER } = await import('./timers/podcasts.js');
+    expect(MAIN_PODCAST_PROVIDER).toBe(MAIN_FEED_PROVIDER);
+  });
+
+  it("carries the site's show beside the provider's feed, each answering for itself", async () => {
+    // Both, not one resolved value: `feedUrl` still means the feed THESE
+    // provider rows came from, and which of the two a reader is offered is
+    // the page's decision (useAudioEpisodes).
+    const config = {
+      mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+      feeds: [{ provider: 'azure', url: 'https://example.com/azure.xml' }],
+    };
+    const azure = JSON.parse(
+      (
+        await handlers({ config }).listPodcasts(
+          makeRequest({ query: { provider: 'azure' } }),
+          context
+        )
+      ).body
+    );
+    expect(azure.feedUrl).toBe('https://example.com/azure.xml');
+    expect(azure.mainFeedUrl).toBe('https://media.rss.com/hybrid-cloud-insights/feed.xml');
+
+    // A provider with no feed of its own: the show is all there is to offer.
+    const aws = JSON.parse(
+      (
+        await handlers({ config }).listPodcasts(
+          makeRequest({ query: { provider: 'aws' } }),
+          context
+        )
+      ).body
+    );
+    expect(aws.feedUrl).toBeNull();
+    expect(aws.mainFeedUrl).toBe('https://media.rss.com/hybrid-cloud-insights/feed.xml');
+  });
+
+  it('publishes the main feed only when it is an https URL', () => {
+    const url = 'https://media.rss.com/hybrid-cloud-insights/feed.xml';
+    expect(resolveMainFeedUrl({ mainFeedUrl: ` ${url} ` })).toBe(url);
+    expect(resolveMainFeedUrl({ mainFeedUrl: 'http://insecure.example/feed.xml' })).toBeNull();
+    expect(resolveMainFeedUrl({ mainFeedUrl: 'javascript:alert(1)' })).toBeNull();
+    expect(resolveMainFeedUrl({ mainFeedUrl: 42 })).toBeNull();
+    expect(resolveMainFeedUrl({ feeds: [] })).toBeNull();
+    expect(resolveMainFeedUrl(null)).toBeNull();
   });
 
   it('only ever returns an https URL for the asked-for provider', () => {

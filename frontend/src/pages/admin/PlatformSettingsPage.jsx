@@ -532,10 +532,14 @@ export function PodcastFeedsCard({ value, onChange, onSave, saving, meta }) {
       .filter((provider) => provider && !PODCAST_PROVIDERS.includes(provider));
     return [...PODCAST_PROVIDERS, ...new Set(extra)];
   }, [feeds]);
+  // Spread the current value rather than rebuilding it: the main feed and the
+  // provider rows are edited by different controls and neither may drop the
+  // other's field on the way to the save.
+  const update = (patch) => onChange({ ...(value ?? {}), ...patch });
   const urlFor = (provider) => feeds.find((row) => row.provider === provider)?.url ?? '';
   const setUrl = (provider, url) => {
     const present = feeds.some((row) => row.provider === provider);
-    onChange({
+    update({
       feeds: present
         ? feeds.map((row) => (row.provider === provider ? { provider, url } : row))
         : [...feeds, { provider, url }],
@@ -549,39 +553,66 @@ export function PodcastFeedsCard({ value, onChange, onSave, saving, meta }) {
           <Podcast className="h-5 w-5" /> Podcast feeds
         </CardTitle>
         <CardDescription>
-          One RSS feed per provider, fetched every two hours into the public podcast list. Must be
-          https. Blank means no feed for that provider; a feed that answers 410 Gone is reported in
-          Ops Health and should be replaced or blanked here.
+          The main feed is the site&apos;s own show. Its episodes appear on every provider&apos;s
+          audio page, at the top, and its RSS button is what a reader gets on a provider with no
+          feed of its own. The per-provider feeds below are optional extras for a show that belongs
+          to one provider. All are fetched every two hours, all must be https; blank means no feed.
+          A feed that answers 410 Gone is reported in Ops Health and should be replaced or blanked
+          here.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3 pt-0">
+      <CardContent className="space-y-4 pt-0">
         <StoredState meta={meta} />
         <form
-          className="grid gap-3 sm:grid-cols-2"
+          className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
             onSave();
           }}
         >
-          {providers.map((provider) => (
-            <div key={provider} className="space-y-1">
-              <Label htmlFor={`feed-${provider}`}>{provider}</Label>
-              <Input
-                id={`feed-${provider}`}
-                type="text"
-                inputMode="url"
-                value={urlFor(provider)}
-                disabled={saving}
-                spellCheck={false}
-                placeholder="https://…/feed.xml"
-                onChange={(event) => setUrl(provider, event.target.value)}
-                className="font-mono text-xs"
-              />
-            </div>
-          ))}
-          <div className="sm:col-span-2">
-            <SaveRow saving={saving} />
+          <div className="space-y-1 rounded-lg border border-primary/40 bg-primary/5 p-3">
+            <Label htmlFor="feed-main" className="text-sm font-semibold">
+              Main feed
+            </Label>
+            <Input
+              id="feed-main"
+              type="text"
+              inputMode="url"
+              value={value?.mainFeedUrl ?? ''}
+              disabled={saving}
+              spellCheck={false}
+              placeholder="https://media.rss.com/…/feed.xml"
+              onChange={(event) => update({ mainFeedUrl: event.target.value })}
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              The site&apos;s show — not any one provider&apos;s.
+            </p>
           </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Per-provider feeds (optional)</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {providers.map((provider) => (
+                <div key={provider} className="space-y-1">
+                  <Label htmlFor={`feed-${provider}`}>{provider}</Label>
+                  <Input
+                    id={`feed-${provider}`}
+                    type="text"
+                    inputMode="url"
+                    value={urlFor(provider)}
+                    disabled={saving}
+                    spellCheck={false}
+                    placeholder="https://…/feed.xml"
+                    onChange={(event) => setUrl(provider, event.target.value)}
+                    className="font-mono text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <SaveRow saving={saving} />
         </form>
       </CardContent>
     </Card>

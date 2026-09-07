@@ -345,6 +345,46 @@ describe('PodcastFeedsCard', () => {
       ],
     });
   });
+
+  it('edits the main feed and the provider rows without either dropping the other', () => {
+    // Two controls, one document. The main feed is the site's show and the
+    // provider rows are optional extras; a save that carried only the field
+    // last touched would silently blank the other.
+    const onChange = vi.fn();
+    const value = {
+      mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+      feeds: [{ provider: 'azure', url: 'https://x.example/azure.xml' }],
+    };
+    render(
+      <PodcastFeedsCard
+        value={value}
+        meta={meta}
+        saving={false}
+        onChange={onChange}
+        onSave={vi.fn()}
+      />
+    );
+    expect(screen.getByLabelText('Main feed').value).toBe(
+      'https://media.rss.com/hybrid-cloud-insights/feed.xml'
+    );
+
+    fireEvent.change(screen.getByLabelText('Main feed'), {
+      target: { value: 'https://media.rss.com/hybrid-cloud-insights/feed.xml?v=2' },
+    });
+    expect(onChange).toHaveBeenLastCalledWith({
+      mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml?v=2',
+      feeds: [{ provider: 'azure', url: 'https://x.example/azure.xml' }],
+    });
+
+    fireEvent.change(screen.getByLabelText('aws'), { target: { value: 'https://x.example/aws' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      mainFeedUrl: 'https://media.rss.com/hybrid-cloud-insights/feed.xml',
+      feeds: [
+        { provider: 'azure', url: 'https://x.example/azure.xml' },
+        { provider: 'aws', url: 'https://x.example/aws' },
+      ],
+    });
+  });
 });
 
 // unwrapPublerAccounts moved to src/lib/publerAccounts.js with #397; its unit
