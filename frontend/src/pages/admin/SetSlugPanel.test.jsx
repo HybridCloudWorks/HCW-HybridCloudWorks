@@ -52,21 +52,23 @@ describe('pure helpers', () => {
     expect(currentSlugOf({})).toBe('');
   });
 
-  it('describes a change, a no-op and a normalisation differently', () => {
-    const changed = describeSetSlugResult({
+  it('describes a move, a no-op and a normalisation differently', () => {
+    const moved = describeSetSlugResult({
       changed: true,
+      moved: true,
       requested: WANTED,
       previousSlug: HELD,
       slug: WANTED,
       publicUrl: `https://hybridcloudworks.com/azure/blog/${WANTED}`,
     });
-    expect(changed.tone).toBe('ok');
-    expect(changed.message).toContain(HELD);
-    expect(changed.message).toContain(WANTED);
-    expect(changed.message).not.toContain('normalised');
+    expect(moved.tone).toBe('ok');
+    expect(moved.message).toContain(HELD);
+    expect(moved.message).toContain(WANTED);
+    expect(moved.message).not.toContain('normalised');
 
     const normalised = describeSetSlugResult({
       changed: true,
+      moved: true,
       requested: '  Agent Kit!  ',
       previousSlug: HELD,
       slug: 'agent-kit',
@@ -77,6 +79,39 @@ describe('pure helpers', () => {
     expect(noop.tone).toBe('muted');
     expect(noop.message).toContain('Already on that slug');
   });
+
+  it('describes a URL-only repair as a repair, never as "Moved from x to x"', () => {
+    // The write is real — Slug caught up and two URL fields were written — but
+    // the slug did not move, and the move sentence would read as a bug in the
+    // tool rather than as the repair it is.
+    const repaired = describeSetSlugResult({
+      changed: true,
+      moved: false,
+      requested: HELD,
+      previousSlug: HELD,
+      slug: HELD,
+      fields: ['Slug', 'slugPageUrl', 'publicUrl'],
+      publicUrl: `https://hybridcloudworks.com/azure/blog/${HELD}`,
+    });
+    expect(repaired.tone).toBe('ok');
+    expect(repaired.message).not.toContain('Moved from');
+    expect(repaired.message).toContain('Slug unchanged');
+    expect(repaired.message).toContain('Slug, slugPageUrl, publicUrl');
+    expect(repaired.publicUrl).toBe(`https://hybridcloudworks.com/azure/blog/${HELD}`);
+
+    // With no field list it still says what happened rather than inventing one.
+    const bare = describeSetSlugResult({ changed: true, moved: false, slug: HELD });
+    expect(bare.message).toContain('Repaired its published URLs');
+  });
+
+  it('falls back to comparing the slugs when the API predates `moved`', () => {
+    // The deploy window in which the page is newer than the Functions app.
+    const older = describeSetSlugResult({ changed: true, previousSlug: HELD, slug: HELD });
+    expect(older.message).not.toContain('Moved from');
+    expect(older.message).toContain('Slug unchanged');
+    const olderMoved = describeSetSlugResult({ changed: true, previousSlug: HELD, slug: WANTED });
+    expect(olderMoved.message).toContain('Moved from');
+  });
 });
 
 describe('SetSlugPanel', () => {
@@ -85,6 +120,8 @@ describe('SetSlugPanel', () => {
       contentId: collided.id,
       requested: WANTED,
       changed: true,
+      moved: true,
+      fields: ['slug', 'curatedSubpagePath'],
       previousSlug: HELD,
       slug: WANTED,
       publicUrl: `https://hybridcloudworks.com/azure/blog/${WANTED}`,

@@ -755,7 +755,16 @@ export function createPublishHandlers({
     return {
       blogId: contentId,
       reused: true,
-      slugChanged: true,
+      // TWO DIFFERENT OUTCOMES, AND THE CALLER MUST BE ABLE TO TELL THEM APART.
+      // `moved` is whether the slug the site actually routes on changed;
+      // `fields` is what the patch wrote. They come apart on exactly the
+      // articles this exists for: with `slug` already right and `Slug` still
+      // holding the old value, or the URL fields never written, the write is a
+      // REPAIR — real, and one of the situations the control is for — but
+      // nothing moved. This used to report `slugChanged: true` for both, which
+      // the panel rendered as `Moved from "x" to "x"`.
+      moved: decision.from !== slug,
+      fields: Object.keys(update),
       slug,
       previousSlug: decision.from,
       curatedSubpagePath: after.curatedSubpagePath || null,

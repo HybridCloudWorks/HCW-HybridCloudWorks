@@ -88,9 +88,14 @@ This project has not cut a tagged release; entries are grouped under
   `frontend/`, so a live client-side preview would mean a second copy of the
   one function whose output IS the URL — and the response names `requested`
   beside `slug`, which the panel shows whenever they differ. Nothing can
-  silently no-op: a change, a truthful no-op and a refusal that wrote nothing
-  each render with their reason, and a refusal names the document holding the
-  URL.
+  silently no-op, and the panel distinguishes **four** outcomes rather than
+  collapsing them: a move (the URL is a different one now), a repair (the slug
+  stayed, but `Slug` was brought into line with it or URL fields that had
+  drifted were re-derived — a real write, and one of the cases this exists
+  for), a truthful no-op, and a refusal that wrote nothing. The response
+  carries `moved` and the list of `fields` the patch touched so the panel is
+  told which happened rather than guessing, and a refusal names the document
+  holding the URL.
 - **The site has a show of its own, and every audio page leads with it
   (#349).** `admin_config/podcast_feeds` could only describe feeds that belong
   to a provider — every row is `{ provider, url }` — so the RSS.com show the

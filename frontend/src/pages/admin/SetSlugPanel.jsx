@@ -51,8 +51,22 @@ export function currentSlugOf(item = {}) {
 
 /**
  * The response as a line to render. Pure, so every branch is pinned by a test
- * rather than by clicking: a change, a no-op and a refusal read differently on
- * purpose, and none of them may read as nothing having happened.
+ * rather than by clicking.
+ *
+ * THREE OUTCOMES, NOT TWO, and the third is the one this got wrong. A write
+ * that does not move the slug is still a real write: `Slug` brought into line
+ * with `slug`, or URL fields that were never written, on an article whose
+ * published URLs had drifted from the slug it serves. That is one of the
+ * situations this control exists for, and reporting it with the same sentence
+ * as a move produced `Moved from "x" to "x"` — which reads as a bug in the
+ * tool rather than as the repair it was. An operator correcting a live URL has
+ * to be able to tell a move from a repair, so they are separate sentences and
+ * the repair names the fields it touched.
+ *
+ * `moved` comes from the server, which knows what it wrote, rather than being
+ * inferred here — the same reason normalisation is server-side. The comparison
+ * is kept only as a fallback for the deploy window in which the page is newer
+ * than the Functions app and the field is absent.
  */
 export function describeSetSlugResult(result = {}) {
   if (!result.changed) {
@@ -62,6 +76,19 @@ export function describeSetSlugResult(result = {}) {
       publicUrl: result.publicUrl || '',
     };
   }
+  const moved =
+    typeof result.moved === 'boolean' ? result.moved : result.previousSlug !== result.slug;
+
+  if (!moved) {
+    const fields = Array.isArray(result.fields) ? result.fields : [];
+    const what = fields.length ? `Repaired ${fields.join(', ')}.` : 'Repaired its published URLs.';
+    return {
+      tone: 'ok',
+      message: `Slug unchanged ("${result.slug}") — its published URLs had drifted from it. ${what}`,
+      publicUrl: result.publicUrl || '',
+    };
+  }
+
   const normalised =
     result.requested && result.requested.trim() !== result.slug
       ? ` (normalised from "${result.requested.trim()}")`
@@ -94,6 +121,7 @@ export default function SetSlugPanel({ item, onApplied }) {
         slug: result.slug || null,
         previousSlug: result.previousSlug || null,
         changed: Boolean(result.changed),
+        moved: Boolean(result.moved),
       });
       if (result.changed) onApplied?.(item.id, result);
     } catch (err) {

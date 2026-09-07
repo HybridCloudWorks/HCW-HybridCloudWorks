@@ -1028,7 +1028,7 @@ describe('reason: set-slug — the #400 URL correction', () => {
 
     expect(result).toMatchObject({
       blogId: 'c1',
-      slugChanged: true,
+      moved: true,
       slug: WANTED,
       previousSlug: HELD,
       curatedSubpagePath: `/azure/frameworks/${WANTED}`,
@@ -1057,6 +1057,27 @@ describe('reason: set-slug — the #400 URL correction', () => {
     expect(store.patchDoc.mock.calls.some(([c]) => c === 'admin_config')).toBe(false);
     const version = store.upsertDoc.mock.calls.find(([c]) => c === 'content_versions')[1];
     expect(version.versionReason).toBe(SET_SLUG_REASON);
+  });
+
+  it('distinguishes a MOVE from a URL-only REPAIR, and names the fields either way', async () => {
+    // Two different outcomes, and the caller has to tell them apart. Asked for
+    // a new slug, the article moves. Asked for the slug it already serves, the
+    // write is still real — `Slug` catches up and the missing URL fields are
+    // written — but nothing moved, and reporting that as a move rendered
+    // `Moved from "x" to "x"` in the panel.
+    const moved = await setSlug(makeStore(collidedDoc()), WANTED);
+    expect(moved.moved).toBe(true);
+    expect(moved.previousSlug).toBe(HELD);
+    expect(moved.slug).toBe(WANTED);
+    expect(moved.fields).toContain('slug');
+    expect(moved.fields).toContain('curatedSubpagePath');
+
+    const repaired = await setSlug(makeStore(collidedDoc()), HELD);
+    expect(repaired.moved).toBe(false);
+    expect(repaired.previousSlug).toBe(HELD);
+    expect(repaired.slug).toBe(HELD);
+    // `slug` and `curatedSubpagePath` already matched, so neither was written.
+    expect(repaired.fields).toEqual(['Slug', 'slugPageUrl', 'publicUrl']);
   });
 
   it('completes on an article a FULL republish would refuse', async () => {

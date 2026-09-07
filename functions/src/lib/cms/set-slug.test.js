@@ -60,11 +60,12 @@ describe('toSetSlugResponse', () => {
     expect(body).toMatchObject({ changed: false, reason: 'Already on that slug', publicUrl: 'U' });
   });
 
-  it('reports a success with the previous slug, the new slug and the URL', () => {
+  it('reports a move with the previous slug, the new slug and the URL', () => {
     const { body } = parse(
       toSetSlugResponse(
         {
-          slugChanged: true,
+          moved: true,
+          fields: ['slug', 'Slug', 'curatedSubpagePath'],
           previousSlug: 'old',
           slug: 'new',
           curatedSubpagePath: '/azure/blog/new',
@@ -77,10 +78,37 @@ describe('toSetSlugResponse', () => {
       contentId: 'c1',
       requested: ' Raw Input ',
       changed: true,
+      moved: true,
+      fields: ['slug', 'Slug', 'curatedSubpagePath'],
       previousSlug: 'old',
       slug: 'new',
       curatedSubpagePath: '/azure/blog/new',
       publicUrl: 'https://hybridcloudworks.com/azure/blog/new',
+    });
+  });
+
+  it('carries moved:false and the written fields through, so a repair is not reported as a move', () => {
+    // changed and moved are different questions. A write that leaves the slug
+    // where it is — Slug caught up, URL fields filled in — is a repair, and
+    // the panel renders it as one instead of "Moved from x to x".
+    const { body } = parse(
+      toSetSlugResponse(
+        {
+          moved: false,
+          fields: ['Slug', 'slugPageUrl', 'publicUrl'],
+          previousSlug: 'same',
+          slug: 'same',
+          expectedPublicUrl: 'https://hybridcloudworks.com/azure/blog/same',
+        },
+        meta
+      )
+    );
+    expect(body).toMatchObject({
+      changed: true,
+      moved: false,
+      fields: ['Slug', 'slugPageUrl', 'publicUrl'],
+      previousSlug: 'same',
+      slug: 'same',
     });
   });
 });
@@ -197,11 +225,14 @@ describe('setContentSlug', () => {
     expect(status).toBe(200);
     expect(body).toMatchObject({
       changed: true,
+      moved: true,
       previousSlug: COLLIDED.slug,
       slug: COLLIDED.Slug,
       curatedSubpagePath: `/azure/blog/${COLLIDED.Slug}`,
       publicUrl: `https://hybridcloudworks.com/azure/blog/${COLLIDED.Slug}`,
     });
+    expect(body.fields).toContain('slug');
+    expect(body.fields).toContain('curatedSubpagePath');
 
     const after = store.byId.get(COLLIDED.id);
     expect(after.slug).toBe(COLLIDED.Slug);
@@ -210,6 +241,34 @@ describe('setContentSlug', () => {
     expect(after.slugPageUrl).toBe(body.publicUrl);
     expect(after.publishedUrl).toBe(body.publicUrl);
     expect(after.publicUrl).toBe(body.publicUrl);
+  });
+
+  it('reports a URL repair as changed but NOT moved, and names the fields', async () => {
+    // The outcome the panel used to render as `Moved from "x" to "x"`. The
+    // article already serves this slug in `slug`, but `Slug` still holds the
+    // other value and two URL fields were never written — a real write, and
+    // one of the situations this control exists for, but nothing moved.
+    const { handlers, store } = makeHandlers([COLLIDED]);
+
+    const { status, body } = parse(
+      await handlers.setContentSlug(
+        makeRequest({ contentId: COLLIDED.id, slug: COLLIDED.slug }),
+        context
+      )
+    );
+
+    expect(status).toBe(200);
+    expect(body.changed).toBe(true);
+    expect(body.moved).toBe(false);
+    expect(body.previousSlug).toBe(COLLIDED.slug);
+    expect(body.slug).toBe(COLLIDED.slug);
+    // `slug` and `curatedSubpagePath` already matched and are absent; this
+    // fixture carries none of the three URL fields, so all three are written.
+    expect(body.fields).toEqual(['Slug', 'slugPageUrl', 'publishedUrl', 'publicUrl']);
+    // The repair really happened: the pair is aligned and the URLs exist.
+    const after = store.byId.get(COLLIDED.id);
+    expect(after.Slug).toBe(COLLIDED.slug);
+    expect(after.slugPageUrl).toBe(`https://hybridcloudworks.com${COLLIDED.curatedSubpagePath}`);
   });
 
   it('refuses a slug another document holds, names it, and writes nothing', async () => {
@@ -337,8 +396,9 @@ describe('setContentSlug', () => {
     expect(audit[1]).toMatchObject({
       action: 'content_slug_set',
       contentId: COLLIDED.id,
-      details: { status: 200, previousSlug: COLLIDED.slug, slug: COLLIDED.Slug, changed: true },
+      details: { status: 200, previousSlug: COLLIDED.slug, slug: COLLIDED.Slug, moved: true },
     });
+    expect(audit[1].details.fields).toContain('slug');
 
     // A refusal is audited too — an operator's failed attempt on a URL is
     // exactly what a later reader of the log wants to see.
@@ -353,7 +413,7 @@ describe('setContentSlug', () => {
     const refusedRow = refused.store.upserts.find(
       ([container]) => container === 'admin_audit_logs'
     );
-    expect(refusedRow[1].details).toMatchObject({ status: 409, changed: false });
+    expect(refusedRow[1].details).toMatchObject({ status: 409, moved: false, fields: [] });
     expect(refusedRow[1].details.error).toMatch(/taken-slug/);
 
     // And a store that cannot take the row does not cost the operator the answer.

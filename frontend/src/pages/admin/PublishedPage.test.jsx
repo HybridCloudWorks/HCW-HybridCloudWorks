@@ -302,6 +302,8 @@ describe('PublishedPage', () => {
           contentId: 'content-2',
           requested: 'existing-live-article',
           changed: true,
+          moved: true,
+          fields: ['slug', 'Slug', 'curatedSubpagePath'],
           previousSlug: 'stale-slug',
           slug: 'existing-live-article',
           curatedSubpagePath: '/aws/blog/existing-live-article',

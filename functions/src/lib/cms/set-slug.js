@@ -92,6 +92,13 @@ export function toSetSlugResponse(result = {}, { contentId, requested }) {
     contentId,
     requested,
     changed: true,
+    // `changed` says a write happened; `moved` says whether the URL the site
+    // routes on is a different one now. A repair — `Slug` brought into line
+    // with `slug`, or URL fields that were never written — is changed but not
+    // moved, and an operator correcting a live URL has to be able to tell
+    // those apart. `fields` names what was actually written.
+    moved: Boolean(result.moved),
+    fields: Array.isArray(result.fields) ? result.fields : [],
     previousSlug: result.previousSlug || null,
     slug: result.slug || null,
     curatedSubpagePath: result.curatedSubpagePath || null,
@@ -164,7 +171,11 @@ export function createSetSlugHandlers({
             status: response.status,
             previousSlug: result.previousSlug || null,
             slug: result.slug || null,
-            changed: Boolean(result.slugChanged),
+            // Both, for the same reason the response carries both: a later
+            // reader of this log needs to know whether a URL moved or was
+            // repaired, and which fields the patch touched.
+            moved: Boolean(result.moved),
+            fields: Array.isArray(result.fields) ? result.fields : [],
             ...(result.error && { error: result.error }),
             ...(result.skipped && { skipped: result.reason || 'Nothing to change' }),
           },
