@@ -257,6 +257,31 @@ describe('evaluateLabsProbe', () => {
     expect(evaluateLabsProbe(null).pass).toBeNull();
   });
 
+  it('never falls back to the earlier read when the closing read returned no status', () => {
+    // { status: null } without a throw — the API answered, but with nothing
+    // usable. The earlier read said queued; using it would score a state that
+    // was never observed at the end of the probe.
+    const reason =
+      'final lab_jobs/job-1 state unknown — the closing getLabJob read returned no status';
+    expect(evaluateLabsProbe({ ...good, final: { status: null } })).toEqual({
+      pass: false,
+      reason,
+    });
+    expect(evaluateLabsProbe({ ...good, final: undefined })).toEqual({ pass: false, reason });
+    // And it cannot pass on the earlier read either, however settled that was.
+    expect(
+      evaluateLabsProbe({ ...good, read: { found: true, status: 'cancelled' }, final: null }).pass
+    ).toBe(false);
+
+    const report = buildReport({ generatedAt: 'now', labs: { ...good, final: { status: null } } });
+    expect(report).toContain(
+      'lab_jobs/job-1 final status: unknown — the closing read returned no status'
+    );
+    expect(report).toContain('Authenticated no-op path: FAIL (final lab_jobs/job-1 state unknown');
+    expect(report).not.toContain('still "queued"');
+    expect(report).not.toContain('final status: null');
+  });
+
   it('reports a failed final read as its own failure, not as "still queued"', () => {
     // The read-back before the cancel said queued; the read after it failed.
     // Falling back to the earlier status would assert a state nobody observed.

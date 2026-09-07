@@ -219,7 +219,15 @@ export function evaluateLabsProbe(probe) {
       reason: `final getLabJob read failed (${final.error}) — lab_jobs/${enqueue.jobId} state unknown`,
     };
   }
-  const finalStatus = final?.status ?? read.status;
+  // No fallback to the earlier read: the verdict is about the state at the
+  // END of the probe, and a closing read that returned nothing observed none.
+  if (!final?.status) {
+    return {
+      pass: false,
+      reason: `final lab_jobs/${enqueue.jobId} state unknown — the closing getLabJob read returned no status`,
+    };
+  }
+  const finalStatus = final.status;
   if (!SETTLED_JOB_STATUSES.has(finalStatus)) {
     return { pass: false, reason: `lab_jobs/${enqueue.jobId} is still "${finalStatus}"` };
   }
@@ -309,9 +317,9 @@ function labsReportLines({ labs, unauth }) {
       lines.push(`- cancelLabJob: ${cancel}`);
     }
     if (labs.final) {
-      const finalState = labs.final.error
-        ? `read failed (${labs.final.error}) — state unknown`
-        : labs.final.status;
+      let finalState = labs.final.status;
+      if (labs.final.error) finalState = `read failed (${labs.final.error}) — state unknown`;
+      else if (!finalState) finalState = 'unknown — the closing read returned no status';
       lines.push(`- lab_jobs/${e.jobId ?? '?'} final status: ${finalState}`);
     }
   }
@@ -646,7 +654,7 @@ function LabsProbeResult({ labs }) {
         <Row label="final status">
           {labs.final.error
             ? `read failed (${labs.final.error}) — state unknown`
-            : (labs.final.status ?? '?')}
+            : labs.final.status || 'unknown — the closing read returned no status'}
         </Row>
       ) : null}
       <div className="pt-2">
