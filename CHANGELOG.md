@@ -19,6 +19,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Every publish now checks whether another article already holds its URL,
+  and the collisions already in the corpus have a report of their own
+  (#400).** One case is deliberately left open and is named below: two
+  first-publishes racing on the same title can still both probe clean and take
+  the same bare slug. Closing it would mean suffixing every new URL with a
+  document id, which is not worth doing to a site's whole URL space for a
+  collision that is rare, recoverable and now reported. Three published
+  articles share
+  `enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio`,
+  so two of them are published with no URL at all and the third's identity
+  changes with the order Cosmos returns rows — visible in #399's diff, where
+  the body under that key moved from `7ZCmiOEIlWMg99xQHY0A` to
+  `1k5ayjbEdYdo7NzvXIWW`. None of the three was ever assigned that slug by this
+  pipeline: `processPublishContent` writes `slug` and `Slug` to the same value
+  in one patch, and on all three — and on ten of the twenty-two published
+  articles — the two differ. They arrived from Site-Main already
+  `contentStatus: published`, which takes the branch that reuses the stored
+  slug, and that branch never probed. `uniqueSlug` becomes pure `resolveSlug`
+  plus a `slugHolders` probe, keeping its shape — bare slug when nothing else
+  holds it, suffixed with the document id when something does, and a lookup
+  failure never blocking a publish — with both gaps closed: the probe now reads
+  `c.slug OR c.Slug`, because the two fields carry different values on ten of
+  the twenty-two published articles and the manifest routes on `slug || Slug`;
+  and every publish probes, a republish included, moving off a slug another
+  document holds instead of re-asserting it. A probe that throws still yields
+  the always-unique suffixed slug on a first publish and now leaves a live URL
+  untouched on a republish. What a read cannot establish — two publishers
+  racing on one title — is documented at `resolveSlug` and caught by the new
+  `scripts/report-slug-collisions.mjs`, which prints the contested URLs from the
+  committed manifest with no credential. `curatedSubpagePath` moves with the
+  slug now (`resolveCuratedSubpagePath`, found by Copilot's review): it was
+  taken from the stored value unconditionally, so an article leaving a
+  contested slug would have kept advertising the contested URL in
+  `slugPageUrl`, `publishedUrl` and `publicUrl` while `slug` said otherwise,
+  and it is normalised to a leading slash because three frontend hooks read the
+  provider out of `curatedSubpagePath.split('/')[1]`. The slug is normalised
+  once before the probe for the same reason the URL is: `resolveSlug` trimmed
+  while `slugHolders` probed the raw value, so a stored `'  shared-slug  '` —
+  migrated or hand-edited, which is this corpus — matched no holder and the
+  trimmed form was then written onto a URL another article held.
 - **The Social Hub lists Publer accounts again, and when it cannot it says
   which of three things is wrong (#397).** Both of its call sites tested the
   `publerProxy` response with `Array.isArray`, and the proxy answers with an
