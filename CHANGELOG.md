@@ -146,6 +146,32 @@ This project has not cut a tagged release; entries are grouped under
   colour type and size. The owner can replace any file one-for-one with real
   artwork; nothing keys on it being generated, and the generator is not part
   of the build.
+- **The Cosmos out-of-account exporter, as ADR 0028 designed it (issue #231,
+  application half).** A daily timer, `cosmosExportScheduler`, decides full
+  (Sunday) or delta from the UTC date and enqueues one `cosmos-export-container`
+  job per exported container onto the existing platform jobs queue; the worker
+  pages `SELECT * FROM c` (full) or reads the change feed from the stored
+  continuation (delta, latest-version mode, whole container) and streams the
+  documents as gzip NDJSON into the private `cosmos-export` blob container at
+  the Cool tier, writing the continuation only after the blob is safely
+  written and a full run's checkpoint taken before it starts paging. Each job
+  ends with a marker; the worker that finds every marker writes the run
+  manifest once and emits the `cosmosExportCompleted` custom event the
+  missing-run alerts count. The classification is code —
+  `functions/src/lib/backup/export-classification.js`, the ADR's six classes —
+  and a test holds it to `infra/cosmos-containers.json`: every one of the 72
+  provisioned containers exactly once, nothing unprovisioned, 60 on a full
+  and 53 on a delta. Logs and telemetry carry container names, counts and
+  durations, never a document. Inert until `FEATURE_FLAG_COSMOS_EXPORT` is
+  `true` (or `1`), which Terraform writes from `cosmos_export_enabled`; the
+  container, lifecycle rule, alert rules and setting are the Terraform half. The app gains its first custom-event emitter
+  (`lib/telemetry.js`, the edge probe's envelope shape, no SDK), and
+  `uploadBlobFromStream` accepts an access tier and metadata. A restore
+  runbook (`docs/runbooks/cosmos-restore.md`) gives the quarterly drill from
+  ADR 0028 §6 as paste-ready PowerShell, and
+  `scripts/restore-cosmos-export.mjs` reads the latest complete full plus its
+  deltas from the container and upserts them into a target account, with
+  `--dry-run` that only counts and `--verify` that counts the target back.
 - **Article bodies stop hotlinking upstream images (#374).** At publish time
   every external `<img>` or `![](…)` URL in any body field (`blogDraft`,
   `Content`, `content` — the audited article kept an RSS stub in one and its

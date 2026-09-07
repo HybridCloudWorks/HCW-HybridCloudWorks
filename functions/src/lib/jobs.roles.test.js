@@ -21,6 +21,7 @@ import { registerJobType, listJobTypes } from './jobs.js';
 import { ROLE_NAMES, roleLevel } from './auth/roles.js';
 
 // Importing the registration modules populates the process-wide registry.
+import '../functions/cosmos-export.js';
 import '../functions/forge-jobs.js';
 import '../functions/inspect-jobs.js';
 import '../functions/listen-and-learn-jobs.js';

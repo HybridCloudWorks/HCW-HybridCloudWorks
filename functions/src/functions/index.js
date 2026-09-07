@@ -21,6 +21,7 @@ import './inspect-jobs.js';
 import './forge-jobs.js';
 import './jobs-sweeper.js';
 import './change-feed.js';
+import './cosmos-export.js';
 import './jobs-http.js';
 import './jobs-worker.js';
 import './lab-agent-http.js';

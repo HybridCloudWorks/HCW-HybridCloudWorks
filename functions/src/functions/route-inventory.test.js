@@ -326,9 +326,12 @@ describe('non-HTTP triggers', () => {
     // Not an authorization surface, but they are registrations, and one of
     // them deletes blobs with an unimplemented body (TODO.md T-302). The
     // seventeen are the T-323 timers in schedulers.js; the eighteenth is
-    // platformJobSweeper (jobs-sweeper.js), behind its own flag.
-    expect(timerRegistrations.size).toBe(18);
+    // platformJobSweeper (jobs-sweeper.js), behind its own flag; the
+    // nineteenth is cosmosExportScheduler (cosmos-export.js, ADR 0028),
+    // behind FEATURE_FLAG_COSMOS_EXPORT.
+    expect(timerRegistrations.size).toBe(19);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
+    expect(timerRegistrations.has('cosmosExportScheduler')).toBe(true);
     for (const name of ['cleanupTempStorage', 'cleanupUnusedCertImages']) {
       // The two that delete blobs: registered, and their handlers are the
       // dry-run-by-default factories (lib/timers/temp-storage.js, cert-image-cleanup.js).
