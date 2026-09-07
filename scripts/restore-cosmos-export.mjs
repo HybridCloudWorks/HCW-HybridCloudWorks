@@ -45,6 +45,7 @@ import {
   dataBlobName,
   manifestBlobName,
   parseLine,
+  assertLayerBlobPresent,
   countRestore,
   formatRow,
   parseConcurrency,
@@ -195,13 +196,11 @@ export async function main(argv = process.argv.slice(2), out = console) {
     const target = db ? db.container(name) : null;
     for (const layer of layers) {
       const blob = dataBlobName(layer.mode, layer.runId, name);
-      // A container added to the classification after this full has no blob in
-      // it; a delta with nothing for it still has an (empty) blob. Missing is
-      // only expected for the former.
-      if (!(await blobExists(exportBlobs, blob))) {
-        layerIds.push({ layer: `${layer.mode}/${layer.runId}`, ids: [] });
-        continue;
-      }
+      // Every layer was selected because its manifest exists, and the manifest
+      // is written only once every container's marker is present — so a
+      // missing data blob is a corrupted or expired set, never an empty
+      // container (those still have a blob). Loud, in --dry-run too.
+      assertLayerBlobPresent(await blobExists(exportBlobs, blob), blob);
       const ids = [];
       if (target) {
         await forEachConcurrent(readDocuments(exportBlobs, blob), opts.concurrency, async (doc) => {

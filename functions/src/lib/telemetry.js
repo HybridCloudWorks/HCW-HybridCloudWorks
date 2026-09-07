@@ -98,19 +98,18 @@ export function createEventTracker({
    * @param {Record<string, unknown>} [properties]
    */
   async function trackEvent(name, properties = {}) {
-    let target;
+    // Everything that can throw — a missing setting, a bad name, a property
+    // that will not serialise (BigInt, a cycle), the POST — is inside one
+    // try, because the promise above is "never rejects" and a throw here
+    // would fail the job whose success it was reporting.
     try {
-      target = parseConnectionString(env.APPLICATIONINSIGHTS_CONNECTION_STRING);
-    } catch (error) {
-      log.warn?.(`[telemetry] ${name} not sent: ${error?.message || error}`);
-      return false;
-    }
-    const envelope = buildEventEnvelope({ iKey: target.iKey, name, properties, time: now() });
-    try {
+      const target = parseConnectionString(env.APPLICATIONINSIGHTS_CONNECTION_STRING);
+      const envelope = buildEventEnvelope({ iKey: target.iKey, name, properties, time: now() });
+      const body = JSON.stringify(envelope);
       const res = await fetcher(`${target.endpoint}v2/track`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(envelope),
+        body,
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {

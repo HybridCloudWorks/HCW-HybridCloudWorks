@@ -104,4 +104,23 @@ describe('createEventTracker', () => {
     await expect(down.trackEvent('e')).resolves.toBe(false);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ECONNRESET'));
   });
+
+  it('a property that cannot be serialised, or a bad name, resolves false with a warning and never posts', async () => {
+    const warn = vi.fn();
+    const fetcher = vi.fn(async () => ({ ok: true, status: 200 }));
+    const tracker = createEventTracker({
+      env: { APPLICATIONINSIGHTS_CONNECTION_STRING: CONN },
+      fetcher,
+      log: { warn },
+    });
+    const circular = {};
+    circular.self = circular;
+    await expect(tracker.trackEvent('e', { circular })).resolves.toBe(false);
+    await expect(tracker.trackEvent('e', { big: 10n })).resolves.toBe(false);
+    await expect(tracker.trackEvent('', { mode: 'full' })).resolves.toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn.mock.calls[0][0]).toMatch(/e not sent: .*circular/i);
+    expect(warn.mock.calls[2][0]).toMatch(/name is required/);
+  });
 });

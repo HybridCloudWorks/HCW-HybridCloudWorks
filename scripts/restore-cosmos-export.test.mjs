@@ -11,6 +11,7 @@ import {
   dataBlobName,
   manifestBlobName,
   parseLine,
+  assertLayerBlobPresent,
   stripSystemFields,
   countRestore,
   formatRow,
@@ -189,6 +190,33 @@ describe('helpers', () => {
         if (i === 4) throw new Error('boom');
       })
     ).rejects.toThrow('boom');
+  });
+
+  it('forEachConcurrent treats a synchronous throw like a rejection and drains the in-flight work first', async () => {
+    let inFlight = 0;
+    let finished = 0;
+    async function* items() {
+      for (let i = 0; i < 6; i += 1) yield i;
+    }
+    await expect(
+      forEachConcurrent(items(), 3, (i) => {
+        if (i === 2) throw new Error('sync boom');
+        inFlight += 1;
+        return new Promise((r) => setTimeout(r, 5)).then(() => {
+          inFlight -= 1;
+          finished += 1;
+        });
+      })
+    ).rejects.toThrow('sync boom');
+    expect(inFlight).toBe(0);
+    expect(finished).toBe(2);
+  });
+
+  it('assertLayerBlobPresent throws naming the blob when a selected layer has no data blob', () => {
+    expect(() => assertLayerBlobPresent(true, 'full/2026-09-13/content.ndjson.gz')).not.toThrow();
+    expect(() => assertLayerBlobPresent(false, 'delta/2026-09-14/blogs.ndjson.gz')).toThrow(
+      /delta\/2026-09-14\/blogs\.ndjson\.gz is missing .* corrupted or expired/
+    );
   });
 });
 

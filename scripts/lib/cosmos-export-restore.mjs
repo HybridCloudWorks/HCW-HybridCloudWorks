@@ -125,6 +125,22 @@ export function containersToRestore(fullManifest, only = null) {
   return [...new Set(only)].sort();
 }
 
+/**
+ * A selected layer's data blob must exist: the layer was chosen because its
+ * manifest exists, and the manifest is written only once every marker is
+ * present, so absence means the set is corrupted or has expired under the
+ * lifecycle rule. Restoring past it would silently produce a partial copy.
+ *
+ * @param {boolean} present
+ * @param {string} blob - the blob name, for the error
+ */
+export function assertLayerBlobPresent(present, blob) {
+  if (present) return;
+  throw new Error(
+    `${blob} is missing from the export container: the run's manifest says it was written, so the set is corrupted or expired — do not restore from it`
+  );
+}
+
 /** One NDJSON line → a document, with Cosmos system fields removed. Blank lines are skipped by the caller. */
 export function parseLine(line) {
   const doc = JSON.parse(line);
@@ -183,20 +199,25 @@ export function parseConcurrency(value) {
 
 /**
  * Run `work(item)` over an async iterable with at most `limit` in flight.
- * Rejects on the first failure after draining what is in flight.
+ * Rejects on the first failure after draining what is in flight. A worker
+ * that throws synchronously is treated like one that rejects: wrapped in a
+ * promise, so it is recorded as the failure and the in-flight set drains,
+ * rather than escaping this loop with work still running.
  */
 export async function forEachConcurrent(items, limit, work) {
   const inFlight = new Set();
   let failure = null;
   for await (const item of items) {
     if (failure) break;
-    const p = work(item).then(
-      () => inFlight.delete(p),
-      (err) => {
-        inFlight.delete(p);
-        failure ??= err;
-      }
-    );
+    const p = Promise.resolve()
+      .then(() => work(item))
+      .then(
+        () => inFlight.delete(p),
+        (err) => {
+          inFlight.delete(p);
+          failure ??= err;
+        }
+      );
     inFlight.add(p);
     if (inFlight.size >= limit) await Promise.race(inFlight);
   }
