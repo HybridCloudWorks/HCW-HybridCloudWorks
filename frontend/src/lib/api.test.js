@@ -55,6 +55,17 @@ describe('authedFetch', () => {
     expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer acquired-here');
   });
 
+  it('getJSON forwards a pre-acquired token and stays a GET', async () => {
+    const { getJSON } = await import('@/lib/api');
+    await getJSON('getAuthExpectations', { token: 'pre-acquired' });
+    expect(acquireApiToken).not.toHaveBeenCalled();
+    const [[url, init]] = fetch.mock.calls;
+    expect(url).toBe('https://api.example.test/api/getAuthExpectations');
+    expect(init.method).toBe('GET');
+    expect(init.headers.Authorization).toBe('Bearer pre-acquired');
+    expect('token' in init).toBe(false);
+  });
+
   it('treats an empty token as absent rather than sending "Bearer "', async () => {
     const { authedFetch } = await import('@/lib/api');
     await authedFetch('getLabsSnapshot', { method: 'POST', body: '{}', token: '' });

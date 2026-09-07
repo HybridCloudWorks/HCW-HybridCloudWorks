@@ -127,17 +127,19 @@ describe('getCurrentAdminStatus', () => {
 
 describe('getAuthExpectations', () => {
   const env = { ENTRA_API_AUDIENCE: 'api://api-app-id', ENTRA_TENANT_ID: 'tenant-1' };
+  // The route is registered GET-only; the shared makeRequest builds a POST.
+  const getRequest = () => ({ ...makeRequest(), method: 'GET' });
 
   it('refuses an unauthenticated caller with the guard’s own response', async () => {
     const h = createAdminIdentityHandlers({ guard: denyUser, store: makeStore(), env, ...fixed });
-    const res = await h.getAuthExpectations(makeRequest(), context);
+    const res = await h.getAuthExpectations(getRequest(), context);
     expect(res.status).toBe(401);
   });
 
   it('returns what the guard enforces, and no registry read is needed to say so', async () => {
     const store = makeStore();
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, env, ...fixed });
-    const res = await h.getAuthExpectations(makeRequest(), context);
+    const res = await h.getAuthExpectations(getRequest(), context);
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual({
       expectedAudience: 'api://api-app-id',
@@ -151,7 +153,7 @@ describe('getAuthExpectations', () => {
   it('does not need the admin role — a role-holder missing from the registry can still ask', async () => {
     const guard = guardWith();
     const h = createAdminIdentityHandlers({ guard, store: makeStore(), env, ...fixed });
-    await h.getAuthExpectations(makeRequest(), context);
+    await h.getAuthExpectations(getRequest(), context);
     expect(guard.requireUser).toHaveBeenCalled();
     expect(guard.requireRole).not.toHaveBeenCalled();
   });
@@ -163,7 +165,7 @@ describe('getAuthExpectations', () => {
       env: {},
       ...fixed,
     });
-    const body = JSON.parse((await h.getAuthExpectations(makeRequest(), context)).body);
+    const body = JSON.parse((await h.getAuthExpectations(getRequest(), context)).body);
     expect(body.expectedAudience).toBeNull();
     expect(body.tenantId).toBeNull();
   });

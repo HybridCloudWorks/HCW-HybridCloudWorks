@@ -168,8 +168,10 @@ export async function postJSON(fnName, body) {
  * @param {string} fnName - route path after the API base
  * @returns {Promise<object>} Parsed JSON response
  */
-export async function getJSON(fnName) {
-  const res = await authedFetch(fnName, { method: 'GET' });
+export async function getJSON(fnName, options = {}) {
+  // `options` reaches authedFetch unchanged, so `token` (a pre-acquired
+  // bearer token — see authedFetch) works here too.
+  const res = await authedFetch(fnName, { ...options, method: 'GET' });
   return res.json();
 }
 

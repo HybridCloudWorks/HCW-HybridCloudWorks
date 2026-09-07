@@ -392,7 +392,8 @@ async function collectIdentity() {
     result.tokenError = messageOf(err, 'could not acquire the access token');
   }
   try {
-    result.expectations = await getJSON('getAuthExpectations');
+    // Same acquisition as the status call below — the whole run is one token.
+    result.expectations = await getJSON('getAuthExpectations', token ? { token } : {});
   } catch (err) {
     result.expectationsError = messageOf(err, 'getAuthExpectations failed');
   }

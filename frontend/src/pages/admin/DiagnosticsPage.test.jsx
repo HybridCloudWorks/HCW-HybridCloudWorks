@@ -403,7 +403,7 @@ describe('the page', () => {
     await identityLoaded();
 
     expect(acquireApiToken).toHaveBeenCalledTimes(1);
-    expect(getJSON).toHaveBeenCalledWith('getAuthExpectations');
+    expect(getJSON).toHaveBeenCalledWith('getAuthExpectations', { token: TOKEN });
     expect(authedFetch).toHaveBeenCalledWith('getCurrentAdminStatus', {
       method: 'GET',
       token: TOKEN,
@@ -434,6 +434,10 @@ describe('the page', () => {
     expect(init.token).toBe(TOKEN);
     expect(init.token).not.toBe(STALE);
     expect(init.headers).toBeUndefined();
+    // The expectations call rides the same acquisition — the run is ONE token,
+    // not one per call.
+    expect(getJSON).toHaveBeenCalledTimes(1);
+    expect(getJSON).toHaveBeenCalledWith('getAuthExpectations', { token: TOKEN });
     // And the claims panel reflects that same token: Admin present.
     expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText('FAIL')).toBeNull();
