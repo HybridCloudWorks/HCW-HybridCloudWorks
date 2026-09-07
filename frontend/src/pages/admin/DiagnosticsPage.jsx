@@ -199,6 +199,8 @@ export function evaluateIdentity(token, admin) {
  */
 export function evaluateLabsProbe(probe) {
   if (!probe) return { pass: null, reason: 'NOT RUN — press "Run authenticated probe"' };
+  // The runner itself threw before any step recorded a result.
+  if (probe.error) return { pass: false, reason: probe.error };
   const { enqueue, read, final } = probe;
   if (!enqueue || enqueue.httpStatus !== 200) {
     return { pass: false, reason: `enqueueLabJob answered ${enqueue?.httpStatus ?? 'no status'}` };
@@ -350,10 +352,20 @@ async function collectIdentity() {
     adminHttp: null,
     adminError: null,
   };
+  // ONE acquisition, decoded here and sent on the status call. authedFetch
+  // force-refreshes for getCurrentAdminStatus so a just-granted role is
+  // visible at once; decoding a separately acquired (cached) token could show
+  // the role missing while the API call, on a fresh token, succeeded. So the
+  // token is acquired once with that same refresh behaviour, and the status
+  // call carries it explicitly — authedFetch lets a caller-supplied
+  // Authorization header win — so the claims shown and the claims the API
+  // judged are the same bytes.
   let payload = null;
+  let token = null;
   try {
     const { acquireApiToken } = await import('@/lib/entraAuth');
-    payload = decodeJwtPayload(await acquireApiToken());
+    token = await acquireApiToken({ forceRefresh: true });
+    payload = decodeJwtPayload(token);
     if (!payload) result.tokenError = 'the access token could not be decoded';
   } catch (err) {
     result.tokenError = messageOf(err, 'could not acquire the access token');
@@ -365,12 +377,16 @@ async function collectIdentity() {
   }
   result.token = summarizeToken(payload, result.expectations);
   try {
-    const res = await authedFetch('getCurrentAdminStatus', { method: 'GET' });
+    const res = await authedFetch('getCurrentAdminStatus', {
+      method: 'GET',
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    });
     result.adminHttp = res.status;
     result.admin = summarizeAdminStatus(await bodyOf(res), payload?.oid ?? payload?.sub ?? null);
   } catch (err) {
     result.adminError = messageOf(err, 'getCurrentAdminStatus failed');
   }
+  token = null;
   return result;
 }
 
@@ -421,8 +437,12 @@ async function runLabsProbeSteps() {
 
 /** The same request through plain fetch: no token acquired, no header. */
 async function probeUnauthenticated() {
+  // Outside the try on purpose: an unset VITE_AZURE_FUNCTIONS_URL throws
+  // here, and that is a configuration fault to surface as one, not a probe
+  // result to score as a failed request.
+  const url = getEndpoint('enqueueLabJob');
   try {
-    const res = await fetch(getEndpoint('enqueueLabJob'), {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(LABS_PROBE_JOB),
@@ -584,6 +604,16 @@ function LabsProbeResult({ labs }) {
   if (!labs) return null;
   const e = labs.enqueue || {};
   const verdict = evaluateLabsProbe(labs);
+  if (labs.error) {
+    return (
+      <div className="space-y-1">
+        <Row label="probe">{labs.error}</Row>
+        <div className="pt-2">
+          <Verdict pass={verdict.pass}>Authenticated no-op path — {verdict.reason}</Verdict>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="space-y-1">
       <Row label="enqueueLabJob">
@@ -727,14 +757,36 @@ export default function DiagnosticsPage() {
 
   const runLabs = useCallback(async () => {
     setLabsBusy(true);
-    setLabs(await runLabsProbeSteps());
-    setLabsBusy(false);
+    try {
+      setLabs(await runLabsProbeSteps());
+    } catch (err) {
+      // The steps record their own failures; this is a throw from outside
+      // them. Shown in the panel as a failed probe, never left as a stuck
+      // spinner with every button disabled.
+      setLabs({
+        enqueue: null,
+        read: null,
+        cancel: null,
+        final: null,
+        error: messageOf(err, 'the probe threw before it could record a result'),
+      });
+    } finally {
+      setLabsBusy(false);
+    }
   }, []);
 
   const runUnauth = useCallback(async () => {
     setUnauthBusy(true);
-    setUnauth(await probeUnauthenticated());
-    setUnauthBusy(false);
+    try {
+      setUnauth(await probeUnauthenticated());
+    } catch (err) {
+      setUnauth({
+        httpStatus: null,
+        error: messageOf(err, 'the probe threw before it could record a result'),
+      });
+    } finally {
+      setUnauthBusy(false);
+    }
   }, []);
 
   // Nothing may be copied while a check is in flight: a report taken mid-run

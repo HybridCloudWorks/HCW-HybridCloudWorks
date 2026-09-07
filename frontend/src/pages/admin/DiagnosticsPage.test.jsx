@@ -23,13 +23,14 @@ const authedFetch = vi.fn();
 const getJSON = vi.fn();
 const postJSON = vi.fn();
 const acquireApiToken = vi.fn();
+const getEndpoint = vi.fn((name) => `https://api.example.test/api/${name}`);
 const toast = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   authedFetch: (...args) => authedFetch(...args),
   getJSON: (...args) => getJSON(...args),
   postJSON: (...args) => postJSON(...args),
-  getEndpoint: (name) => `https://api.example.test/api/${name}`,
+  getEndpoint: (...args) => getEndpoint(...args),
 }));
 vi.mock('@/lib/entraAuth', () => ({ acquireApiToken: (...args) => acquireApiToken(...args) }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
@@ -354,12 +355,37 @@ describe('the page', () => {
 
     expect(acquireApiToken).toHaveBeenCalledTimes(1);
     expect(getJSON).toHaveBeenCalledWith('getAuthExpectations');
-    expect(authedFetch).toHaveBeenCalledWith('getCurrentAdminStatus', { method: 'GET' });
+    expect(authedFetch).toHaveBeenCalledWith('getCurrentAdminStatus', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
 
     seen(/aud, email, exp, iat, iss, name, oid, preferred_username, roles, sub, tid/);
     expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText('FAIL')).toBeNull();
     expectNoSecrets(container.textContent);
+  });
+
+  it('decodes the very token it sends to getCurrentAdminStatus, from one refreshed acquisition', async () => {
+    // authedFetch force-refreshes for getCurrentAdminStatus. If the panel
+    // decoded a separately acquired (cached) token, a just-granted role could
+    // read FAIL here while the API, on a fresh token, said isAdmin true.
+    const STALE = `${b64url({ alg: 'RS256' })}.${b64url({ ...CLAIMS, roles: [] })}.sig`;
+    acquireApiToken.mockReset().mockResolvedValueOnce(TOKEN).mockResolvedValue(STALE);
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+
+    // One acquisition for the whole identity run, with the refresh the API
+    // call itself would have asked for.
+    expect(acquireApiToken).toHaveBeenCalledTimes(1);
+    expect(acquireApiToken).toHaveBeenCalledWith({ forceRefresh: true });
+    // The bytes sent are the bytes decoded — not whatever a second call gave.
+    const [, init] = authedFetch.mock.calls.find(([name]) => name === 'getCurrentAdminStatus');
+    expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(init.headers.Authorization).not.toBe(`Bearer ${STALE}`);
+    // And the claims panel reflects that same token: Admin present.
+    expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
+    expect(screen.queryByText('FAIL')).toBeNull();
   });
 
   it('reports the API refusing the token as unknown, with the refusal shown', async () => {
@@ -433,6 +459,35 @@ describe('the page', () => {
     // No token was even acquired for this path.
     expect(acquireApiToken).not.toHaveBeenCalled();
     expect(screen.getByText(/Unauthenticated request refused — HTTP 401/)).toBeTruthy();
+  });
+
+  it('a probe that throws resets its busy flag, re-enables the buttons and shows the error', async () => {
+    // A real seam, not a contrived one: an unset VITE_AZURE_FUNCTIONS_URL
+    // makes getEndpoint throw before the request is even built.
+    getEndpoint.mockImplementationOnce(() => {
+      throw new Error('VITE_AZURE_FUNCTIONS_URL is not set, so enqueueLabJob cannot be called.');
+    });
+    vi.stubGlobal('fetch', vi.fn());
+    render(<DiagnosticsPage />);
+    await identityLoaded();
+    const unauthButton = screen.getByText('Run unauthenticated probe').closest('button');
+    const copy = screen.getByText('Copy report').closest('button');
+
+    fireEvent.click(screen.getByText('Run unauthenticated probe'));
+    await waitFor(() => seen(/VITE_AZURE_FUNCTIONS_URL is not set/));
+
+    // Not stuck: the busy flag was cleared in finally, so both come back.
+    expect(unauthButton.disabled).toBe(false);
+    expect(copy.disabled).toBe(false);
+    expect(screen.queryByText(/Checks still running/)).toBeNull();
+    // Surfaced as a failed probe, and the report says the same.
+    expect(screen.getByText('FAIL')).toBeTruthy();
+    expect(screen.getByLabelText('Diagnostics report').textContent).toContain(
+      'no Authorization header: FAIL (VITE_AZURE_FUNCTIONS_URL is not set'
+    );
+    // The button is usable again: the next run goes through.
+    fireEvent.click(screen.getByText('Run unauthenticated probe'));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
 
   it('a 200 on the unauthenticated probe is a FAIL', async () => {
