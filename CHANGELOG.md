@@ -19,6 +19,105 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Thirty-three empty section pages leave the sitemap, and the counts that
+  decide it now come from every container a section page reads (#373).** Part 2
+  could speak for one section: `frameworks` reads the `content` container and
+  the manifest builder was handed that corpus. Every other section reads
+  something the builder cannot see — `blog`, `coder-corner` and `code` fall
+  back to the legacy `blogs` container when `content` has nothing for a
+  provider, which is precisely the case being declared empty, and `audio` and
+  `audio-architecture` read `podcasts` and `listen_and_learn_episodes`, which
+  are not content at all. So the counting moved into the app, where the Cosmos
+  access already is: `GET /api/public/content-manifest` returns a `sections`
+  map beside `items`, computed over all four containers under the same public
+  filter `GET /api/public/content` applies, and the builder prefers it —
+  falling back to its own frameworks-only count when the deployed revision
+  predates the field, so merging this and deploying Functions can happen in
+  either order without the five frameworks pages returning to the sitemap in
+  between. `sitemapRoutes` in the pre-render is unchanged: it never named a
+  section, so it drops the new ones the moment the counts arrive. Measured
+  against the live containers and the 2026-09-07 crawl, the sitemap goes from
+  113 URLs to 80, and all thirty-three that leave are pages the crawl calls
+  empty; nothing the crawl calls `works` is dropped. Two rules are the reason
+  a count is trusted: only a section whose page *infers* a provider from
+  titles and URLs (`blog`, `frameworks`) lets an unattributable item block its
+  zeros — the rest match a stored provider field in SQL, so such an item is
+  fetched by no page and blocking sixteen audio pages on behalf of two
+  provider-less podcast rows would be wrong — and a read that fills its window
+  returns null rather than a truncated count, because the rows past the window
+  are indistinguishable from rows that do not exist. `architecture-designs` is
+  deliberately not counted: its pages merge `staticBlueprints` hardcoded in
+  each `ArchitecturePage.jsx`, so four of the five render fine on a corpus
+  holding one architecture document and an API zero would drop working URLs.
+  Every dropped route still renders and still serves its empty state; this
+  changes what is advertised, not what exists.
+- **Every publish now checks whether another article already holds its URL,
+  and the collisions already in the corpus have a report of their own
+  (#400).** One case is deliberately left open and is named below: two
+  first-publishes racing on the same title can still both probe clean and take
+  the same bare slug. Closing it would mean suffixing every new URL with a
+  document id, which is not worth doing to a site's whole URL space for a
+  collision that is rare, recoverable and now reported. Three published
+  articles share
+  `enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio`,
+  so two of them are published with no URL at all and the third's identity
+  changes with the order Cosmos returns rows — visible in #399's diff, where
+  the body under that key moved from `7ZCmiOEIlWMg99xQHY0A` to
+  `1k5ayjbEdYdo7NzvXIWW`. None of the three was ever assigned that slug by this
+  pipeline: `processPublishContent` writes `slug` and `Slug` to the same value
+  in one patch, and on all three — and on ten of the twenty-two published
+  articles — the two differ. They arrived from Site-Main already
+  `contentStatus: published`, which takes the branch that reuses the stored
+  slug, and that branch never probed. `uniqueSlug` becomes pure `resolveSlug`
+  plus a `slugHolders` probe, keeping its shape — bare slug when nothing else
+  holds it, suffixed with the document id when something does, and a lookup
+  failure never blocking a publish — with both gaps closed: the probe now reads
+  `c.slug OR c.Slug`, because the two fields carry different values on ten of
+  the twenty-two published articles and the manifest routes on `slug || Slug`;
+  and every publish probes, a republish included, moving off a slug another
+  document holds instead of re-asserting it. A probe that throws still yields
+  the always-unique suffixed slug on a first publish and now leaves a live URL
+  untouched on a republish. What a read cannot establish — two publishers
+  racing on one title — is documented at `resolveSlug` and caught by the new
+  `scripts/report-slug-collisions.mjs`, which prints the contested URLs from the
+  committed manifest with no credential. `curatedSubpagePath` moves with the
+  slug now (`resolveCuratedSubpagePath`, found by Copilot's review): it was
+  taken from the stored value unconditionally, so an article leaving a
+  contested slug would have kept advertising the contested URL in
+  `slugPageUrl`, `publishedUrl` and `publicUrl` while `slug` said otherwise,
+  and it is normalised to a leading slash because three frontend hooks read the
+  provider out of `curatedSubpagePath.split('/')[1]`. The slug is normalised
+  once before the probe for the same reason the URL is: `resolveSlug` trimmed
+  while `slugHolders` probed the raw value, so a stored `'  shared-slug  '` —
+  migrated or hand-edited, which is this corpus — matched no holder and the
+  trimmed form was then written onto a URL another article held.
+- **The Social Hub lists Publer accounts again, and when it cannot it says
+  which of three things is wrong (#397).** Both of its call sites tested the
+  `publerProxy` response with `Array.isArray`, and the proxy answers with an
+  envelope — `{ ok, status, data }`, or `{ ok: false, code:
+  'INTEGRATION_NOT_CONFIGURED' }` when no key is seeded — which is never an
+  array. So the check was always false and a fully connected workspace rendered
+  exactly like an empty one, on the Compose tab and on Connection Settings
+  both. The reader the Platform settings page grew for the same bug (#391) has
+  moved to `frontend/src/lib/publerAccounts.js` with its unit tests, and both
+  pages import it rather than keeping two copies to drift apart. The three
+  outcomes are now distinct where they used to be one empty list: an unseeded
+  integration says so and names the Connection Settings tab, a failed call says
+  the call failed and carries the upstream message, and only a proxy that
+  answered with no accounts still reads as an empty workspace. The reader names
+  that third case explicitly, because the proxy answers HTTP 200 whatever
+  happens: Publer refusing the key comes back as a *resolved*
+  `{ ok: false, status: 401 }`, which no `.catch()` will ever see, so both
+  pages showed an authentication failure as an empty workspace until
+  `unwrapPublerAccounts` grew a `failed` outcome carrying Publer's own status.
+  The unconfigured copy no longer blames the API key either — one code covers a
+  missing `PUBLER_API_KEY` *and* a missing `PUBLER_WORKSPACE_ID`, so the page
+  repeats whichever the server named rather than guessing. Reaching
+  Connection Settings had also been throwing a `ReferenceError` before it could
+  paint — its two credential tiles called `publerKey()` and `publerWsId()`,
+  which are defined nowhere in the bundle and cannot be, because FINDING-04
+  moved both values into Key Vault. One tile replaces them and reports the only
+  thing the browser can observe: whether the proxy could use the credential.
 - **The audit stops calling a cancelled request a failure, the Azure
   architecture page names its provider, and the 2026-09-07 crawl is on the
   record (#361, #371, #373, #374).** The run against the deployed batch reads
