@@ -371,10 +371,30 @@ describe('byte ranges (#349)', () => {
     expect(res.headers['X-Content-Type-Options']).toBe('nosniff');
   });
 
-  it('still answers 304 to a matching ETag when a Range is sent', async () => {
-    const res = await get(rangeStorage(), { range: 'bytes=0-3', 'if-none-match': ETAG });
+  it('answers 304 to a matching ETag on a Range without reading any bytes', async () => {
+    // The ETag comes from blob properties, so a matching conditional never
+    // pays for a ranged download it would then discard.
+    const storage = rangeStorage();
+    const res = await get(storage, { range: 'bytes=0-3', 'if-none-match': ETAG });
     expect(res.status).toBe(304);
     expect(res.body).toBeUndefined();
+    expect(storage.headBlobForDelivery).toHaveBeenCalledTimes(1);
+    expect(storage.readBlobRangeForDelivery).not.toHaveBeenCalled();
+    expect(storage.readBlobForDelivery).not.toHaveBeenCalled();
+  });
+
+  it('reads the range once when the conditional ETag does not match', async () => {
+    const storage = rangeStorage();
+    const res = await get(storage, { range: 'bytes=0-3', 'if-none-match': '"stale"' });
+    expect(res.status).toBe(206);
+    expect(storage.headBlobForDelivery).toHaveBeenCalledTimes(1);
+    expect(storage.readBlobRangeForDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not read properties for an unconditional absolute range', async () => {
+    const storage = rangeStorage();
+    await get(storage, { range: 'bytes=0-3' });
+    expect(storage.headBlobForDelivery).not.toHaveBeenCalled();
   });
 
   it('ignores a multi-range request and serves the whole file', async () => {

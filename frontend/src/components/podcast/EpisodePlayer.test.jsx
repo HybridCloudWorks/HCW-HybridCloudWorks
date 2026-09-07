@@ -73,6 +73,17 @@ describe('EpisodePlayer', () => {
     expect(screen.getByText('2:00')).toBeInTheDocument();
   });
 
+  it('never lets the progress bar exceed the track when playback outruns the known duration', () => {
+    // durationSeconds on the document can be shorter than the real file.
+    const { container } = render(<EpisodePlayer episode={episode} meta={meta} />);
+    const audio = container.querySelector('audio');
+    audio.currentTime = 9999;
+    fireEvent.timeUpdate(audio);
+
+    expect(screen.getByTestId('episode-progress').style.width).toBe('100%');
+    expect(screen.getByRole('slider', { name: 'Seek' })).toHaveValue('540');
+  });
+
   it('asks for metadata only until play is pressed', () => {
     const { container } = render(<EpisodePlayer episode={episode} meta={meta} />);
     expect(container.querySelector('audio')).toHaveAttribute('preload', 'metadata');

@@ -119,7 +119,13 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
         <div className="relative w-full h-2 bg-card/60 rounded-full overflow-hidden mb-2">
           <div
             className={`h-full bg-gradient-to-r ${meta.progressBar} rounded-full transition-all duration-200`}
-            style={{ width: sliderMax ? `${(currentTime / sliderMax) * 100}%` : '0%' }}
+            style={{
+              // Clamped like the slider's value: a document's durationSeconds
+              // can be shorter than the real file, and the bar must not
+              // overflow its track while the last seconds play.
+              width: sliderMax ? `${(Math.min(currentTime, sliderMax) / sliderMax) * 100}%` : '0%',
+            }}
+            data-testid="episode-progress"
             aria-hidden="true"
           />
           <input

@@ -1369,6 +1369,18 @@ describe('listListenAndLearnEpisodes — the provider-wide list (#349)', () => {
     expect(params).toContainEqual({ name: '@provider', value: 'azure' });
   });
 
+  it('orders newest approval first in SQL, on one field, so the cap keeps the newest rows', async () => {
+    // Above the cap an unordered TOP returns an arbitrary subset that no
+    // in-memory sort can recover. One key only: the container declares no
+    // composite index, and a two-key ORDER BY would need one.
+    const deps = store();
+    await list(deps);
+    const query = deps.queryDocs.mock.calls[0][1];
+    expect(query).toMatch(/ORDER BY c\.approvedAt DESC\s*$/);
+    expect(query.match(/ORDER BY/g)).toHaveLength(1);
+    expect(query).not.toMatch(/ORDER BY [^,]+,/);
+  });
+
   it('projects each row to the listing allowlist and joins the certification', async () => {
     const deps = store({
       episodes: [published()],

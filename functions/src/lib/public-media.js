@@ -160,19 +160,26 @@ export function createPublicMediaHandlers({ storage }) {
 
   /** A single satisfiable-or-not byte range: 206, 416, or 304. */
   async function partial(container, blobPath, request, range) {
+    // A conditional request or a suffix needs the blob's properties before
+    // any bytes are read: the first so a matching ETag answers 304 without
+    // a ranged download it would then discard, the second because a suffix
+    // is relative to a size this route does not know yet. One properties
+    // read serves both.
+    const conditional = Boolean(request.headers?.get?.('if-none-match'));
     let offsets = range;
-    if ('suffix' in range) {
-      // A suffix is relative to a size this route does not know yet.
+    if (conditional || 'suffix' in range) {
       const blob = await storage.headBlobForDelivery(container, blobPath);
       if (!blob) return json(404, { error: 'Not found' });
-      offsets = resolveRange(range, blob.contentLength);
-      if (!offsets) return unsatisfiable(blob.contentLength);
+      if (etagMatches(request, blob.etag)) return notModified(blob.etag);
+      if ('suffix' in range) {
+        offsets = resolveRange(range, blob.contentLength);
+        if (!offsets) return unsatisfiable(blob.contentLength);
+      }
     }
 
     const chunk = await storage.readBlobRangeForDelivery(container, blobPath, offsets);
     if (!chunk) return json(404, { error: 'Not found' });
     if (chunk.unsatisfiable) return unsatisfiable(chunk.totalLength);
-    if (etagMatches(request, chunk.etag)) return notModified(chunk.etag);
 
     return {
       status: 206,

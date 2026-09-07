@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { routes } from '@/lib/routeFactory';
 import ProviderLandingTemplate from '@/components/shared/ProviderLandingTemplate';
 import HeroImageCarousel from '@/components/landing/HeroImageCarousel';
-import usePodcastData from '@/hooks/usePodcastData';
+import useAudioEpisodes from '@/hooks/useAudioEpisodes';
 
 // Generated art (#371): scripts/generate-brand-art.mjs draws this set; replace any
 // file one-for-one to swap in real artwork. scripts/hero-assets-exist.test.js
@@ -144,14 +144,15 @@ function FrameworkCards() {
 }
 
 function PodcastList() {
-  const { episodes } = usePodcastData('gcp');
+  // Both audio sources, newest first (#349); the card shows the latest three.
+  const { episodes } = useAudioEpisodes('gcp');
   if (!episodes || episodes.length === 0) {
     return <p className="text-sm text-slate-500 py-2">No episodes available yet.</p>;
   }
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
       {episodes.slice(0, 3).map((ep, i) => {
-        const mins = ep.duration ? Math.floor(Number(ep.duration) / 60) : null;
+        const mins = ep.durationSeconds ? Math.floor(ep.durationSeconds / 60) : null;
         return (
           <Link
             key={ep.id}

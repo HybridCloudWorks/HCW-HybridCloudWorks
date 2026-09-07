@@ -1074,10 +1074,18 @@ export function createPublicReadHandlers({ store }) {
           .toLowerCase();
         if (!provider) return json(400, { error: 'platform is required' });
 
+        // ORDER BY in SQL so that, above the cap, the rows kept are the newest
+        // rather than an arbitrary subset the in-memory sort could not
+        // recover. One field, not two: the container declares no composite
+        // index (infra/cosmos-containers.json), which a two-key ORDER BY
+        // needs. `approvedAt` is safe to order on where the header's rule 2
+        // forbids the content aliases: setEpisodeStatus stamps it in the same
+        // write that sets status to published, so no published row lacks it.
+        // The in-memory sort below still applies the generatedAt fallback.
         const [episodes, sets] = await Promise.all([
           store.queryDocs(
             LISTEN_AND_LEARN_EPISODE_CONTAINER,
-            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} * FROM c WHERE c.provider = @provider AND c.status = @status`,
+            `SELECT TOP ${LISTEN_AND_LEARN_MAX_LISTED} * FROM c WHERE c.provider = @provider AND c.status = @status ORDER BY c.approvedAt DESC`,
             [
               { name: '@provider', value: provider },
               { name: '@status', value: 'published' },
