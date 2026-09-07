@@ -53,6 +53,47 @@ export function getPrePublishFailures(item) {
   return failures;
 }
 
+/**
+ * The row fields a set-slug response justifies changing — ONLY the ones it
+ * actually carried (#400).
+ *
+ * This used to spread every field with `|| ''`, so a response that omitted the
+ * URLs wrote empty strings over the ones the row already had: the row lost its
+ * `curatedSubpagePath`, `getPublicUrl` fell through to the client-derived
+ * `getContentPublicPath`, and "View Live" either vanished or pointed at a URL
+ * built by rules the server does not use. That is the same mistake as the
+ * server-side bug this PR fixes — reacting to an ABSENT value as though it
+ * were a NEW value — so it is fixed the same way: an absent field means "no
+ * information", and the row keeps what it had.
+ *
+ * It matters most across a deploy: a Functions app that predates the
+ * no-path refusal can still answer `changed: true` with no URL fields at all,
+ * and that is precisely the response that must not blank a live row.
+ *
+ * A refusal never reaches here — the panel only calls this on a `changed`
+ * response, and a refusal throws — but an empty override is returned rather
+ * than assumed, so nothing repaints if it ever does.
+ */
+export function slugRowOverride(result = {}) {
+  const override = {};
+  const slug = typeof result.slug === 'string' ? result.slug.trim() : '';
+  if (slug) {
+    override.slug = slug;
+    override.Slug = slug;
+  }
+  const path =
+    typeof result.curatedSubpagePath === 'string' ? result.curatedSubpagePath.trim() : '';
+  if (path) override.curatedSubpagePath = path;
+
+  const url = typeof result.publicUrl === 'string' ? result.publicUrl.trim() : '';
+  if (url) {
+    override.slugPageUrl = url;
+    override.publishedUrl = url;
+    override.publicUrl = url;
+  }
+  return override;
+}
+
 function getReviewPath(contentId) {
   return ADMIN_ROUTES.REVIEW.replace(':id', contentId);
 }
@@ -449,16 +490,14 @@ export default function PublishedPage() {
     slugOverrides[item.id] ? { ...item, ...slugOverrides[item.id] } : item;
 
   const applySlugResult = (contentId, result) => {
+    const override = slugRowOverride(result);
+    if (Object.keys(override).length === 0) return;
+    // Merged onto whatever this row already carried, not substituted for it —
+    // see slugRowOverride. A second apply that reports fewer fields than the
+    // first must not drop the first's.
     setSlugOverrides((prev) => ({
       ...prev,
-      [contentId]: {
-        slug: result.slug,
-        Slug: result.slug,
-        curatedSubpagePath: result.curatedSubpagePath || '',
-        slugPageUrl: result.publicUrl || '',
-        publishedUrl: result.publicUrl || '',
-        publicUrl: result.publicUrl || '',
-      },
+      [contentId]: { ...(prev[contentId] || {}), ...override },
     }));
   };
 
