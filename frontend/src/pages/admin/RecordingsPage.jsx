@@ -793,10 +793,13 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                       ~/.plaud/tokens-mcp.json
                     </code>
                     . Copy the <code>access_token</code> and the <code>refresh_token</code>. Paste
-                    BOTH — the access token connects the Library and lasts about a day; the refresh
-                    token is what lets the site rotate the pair every 12 hours. An access token
-                    pasted on its own works until it expires and then stops, with nothing able to
-                    renew it.
+                    both the first time — the access token connects the Library and lasts about a
+                    day; the refresh token is what lets the site rotate the pair every 12 hours. An
+                    access token stored on its own works until it expires and then stops, with
+                    nothing able to renew it. Reconnecting later, you may leave the refresh field
+                    blank to keep the one already stored; fill it whenever you have just
+                    re-authorized, because that issues a new refresh token and the stored one stops
+                    working.
                     <br />
                     <br />
                     To print them, in PowerShell:
@@ -879,8 +882,8 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
         <p>
           <strong>Auth:</strong> OAuth — the access token lasts about a day, the refresh token about
           a week, and each refresh returns a new pair with a fresh week. With both stored, the
-          12-hour `refreshPlaudToken` timer keeps the connection alive indefinitely. Plaud
-          Embedded&apos;s client id and secret are a different product and are not used here.
+          12-hour <code>refreshPlaudToken</code> timer keeps the connection alive indefinitely.
+          Plaud Embedded&apos;s client id and secret are a different product and are not used here.
         </p>
         <a
           href="https://docs.plaud.ai/plaud-mcp-cli/mcp"
