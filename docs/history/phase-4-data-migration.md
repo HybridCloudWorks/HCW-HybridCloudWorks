@@ -101,7 +101,8 @@ Not in this phase.
 
 ### D6. Storage — manifest-driven, faithful, no URL rewriting
 
-[scripts/lib/storage-manifest.mjs](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/scripts/lib/storage-manifest.mjs) maps each GCS top-level
+`scripts/lib/storage-manifest.mjs` — retired with the rest of the migration surface in commit
+`59e471b0`, so the link that was here returned 404; de-linked 2026-09-07 — maps each GCS top-level
 prefix to one of the five Terraform blob containers. `covers/`, `blogs/`, `certifications/`,
 `speakerevents/` → same-named container, prefix stripped; `database/{certifications,blogs,speakerevents}/`
 → the family's container under `database/`; `image-gallery/`, `character/`, `listen-and-learn/`,

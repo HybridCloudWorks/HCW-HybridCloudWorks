@@ -4,6 +4,22 @@
 **Decision date:** 2026-08-28
 **Owners:** Workload owner
 
+> **Status note, 2026-09-07 — this record says `Proposed`, and the thing is
+> built, deployed and armed.** The [decisions index](../decisions/index.md)
+> defines `Proposed` as "under review and **not authorized for
+> implementation**", so the register currently contradicts the estate. The
+> evidence that it is live: `availability_probe_alert_enabled` was applied on
+> **2026-09-01** when T-519 closed, `alert-api-reachability-prod-cus` runs in
+> `rg-web-site-prod-cus`, and it was armed only after a full 30-minute window
+> held 6 healthy rows — recorded in
+> [Availability probe](../runbooks/availability-probe.md) and in
+> [Alerting and support](../runbooks/alerting-and-support.md).
+>
+> **The status is deliberately left alone.** Moving an ADR from `Proposed` to
+> `Accepted` is a ratification, which belongs to the architecture owner and
+> not to a documentation pass. This note exists so that nobody reads
+> `Proposed` and concludes the probe is unbuilt in the meantime.
+
 ## Context
 
 [ADR 0022](../decisions/0022-alerting-fabric.md) accepted, as a named cost, that reachability —

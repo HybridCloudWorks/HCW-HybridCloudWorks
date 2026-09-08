@@ -1,8 +1,22 @@
 # Resource Validation Report — 2026-08-18
 
-> **Superseded in part — annotated 2026-08-25.** This is a point-in-time record
-> and is kept as written. Five of its conclusions no longer hold, and one of
-> them was wrong when it was written:
+> **Superseded in part — annotated 2026-08-25, extended 2026-09-07.** This is a
+> point-in-time record and is kept as written. Six of its conclusions no longer
+> hold, and one of them was wrong when it was written:
+>
+> - **§1's DNS reading is superseded by the topology, not just by the values**
+>   (added 2026-09-07). §1 records the apex as *Cloudflare-proxied* and `www.`
+>   and `api-azure.` as **NXDOMAIN**. All three answers have changed, and the
+>   first is the one that misleads: the apex resolves to **Azure** and is
+>   **not** proxied, `www` is a CNAME into `azurestaticapps.net` and is not
+>   proxied, and `api-azure` exists and is **the one proxied hostname**. The
+>   split is deliberate — a Static Web App root domain validates against a
+>   token Azure reissues, and a proxied `docs` record would stall GitHub Pages
+>   certificate issuance — so an apex *behind* the proxy would now be the
+>   finding. [Edge and DNS verification](../runbooks/edge-dns-verification.md)
+>   is the current reference and carries the measured 2026-09-07 run; read
+>   §1 below as the August reading. Note this also retires §1's inference that
+>   the `api-azure` CNAME was "not applied or not resolving": it resolves.
 >
 > - **The addendum's "T-505 observability layer — Applied" verdict is wrong
 >   about alert rules.** The action group, diagnostic settings, the 0.25 GB/day

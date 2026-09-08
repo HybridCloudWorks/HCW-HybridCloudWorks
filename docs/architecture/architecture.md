@@ -1,6 +1,58 @@
 # HybridCloudWorks Azure Target Architecture
 
-**Status:** Draft for architecture approval
+> **Superseded in part — annotated 2026-09-07.** This is the **pre-migration
+> target** design, written before the platform was built, and it is kept as
+> written: it is the only record of what was intended, and several ADRs are
+> only legible next to it. It is **not** a description of the running system.
+> Five of its statements are now false, and a reader treating this page as
+> current would act on every one of them. The built estate is described by the
+> [ADR register](../decisions/index.md), the
+> [deployment runbook](../runbooks/deployment-runbook.md) and
+> [`infra/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/infra).
+>
+> - **"Three Functions Flex Consumption applications" (§4.2) — superseded.**
+>   One app runs everything. `infra/functionapp.tf` declares a single
+>   `azurerm_function_app_flex_consumption`, and
+>   [ADR 0019](../decisions/0019-single-function-app.md) ratified that boundary,
+>   superseding [ADR 0004](../decisions/0004-functions-boundaries.md). Least
+>   privilege is enforced by contract — per-route guards, per-caller
+>   server-side constraints, per-timer feature flags — not by process
+>   separation.
+> - **Vike (§2, §3 diagram, §4.1) was never adopted.** The frontend is React
+>   and Vite; `frontend/package.json` has no Vike dependency at all. Pre-rendering
+>   is `frontend/scripts/prerender.mjs`, which renders every route in its
+>   manifest through the real application and fails the build on a route that
+>   throws or comes back shell-sized.
+> - **"Static Web Apps Standard" (§4.1) is now Free.** Moved on 2026-09-05
+>   (owner decision, #341; `sku_tier = "Free"` in `infra/frontend.tf`).
+>   Everything this estate uses is in the Free plan, and the workload's one
+>   fixed monthly line went with it — see [Cost analysis](../architecture/cost-analysis.md).
+> - **Azure OpenAI (§3 diagram, §5, §6, §11) does not exist.** The account and
+>   its resource group were retired on 2026-08-19
+>   ([Naming convention](../standards/naming-convention.md)); the subscription
+>   holds zero model quota. Provider availability is decided at runtime by key
+>   presence in Key Vault (`functions/src/lib/ai/router.js`), so every mention
+>   of model capacity, content filters, TPM or a monthly model allocation
+>   describes a resource that was never provisioned.
+>   [ADR 0013](../decisions/0013-ai-provider-strategy.md) still records the
+>   original decision and has not been formally superseded — see the note on
+>   that page.
+> - **No private endpoint exists (§4.4).** `grep private_endpoint infra/*.tf`
+>   returns nothing. What was built is service endpoints on the Functions
+>   integration subnet, VNet rules on Cosmos, Key Vault and both storage
+>   accounts, and default-`Deny` firewalls.
+>   [ADR 0008](../decisions/0008-selective-private-link.md) remains **Accepted
+>   and unimplemented**, which is an open architecture question rather than a
+>   documentation one.
+>
+> The apex/`www`/`api-azure` DNS split this page assumes is also not what runs;
+> [Edge and DNS verification](../runbooks/edge-dns-verification.md) is the
+> current reference.
+
+**Status:** Draft for architecture approval — **superseded in part; see the
+annotation above.** Plan v0.1 was replaced by the as-built v0.2 in
+[ADR 0018](../decisions/0018-as-built-plan-v02.md), which dispositioned every
+deviation.
 
 **Decision scope:** Production target state and migration boundaries
 

@@ -40,6 +40,27 @@ architecture question rather than a cost one — the cost consequence is simply
 that this line is zero — and it is left for the architecture owner rather than
 dispositioned here.
 
+## Corrected 2026-09-07
+
+Two things moved after the 2026-08-24 reading below was taken. The reading
+itself is left exactly as measured — it is the only baseline this estate has —
+but its two headline conclusions no longer describe the platform:
+
+| What this page concluded | What changed |
+| --- | --- |
+| "One fixed USD 9 line" — Static Web Apps Standard, billing whether or not anyone visits | **The Static Web App moved to the Free plan on 2026-09-05** (owner decision, #341; `sku_tier = "Free"` in `infra/frontend.tf`). That line is now **USD 0**, and the workload's one fixed cost is gone. Everything the estate uses is in Free; `infra/frontend.tf` lists what Standard bought that it did not. Microsoft documents the move in either direction, so a third custom domain or a bandwidth overage is the signal to go back |
+| "Cloudflare's Bot Fight Mode is what blocks Azure's availability agents, which is why this platform has no reachability alert" | **The platform has had a reachability alert since 2026-09-01** (T-519 closed). It is not the Azure availability test — that is still uncreated, and Bot Fight Mode is still why — but a Cloudflare Worker probe ([ADR 0024](../decisions/0024-edge-availability-probe.md)) feeding `alert-api-reachability-prod-cus`. The *cost* consequence is unchanged and is why the sentence survived this long: the Worker is free and the 14,400-execution web test is still unarmed |
+
+The Cosmos figures below are later than the 2026-08-24 reading and are not
+affected — they were measured on 2026-09-06 against the live account.
+
+**What this does to the total.** The estate's whole fixed cost was the USD 9
+Static Web Apps line; removing it leaves telemetry as the only line that is not
+a rounding error. The shape stated at the end of the next section — "one fixed
+USD 9 line, one telemetry line of roughly USD 20, and everything else a
+rounding error" — is now **one telemetry line of roughly USD 20, and everything
+else a rounding error**. The measurement plan's first item settles the rest.
+
 ## What the estate actually costs
 
 Cost Management, month-to-date, read 2026-08-24. Application subscription:
@@ -87,7 +108,7 @@ telemetry line of roughly USD 20, and everything else a rounding error.
 
 | Cost area | Control in code | Where |
 | --- | --- | --- |
-| Static Web Apps | Standard plan, one production site; preview environments stay ephemeral | `azurerm_static_web_app.hcw` |
+| Static Web Apps | **Free plan since 2026-09-05** (#341), one production site; preview environments stay ephemeral, and Free allows 3. Everything this estate uses is in Free — 2 custom domains with managed SSL (the apex and `www` are exactly 2), global distribution, SPA routing, 100 GB bandwidth. What Standard bought and this estate did not use: the 99.95% SLA, bandwidth overage billing, `allowedIpRanges`, bring-your-own-Functions, private endpoints | `azurerm_static_web_app.hcw`, `infra/frontend.tf` |
 | Functions, Flex Consumption | **Always-ready deliberately unset (= 0)** — one always-ready 2048 MB instance is roughly $20/month whether or not anything runs. `maximum_instance_count = 20` bounds a traffic spike on the unauthenticated comparison endpoint | `infra/main.tf`, the Scale block |
 | Cosmos DB | Serverless capability, no provisioned throughput block anywhere, and a per-container `indexing_policy` with explicit included/excluded paths — indexing is RU spend on every write | `azurerm_cosmosdb_account.hcw`, `azurerm_cosmosdb_sql_container.hcw` |
 | Blob storage | Lifecycle deletes scraped article images after 90 days. Versioning on the content account — declared, not yet applied — is bounded by a 30-day non-current-version expiry in the same change, which is what stops versioning becoming an unbounded bill | `azurerm_storage_management_policy.cleanup` |
@@ -98,9 +119,17 @@ telemetry line of roughly USD 20, and everything else a rounding error.
 
 ## What the alert fabric costs
 
-`fix/go-live-remediation` adds the first alert rules this platform has ever had.
-None of them is applied yet, so this is what the fabric *will* cost. The units,
-from the Azure Monitor pricing page:
+The first alert rules this platform ever had arrived on the retired
+`fix/go-live-remediation` branch and are now on `main` in
+`infra/observability.tf`. This section was written as what the fabric *will*
+cost and is left in that form, because the unit model below is what makes it
+re-computable; the rules are no longer hypothetical, though — at least
+`alert-api-reachability-prod-cus` has been live since 2026-09-01, and the
+`infra/observability.tf` inventory has grown past the five costed here to
+include the two Cosmos-export rules
+([ADR 0028](../decisions/0028-cosmos-out-of-account-export.md)). Re-count the
+rules before treating the total as current. The units, from the Azure Monitor
+pricing page:
 
 - **Metric alert rules** bill per monitored time series per month. Three are
   declared (`function_http_5xx`, `function_response_time`, `cosmos_throttled`);
@@ -159,8 +188,11 @@ entire workload ceiling. Cloudflare currently offers Free and Pro plans at a
 substantially lower fixed cost, so it remains the approved edge (ADR 0002).
 
 The cost of that choice is not zero, and it is not financial: Cloudflare's Bot
-Fight Mode is what blocks Azure's availability agents, which is why this
-platform has no reachability alert. That trade is recorded in ADR 0022.
+Fight Mode blocks Azure's availability agents, so the Azure availability test
+and its alert stay uncreated. That trade is recorded in ADR 0022. It no longer
+means the platform is unwatched — [ADR 0024](../decisions/0024-edge-availability-probe.md)
+routes around it with a Cloudflare Worker, armed 2026-09-01 — and the route it
+took happens to be the free one, so the trade costs nothing here either.
 
 References:
 
@@ -267,9 +299,10 @@ The first baseline now exists, so this is maintenance rather than discovery:
 6. Treat a reduction as realized savings only after billed cost falls without
    violating latency, error, recovery, or security targets.
 
-No commitment purchase is appropriate. Nothing here has a reservable shape:
-Static Web Apps Standard has no reservation, serverless Cosmos has no
-throughput to reserve, and Flex Consumption bills on execution.
+No commitment purchase is appropriate, and the Free-plan move of 2026-09-05
+only strengthens it. Nothing here has a reservable shape: Static Web Apps has
+no reservation on either plan and now bills nothing at all, serverless Cosmos
+has no throughput to reserve, and Flex Consumption bills on execution.
 
 ## FINOPS_ASSESSMENT
 

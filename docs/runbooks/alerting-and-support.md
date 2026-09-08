@@ -4,11 +4,53 @@
 and — stated as plainly as the coverage itself — what nothing watches.
 
 **State:** the rules described here are declared in `infra/observability.tf` on
-`fix/go-live-remediation` and **have not been applied**. Until that apply runs,
-`az monitor metrics alert list` and `az monitor scheduled-query list` return
-empty in both subscriptions, which is what the Go-Live readiness review found on
-2026-08-24. Read every "fires when" below as a description of the configuration,
-not of the live tenant.
+`main`, and the estate is no longer alert-less.
+
+> **Corrected 2026-09-07.** This block used to read "declared on
+> `fix/go-live-remediation` and **have not been applied**", and told the reader
+> to treat every "fires when" below as configuration rather than as the live
+> tenant. Both halves are now wrong, and in the direction that matters: an
+> operator was being told nothing was watching while rules were firing.
+>
+> - **The branch is gone.** `fix/go-live-remediation` no longer exists on
+>   `origin`; every rule it declared is on `main` in `infra/observability.tf`.
+> - **At least one rule is demonstrably live.**
+>   `alert-api-reachability-prod-cus` was armed on 2026-09-01 when T-519
+>   closed — this page says so itself, forty lines below — and
+>   [Availability probe](../runbooks/availability-probe.md) records the same
+>   arming. `alert-cosmos-export-daily` and `alert-cosmos-export-full` are
+>   bound to `cosmos_export_enabled` ([ADR 0028](../decisions/0028-cosmos-out-of-account-export.md)).
+> - **What is still not settled here is which rules the last apply carried.**
+>   That is a live-tenant question this page cannot answer from the
+>   repository. Settle it with the command below before relying on any single
+>   "fires when", rather than assuming either way.
+
+The Go-Live readiness review of 2026-08-24 found `az monitor metrics alert
+list` and `az monitor scheduled-query list` empty in both subscriptions. That
+reading is what the paragraph above described, and it is now nine applies old.
+Re-read it rather than trusting a date:
+
+```powershell
+az monitor scheduled-query list -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Select-Object name, enabled
+```
+
+```powershell
+az monitor metrics alert list -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Select-Object name, enabled
+```
+
+Those two cover every rule but one. **`logs_daily_cap` is not in either**: it
+watches Log Analytics ingestion, so it is declared in
+`azurerm_resource_group.platform_mgmt` — a different resource group **and a
+different subscription**, which is why it needs its own read:
+
+```powershell
+az monitor scheduled-query list -g rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus -o json | ConvertFrom-Json | Select-Object name, enabled
+```
+
+A rule named in this page and absent from the list that should hold it has not
+been applied; a rule present with `enabled: True` is watching the live tenant
+now. Looking for `logs_daily_cap` in `rg-web-site-prod-cus` and concluding it
+was never applied is the one easy mistake here.
 
 **Authority:** this page does not authorize anything. Tuning a threshold is a
 normal pull request; arming the availability test or the timers is an owner
@@ -20,7 +62,13 @@ Five rules is not the same as coverage. Three things make this fabric less than
 an inventory of it suggests, and all three are worth knowing before the first
 one fires.
 
-### Reachability is not covered
+### Reachability is covered, but not by the Azure test
+
+This heading read *Reachability is not covered* until 2026-09-07. It was
+written before [ADR 0024](../decisions/0024-edge-availability-probe.md) and
+outlived the gap it named: the section's own body has recorded the Worker probe
+as armed since 2026-09-01. The Azure availability test is still not created,
+which is the part that remains true and is why the section is kept.
 
 `azurerm_monitor_metric_alert.api_availability` carries `count = 0`. The
 availability test it watches is created with `enabled = false`, and the alert is
@@ -107,7 +155,7 @@ tables, and `Usage` is not billable.
 | `alert-cosmos-throttle` | 2 | More than 10 Cosmos responses with `StatusCode = 429` in 15 min | Retries are no longer absorbing throttling | Cosmos → **Insights** → normalized RU consumption, to find the container and partition key range |
 | `alert-app-exceptions` | 1 | More than 5 `AppExceptions` rows in 15 min | Handlers are throwing | The `AppExceptions` table, grouped by `ProblemId` and `OperationName` |
 | `alert-logs-capacity` | 2 | Billable ingestion passes 80% of the daily cap since the 08:00 UTC reset | Telemetry is about to stop for the day, taking the two log-based signals with it | The `Usage` table, grouped by `DataType`, over the same window |
-| ~~`alert-api-availability`~~ | 1 | **Not created** (`count = 0`) | — | See *[Reachability is not covered](#reachability-is-not-covered)* |
+| ~~`alert-api-availability`~~ | 1 | **Not created** (`count = 0`) | — | See *[Reachability is covered, but not by the Azure test](#reachability-is-covered-but-not-by-the-azure-test)* |
 
 ### Notes that change what you do
 
@@ -233,11 +281,31 @@ has.
 
 ## Break-glass: storage after shared-key authentication is disabled
 
-`fix/go-live-remediation` sets `shared_access_key_enabled = false` on both
-production storage accounts, `stsiteprodcus01` (content and media) and
-`stsitefuncprodcus01` (Functions host state and deployment packages). **That
-apply has not run** — key access reads `true` on both accounts today — so what
-follows describes the estate from the apply onward.
+`shared_access_key_enabled = false` on both production storage accounts,
+`stsiteprodcus01` (content and media) and `stsitefuncprodcus01` (Functions host
+state and deployment packages), comes from `storage_shared_access_key_enabled`,
+which **defaults to `false` on `main`** (`infra/variables.tf`,
+`infra/storage.tf`).
+
+> **Corrected 2026-09-07.** This paragraph credited the retired
+> `fix/go-live-remediation` branch and asserted "**That apply has not run** —
+> key access reads `true` on both accounts today". The branch is gone and the
+> setting is on `main`, so the claim's basis no longer exists. Whether the
+> apply has landed on the live accounts is a tenant read, not something this
+> page can assert either way — take it from the accounts themselves before
+> assuming you still have key access:
+>
+> ```powershell
+> az storage account list -o json | ConvertFrom-Json | Where-Object { $_.name -in 'stsiteprodcus01','stsitefuncprodcus01' } | Select-Object name, resourceGroup, allowSharedKeyAccess
+> ```
+>
+> `allowSharedKeyAccess: False` on both rows means everything below already
+> applies. The two accounts sit in **different** resource groups —
+> `stsiteprodcus01` in `rg-stor-site-prod-cus` and `stsitefuncprodcus01` in
+> `rg-web-site-prod-cus` — which is why this reads the subscription and filters
+> rather than passing one `-g`.
+
+What follows describes the estate from that apply onward.
 
 Nothing in the platform reads an account key. The Function App uses its managed
 identity, the deploy workflow uploads with the deploy identity's Entra token,
