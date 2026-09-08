@@ -54,14 +54,18 @@ export const ARTICLE_DISCLAIMER =
   'the two differ, trust the article.';
 
 /**
- * Body fields, in the order the detail consumers resolve them.
+ * Body fields, published first.
  *
- * Not a guess: `content || Content || postContent` is the order
- * `blogUtils.normalizeContentFields` applies in the browser, and `blogDraft`
- * follows it because `public-reads.js` counts it among the heavy body fields a
- * detail read returns. The order matters — a document carrying both a
+ * The first three and their order are `blogUtils.normalizeContentFields`
+ * (`content || Content || postContent`), which is what the browser's detail
+ * consumers read. `blogDraft` is NOT part of that normalizer — it is appended
+ * here, last and deliberately, because `public-reads.js` counts it among the
+ * heavy body fields a detail read returns, so it is a body this repository
+ * stores even though the normalizer ignores it.
+ *
+ * Last is the whole point of including it: a document carrying both a
  * published `content` and a stale `blogDraft` must generate from the published
- * one.
+ * one, and a document carrying only a draft is better scripted than refused.
  */
 export const BODY_FIELDS = ['content', 'Content', 'postContent', 'blogDraft'];
 
@@ -84,11 +88,32 @@ export function resolveArticleSlug(doc) {
  * and the exact one it is least likely to notice.
  */
 export function resolveArticleBody(doc) {
+  // Non-strings are skipped rather than coerced. `String({})` is
+  // "[object Object]" — non-empty, so it would pass every check below and
+  // reach the model as a prompt about nothing, which is precisely the outcome
+  // this function exists to prevent. The migrated content documents are not
+  // uniformly typed, so this is a real shape, not a hypothetical one.
+  const mistyped = [];
   for (const field of BODY_FIELDS) {
-    const value = String(doc?.[field] || '').trim();
+    const raw = doc?.[field];
+    if (raw === undefined || raw === null || raw === '') continue;
+    if (typeof raw !== 'string') {
+      mistyped.push(`${field} is ${Array.isArray(raw) ? 'an array' : typeof raw}`);
+      continue;
+    }
+    const value = raw.trim();
     if (value) return value;
   }
+
   const id = doc?.id || resolveArticleSlug(doc) || '(no id)';
+  // Naming the mistyped field matters: "has no body" would send someone
+  // looking for missing content when the content is present and the wrong
+  // shape, which is a different fix in a different place.
+  if (mistyped.length) {
+    throw new ScriptError(
+      `Article ${id} has no usable body — ${mistyped.join(', ')}; nothing to script from`
+    );
+  }
   throw new ScriptError(
     `Article ${id} has no body in any of ${BODY_FIELDS.join(', ')}; nothing to script from`
   );
@@ -120,6 +145,11 @@ function stripHtmlTags(value) {
  *
  * @returns {{ text: string, codeBlocks: object[], tables: object[] }}
  */
+/** "1 line", "3 lines" — this text reaches the model, so it reads as English. */
+function lineCount(n) {
+  return `${n} line${n === 1 ? '' : 's'}`;
+}
+
 export function prepareArticleForSpeech(body) {
   const codeBlocks = [];
   const tables = [];
@@ -131,7 +161,7 @@ export function prepareArticleForSpeech(body) {
     const lines = code.replace(/\s+$/, '').split(/\r?\n/).length;
     codeBlocks.push({ index: codeBlocks.length + 1, language: String(lang || '').trim(), lines });
     const label = String(lang || '').trim() || 'code';
-    return `\n[code block ${codeBlocks.length}: ${label}, ${lines} lines]\n`;
+    return `\n[code block ${codeBlocks.length}: ${label}, ${lineCount(lines)}]\n`;
   });
 
   // 2. HTML, before the inline rules — a tag can wrap a link or emphasis.
@@ -202,7 +232,7 @@ function renderSetAside({ codeBlocks, tables }) {
   const lines = [];
   for (const block of codeBlocks) {
     lines.push(
-      `- [code block ${block.index}] ${block.language || 'code'}, ${block.lines} lines — refer to it, never read it out.`
+      `- [code block ${block.index}] ${block.language || 'code'}, ${lineCount(block.lines)} — refer to it, never read it out.`
     );
   }
   for (const table of tables) {

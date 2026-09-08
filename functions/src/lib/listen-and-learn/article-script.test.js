@@ -52,6 +52,27 @@ describe('resolveArticleBody', () => {
       /art-7 has no body/
     );
   });
+
+  it('refuses a non-string body instead of coercing it', () => {
+    // String({}) is "[object Object]" — non-empty, so a coercing check passes
+    // it straight through to the model as a prompt about nothing. The migrated
+    // documents are not uniformly typed, so this is a real shape.
+    expect(() => resolveArticleBody({ id: 'art-8', content: { html: '<p>hi</p>' } })).toThrow(
+      /content is object/
+    );
+  });
+
+  it('says the body is mistyped rather than missing, which is a different fix', () => {
+    expect(() => resolveArticleBody({ id: 'art-9', content: ['a', 'b'] })).toThrow(
+      /no usable body — content is an array/
+    );
+  });
+
+  it('steps over a mistyped field to a usable one behind it', () => {
+    expect(resolveArticleBody({ content: { nope: 1 }, postContent: 'real text' })).toBe(
+      'real text'
+    );
+  });
 });
 
 describe('prepareArticleForSpeech', () => {
@@ -132,8 +153,19 @@ describe('buildArticlePrompt', () => {
     const prepared = prepareArticleForSpeech('Intro.\n\n```sql\nSELECT 1\n```\n');
     const prompt = buildArticlePrompt({ article: { title: 'Backends' }, prepared });
     expect(prompt).toContain(ARTICLE_DISCLAIMER);
-    expect(prompt).toContain('[code block 1] sql, 1 lines');
+    expect(prompt).toContain('[code block 1] sql, 1 line');
     expect(prompt).toContain('never read it out');
+  });
+
+  it('counts lines as English, since the marker is model-facing text', () => {
+    // "1 lines" in a prompt is a small thing that the model reads and may
+    // echo. Both places that render a line count go through one helper, so
+    // they cannot disagree.
+    const one = prepareArticleForSpeech('```sql\nSELECT 1\n```\n');
+    const many = prepareArticleForSpeech('```sql\nSELECT 1\nFROM t\n```\n');
+    expect(one.text).toContain('1 line]');
+    expect(many.text).toContain('2 lines]');
+    expect(buildArticlePrompt({ article: { title: 'T' }, prepared: many })).toContain('2 lines');
   });
 
   it('says there is nothing set aside when the article is all prose', () => {
