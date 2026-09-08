@@ -35,14 +35,17 @@ This project has not cut a tagged release; entries are grouped under
   somebody to notice the thing it exists to notice. A workflow added tomorrow
   is covered tomorrow.
 
-  **Three verdicts, kept apart.** `healthy`, `broken`, and `unproven` — the
-  last covering "never ran", "still running", and "every run was cancelled".
-  Counting a cancellation as a failure would have flagged
-  `deploy-azure-frontend.yml`, which was used successfully three times the
-  same morning. Staleness is part of the failure condition, not a separate
-  finding: a workflow that failed twice this afternoon is somebody mid-debug,
-  and a detector that fires on ordinary work stops being read — which is the
-  failure mode that allowed the three weeks.
+  **Three verdicts, kept apart.** `healthy`, `broken`, and `unproven`, the
+  last being "this tool is making no claim" and reached three ways: nothing
+  finished to read (never ran, or still running); everything that finished
+  stopped short of a verdict (cancelled, neutral, `action_required`, skipped,
+  stale); or a real failure still inside the staleness window, which is
+  somebody mid-debug rather than an abandonment. Counting a cancellation as a
+  failure would have flagged `deploy-azure-frontend.yml`, which was used
+  successfully three times the same morning. Staleness is part of the failure
+  condition rather than a separate finding, because a detector that fires on
+  ordinary work stops being read — the failure mode that allowed the three
+  weeks.
 
   **`broken` means "nothing succeeded and something failed", not "every run
   failed", and the message says which.** Review asked for the stricter rule,

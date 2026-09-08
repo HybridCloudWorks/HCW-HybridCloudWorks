@@ -22,10 +22,17 @@
  * the exit-code split in `tfc-plan-check.yml`):
  *
  *   healthy    a success in the sampled window.
- *   unproven   no run to read, or too few to conclude from, or the only runs
- *              were cancelled. This is NOT a pass and NOT a fail — it is "this
- *              instrument had nothing to measure". A workflow dispatched once
- *              and cancelled says nothing about whether it works.
+ *   unproven   this tool is making no claim, reached three ways: nothing
+ *              finished to read (never ran, or still running); everything
+ *              that finished stopped short of a verdict (cancelled, neutral,
+ *              action_required, skipped, stale); or a real failure that is
+ *              still inside the staleness window, which is somebody mid-debug
+ *              rather than an abandonment. NOT a pass and NOT a fail in any
+ *              of the three. A workflow dispatched once and cancelled says
+ *              nothing about whether it works; one that failed an hour ago
+ *              says nothing about whether anybody is coming back. Widened
+ *              from "the instrument had nothing to measure" in review, which
+ *              described the first two ways in and not the third.
  *   broken     nothing in the sample succeeded, at least one run failed, AND
  *              the newest run of any kind is older than the staleness
  *              threshold. All three are required. A workflow that failed twice
