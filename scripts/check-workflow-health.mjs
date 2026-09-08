@@ -115,14 +115,21 @@ export function assessWorkflow(workflow, { now, staleDays }) {
     };
   }
 
-  const newestFailure = failures.reduce((a, b) => (a.created_at > b.created_at ? a : b));
-  const ageDays = (now.getTime() - Date.parse(newestFailure.created_at)) / 86_400_000;
+  // AGE COMES FROM THE NEWEST FINISHED RUN, NOT THE NEWEST FAILURE, and the
+  // difference is the difference between "abandoned" and "someone is on it".
+  // A workflow that failed 30 days ago and had a run cancelled yesterday has
+  // been touched yesterday; dating it from the failure would call that
+  // abandoned and say "nobody has been back" about a workflow somebody was
+  // back at. The verdict's own words have to be true. Raised in review on
+  // PR #426.
+  const newestRun = finished.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+  const ageDays = (now.getTime() - Date.parse(newestRun.created_at)) / 86_400_000;
 
   if (!Number.isFinite(ageDays)) {
     return {
       path: workflow.path,
       verdict: 'unproven',
-      why: `unreadable timestamp ${newestFailure.created_at}`,
+      why: `unreadable timestamp ${newestRun.created_at}`,
     };
   }
 
@@ -138,7 +145,7 @@ export function assessWorkflow(workflow, { now, staleDays }) {
   return {
     path: workflow.path,
     verdict: 'broken',
-    why: `${failures.length} of ${finished.length} sampled run(s) failed, none succeeded, and the newest attempt was ${ageDays.toFixed(0)}d ago (${newestFailure.created_at.slice(0, 10)})`,
+    why: `${failures.length} of ${finished.length} sampled run(s) failed, none succeeded, and the newest attempt of any kind was ${ageDays.toFixed(0)}d ago (${newestRun.created_at.slice(0, 10)})`,
     ageDays,
   };
 }
@@ -154,10 +161,13 @@ export function renderReport(results, { staleDays }) {
   const unproven = results.filter((r) => r.verdict === 'unproven');
   const lines = ['## Workflow health', ''];
 
+  // The headline speaks only for the `broken` set, because that is the only
+  // set it counts. Claiming "every workflow succeeded recently or is inside
+  // the window" contradicted the stalled section printed below it the moment
+  // that section existed — a summary arguing with its own body. Introduced by
+  // the stalled split and caught in review on PR #426.
   if (broken.length === 0) {
-    lines.push(
-      `**No workflow is failing-and-abandoned.** Every workflow either succeeded recently or is inside the ${staleDays}-day window.`
-    );
+    lines.push('**No workflow is failing-and-abandoned.**');
   } else {
     lines.push(
       `**${broken.length} workflow(s) have never succeeded in the sampled window and nobody has been back.**`,

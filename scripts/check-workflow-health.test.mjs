@@ -233,3 +233,57 @@ describe('a workflow nobody has concluded either way', () => {
     expect(collapsed ?? '').toContain('.github/workflows/x.yml');
   });
 });
+
+describe('what "nobody has been back" is measured from', () => {
+  const now = new Date('2026-09-08T00:00:00Z');
+
+  it('a recent cancellation means somebody HAS been back, so it is not abandoned', () => {
+    // The regression: age came from the newest FAILURE. A workflow that failed
+    // 30 days ago and had a run cancelled yesterday was called abandoned, in a
+    // sentence that said "nobody has been back" about a workflow somebody was
+    // back at yesterday. Caught in review on #426.
+    const got = assessWorkflow(
+      {
+        path: '.github/workflows/x.yml',
+        runs: [
+          { conclusion: 'failure', created_at: '2026-08-09T00:00:00Z' },
+          { conclusion: 'cancelled', created_at: '2026-09-07T00:00:00Z' },
+        ],
+      },
+      { now, staleDays: 10 }
+    );
+    expect(got.verdict).toBe('unproven');
+    expect(got.ageDays).toBeCloseTo(1, 5);
+  });
+
+  it('still calls it broken when nothing of any kind is recent', () => {
+    const got = assessWorkflow(
+      {
+        path: '.github/workflows/x.yml',
+        runs: [
+          { conclusion: 'failure', created_at: '2026-08-09T00:00:00Z' },
+          { conclusion: 'cancelled', created_at: '2026-08-10T00:00:00Z' },
+        ],
+      },
+      { now, staleDays: 10 }
+    );
+    expect(got.verdict).toBe('broken');
+    // Dated from the newest run, not the newest failure.
+    expect(got.why).toContain('2026-08-10');
+  });
+
+  it('does not claim everything is inside the window while showing one that is not', () => {
+    const stalled = assessWorkflow(
+      {
+        path: '.github/workflows/old.yml',
+        runs: [{ conclusion: 'cancelled', created_at: '2026-01-01T00:00:00Z' }],
+      },
+      { now, staleDays: 10 }
+    );
+    const report = renderReport([stalled], { staleDays: 10 });
+    expect(report).toContain('No workflow is failing-and-abandoned.');
+    expect(report).toContain('concluded nothing either way for over 10 days');
+    // The self-contradiction: the headline used to assert this too.
+    expect(report).not.toContain('inside the 10-day window.');
+  });
+});
