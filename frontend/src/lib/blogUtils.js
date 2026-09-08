@@ -75,7 +75,8 @@ const RELATIVE_URL_BASE = 'https://relative.invalid';
  * True when a URL points at video rather than an image (issue #374).
  *
  * WHY THIS EXISTS. The curated feed fills `contentImageUrl` from whatever
- * media the publisher led with, and on 2026-09-06 that was an **`.mp4`**: the
+ * media the publisher led with, and sometimes that is an **`.mp4`**. The
+ * published-pages audit re-run of 2026-09-07 found one: the
  * Microsoft Foundry observability article's cover was
  * `…/2026/06/RUBRIC-EVALUATOR.mp4`, a real 5.3 MB `video/mp4`. Every cover
  * slot renders an `<img>`, so the reader got one empty box and the

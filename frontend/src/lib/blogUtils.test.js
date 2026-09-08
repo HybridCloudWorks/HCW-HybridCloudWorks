@@ -1,7 +1,7 @@
 /**
  * Cover-image resolution when the feed supplies a video (issue #374).
  *
- * The case these guard is not hypothetical. On 2026-09-07 the published-pages
+ * What these tests guard is not hypothetical. On 2026-09-07 the published-pages
  * audit reported one broken image on
  * `/azure/blog/microsoft-foundry-end-to-end-observability-and-roi-for-production-ai-agents`,
  * and the deployed HTML held exactly one broken `<img>`:
