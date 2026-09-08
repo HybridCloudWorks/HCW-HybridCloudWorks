@@ -18,9 +18,32 @@
  * valid, the setting was valid, and only their combination was wrong.
  *
  * Re-adding the setting — or `TZ`, which does the same job — would silently
- * re-time nine live jobs and make the same six sentences wrong again. There is
- * no plan diff that reads as "every timer moved five hours"; it reads as one
- * app setting.
+ * move **fifteen** of the nineteen registered timers and make the same six
+ * sentences wrong again. There is no plan diff that reads as "every timer
+ * moved five hours"; it reads as one app setting.
+ *
+ * Fifteen is the number this file enforces, and it is worth splitting because
+ * the two halves matter differently to an operator:
+ *
+ *   - **Nine change the instant they run.** The fixed-hour and fixed-day
+ *     schedules — a 07:00 digest becomes a 07:00 UTC digest, five hours
+ *     earlier in wall-clock terms. This is the half that shows up as "the
+ *     report arrived in the middle of the night".
+ *   - **Six change phase but not cadence.** The hour-interval forms — every
+ *     two, four, six and twelve hours — still fire that often; WHICH hours
+ *     shifts by minus five, modulo the interval. Nothing depends on those
+ *     landing on particular hours, which is why they are the quieter half —
+ *     but they ARE clock-dependent, and a guard that ignored them would pass
+ *     while the estate moved underneath it.
+ *
+ * The remaining four are minute-only, every five or fifteen minutes, and
+ * cannot move in any zone. The classifier below decides which bucket each one
+ * is in from its hour field rather than from a list, so this comment describes
+ * the count and does not produce it.
+ *
+ * (Interval expressions are spelled out in words here rather than written
+ * literally: an asterisk-slash sequence inside a block comment closes it, and
+ * doing that in this file breaks the parser rather than the prose.)
  *
  * ## What is asserted, and what is deliberately not
  *
