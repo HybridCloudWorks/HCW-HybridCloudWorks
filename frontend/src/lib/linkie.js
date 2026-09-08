@@ -42,10 +42,11 @@
  * `readLinkieBody` is what a write path calls so a refused key raises instead
  * of passing for success.
  *
- * Since #430 both live in `lib/integrationEnvelope.js` — Klaviyo was the third
- * integration caught by this envelope, so the reading was promoted out of here
- * rather than written a third time. The names below stay, because they are
- * what this module's callers and tests already use, and because
+ * Since #430, both of those functions are thin wrappers: their implementation
+ * moved to `lib/integrationEnvelope.js`. Klaviyo was the third integration
+ * caught by this envelope, so the reading was promoted into a shared module
+ * rather than written a third time. The names here stay, because they are what
+ * this module's callers and tests already use, and because
  * `describeLinkieFailure` has to name Linkie in the sentence an operator
  * reads.
  */
