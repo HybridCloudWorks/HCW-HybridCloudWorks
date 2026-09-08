@@ -135,6 +135,25 @@ function stripHtmlTags(value) {
 }
 
 /**
+ * Ceiling on the article text that reaches the model.
+ *
+ * A guard, not a routine truncation. Published articles here run roughly 6-20
+ * kB of prose, so 60 kB is far above anything the catalogue holds — it exists
+ * so one runaway document cannot exceed a provider's context or spend without
+ * limit. `content/critique.js` sets the precedent at `slice(0, 12000)`; this
+ * is more generous because that call judges an article while this one has to
+ * retell it, and fidelity is the requirement.
+ *
+ * **Truncation is reported, never silent.** A cut article that produced a
+ * confident, complete-sounding episode is exactly this module's worst failure
+ * — the reviewer cannot see what was dropped, and the episode does not sound
+ * like anything is missing. So `prepared.truncated` rides through to the
+ * prompt, which tells the model to say the article continues, and onto the
+ * result, so the admin review knows it is looking at partial coverage.
+ */
+export const MAX_ARTICLE_INPUT_BYTES = 60_000;
+
+/**
  * Rewrite an article body into something that can be spoken, and report what
  * had to be set aside.
  *
@@ -214,7 +233,20 @@ export function prepareArticleForSpeech(body) {
   // 8. Collapse the whitespace the replacements left behind.
   text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
-  return { text, codeBlocks, tables };
+  // 9. Bound what reaches the model. See MAX_ARTICLE_INPUT_BYTES.
+  const full = Buffer.byteLength(text, 'utf8');
+  const truncated = full > MAX_ARTICLE_INPUT_BYTES;
+  if (truncated) {
+    // Cut on a byte boundary that is also a character boundary — slicing a
+    // Buffer mid-codepoint would put U+FFFD in the prompt.
+    text = Buffer.from(text, 'utf8')
+      .subarray(0, MAX_ARTICLE_INPUT_BYTES)
+      .toString('utf8')
+      .replace(/�$/, '')
+      .trimEnd();
+  }
+
+  return { text, codeBlocks, tables, truncated, sourceBytes: full };
 }
 
 /**
@@ -299,6 +331,7 @@ TITLE: ${fenceArticleText(article.title)}
 
 ${fenceArticleText(prepared.text)}
 ${ARTICLE_CLOSE}
+${prepared.truncated ? '\nTHE ARTICLE ABOVE IS CUT SHORT — it was too long to include in full. Cover what is there, and say near the end that the written article continues beyond what this episode covers. Do not invent the ending.\n' : ''}
 
 PARTS THAT CANNOT BE READ ALOUD — they appear as markers in the text above:
 ${renderSetAside(prepared)}
@@ -403,5 +436,10 @@ export async function generateArticleScript({
     sourceArticleSlug: resolveArticleSlug(article) || null,
     sourceArticleTitle: title,
     setAside: { codeBlocks: prepared.codeBlocks.length, tables: prepared.tables.length },
+    // Partial coverage is a fact about the episode, so it travels with it. The
+    // admin review is the only place this can be caught, and it cannot catch
+    // what it is not told.
+    truncated: prepared.truncated,
+    sourceBytes: prepared.sourceBytes,
   };
 }

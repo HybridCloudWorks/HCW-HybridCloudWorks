@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   ARTICLE_DISCLAIMER,
+  MAX_ARTICLE_INPUT_BYTES,
   MIN_ARTICLE_SCRIPT_BYTES,
   ScriptError,
   buildArticlePrompt,
@@ -145,6 +146,45 @@ describe('prepareArticleForSpeech', () => {
     // A single pass leaves a live tag behind on overlapping constructs.
     expect(prepareArticleForSpeech('<scr<script>ipt>alert(1)</script>').text).toContain('alert(1)');
     expect(prepareArticleForSpeech('<scr<script>ipt>alert(1)</script>').text).not.toContain('<');
+  });
+});
+
+describe('the input ceiling', () => {
+  it('leaves a normal article untouched', () => {
+    const prepared = prepareArticleForSpeech('x'.repeat(20000));
+    expect(prepared.truncated).toBe(false);
+    expect(prepared.text).toHaveLength(20000);
+  });
+
+  it('cuts a runaway article and says so', () => {
+    const prepared = prepareArticleForSpeech('x'.repeat(MAX_ARTICLE_INPUT_BYTES + 5000));
+    expect(prepared.truncated).toBe(true);
+    expect(Buffer.byteLength(prepared.text, 'utf8')).toBeLessThanOrEqual(MAX_ARTICLE_INPUT_BYTES);
+    expect(prepared.sourceBytes).toBe(MAX_ARTICLE_INPUT_BYTES + 5000);
+  });
+
+  it('cuts on a character boundary, not a byte one', () => {
+    // Slicing a Buffer mid-codepoint puts U+FFFD in the prompt. Every char
+    // here is 4 bytes, so the limit lands mid-character by construction.
+    const prepared = prepareArticleForSpeech('😀'.repeat(MAX_ARTICLE_INPUT_BYTES));
+    expect(prepared.text).not.toContain('�');
+  });
+
+  it('tells the model the article was cut, so it cannot invent the ending', () => {
+    const prompt = buildArticlePrompt({
+      article: { title: 'Long one' },
+      prepared: prepareArticleForSpeech('x'.repeat(MAX_ARTICLE_INPUT_BYTES + 1)),
+    });
+    expect(prompt).toContain('CUT SHORT');
+    expect(prompt).toContain('Do not invent the ending');
+  });
+
+  it('says nothing about truncation when there was none', () => {
+    const prompt = buildArticlePrompt({
+      article: { title: 'Short one' },
+      prepared: prepareArticleForSpeech('Ordinary prose.'),
+    });
+    expect(prompt).not.toContain('CUT SHORT');
   });
 });
 
