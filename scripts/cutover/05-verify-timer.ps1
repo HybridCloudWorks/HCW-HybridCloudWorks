@@ -689,9 +689,11 @@ Write-Host ''
 if ($sawSchedule) {
     Write-Host 'The Last/Next offsets above are the host''s own words, and they are the app clock.'
     Write-Host 'A daily 04:00 job whose Last reads 04:00:00+00:00 is CORRECT. Any non-zero'
-    Write-Host 'offset means WEBSITE_TIME_ZONE or TZ has been re-introduced and every schedule'
-    Write-Host 'is off by five or six hours. (Before 2026-09-07 this read the other way round:'
-    Write-Host '-05:00 was the pass. History from before that date is not a failure.)'
+    Write-Host 'offset means WEBSITE_TIME_ZONE or TZ has been re-introduced, and every'
+    Write-Host 'clock-dependent schedule is retimed by exactly that offset — read it off the'
+    Write-Host 'line above rather than assuming a figure, because it is whatever zone was set.'
+    Write-Host '(Before 2026-09-07 this read the other way round: -05:00 was the pass.'
+    Write-Host 'History from before that date is not a failure.)'
 }
 else {
     Write-Warn 'No ScheduleStatus row was seen, so the CLOCK is still unproven.'
