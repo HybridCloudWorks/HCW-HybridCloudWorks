@@ -17,6 +17,73 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **`scripts/check-workflow-health.mjs` — the guard that would have caught
+  the three weeks.** Split out of #426, which retires the workflow that
+  prompted it. `validate-deployed.yml` explained in its own header why it
+  could not pass from a GitHub-hosted runner, and still sat in
+  `.github/workflows/` from 2026-08-18 to 2026-09-08: the knowledge was not
+  missing, nothing was reading it. This reads run history from the Actions
+  API and names any workflow with no success among its sampled runs, at least
+  one failure among them, and no attempt of any kind newer than ten days. Run
+  against the live repository on 2026-09-08 it named `validate-deployed.yml`
+  and nothing else — no false positives across the other eighteen.
+
+  **It measures rather than asserts.** There is no list of workflows in it to
+  keep in step with the directory — a hand-maintained list would have needed
+  somebody to notice the thing it exists to notice. A workflow added tomorrow
+  is covered tomorrow.
+
+  **Three verdicts, kept apart.** `healthy`, `broken`, and `unproven` — the
+  last covering "never ran", "still running", and "every run was cancelled".
+  Counting a cancellation as a failure would have flagged
+  `deploy-azure-frontend.yml`, which was used successfully three times the
+  same morning. Staleness is part of the failure condition, not a separate
+  finding: a workflow that failed twice this afternoon is somebody mid-debug,
+  and a detector that fires on ordinary work stops being read — which is the
+  failure mode that allowed the three weeks.
+
+  **`broken` means "nothing succeeded and something failed", not "every run
+  failed", and the message says which.** Review asked for the stricter rule,
+  with a mixed sample demoted to `unproven`; it was declined on the evidence.
+  A workflow that failed a month ago and had a run cancelled a month ago has
+  failed, has never worked and has been left — and under the stricter rule it
+  would be printed under a line reading "none of which reached a verdict",
+  about a run that reached a verdict of failure. One stray cancellation would
+  also have been enough to hide `validate-deployed.yml` itself. What keeps
+  the looser rule honest is that the verdict prints its own arithmetic:
+  "N of M sampled run(s) failed, none succeeded".
+
+  **A trap found while building it, recorded in the file.** The first draft
+  called `/actions/runs?workflow_id={id}`. That form returns HTTP 200 and
+  IGNORES the filter, handing back the repository's newest runs across every
+  workflow — so all nineteen came back "healthy", including the one whose
+  entire history is two failures. It is `/actions/workflows/{id}/runs`. The
+  script now also asserts that every returned run belongs to the workflow it
+  asked about, and exits 2 rather than 0 if that does not hold, because a
+  silently unfiltered response is indistinguishable from good news.
+
+  **It runs as a second JOB in `monitor-deploy-drift.yml`, not a new file.**
+  The owner's instruction on 2026-09-08 was that there are too many
+  workflows; that file already holds `actions: read`, already runs Node
+  without `npm ci`, already runs on a schedule, and is already the
+  delivery-health monitor (renamed "Monitor delivery health"). A separate job
+  rather than a second step, because "the frontend is four days behind" and
+  "a workflow has been failing since August" are different findings, and one
+  job conclusion would merge them into a red X that says neither.
+
+  Covered by `scripts/check-workflow-health.test.mjs` (36 tests, real run
+  histories as fixtures) and one case in `entrypoint-guards.test.mjs`; the
+  suite goes 300 → 337. Proven load-bearing by mutation: implementing the
+  stricter `broken` rule failed four tests, two of them written for earlier
+  review rounds, with `expected 'unproven' to be 'broken'` and the demoted
+  workflow printing `2 run(s), none of which reached a verdict`; making the
+  message claim "every sampled run failed" failed the arithmetic test; and
+  reverting the entry-point guard to the `file://` template form failed with
+  `expected +0 to be 2`, the script exiting 0 on Windows having run nothing,
+  the same bug that once shipped in `smoke-deployed.mjs`.
+
 ### Changed
 
 - **Every timer now runs on UTC; nine live jobs moved five hours earlier

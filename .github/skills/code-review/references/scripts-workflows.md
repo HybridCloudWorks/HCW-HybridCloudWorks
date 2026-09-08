@@ -20,11 +20,14 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   use `@azure/identity` — no keys, no connection strings. Scripts that hit
   GitHub use the app-token helper (`github-app-token.mjs`), not PATs.
 - Monitors (`check-deploy-drift.mjs`, `check-unresolved-secrets.mjs`,
-  `check-tfc-plan.mjs`, `assert-expected-plan.mjs`) exist to distinguish
-  real failures from reporting failures — review that error paths exit
-  non-zero and that "success" means the thing actually verified, not that
-  the command ran (this repo has been burned by that distinction; see
-  `.claude/CLAUDE.md`).
+  `check-tfc-plan.mjs`, `assert-expected-plan.mjs`,
+  `check-workflow-health.mjs`) exist to distinguish real failures from
+  reporting failures — review that error paths exit non-zero and that
+  "success" means the thing actually verified, not that the command ran
+  (this repo has been burned by that distinction; see `.claude/CLAUDE.md`).
+  `check-workflow-health.mjs` splits that three ways rather than two: it
+  exits 2 when it could not read the run history at all, because "I could
+  not look" and "I looked and it is fine" are opposite conclusions.
 
 ### PowerShell (`*.ps1`)
 - Must pass `scripts/validate-powershell.ps1` and the hygiene test

@@ -1,0 +1,431 @@
+#!/usr/bin/env node
+/**
+ * Which workflows in this repository have stopped being able to succeed?
+ *
+ * WHY THIS EXISTS. `validate-deployed.yml` was dispatched twice on 2026-08-18,
+ * failed both times, and then sat in `.github/workflows/` for three weeks. Its
+ * own header explained why it could not pass from a GitHub-hosted runner
+ * (Cloudflare answers a datacenter IP with a 403, so its single assertion
+ * `test "$code" = "200"` can never hold), so the knowledge was not missing —
+ * nothing was reading it. Nothing in the repository looked at run history and
+ * said "this one has never worked". This does.
+ *
+ * IT MEASURES, IT DOES NOT ASSERT. There is no list of workflows in this file
+ * to keep in step with the directory, and no per-workflow expectation to
+ * update. The verdict comes from `/actions/runs` — what actually happened —
+ * which means a workflow added tomorrow is covered tomorrow, and a workflow
+ * deleted today stops being checked today. A hand-maintained list would have
+ * needed someone to notice the thing it exists to notice.
+ *
+ * THE THREE VERDICTS ARE KEPT APART, because collapsing them is the mistake
+ * this repository keeps paying for (T-514; `05-verify-timer.ps1` 2026-08-30;
+ * the exit-code split in `tfc-plan-check.yml`):
+ *
+ *   healthy    a success in the sampled window.
+ *   unproven   no run to read, or too few to conclude from, or the only runs
+ *              were cancelled. This is NOT a pass and NOT a fail — it is "this
+ *              instrument had nothing to measure". A workflow dispatched once
+ *              and cancelled says nothing about whether it works.
+ *   broken     nothing in the sample succeeded, at least one run failed, AND
+ *              the newest run of any kind is older than the staleness
+ *              threshold. All three are required. A workflow that failed twice
+ *              in the last hour is somebody mid-debug and is not this tool's
+ *              business; a workflow that has never succeeded and last ran
+ *              three weeks ago is.
+ *
+ * WHY `broken` IS "NOTHING SUCCEEDED" AND NOT "EVERY RUN FAILED". Those differ
+ * only for a mixed sample — say one failure and one cancellation, both a month
+ * old — and there the second reading is the wrong one twice over. It is false
+ * on its face: that workflow failed, was never made to work, and has been
+ * left. And the bucket it would fall into says so out loud, because the
+ * `unproven` line reads "N run(s), none of which reached a verdict" about a
+ * run that reached a verdict of failure. It would also make a single stray
+ * cancellation enough to hide the case this file was written for:
+ * `validate-deployed.yml`'s real history is two failures, and a third run
+ * cancelled by whoever gave up on it would have moved it out of the finding
+ * and into a collapsed block. A detector that misses is worse than one that
+ * over-reports, because nobody audits the quiet answer. What keeps the
+ * over-reporting honest is that the verdict states its own arithmetic — "N of
+ * M sampled run(s) failed, none succeeded" — so a mixed sample reports itself
+ * as mixed and a reader can disagree with it from the line alone. Raised in
+ * review on PR #426.
+ *
+ * WHY STALENESS IS PART OF THE FAILURE CONDITION rather than a separate
+ * finding. The subject is "nobody is coming back to this", and freshness is
+ * the only available evidence for it. Failing on a fresh red would page on
+ * every ordinary broken-then-fixed afternoon, and a detector that fires on
+ * ordinary work stops being read — which is the failure mode that let the
+ * three weeks happen in the first place.
+ *
+ * WHAT IT CANNOT SEE. A workflow that succeeds while asserting nothing. A
+ * workflow whose jobs are individually red inside a green run. Neither is
+ * visible from run conclusions, and pretending otherwise would make this the
+ * kind of green check that means nothing.
+ *
+ * Run it:
+ *
+ *   GITHUB_TOKEN=... GITHUB_REPOSITORY=owner/repo node scripts/check-workflow-health.mjs
+ *
+ * Exit 0 when nothing is broken, 1 when something is, 2 when the run history
+ * could not be read at all — "I could not look" and "I looked and it is fine"
+ * are opposite conclusions and a single exit code would merge them.
+ */
+
+/** Runs older than this, with no success among them, are the finding. */
+export const DEFAULT_STALE_DAYS = 10;
+
+/** The GitHub REST API's ceiling for `per_page`; it clamps silently above this. */
+export const MAX_PER_PAGE = 100;
+
+/** How many recent runs to read per workflow. */
+export const DEFAULT_SAMPLE = 10;
+
+/**
+ * Conclusions that count as evidence the workflow ran and did not work.
+ *
+ * `cancelled` is deliberately absent: a human stopping a run says nothing
+ * about whether it could have succeeded, and counting it would have flagged
+ * `deploy-azure-frontend.yml` — a workflow used successfully the same day —
+ * on the strength of two cancellations.
+ */
+export const FAILING_CONCLUSIONS = new Set(['failure', 'timed_out', 'startup_failure']);
+
+/** Only this counts as the workflow having worked. */
+export const PASSING_CONCLUSIONS = new Set(['success']);
+
+/**
+ * Verdict for one workflow, from its run history alone.
+ *
+ * @param {{path: string, state?: string, runs: Array<{conclusion: string|null, created_at: string}>}} workflow
+ * @param {{now: Date, staleDays: number}} options
+ */
+export function assessWorkflow(workflow, { now, staleDays }) {
+  const runs = Array.isArray(workflow.runs) ? workflow.runs : [];
+  const finished = runs.filter((r) => r.conclusion !== null && r.conclusion !== undefined);
+
+  if (finished.length === 0) {
+    return { path: workflow.path, verdict: 'unproven', why: 'no finished run to read' };
+  }
+
+  const passes = finished.filter((r) => PASSING_CONCLUSIONS.has(r.conclusion));
+  if (passes.length > 0) {
+    const newest = passes.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+    return {
+      path: workflow.path,
+      verdict: 'healthy',
+      why: `succeeded ${newest.created_at.slice(0, 10)}`,
+      lastSuccess: newest.created_at,
+    };
+  }
+
+  const failures = finished.filter((r) => FAILING_CONCLUSIONS.has(r.conclusion));
+  if (failures.length === 0) {
+    // Everything sampled was cancelled, neutral, skipped, stale or
+    // action_required. Nothing was measured, so nothing is claimed — but HOW
+    // LONG nothing has been measured for is itself worth reporting, which is
+    // why the age rides along. A workflow nobody has concluded either way in
+    // months is the thing this audit was run to find, and it would otherwise
+    // sit in the collapsed section forever. Raised in review on PR #426.
+    const newest = finished.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+    const age = (now.getTime() - Date.parse(newest.created_at)) / 86_400_000;
+    return {
+      path: workflow.path,
+      verdict: 'unproven',
+      why: `${finished.length} run(s), none of which reached a verdict`,
+      ageDays: Number.isFinite(age) ? age : undefined,
+    };
+  }
+
+  // AGE COMES FROM THE NEWEST FINISHED RUN, NOT THE NEWEST FAILURE, and the
+  // difference is the difference between "abandoned" and "someone is on it".
+  // A workflow that failed 30 days ago and had a run cancelled yesterday has
+  // been touched yesterday; dating it from the failure would call that
+  // abandoned and say "nobody has been back" about a workflow somebody was
+  // back at. The verdict's own words have to be true. Raised in review on
+  // PR #426.
+  const newestRun = finished.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+  const ageDays = (now.getTime() - Date.parse(newestRun.created_at)) / 86_400_000;
+
+  if (!Number.isFinite(ageDays)) {
+    return {
+      path: workflow.path,
+      verdict: 'unproven',
+      why: `unreadable timestamp ${newestRun.created_at}`,
+    };
+  }
+
+  if (ageDays < staleDays) {
+    return {
+      path: workflow.path,
+      verdict: 'unproven',
+      why: `failing, and the newest run of any kind is ${ageDays.toFixed(1)}d old — inside the ${staleDays}d window, so this is work in progress`,
+      ageDays,
+    };
+  }
+
+  return {
+    path: workflow.path,
+    verdict: 'broken',
+    why: `${failures.length} of ${finished.length} sampled run(s) failed, none succeeded, and the newest attempt of any kind was ${ageDays.toFixed(0)}d ago (${newestRun.created_at.slice(0, 10)})`,
+    ageDays,
+  };
+}
+
+/** @param {Array} workflows @param {{now: Date, staleDays: number}} options */
+export function assessAll(workflows, options) {
+  return workflows.map((w) => assessWorkflow(w, options));
+}
+
+/** Markdown for the job summary. Kept pure so the tests can read it. */
+export function renderReport(results, { staleDays }) {
+  const broken = results.filter((r) => r.verdict === 'broken');
+  const unproven = results.filter((r) => r.verdict === 'unproven');
+  const lines = ['## Workflow health', ''];
+
+  // The headline speaks only for the `broken` set, because that is the only
+  // set it counts. Claiming "every workflow succeeded recently or is inside
+  // the window" contradicted the stalled section printed below it the moment
+  // that section existed — a summary arguing with its own body. Introduced by
+  // the stalled split and caught in review on PR #426.
+  if (broken.length === 0) {
+    lines.push('**No workflow is failing-and-abandoned.**');
+  } else {
+    lines.push(
+      `**${broken.length} workflow(s) have never succeeded in the sampled window and nobody has been back.**`,
+      '',
+      'A workflow that cannot succeed teaches everyone to ignore a red X. Fix it or delete it.',
+      ''
+    );
+    for (const r of broken) lines.push(`- \`${r.path}\` — ${r.why}`);
+  }
+
+  // An unproven verdict is not a failure and never exits non-zero — nothing was
+  // measured, so nothing is claimed. But one that has been unproven for longer
+  // than the staleness window is the case this audit existed to surface, and
+  // burying it in a collapsed block is how it stays buried. Split, not
+  // reclassified.
+  const stalled = unproven.filter((r) => Number.isFinite(r.ageDays) && r.ageDays >= staleDays);
+  const recent = unproven.filter((r) => !stalled.includes(r));
+
+  if (stalled.length > 0) {
+    lines.push(
+      '',
+      `**${stalled.length} workflow(s) have concluded nothing either way for over ${staleDays} days.**`,
+      '',
+      'Not a failure — but nothing here is evidence it still works. Confirm or delete.',
+      ''
+    );
+    for (const r of stalled)
+      lines.push(`- \`${r.path}\` — ${r.why}, newest ${r.ageDays.toFixed(1)}d ago`);
+  }
+
+  if (recent.length > 0) {
+    lines.push('', '<details><summary>Not concluded either way</summary>', '');
+    for (const r of recent) lines.push(`- \`${r.path}\` — ${r.why}`);
+    lines.push('', '</details>');
+  }
+
+  return lines.join('\n');
+}
+
+/* c8 ignore start — the network half, exercised by running it */
+import { pathToFileURL } from 'node:url';
+
+async function api(path, token) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: `Bearer ${token}`,
+      'user-agent': 'hcw-check-workflow-health',
+    },
+  });
+  if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * A positive integer from an environment variable, or the default.
+ *
+ * `Number('soon')` is `NaN`, and NaN propagates instead of throwing: it would
+ * have reached `per_page=NaN` in a request URL, and made every comparison
+ * against a staleness window false — so a mistyped variable would have turned
+ * this tool into one that reports on rows it did not fetch. Caught in review on
+ * PR #426. A misconfiguration must not become a finding.
+ *
+ * Falls back rather than exiting because neither variable is required; both
+ * exist to let an operator widen a window from a workflow file, and the default
+ * is always a defensible answer.
+ */
+export function positiveIntOr(raw, fallback, max = Infinity) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || Math.trunc(n) !== n || n < 1) {
+    console.error(
+      `Ignoring "${raw}" — expected a positive whole number. Using ${fallback} instead.`
+    );
+    return fallback;
+  }
+  if (n > max) {
+    // GitHub does not reject an oversized `per_page`; it silently clamps to
+    // 100 — verified against the live API, which returned 100 runs for
+    // `per_page=500` with HTTP 200. So this is not an availability fix. It is
+    // an honesty one: without it an operator who asked for 500 would be told
+    // nothing and quietly get 100, and a tool whose whole claim is "I only
+    // report what I measured" should not silently measure something else.
+    // Raised in review on PR #426.
+    console.error(`Clamping ${n} to ${max} — the API caps it there.`);
+    return max;
+  }
+  return n;
+}
+
+/**
+ * Why the workflow listing cannot be trusted, or null when it can.
+ *
+ * FAILS CLOSED ON A TRUNCATED LISTING. One page is `MAX_PER_PAGE` workflows
+ * and GitHub paginates: past that, the rest would be dropped silently and
+ * every one of them reported as nothing at all — a healthy answer to a
+ * question that was never asked, which is the exact shape this file exists to
+ * catch, one level up from the run-filter guard. Nineteen workflows today, so
+ * it has never fired; it is here because the failure would be invisible when
+ * it did.
+ *
+ * THE MESSAGE DOES NOT SAY "RAISE per_page". The request already asks for the
+ * API's ceiling, so that would be an impossible instruction — and sending an
+ * operator toward a fix that cannot work is worse than saying nothing, because
+ * they try it and conclude the tool is broken rather than the situation.
+ * Following pages is the only real remedy, and it is a change to the caller.
+ * Both points raised in review on PR #426.
+ *
+ * Pure and exported so the wording is pinned by a test rather than by reading
+ * it — the same reason the rest of this file's logic is.
+ */
+export function listingRefusal(listing) {
+  if (!Array.isArray(listing?.workflows)) {
+    return 'The workflow listing had no `workflows` array; nothing is asserted.';
+  }
+  if (Number.isFinite(listing.total_count) && listing.total_count > listing.workflows.length) {
+    return `The workflow listing is paginated — ${listing.total_count} workflows, ${listing.workflows.length} read at the API's ${MAX_PER_PAGE} ceiling. Following pages is a change to the caller; nothing is asserted.`;
+  }
+  return null;
+}
+
+/**
+ * The two tunables, read from an environment.
+ *
+ * A FUNCTION AND NOT TWO LINES INSIDE main(), so the WIRING is testable and
+ * not just the helper underneath it. The first version of the ceiling test
+ * passed with the ceiling removed from the call site, because it exercised
+ * `positiveIntOr(..., MAX_PER_PAGE)` directly and nothing asserted that
+ * `main` actually passed the ceiling. A test that cannot see the wiring is a
+ * test of the wrong thing.
+ *
+ * `sample` takes the API ceiling; `staleDays` deliberately does not — it is
+ * not a request parameter and a long window is a legitimate thing to ask for.
+ */
+export function readTuning(env = {}) {
+  return {
+    staleDays: positiveIntOr(env.WORKFLOW_STALE_DAYS, DEFAULT_STALE_DAYS),
+    sample: positiveIntOr(env.WORKFLOW_SAMPLE, DEFAULT_SAMPLE, MAX_PER_PAGE),
+  };
+}
+
+async function main() {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  const { staleDays, sample } = readTuning(process.env);
+
+  if (!token || !repo) {
+    console.error('Usage: node check-workflow-health.mjs');
+    console.error('GITHUB_TOKEN and GITHUB_REPOSITORY are both required.');
+    process.exit(2);
+  }
+
+  let listing;
+  try {
+    listing = await api(`/repos/${repo}/actions/workflows?per_page=${MAX_PER_PAGE}`, token);
+  } catch (err) {
+    console.error(`Could not read the workflow listing: ${err.message}`);
+    console.error('Nothing was asserted either way.');
+    process.exit(2);
+  }
+
+  const refusal = listingRefusal(listing);
+  if (refusal) {
+    console.error(refusal);
+    process.exit(2);
+  }
+
+  // `dynamic/...` entries are GitHub's own (Dependabot, Copilot) and have no
+  // file in this repository to fix or delete, so they are not this tool's
+  // business.
+  const files = listing.workflows.filter((w) => w.path.startsWith('.github/workflows/'));
+
+  const workflows = [];
+  for (const w of files) {
+    let runs = [];
+    try {
+      // `/actions/workflows/{id}/runs`, NOT `/actions/runs?workflow_id={id}`.
+      // The second form is accepted, returns HTTP 200, and IGNORES the filter:
+      // it hands back the repository's newest runs across every workflow. The
+      // first draft of this script used it, and every workflow inherited the
+      // newest repo-wide run — so all nineteen came back "healthy", including
+      // the one whose entire history is two failures. A green answer to a
+      // question that was never asked, which is the exact shape this file
+      // exists to catch. Verified 2026-09-08: the query-param form returned
+      // `monitor-unresolved-secrets.yml` runs when asked for
+      // `validate-deployed.yml`.
+      const got = await api(
+        `/repos/${repo}/actions/workflows/${w.id}/runs?per_page=${sample}`,
+        token
+      );
+      runs = got.workflow_runs || [];
+    } catch (err) {
+      console.error(`Could not read runs for ${w.path}: ${err.message}`);
+      process.exit(2);
+    }
+
+    // The endpoint above is trusted for the filter; this proves it held. A
+    // silently unfiltered response would otherwise be indistinguishable from a
+    // healthy workflow, which is how the first draft passed.
+    //
+    // IT ASSERTS ON `workflow_id`, AND IT FAILS CLOSED. The first version of
+    // this guard read `r.path && r.path !== w.path`, and that leading truthy
+    // check made it fail OPEN: a run whose `path` was absent or empty was
+    // silently counted as belonging here. A guard against a response that
+    // quietly carries the wrong rows must not itself quietly accept a row it
+    // cannot identify. Caught in review on PR #426.
+    //
+    // `workflow_id` rather than `path` because it is the exact value the
+    // request filtered on — a numeric identity comparison, not a string one —
+    // and because a workflow that is renamed keeps its id. A run missing the
+    // field fails the comparison and stops the script, which is the intended
+    // direction: this tool's whole claim is that the rows it read are the rows
+    // it asked for.
+    const foreign = runs.filter((r) => r.workflow_id !== w.id);
+    if (foreign.length > 0) {
+      const first = foreign[0];
+      const seen = first.workflow_id ?? '(no workflow_id on the run)';
+      console.error(
+        `Run listing for ${w.path} contained ${foreign.length} run(s) that are not workflow ${w.id} (first: ${seen}). The filter did not hold; nothing is asserted.`
+      );
+      process.exit(2);
+    }
+
+    workflows.push({ path: w.path, state: w.state, runs });
+  }
+
+  const results = assessAll(workflows, { now: new Date(), staleDays });
+  const report = renderReport(results, { staleDays });
+  console.log(report);
+  process.exit(results.some((r) => r.verdict === 'broken') ? 1 : 0);
+}
+
+// pathToFileURL, not a `file://` template: on Windows argv[1] is `C:\...` and
+// the template form never matches, so the script would exit 0 having run
+// nothing. That exact bug shipped in smoke-deployed.mjs; scripts/entrypoint-
+// guards.test.mjs spawns this file to prove the guard still fires.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
+/* c8 ignore stop */
