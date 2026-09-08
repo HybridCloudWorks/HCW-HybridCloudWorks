@@ -166,7 +166,7 @@ export const MAX_ARTICLE_INPUT_BYTES = 60_000;
  * because a code block can legally contain pipes, hashes and angle brackets
  * that every later rule would otherwise mangle.
  *
- * @returns {{ text: string, codeBlocks: object[], tables: object[] }}
+ * @returns {{ text: string, codeBlocks: object[], tables: object[], truncated: boolean, sourceBytes: number }}
  */
 /** "1 line", "3 lines" — this text reaches the model, so it reads as English. */
 function lineCount(n) {
