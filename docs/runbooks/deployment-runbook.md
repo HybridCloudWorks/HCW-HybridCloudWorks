@@ -287,17 +287,16 @@ problem means production is already degraded rather than merely unchanged.
    it is answered by the origin lock with a 403 — the surface job asserted a
    200 from the apex and got that 403 too. This runbook previously said the
    surface half "still runs usefully", which the job history disproves.
-   `deploy-functions.yml` relies on that same 403 to prove the origin lock, so
-   the workflow could not be fixed without weakening the lock. The operator
-   path is [Edge and DNS verification](edge-dns-verification.md).
-   `deploy-functions.yml` depends on exactly that behaviour — it fails the
-   deploy if the same URL returns 200 from a runner. Making the smoke job pass
-   from CI needs the same Cloudflare change that blocked the standard
+   `deploy-functions.yml` relies on that same 403 to prove the origin lock — it
+   fails the deploy if the same URL answers 200 from a runner — so the workflow
+   could not be fixed without weakening the lock. The operator path is
+   [Edge and DNS verification](edge-dns-verification.md). Making the smoke job
+   pass from CI needs the same Cloudflare change that blocked the standard
    availability test (T-519 itself closed 2026-09-01 by routing around it with
    the ADR 0024 Worker; runner paths stay blocked); the alternatives are
-   weakening the origin lock or
-   asserting against a host that answers without touching the API. Tiers 2–3
-   need credentials and stay operator-run regardless.
+   weakening the origin lock or asserting against a host that answers without
+   touching the API. Tiers 2–3 need credentials and stay operator-run
+   regardless.
 5. Azure portal / CLI spot checks for the changed resources.
 6. Application Insights: no new exception cluster in the 30 minutes after
    apply; both budgets' configuration intact after any change that touches

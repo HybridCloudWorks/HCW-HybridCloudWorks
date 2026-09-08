@@ -76,6 +76,7 @@ jobs:
       #
       # The lesson it encoded did not go with it: a helper whose internals can
       # only run against a live cloud is a helper nobody can change safely.
-      # scripts/check-workflow-health.test.mjs is the current expression of it
-      # — pure verdict logic, real fixtures, no token — and it runs in the
-      # `scripts (operations)` job of ci.yml.
+      # scripts/check-unresolved-secrets.mjs carries the same row-shape guard
+      # in the same shape — it refuses a payload it cannot recognise instead of
+      # reporting a clean bill of health — and its tests need no credential, so
+      # they run in the `scripts (operations)` job of ci.yml.

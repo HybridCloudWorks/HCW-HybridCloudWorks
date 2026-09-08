@@ -43,31 +43,8 @@
 # GitHub API: the last successful run of each deploy workflow, and the commits on
 # main touching that service's paths since. Nothing to authenticate to, nothing
 # to leak, and no self-arming gate needed.
-#
-# ===========================================================================
-# A SECOND JOB, ADDED 2026-09-08: CAN EVERY WORKFLOW STILL SUCCEED?
-# ===========================================================================
-# `validate-deployed.yml` was dispatched twice on 2026-08-18, failed both
-# times, and sat in the directory for three weeks. Its own header explained
-# why it could not pass from a GitHub-hosted runner; nothing was reading it.
-# `scripts/check-workflow-health.mjs` reads run history and names any workflow
-# whose sampled runs are all red and whose newest attempt is stale. It found
-# exactly that one and nothing else on 2026-09-08.
-#
-# WHY IT LIVES HERE AND NOT IN A FILE OF ITS OWN. The owner's instruction on
-# 2026-09-08 was that there are too many workflows. This one already holds the
-# permissions the check needs (`actions: read`), already runs Node with no
-# `npm ci`, already runs on a schedule, and is already the repository's
-# delivery-health monitor. A twentieth file to ask one more question of the
-# same API would have been the wrong trade.
-#
-# IT IS A SEPARATE JOB, NOT A SECOND STEP, and that is not cosmetic. "The
-# frontend is four days behind" and "a workflow has been failing since August"
-# are different findings needing different people; a single job conclusion
-# would merge them into one red X that says neither. Same reasoning as the
-# three-way exit-code split in tfc-plan-check.yml.
 
-name: Monitor delivery health
+name: Monitor Deploy Drift
 
 on:
   schedule:
@@ -121,37 +98,4 @@ jobs:
           report=$(node scripts/check-deploy-drift.mjs)
           status=$?
           echo "$report" | tee -a "$GITHUB_STEP_SUMMARY"
-          exit $status
-
-  workflows:
-    name: Can every workflow still succeed?
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: '22'
-
-      # No `npm ci`, for the same reason the job above gives: the script uses
-      # global fetch and nothing else.
-      - name: Read the run history
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          report=$(node scripts/check-workflow-health.mjs)
-          status=$?
-          # Both destinations: the summary is readable from the mobile app, and
-          # stdout is what the REST logs API exposes. verify-alert-state.yml's
-          # first run wrote only the summary and could not be diagnosed without
-          # opening a browser.
-          echo "$report" | tee -a "$GITHUB_STEP_SUMMARY"
-          # Exit 2 means the history could not be read, which is NOT a verdict
-          # on any workflow. It still fails the job — an instrument that cannot
-          # see should say so loudly — but the report says which of the two
-          # happened.
           exit $status

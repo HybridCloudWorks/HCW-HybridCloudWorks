@@ -49,18 +49,6 @@ describe('entry-point guards fire when the script is invoked directly', () => {
     expect(got.stdout).toContain('### Slug collisions in the published set');
   });
 
-  it('check-workflow-health.mjs exits 2 — not 0 — when it cannot look', () => {
-    // Exit 2, because "I could not read the run history" and "I read it and
-    // nothing is broken" are opposite conclusions. Exiting 0 here would make
-    // an unauthenticated run indistinguishable from a clean bill of health.
-    const env = { ...process.env };
-    delete env.GITHUB_TOKEN;
-    delete env.GITHUB_REPOSITORY;
-    const got = run('check-workflow-health.mjs', [], env);
-    expect(got.code).toBe(2);
-    expect(got.stdout + got.stderr).toContain('Usage: node check-workflow-health.mjs');
-  });
-
   it('build-content-manifest.mjs fails loudly without FUNCTION_ORIGIN', () => {
     const env = { ...process.env };
     delete env.FUNCTION_ORIGIN;

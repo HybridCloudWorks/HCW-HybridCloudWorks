@@ -102,56 +102,6 @@ This project has not cut a tagged release; entries are grouped under
   granting the Admin app role to a named user, which is a recurring operation
   with no other tool. None is spent.
 
-### Added
-
-- **`scripts/check-workflow-health.mjs` — the guard that would have caught
-  the three weeks.** `validate-deployed.yml` explained in its own header why
-  it could not pass, and still sat there from 2026-08-18 to 2026-09-08. The
-  knowledge was not missing; nothing was reading it. This reads run history
-  from the Actions API and names any workflow whose sampled runs are all red
-  AND whose newest attempt is older than ten days. Run against the live
-  repository on 2026-09-08 it named `validate-deployed.yml` and nothing else.
-
-  **It measures rather than asserts.** There is no list of workflows in it to
-  keep in step with the directory — a hand-maintained list would have needed
-  somebody to notice the thing it exists to notice. A workflow added tomorrow
-  is covered tomorrow.
-
-  **Three verdicts, kept apart.** `healthy`, `broken`, and `unproven` — the
-  last covering "never ran", "still running", and "every run was cancelled".
-  Counting a cancellation as a failure would have flagged
-  `deploy-azure-frontend.yml`, which was used successfully three times the
-  same morning. Staleness is part of the failure condition, not a separate
-  finding: a workflow that failed twice this afternoon is somebody mid-debug,
-  and a detector that fires on ordinary work stops being read — which is the
-  failure mode that allowed the three weeks.
-
-  **A trap found while building it, recorded in the file.** The first draft
-  called `/actions/runs?workflow_id={id}`. That form returns HTTP 200 and
-  IGNORES the filter, handing back the repository's newest runs across every
-  workflow — so all nineteen came back "healthy", including the one whose
-  entire history is two failures. It is `/actions/workflows/{id}/runs`. The
-  script now also asserts that every returned run belongs to the workflow it
-  asked about, and exits 2 rather than 0 if that does not hold, because a
-  silently unfiltered response is indistinguishable from good news.
-
-  **It runs as a second JOB in `monitor-deploy-drift.yml`, not a new file.**
-  The owner's instruction was that there are too many workflows; that file
-  already holds `actions: read`, already runs Node without `npm ci`, already
-  runs on a schedule, and is already the delivery-health monitor (renamed
-  "Monitor delivery health"). A separate job rather than a second step,
-  because "the frontend is four days behind" and "a workflow has been failing
-  since August" are different findings, and one job conclusion would merge
-  them into a red X that says neither.
-
-  Covered by `scripts/check-workflow-health.test.mjs` (10 tests, real run
-  histories as fixtures) and one case in `entrypoint-guards.test.mjs`. Both
-  were proven load-bearing by mutation: disabling the staleness window failed
-  "holds fire on a fresh failure" with `expected 'broken' to be 'unproven'`,
-  and reverting the entry-point guard to the `file://` template form failed
-  with `expected +0 to be 2` — the script exiting 0 on Windows having run
-  nothing, the same bug that once shipped in `smoke-deployed.mjs`.
-
 ### Changed
 
 - **Every timer now runs on UTC; nine live jobs moved five hours earlier

@@ -32,10 +32,11 @@
 
     IT DELIBERATELY DOES NOT EXECUTE ANYTHING. Every script here is written to
     reach a live subscription, and a validator that ran them would be a
-    validator nobody could run. Behaviour is tested where behaviour can be
-    tested without Azure: see scripts/powershell-hygiene.test.mjs, which pins
-    the timer script's skip matcher against the actual log lines it has to
-    tell apart.
+    validator nobody could run. Behaviour has to be tested where it can be
+    tested without Azure. A scripts/powershell-hygiene.test.mjs did that for
+    the timer script's skip matcher until 2026-09-08, when both it and
+    cutover/05-verify-timer.ps1 were retired with the timer-arming gate they
+    served; this file's own coverage is validate-powershell.tests.ps1 below.
 #>
 
 <#

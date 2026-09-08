@@ -123,10 +123,11 @@ export function parseReferenceStatuses(payload) {
  *
  * This is the same guard as the row-shape assertion that used to live in
  * scripts/cutover/workspace-query.psm1 (retired 2026-09-08 with the timer
- * script it served), for the same reason. A call that succeeds and answers a different question is worse
- * than one that fails, because its output looks like data. On 2026-08-30 a
- * truncated query reported 57,984 invocations and no worker traces in the same
- * run, and both numbers were real — about the wrong subject.
+ * script it served), for the same reason. A call that succeeds and answers a
+ * different question is worse than one that fails, because its output looks
+ * like data. On 2026-08-30 a truncated query reported 57,984 invocations and
+ * no worker traces in the same run, and both numbers were real — about the
+ * wrong subject.
  */
 export function assertKnownShape(statuses, raw) {
   if (statuses !== null) return statuses;

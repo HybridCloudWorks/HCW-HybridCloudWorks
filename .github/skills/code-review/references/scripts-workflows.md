@@ -27,9 +27,10 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   `.claude/CLAUDE.md`).
 
 ### PowerShell (`*.ps1`)
-- Must pass `scripts/validate-powershell.ps1` and the hygiene test
-  (`powershell-hygiene.test.mjs`). Owner-pasteable commands follow the
-  CLAUDE.md rules: no placeholders, no bash-isms, one line where possible.
+- Must pass `scripts/validate-powershell.ps1` (parse and encoding) and its
+  own tests, `scripts/validate-powershell.tests.ps1`. Owner-pasteable commands
+  follow the CLAUDE.md rules: no placeholders, no bash-isms, one line where
+  possible.
 - `validate-repository-structure.ps1` is the Markdown allowlist — a diff
   extending the allowlist deserves scrutiny: the usual right fix is moving
   the doc to `docs/`, not growing the allowlist.
@@ -50,8 +51,7 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   frequency against cost/noise and that failure actually surfaces (creates an
   issue / fails visibly) rather than dying silently. A monitor that cannot
   pass from a GitHub-hosted runner is not a monitor: `validate-deployed.yml`
-  was deleted on 2026-09-08 after twenty-one days red, and
-  `scripts/check-workflow-health.mjs` now measures for that shape.
+  was deleted on 2026-09-08 after twenty-one days red.
 
 ## Verification commands
 
