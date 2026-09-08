@@ -1,6 +1,6 @@
-# ADR 0029: Podcast hosting is RSS.com Free with manual upload, the podcast page is the one audio surface, and the media route serves byte ranges
+# ADR 0029: Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges
 
-**Status:** Accepted
+**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a)
 **Decision date:** 2026-09-07
 **Owners:** Workload owner
 
@@ -35,14 +35,20 @@ shaped this record:
   feed was ruled out because Apple requires byte-range support of an
   enclosure host.
 
-The owner's decision on 2026-09-07 was **no paid upgrades**.
+The owner's decision on 2026-09-07 was **no paid upgrades**. That held for one
+day: on 2026-09-08 the owner approved both ElevenLabs and RSS.com Max. Those
+amend §1 and §2 below rather than replacing this record, because the reasoning
+that produced the Free-plan design is still the reasoning the paid design has to
+beat — §1b and §2a say what changed and, more importantly, what did not.
 
 ## Purpose and decision drivers
 
 - **Cost.** The platform bills in the tens of dollars a month under a USD 150
-  ceiling (ADR 0015). A podcast that publishes a handful of episodes a month
-  does not justify USD 37 a month for an upload the owner can do by hand, or
-  a speech subscription when the configured provider is effectively free.
+  ceiling (ADR 0015). On 2026-09-07 a podcast publishing a handful of episodes
+  a month did not justify USD 37 a month for an upload the owner could do by
+  hand, or a speech subscription when the configured provider was effectively
+  free. The ceiling has not moved; what changed on 2026-09-08 is what is being
+  weighed against it (§1b, §2a).
 - **Reliability of the public surface.** Whatever the host does, a visitor to
   `/azure/podcast` should find every episode the site has and be able to
   play and seek it. Two disconnected audio systems, one of which had just
@@ -59,15 +65,19 @@ The owner's decision on 2026-09-07 was **no paid upgrades**.
 
 ## Decision
 
-### 1. Hosting: RSS.com Free, manual upload, the feed is the integration boundary
+### 1. Hosting: RSS.com, and the feed is the integration boundary (plan and upload amended in §1b)
 
-The show lives on RSS.com's Free plan. Episodes — human recordings and
-generated ones alike — are uploaded by hand in the RSS.com dashboard. The
-site ingests the show's public feed exactly as it ingested the previous
+**Decided 2026-09-07; the plan, the upload and the API claim amended by §1b.**
+The show lived on RSS.com's Free plan, and episodes — human recordings and
+generated ones alike — were uploaded by hand in the RSS.com dashboard. Nothing
+in the repository knew the host's API, and at that date nothing needed to.
+
+**The ingest half of this decision is unchanged and §1b keeps it deliberately.**
+The site ingests the show's public feed exactly as it ingested the previous
 host's: `fetchPodcastFeeds` reads `admin_config/podcast_feeds`
 (`{ feeds: [{ provider, url }] }`, #348) every two hours and upserts one
-`podcasts` row per episode. Nothing in the repository knows the host's API
-and nothing needs to.
+`podcasts` row per episode. That is still the only way an episode reaches the
+site, whoever uploaded it and however.
 
 The owner seeds the feed URL into `admin_config/podcast_feeds` through the
 admin platform page. `PODCAST_FEEDS` in `timers/podcasts.js` stays empty;
@@ -130,18 +140,82 @@ were.
   run would overwrite the other's `provider` and an episode would flip between
   the show and a provider every two hours.
 
-Nothing about hosting changes: the upload is still manual, the API is still not
-integrated, and the feed is still the integration boundary.
+Nothing about hosting changed with 1a. As of 2026-09-07 the upload was still
+manual and the host's API still not integrated; §1b changes both. The feed being
+the integration boundary is the part that outlived them, and §1b keeps it
+deliberately.
 
-### 2. Speech: Gemini first, Azure AI Speech second, ElevenLabs deferred
+#### 1b. RSS.com Max is approved; publishing becomes an API step — amended 2026-09-08
 
-`speech/index.js` keeps its order: Gemini TTS when `GEMINI-API-KEY` is
-present, Azure AI Speech as the fallback, pinnable with
-`LISTEN_AND_LEARN_TTS_PROVIDER`. ElevenLabs is not added. Its commercial
-licence requires a paid plan, and the owner has declined paid services; the
-provider switch already rejects `elevenlabs` by name in its tests, so the
-shape a third provider takes is recorded and the trial is a bounded piece of
-work when a plan is approved.
+The owner approved the Max plan on 2026-09-08, meeting half of the trigger this
+record wrote for itself — "only if the automated publish step is wanted and the
+API has left beta". The other half is a fact about the API rather than about the
+budget, so it is checked before code is written rather than assumed: #349 found
+the API in public beta on 2026-09-05, warning that endpoints may change. If it
+still is, that is a constraint to design against and not a blocker — an
+idempotent, retryable publish whose failure does not un-approve the episode, and
+the manual path left intact underneath it.
+
+**What changes.** Approving an episode uploads it to RSS.com. The manual
+dashboard upload stops being the only way an episode reaches the feed, which is
+what the Consequences section below called "the cost of ownership of the Free
+plan, and it is the whole cost". That was costed against one source of episodes.
+#432 adds three (#433, #434, #435), and a per-episode manual step scales with
+the number of things producing episodes.
+
+**What does not.** The feed is still the integration boundary. The site learns
+about a published episode by ingesting the show's feed into `podcasts`, exactly
+as it does for an episode uploaded by hand — not by writing the row at publish
+time from what it just uploaded. That shortcut is tempting and wrong: it creates
+a row the feed did not produce, and when the two disagree there is no longer a
+single answer to what is published. The accepted cost is a visible lag between
+approval and appearance, which the admin surface explains rather than leaving an
+operator refreshing.
+
+**Generation still does not publish.** `setEpisodeStatus` moving an episode to
+`published` is the trigger, never the end of a generation run. Drafts are
+AI-written content going out under the owner's name; the review gate is why the
+Consequences section says episodes land as drafts, and an automated publish path
+must not route around it.
+
+Tracked by #437.
+
+### 2. Speech: providers selected by key presence, in a stated preference order (order amended in §2a)
+
+**Decided 2026-09-07; superseded by §2a below.** `speech/index.js` keeps its
+order: Gemini TTS when the `GEMINI_API_KEY` app setting is present — a Key Vault
+reference to the `GEMINI-API-KEY` secret, which is why the two spellings differ
+(`infra/functionapp.tf`) — Azure AI Speech as the fallback, pinnable with
+`LISTEN_AND_LEARN_TTS_PROVIDER`. ElevenLabs was not
+added: its commercial licence requires a paid plan, and at that date the owner
+had declined paid services. The provider switch rejects `elevenlabs` by name in
+its tests, so the shape a third provider takes was recorded and the trial was a
+bounded piece of work for when a plan was approved.
+
+#### 2a. ElevenLabs is selected — amended 2026-09-08
+
+The owner approved a paid ElevenLabs plan on 2026-09-08. The trigger this record
+wrote for itself — "Revisit ElevenLabs when a paid plan is approved" — is met
+literally, so the deferral above is superseded rather than argued with.
+
+**What changes.** A third entry in `PROVIDERS`, selected when its key is
+present, under the same contract as its siblings: MP3 out, so the blob path, the
+stored `contentType` and the player are untouched and the provider stays an
+implementation detail of that directory. The test asserting `elevenlabs` is not
+a configured provider was the record of the deferral; it is replaced by tests of
+the provider rather than deleted quietly.
+
+**What the preference order has to answer.** Gemini is first today because it
+costs nothing beyond a key already seeded, and Azure AI Speech is kept because
+every Gemini TTS model is a *preview* model and preview endpoints get retired on
+notice. Paying for ElevenLabs changes the first half of that reasoning and none
+of the second. So it runs when configured — it is what the owner is paying for
+and chose — and Gemini remains the fallback for a state a paid provider has and
+a free one does not: out of credit. The estimated cost of a run is stated before
+the run starts, because roughly USD 4 per certification is a number an operator
+should see beforehand rather than find in the usage table afterwards.
+
+Tracked by #436.
 
 ### 3. The podcast page is the single audio surface
 
@@ -192,10 +266,11 @@ ever run, is a YouTube embed on a page, not an integration.
 
 ## Consequences and accepted risks
 
-- **One manual upload per episode.** That is the cost of ownership of the
-  Free plan, and it is the whole cost. Generated Listen & Learn episodes are
-  not on the public feed unless the owner uploads them; on the site they are
-  already on the podcast page, which is where a visitor looks.
+- **One manual upload per episode — accepted 2026-09-07, ended by §1b.** That was
+  the cost of ownership of the Free plan, and it was the whole cost. Generated
+  Listen & Learn episodes were not on the public feed unless the owner uploaded
+  them; on the site they were already on the podcast page, which is where a
+  visitor looks. §1b is what made that cost worth removing rather than bearing.
 - **No download analytics beyond the host's.** RSS.com's dashboard reports
   plays of feed episodes; Listen & Learn plays through the media route are
   visible only as Function invocations.
@@ -218,11 +293,15 @@ ever run, is a YouTube embed on a page, not an integration.
 ## Alternatives considered
 
 - **RSS.com Max with an API publish step (option 2 on #349).** `publish.js`
-  would push each finished MP3 to the host and the feed would round-trip it
-  into `podcasts`. USD 37 a month for automating something that happens a
-  handful of times a month, on a beta API whose endpoints may change.
-  Declined by the owner; the site side was built so that adding it later is
-  a publish step and a configuration change, not a redesign.
+  would push a finished MP3 to the host and the feed would round-trip it into
+  `podcasts`. USD 37 a month for automating something that happens a handful of
+  times a month, on a beta API whose endpoints may change. Declined on
+  2026-09-07 and **approved on 2026-09-08** (§1b, #437); the site side was
+  built so that adding it later is a publish step and a configuration change,
+  not a redesign, which is what that issue now does. As considered here the
+  push was described per finished MP3, which reads as generation-time
+  publishing; **§1b settles it the other way** — approval is the trigger and
+  generation never publishes, because a draft must not reach a public feed.
 - **Self-host the feed (option 3 on #349).** A new `GET
   /api/public/podcast/{provider}/feed.xml` built from `podcasts` plus
   published Listen & Learn episodes and submitted to the directories
@@ -230,8 +309,9 @@ ever run, is a YouTube embed on a page, not an integration.
   support and it forfeits the host's analytics. The blocker is removed by
   this record; the option is the revisit path below.
 - **ElevenLabs now, on a Starter plan.** About USD 4 per certification and a
-  dialogue endpoint that matches the stored format. Deferred: a paid plan is
-  required for commercial use, and the configured provider costs nothing.
+  dialogue endpoint that matches the stored format. Deferred on 2026-09-07
+  because a paid plan is required for commercial use and the configured provider
+  costs nothing; **approved on 2026-09-08** (§2a, #436).
 - **Serve Listen & Learn audio straight from blob storage.** Requires
   reversing `allow_nested_items_to_be_public` and the account's network
   deny, which ADR 0014 and T-105 chose not to do; the media route with
@@ -258,14 +338,21 @@ ever run, is a YouTube embed on a page, not an integration.
 - **Revisit toward self-hosting (option 3)** when any of these holds: the
   manual upload is missed for more than one episode; the owner wants
   generated episodes on the public feed without the upload step; RSS.com's
-  Free plan changes what it distributes. The media route is ready; the work
+  plan changes what it distributes. The media route is ready; the work
   is the feed route, the directory submissions, and deciding what replaces
   the host's analytics.
-- **Revisit ElevenLabs** when a paid plan is approved. The trial the issue
-  describes — one certification through both providers, compared on cost
-  and listenability — is the evidence a new ADR would record.
+  **The second condition fired on 2026-09-08 and was answered by §1b instead**,
+  which buys the same outcome without leaving the directories or giving up the
+  host's analytics. Self-hosting stays the fallback if the host's API does not
+  hold up; it is no longer the only route to publishing without an upload.
+- **Revisit ElevenLabs** when a paid plan is approved. **Met 2026-09-08**
+  (§2a, #436). The trial the issue describes — one certification through both
+  providers, compared on cost and listenability — is the evidence that issue
+  records.
 - **Revisit RSS.com Max** only if the automated publish step is wanted and
-  the API has left beta.
+  the API has left beta. **The first condition was met 2026-09-08** (§1b, #437);
+  the second is a fact about the API today, verified on that issue before the
+  client is written.
 
 ## Related decisions and references
 
@@ -275,6 +362,9 @@ ever run, is a YouTube embed on a page, not an integration.
   presence, which is the shape the speech order follows.
 - [ADR 0015](0015-cost-governance.md) — the ceiling every "no paid upgrade"
   above is measured against.
+- Issue #432 (the audio pipeline project §1b and §2a are the spend decisions
+  for), #433, #434, #435 (the three source paths that made a per-episode manual
+  upload expensive), #436 (ElevenLabs), #437 (RSS.com publish).
 - Issue #349 (the evaluation and the owner's decisions), #348 (the feed list
   moved to `admin_config`), #372 (retired media hidden from the list); PR
   #363 removed the previous host's remaining references.
