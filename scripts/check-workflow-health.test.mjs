@@ -20,6 +20,9 @@ import {
   renderReport,
   DEFAULT_STALE_DAYS,
   positiveIntOr,
+  DEFAULT_SAMPLE,
+  MAX_PER_PAGE,
+  readTuning,
 } from './check-workflow-health.mjs';
 
 const NOW = new Date('2026-09-08T05:00:00Z');
@@ -285,5 +288,50 @@ describe('what "nobody has been back" is measured from', () => {
     expect(report).toContain('concluded nothing either way for over 10 days');
     // The self-contradiction: the headline used to assert this too.
     expect(report).not.toContain('inside the 10-day window.');
+  });
+});
+
+describe('the per_page ceiling', () => {
+  // GitHub does not reject an oversized per_page — verified against the live
+  // API, which answered HTTP 200 with 100 runs for per_page=500. So this is
+  // not about avoiding an error; it is about not silently measuring something
+  // other than what was asked for. Raised in review on #426.
+  it('clamps to the API ceiling instead of passing the value through', () => {
+    expect(positiveIntOr('500', 10, MAX_PER_PAGE)).toBe(100);
+    expect(positiveIntOr('101', 10, MAX_PER_PAGE)).toBe(100);
+  });
+
+  it('leaves a value at or under the ceiling alone', () => {
+    expect(positiveIntOr('100', 10, MAX_PER_PAGE)).toBe(100);
+    expect(positiveIntOr('25', 10, MAX_PER_PAGE)).toBe(25);
+  });
+
+  it('still falls back for a non-number, ceiling or not', () => {
+    expect(positiveIntOr('soon', 10, MAX_PER_PAGE)).toBe(10);
+  });
+
+  it('does not clamp when no ceiling is given', () => {
+    // WORKFLOW_STALE_DAYS has no API ceiling and must not inherit one.
+    expect(positiveIntOr('365', 10)).toBe(365);
+  });
+});
+
+describe('readTuning — the wiring, not just the helper', () => {
+  it('applies the API ceiling to the sample size', () => {
+    expect(readTuning({ WORKFLOW_SAMPLE: '500' }).sample).toBe(100);
+  });
+
+  it('does not apply it to the staleness window', () => {
+    expect(readTuning({ WORKFLOW_STALE_DAYS: '365' }).staleDays).toBe(365);
+  });
+
+  it('falls back for both when the environment is empty', () => {
+    expect(readTuning({})).toEqual({ staleDays: DEFAULT_STALE_DAYS, sample: DEFAULT_SAMPLE });
+  });
+
+  it('never yields NaN for either', () => {
+    const got = readTuning({ WORKFLOW_SAMPLE: 'soon', WORKFLOW_STALE_DAYS: 'later' });
+    expect(Number.isFinite(got.sample)).toBe(true);
+    expect(Number.isFinite(got.staleDays)).toBe(true);
   });
 });

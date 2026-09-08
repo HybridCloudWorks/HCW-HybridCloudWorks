@@ -56,6 +56,9 @@
 /** Runs older than this, with no success among them, are the finding. */
 export const DEFAULT_STALE_DAYS = 10;
 
+/** The GitHub REST API's ceiling for `per_page`; it clamps silently above this. */
+export const MAX_PER_PAGE = 100;
+
 /** How many recent runs to read per workflow. */
 export const DEFAULT_SAMPLE = 10;
 
@@ -235,7 +238,7 @@ async function api(path, token) {
  * exist to let an operator widen a window from a workflow file, and the default
  * is always a defensible answer.
  */
-export function positiveIntOr(raw, fallback) {
+export function positiveIntOr(raw, fallback, max = Infinity) {
   if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
   const n = Number(raw);
   if (!Number.isFinite(n) || Math.trunc(n) !== n || n < 1) {
@@ -244,14 +247,44 @@ export function positiveIntOr(raw, fallback) {
     );
     return fallback;
   }
+  if (n > max) {
+    // GitHub does not reject an oversized `per_page`; it silently clamps to
+    // 100 — verified against the live API, which returned 100 runs for
+    // `per_page=500` with HTTP 200. So this is not an availability fix. It is
+    // an honesty one: without it an operator who asked for 500 would be told
+    // nothing and quietly get 100, and a tool whose whole claim is "I only
+    // report what I measured" should not silently measure something else.
+    // Raised in review on PR #426.
+    console.error(`Clamping ${n} to ${max} — the API caps it there.`);
+    return max;
+  }
   return n;
+}
+
+/**
+ * The two tunables, read from an environment.
+ *
+ * A FUNCTION AND NOT TWO LINES INSIDE main(), so the WIRING is testable and
+ * not just the helper underneath it. The first version of the ceiling test
+ * passed with the ceiling removed from the call site, because it exercised
+ * `positiveIntOr(..., MAX_PER_PAGE)` directly and nothing asserted that
+ * `main` actually passed the ceiling. A test that cannot see the wiring is a
+ * test of the wrong thing.
+ *
+ * `sample` takes the API ceiling; `staleDays` deliberately does not — it is
+ * not a request parameter and a long window is a legitimate thing to ask for.
+ */
+export function readTuning(env = {}) {
+  return {
+    staleDays: positiveIntOr(env.WORKFLOW_STALE_DAYS, DEFAULT_STALE_DAYS),
+    sample: positiveIntOr(env.WORKFLOW_SAMPLE, DEFAULT_SAMPLE, MAX_PER_PAGE),
+  };
 }
 
 async function main() {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
-  const staleDays = positiveIntOr(process.env.WORKFLOW_STALE_DAYS, DEFAULT_STALE_DAYS);
-  const sample = positiveIntOr(process.env.WORKFLOW_SAMPLE, DEFAULT_SAMPLE);
+  const { staleDays, sample } = readTuning(process.env);
 
   if (!token || !repo) {
     console.error('Usage: node check-workflow-health.mjs');
