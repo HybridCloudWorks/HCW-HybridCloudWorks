@@ -23,6 +23,7 @@ import {
   DEFAULT_SAMPLE,
   MAX_PER_PAGE,
   listingRefusal,
+  runsRefusal,
   readTuning,
 } from './check-workflow-health.mjs';
 
@@ -401,6 +402,72 @@ describe('what `broken` claims, and what it does not', () => {
   it('never claims the sample was all red — it prints the count it counted', () => {
     const got = assessWorkflow(MIXED, { now, staleDays: 10 });
     expect(got.why).toContain('1 of 2 sampled run(s) failed, none succeeded');
+  });
+});
+
+describe('runsRefusal', () => {
+  // The same subject as listingRefusal, one level down: can the rows be
+  // trusted to be the rows that were asked for? Both failures here used to be
+  // silent in different ways — `got.workflow_runs || []` turned a missing
+  // array into "no runs", which reads as `unproven`, and a truthy non-array
+  // reached `runs.filter(...)` and threw, and an uncaught throw exits 1, which
+  // in this tool means "a workflow is broken". Raised in review on #428.
+  const CI = { path: '.github/workflows/ci.yml', id: 328179407 };
+
+  it('accepts a listing whose runs all belong to the workflow asked for', () => {
+    expect(
+      runsRefusal(
+        {
+          workflow_runs: [
+            { workflow_id: CI.id, conclusion: 'success', created_at: '2026-09-08T00:00:00Z' },
+            { workflow_id: CI.id, conclusion: 'failure', created_at: '2026-09-07T00:00:00Z' },
+          ],
+        },
+        CI
+      )
+    ).toBeNull();
+    // An empty history is a real answer and not a refusal; assessWorkflow
+    // calls it unproven, which is the correct verdict for a workflow that has
+    // never run.
+    expect(runsRefusal({ workflow_runs: [] }, CI)).toBeNull();
+  });
+
+  it('refuses a payload with no workflow_runs array, rather than reading it as no runs', () => {
+    for (const payload of [
+      null,
+      undefined,
+      {},
+      { workflow_runs: null },
+      { workflow_runs: {} },
+      { workflow_runs: 'nope' },
+    ]) {
+      const got = runsRefusal(payload, CI);
+      expect(got, `runsRefusal accepted ${JSON.stringify(payload)}`).not.toBeNull();
+      expect(got).toContain('no `workflow_runs` array');
+      expect(got).toContain('nothing is asserted');
+    }
+  });
+
+  it('refuses a run belonging to a different workflow, and says which', () => {
+    const got = runsRefusal(
+      { workflow_runs: [{ workflow_id: 999, conclusion: 'success', created_at: 'x' }] },
+      CI
+    );
+    expect(got).not.toBeNull();
+    expect(got).toContain('1 run(s) that are not workflow 328179407');
+    expect(got).toContain('first: 999');
+  });
+
+  it('fails CLOSED on a row it cannot identify at all', () => {
+    // The 2026-09-08 regression in the first version of this guard was a
+    // leading truthy check that let an unidentifiable row through. A guard
+    // against a response carrying the wrong rows must not quietly accept a row
+    // it cannot read.
+    for (const run of [{}, { workflow_id: null }, { workflow_id: undefined }, null]) {
+      const got = runsRefusal({ workflow_runs: [run] }, CI);
+      expect(got, `runsRefusal accepted run ${JSON.stringify(run)}`).not.toBeNull();
+      expect(got).toContain('no workflow_id on the run');
+    }
   });
 });
 

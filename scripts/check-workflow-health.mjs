@@ -344,6 +344,51 @@ export function listingRefusal(listing) {
 }
 
 /**
+ * Why a run listing cannot be trusted, or null when it can. The same job as
+ * `listingRefusal`, one level down.
+ *
+ * FAILS CLOSED ON A PAYLOAD WITH NO `workflow_runs` ARRAY. This read
+ * `got.workflow_runs || []`, and both halves of that were wrong. A missing
+ * array became "no runs", which is `unproven` — a silent mis-measurement,
+ * reported as a workflow nobody has run rather than a response nobody could
+ * read. And a truthy non-array reached `runs.filter(...)`, which throws, and an
+ * uncaught throw exits **1**, which in this tool means "a workflow is broken".
+ * One shape lied quietly and the other lied loudly. Raised in review on
+ * PR #428, the second instance of it; the first was the listing above.
+ *
+ * FAILS CLOSED ON A ROW IT CANNOT IDENTIFY. The endpoint is trusted for the
+ * filter; this proves the filter held. A silently unfiltered response is
+ * otherwise indistinguishable from a healthy workflow, which is how the first
+ * draft of this script passed with every workflow green.
+ *
+ * IT ASSERTS ON `workflow_id`. The first version read
+ * `r.path && r.path !== w.path`, and that leading truthy check made it fail
+ * OPEN: a run whose `path` was absent or empty was silently counted as
+ * belonging here. A guard against a response that quietly carries the wrong
+ * rows must not itself quietly accept a row it cannot identify. Caught in
+ * review on PR #426. `workflow_id` rather than `path` because it is the exact
+ * value the request filtered on — a numeric identity comparison, not a string
+ * one — and because a workflow that is renamed keeps its id.
+ *
+ * Pure and exported for the reason the rest of this file is: a guard whose
+ * only exercise is a live API call is a guard nobody can change safely.
+ *
+ * @param {unknown} payload the parsed response body
+ * @param {{path: string, id: number}} workflow the workflow it was asked for
+ */
+export function runsRefusal(payload, workflow) {
+  if (!Array.isArray(payload?.workflow_runs)) {
+    return `Run listing for ${workflow.path} carried no \`workflow_runs\` array; nothing is asserted.`;
+  }
+  const foreign = payload.workflow_runs.filter((r) => r?.workflow_id !== workflow.id);
+  if (foreign.length > 0) {
+    const seen = foreign[0]?.workflow_id ?? '(no workflow_id on the run)';
+    return `Run listing for ${workflow.path} contained ${foreign.length} run(s) that are not workflow ${workflow.id} (first: ${seen}). The filter did not hold; nothing is asserted.`;
+  }
+  return null;
+}
+
+/**
  * The two tunables, read from an environment.
  *
  * A FUNCTION AND NOT TWO LINES INSIDE main(), so the WIRING is testable and
@@ -396,7 +441,7 @@ async function main() {
 
   const workflows = [];
   for (const w of files) {
-    let runs = [];
+    let got;
     try {
       // `/actions/workflows/{id}/runs`, NOT `/actions/runs?workflow_id={id}`.
       // The second form is accepted, returns HTTP 200, and IGNORES the filter:
@@ -408,44 +453,20 @@ async function main() {
       // exists to catch. Verified 2026-09-08: the query-param form returned
       // `monitor-unresolved-secrets.yml` runs when asked for
       // `validate-deployed.yml`.
-      const got = await api(
-        `/repos/${repo}/actions/workflows/${w.id}/runs?per_page=${sample}`,
-        token
-      );
-      runs = got.workflow_runs || [];
+      got = await api(`/repos/${repo}/actions/workflows/${w.id}/runs?per_page=${sample}`, token);
     } catch (err) {
       console.error(`Could not read runs for ${w.path}: ${err.message}`);
       process.exit(2);
     }
 
-    // The endpoint above is trusted for the filter; this proves it held. A
-    // silently unfiltered response would otherwise be indistinguishable from a
-    // healthy workflow, which is how the first draft passed.
-    //
-    // IT ASSERTS ON `workflow_id`, AND IT FAILS CLOSED. The first version of
-    // this guard read `r.path && r.path !== w.path`, and that leading truthy
-    // check made it fail OPEN: a run whose `path` was absent or empty was
-    // silently counted as belonging here. A guard against a response that
-    // quietly carries the wrong rows must not itself quietly accept a row it
-    // cannot identify. Caught in review on PR #426.
-    //
-    // `workflow_id` rather than `path` because it is the exact value the
-    // request filtered on — a numeric identity comparison, not a string one —
-    // and because a workflow that is renamed keeps its id. A run missing the
-    // field fails the comparison and stops the script, which is the intended
-    // direction: this tool's whole claim is that the rows it read are the rows
-    // it asked for.
-    const foreign = runs.filter((r) => r.workflow_id !== w.id);
-    if (foreign.length > 0) {
-      const first = foreign[0];
-      const seen = first.workflow_id ?? '(no workflow_id on the run)';
-      console.error(
-        `Run listing for ${w.path} contained ${foreign.length} run(s) that are not workflow ${w.id} (first: ${seen}). The filter did not hold; nothing is asserted.`
-      );
+    // Shape and filter, both fail-closed, both testable. See runsRefusal.
+    const runsWrong = runsRefusal(got, w);
+    if (runsWrong) {
+      console.error(runsWrong);
       process.exit(2);
     }
 
-    workflows.push({ path: w.path, state: w.state, runs });
+    workflows.push({ path: w.path, state: w.state, runs: got.workflow_runs });
   }
 
   const results = assessAll(workflows, { now: new Date(), staleDays });

@@ -170,19 +170,25 @@ This project has not cut a tagged release; entries are grouped under
   capture-then-read-`$?` shape, because `node ... | tee` would report tee's
   status and never fail.
 
-  **Every refusal path exits 2, including the ones that used to throw.**
-  `main` filters the listing on `w.path` and asks for runs by `w.id`; an entry
-  carrying neither reached `w.path.startsWith(...)` and threw a TypeError, and
-  an uncaught throw from the awaited `main()` exits **1** — measured — which in
-  this tool means "a workflow is broken". An unreadable listing would have
-  reported a broken workflow. `listingRefusal` now checks entry shape
-  alongside pagination. The requests also pin `X-GitHub-Api-Version:
-  2022-11-28`, matching `check-deploy-drift.mjs` (the other job in the same
-  workflow file), `github-app-token.mjs` and `open-manifest-pr.mjs`.
+  **Every refusal path exits 2, including the ones that used to throw.** An
+  uncaught throw from the awaited `main()` exits **1** — measured — which in
+  this tool means "a workflow is broken", so a response the script could not
+  read was reported as a repository containing a broken workflow. Two places
+  did it. `main` filtered the listing on `w.path` and asked for runs by
+  `w.id`, and an entry carrying neither threw at `w.path.startsWith(...)`;
+  `listingRefusal` now checks entry shape alongside pagination. And the run
+  listing was read as `got.workflow_runs || []`, where a missing array became
+  "no runs" — a silent mis-measurement reported as `unproven` — while a truthy
+  non-array threw at `runs.filter(...)`; that guard is now `runsRefusal`,
+  pure, exported and tested, and it carries the `workflow_id` filter check
+  that used to sit untested inside `main`. The requests also pin
+  `X-GitHub-Api-Version: 2022-11-28`, matching `check-deploy-drift.mjs` (the
+  other job in the same workflow file), `github-app-token.mjs` and
+  `open-manifest-pr.mjs`.
 
-  Covered by `scripts/check-workflow-health.test.mjs` (38 tests, real run
+  Covered by `scripts/check-workflow-health.test.mjs` (42 tests, real run
   histories as fixtures), `check-workflow-health.invocation.test.mjs` (4), and
-  one case in `entrypoint-guards.test.mjs`; the suite goes 295 → 338, `main`
+  one case in `entrypoint-guards.test.mjs`; the suite goes 295 → 342, `main`
   having dropped from 300 to 295 when #426 deleted `powershell-hygiene.test.mjs`
   with the script it read.
 
@@ -195,7 +201,11 @@ This project has not cut a tagged release; entries are grouped under
   replacing the capture with a `| tee` pipeline, each failed their own
   assertion in the invocation test. Removing the entry-shape guard from
   `listingRefusal` failed with `listingRefusal accepted {}: expected null not
-  to be null`. And reverting the entry-point guard to the `file://` template
+  to be null`. Restoring `got.workflow_runs || []` failed the shape test with
+  `TypeError: Cannot read properties of null` — the defect demonstrating
+  itself — and putting the leading truthy check back into the `workflow_id`
+  comparison failed `fails CLOSED on a row it cannot identify at all`. And
+  reverting the entry-point guard to the `file://` template
   form failed with `expected +0 to be 2`, the script exiting 0 on Windows
   having run nothing — the same bug that once shipped in `smoke-deployed.mjs`.
 
