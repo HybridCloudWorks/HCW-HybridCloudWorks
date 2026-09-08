@@ -41,8 +41,30 @@ import { Link2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { postJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
+import { safeUrl } from '@/lib/safeUrl';
 
 export const SET_SLUG_ROUTE = 'cms/content/slug';
+
+/**
+ * The `sourceUrl` to render as a link, or `''` when it must not be one.
+ *
+ * `sourceUrl` IS ATTACKER-INFLUENCED. It arrives on curated articles from an
+ * upstream feed this site does not control, and putting it straight into an
+ * `href` is the `javascript:` sink `safeUrl` exists for. Caught in review on
+ * PR #421.
+ *
+ * `safeUrl` alone is necessary and not sufficient here. It also permits
+ * `mailto:` and relative references, and its own header warns that a leading
+ * `//` is a relative reference by the URL grammar — `//evil.example` passes and
+ * navigates off-site. None of those is ever a legitimate upstream source, so
+ * this narrows to an ABSOLUTE http/https URL and rejects everything else,
+ * including the empty string, which would render a link to the current page.
+ */
+export function sourceLinkHref(value) {
+  const safe = safeUrl(value, '');
+  if (!safe) return '';
+  return /^https?:\/\//i.test(safe) ? safe : '';
+}
 
 /**
  * The value to offer. `Slug` FIRST, because where the two differ, `slug` holds
@@ -122,6 +144,7 @@ export function describeSetSlugResult(result = {}) {
 export default function SetSlugPanel({ item, onApplied }) {
   const suggested = suggestedSlugFor(item);
   const current = currentSlugOf(item);
+  const sourceHref = sourceLinkHref(item.sourceUrl);
   const [value, setValue] = useState(suggested);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -173,13 +196,13 @@ export default function SetSlugPanel({ item, onApplied }) {
       */}
       <p className="text-xs text-muted-foreground">
         Article: <code>{item.id}</code>
-        {item.sourceUrl ? (
+        {sourceHref ? (
           <>
             {' · '}
             <a
-              href={item.sourceUrl}
+              href={sourceHref}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="underline underline-offset-2"
             >
               source
