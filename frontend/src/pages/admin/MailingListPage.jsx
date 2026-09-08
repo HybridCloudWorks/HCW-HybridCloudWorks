@@ -32,11 +32,7 @@ import {
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
-import {
-  connectionMessage,
-  klaviyoCollection,
-  requireKlaviyoCollection,
-} from '@/lib/klaviyo';
+import { connectionMessage, klaviyoCollection, requireKlaviyoCollection } from '@/lib/klaviyo';
 
 const TABS = [
   { id: 'lists', label: 'Subscribers / Lists' },

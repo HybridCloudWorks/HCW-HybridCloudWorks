@@ -82,9 +82,7 @@ export function requireKlaviyoCollection(response) {
   const items = pickKlaviyoCollection(body);
   if (!items) {
     const { status } = unwrapProxy(response);
-    throw new Error(
-      `${SERVICE} answered ${status || '2xx'} with a body this page cannot read`
-    );
+    throw new Error(`${SERVICE} answered ${status || '2xx'} with a body this page cannot read`);
   }
   return items;
 }

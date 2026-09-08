@@ -112,8 +112,6 @@ describe('The lists tab', () => {
     postJSON.mockResolvedValue(envelope(true, 200, klaviyoBody([])));
     render(<MailingListPage />);
 
-    await waitFor(() =>
-      expect(screen.getByText(/No lists found in Klaviyo/i)).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByText(/No lists found in Klaviyo/i)).toBeInTheDocument());
   });
 });
