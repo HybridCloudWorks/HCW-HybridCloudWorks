@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
+import { connectionMessage, klaviyoCollection, requireKlaviyoCollection } from '@/lib/klaviyo';
 
 const TABS = [
   { id: 'lists', label: 'Subscribers / Lists' },
@@ -109,8 +110,13 @@ function ListsTab() {
     setError('');
     try {
       const [listsRes, profilesRes] = await Promise.all([kListLists(), kListProfiles()]);
-      setLists(Array.isArray(listsRes?.data) ? listsRes.data : []);
-      setProfiles(Array.isArray(profilesRes?.data) ? profilesRes.data : []);
+      const listsResult = klaviyoCollection(listsRes);
+      const profilesResult = klaviyoCollection(profilesRes);
+      setLists(listsResult.items);
+      setProfiles(profilesResult.items);
+      // A refused key used to empty both silently, and an empty mailing list
+      // reads as "the audience is empty" rather than "we could not ask".
+      setError(listsResult.error || profilesResult.error);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -205,8 +211,9 @@ function CampaignsTab() {
     setLoading(true);
     setError('');
     try {
-      const res = await kListCampaigns();
-      setCampaigns(Array.isArray(res?.data) ? res.data : []);
+      const { items, error: failure } = klaviyoCollection(await kListCampaigns());
+      setCampaigns(items);
+      setError(failure);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -361,9 +368,11 @@ function ConnectionTab({ onStatusChange }) {
     setTesting(true);
     setResult(null);
     try {
-      const res = await kListLists();
-      const count = Array.isArray(res?.data) ? res.data.length : 0;
-      setResult({ ok: true, message: `Connected to Klaviyo — ${count} list(s) visible.` });
+      // requireKlaviyoCollection throws on a refused key. The old code called
+      // setResult({ ok: true }) unconditionally, and the proxy answers 200 for
+      // every outcome, so a 401 rendered green with a tick (#430).
+      const lists = requireKlaviyoCollection(await kListLists());
+      setResult({ ok: true, message: connectionMessage(lists) });
       onStatusChange?.(true);
     } catch (err) {
       setResult({ ok: false, message: err.message });
@@ -451,8 +460,13 @@ export default function MailingListPage() {
 
   useEffect(() => {
     if (!authReady) return;
+    // The header dot is produced by the same path as Test Connection, so it
+    // inherited the same lie: resolving was treated as connected.
     kListLists()
-      .then(() => setConnected(true))
+      .then((res) => {
+        requireKlaviyoCollection(res);
+        setConnected(true);
+      })
       .catch(() => setConnected(false));
   }, [authReady]);
 

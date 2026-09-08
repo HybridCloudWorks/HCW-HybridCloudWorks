@@ -41,10 +41,24 @@
  * `unwrapLinkie` is the one place that reads the envelope, and
  * `readLinkieBody` is what a write path calls so a refused key raises instead
  * of passing for success.
+ *
+ * Since #430, both of those functions are thin wrappers: their implementation
+ * moved to `lib/integrationEnvelope.js`. Klaviyo was the third integration
+ * caught by this envelope, so the reading was promoted into a shared module
+ * rather than written a third time. The names here stay, because they are what
+ * this module's callers and tests already use, and because
+ * `describeLinkieFailure` has to name Linkie in the sentence an operator
+ * reads.
  */
+import {
+  INTEGRATION_NOT_CONFIGURED,
+  describeProxyFailure,
+  readProxyBody,
+  unwrapProxy,
+} from '@/lib/integrationEnvelope';
 
 /** The proxy's code for "a required app setting is missing, so Linkie was never called". */
-export const LINKIE_NOT_CONFIGURED = 'INTEGRATION_NOT_CONFIGURED';
+export const LINKIE_NOT_CONFIGURED = INTEGRATION_NOT_CONFIGURED;
 
 /**
  * Linkie's post `provider` enum, carried over from Site-Main's LinkiePage,
@@ -144,19 +158,7 @@ export const linkiePaths = Object.freeze({
  * @returns {{ body: unknown, notConfigured: boolean, failed: boolean,
  *             status: number | null, reason: string }}
  */
-export function unwrapLinkie(response) {
-  const status = Number.isFinite(response?.status) ? response.status : null;
-  const reason = typeof response?.error === 'string' ? response.error : '';
-
-  if (response && response.ok === false) {
-    const notConfigured = response.code === LINKIE_NOT_CONFIGURED;
-    return { body: null, notConfigured, failed: !notConfigured, status, reason };
-  }
-
-  const body =
-    response && typeof response === 'object' && 'data' in response ? response.data : response;
-  return { body: body ?? null, notConfigured: false, failed: false, status, reason: '' };
-}
+export const unwrapLinkie = unwrapProxy;
 
 /**
  * The failure in one line. Prefers the upstream status, because "Linkie
@@ -165,9 +167,8 @@ export function unwrapLinkie(response) {
  * @param {{ status?: number | null, reason?: string }} failure
  * @returns {string}
  */
-export function describeLinkieFailure({ status, reason } = {}) {
-  if (status) return `Linkie answered ${status}${reason ? ` — ${reason}` : ''}`;
-  return reason || 'the request failed';
+export function describeLinkieFailure(failure = {}) {
+  return describeProxyFailure('Linkie', failure);
 }
 
 /**
@@ -181,14 +182,7 @@ export function describeLinkieFailure({ status, reason } = {}) {
  * @throws {Error} when the integration is unconfigured or the call failed
  */
 export function readLinkieBody(response) {
-  const unwrapped = unwrapLinkie(response);
-  if (unwrapped.notConfigured) {
-    throw new Error(unwrapped.reason || 'Linkie is not configured');
-  }
-  if (unwrapped.failed) {
-    throw new Error(describeLinkieFailure(unwrapped));
-  }
-  return unwrapped.body;
+  return readProxyBody('Linkie', response);
 }
 
 /**
