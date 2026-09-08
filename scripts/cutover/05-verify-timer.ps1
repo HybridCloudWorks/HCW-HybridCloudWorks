@@ -7,9 +7,16 @@
     at a time, and each must be observed firing once before the next is added.
 
     The gate is not "did it run". It is "did it run at the intended time".
-    A timer that fires five hours early passes a naive "fired once" check and
+    A timer that fires at the wrong hour passes a naive "fired once" check and
     fails the real one — that is the documented trap, and it is invisible unless
     something reads the offset deliberately.
+
+    The size and DIRECTION of that error are not fixed. It is whatever offset
+    an app-setting clock introduces: five hours in summer and six in winter for
+    America/Chicago, either sign depending on which way the drift goes, and a
+    different number entirely for any other zone someone sets. Writing "five
+    hours early" here would pin the trap to one instance of it and quietly
+    excuse the rest.
 
     ==========================================================================
     THE APP CLOCK IS UTC AS OF 2026-09-07 (#416). THE PASS CONDITION FLIPPED.
