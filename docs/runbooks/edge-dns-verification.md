@@ -93,6 +93,18 @@ reads ARM rather than asking `/api/health`.
 'https://hybridcloudworks.com/','https://api-azure.hybridcloudworks.com/api/health' | ForEach-Object { $r = Invoke-WebRequest -Uri $_ -UseBasicParsing; [pscustomobject]@{ Url = $_; Status = [int]$r.StatusCode; Server = ($r.Headers['Server'] -join ','); CfRay = ($r.Headers['CF-RAY'] -join ',') } }
 ```
 
+`-UseBasicParsing` is deliberate and is not there for PowerShell 7, where it
+does nothing at all — measured on 7.6.5, it is accepted silently, with no
+deprecation warning and no effect. It is there for **Windows PowerShell 5.1**,
+which still ships with Windows and is what `powershell.exe` starts: without the
+flag, `Invoke-WebRequest` parses the response with the Internet Explorer
+engine, and on a host where IE's first-run configuration has never been
+completed it throws instead of returning. That failure names the browser
+engine, not the site, so it reads as the site being down when nothing is wrong
+— which is precisely the reporting failure this runbook exists to prevent.
+Costing nothing in the shell you are probably using and saving a false alarm in
+the other one, it stays.
+
 **Success.** The apex returns an `A` record outside Cloudflare's ranges and
 `www` returns a `CNAME` into `*.azurestaticapps.net`; neither answer carries a
 `CF-RAY` header or `Server: cloudflare`. `api-azure` returns two `A` records
