@@ -73,8 +73,13 @@ export function unwrapProxy(response) {
     return { body: null, notConfigured, failed: !notConfigured, status, reason };
   }
 
-  const body =
-    response && typeof response === 'object' && 'data' in response ? response.data : response;
+  // An envelope always carries a boolean `ok` — rest-proxy.js writes one on
+  // every path it can return. Keying on `data` instead treated ANY object with
+  // a `data` field as an envelope, which silently unwrapped an already-read
+  // JSON:API body (`{ data: [...], links: {...} }`) down to its array. That
+  // contradicted the "a bare body is accepted" promise two paragraphs up, and
+  // it did so for exactly the shape Klaviyo returns.
+  const body = typeof response?.ok === 'boolean' ? response.data : response;
   return { body: body ?? null, notConfigured: false, failed: false, status, reason: '' };
 }
 

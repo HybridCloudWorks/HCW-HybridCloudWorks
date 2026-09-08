@@ -56,6 +56,20 @@ describe('unwrapProxy', () => {
     // field must not be mistaken for a refusal.
     expect(unwrapProxy({ data: 'x' }).failed).toBe(false);
   });
+
+  it('does not unwrap a bare body that merely happens to have `data`', () => {
+    // An envelope is identified by its boolean `ok`, not by carrying `data`.
+    // Keying on `data` stripped an already-read JSON:API body down to its
+    // array — and JSON:API is exactly what Klaviyo returns, so the shape most
+    // likely to be passed here was the one it silently altered.
+    const jsonApiBody = { data: [{ id: 'l1' }], links: { self: 'https://…' } };
+    expect(unwrapProxy(jsonApiBody).body).toEqual(jsonApiBody);
+  });
+
+  it('still unwraps a real envelope carrying that same body', () => {
+    const jsonApiBody = { data: [{ id: 'l1' }], links: { self: 'https://…' } };
+    expect(unwrapProxy({ ok: true, status: 200, data: jsonApiBody }).body).toEqual(jsonApiBody);
+  });
 });
 
 describe('describeProxyFailure', () => {
