@@ -705,6 +705,9 @@ export default function LinkiePage() {
   const [connected, setConnected] = useState('checking');
   const [profiles, setProfiles] = useState([]);
   const [profileNotice, setProfileNotice] = useState('');
+  // Bumped when a Connection test succeeds, to re-run the profile probe below.
+  // See handleConnectionTested for why that is not optional.
+  const [probeNonce, setProbeNonce] = useState(0);
 
   const [recentContent, setRecentContent] = useState([]);
 
@@ -760,7 +763,26 @@ export default function LinkiePage() {
     return () => {
       cancelled = true;
     };
-  }, [authReady]);
+  }, [authReady, probeNonce]);
+
+  /**
+   * A Connection test that succeeds means the credential changed under us.
+   *
+   * The probe above keyed on `authReady` alone, so it ran once and never
+   * again. An operator who arrived with a broken key, fixed it, and pressed
+   * Test Connection got a green header and Links and Analytics still disabled
+   * — because `profiles` was still the empty array from the failed probe, and
+   * nothing short of a page reload would refill it. Caught in review on
+   * PR #429.
+   *
+   * Re-running is the whole point: the probe IS the profile resolve, so a key
+   * that started working has to be re-asked before anything else on the page
+   * can work. Only a success bumps it; a failed test has nothing new to learn.
+   */
+  const handleConnectionTested = (ok) => {
+    setConnected(ok);
+    if (ok) setProbeNonce((n) => n + 1);
+  };
 
   const selectedProfile = selectProfile(profiles, preferredProfileId);
   const profileId = selectedProfile?._id || null;
@@ -833,7 +855,7 @@ export default function LinkiePage() {
         {activeTab === 'analytics' && (
           <AnalyticsTab profileId={profileId} profileNotice={profileNotice} />
         )}
-        {activeTab === 'connection' && <ConnectionTab onStatusChange={setConnected} />}
+        {activeTab === 'connection' && <ConnectionTab onStatusChange={handleConnectionTested} />}
       </div>
     </div>
   );
