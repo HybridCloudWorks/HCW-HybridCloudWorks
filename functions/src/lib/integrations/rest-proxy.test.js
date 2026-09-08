@@ -192,6 +192,48 @@ describe('per-integration path allowlist', () => {
     }
   });
 
+  it('passes every request the Linkie Hub actually sends, so the allowlist needs no widening', async () => {
+    // The claim above this test used to be aspirational: the admin page called
+    // /links, /links/:id and /analytics — none of which exist upstream, and all
+    // of which this allowlist correctly refused. The page now calls the real
+    // API (frontend/src/lib/linkie.js), and these six requests are its entire
+    // surface. If a seventh appears, this test is where widening the allowlist
+    // has to be argued for rather than done quietly.
+    const requests = [
+      { path: '/profiles', method: 'GET' },
+      { path: '/profiles/p1/posts', method: 'GET' },
+      { path: '/profiles/p1/posts', method: 'POST', body: [{ url: 'https://a.test' }] },
+      { path: '/profiles/p1/posts/x9', method: 'PATCH', body: { url: 'https://b.test' } },
+      { path: '/profiles/p1/posts/x9', method: 'DELETE' },
+      { path: '/analytics/traffic-stats?link_in_bio_id=p1', method: 'GET' },
+    ];
+    for (const request of requests) {
+      const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' }));
+      const response = await handlerFor(fetchImpl)(makeRequest(request), context);
+      const label = `${request.method} ${request.path}`;
+      expect(response.status, label).toBe(200);
+      expect(JSON.parse(response.body).ok, label).toBe(true);
+      // URL AND METHOD ARE NOT THE WHOLE CLAIM. A regression that forwarded
+      // the right path with an empty body would satisfy the allowlist and
+      // pass this test while silently posting nothing — the write would
+      // succeed, and create an empty post. So the write methods assert the
+      // payload arrives too, and the read methods assert one is NOT invented,
+      // since a body on a GET is its own kind of wrong. Raised in review on
+      // PR #429.
+      const [, options] = fetchImpl.mock.calls[0];
+      expect(options.method, label).toBe(request.method);
+      if (request.body === undefined) {
+        expect(options.body, label).toBeUndefined();
+      } else {
+        expect(JSON.parse(options.body), label).toEqual(request.body);
+      }
+      expect(fetchImpl, label).toHaveBeenCalledWith(
+        `https://app.linkie.bio/api/v1${request.path}`,
+        expect.objectContaining({ method: request.method })
+      );
+    }
+  });
+
   it('blocks the rest of the upstream API', () => {
     // The key's scopes are broader than any one screen needs, so an allowlist
     // is worth more than trusting whatever path the caller sends.

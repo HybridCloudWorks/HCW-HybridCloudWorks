@@ -1,15 +1,38 @@
 /**
- * Linkie Hub - manage Linkie links, view analytics, push published content.
+ * Linkie Hub - manage Linkie posts, view analytics, push published content.
  *
  * All Linkie API calls route through the `linkieProxy` Azure Function
  * (LINKIE_API_KEY lives in Azure Key Vault - never in the client bundle).
- * Mirrors the SocialHubPage integration pattern.
+ *
+ * ===========================================================================
+ * WHY THIS PAGE WAS REWRITTEN
+ * ===========================================================================
+ * Four of its six calls went to endpoints that do not exist: `/links`,
+ * `/links/:id` (POST, PUT and DELETE) and `/analytics`. The Links and
+ * Analytics tabs could never have worked. `linkieProxy`'s allowlist is the
+ * only reason they failed loudly — `/links is not an allowed Linkie endpoint`
+ * — rather than silently.
+ *
+ * The allowlist was right and this page was wrong. Linkie has no top-level
+ * link or analytics resource: links are profile-scoped POSTS and analytics is
+ * `/analytics/traffic-stats`. The real shapes, and where each is proven, are
+ * documented in `@/lib/linkie` — which also holds every pure part of this
+ * page, because the mapping is what was got wrong and a mapping in a component
+ * is a mapping nobody tests.
+ *
+ * Two consequences worth stating rather than hiding:
+ *
+ *   - REORDER AND HIDE ARE GONE. Both sent `PUT /links/:id` with `position` or
+ *     `disabled`. Linkie's posts API has neither field and no ordering
+ *     endpoint; the controls were operating on a resource that does not exist.
+ *   - EDIT NOW CHANGES ONLY THE URL. `PATCH /profiles/:id/posts/:postId`
+ *     accepts `url` and nothing else.
  *
  * Required Azure Function App setting (prefer a Key Vault reference):
  *   LINKIE_API_KEY - Linkie Admin API key
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -29,14 +52,30 @@ import {
   RefreshCw,
   CheckCircle,
   AlertCircle,
-  ArrowUp,
-  ArrowDown,
-  Eye,
-  EyeOff,
   BarChart3,
   Send,
 } from 'lucide-react';
 import { postJSON, getJSON } from '@/lib/api';
+import {
+  EMPTY_POST_FORM,
+  LINKIE_POST_TYPES,
+  LINKIE_PROVIDERS,
+  buildPostPayload,
+  contentItemPostPayload,
+  createPostsBody,
+  describeLinkieFailure,
+  extractPosts,
+  extractProfiles,
+  extractTrafficStats,
+  linkiePaths,
+  profileLabel,
+  readLinkieBody,
+  selectProfile,
+  trafficStatCards,
+  unwrapLinkie,
+  validatePostForm,
+  visibleLinksState,
+} from '@/lib/linkie';
 
 const TABS = [
   { id: 'links', label: 'Links' },
@@ -45,22 +84,20 @@ const TABS = [
 ];
 
 // ── Linkie proxy wrappers ─────────────────────────────────────────────────────
+// One call each, named after the endpoint it reaches, so a path that does not
+// exist cannot hide behind a plausible function name the way `ltListLinks` did.
 
 const linkieFetch = (path, method = 'GET', body) => postJSON('linkieProxy', { path, method, body });
 
-const ltGetProfile = () => linkieFetch('/profiles');
-const ltListLinks = () => linkieFetch('/links');
-const ltCreateLink = (link) => linkieFetch('/links', 'POST', link);
-const ltUpdateLink = (id, updates) => linkieFetch(`/links/${id}`, 'PUT', updates);
-const ltDeleteLink = (id) => linkieFetch(`/links/${id}`, 'DELETE');
-const ltGetAnalytics = () => linkieFetch('/analytics');
-
-function extractLinks(res) {
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res?.links)) return res.links;
-  if (Array.isArray(res?.data)) return res.data;
-  return [];
-}
+const ltGetProfiles = () => linkieFetch(linkiePaths.profiles());
+const ltListPosts = (profileId) => linkieFetch(linkiePaths.posts(profileId));
+const ltCreatePost = (profileId, post) =>
+  linkieFetch(linkiePaths.posts(profileId), 'POST', createPostsBody(post));
+const ltUpdatePostUrl = (profileId, postId, url) =>
+  linkieFetch(linkiePaths.post(profileId, postId), 'PATCH', { url });
+const ltDeletePost = (profileId, postId) =>
+  linkieFetch(linkiePaths.post(profileId, postId), 'DELETE');
+const ltGetTrafficStats = (linkInBioId) => linkieFetch(linkiePaths.trafficStats(linkInBioId));
 
 // ── Published content helpers (same rule as SocialHubPage) ───────────────────
 
@@ -84,56 +121,65 @@ function getLiveUrl(item) {
 
 // ── Links Tab ─────────────────────────────────────────────────────────────────
 
-const EMPTY_LINK_FORM = { title: '', url: '' };
-
-function LinksTab({ recentContent }) {
+function LinksTab({ recentContent, profileId, profileNotice }) {
   const { toast } = useToast();
-  const [links, setLinks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState(null); // link id (or 'new') currently saving
-  const [form, setForm] = useState(EMPTY_LINK_FORM);
+  const [reloadToken, setReloadToken] = useState(0);
+  // One settled result, tagged with the request that produced it. `loading` is
+  // DERIVED from that tag rather than set at the top of the effect: a
+  // synchronous setState in an effect body is a cascading render, and the
+  // React Compiler lint (react-hooks/set-state-in-effect) rejects it.
+  const [result, setResult] = useState({ key: '', posts: [], error: '' });
+  const [busyId, setBusyId] = useState(null); // post _id (or 'new') currently saving
+  const [form, setForm] = useState(EMPTY_POST_FORM);
   const [editingId, setEditingId] = useState(null);
+  const [editingUrl, setEditingUrl] = useState('');
   const [pushingId, setPushingId] = useState(null);
 
-  const load = useCallback(async () => {
-    setError('');
-    setLoading(true);
-    try {
-      const res = await ltListLinks();
-      setLinks(extractLinks(res));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    queueMicrotask(() => {
-      load();
-    });
-  }, [load]);
+    if (!profileId) return undefined;
+    let cancelled = false;
+    const key = `${profileId}#${reloadToken}`;
+    ltListPosts(profileId)
+      .then((response) => {
+        if (cancelled) return;
+        // The proxy answers 200 whatever Linkie said, so `ok` is the only
+        // signal. Without this branch a 401 renders as "No posts yet".
+        const unwrapped = unwrapLinkie(response);
+        if (unwrapped.notConfigured || unwrapped.failed) {
+          const reason = unwrapped.notConfigured
+            ? unwrapped.reason
+            : describeLinkieFailure(unwrapped);
+          setResult({ key, posts: [], error: reason });
+          return;
+        }
+        setResult({ key, posts: extractPosts(response), error: '' });
+      })
+      .catch((err) => {
+        if (!cancelled) setResult({ key, posts: [], error: err.message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, reloadToken]);
+
+  const requestKey = profileId ? `${profileId}#${reloadToken}` : '';
+  const loading = Boolean(profileId) && result.key !== requestKey;
+  const { posts, error } = visibleLinksState({ profileId, loading, result });
+
+  const reload = () => setReloadToken((n) => n + 1);
 
   const handleSubmit = async () => {
-    const title = form.title.trim();
-    const url = form.url.trim();
-    if (!title || !url) {
-      toast({ title: 'Title and URL are required', variant: 'destructive' });
+    const problem = validatePostForm(form);
+    if (problem) {
+      toast({ title: problem, variant: 'destructive' });
       return;
     }
-    setBusyId(editingId || 'new');
+    setBusyId('new');
     try {
-      if (editingId) {
-        await ltUpdateLink(editingId, { title, url });
-        toast({ title: 'Link updated' });
-      } else {
-        await ltCreateLink({ title, url });
-        toast({ title: 'Link added to Linkie' });
-      }
-      setForm(EMPTY_LINK_FORM);
-      setEditingId(null);
-      await load();
+      readLinkieBody(await ltCreatePost(profileId, buildPostPayload(form)));
+      toast({ title: 'Added to Linkie' });
+      setForm(EMPTY_POST_FORM);
+      reload();
     } catch (err) {
       toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -141,44 +187,33 @@ function LinksTab({ recentContent }) {
     }
   };
 
-  const handleDelete = async (id) => {
-    setBusyId(id);
+  const handleSaveUrl = async (postId) => {
+    const url = editingUrl.trim();
+    if (!url) {
+      toast({ title: 'A URL is required', variant: 'destructive' });
+      return;
+    }
+    setBusyId(postId);
     try {
-      await ltDeleteLink(id);
-      setLinks((prev) => prev.filter((l) => l.id !== id));
-      toast({ title: 'Link deleted' });
+      readLinkieBody(await ltUpdatePostUrl(profileId, postId, url));
+      toast({ title: 'URL updated' });
+      setEditingId(null);
+      reload();
+    } catch (err) {
+      toast({ title: 'Update failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDelete = async (postId) => {
+    setBusyId(postId);
+    try {
+      readLinkieBody(await ltDeletePost(profileId, postId));
+      setResult((prev) => ({ ...prev, posts: prev.posts.filter((post) => post._id !== postId) }));
+      toast({ title: 'Removed from Linkie' });
     } catch (err) {
       toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleToggle = async (link) => {
-    const isHidden = link.disabled === true || link.visible === false;
-    setBusyId(link.id);
-    try {
-      await ltUpdateLink(link.id, { disabled: !isHidden });
-      setLinks((prev) => prev.map((l) => (l.id === link.id ? { ...l, disabled: !isHidden } : l)));
-    } catch (err) {
-      toast({ title: 'Toggle failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleMove = async (index, direction) => {
-    const target = index + direction;
-    if (target < 0 || target >= links.length) return;
-    const link = links[index];
-    setBusyId(link.id);
-    try {
-      await ltUpdateLink(link.id, { position: target });
-      const next = [...links];
-      [next[index], next[target]] = [next[target], next[index]];
-      setLinks(next);
-    } catch (err) {
-      toast({ title: 'Reorder failed', description: err.message, variant: 'destructive' });
     } finally {
       setBusyId(null);
     }
@@ -193,9 +228,9 @@ function LinksTab({ recentContent }) {
     }
     setPushingId(item.id);
     try {
-      await ltCreateLink({ title, url });
+      readLinkieBody(await ltCreatePost(profileId, contentItemPostPayload({ title, url })));
       toast({ title: 'Pushed to Linkie', description: title });
-      await load();
+      reload();
     } catch (err) {
       toast({ title: 'Push failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -203,181 +238,214 @@ function LinksTab({ recentContent }) {
     }
   };
 
+  const canWrite = Boolean(profileId);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Left: link list + add/edit form */}
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{editingId ? 'Edit Link' : 'Add a Link'}</CardTitle>
+            <CardTitle className="text-base">Add a Post</CardTitle>
+            <CardDescription className="text-xs">
+              A Linkie post has no title. Its caption is the nearest field, so that is where an
+              article headline goes.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
-              <Label className="text-xs">Title</Label>
+              <Label className="text-xs" htmlFor="linkie-post-url">
+                URL
+              </Label>
               <Input
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="My latest article"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">URL</Label>
-              <Input
+                id="linkie-post-url"
                 value={form.url}
                 onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
                 placeholder="https://hybridcloudworks.com/…"
               />
             </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={handleSubmit}
-                disabled={busyId !== null}
-                className="gap-1.5"
-              >
-                {busyId === (editingId || 'new') ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-                {editingId ? 'Save Changes' : 'Add Link'}
-              </Button>
-              {editingId && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingId(null);
-                    setForm(EMPTY_LINK_FORM);
-                  }}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs" htmlFor="linkie-post-provider">
+                  Provider
+                </Label>
+                <select
+                  id="linkie-post-provider"
+                  value={form.provider}
+                  onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+                  className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  Cancel
-                </Button>
-              )}
+                  {LINKIE_PROVIDERS.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs" htmlFor="linkie-post-type">
+                  Post Type
+                </Label>
+                <select
+                  id="linkie-post-type"
+                  value={form.postType}
+                  onChange={(e) => setForm((f) => ({ ...f, postType: e.target.value }))}
+                  className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  {LINKIE_POST_TYPES.map((postType) => (
+                    <option key={postType} value={postType}>
+                      {postType}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+            <div>
+              <Label className="text-xs" htmlFor="linkie-post-account">
+                Account Name
+              </Label>
+              <Input
+                id="linkie-post-account"
+                value={form.accountName}
+                onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label className="text-xs" htmlFor="linkie-post-text">
+                Text (caption)
+              </Label>
+              <Input
+                id="linkie-post-text"
+                value={form.text}
+                onChange={(e) => setForm((f) => ({ ...f, text: e.target.value }))}
+                placeholder="My latest article"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              disabled={busyId !== null || !canWrite}
+              className="gap-1.5"
+            >
+              {busyId === 'new' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              Add Post
+            </Button>
           </CardContent>
         </Card>
 
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">
-            Current Links
-            {links.length > 0 && (
+            Current Posts
+            {posts.length > 0 && (
               <Badge variant="secondary" className="ml-2 text-[10px]">
-                {links.length}
+                {posts.length}
               </Badge>
             )}
           </h3>
-          <Button variant="ghost" size="sm" onClick={load} className="gap-1.5 h-7">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={reload}
+            disabled={!canWrite}
+            className="gap-1.5 h-7"
+          >
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </Button>
         </div>
 
-        {loading && (
+        {!canWrite && profileNotice && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{profileNotice}</span>
+          </div>
+        )}
+        {canWrite && loading && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
-        {error && (
+        {canWrite && error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error} — check the Connection tab.</span>
           </div>
         )}
-        {!loading && !error && links.length === 0 && (
-          <p className="text-sm text-muted-foreground py-4 text-center">No links yet.</p>
+        {canWrite && !loading && !error && posts.length === 0 && (
+          <p className="text-sm text-muted-foreground py-4 text-center">No posts yet.</p>
         )}
 
-        {links.map((link, index) => {
-          const isHidden = link.disabled === true || link.visible === false;
-          const isBusy = busyId === link.id;
+        {posts.map((post, index) => {
+          const isBusy = busyId === post._id;
+          const isEditing = editingId === post._id;
           return (
-            <Card key={link.id || index} className="p-3">
-              <div className="flex items-center gap-3">
-                <div className="flex flex-col gap-0.5 shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5"
-                    disabled={isBusy || index === 0}
-                    onClick={() => handleMove(index, -1)}
-                  >
-                    <ArrowUp className="h-3 w-3" />
+            <Card key={post._id || index} className="p-3">
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={editingUrl}
+                    onChange={(e) => setEditingUrl(e.target.value)}
+                    className="flex-1"
+                    aria-label="Post URL"
+                  />
+                  <Button size="sm" disabled={isBusy} onClick={() => handleSaveUrl(post._id)}>
+                    {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5"
-                    disabled={isBusy || index === links.length - 1}
-                    onClick={() => handleMove(index, 1)}
-                  >
-                    <ArrowDown className="h-3 w-3" />
+                  <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                    Cancel
                   </Button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium truncate ${isHidden ? 'opacity-50' : ''}`}>
-                    {link.title || 'Untitled'}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">{link.url}</p>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {isHidden && (
-                    <Badge variant="outline" className="text-[10px]">
-                      Hidden
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{post.text || post.provider}</p>
+                    <p className="text-xs text-muted-foreground truncate">{post.url}</p>
+                    <Badge variant="outline" className="text-[10px] mt-1">
+                      {post.provider} · {post.post_type}
                     </Badge>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    disabled={isBusy}
-                    title={isHidden ? 'Show link' : 'Hide link'}
-                    onClick={() => handleToggle(link)}
-                  >
-                    {isHidden ? (
-                      <EyeOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Eye className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    disabled={isBusy}
-                    title="Edit"
-                    onClick={() => {
-                      setEditingId(link.id);
-                      setForm({ title: link.title || '', url: link.url || '' });
-                    }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                    disabled={isBusy}
-                    title="Delete"
-                    onClick={() => handleDelete(link.id)}
-                  >
-                    {isBusy ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={isBusy || !post._id}
+                      title="Edit URL — the only field Linkie lets you change"
+                      onClick={() => {
+                        setEditingId(post._id);
+                        setEditingUrl(post.url || '');
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                      disabled={isBusy || !post._id}
+                      title="Delete"
+                      onClick={() => handleDelete(post._id)}
+                    >
+                      {isBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
             </Card>
           );
         })}
       </div>
 
-      {/* Right: push published content to Linkie */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold">Push Published Content</h3>
         <p className="text-xs text-muted-foreground">
-          Add the public URL of a recently published page as a Linkie link.
+          Add the public URL of a recently published page as a Linkie post.
         </p>
         {recentContent.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
@@ -388,7 +456,16 @@ function LinksTab({ recentContent }) {
           {recentContent.map((item) => {
             const title = item.Title || item.title || 'Untitled';
             const url = getLiveUrl(item);
-            const alreadyLinked = links.some((l) => l.url === url);
+            // `posts` is [] while the fetch is in flight, so alreadyLinked is
+            // false for EVERYTHING until it settles — which would light up
+            // Push on articles already in Linkie and let a fast operator
+            // create duplicates. "Not answered yet" is not "not linked", so
+            // the button waits for the answer. Caught in review on PR #429.
+            const alreadyLinked = posts.some((post) => post.url === url);
+            const cannotTellYet = loading;
+            let pushTitle;
+            if (!canWrite) pushTitle = profileNotice || 'No Linkie profile selected';
+            else if (cannotTellYet) pushTitle = 'Checking what is already linked…';
             return (
               <div
                 key={item.id}
@@ -409,7 +486,10 @@ function LinksTab({ recentContent }) {
                   size="sm"
                   variant={alreadyLinked ? 'outline' : 'default'}
                   className="gap-1.5 shrink-0"
-                  disabled={!url || alreadyLinked || pushingId === item.id}
+                  disabled={
+                    !url || !canWrite || cannotTellYet || alreadyLinked || pushingId === item.id
+                  }
+                  title={pushTitle}
                   onClick={() => handlePushContent(item)}
                 >
                   {pushingId === item.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -430,29 +510,57 @@ function LinksTab({ recentContent }) {
 
 // ── Analytics Tab ─────────────────────────────────────────────────────────────
 
-function AnalyticsTab() {
-  const [analytics, setAnalytics] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await ltGetAnalytics();
-      setAnalytics(res || {});
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+function AnalyticsTab({ profileId, profileNotice }) {
+  const [reloadToken, setReloadToken] = useState(0);
+  // Same shape as the Links tab, for the same reason: loading is derived from
+  // the settled request's key, never set synchronously in the effect body.
+  const [result, setResult] = useState({ key: '', analytics: null, error: '' });
 
   useEffect(() => {
-    queueMicrotask(() => {
-      load();
-    });
-  }, [load]);
+    if (!profileId) return undefined;
+    let cancelled = false;
+    const key = `${profileId}#${reloadToken}`;
+    // Linkie's analytics endpoint takes a `link_in_bio_id`. The profile's own
+    // `_id` is what Site-Main sends for it, and is the closest identifier this
+    // API exposes — see the note in the PR: it is the one shape here that
+    // repository evidence does not fully settle.
+    ltGetTrafficStats(profileId)
+      .then((response) => {
+        if (cancelled) return;
+        const unwrapped = unwrapLinkie(response);
+        if (unwrapped.notConfigured || unwrapped.failed) {
+          const reason = unwrapped.notConfigured
+            ? unwrapped.reason
+            : describeLinkieFailure(unwrapped);
+          setResult({ key, analytics: null, error: reason });
+          return;
+        }
+        // The whole envelope is kept, not just the body: the "Raw analytics
+        // response" panel is the operator's only view of what Linkie actually
+        // sent, and the upstream status belongs in it.
+        setResult({ key, analytics: response, error: '' });
+      })
+      .catch((err) => {
+        if (!cancelled) setResult({ key, analytics: null, error: err.message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, reloadToken]);
+
+  const requestKey = profileId ? `${profileId}#${reloadToken}` : '';
+  const loading = Boolean(profileId) && result.key !== requestKey;
+  const analytics = loading ? null : result.analytics;
+  const error = loading ? '' : result.error;
+
+  if (!profileId) {
+    return (
+      <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs">
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>{profileNotice || 'No Linkie profile selected — check the Connection tab.'}</span>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -467,20 +575,14 @@ function AnalyticsTab() {
       <div className="flex flex-col items-center py-8 gap-3">
         <AlertCircle className="h-6 w-6 text-destructive" />
         <p className="text-sm text-destructive">{error}</p>
-        <Button variant="outline" size="sm" onClick={load}>
+        <Button variant="outline" size="sm" onClick={() => setReloadToken((n) => n + 1)}>
           Retry
         </Button>
       </div>
     );
   }
 
-  const summary = analytics?.data || analytics || {};
-  const stats = [
-    { label: 'Views', value: summary.views ?? summary.totalViews },
-    { label: 'Clicks', value: summary.clicks ?? summary.totalClicks },
-    { label: 'CTR', value: summary.ctr ?? summary.clickThroughRate },
-    { label: 'Unique Visitors', value: summary.uniqueViews ?? summary.uniqueVisitors },
-  ].filter((s) => s.value !== undefined && s.value !== null);
+  const stats = trafficStatCards(extractTrafficStats(analytics));
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -519,8 +621,17 @@ function ConnectionTab({ onStatusChange }) {
     setTesting(true);
     setResult(null);
     try {
-      const profile = await ltGetProfile();
-      setResult({ ok: true, message: 'Connected to the Linkie API.', profile });
+      const response = await ltGetProfiles();
+      // `/profiles` was already the right endpoint, so this test has always
+      // worked — but it read a resolved not-ok envelope as success. A refused
+      // key now says so.
+      const profile = readLinkieBody(response);
+      const profiles = extractProfiles(response);
+      setResult({
+        ok: true,
+        message: `Connected to the Linkie API — ${profiles.length} profile${profiles.length === 1 ? '' : 's'}.`,
+        profile,
+      });
       onStatusChange?.(true);
     } catch (err) {
       setResult({ ok: false, message: err.message });
@@ -601,12 +712,18 @@ export default function LinkiePage() {
   const { authReady } = useAuthReady();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'links';
+  const preferredProfileId = searchParams.get('profile') || '';
   const [connected, setConnected] = useState('checking');
+  const [profiles, setProfiles] = useState([]);
+  const [profileNotice, setProfileNotice] = useState('');
+  // Bumped when a Connection test succeeds, to re-run the profile probe below.
+  // See handleConnectionTested for why that is not optional.
+  const [probeNonce, setProbeNonce] = useState(0);
 
   const [recentContent, setRecentContent] = useState([]);
 
   useEffect(() => {
-    if (!authReady) return;
+    if (!authReady) return undefined;
     let cancelled = false;
     getJSON('cms/content?limit=500')
       .then((res) => {
@@ -620,15 +737,72 @@ export default function LinkiePage() {
     };
   }, [authReady]);
 
-  // Lightweight readiness probe — function resolves the secret server-side.
+  // Readiness probe AND the profile resolve, because they are the same call:
+  // every posts and analytics path is profile-scoped, so nothing else on this
+  // page can run until `/profiles` has answered.
   useEffect(() => {
-    if (!authReady) return;
-    ltGetProfile()
-      .then(() => setConnected(true))
-      .catch(() => setConnected(false));
-  }, [authReady]);
+    if (!authReady) return undefined;
+    let cancelled = false;
+    ltGetProfiles()
+      .then((response) => {
+        if (cancelled) return;
+        const unwrapped = unwrapLinkie(response);
+        if (unwrapped.notConfigured || unwrapped.failed) {
+          setConnected(false);
+          setProfiles([]);
+          setProfileNotice(
+            (unwrapped.notConfigured ? unwrapped.reason : describeLinkieFailure(unwrapped)) ||
+              'Linkie could not be reached'
+          );
+          return;
+        }
+        const list = extractProfiles(response);
+        setConnected(true);
+        setProfiles(list);
+        setProfileNotice(
+          list.length === 0
+            ? 'This Linkie API key owns no profiles — check the Connection tab.'
+            : ''
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setConnected(false);
+        setProfiles([]);
+        setProfileNotice(err.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, probeNonce]);
 
-  const setTab = (id) => setSearchParams({ tab: id });
+  /**
+   * A Connection test that succeeds means the credential changed under us.
+   *
+   * The probe above keyed on `authReady` alone, so it ran once and never
+   * again. An operator who arrived with a broken key, fixed it, and pressed
+   * Test Connection got a green header and Links and Analytics still disabled
+   * — because `profiles` was still the empty array from the failed probe, and
+   * nothing short of a page reload would refill it. Caught in review on
+   * PR #429.
+   *
+   * Re-running is the whole point: the probe IS the profile resolve, so a key
+   * that started working has to be re-asked before anything else on the page
+   * can work. Only a success bumps it; a failed test has nothing new to learn.
+   */
+  const handleConnectionTested = (ok) => {
+    setConnected(ok);
+    if (ok) setProbeNonce((n) => n + 1);
+  };
+
+  const selectedProfile = selectProfile(profiles, preferredProfileId);
+  const profileId = selectedProfile?._id || null;
+
+  const updateParams = (patch) => {
+    const next = { tab: activeTab };
+    if (preferredProfileId) next.profile = preferredProfileId;
+    setSearchParams({ ...next, ...patch });
+  };
 
   return (
     <div className="space-y-6">
@@ -637,16 +811,39 @@ export default function LinkiePage() {
         title="Linkie Hub"
         service="Linkie"
         connected={connected}
-        description="Manage your Linkie links, push published content, and review link analytics."
+        description="Manage your Linkie posts, push published content, and review link analytics."
         accent="emerald"
       />
+
+      {profiles.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="text-xs" htmlFor="linkie-profile">
+            Profile
+          </Label>
+          <select
+            id="linkie-profile"
+            value={profileId || ''}
+            onChange={(e) => updateParams({ profile: e.target.value })}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            {profiles.map((profile) => (
+              <option key={profile._id} value={profile._id}>
+                {profileLabel(profile)}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted-foreground">
+            Posts and analytics are scoped to this profile.
+          </span>
+        </div>
+      )}
 
       <div className="flex gap-1 border-b border-border">
         {TABS.map(({ id, label }) => (
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => updateParams({ tab: id })}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
               activeTab === id
                 ? 'border-primary text-primary'
@@ -659,9 +856,17 @@ export default function LinkiePage() {
       </div>
 
       <div>
-        {activeTab === 'links' && <LinksTab recentContent={recentContent} />}
-        {activeTab === 'analytics' && <AnalyticsTab />}
-        {activeTab === 'connection' && <ConnectionTab onStatusChange={setConnected} />}
+        {activeTab === 'links' && (
+          <LinksTab
+            recentContent={recentContent}
+            profileId={profileId}
+            profileNotice={profileNotice}
+          />
+        )}
+        {activeTab === 'analytics' && (
+          <AnalyticsTab profileId={profileId} profileNotice={profileNotice} />
+        )}
+        {activeTab === 'connection' && <ConnectionTab onStatusChange={handleConnectionTested} />}
       </div>
     </div>
   );
