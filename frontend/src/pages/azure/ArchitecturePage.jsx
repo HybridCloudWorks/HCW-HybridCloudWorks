@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import FeaturedArchitecture from '@/components/architecture/FeaturedArchitecture';
+import { staticBlueprints } from './architecture-blueprints';
 
 // The two badges the hand-written panel showed, from the blueprint's own fields.
 function featuredBadges(blueprint) {
@@ -50,85 +51,6 @@ export default function ArchitecturePage() {
     () => fetchPublicContentList({ type: 'architecture', limit: 250, source: 'blogs' }),
     shouldLoadLegacy ? 'architecture:legacy' : ''
   );
-
-  const staticBlueprints = [
-    {
-      icon: 'hub',
-      category: 'Networking',
-      categoryColor: 'blue',
-      title: 'Enterprise Hub-and-Spoke Landing Zone',
-      description:
-        'Reference architecture for centralized connectivity, policy-driven segmentation, and shared security services across enterprise subscriptions.',
-      rpo: '< 15 min',
-      rto: '< 1 hr',
-      level: '400',
-      cost: '$2.1k/mo',
-    },
-    {
-      icon: 'cloud_sync',
-      category: 'Migration',
-      categoryColor: 'purple',
-      title: 'Azure VMware Estate Migration',
-      description:
-        'Phased migration blueprint using Azure VMware Solution, Recovery Services, and dependency mapping for low-risk cutovers.',
-      rpo: '24 hr',
-      rto: '4 hr',
-      level: '200',
-      cost: '$1.4k/mo',
-      costColor: 'green',
-    },
-    {
-      icon: 'monitoring',
-      category: 'FinOps',
-      categoryColor: 'green',
-      title: 'FinOps Guardrails for Azure Subscriptions',
-      description:
-        'Policy and budget-control pattern with Cost Management exports, Azure Policy enforcement, and automated anomaly alerts.',
-      rpo: '1 hr',
-      rto: '2 hr',
-      level: '300',
-      cost: '$950/mo',
-      costColor: 'green',
-    },
-    {
-      icon: 'database',
-      category: 'Database',
-      categoryColor: 'orange',
-      title: 'Global Data Tier with Cosmos DB + SQL',
-      description:
-        'Multi-region data architecture combining Cosmos DB and Azure SQL with geo-replication and strict consistency controls.',
-      rpo: '< 1s',
-      rto: '< 1 min',
-      level: '400',
-      cost: '$3.2k/mo',
-    },
-    {
-      icon: 'security',
-      category: 'Security',
-      categoryColor: 'red',
-      title: 'Zero Trust Identity Control Plane',
-      description:
-        'Identity-first architecture using Entra ID, Conditional Access, PIM, and Defender for Cloud to enforce least privilege at scale.',
-      rpo: 'N/A',
-      rto: 'N/A',
-      level: '300',
-      cost: '$780/mo',
-      costColor: 'green',
-    },
-    {
-      icon: 'api',
-      category: 'Serverless',
-      categoryColor: 'blue',
-      title: 'Event-Driven Serverless Integration Mesh',
-      description:
-        'Serverless integration pattern based on Event Grid, Functions, and Service Bus for near real-time distributed workflows.',
-      rpo: '< 5 min',
-      rto: 'Immediate',
-      level: '200',
-      cost: '$420/mo',
-      costColor: 'green',
-    },
-  ];
 
   const dynamicBlueprints =
     contentBlueprints.length > 0

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
+import { staticBlueprints } from './architecture-blueprints';
 
 function firstPresent(...values) {
   for (const value of values) {
@@ -32,100 +33,6 @@ function mapDynamicBlueprint(doc, index, normalizeCategory) {
 }
 
 export default function ArchitecturePage() {
-  const staticBlueprints = [
-    {
-      id: 1,
-      icon: 'hub',
-      category: 'Compute',
-      categoryColor: 'text-blue-400',
-      title: 'Global Load Balancing',
-      description:
-        'Global external HTTP(S) load balancing with Cloud Armor, regional failover policies, and CDN edge caching for resilient web workloads.',
-      rpo: '1h',
-      rto: '30m',
-      level: 'Production',
-      cost: '$2,400/mo',
-      costColor: 'text-green-400',
-      featured: true,
-      waf: 96,
-    },
-    {
-      id: 2,
-      icon: 'storage',
-      category: 'Data',
-      categoryColor: 'text-yellow-400',
-      title: 'BigQuery Data Lake',
-      description:
-        'Unified analytics architecture combining BigQuery, Dataplex, and Cloud Storage lifecycle controls for governed enterprise reporting.',
-      rpo: '4h',
-      rto: '2h',
-      level: 'Production',
-      cost: '$1,800/mo',
-      costColor: 'text-green-400',
-      waf: 93,
-    },
-    {
-      id: 3,
-      icon: 'computer',
-      category: 'Networking',
-      categoryColor: 'text-purple-400',
-      title: 'Hybrid Interconnect',
-      description:
-        'Low-latency private connectivity pattern using Dedicated Interconnect, Cloud Router, and HA VPN fallback for critical hybrid systems.',
-      rpo: '15m',
-      rto: '5m',
-      level: 'Mission Critical',
-      cost: '$3,600/mo',
-      costColor: 'text-orange-400',
-      waf: 98,
-    },
-    {
-      id: 4,
-      icon: 'psychology',
-      category: 'AI/ML',
-      categoryColor: 'text-pink-400',
-      title: 'Vertex AI Pipeline',
-      description:
-        'End-to-end MLOps blueprint with Vertex AI Pipelines, Feature Store, and model registry promotion across dev/stage/prod projects.',
-      rpo: '1h',
-      rto: '30m',
-      level: 'Production',
-      cost: '$2,200/mo',
-      costColor: 'text-green-400',
-      waf: 91,
-    },
-    {
-      id: 5,
-      icon: 'shield',
-      category: 'Security',
-      categoryColor: 'text-red-400',
-      title: 'Zero Trust Security',
-      description:
-        'Identity-aware proxy and BeyondCorp Enterprise architecture enforcing context-aware access and workload isolation across environments.',
-      rpo: '30m',
-      rto: '15m',
-      level: 'Mission Critical',
-      cost: '$2,800/mo',
-      costColor: 'text-orange-400',
-      waf: 99,
-    },
-    {
-      id: 6,
-      icon: 'cloud',
-      category: 'Serverless',
-      categoryColor: 'text-cyan-400',
-      title: 'Cloud Run Microservices',
-      description:
-        'Containerized microservices pattern using Cloud Run, Eventarc, and Pub/Sub with autoscaling and per-service least-privilege IAM.',
-      rpo: '1h',
-      rto: '20m',
-      level: 'Production',
-      cost: '$1,200/mo',
-      costColor: 'text-green-400',
-      waf: 94,
-    },
-  ];
-
   const categories = ['Compute', 'Data', 'Networking', 'AI/ML', 'Security', 'Serverless'];
   const [selectedCategories, setSelectedCategories] = useState([]);
 

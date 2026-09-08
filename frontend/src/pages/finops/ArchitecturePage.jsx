@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import { useNavigate } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
+import { staticBlueprints } from './architecture-blueprints';
 
 function firstPresent(...values) {
   for (const value of values) {
@@ -35,100 +36,6 @@ function mapDynamicBlueprint(doc, index, normalizeCategory) {
 
 export default function ArchitecturePage() {
   const navigate = useNavigate();
-  const staticBlueprints = [
-    {
-      id: 1,
-      icon: 'trending_down',
-      category: 'Cost Analysis',
-      categoryColor: 'text-emerald-400',
-      title: 'Multi-Cloud Cost Optimization',
-      description:
-        'Cross-cloud optimization architecture with shared tagging taxonomy, cost telemetry normalization, and rightsizing recommendation pipelines.',
-      rpo: '1h',
-      rto: '30m',
-      level: 'Production',
-      cost: '$1,800/mo',
-      costColor: 'text-green-400',
-      featured: true,
-      waf: 94,
-    },
-    {
-      id: 2,
-      icon: 'analytics',
-      category: 'Reporting',
-      categoryColor: 'text-blue-400',
-      title: 'Real-time Cost Dashboard',
-      description:
-        'Streaming dashboard pattern for near real-time cloud spend visibility across business units, products, and environments.',
-      rpo: '15m',
-      rto: '5m',
-      level: 'Production',
-      cost: '$1,200/mo',
-      costColor: 'text-green-400',
-      waf: 92,
-    },
-    {
-      id: 3,
-      icon: 'calculate',
-      category: 'Billing',
-      categoryColor: 'text-purple-400',
-      title: 'Chargeback & Allocation',
-      description:
-        'Allocation framework for unit-economics reporting with cost ownership, shared resource split rules, and monthly chargeback automation.',
-      rpo: '1d',
-      rto: '4h',
-      level: 'Standard',
-      cost: '$900/mo',
-      costColor: 'text-green-400',
-      waf: 89,
-    },
-    {
-      id: 4,
-      icon: 'optimization',
-      category: 'Automation',
-      categoryColor: 'text-yellow-400',
-      title: 'RI & Savings Plan Automation',
-      description:
-        'Automation workflow for committed-use planning, purchase simulation, and policy-based guardrails to reduce avoidable spend.',
-      rpo: '6h',
-      rto: '2h',
-      level: 'Production',
-      cost: '$2,100/mo',
-      costColor: 'text-orange-400',
-      waf: 95,
-    },
-    {
-      id: 5,
-      icon: 'policy',
-      category: 'Governance',
-      categoryColor: 'text-red-400',
-      title: 'Budget & Policy Framework',
-      description:
-        'Governance architecture tying budget thresholds to policy enforcement, alert routing, and escalation workflows by cost center.',
-      rpo: '24h',
-      rto: '1h',
-      level: 'Mission Critical',
-      cost: '$1,600/mo',
-      costColor: 'text-orange-400',
-      waf: 97,
-    },
-    {
-      id: 6,
-      icon: 'lightbulb',
-      category: 'Optimization',
-      categoryColor: 'text-pink-400',
-      title: 'Waste Identification & Alerts',
-      description:
-        'Continuous anomaly and idle-resource detection pipeline with actionable alerts for compute, storage, and network waste classes.',
-      rpo: '30m',
-      rto: '15m',
-      level: 'Production',
-      cost: '$1,400/mo',
-      costColor: 'text-green-400',
-      waf: 93,
-    },
-  ];
-
   const categories = [
     'Cost Analysis',
     'Reporting',

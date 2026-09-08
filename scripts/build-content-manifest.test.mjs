@@ -145,6 +145,23 @@ describe('sectionCounts', () => {
     expect(sections._unattributed.frameworks).toBe(0);
   });
 
+  it('counts architecture items per provider, and not as frameworks', () => {
+    // The fallback path can speak for architecture-designs for the same reason
+    // it can speak for frameworks, and with a stronger claim: a zero it
+    // produces only drops a route whose architecture-blueprints.js is also
+    // empty, and the one provider that is true of — VMware — has a page that
+    // reads the `content` container this script is handed and nothing else.
+    const sections = sectionCounts([
+      doc('azure', 'architecture'),
+      doc('vmware', 'framework'),
+      doc('aws', 'blog'),
+    ]);
+    expect(sections.azure['architecture-designs']).toBe(1);
+    expect(sections.azure.frameworks).toBe(0);
+    expect(sections.vmware['architecture-designs']).toBe(0);
+    expect(sections.aws['architecture-designs']).toBe(0);
+  });
+
   it('counts a framework with no recognised provider as unattributed', () => {
     const sections = sectionCounts([
       { id: 'u', slug: 'u', type: 'framework' },

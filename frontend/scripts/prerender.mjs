@@ -40,7 +40,7 @@
  * about and continue past.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -110,21 +110,84 @@ export function dedupeRoutes(list) {
 }
 
 /**
+ * Items a route renders from the repository rather than from the API, keyed by
+ * route (issue #373).
+ *
+ * WHY THIS EXISTS. `manifest.sections` counts what the content API returns, and
+ * for six of the seven sections that is the whole page. `architecture-designs`
+ * is the exception: each provider's ArchitecturePage merges the API documents
+ * with a hardcoded blueprint list, so on 2026-09-07 an API count of zero was
+ * true of all five architecture pages and wrong about four of them — only
+ * `/vmware/architecture-designs` was actually empty. That is why the section was
+ * left uncounted when the other six were wired up, and acting on its zero would
+ * have unadvertised four working pages to fix one broken one.
+ *
+ * WHY IT IS DERIVED. The obvious fix — a list here naming the providers that
+ * have static content — is wrong the first time someone adds or removes a
+ * blueprint, and nothing would fail to say so. So each page's list moved to a
+ * sibling `src/pages/<provider>/architecture-blueprints.js` and this reads them:
+ * every directory under `src/pages` is checked for that file, the module is
+ * imported, and its `staticBlueprints` array is counted. The count has exactly
+ * one source, which is the array the page itself renders.
+ *
+ * The map is keyed by full route rather than by provider so that
+ * `sitemapRoutes` needs no notion of which section has static content — a future
+ * section that hardcodes items adds a module and a line to FILE_SECTION here,
+ * and nothing downstream changes.
+ *
+ * A directory with no such module contributes no entry, which reads as zero. An
+ * import that fails is not swallowed: this runs at build time, and a data module
+ * that cannot be loaded means the page cannot render it either.
+ */
+const FILE_SECTION = Object.freeze({
+  'architecture-blueprints.js': { section: 'architecture-designs', exported: 'staticBlueprints' },
+});
+
+export async function staticSectionItems(pagesDir) {
+  const items = {};
+  if (!existsSync(pagesDir)) return items;
+  for (const provider of readdirSync(pagesDir, { withFileTypes: true })) {
+    if (!provider.isDirectory()) continue;
+    for (const [file, { section, exported }] of Object.entries(FILE_SECTION)) {
+      const path = join(pagesDir, provider.name, file);
+      if (!existsSync(path)) continue;
+      const module = await import(pathToFileURL(path).href);
+      const list = module[exported];
+      if (!Array.isArray(list)) {
+        throw new Error(`${path} does not export an array named ${exported}`);
+      }
+      items[`/${provider.name}/${section}`] = list.length;
+    }
+  }
+  return items;
+}
+
+/**
  * The routes the sitemap advertises: every published route except a section
- * page the manifest knows to be empty (issue #373).
+ * page known to be empty (issue #373).
  *
  * The page is still rendered and still served — a visitor who types the URL
  * gets the honest empty state — it is just not offered to search engines as a
- * page worth indexing. A route `/<provider>/<section>` is dropped only when
- * `manifest.sections[provider][section]` is exactly 0 AND the manifest counts
- * no unattributed item for that section: the frameworks page infers a
- * provider from titles and URLs as a last resort, so an unattributed item
- * could appear on any provider's page and a zero is not trusted while one
- * exists. A manifest without `sections` (the route predates the field) drops
- * nothing. Returns the kept routes and the dropped ones, so the build log can
- * say what left and why.
+ * page worth indexing. A route `/<provider>/<section>` is dropped only when all
+ * three of these hold:
+ *
+ *   - `manifest.sections[provider][section]` is exactly 0, so the API puts
+ *     nothing on the page;
+ *   - the manifest counts no unattributed item for that section, because the
+ *     blog and frameworks pages infer a provider from titles and URLs as a last
+ *     resort and the architecture pages default an unattributed document to
+ *     their own provider — so such an item could appear on any provider's page
+ *     and a zero is not trusted while one exists;
+ *   - `staticItems[route]` is not positive, so the page renders nothing from the
+ *     repository either. This is the half `manifest.sections` cannot see, and
+ *     without it the four architecture pages that render hardcoded blueprints
+ *     would be dropped on an API zero that says nothing about them.
+ *
+ * A manifest without `sections` (the route predates the field) drops nothing.
+ * Returns the kept routes and the dropped ones, so the build log can say what
+ * left and why.
  */
-export function sitemapRoutes(routes, manifest) {
+export function sitemapRoutes(routes, manifest, staticItems = {}) {
   const sections = manifest?.sections;
   if (!sections || typeof sections !== 'object') return { kept: routes, dropped: [] };
   const unattributed = sections._unattributed || {};
@@ -133,7 +196,9 @@ export function sitemapRoutes(routes, manifest) {
   for (const route of routes) {
     const [, provider, section, ...rest] = route.split('/');
     const count = sections[provider]?.[section];
-    if (rest.length === 0 && count === 0 && !(unattributed[section] > 0)) {
+    const empty =
+      rest.length === 0 && count === 0 && !(unattributed[section] > 0) && !(staticItems[route] > 0);
+    if (empty) {
       dropped.push(route);
     } else {
       kept.push(route);
@@ -643,9 +708,12 @@ async function main() {
   // disagree: they have one source.
   //
   // Skipped routes are excluded by construction. Advertising a URL that renders
-  // the 404 page is worse than omitting it. Section pages the manifest knows to
-  // be empty are rendered but not advertised — see sitemapRoutes.
-  const sitemap = sitemapRoutes(publishedRoutes, manifest);
+  // the 404 page is worse than omitting it. Section pages known to be empty are
+  // rendered but not advertised — see sitemapRoutes. "Empty" needs both the
+  // manifest's API counts and the blueprint lists the pages hold themselves,
+  // which is what staticSectionItems reads.
+  const staticItems = await staticSectionItems(join(frontend, 'src', 'pages'));
+  const sitemap = sitemapRoutes(publishedRoutes, manifest, staticItems);
   for (const route of sitemap.dropped) {
     console.log(`[prerender] sitemap: omitted ${route} — no published items for this section`);
   }

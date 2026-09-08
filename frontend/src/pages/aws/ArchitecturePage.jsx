@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import FeaturedArchitecture from '@/components/architecture/FeaturedArchitecture';
+import { staticBlueprints } from './architecture-blueprints';
 
 // The two badges the hand-written panel showed, from the blueprint's own fields.
 function featuredBadges(blueprint) {
@@ -82,91 +83,6 @@ export default function ArchitecturePage() {
             cost: doc.costAnalysis?.estimatedMonthly || 'TBD',
             costColor: 'green',
           }));
-
-  const staticBlueprints = [
-    {
-      icon: 'public',
-      category: 'Networking',
-      categoryColor: 'blue',
-      title: 'Global Load Balancing',
-      slug: 'global-load-balancing',
-      description:
-        'High-availability routing using ELB and Route 53 with multi-region failover and health checks.',
-      rpo: '< 1 min',
-      rto: '< 5 min',
-      level: '300',
-      cost: '$1.2k/mo',
-      costColor: 'blue',
-    },
-    {
-      icon: 'rebase_edit',
-      category: 'Disaster Recovery',
-      categoryColor: 'red',
-      title: 'Multi-Region DR',
-      slug: 'multi-region-dr',
-      description:
-        'Active-Passive setup using RDS Aurora Global Database and S3 Cross-Region Replication for mission-critical apps.',
-      rpo: '< 15 min',
-      rto: '< 30 min',
-      level: '400',
-      cost: '$3.8k/mo',
-      costColor: 'red',
-    },
-    {
-      icon: 'hub',
-      category: 'Containers',
-      categoryColor: 'orange',
-      title: 'Container Orchestration',
-      slug: 'container-orchestration',
-      description:
-        'Modern microservices deployment on ECS Fargate with automated scaling and service discovery.',
-      rpo: 'N/A',
-      rto: '< 5 min',
-      level: '300',
-      cost: '$2.2k/mo',
-    },
-    {
-      icon: 'api',
-      category: 'Serverless',
-      categoryColor: 'blue',
-      title: 'Serverless API',
-      slug: 'serverless-api',
-      description:
-        'Cost-optimized event-driven backend using Lambda, API Gateway, and DynamoDB for massive scale.',
-      rpo: 'Real-time',
-      rto: 'N/A',
-      level: '200',
-      cost: '$400/mo',
-      costColor: 'green',
-    },
-    {
-      icon: 'database',
-      category: 'Analytics',
-      categoryColor: 'purple',
-      title: 'Data Lake Architecture',
-      slug: 'data-lake',
-      description:
-        'Scalable data storage and analytics pipeline using S3, Glue, and Athena for serverless queries.',
-      rpo: '24 hr',
-      rto: '4 hr',
-      level: '300',
-      cost: '$800/mo',
-      costColor: 'green',
-    },
-    {
-      icon: 'settings_input_component',
-      category: 'Connectivity',
-      categoryColor: 'blue',
-      title: 'Hybrid Connectivity',
-      slug: 'hybrid-connectivity',
-      description:
-        'Secure enterprise connection via Direct Connect and Transit Gateway for hybrid cloud workloads.',
-      rpo: 'N/A',
-      rto: 'Immediate',
-      level: '400',
-      cost: '$2.4k/mo',
-    },
-  ];
 
   const blueprints = [...dynamicBlueprints, ...staticBlueprints];
 
