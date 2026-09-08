@@ -153,6 +153,11 @@ function stripHtmlTags(value) {
  */
 export const MAX_ARTICLE_INPUT_BYTES = 60_000;
 
+/** "1 line", "3 lines" — this text reaches the model, so it reads as English. */
+function lineCount(n) {
+  return `${n} line${n === 1 ? '' : 's'}`;
+}
+
 /**
  * Rewrite an article body into something that can be spoken, and report what
  * had to be set aside.
@@ -166,13 +171,9 @@ export const MAX_ARTICLE_INPUT_BYTES = 60_000;
  * because a code block can legally contain pipes, hashes and angle brackets
  * that every later rule would otherwise mangle.
  *
+ * @param {unknown} body - the article's raw body
  * @returns {{ text: string, codeBlocks: object[], tables: object[], truncated: boolean, sourceBytes: number }}
  */
-/** "1 line", "3 lines" — this text reaches the model, so it reads as English. */
-function lineCount(n) {
-  return `${n} line${n === 1 ? '' : 's'}`;
-}
-
 export function prepareArticleForSpeech(body) {
   const codeBlocks = [];
   const tables = [];
