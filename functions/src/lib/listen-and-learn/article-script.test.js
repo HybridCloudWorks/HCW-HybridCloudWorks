@@ -102,6 +102,19 @@ describe('prepareArticleForSpeech', () => {
     expect(text).not.toContain('Plan');
   });
 
+  it('extracts a fence whose info string carries more than the language', () => {
+    // GFM allows extras after the language, and a fence that does not match is
+    // not merely uncounted — its contents fall through to the table and
+    // heading rules and get read aloud, which is the one thing this module
+    // promises never happens.
+    const { text, codeBlocks } = prepareArticleForSpeech(
+      'Run:\n\n```bash linenos title="deploy.sh"\n# install\necho hi\n```\n'
+    );
+    expect(codeBlocks).toEqual([{ index: 1, language: 'bash', lines: 2 }]);
+    expect(text).not.toContain('echo hi');
+    expect(text).not.toContain('Section: install');
+  });
+
   it('names a table by its columns instead of reading the cells', () => {
     const { text, tables } = prepareArticleForSpeech(
       '| Plan | Price |\n| --- | --- |\n| Free | 0 |\n| Max | 37 |\n'

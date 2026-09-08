@@ -161,7 +161,13 @@ export function prepareArticleForSpeech(body) {
   let text = String(body || '');
 
   // 1. Fenced code. First, for the reason in the header.
-  text = text.replace(/```([\w+-]*)\r?\n([\s\S]*?)```/g, (_match, lang, code) => {
+  // The info string is `lang` plus anything else the author put on that line.
+  // GFM allows extras — ```bash linenos, ```js title="x" — and matching only
+  // `lang\n` meant such a fence was not extracted at all: the code then fell
+  // through to the table and heading rules, which is precisely the mangling
+  // the ordering above exists to prevent. `[^\r\n]*` consumes the rest of the
+  // line; only the first token is kept as the language.
+  text = text.replace(/```([\w+-]*)[^\r\n]*\r?\n([\s\S]*?)```/g, (_match, lang, code) => {
     const lines = code.replace(/\s+$/, '').split(/\r?\n/).length;
     codeBlocks.push({ index: codeBlocks.length + 1, language: String(lang || '').trim(), lines });
     const label = String(lang || '').trim() || 'code';
