@@ -170,10 +170,20 @@ written, tested fallback TTS path, deliberately unprovisioned because standing
 one up is a spend decision nobody has made.
 
 Any other number is actionable. Which references are unresolved is deliberately
-not in this anonymous response; the names are on the authenticated Ops Health
-page at <https://hybridcloudworks.com/admin/ops-health>, and Actions →
+not in this anonymous response; the names are on the authenticated Integrations
+page at <https://hybridcloudworks.com/admin/integrations>, and Actions →
 **Monitor Unresolved Secrets** answers the same question from ARM without
 traversing Cloudflare at all.
+
+That page, not Ops Health. This line used to point at `/admin/ops-health`,
+which never carried the names: `getOpsHealthSnapshot` returns readiness, the
+digest, alerts and operational signals, and nothing about secrets. The names
+come from `cms/secrets`, which is the credential surface — the old API Keys
+page, now merged into Integrations. There an unresolved reference shows the
+same gray **Not set** light as a secret nobody ever seeded, because
+`computeSecretState` cannot tell the two apart from inside the worker: both
+mean `process.env` is holding the literal `@Microsoft.KeyVault(…)` string or
+nothing at all.
 
 **A 404 on every route is not a DNS or edge failure**, though it presents like
 one. It is the Functions host answering with no functions registered, or App

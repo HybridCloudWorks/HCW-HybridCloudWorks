@@ -150,9 +150,7 @@ const AdminLivePagesPage = lazyPage(() => import('@/pages/admin/LivePagesPage'))
 const AdminCalendarPage = lazyPage(() => import('@/pages/admin/CalendarPage'));
 const AdminImagePromptsPage = lazyPage(() => import('@/pages/admin/ImagePromptsPage'));
 const AdminImageGalleryPage = lazyPage(() => import('@/pages/admin/ImageGalleryPage'));
-const AdminOpsHealthPage = lazyPage(() => import('@/pages/admin/OpsHealthPage'));
-const AdminApiKeysPage = lazyPage(() => import('@/pages/admin/ApiKeysPage'));
-const AdminDiagnosticsPage = lazyPage(() => import('@/pages/admin/DiagnosticsPage'));
+const AdminHealthPage = lazyPage(() => import('@/pages/admin/HealthPage'));
 const AdminPlatformSettingsPage = lazyPage(() => import('@/pages/admin/PlatformSettingsPage'));
 const AdminFrameworksPage = lazyPage(() => import('@/pages/admin/FrameworksPage'));
 const AdminCoderCornerPage = lazyPage(() => import('@/pages/admin/CoderCornerPage'));
@@ -165,7 +163,7 @@ const AdminServiceDocsPage = lazyPage(() => import('@/pages/admin/ServiceDocsPag
 const AdminForgeStudioPage = lazyPage(() => import('@/pages/admin/ForgeStudioPage'));
 const AdminLinkiePage = lazyPage(() => import('@/pages/admin/LinkiePage'));
 const AdminMailingListPage = lazyPage(() => import('@/pages/admin/MailingListPage'));
-const AdminConnectionsPage = lazyPage(() => import('@/pages/admin/ConnectionsPage'));
+const AdminIntegrationsPage = lazyPage(() => import('@/pages/admin/IntegrationsPage'));
 const AdminLabsPage = lazyPage(() => import('@/pages/admin/LabsPage'));
 const AdminListenAndLearnPage = lazyPage(() => import('@/pages/admin/ListenAndLearnPage'));
 
@@ -402,10 +400,9 @@ function App() {
                 <Route path="certifications" element={<AdminCertificationsPage />} />
                 <Route path="image-prompts" element={<AdminImagePromptsPage />} />
                 <Route path="image-gallery" element={<AdminImageGalleryPage />} />
-                <Route path="ops-health" element={<AdminOpsHealthPage />} />
-                <Route path="api-keys" element={<AdminApiKeysPage />} />
-                <Route path="diagnostics" element={<AdminDiagnosticsPage />} />
                 <Route path="platform" element={<AdminPlatformSettingsPage />} />
+                <Route path="health" element={<AdminHealthPage />} />
+                <Route path="integrations" element={<AdminIntegrationsPage />} />
                 <Route path="social" element={<AdminSocialHubPage />} />
                 <Route path="recordings" element={<AdminRecordingsPage />} />
                 <Route path="forge-studio" element={<AdminForgeStudioPage />} />
@@ -413,7 +410,10 @@ function App() {
                 <Route path="ai-engine/docs/:serviceId" element={<AdminServiceDocsPage />} />
                 <Route path="linkie" element={<AdminLinkiePage />} />
                 <Route path="mailing-list" element={<AdminMailingListPage />} />
-                <Route path="connections" element={<AdminConnectionsPage />} />
+                <Route path="ops-health" element={<Navigate to="/admin/health" replace />} />
+                <Route path="diagnostics" element={<Navigate to="/admin/health" replace />} />
+                <Route path="connections" element={<Navigate to="/admin/integrations" replace />} />
+                <Route path="api-keys" element={<Navigate to="/admin/integrations" replace />} />
                 <Route path="labs" element={<AdminLabsPage />} />
                 <Route path="listen-and-learn" element={<AdminListenAndLearnPage />} />
                 <Route path="*" element={<NotFoundPage />} />

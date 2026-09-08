@@ -54,7 +54,8 @@ export const ADMIN_ROUTES = {
   LINKIE: '/admin/linkie',
   MAILING_LIST: '/admin/mailing-list',
   // Platform
-  CONNECTIONS: '/admin/connections',
+  HEALTH: '/admin/health',
+  INTEGRATIONS: '/admin/integrations',
   LABS: '/admin/labs',
 };
 
