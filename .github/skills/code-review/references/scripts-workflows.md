@@ -13,18 +13,23 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
 - Several scripts are **workflow contracts** — they're invoked by a workflow
   with specific inputs/outputs, and some have invocation tests pinning that
   (`check-unresolved-secrets.invocation.test.mjs`,
-  `manifest-workflow.test.mjs`, `workflow-write-permissions.test.mjs`,
-  `oidc-subjects.test.mjs`). When a script's CLI or output changes, find and
-  review the workflow that calls it in the same pass.
+  `check-workflow-health.invocation.test.mjs`, `manifest-workflow.test.mjs`,
+  `workflow-write-permissions.test.mjs`, `oidc-subjects.test.mjs`). When a
+  script's CLI or output changes, find and review the workflow that calls it
+  in the same pass — a script that writes its refusal to stderr and a job that
+  captures only stdout each look correct alone.
 - Scripts that hit Azure (`smoke-deployed.mjs`, container-spec generation)
   use `@azure/identity` — no keys, no connection strings. Scripts that hit
   GitHub use the app-token helper (`github-app-token.mjs`), not PATs.
 - Monitors (`check-deploy-drift.mjs`, `check-unresolved-secrets.mjs`,
-  `check-tfc-plan.mjs`, `assert-expected-plan.mjs`) exist to distinguish
-  real failures from reporting failures — review that error paths exit
-  non-zero and that "success" means the thing actually verified, not that
-  the command ran (this repo has been burned by that distinction; see
-  `.claude/CLAUDE.md`).
+  `check-tfc-plan.mjs`, `assert-expected-plan.mjs`,
+  `check-workflow-health.mjs`) exist to distinguish real failures from
+  reporting failures — review that error paths exit non-zero and that
+  "success" means the thing actually verified, not that the command ran
+  (this repo has been burned by that distinction; see `.claude/CLAUDE.md`).
+  `check-workflow-health.mjs` splits that three ways rather than two: it
+  exits 2 when it could not read the run history at all, because "I could
+  not look" and "I looked and it is fine" are opposite conclusions.
 
 ### PowerShell (`*.ps1`)
 - Must pass `scripts/validate-powershell.ps1` (parse and encoding) and its

@@ -102,6 +102,113 @@ This project has not cut a tagged release; entries are grouped under
   granting the Admin app role to a named user, which is a recurring operation
   with no other tool. None is spent.
 
+### Added
+
+- **`scripts/check-workflow-health.mjs` — the guard that would have caught
+  the three weeks.** Split out of #426, which retired the workflow that
+  prompted it on 2026-09-08. `validate-deployed.yml` explained in its own header why it
+  could not pass from a GitHub-hosted runner, and still sat in
+  `.github/workflows/` from 2026-08-18 to 2026-09-08: the knowledge was not
+  missing, nothing was reading it. This reads run history from the Actions
+  API and names any workflow with no success among its sampled runs, at least
+  one failure among them, and no attempt of any kind newer than ten days. Run
+  against the live repository on 2026-09-08 it named `validate-deployed.yml`
+  and nothing else — no false positives across the other eighteen.
+
+  **It measures rather than asserts.** There is no list of workflows in it to
+  keep in step with the directory — a hand-maintained list would have needed
+  somebody to notice the thing it exists to notice. A workflow added tomorrow
+  is covered tomorrow.
+
+  **Three verdicts, kept apart.** `healthy`, `broken`, and `unproven`, the
+  last being "this tool is making no claim" and reached three ways: nothing
+  finished to read (never ran, or still running); everything that finished
+  stopped short of a verdict (cancelled, neutral, `action_required`, skipped,
+  stale); or a real failure still inside the staleness window, which is
+  somebody mid-debug rather than an abandonment. Counting a cancellation as a
+  failure would have flagged `deploy-azure-frontend.yml`, which was used
+  successfully three times the same morning. Staleness is part of the failure
+  condition rather than a separate finding, because a detector that fires on
+  ordinary work stops being read — the failure mode that allowed the three
+  weeks.
+
+  **`broken` means "nothing succeeded and something failed", not "every run
+  failed", and the message says which.** Review asked for the stricter rule,
+  with a mixed sample demoted to `unproven`; it was declined on the evidence.
+  A workflow that failed a month ago and had a run cancelled a month ago has
+  failed, has never worked and has been left — and under the stricter rule it
+  would be printed under a line reading "none of which reached a verdict",
+  about a run that reached a verdict of failure. One stray cancellation would
+  also have been enough to hide `validate-deployed.yml` itself. What keeps
+  the looser rule honest is that the verdict prints its own arithmetic:
+  "N of M sampled run(s) failed, none succeeded".
+
+  **A trap found while building it, recorded in the file.** The first draft
+  called `/actions/runs?workflow_id={id}`. That form returns HTTP 200 and
+  IGNORES the filter, handing back the repository's newest runs across every
+  workflow — so all nineteen came back "healthy", including the one whose
+  entire history is two failures. It is `/actions/workflows/{id}/runs`. The
+  script now also asserts that every returned run belongs to the workflow it
+  asked about, and exits 2 rather than 0 if that does not hold, because a
+  silently unfiltered response is indistinguishable from good news.
+
+  **It runs as a second JOB in `monitor-deploy-drift.yml`, not a new file.**
+  The owner's instruction on 2026-09-08 was that there are too many
+  workflows; that file already holds `actions: read`, already runs Node
+  without `npm ci`, already runs on a schedule, and is already the
+  delivery-health monitor (renamed "Monitor delivery health"). A separate job
+  rather than a second step, because "the frontend is four days behind" and
+  "a workflow has been failing since August" are different findings, and one
+  job conclusion would merge them into a red X that says neither.
+
+  **The job captures stderr, and that is load-bearing.** Every exit-2 path in
+  the script writes with `console.error` and nothing to stdout, while the job
+  captured the report with `report=$(node ...)`. Measured: exit 2, zero bytes
+  captured — a red job with a blank step summary, in the one case an operator
+  most needs to read why. The invocation now redirects with `2>&1`, and
+  `check-workflow-health.invocation.test.mjs` pins both that and the
+  capture-then-read-`$?` shape, because `node ... | tee` would report tee's
+  status and never fail.
+
+  **Every refusal path exits 2, including the ones that used to throw.** An
+  uncaught throw from the awaited `main()` exits **1** — measured — which in
+  this tool means "a workflow is broken", so a response the script could not
+  read was reported as a repository containing a broken workflow. Two places
+  did it. `main` filtered the listing on `w.path` and asked for runs by
+  `w.id`, and an entry carrying neither threw at `w.path.startsWith(...)`;
+  `listingRefusal` now checks entry shape alongside pagination. And the run
+  listing was read as `got.workflow_runs || []`, where a missing array became
+  "no runs" — a silent mis-measurement reported as `unproven` — while a truthy
+  non-array threw at `runs.filter(...)`; that guard is now `runsRefusal`,
+  pure, exported and tested, and it carries the `workflow_id` filter check
+  that used to sit untested inside `main`. The requests also pin
+  `X-GitHub-Api-Version: 2022-11-28`, matching `check-deploy-drift.mjs` (the
+  other job in the same workflow file), `github-app-token.mjs` and
+  `open-manifest-pr.mjs`.
+
+  Covered by `scripts/check-workflow-health.test.mjs` (42 tests, real run
+  histories as fixtures), `check-workflow-health.invocation.test.mjs` (4), and
+  one case in `entrypoint-guards.test.mjs`; the suite goes 295 → 342, `main`
+  having dropped from 300 to 295 when #426 deleted `powershell-hygiene.test.mjs`
+  with the script it read.
+
+  **Every one proven load-bearing by mutation**, each reverted afterwards.
+  Implementing the stricter `broken` rule failed four tests, two of them
+  written for earlier review rounds, with `expected 'unproven' to be 'broken'`
+  and the demoted workflow printing `2 run(s), none of which reached a
+  verdict`. Making the broken message claim "every sampled run failed" failed
+  the arithmetic test. Removing `2>&1` from the workflow invocation, and
+  replacing the capture with a `| tee` pipeline, each failed their own
+  assertion in the invocation test. Removing the entry-shape guard from
+  `listingRefusal` failed with `listingRefusal accepted {}: expected null not
+  to be null`. Restoring `got.workflow_runs || []` failed the shape test with
+  `TypeError: Cannot read properties of null` — the defect demonstrating
+  itself — and putting the leading truthy check back into the `workflow_id`
+  comparison failed `fails CLOSED on a row it cannot identify at all`. And
+  reverting the entry-point guard to the `file://` template
+  form failed with `expected +0 to be 2`, the script exiting 0 on Windows
+  having run nothing — the same bug that once shipped in `smoke-deployed.mjs`.
+
 ### Changed
 
 - **Every timer now runs on UTC; nine live jobs moved five hours earlier
