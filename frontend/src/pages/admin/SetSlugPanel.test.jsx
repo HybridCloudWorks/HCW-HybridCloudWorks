@@ -114,6 +114,42 @@ describe('pure helpers', () => {
   });
 });
 
+describe('identifying which article the panel is editing', () => {
+  // The case this exists for: three articles that share a title, a provider
+  // and a date, so the list rows are identical and the suggestion is the same
+  // contested slug three times. Measured on production 2026-09-08. Without an
+  // identity line the operator guesses, and guessing wrong puts an article on
+  // another article's URL.
+  const indistinguishable = {
+    id: '7MCkl1cSf7GGCgJxlCwZ',
+    Title:
+      'Enable AI-Powered Discovery of Azure Updates with Microsoft Release Communications MCP Server',
+    slug: HELD,
+    Slug: HELD,
+    sourceUrl: 'https://azure.microsoft.com/updates?id=562894',
+  };
+
+  it('names the content id even when the title and both slug fields collide', () => {
+    render(<SetSlugPanel item={indistinguishable} onApplied={() => {}} />);
+    // Exact, not substring: a shorter id must not pass by being a prefix.
+    const id = screen.getByText('7MCkl1cSf7GGCgJxlCwZ');
+    expect(id.textContent).toBe('7MCkl1cSf7GGCgJxlCwZ');
+  });
+
+  it('links the source URL, which says what the article is when the title does not', () => {
+    render(<SetSlugPanel item={indistinguishable} onApplied={() => {}} />);
+    const link = screen.getByRole('link', { name: 'source' });
+    expect(link).toHaveAttribute('href', 'https://azure.microsoft.com/updates?id=562894');
+  });
+
+  it('renders no source link for an authored article that has none', () => {
+    render(<SetSlugPanel item={collided} onApplied={() => {}} />);
+    expect(screen.queryByRole('link', { name: 'source' })).toBeNull();
+    // The id still shows: it is the half that always exists.
+    expect(screen.getByText(collided.id).textContent).toBe(collided.id);
+  });
+});
+
 describe('SetSlugPanel', () => {
   it('prefills the suggestion and sends the raw input to the route', async () => {
     postJSON.mockResolvedValue({
