@@ -293,12 +293,15 @@ ever run, is a YouTube embed on a page, not an integration.
 ## Alternatives considered
 
 - **RSS.com Max with an API publish step (option 2 on #349).** `publish.js`
-  would push each finished MP3 to the host and the feed would round-trip it
-  into `podcasts`. USD 37 a month for automating something that happens a
-  handful of times a month, on a beta API whose endpoints may change.
-  Declined on 2026-09-07 and **approved on 2026-09-08** (§1b, #437); the site
-  side was built so that adding it later is a publish step and a configuration
-  change, not a redesign, which is what that issue now does.
+  would push a finished MP3 to the host and the feed would round-trip it into
+  `podcasts`. USD 37 a month for automating something that happens a handful of
+  times a month, on a beta API whose endpoints may change. Declined on
+  2026-09-07 and **approved on 2026-09-08** (§1b, #437); the site side was
+  built so that adding it later is a publish step and a configuration change,
+  not a redesign, which is what that issue now does. As considered here the
+  push was described per finished MP3, which reads as generation-time
+  publishing; **§1b settles it the other way** — approval is the trigger and
+  generation never publishes, because a draft must not reach a public feed.
 - **Self-host the feed (option 3 on #349).** A new `GET
   /api/public/podcast/{provider}/feed.xml` built from `podcasts` plus
   published Listen & Learn episodes and submitted to the directories
