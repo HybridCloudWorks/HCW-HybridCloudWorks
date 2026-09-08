@@ -231,12 +231,17 @@ describe('generateArticleScript', () => {
     // the failure it prevents has already been paid for. Published, so this
     // fails on the body rather than on eligibility.
     const generate = vi.fn();
-    await expect(
-      generateArticleScript({
-        article: { id: 'art-2', Title: 'x', contentStatus: 'published' },
-        generate,
-      })
-    ).rejects.toThrow(/has no body/);
+    const error = await generateArticleScript({
+      article: { id: 'art-2', Title: 'x', contentStatus: 'published' },
+      generate,
+    }).catch((err) => err);
+
+    // Both the type and the message. The type because a handler will want to
+    // tell "this article cannot be scripted" from "the model failed" and turn
+    // one into a 400 and the other into a 502; the message because the type
+    // alone would pass for any of this module's five refusals.
+    expect(error).toBeInstanceOf(ScriptError);
+    expect(error.message).toMatch(/has no body/);
     expect(generate).not.toHaveBeenCalled();
   });
 
