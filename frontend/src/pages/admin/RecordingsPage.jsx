@@ -11,13 +11,26 @@
  *   3. Connect       — OAuth token setup for Plaud MCP
  *
  * Auth flow:
- *   • User runs `npx -y @plaud-ai/mcp@latest install` or connects via Claude Web
+ *   • User runs `npx -y @plaud-ai/mcp@latest install` once, to set up a local
+ *     AI client and authorize in the browser
  *   • Copies the resulting OAuth access token AND refresh token
  *     (~/.plaud/tokens-mcp.json holds both)
  *   • Pastes them in the Connect tab → stored in Cosmos DB (server-side only)
  *   • mcpProxy uses the access token; the refreshPlaudToken timer rotates the
  *     pair every 12 hours using the refresh token. Neither value reaches the
  *     browser after saving — reads carry hasOauthToken / hasOauthRefreshToken.
+ *
+ * BOTH tokens matter. An access token pasted alone lasts about a day and then
+ * stops, because the timer has nothing to renew it with — the failure looks
+ * like "it worked and then stopped", which is exactly what it is. A refresh
+ * returns a NEW pair with a fresh week, so a stored pair renews indefinitely.
+ *
+ * When Plaud answers 401 / CLIENT_USER_AUTH_REVOKED, the authorization was
+ * revoked server-side and the token's own expiry is irrelevant. Re-running the
+ * installer does NOT fix it — measured 2026-09-08, twice: it reuses the same
+ * client-user record and mints new tokens against the revoked link. The MCP's
+ * `login` tool clears it in one call ("log me into Plaud" in any connected AI
+ * client). Nothing in Plaud's docs connects that error to that remedy.
  *
  * These are the Plaud MCP tokens. Plaud Embedded's client id and secret
  * (docs.plaud.ai/plaud-embedded) are a different product — device SDK and
@@ -757,7 +770,7 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                   npx -y @plaud-ai/mcp@latest install
                 </div>
               ),
-              note: 'Requires Node.js ≥ 20. Detects local AI clients and writes MCP config automatically.',
+              note: 'Requires Node.js ≥ 20. Detects local AI clients and writes MCP config automatically. First-time setup only — re-running this does NOT repair a rejected token; see "If the Library stops working" below.',
             },
             {
               n: 2,
@@ -773,30 +786,33 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
               n: 3,
               title: 'Copy your access token and refresh token',
               body: (
-                <p className="text-xs text-slate-500 mt-1">
-                  Your tokens are saved to{' '}
-                  <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">
-                    ~/.plaud/tokens-mcp.json
-                  </code>
-                  . Open that file and copy the <code>access_token</code> value and the{' '}
-                  <code>refresh_token</code> value. The access token connects the Library; the
-                  refresh token lets the site rotate it every 12 hours so the connection does not
-                  lapse after a day.
-                  <br />
-                  <br />
-                  Alternatively, use <strong>Claude Web</strong>: open the Plaud connector at{' '}
-                  <a
-                    href="https://claude.ai"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 underline"
-                  >
-                    claude.ai
-                  </a>{' '}
-                  → Settings → Connectors → Add custom connector → URL:{' '}
-                  <code>https://mcp.plaud.ai/mcp</code>. After authorizing, Claude stores the token;
-                  you can find it in your Claude settings.
-                </p>
+                <>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your tokens are saved to{' '}
+                    <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">
+                      ~/.plaud/tokens-mcp.json
+                    </code>
+                    . Copy the <code>access_token</code> and the <code>refresh_token</code>. Paste
+                    both the first time — the access token connects the Library and lasts about a
+                    day; the refresh token is what lets the site rotate the pair every 12 hours. An
+                    access token stored on its own works until it expires and then stops, with
+                    nothing able to renew it. Reconnecting later, you may leave the refresh field
+                    blank to keep the one already stored; fill it whenever you have just
+                    re-authorized, because that issues a new refresh token and the stored one stops
+                    working.
+                    <br />
+                    <br />
+                    To print them, in PowerShell:
+                  </p>
+                  <div className="mt-1 font-mono text-xs bg-slate-900 text-slate-100 rounded p-2 select-all break-all">
+                    Get-Content &quot;$env:USERPROFILE\.plaud\tokens-mcp.json&quot;
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    <code>expires_at</code> in that file is in <strong>milliseconds</strong>. A
+                    converter that assumes seconds returns a date tens of thousands of years out,
+                    which is easily misread as the token being unusable when it has a day left.
+                  </p>
+                </>
               ),
             },
             {
@@ -816,7 +832,7 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                     <Input
                       type="password"
                       className="h-9 text-xs font-mono flex-1"
-                      placeholder="refresh_token — eyJ… (optional, needed for auto-refresh)"
+                      placeholder="refresh_token — eyJ… (required to stay connected)"
                       aria-label="Plaud refresh token"
                       value={refreshToken}
                       onChange={(e) => setRefreshToken(e.target.value)}
@@ -833,8 +849,10 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                   <p className="text-xs text-slate-400 flex items-center gap-1">
                     <ShieldCheck className="h-3 w-3" />
                     Both values are stored server-side in Cosmos DB and never sent back to the
-                    browser after saving. Leaving the refresh token blank keeps whatever was stored
-                    before.
+                    browser after saving. Leaving the refresh field blank keeps the token already
+                    stored — right when you are only replacing an expired access token, wrong after
+                    re-authorizing, because that issued a new refresh token and retired the stored
+                    one.
                   </p>
                 </div>
               ),
@@ -864,19 +882,46 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
           get_current_user
         </p>
         <p>
-          <strong>Auth:</strong> OAuth — the access token lasts about a day and the refresh token
-          about a week. With both stored, the site rotates the pair every 12 hours; if the Library
-          stops working, connect again here. Plaud Embedded&apos;s client id and secret are a
-          different product and are not used.
+          <strong>Auth:</strong> OAuth — the access token lasts about a day, the refresh token about
+          a week, and each refresh returns a new pair with a fresh week. With both stored, the
+          12-hour <code>refreshPlaudToken</code> timer keeps the connection alive indefinitely.
+          Plaud Embedded&apos;s client id and secret are a different product and are not used here.
         </p>
         <a
-          href="https://docs.plaud.ai/documentation/plaud_app/mcp"
+          href="https://docs.plaud.ai/plaud-mcp-cli/mcp"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 font-medium hover:underline"
         >
           Full Plaud MCP docs <ExternalLink className="h-3 w-3" />
         </a>
+      </div>
+
+      {/*
+        Measured on 2026-09-08. Two full re-installs and a fresh browser
+        authorization all produced tokens that Plaud rejected with
+        CLIENT_USER_AUTH_REVOKED, because the installer reuses the existing
+        client-user record rather than creating one. The MCP's own `login` tool
+        cleared it in a single call. Nothing in Plaud's documentation connects
+        that error to that remedy, which is why it is written down here.
+      */}
+      <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-800 dark:text-amber-300 space-y-1">
+        <p className="font-semibold">If the Library stops working</p>
+        <p>
+          A 401, or <code>CLIENT_USER_AUTH_REVOKED</code> from Plaud, means the authorization was
+          revoked on Plaud&apos;s side — not that the token expired. Re-running the installer does
+          NOT fix it: it mints new tokens against the same revoked record.
+        </p>
+        <p>
+          The fix is the MCP&apos;s own login tool. In an AI client that has Plaud connected (Claude
+          Code, Claude Desktop, Cursor), ask it to <strong>log you into Plaud</strong>. That calls{' '}
+          <code>login</code>, clears the revocation, and rewrites{' '}
+          <code>~/.plaud/tokens-mcp.json</code>. Then copy both values back into the fields above.
+        </p>
+        <p>
+          You do not need to revoke the app in Plaud&apos;s Authorized apps panel, and the grant
+          staying listed there does not mean the connection works — the two are tracked separately.
+        </p>
       </div>
     </div>
   );
