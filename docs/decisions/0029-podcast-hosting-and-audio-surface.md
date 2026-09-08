@@ -180,7 +180,7 @@ must not route around it.
 
 Tracked by #437.
 
-### 2. Speech: providers selected by key presence, Gemini then Azure AI Speech (ElevenLabs added in §2a)
+### 2. Speech: providers selected by key presence, in a stated preference order (order amended in §2a)
 
 **Decided 2026-09-07; superseded by §2a below.** `speech/index.js` keeps its
 order: Gemini TTS when the `GEMINI_API_KEY` app setting is present — a Key Vault
