@@ -1076,17 +1076,44 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_full_mi
     # day-of-week term the count form cannot express: the rule must be TRUE
     # only on a Monday with no full in the window, and FALSE — not merely
     # empty — on the other six days. `summarize count()` with no `by` returns
-    # one row of 0 on empty input, so `missing` is always exactly one value.
+    # one row of 0 on empty input, so the measure is always exactly one value.
     # dayofweek() is a timespan from Sunday; 1d is Monday.
+    #
+    # THE COLUMN IS NOT CALLED `missing`, AND CANNOT BE. `missing` is a
+    # reserved word in KQL, so `project missing = …` does not parse and Azure
+    # rejects the whole rule at create time with
+    #
+    #   Query could not be parsed at 'missing' on line [5,11].
+    #   A recognition error occurred in the query.
+    #
+    # naming the token and the position rather than saying the word is
+    # reserved, which is the expensive kind of error message: line 5 column 11
+    # is exactly where the column name starts, so it reads as a problem with
+    # the expression that follows.
+    #
+    # It cost a partial apply on 2026-09-08. Terraform created
+    # azurerm_monitor_scheduled_query_rules_alert_v2.cosmos_export_daily_missing
+    # — `alert-cosmos-export-daily-prod-cus` as it exists in Azure today, the
+    # `-${var.environment}-${var.region_abbreviation}` suffix resolved — and
+    # set FEATURE_FLAG_COSMOS_EXPORT = "true", then failed on this resource,
+    # leaving the exporter armed with only one of its two alerts. That is the
+    # half-state the `count` gate on a single variable exists to prevent.
+    #
+    # Confirmed by isolation against the live component, not by reading docs:
+    # `project gap = iff(fulls == 0, 1, 0)` parses, `project missing = fulls`
+    # does not, and `extend missing = …` fails identically — so it is the name
+    # and not the pipeline, the operator or the expression. Any non-reserved
+    # name works; if this is ever renamed again, `metric_measure_column` below
+    # must move with it, because the two are matched by string.
     query                   = <<-KQL
       customEvents
       | where name == "cosmosExportCompleted"
       | where tostring(customDimensions.mode) == "full"
       | summarize fulls = count()
-      | project missing = iff(dayofweek(now()) == 1d and fulls == 0, 1, 0)
+      | project missing_full = iff(dayofweek(now()) == 1d and fulls == 0, 1, 0)
     KQL
     time_aggregation_method = "Maximum"
-    metric_measure_column   = "missing"
+    metric_measure_column   = "missing_full"
     operator                = "GreaterThan"
     threshold               = 0
 
