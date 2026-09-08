@@ -96,6 +96,49 @@ Three defects, none of them the two from the previous run:
 The hero images this run confirms serving: `/gcp`, `/github`, `/terraform` and
 `/finops` all answer 200 for `1.png` (#371, #390).
 
+## Where the empty pages ended, 2026-09-07
+
+The *empty* column above is what the crawler saw. What matters for #373 is
+narrower: how many empty pages the **sitemap still advertises**, because a page
+that renders an honest empty state and is not crawled is not a defect.
+
+| | Sitemap URLs | Empty pages in it |
+| --- | ---: | ---: |
+| Before any of this work | 118 (5 duplicated) | 11 |
+| After #386 and the first half of #373 | 113 | 48 |
+| After #404 — section counts move into the app | **80** | **7** |
+| After #417 — architecture counted, once deployed | **79** | **6** |
+
+The last two rows are one route, `/vmware/architecture-designs`, and it took a
+separate change because the obvious one was wrong. #404 deferred it on the
+grounds that all five architecture pages merge `staticBlueprints` hardcoded in
+the page, so an API count of zero is true of every one of them and right about
+only one. That reasoning was correct about the risk. It was wrong about the
+data: `frontend/src/pages/vmware/ArchitecturePage.jsx` had **no**
+`staticBlueprints` at all, and is the only one of the five that can be empty.
+
+#417 makes the pre-render **derive** that rather than declare it. Each page's
+list moved to a sibling `architecture-blueprints.js`, VMware's exporting `[]`,
+and `sitemapRoutes` drops a route only when the API count is zero, the
+unattributed bucket is zero, **and** that page's own module is empty. A
+hardcoded list of "pages that have static content" would have been wrong the
+first time someone added a blueprint, with nothing to say so.
+
+The control build is the evidence that the earlier caution was justified: with
+the same counts and the pre-#417 rule, `/aws`, `/finops` and `/gcp`
+architecture-designs leave the sitemap as well — 76 URLs instead of 79. Three
+working pages unadvertised to fix one empty one, measured rather than argued.
+
+**The six that remain are empty by configuration and stay.** Four `/tools/*`
+pages say *Coming Soon* because nothing has been written for them yet, and two
+`/templates/*` pages are submission forms the crawler reads as thin because a
+form has little prose. Neither is a page that lost its content.
+
+Nothing above is live yet. Merging #417 changed no URL; the sitemap moves only
+after a Functions deploy carries the new counts, the manifest workflow
+republishes them, and a frontend deploy rebuilds — the same sequence #404
+needed. The live sitemap is 80 URLs until then.
+
 ## Matrix
 
 | Path | HTTP | Verdict | Findings |
