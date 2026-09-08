@@ -210,8 +210,15 @@ export default function AdminLayout() {
     }
   };
 
+  // FULL VIEWPORT HEIGHT below, not `calc(100vh-4rem)`. That 4rem was
+  // reserving room for the site header — and App.jsx renders it as
+  // `{!isAdminRoute && <Header />}`, so on every admin route there is no
+  // header to reserve for. The Footer is suppressed the same way. The layout
+  // was therefore 64px shorter than the window with nothing occupying the gap,
+  // which is what pushed the sidebar's brand block flush against the top of
+  // the viewport with no breathing room above "ContentForge".
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex bg-background">
+    <div className="min-h-screen flex bg-background">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside
         className={`relative border-r border-border bg-card flex flex-col shrink-0 transition-all duration-200 ${
