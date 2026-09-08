@@ -1,9 +1,31 @@
 /**
- * Diagnostics — the two live checks that need a real admin's token (#355,
- * #356), done in the signed-in session instead of by copying a bearer token
- * out of developer tools and decoding it by hand.
+ * What can be verified right now — checks that need someone to press a button.
  *
- * ## What this page never shows
+ * The other half of the Health page reads what the estate has already written
+ * down. Nothing here exists until it is asked for: these run in the signed-in
+ * admin's session, with the admin's own token, and answer questions no timer
+ * can answer on its own.
+ *
+ * Three kinds live here, and they are the same kind underneath:
+ *
+ * - **Pipeline smoke tests** — fetch RSS, inspect a batch, build the digest.
+ *   Moved off the old Ops Health page, where they sat among live metrics and
+ *   read as status rather than as actions. They are on-demand checks that
+ *   write real data, which is exactly what the rest of this file is.
+ * - **Identity** — does this session's token carry the audience and the App
+ *   Role the API enforces, and does the admin registry agree it is this
+ *   principal? Done here instead of by copying a bearer token out of developer
+ *   tools and decoding it by hand.
+ * - **The Labs no-op probe** — submit one job the way the Labs console does,
+ *   read it back, cancel it, with and without an Authorization header.
+ *
+ * These checks were built to answer two specific tickets, which they did; both
+ * closed on 2026-09-07 on the evidence of their first run. The checks are
+ * repeatable and the questions recur, so they stay — but a tool that outlives
+ * the ticket it was built for should stop quoting the ticket, and this one no
+ * longer does.
+ *
+ * ## What this never shows
  *
  * The token, `sub`, `oid`, `email`, `name`, `preferred_username` — any claim
  * that identifies the person. The token is acquired the same way every API
@@ -21,9 +43,10 @@
  * and the App Role value its guard looks for. Comparing against a constant
  * built into the frontend would only prove the frontend agrees with itself. If
  * that route refuses the token, the comparison is reported as unknown and the
- * refusal itself is shown — which is the audience-drift signal #355 describes.
+ * refusal itself is shown — which is the audience-drift signal these checks
+ * exist to catch.
  *
- * ## The Labs probe (#356)
+ * ## The Labs probe
  *
  * Submits one job exactly as the Labs console does in its default state — the
  * `shell-echo` smoke test with an empty payload — then reads the document back
@@ -34,21 +57,22 @@
  * attached anywhere on that path.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuthReady } from '@/hooks/useAuthReady';
+import React, { useState } from 'react';
 import { authedFetch, getEndpoint, getJSON, postJSON } from '@/lib/api';
+import { runJob } from '@/lib/jobs';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/use-toast';
 import {
-  ClipboardCopy,
+  FileText,
   FlaskConical,
+  Info,
   Loader2,
-  RefreshCw,
+  Play,
   ShieldCheck,
   ShieldOff,
-  Stethoscope,
+  Workflow,
+  Wrench,
 } from 'lucide-react';
 
 // ── Pure helpers (exported for the tests) ─────────────────────────────────────
@@ -172,7 +196,7 @@ export function summarizeAdminStatus(body, tokenOid) {
 }
 
 /**
- * The #355 verdict: the token carries the audience and the role, and the
+ * The identity verdict: the token carries the audience and the role, and the
  * registry agrees it is this principal and that they are an admin. Unknown
  * until both halves have been read.
  */
@@ -195,7 +219,7 @@ export function evaluateIdentity(token, admin) {
 }
 
 /**
- * The #356 verdict for the authenticated probe.
+ * The verdict for the authenticated Labs probe.
  *
  * The documented response of enqueueLabJob is HTTP 200 with
  * `{ jobId, type, status: 'queued' }` (lib/labs.js). The document must then
@@ -242,7 +266,7 @@ export function evaluateLabsProbe(probe) {
   return { pass: true, reason: `documented no-op response; document ${finalStatus}` };
 }
 
-/** The #356 verdict for the unauthenticated probe: a 401 or 403, nothing else. */
+/** The verdict for the unauthenticated probe: a 401 or 403, nothing else. */
 export function evaluateUnauthenticatedProbe(result) {
   if (!result) return { pass: null, reason: 'NOT RUN — press "Run unauthenticated probe"' };
   if (result.error) return { pass: false, reason: result.error };
@@ -258,7 +282,7 @@ const mark = (value) => {
 
 const list = (values) => (values && values.length ? values.join(', ') : '(none)');
 
-/** The #355 half of the report. */
+/** The identity half of the report. */
 function identityReportLines({
   identityPending,
   token,
@@ -269,7 +293,7 @@ function identityReportLines({
   adminHttp,
   adminError,
 }) {
-  const lines = ['### #355 — token claims and admin registry', ''];
+  const lines = ['### Identity — token claims and admin registry', ''];
   // Before the first run has settled there is nothing to report, and saying
   // "could not be read" here would be false — the check has not happened yet.
   if (identityPending) {
@@ -303,9 +327,9 @@ function identityReportLines({
   return lines;
 }
 
-/** The #356 half of the report. */
+/** The Labs half of the report. */
 function labsReportLines({ labs, unauth }) {
-  const lines = ['### #356 — Labs no-op probe', ''];
+  const lines = ['### Labs no-op probe', ''];
   if (labs) {
     const e = labs.enqueue || {};
     const outcome = e.error
@@ -343,8 +367,13 @@ function labsReportLines({ labs, unauth }) {
 }
 
 /**
- * The Markdown the owner pastes on #355 and #356. Names, booleans, statuses
- * and identifiers only — the same summary the page renders, nothing more.
+ * The Markdown the operator copies. Names, booleans, statuses and identifiers
+ * only — the same summary the page renders, nothing more.
+ *
+ * It deliberately names no ticket. It used to head its two halves `### #355`
+ * and `### #356`; both closed on 2026-09-07 by this page's first run, so the
+ * headings addressed a destination that no longer exists and invited anyone
+ * running it since to file evidence against finished work.
  */
 export function buildReport({ generatedAt, labs, unauth, ...identity }) {
   return [
@@ -366,13 +395,13 @@ const bodyOf = async (res) => {
   }
 };
 
-const messageOf = (err, fallback) => err?.message || fallback;
+export const messageOf = (err, fallback) => err?.message || fallback;
 
 /**
  * Token, expectations, registry. The decoded payload lives only inside this
  * function; only the summaries leave it.
  */
-async function collectIdentity() {
+export async function collectIdentity() {
   const result = {
     token: null,
     tokenError: null,
@@ -429,7 +458,7 @@ async function collectIdentity() {
 }
 
 /** Enqueue exactly as the Labs console does; read back; cancel; read again. */
-async function runLabsProbeSteps() {
+export async function runLabsProbeSteps() {
   const probe = { enqueue: null, read: null, cancel: null, final: null };
   try {
     const res = await authedFetch('enqueueLabJob', {
@@ -474,7 +503,7 @@ async function runLabsProbeSteps() {
 }
 
 /** The same request through plain fetch: no token acquired, no header. */
-async function probeUnauthenticated() {
+export async function probeUnauthenticated() {
   // Outside the try on purpose: an unset VITE_AZURE_FUNCTIONS_URL throws
   // here, and that is a configuration fault to surface as one, not a probe
   // result to score as a failed request.
@@ -490,6 +519,161 @@ async function probeUnauthenticated() {
   } catch (err) {
     return { httpStatus: null, error: messageOf(err, 'request failed') };
   }
+}
+
+// ── Pipeline smoke tests ──────────────────────────────────────────────────────
+
+export const ACTION_CONFIG = {
+  rss: {
+    id: 'rss',
+    title: 'RSS Fetch',
+    subtitle: 'Pulls latest feed entries and creates new content candidates.',
+    icon: Play,
+    buttonLabel: 'Run Now',
+    runningLabel: 'Fetching RSS...',
+    details: 'Pulls the latest RSS feed entries and creates new content candidates for review.',
+    // A platform job, not an RPC: the fetch takes minutes and Flex Consumption
+    // cuts HTTP responses at 230 s (T-322). runJob enqueues and polls.
+    runner: async () => {
+      const job = await runJob('fetch-rss-feeds', {});
+      if (job.status !== 'succeeded') {
+        throw new Error(job.error || `RSS fetch ${job.status}`);
+      }
+      const r = job.result || {};
+      const errors = r.errors?.length ? ` ${r.errors.length} feed(s) failed.` : '';
+      return `RSS fetch complete: ${r.processed || 0} feeds, ${r.newContent || 0} new content drafts, ${r.duplicates || 0} duplicates skipped.${errors}`;
+    },
+  },
+  inspect: {
+    id: 'inspect',
+    title: 'Batch Inspect',
+    subtitle: 'Queues metadata inspection for recent ingested items.',
+    icon: Wrench,
+    buttonLabel: 'Run Now',
+    runningLabel: 'Inspecting...',
+    details:
+      'Queues inspection for up to 10 ingested items so metadata is populated before review.',
+    // A platform job (T-322): selects ingested documents and runs the inspector
+    // on each — scrape, analyse, critique — instead of flagging them for a
+    // trigger that does not exist on Azure yet (T-324).
+    runner: async () => {
+      const job = await runJob('batch-inspect', { limit: 10 });
+      if (job.status !== 'succeeded') {
+        throw new Error(job.error || `Inspection ${job.status}`);
+      }
+      const r = job.result || {};
+      const rework = r.needsRework ? `, ${r.needsRework} need rework` : '';
+      const failed = r.failed ? `, ${r.failed} failed` : '';
+      return `Inspection complete: ${r.inspected || 0}/${r.total || 0} documents inspected${rework}${failed}.`;
+    },
+  },
+  digest: {
+    id: 'digest',
+    title: 'Reviewer Digest',
+    subtitle: 'Builds the reviewer summary from queued and recent RSS entries.',
+    icon: FileText,
+    buttonLabel: 'Run Now',
+    runningLabel: 'Generating Digest...',
+    details:
+      'Generates digest metrics for reviewer operations. If the Azure backend reports a query or index configuration error, check the Cosmos DB indexing policy and Azure Function logs before retrying.',
+    runner: async () => {
+      const result = await postJSON('generateReviewerDigestManual', {});
+      return `Reviewer digest generated: ${result.totalQueued || 0} queued items, ${result.recentRssCount || 0} recent RSS entries.`;
+    },
+  },
+};
+
+/**
+ * A digest failure that is really a Cosmos indexing failure, said plainly.
+ *
+ * The retry sentence used to end "then retry S3.3" — a migration stage that no
+ * longer names anything an operator can act on. What to retry is the button
+ * they just pressed.
+ */
+export function normalizeDigestError(message) {
+  if (message.includes('FAILED_PRECONDITION') && message.toLowerCase().includes('index')) {
+    return 'Reviewer digest query or index configuration is not ready in the Azure backend. Check the Cosmos DB indexing policy and Azure Function logs, then run this action again.';
+  }
+  return message;
+}
+
+function ActionTile({ config, runningAction, actionInfoOpen, onRun, onToggleInfo }) {
+  const Icon = config.icon;
+  return (
+    <div className="h-full rounded-lg border p-3 flex flex-col gap-3">
+      <div>
+        <p className="text-sm font-semibold">{config.title}</p>
+        <p className="text-xs text-muted-foreground mt-1">{config.subtitle}</p>
+      </div>
+      {actionInfoOpen[config.id] && (
+        <div className="rounded-md border border-slate-300/60 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+          {config.details}
+        </div>
+      )}
+      <div className="mt-auto flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full gap-1"
+          onClick={() => onRun(config.id)}
+          disabled={runningAction !== ''}
+        >
+          <Icon className="h-4 w-4" />
+          {runningAction === config.id ? config.runningLabel : config.buttonLabel}
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
+          onClick={() => onToggleInfo(config.id)}
+          title="What this action does"
+          aria-label={`Toggle ${config.title} explanation`}
+        >
+          <Info className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function SmokeActionsCard({
+  runningAction,
+  actionInfoOpen,
+  actionMessage,
+  actionError,
+  onRunAction,
+  onToggleActionInfo,
+}) {
+  const actionList = [ACTION_CONFIG.rss, ACTION_CONFIG.inspect, ACTION_CONFIG.digest];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Workflow className="h-4 w-4 text-sky-500" /> Pipeline Smoke Tests
+        </CardTitle>
+        <CardDescription>
+          Each of these does real work — fetches feeds, inspects documents, writes a digest. They
+          are checks, not simulations.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {actionList.map((config) => (
+            <ActionTile
+              key={config.id}
+              config={config}
+              runningAction={runningAction}
+              actionInfoOpen={actionInfoOpen}
+              onRun={onRunAction}
+              onToggleInfo={onToggleActionInfo}
+            />
+          ))}
+        </div>
+        {actionMessage && <p className="text-xs text-emerald-600">{actionMessage}</p>}
+        {actionError && <p className="text-xs text-red-600">{actionError}</p>}
+      </CardContent>
+    </Card>
+  );
 }
 
 // ── Presentation ──────────────────────────────────────────────────────────────
@@ -565,7 +749,7 @@ function TokenClaimsBody({ identity }) {
   );
 }
 
-function TokenClaimsCard({ identity }) {
+export function TokenClaimsCard({ identity }) {
   return (
     <Card>
       <CardHeader>
@@ -582,7 +766,8 @@ function TokenClaimsCard({ identity }) {
         {identity?.expectationsError ? (
           <Note>
             getAuthExpectations refused the token: {identity.expectationsError}. The comparisons
-            above are unknown, and the refusal itself is the audience-drift signal #355 describes.
+            above are unknown, and the refusal itself is the audience-drift signal this check exists
+            to catch.
           </Note>
         ) : null}
       </CardContent>
@@ -609,15 +794,15 @@ function AdminRegistryBody({ identity }) {
       </div>
       {token?.hasAdminRole && !admin.isAdmin ? (
         <Note>
-          The token carries the role and the registry says no — #355 reads this as a registry
-          problem, not a token problem.
+          The token carries the role and the registry says no — that is a registry problem, not a
+          token problem.
         </Note>
       ) : null}
     </>
   );
 }
 
-function AdminRegistryCard({ identity }) {
+export function AdminRegistryCard({ identity }) {
   const container = identity?.expectations?.registryContainer ?? 'admins';
   return (
     <Card>
@@ -697,7 +882,7 @@ function UnauthenticatedResult({ unauth }) {
   );
 }
 
-function ProbeButton({ busy, icon: Icon, onClick, children }) {
+export function ProbeButton({ busy, icon: Icon, onClick, children }) {
   return (
     <Button size="sm" variant="outline" onClick={onClick} disabled={busy}>
       {busy ? (
@@ -710,7 +895,7 @@ function ProbeButton({ busy, icon: Icon, onClick, children }) {
   );
 }
 
-function LabsProbeCard({ labs, labsBusy, onLabs, unauth, unauthBusy, onUnauth }) {
+export function LabsProbeCard({ labs, labsBusy, onLabs, unauth, unauthBusy, onUnauth }) {
   return (
     <Card>
       <CardHeader>
@@ -739,197 +924,47 @@ function LabsProbeCard({ labs, labsBusy, onLabs, unauth, unauthBusy, onUnauth })
   );
 }
 
-// ── The page ──────────────────────────────────────────────────────────────────
-
-export default function DiagnosticsPage() {
-  const { authReady } = useAuthReady();
-  const { toast } = useToast();
-  const [identity, setIdentity] = useState(null);
-  const [identityBusy, setIdentityBusy] = useState(false);
-  const [labs, setLabs] = useState(null);
-  const [labsBusy, setLabsBusy] = useState(false);
-  const [unauth, setUnauth] = useState(null);
-  const [unauthBusy, setUnauthBusy] = useState(false);
-
-  // One identity run at a time. The first run and a re-run go through the
-  // same gate: a click while a run is in flight is ignored rather than
-  // starting a second run whose result would race the first (last to resolve
-  // would win). Each run carries a sequence number, so a result from a run
-  // that was superseded — or torn down by a route change — is discarded
-  // instead of being applied over a newer one.
-  const identitySeq = useRef(0);
-  const identityInFlight = useRef(false);
-
-  const runIdentity = useCallback(async () => {
-    if (identityInFlight.current) return false;
-    identityInFlight.current = true;
-    identitySeq.current += 1;
-    const seq = identitySeq.current;
-    try {
-      const result = await collectIdentity();
-      if (seq === identitySeq.current) setIdentity(result);
-    } finally {
-      if (seq === identitySeq.current) identityInFlight.current = false;
-    }
-    return true;
-  }, []);
-
-  useEffect(() => {
-    if (!authReady) return undefined;
-    runIdentity();
-    return () => {
-      // Supersede whatever is in flight: its result is dropped and the gate
-      // reopens for the next mount.
-      identitySeq.current += 1;
-      identityInFlight.current = false;
-    };
-  }, [authReady, runIdentity]);
-
-  const rerunIdentity = useCallback(async () => {
-    if (identityInFlight.current) return;
-    setIdentityBusy(true);
-    try {
-      await runIdentity();
-    } finally {
-      setIdentityBusy(false);
-    }
-  }, [runIdentity]);
-
-  // The first run has no busy flag of its own — `identity === null` is that
-  // state — so the button reads both.
-  const identityRunning = identityBusy || identity === null;
-
-  const runLabs = useCallback(async () => {
-    setLabsBusy(true);
-    try {
-      setLabs(await runLabsProbeSteps());
-    } catch (err) {
-      // The steps record their own failures; this is a throw from outside
-      // them. Shown in the panel as a failed probe, never left as a stuck
-      // spinner with every button disabled.
-      setLabs({
-        enqueue: null,
-        read: null,
-        cancel: null,
-        final: null,
-        error: messageOf(err, 'the probe threw before it could record a result'),
-      });
-    } finally {
-      setLabsBusy(false);
-    }
-  }, []);
-
-  const runUnauth = useCallback(async () => {
-    setUnauthBusy(true);
-    try {
-      setUnauth(await probeUnauthenticated());
-    } catch (err) {
-      setUnauth({
-        httpStatus: null,
-        error: messageOf(err, 'the probe threw before it could record a result'),
-      });
-    } finally {
-      setUnauthBusy(false);
-    }
-  }, []);
-
-  // Nothing may be copied while a check is in flight: a report taken mid-run
-  // would say a token "could not be read" or a probe was "not run" for work
-  // that is merely pending, and that is what would end up on #355/#356.
-  const settling = identity === null || identityBusy || labsBusy || unauthBusy;
-
-  const report = buildReport({
-    generatedAt: new Date().toISOString(),
-    identityPending: identity === null,
-    ...(identity || {}),
-    labs,
-    unauth,
+/** Local state for the three smoke actions, kept out of the page component. */
+export function useSmokeActions(onAfterRun) {
+  const [runningAction, setRunningAction] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [actionInfoOpen, setActionInfoOpen] = useState({
+    rss: false,
+    inspect: false,
+    digest: false,
   });
 
-  const copyReport = async () => {
+  const runAction = async (actionId) => {
+    const config = ACTION_CONFIG[actionId];
+    if (!config) return;
+    setActionError('');
+    setActionMessage('');
+    setRunningAction(actionId);
     try {
-      await navigator.clipboard.writeText(report);
-      toast({
-        title: 'Report copied',
-        // NOT "paste it on #355 and #356". Those two issues were closed on
-        // 2026-09-07 by the first run of this page, so the instruction named a
-        // destination that no longer exists and told anyone running it since
-        // to file evidence against finished work. A tool that outlives the
-        // ticket it was built for should not keep quoting the ticket.
-        description: 'Paste it wherever this run needs recording.',
-      });
-    } catch (err) {
-      toast({
-        title: 'Clipboard unavailable',
-        description: messageOf(err, 'Select the report text below and copy it by hand.'),
-        variant: 'destructive',
-      });
+      const nextMessage = await config.runner();
+      await onAfterRun?.();
+      setActionMessage(nextMessage);
+    } catch (error) {
+      const rawMessage = error.message || `Failed to run ${config.title}.`;
+      setActionError(actionId === 'digest' ? normalizeDigestError(rawMessage) : rawMessage);
+    } finally {
+      setRunningAction('');
     }
   };
 
-  return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold">
-            <Stethoscope className="h-6 w-6" /> Diagnostics
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            The live checks for #355 and #356, run in this session. The token is decoded here and
-            reduced to claim names; it is never displayed, and only the summary below is copied.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex gap-2">
-            <ProbeButton busy={identityRunning} icon={RefreshCw} onClick={rerunIdentity}>
-              Re-run identity checks
-            </ProbeButton>
-            <Button
-              size="sm"
-              onClick={copyReport}
-              disabled={settling}
-              title={settling ? 'Checks still running' : 'Copy the Markdown report'}
-            >
-              <ClipboardCopy className="mr-2 h-3.5 w-3.5" /> Copy report
-            </Button>
-          </div>
-          {settling ? (
-            <p className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
-              <Loader2 className="h-3 w-3 animate-spin" /> Checks still running — the report is not
-              final
-            </p>
-          ) : null}
-        </div>
-      </div>
+  const toggleActionInfo = (key) => {
+    setActionInfoOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
-      <TokenClaimsCard identity={identity} />
-      <AdminRegistryCard identity={identity} />
-      <LabsProbeCard
-        labs={labs}
-        labsBusy={labsBusy}
-        onLabs={runLabs}
-        unauth={unauth}
-        unauthBusy={unauthBusy}
-        onUnauth={runUnauth}
-      />
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Report</CardTitle>
-          <CardDescription>
-            What Copy report puts on the clipboard. Claim names, booleans, statuses and job ids
-            only.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <pre
-            className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/60 p-3 font-mono text-xs"
-            aria-label="Diagnostics report"
-          >
-            {report}
-          </pre>
-        </CardContent>
-      </Card>
-    </div>
-  );
+  return {
+    runningAction,
+    actionMessage,
+    actionError,
+    actionInfoOpen,
+    runAction,
+    toggleActionInfo,
+    setActionMessage,
+    setActionError,
+  };
 }

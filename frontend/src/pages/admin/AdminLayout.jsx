@@ -24,12 +24,10 @@ import {
   Award,
   Link2,
   Mail,
-  KeyRound,
   Plug,
   FlaskConical,
   Flame,
   Headphones,
-  Stethoscope,
   SlidersHorizontal,
 } from 'lucide-react';
 import { signOutUser } from '@/lib/entraAuth';
@@ -87,15 +85,18 @@ const NAV_GROUPS = [
   {
     label: 'Platform',
     items: [
-      { to: '/admin/ops-health', icon: Activity, label: 'Ops Health' },
-      { to: '/admin/connections', icon: Plug, label: 'Connections' },
-      { to: '/admin/api-keys', icon: KeyRound, label: 'API Keys' },
       { to: '/admin/platform', icon: SlidersHorizontal, label: 'Platform Settings' },
+      { to: '/admin/health', icon: Activity, label: 'Health' },
+      { to: '/admin/integrations', icon: Plug, label: 'Integrations' },
       { to: '/admin/labs', icon: FlaskConical, label: 'Labs', pill: 'VPS' },
-      { to: '/admin/diagnostics', icon: Stethoscope, label: 'Diagnostics' },
     ],
   },
 ];
+
+// Exported for the nav-order test. The Platform group's order is a decision
+// the owner made explicitly — settings first, Labs last — so it is asserted
+// rather than left to whoever next edits the array.
+export { NAV_GROUPS };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
