@@ -258,6 +258,24 @@ async function main() {
     process.exit(2);
   }
 
+  // FAIL CLOSED ON A TRUNCATED LISTING. `per_page=100` is one page, and GitHub
+  // paginates: past 100 workflows the rest would be dropped silently and every
+  // one of them reported as nothing at all — a healthy answer to a question
+  // that was never asked, which is the exact shape this file exists to catch,
+  // one level up from the run-filter guard below. Nineteen today, so this has
+  // never fired; it is here because the failure would be invisible when it
+  // did. Raised in review on PR #426.
+  if (!Array.isArray(listing?.workflows)) {
+    console.error('The workflow listing had no `workflows` array; nothing is asserted.');
+    process.exit(2);
+  }
+  if (Number.isFinite(listing.total_count) && listing.total_count > listing.workflows.length) {
+    console.error(
+      `The workflow listing is paginated — ${listing.total_count} workflows, ${listing.workflows.length} read. Raise per_page or follow the pages; nothing is asserted.`
+    );
+    process.exit(2);
+  }
+
   // `dynamic/...` entries are GitHub's own (Dependabot, Copilot) and have no
   // file in this repository to fix or delete, so they are not this tool's
   // business.
