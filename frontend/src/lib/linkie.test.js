@@ -33,6 +33,7 @@ import {
   trafficStatCards,
   unwrapLinkie,
   validatePostForm,
+  visibleLinksState,
 } from './linkie';
 
 /** One profile, as Linkie nests them, wrapped in the proxy envelope. */
@@ -309,5 +310,40 @@ describe('extractTrafficStats and trafficStatCards', () => {
     ]);
     expect(trafficStatCards({})).toEqual([]);
     expect(trafficStatCards(null)).toEqual([]);
+  });
+});
+
+describe('visibleLinksState', () => {
+  const withPosts = { posts: [{ _id: 'x', url: 'https://a' }], error: 'boom' };
+
+  it('shows nothing when there is no profile, even though a result is held', () => {
+    // The regression: `loading` is false when profileId is null, so a naive
+    // `loading ? [] : result.posts` leaks the previous profile's list into a
+    // state where every write is gated. Caught in review on #429.
+    expect(visibleLinksState({ profileId: null, loading: false, result: withPosts })).toEqual({
+      posts: [],
+      error: '',
+    });
+  });
+
+  it('shows nothing while a fetch is in flight', () => {
+    expect(visibleLinksState({ profileId: 'p1', loading: true, result: withPosts })).toEqual({
+      posts: [],
+      error: '',
+    });
+  });
+
+  it('shows the result once a profile is selected and the fetch has settled', () => {
+    expect(visibleLinksState({ profileId: 'p1', loading: false, result: withPosts })).toEqual({
+      posts: withPosts.posts,
+      error: 'boom',
+    });
+  });
+
+  it('does not throw on a result it has never been given', () => {
+    expect(visibleLinksState({ profileId: 'p1', loading: false, result: undefined })).toEqual({
+      posts: [],
+      error: '',
+    });
   });
 });

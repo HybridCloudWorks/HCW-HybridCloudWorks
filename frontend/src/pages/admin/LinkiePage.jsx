@@ -74,6 +74,7 @@ import {
   trafficStatCards,
   unwrapLinkie,
   validatePostForm,
+  visibleLinksState,
 } from '@/lib/linkie';
 
 const TABS = [
@@ -163,8 +164,7 @@ function LinksTab({ recentContent, profileId, profileNotice }) {
 
   const requestKey = profileId ? `${profileId}#${reloadToken}` : '';
   const loading = Boolean(profileId) && result.key !== requestKey;
-  const posts = loading ? [] : result.posts;
-  const error = loading ? '' : result.error;
+  const { posts, error } = visibleLinksState({ profileId, loading, result });
 
   const reload = () => setReloadToken((n) => n + 1);
 

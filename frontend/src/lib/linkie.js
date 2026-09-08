@@ -382,3 +382,24 @@ export function trafficStatCards(summary) {
     { label: 'Subscribers', value: stats.total_subscribers },
   ].filter((card) => card.value !== undefined && card.value !== null);
 }
+
+/**
+ * What the Links tab may show, given the profile and the in-flight state.
+ *
+ * NO PROFILE MEANS NO POSTS, not "the last profile's posts". `loading` is
+ * false when there is no `profileId` — there is nothing in flight to wait for
+ * — so a naive `loading ? [] : result.posts` lets the previously resolved
+ * profile's list survive the profile going away. The tab then shows rows for
+ * a profile it no longer has, while every write is gated, which is worse than
+ * showing nothing: it implies the data is current and the buttons are broken.
+ *
+ * The Analytics tab expresses the same rule as an early return when
+ * `profileId` is null. This is that rule, for a tab that has rows to suppress
+ * rather than a whole panel. Caught in review on PR #429.
+ *
+ * @param {{ profileId: string|null, loading: boolean, result: { posts?: object[], error?: string } }} args
+ */
+export function visibleLinksState({ profileId, loading, result }) {
+  if (!profileId || loading) return { posts: [], error: '' };
+  return { posts: result?.posts || [], error: result?.error || '' };
+}
