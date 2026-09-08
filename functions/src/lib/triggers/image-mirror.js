@@ -18,8 +18,8 @@
  */
 import { PUBLIC_MEDIA_CONTAINERS, mediaUrlFor } from '../blob-paths.js';
 import {
-  MIME_TO_EXT,
   isExternalUrlString,
+  requireImageExtension,
   fetchImage as defaultFetchImage,
 } from './fetch-image.js';
 import { shouldProcessValue } from './value-marker.js';
@@ -62,7 +62,7 @@ export function downloadUrlFor(container, blobPath, sourceUrl) {
  * @param {object} deps
  * @param {{ readDoc: Function, patchDoc: Function }} deps.store
  * @param {{ uploadBlob: Function }} deps.storage - uploadBlob(container, blobName, content, contentType, metadata)
- * @param {(url: string) => Promise<{buffer: Buffer, contentType: string}>} [deps.fetchImage]
+ * @param {(url: string) => Promise<{buffer?: Buffer, contentType: string, refused?: string, reason?: string}>} [deps.fetchImage]
  * @param {{ log?: Function, warn?: Function, error?: Function }} [deps.log]
  */
 export function createImageMirror({ store, storage, fetchImage = defaultFetchImage, log = {} }) {
@@ -86,8 +86,16 @@ export function createImageMirror({ store, storage, fetchImage = defaultFetchIma
 
     try {
       log.log?.(`[${spec.tag}] Downloading for ${container}/${doc.id}`);
-      const { buffer, contentType } = await fetchImage(newUrl);
-      const ext = MIME_TO_EXT[contentType] ?? 'png';
+      const fetched = await fetchImage(newUrl);
+      // Not an image, so not a mirror (#415). The marker is deliberately not
+      // written: an editor who replaces the video with a picture gets it
+      // mirrored on the next write, exactly as after a fetch failure.
+      if (fetched.refused) {
+        log.warn?.(`[${spec.tag}] Refused ${container}/${doc.id}: ${fetched.reason}`);
+        return { mirrored: false, reason: `refused: ${fetched.refused}` };
+      }
+      const { buffer, contentType } = fetched;
+      const ext = requireImageExtension(contentType);
       const blobPath = `${doc.id}/images/${spec.blobName}.${ext}`;
       await storage.uploadBlob(container, blobPath, buffer, contentType, { sourceUrl: newUrl });
       const field = rowyImageField({

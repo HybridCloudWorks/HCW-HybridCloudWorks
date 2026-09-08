@@ -73,7 +73,14 @@ describe('inlineBlobPath and rewriteBody', () => {
     expect(inlineBlobPath('c1', UPSTREAM_A, 'image/webp')).toBe(p);
     expect(inlineBlobPath('c1', UPSTREAM_B, 'image/webp')).not.toBe(p);
     expect(inlineBlobPath('c2', UPSTREAM_A, 'image/webp')).not.toBe(p);
-    expect(inlineBlobPath('c1', UPSTREAM_A, 'application/octet-stream')).toMatch(/\.png$/);
+    // #415: this used to default to `.png`, which is how a video would have
+    // been stored under a name claiming to be an image.
+    expect(() => inlineBlobPath('c1', UPSTREAM_A, 'application/octet-stream')).toThrow(
+      'No stored extension for media type application/octet-stream'
+    );
+    expect(() => inlineBlobPath('c1', UPSTREAM_A, 'video/mp4')).toThrow(
+      'No stored extension for media type video/mp4'
+    );
   });
 
   it('replaces every occurrence and touches nothing else', () => {
@@ -137,6 +144,46 @@ describe('createInlineImageRehoster', () => {
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn.mock.calls[0][0]).toContain('cdn.example.org');
     expect(log.warn.mock.calls[0][0]).not.toContain('/diagram.webp');
+  });
+
+  it('stores nothing for a video, leaves its URL in the body, and re-hosts the rest (#415)', async () => {
+    // The fetcher refuses by returning, not by throwing: the response arrived
+    // and was read, it is simply not an image this site can serve.
+    const fetchImage = vi.fn(async (url) =>
+      url === UPSTREAM_B
+        ? {
+            refused: 'not-an-image',
+            contentType: 'video/mp4',
+            reason: 'Content-Type video/mp4 is not an image',
+          }
+        : png
+    );
+    const storage = { uploadBlob: vi.fn(async () => undefined) };
+    const log = { warn: vi.fn() };
+    const { rehost } = createInlineImageRehoster({ storage, fetchImage, log });
+
+    const result = await rehost({ contentId: 'c1', bodies: { content: BODY } });
+
+    // Nothing written for the video — not under a `.png`, not under any name.
+    expect(fetchImage).toHaveBeenCalledTimes(2);
+    expect(storage.uploadBlob).toHaveBeenCalledTimes(1);
+    expect(storage.uploadBlob.mock.calls[0][1]).toBe(inlineBlobPath('c1', UPSTREAM_A, 'image/png'));
+
+    // The video's URL survives the rewrite exactly as the body had it.
+    expect(result.bodies.content).toContain(`![Diagram](${UPSTREAM_B} "Architecture")`);
+    expect(result.failed).toEqual([
+      { url: UPSTREAM_B, reason: 'Content-Type video/mp4 is not an image' },
+    ]);
+    // …and the article's other image still came across.
+    expect(result.rewritten).toEqual([
+      { from: UPSTREAM_A, to: `/api/public/media/covers/${storage.uploadBlob.mock.calls[0][1]}` },
+    ]);
+    expect(result.bodies.content).not.toContain(UPSTREAM_A);
+
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toBe(
+      '[inlineImages] c1: could not re-host an image from cdn.example.org: Content-Type video/mp4 is not an image'
+    );
   });
 
   it('counts an upload failure as a failed image, not a thrown publish', async () => {

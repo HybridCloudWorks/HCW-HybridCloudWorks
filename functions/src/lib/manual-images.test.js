@@ -14,7 +14,12 @@ const guardAs = (role) => ({
 const request = (body) => ({ json: async () => body, headers: { get: () => null } });
 const context = { error: vi.fn() };
 
-function makeHandlers({ role = 'editor', doc, configured = true } = {}) {
+function makeHandlers({
+  role = 'editor',
+  doc,
+  configured = true,
+  fetchImage = vi.fn(async () => ({ buffer: Buffer.from('png'), contentType: 'image/png' })),
+} = {}) {
   const store = {
     readDoc: vi.fn(async () => doc ?? null),
     patchDoc: vi.fn(async () => ({})),
@@ -22,7 +27,6 @@ function makeHandlers({ role = 'editor', doc, configured = true } = {}) {
   };
   const storage = { uploadBlob: vi.fn(async () => 'ok') };
   const replicate = { configured, generate: vi.fn(async () => 'https://replicate/img.png') };
-  const fetchImage = vi.fn(async () => ({ buffer: Buffer.from('png'), contentType: 'image/png' }));
   let n = 0;
   const handlers = createManualImageHandlers({
     guard: guardAs(role),
@@ -89,7 +93,9 @@ describe('triggerAiImageGeneration', () => {
     expect(
       (
         await handlers.triggerAiImageGeneration(
-          request({ contentIds: Array.from({ length: TRIGGER_MAX_CONTENT_IDS + 1 }, (_, i) => `c${i}`) }),
+          request({
+            contentIds: Array.from({ length: TRIGGER_MAX_CONTENT_IDS + 1 }, (_, i) => `c${i}`),
+          }),
           context
         )
       ).status
@@ -177,6 +183,26 @@ describe('generateCuratedArticleImage', () => {
     expect(
       (await handlers.generateCuratedArticleImage(request({ articleTitle: 'T' }), context)).status
     ).toBe(400);
+  });
+
+  it('500s and stores nothing when the generated file is not an image (#415)', async () => {
+    const { handlers, storage, store } = makeHandlers({
+      fetchImage: vi.fn(async () => ({
+        refused: 'not-an-image',
+        contentType: 'video/mp4',
+        reason: 'Content-Type video/mp4 is not an image',
+      })),
+    });
+    const res = await handlers.generateCuratedArticleImage(
+      request({ articleId: 'a1', articleTitle: 'Title' }),
+      context
+    );
+    expect(res.status).toBe(500);
+    expect(JSON.parse(res.body).message).toBe(
+      'Generated image refused: Content-Type video/mp4 is not an image'
+    );
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 });
 

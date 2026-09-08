@@ -203,9 +203,14 @@ export function createManualImageHandlers({
         provider: body.provider,
       });
       const generated = await replicate.generate(prompt);
-      const { buffer, contentType } = await fetchImage(generated);
+      const fetched = await fetchImage(generated);
+      // Not an image: fail the request rather than store it (#415). The outer
+      // catch turns this into the 500 the editor already sees for a generation
+      // that did not come back.
+      if (fetched.refused) throw new Error(`Generated image refused: ${fetched.reason}`);
+      const { buffer, contentType } = fetched;
       const blobPath = `curated-${articleId}.png`;
-      await storage.uploadBlob('covers', blobPath, buffer, contentType || 'image/png', {
+      await storage.uploadBlob('covers', blobPath, buffer, contentType, {
         articleId,
         slot: 'curated',
       });
@@ -272,9 +277,11 @@ export function createManualImageHandlers({
           contentType: body.contentType,
         });
         const generated = await replicate.generate(prompt);
-        const { buffer, contentType } = await fetchImage(generated);
+        const fetched = await fetchImage(generated);
+        if (fetched.refused) throw new Error(`Generated ${slot} image refused: ${fetched.reason}`);
+        const { buffer, contentType } = fetched;
         const blobPath = `preview-${articleId}-${slot}.png`;
-        await storage.uploadBlob('covers', blobPath, buffer, contentType || 'image/png', {
+        await storage.uploadBlob('covers', blobPath, buffer, contentType, {
           articleId,
           slot,
         });

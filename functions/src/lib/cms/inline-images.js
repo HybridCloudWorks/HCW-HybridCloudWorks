@@ -14,9 +14,10 @@
  * mirror uses (`triggers/fetch-image.js`: protocol and private-IP checks,
  * redirect cap, size cap, timeout), stored under the article's id in the
  * public `covers` container, and the body's references are rewritten to the
- * site's own media path. A URL that cannot be fetched is left exactly as it
- * was — the alt text still renders — and recorded on the document, so the
- * editor can see what did not come across instead of finding out from a
+ * site's own media path. A URL that cannot be fetched — or that the fetcher
+ * refuses because what came back is not an image (#415) — is left exactly as
+ * it was, the alt text still renders, and it is recorded on the document, so
+ * the editor can see what did not come across instead of finding out from a
  * reader.
  *
  * WHY IT NEVER FAILS A PUBLISH. The image is decoration on an article that
@@ -37,7 +38,7 @@
 import { createHash } from 'node:crypto';
 
 import { mediaUrlFor } from '../blob-paths.js';
-import { MIME_TO_EXT, isExternalUrlString } from '../triggers/fetch-image.js';
+import { isExternalUrlString, requireImageExtension } from '../triggers/fetch-image.js';
 
 /** Public media container the re-hosted copies live in; the cover trigger's. */
 export const INLINE_IMAGE_CONTAINER = 'covers';
@@ -100,9 +101,17 @@ export function findInlineImageUrls(body) {
   return found;
 }
 
-/** `<contentId>/inline/<sha256(url)[0:16]>.<ext>` — stable per article and URL. */
+/**
+ * `<contentId>/inline/<sha256(url)[0:16]>.<ext>` — stable per article and URL.
+ *
+ * The extension comes from the type the fetcher measured, and there is no
+ * default (#415): this used to fall back to `png` for anything unmapped, which
+ * is how a `video/mp4` would have been stored under a name claiming to be an
+ * image. A type with no extension throws rather than being named, and `one()`
+ * records it as a failed image like any other.
+ */
 export function inlineBlobPath(contentId, url, contentType) {
-  const ext = MIME_TO_EXT[contentType] ?? 'png';
+  const ext = requireImageExtension(contentType);
   const digest = createHash('sha256').update(String(url)).digest('hex').slice(0, 16);
   return `${contentId}/inline/${digest}.${ext}`;
 }
@@ -147,7 +156,10 @@ export const DEFAULT_CONCURRENCY = 4;
 /**
  * @param {object} deps
  * @param {{ uploadBlob: Function }} deps.storage
- * @param {Function} deps.fetchImage `(url) => Promise<{ buffer, contentType }>`
+ * @param {Function} deps.fetchImage `(url) => Promise<{ buffer, contentType } |
+ *   { refused, contentType, reason }>` — see triggers/fetch-image.js. A
+ *   `refused` result is a media type this site will not store; it is a value
+ *   rather than a throw so this step can leave the URL alone deliberately.
  * @param {{ log?: Function, warn?: Function }} [deps.log]
  * @param {number} [deps.concurrency] images in flight at once. Sequential
  *   fetching made the worst case N × the 15 s fetch timeout — eleven images on
@@ -180,9 +192,32 @@ export function createInlineImageRehoster({
     }
     const rewritten = [];
     const failed = [];
+    /** Record one URL as not re-hosted and say so once, without leaking it. */
+    const leaveAlone = (url, reason) => {
+      failed.push({ url, reason });
+      // Host only, never the full URL or the document: enough to see a
+      // publisher refusing us, not enough to leak what was being read.
+      let host = 'invalid-url';
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        // keep the placeholder
+      }
+      // The fetcher's own messages embed URLs; the log line carries none.
+      log.warn?.(
+        `[inlineImages] ${contentId}: could not re-host an image from ${host}: ${scrubUrls(reason)}`
+      );
+    };
     const one = async (url) => {
       try {
-        const { buffer, contentType } = await fetchImage(url);
+        const fetched = await fetchImage(url);
+        // A media-type refusal is a value, not a throw (#415): the response
+        // arrived and was read, it just is not an image this site serves. The
+        // URL stays exactly as the body had it — the reader still gets
+        // whatever the origin serves, and the alt text still renders — and the
+        // remaining images carry on being re-hosted.
+        if (fetched.refused) return leaveAlone(url, fetched.reason);
+        const { buffer, contentType } = fetched;
         const blobPath = inlineBlobPath(contentId, url, contentType);
         // Provenance without the query string: enough to say where the copy
         // came from, not enough to replay a signed or tracking URL.
@@ -191,21 +226,7 @@ export function createInlineImageRehoster({
         });
         rewritten.push({ from: url, to: mediaUrlFor(INLINE_IMAGE_CONTAINER, blobPath) });
       } catch (error) {
-        const reason = String(error?.message || error || 'unknown');
-        failed.push({ url, reason });
-        // Host only, never the full URL or the document: enough to see a
-        // publisher refusing us, not enough to leak what was being read.
-        let host = 'invalid-url';
-        try {
-          host = new URL(url).hostname;
-        } catch {
-          // keep the placeholder
-        }
-        // The fetcher's own messages embed URLs; the log line carries none.
-        const safeReason = scrubUrls(reason);
-        log.warn?.(
-          `[inlineImages] ${contentId}: could not re-host an image from ${host}: ${safeReason}`
-        );
+        leaveAlone(url, String(error?.message || error || 'unknown'));
       }
     };
     // A small pool: `concurrency` workers each pull the next URL until none
