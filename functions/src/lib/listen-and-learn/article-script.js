@@ -418,7 +418,12 @@ export async function generateArticleScript({
   const turns = fitToByteLimit(allTurns, MAX_SCRIPT_BYTES);
 
   return {
-    title: String(parsed.title || title).trim(),
+    // Trim BEFORE falling back. `parsed.title || title` keeps a whitespace-only
+    // model title, because "   " is truthy, and the trim then stores an empty
+    // one — an episode with no name, from a run that reported success.
+    // `script.js:255` has the same shape and the same latent bug; left alone
+    // here only to keep this diff to one feature.
+    title: String(parsed.title || '').trim() || title,
     summary: String(parsed.summary || '').trim(),
     keyTakeaways: Array.isArray(parsed.keyTakeaways)
       ? parsed.keyTakeaways

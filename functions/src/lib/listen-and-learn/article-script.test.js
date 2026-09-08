@@ -164,9 +164,15 @@ describe('the input ceiling', () => {
   });
 
   it('cuts on a character boundary, not a byte one', () => {
-    // Slicing a Buffer mid-codepoint puts U+FFFD in the prompt. Every char
-    // here is 4 bytes, so the limit lands mid-character by construction.
-    const prepared = prepareArticleForSpeech('😀'.repeat(MAX_ARTICLE_INPUT_BYTES));
+    // Slicing a Buffer mid-codepoint puts U+FFFD in the prompt.
+    //
+    // The single leading ASCII byte is the whole test. MAX_ARTICLE_INPUT_BYTES
+    // is 60,000, which divides by 4, so an unprefixed run of 4-byte characters
+    // cuts EXACTLY on a boundary and would pass even with the guard removed.
+    // Offsetting by one puts the limit inside the 15,000th emoji.
+    expect(MAX_ARTICLE_INPUT_BYTES % 4).toBe(0);
+    const prepared = prepareArticleForSpeech(`x${'😀'.repeat(MAX_ARTICLE_INPUT_BYTES)}`);
+    expect(prepared.truncated).toBe(true);
     expect(prepared.text).not.toContain('�');
   });
 
@@ -365,6 +371,15 @@ describe('generateArticleScript', () => {
       .fn()
       .mockResolvedValue(script({ dialogue: [{ speaker: 'Rex', text: 'Hello.' }] }));
     await expect(generateArticleScript({ article, generate })).rejects.toThrow(/unknown speaker/);
+  });
+
+  it('falls back to the article title when the model returns whitespace', async () => {
+    // "   " is truthy, so `parsed.title || title` keeps it and the trim then
+    // stores an empty title — an episode with no name, from a run that
+    // reported success.
+    const generate = vi.fn().mockResolvedValue(script({ title: '   ' }));
+    const result = await generateArticleScript({ article, generate });
+    expect(result.title).toBe('Picking a state backend');
   });
 
   it('reports how much of the article could not be spoken', async () => {
