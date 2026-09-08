@@ -101,6 +101,19 @@ and an unprovisioned container is classified or removed before the first run.
 - A timer (`cosmosExportScheduler`) runs daily at 03:00 UTC, decides *full* or
   *delta* from the day of week, mints a run id from the UTC date, and enqueues
   one message per exported container onto the existing platform jobs queue.
+
+  > **Amended 2026-09-07 (#416).** "03:00 UTC" was written here on 2026-09-06
+  > and was not true when written. The schedule is the bare NCRONTAB hour
+  > `0 0 3 * * *`, and the Function App then set
+  > `WEBSITE_TIME_ZONE = America/Chicago`, so the exporter ran at 03:00
+  > Central — 08:00 UTC in CDT, 09:00 in CST. Nothing computed wrongly (the
+  > run id and the full/delta decision were already taken from the UTC clock),
+  > but the operator-facing alert description said 03:00 UTC too. The owner's
+  > decision was that all times in this app are UTC, so the app setting was
+  > removed rather than this sentence corrected: the exporter now does run at
+  > 03:00 UTC, five hours earlier than it had been. Nothing else in this ADR
+  > changes — the slot was chosen as low-traffic and 03:00 UTC (22:00 Central)
+  > is as quiet as 03:00 Central was.
 - The queue worker exports one container per message: full runs page through
   `SELECT * FROM c` with continuation tokens; delta runs read the change feed
   from the stored continuation and store the new one. Each page is appended to

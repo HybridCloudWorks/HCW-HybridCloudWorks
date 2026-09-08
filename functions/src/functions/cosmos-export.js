@@ -9,9 +9,13 @@
  * returns, so the code is inert on a deploy until the app setting is flipped
  * — the Terraform half of #231 adds the setting.
  *
- * The run id and the full/delta decision come from the UTC clock, not from
- * the host's, so they are the same whichever time zone the schedule fires in
- * (`WEBSITE_TIME_ZONE` is set app-wide in infra/functionapp.tf).
+ * The run id and the full/delta decision come from the UTC clock
+ * (`runIdFor`/`modeFor` in lib/backup/cosmos-export.js), and so does the
+ * schedule: the app sets no `WEBSITE_TIME_ZONE`, so NCRONTAB reads UTC too
+ * (#416). This used to say the two agreed "whichever time zone the schedule
+ * fires in" — a real defence while the app clock was America/Chicago and
+ * 03:00 local could have been a different UTC day from the run id. There is
+ * now one clock and nothing left for that sentence to defend against.
  */
 import { app, output } from '@azure/functions';
 import * as store from '../lib/cosmos-client.js';
@@ -36,7 +40,7 @@ export const exportEnabled = (env = process.env) =>
   env.FEATURE_FLAG_SCHEDULERS !== 'false' && ['1', 'true'].includes(env.FEATURE_FLAG_COSMOS_EXPORT);
 
 app.timer('cosmosExportScheduler', {
-  // 03:00 daily; Sunday is the weekly full, the other six days are deltas.
+  // 03:00 UTC daily; Sunday is the weekly full, the other six days are deltas.
   schedule: '0 0 3 * * *',
   extraOutputs: [queueOutput],
   handler: async (_timer, context) => {

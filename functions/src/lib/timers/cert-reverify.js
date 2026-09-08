@@ -1,5 +1,5 @@
 /**
- * cert-reverify.js — `reVerifyCertifications`, Sundays at midnight Chicago.
+ * cert-reverify.js — `reVerifyCertifications`, Sundays at 00:00 UTC.
  *
  * Ported from Site-Main `cms/certifications.js` (088f458). Two checks per
  * active certification: the expiry date, and — for Credly verification URLs

@@ -1,6 +1,6 @@
 /**
  * content-cleanup.js — the two reapers behind `cleanupRejectedContent`
- * (04:00 Chicago) and `cleanupSoftDeletedContent` (every 4 h).
+ * (04:00 UTC) and `cleanupSoftDeletedContent` (every 4 h).
  *
  * Ported from Site-Main `cms/cleanup.js` (088f458). The first is soft: a
  * rejection older than the cutoff gets `softDeletedAt`, so a misclick stays

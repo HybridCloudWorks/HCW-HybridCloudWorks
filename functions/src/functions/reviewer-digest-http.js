@@ -1,7 +1,7 @@
 /**
  * reviewer-digest-http.js — registration for `generateReviewerDigestManual`
  * (api-surface.json rpc.implemented). Semantics with the timer core in
- * lib/timers/reviewer-digest.js — the manual run and the 07:00 scheduled run
+ * lib/timers/reviewer-digest.js — the manual run and the 07:00 UTC scheduled run
  * are the same snapshot.
  */
 import { httpRoute } from '../lib/auth/http-route.js';
