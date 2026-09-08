@@ -447,11 +447,17 @@ the NCRONTAB column below picks one. Change the hour, not the intent.
 > earlier in absolute time than it did (six in CST). The rows are left exactly as ported; this
 > note is the correction.
 >
-> **Nothing in the table changed except one expression.** `scrapeSkillsHubRss` is the row this
+> **Exactly one NCRONTAB expression changed in the code.** `scrapeSkillsHubRss` is the row this
 > section already flagged as "the one UTC schedule … the casualty": it was ported as
 > `0 0 4 * * 5` *because* 04:00 Central is 09:00 UTC, so leaving it alone would have moved the
 > one job whose intent was already UTC. It is now `0 0 9 * * 5` — the upstream instant, and no
 > longer drifting an hour across DST, which retires the "casualty" sentence above.
+>
+> **The §4.2 port table further down still reads `0 0 4 * * 5` for that row, and stays that
+> way.** It records what was ported in August 2026, which is the job of a history document, and
+> rewriting it would destroy the only evidence of why the expression was chosen. Read that table
+> as the August port and this note as what is live: for `scrapeSkillsHubRss` alone the two now
+> differ, and this note is the current one. Every other row in it is still the running schedule.
 >
 > | Timer | NCRONTAB (unchanged unless noted) | Fired (Central clock) | Fires now (UTC clock) | Move |
 > | --- | --- | --- | --- | --- |
