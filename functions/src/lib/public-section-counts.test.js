@@ -45,20 +45,69 @@ describe('the shape the pre-render reads', () => {
     // blog would let an untitled, unattributed article's page leave the
     // sitemap, and adding it to audio would keep sixteen pages advertised on
     // behalf of two provider-less podcast rows that no page can reach.
+    //
+    // architecture-designs is guarded for a different reason than the text
+    // inference blog and frameworks do: four of the five architecture pages
+    // filter with their OWN slug as the default —
+    // `(doc.cloudProvider || doc['Cloud Provider'] || 'aws')` — so a document
+    // naming no recognised provider shows up on all four.
     const inferred = Object.entries(SECTIONS)
       .filter(([, rule]) => rule.providerInferred)
       .map(([section]) => section);
-    expect(inferred.sort()).toEqual(['blog', 'frameworks']);
+    expect(inferred.sort()).toEqual(['architecture-designs', 'blog', 'frameworks']);
     expect(Object.keys(SECTIONS).sort()).toEqual(
-      ['audio', 'audio-architecture', 'blog', 'code', 'coder-corner', 'frameworks'].sort()
+      [
+        'architecture-designs',
+        'audio',
+        'audio-architecture',
+        'blog',
+        'code',
+        'coder-corner',
+        'frameworks',
+      ].sort()
     );
   });
 
-  it('does not count architecture-designs — its pages carry hardcoded blueprints', () => {
-    // /aws/architecture-designs renders with one architecture document in the
-    // whole corpus, because ArchitecturePage.jsx merges staticBlueprints in.
-    // An API count of zero would drop four working pages.
-    expect(Object.keys(SECTIONS)).not.toContain('architecture-designs');
+  it('counts architecture-designs, which only the static half makes safe', () => {
+    // This count was deliberately absent until the blueprint lists moved to
+    // src/pages/<provider>/architecture-blueprints.js, because a zero was true
+    // of all five architecture pages and right about only VMware. It is safe
+    // now because sitemapRoutes drops a route only when this count AND that
+    // module are both empty — see frontend/scripts/prerender.mjs.
+    expect(Object.keys(SECTIONS)).toContain('architecture-designs');
+
+    const sections = countContentDocs(emptySections(), [
+      published({ type: 'architecture', cloudProvider: 'Azure' }),
+      published({ type: 'architecture', 'Cloud Provider': 'VMware' }),
+      published({ type: 'architecture', cloudProvider: 'Azure' }),
+    ]);
+    expect(sections.azure['architecture-designs']).toBe(2);
+    expect(sections.vmware['architecture-designs']).toBe(1);
+    expect(sections.aws['architecture-designs']).toBe(0);
+    expect(sections[UNATTRIBUTED]['architecture-designs']).toBe(0);
+  });
+
+  it('keeps an architecture document out of the blog count', () => {
+    // The blog listing excludes architecture and framework types, so counting
+    // one as a blog post would keep an empty /vmware/blog advertised.
+    const sections = countContentDocs(emptySections(), [
+      published({ type: 'architecture', cloudProvider: 'Azure' }),
+    ]);
+    expect(sections.azure.blog).toBe(0);
+    expect(sections.azure['architecture-designs']).toBe(1);
+  });
+
+  it('parks an architecture document naming no provider in the unattributed bucket', () => {
+    // It would render on the AWS, Azure, FinOps and GCP pages alike, each of
+    // which defaults an unattributed document to its own provider. VMware is
+    // the exception and the guard is therefore conservative there — which is
+    // the direction to be wrong in, since it only keeps a URL advertised.
+    const sections = countContentDocs(emptySections(), [
+      published({ type: 'architecture' }),
+      published({ type: 'architecture', cloudProvider: 'Oracle' }),
+    ]);
+    expect(sections[UNATTRIBUTED]['architecture-designs']).toBe(2);
+    expect(sections.aws['architecture-designs']).toBe(0);
   });
 
   it('starts every provider and the unattributed bucket at zero', () => {

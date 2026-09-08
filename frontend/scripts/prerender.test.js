@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   dedupeRoutes,
   sitemapRoutes,
+  staticSectionItems,
   findStreamedBoundary,
   splitHead,
   injectIntoTemplate,
@@ -627,10 +628,12 @@ describe('sitemapRoutes', () => {
       });
     });
 
-    it('leaves the pages the manifest deliberately does not count', () => {
-      // `/tools/*` are Coming Soon by configuration; architecture-designs
-      // pages merge hardcoded blueprints the API cannot see; `templates` is
-      // not a provider, so its submission forms have no counts at all.
+    it('leaves the pages this manifest has no counts for', () => {
+      // `/tools/*` are Coming Soon by configuration and `templates` is not a
+      // provider, so its submission forms have no counts at all. The
+      // architecture route is here because THIS fixture predates the
+      // `architecture-designs` counts — a section absent from the map must read
+      // as "no count", never as zero.
       const untouched = [
         '/tools/migration',
         '/gcp/architecture-designs',
@@ -649,5 +652,86 @@ describe('sitemapRoutes', () => {
       };
       expect(sitemapRoutes(['/gcp/blog', '/gcp/audio'], withStray).dropped).toEqual(['/gcp/audio']);
     });
+  });
+
+  /**
+   * The architecture pages, which the API count alone cannot speak for (#373).
+   *
+   * Every one of them renders a hardcoded blueprint list as well as the API's
+   * documents, so a zero from the manifest is true of all five and right about
+   * only the ones whose list is empty. These pin the extra conjunct that tells
+   * them apart.
+   */
+  describe('a section whose page renders items of its own', () => {
+    const manifest = {
+      sections: {
+        aws: { 'architecture-designs': 0 },
+        azure: { 'architecture-designs': 1 },
+        vmware: { 'architecture-designs': 0 },
+        _unattributed: { 'architecture-designs': 0 },
+      },
+    };
+    const routes = [
+      '/aws/architecture-designs',
+      '/azure/architecture-designs',
+      '/vmware/architecture-designs',
+    ];
+
+    it('keeps a page with no API documents but blueprints of its own', () => {
+      const staticItems = {
+        '/aws/architecture-designs': 6,
+        '/azure/architecture-designs': 6,
+        '/vmware/architecture-designs': 0,
+      };
+      expect(sitemapRoutes(routes, manifest, staticItems)).toEqual({
+        kept: ['/aws/architecture-designs', '/azure/architecture-designs'],
+        dropped: ['/vmware/architecture-designs'],
+      });
+    });
+
+    it('drops all of them when no page has blueprints — the pre-#373 shape', () => {
+      // Without the static half this is what the counts alone would do, and it
+      // is why the section was left uncounted until the blueprints became
+      // readable: four working pages leaving the sitemap to fix one empty one.
+      expect(sitemapRoutes(routes, manifest, {}).dropped).toEqual([
+        '/aws/architecture-designs',
+        '/vmware/architecture-designs',
+      ]);
+    });
+
+    it('reads a missing or zero entry as no static content, and nothing else', () => {
+      for (const absent of [undefined, 0, null]) {
+        const staticItems = { '/vmware/architecture-designs': absent };
+        expect(sitemapRoutes(routes, manifest, staticItems).dropped).toContain(
+          '/vmware/architecture-designs'
+        );
+      }
+    });
+  });
+});
+
+/**
+ * The blueprint counts the sitemap rule runs on, read from the real modules.
+ *
+ * These assert LITERAL counts rather than each module's own length, on purpose:
+ * an expectation derived from the thing under test passes however the thing
+ * changes. `/vmware/architecture-designs` leaves the sitemap because its module
+ * is empty, so "empty" is the fact that needs an independent witness.
+ */
+describe('staticSectionItems', () => {
+  const PAGES = join(FRONTEND_ROOT, 'src', 'pages');
+
+  it('counts every provider architecture page, VMware at zero', async () => {
+    expect(await staticSectionItems(PAGES)).toEqual({
+      '/aws/architecture-designs': 6,
+      '/azure/architecture-designs': 6,
+      '/finops/architecture-designs': 6,
+      '/gcp/architecture-designs': 6,
+      '/vmware/architecture-designs': 0,
+    });
+  });
+
+  it('answers nothing for a directory tree that does not exist', async () => {
+    expect(await staticSectionItems(join(PAGES, 'no-such-directory'))).toEqual({});
   });
 });

@@ -117,15 +117,39 @@ export const UNATTRIBUTED = '_unattributed';
  *                         Both routes render
  *                         SharedPodcastPage for the provider in the path, so
  *                         they too carry the same number.
+ *   architecture-designs — each provider's ArchitecturePage: type architecture,
+ *                         provider read from the same two fields this file
+ *                         matches. See below for why it is counted now when it
+ *                         deliberately was not before.
  *
- * `architecture-designs` is deliberately NOT here, and the reason is worth
- * writing down because the section looks exactly like the others. Its pages
- * merge API documents with `staticBlueprints`, a list hardcoded in each
- * provider's ArchitecturePage.jsx: on 2026-09-07 the whole corpus held ONE
- * architecture document and four of the five architecture pages rendered
- * fine, so a count of zero says nothing about whether that page is empty.
- * `/vmware/architecture-designs` — the one that is — has to leave the sitemap
- * some other way.
+ * WHY `architecture-designs` IS HERE NOW. It was left out on purpose, and the
+ * reason was sound: its pages merge API documents with `staticBlueprints`, a
+ * list hardcoded in each provider's ArchitecturePage.jsx, so a count of zero
+ * said nothing about whether the page was empty — on 2026-09-07 the corpus held
+ * ONE architecture document while four of the five pages rendered fine. Acting
+ * on that zero would have dropped four working URLs to fix the one broken one.
+ *
+ * What changed is where the hardcoded lists live, not what they contain. Each
+ * page's blueprints moved to a sibling `architecture-blueprints.js` that the
+ * pre-render imports and counts (issue #373), so "does this page have static
+ * content?" is now a question the build can answer per provider instead of a
+ * property only a human reading JSX could see. This count supplies the other
+ * half of the same question — how many API documents reach the page — and
+ * `sitemapRoutes` drops a route only when both halves are zero. So a zero here
+ * is no longer load-bearing on its own, which is precisely what made it unsafe
+ * to produce before.
+ *
+ * `providerInferred: true` needs its own justification, because the inference
+ * is not the text-matching kind `blog` and `frameworks` do. Four of the five
+ * pages filter with `(doc.cloudProvider || doc['Cloud Provider'] || 'aws')` —
+ * their OWN slug as the default — so an architecture document naming no
+ * recognised provider appears on the AWS, Azure, FinOps and GCP pages alike.
+ * That is exactly the "could surface on any provider's page" the unattributed
+ * bucket exists for. The VMware page is the exception: it defaults to `''` and
+ * so shows such a document nowhere, which means the bucket is conservative for
+ * the one route this whole mechanism can actually drop. Conservative is the
+ * error to choose — it keeps an empty page advertised, where the opposite
+ * mistake unadvertises a page that has content.
  */
 export const SECTIONS = Object.freeze({
   blog: { providerInferred: true },
@@ -134,6 +158,7 @@ export const SECTIONS = Object.freeze({
   code: { providerInferred: false },
   audio: { providerInferred: false },
   'audio-architecture': { providerInferred: false },
+  'architecture-designs': { providerInferred: true },
 });
 
 /** Sections whose items come from `content` and `blogs`, keyed by type test. */
@@ -144,6 +169,13 @@ const CONTENT_SECTION_TYPES = Object.freeze({
   frameworks: (type) => type === 'framework',
   'coder-corner': (type) => type === 'coder_corner',
   code: (type) => type === 'coder_corner',
+  // The AWS and Azure architecture pages read `content` and fall back to
+  // `blogs`, exactly like the sections above; FinOps, GCP and VMware read
+  // `content` alone. Summing both containers is therefore a superset for those
+  // three, and a superset can only keep a route in the sitemap that a narrower
+  // count would have dropped — the safe direction. Measured 2026-09-07: `blogs`
+  // holds no architecture document at all, so today the two agree exactly.
+  'architecture-designs': (type) => type === 'architecture',
 });
 
 /** Sections served by the two audio containers. */
