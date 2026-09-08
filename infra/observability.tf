@@ -1092,10 +1092,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_full_mi
     # the expression that follows.
     #
     # It cost a partial apply on 2026-09-08. Terraform created
-    # alert-cosmos-export-daily and set FEATURE_FLAG_COSMOS_EXPORT = "true",
-    # then failed on this resource — leaving the exporter armed with only one
-    # of its two alerts, which is the half-state the `count` gate on a single
-    # variable exists to prevent.
+    # azurerm_monitor_scheduled_query_rules_alert_v2.cosmos_export_daily_missing
+    # — `alert-cosmos-export-daily-prod-cus` as it exists in Azure today, the
+    # `-${var.environment}-${var.region_abbreviation}` suffix resolved — and
+    # set FEATURE_FLAG_COSMOS_EXPORT = "true", then failed on this resource,
+    # leaving the exporter armed with only one of its two alerts. That is the
+    # half-state the `count` gate on a single variable exists to prevent.
     #
     # Confirmed by isolation against the live component, not by reading docs:
     # `project gap = iff(fulls == 0, 1, 0)` parses, `project missing = fulls`

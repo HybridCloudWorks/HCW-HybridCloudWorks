@@ -25,9 +25,17 @@
  *      does not exist. They are matched by string and nothing else checks it.
  *
  * The first one cost a partial apply on 2026-09-08. Terraform created
- * `alert-cosmos-export-daily` and set `FEATURE_FLAG_COSMOS_EXPORT = "true"`,
- * then failed on `alert-cosmos-export-full` — leaving the Cosmos exporter
- * armed with one of its two alerts. Both rules are gated on the single
+ * `cosmos_export_daily_missing` and set `FEATURE_FLAG_COSMOS_EXPORT = "true"`,
+ * then failed on `cosmos_export_full_missing`, leaving the Cosmos exporter
+ * armed with one of its two alerts.
+ *
+ * Those are the Terraform addresses. The Azure resource names are built as
+ * `alert-cosmos-export-{daily,full}-${var.environment}-${var.region_abbreviation}`,
+ * so in production today they read `alert-cosmos-export-daily-prod-cus` and
+ * `alert-cosmos-export-full-prod-cus` — which is what to search for in the
+ * portal, and the second of which is the one that was absent.
+ *
+ * Both rules are gated on the single
  * `cosmos_export_enabled` variable precisely so that half-state cannot exist,
  * and a partial apply produced it anyway, because a `count` gate decides
  * whether Terraform ATTEMPTS a resource and has no say in whether Azure
