@@ -17,7 +17,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import LinkiePage from './LinkiePage';
 
@@ -84,7 +84,13 @@ describe('a Connection test that succeeds re-resolves the profile', () => {
 
     // The test call, and no probe after it.
     await waitFor(() => expect(postJSON).toHaveBeenCalledTimes(2));
-    await new Promise((r) => setTimeout(r, 20));
+
+    // A negative assertion needs the pending work to have run, or it passes
+    // while the call it forbids is still queued. This flushes React's pending
+    // effects and microtasks deterministically — a wall-clock sleep would do
+    // the same job by guessing, and guess wrong under CI load. Raised in
+    // review on PR #429.
+    await act(async () => {});
     expect(postJSON).toHaveBeenCalledTimes(2);
   });
 });
