@@ -19,6 +19,7 @@ import {
   assessAll,
   renderReport,
   DEFAULT_STALE_DAYS,
+  positiveIntOr,
 } from './check-workflow-health.mjs';
 
 const NOW = new Date('2026-09-08T05:00:00Z');
@@ -158,5 +159,33 @@ describe('the fixtures are the real thing', () => {
         expect(run.created_at, wf.path).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       }
     }
+  });
+});
+
+describe('positiveIntOr', () => {
+  // WORKFLOW_STALE_DAYS and WORKFLOW_SAMPLE reached Number() directly until
+  // review caught it on #426. `Number('soon')` is NaN and NaN does not throw:
+  // it would have gone into a request URL as `per_page=NaN`, and made every
+  // staleness comparison false. A mistyped variable must not become a finding
+  // about a workflow.
+  it('takes a positive whole number', () => {
+    expect(positiveIntOr('30', 10)).toBe(30);
+    expect(positiveIntOr(7, 10)).toBe(7);
+  });
+
+  it('falls back for anything that is not one, rather than yielding NaN', () => {
+    for (const bad of ['soon', '', '   ', undefined, null, 'NaN', '1e', '-5', '0', '2.5', {}]) {
+      const got = positiveIntOr(bad, 10);
+      expect(Number.isFinite(got), `positiveIntOr(${JSON.stringify(bad)}) was not finite`).toBe(
+        true
+      );
+      expect(got).toBe(10);
+    }
+  });
+
+  it('never returns NaN for a value Number() would accept as one', () => {
+    // The specific regression: Number(undefined) is NaN, Number({}) is NaN.
+    expect(Number(positiveIntOr('soon', 10))).not.toBeNaN();
+    expect(String(positiveIntOr('soon', 10))).toBe('10');
   });
 });

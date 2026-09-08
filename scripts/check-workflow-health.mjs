@@ -185,11 +185,36 @@ async function api(path, token) {
   return res.json();
 }
 
+/**
+ * A positive integer from an environment variable, or the default.
+ *
+ * `Number('soon')` is `NaN`, and NaN propagates instead of throwing: it would
+ * have reached `per_page=NaN` in a request URL, and made every comparison
+ * against a staleness window false — so a mistyped variable would have turned
+ * this tool into one that reports on rows it did not fetch. Caught in review on
+ * PR #426. A misconfiguration must not become a finding.
+ *
+ * Falls back rather than exiting because neither variable is required; both
+ * exist to let an operator widen a window from a workflow file, and the default
+ * is always a defensible answer.
+ */
+export function positiveIntOr(raw, fallback) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || Math.trunc(n) !== n || n < 1) {
+    console.error(
+      `Ignoring "${raw}" — expected a positive whole number. Using ${fallback} instead.`
+    );
+    return fallback;
+  }
+  return n;
+}
+
 async function main() {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
-  const staleDays = Number(process.env.WORKFLOW_STALE_DAYS || DEFAULT_STALE_DAYS);
-  const sample = Number(process.env.WORKFLOW_SAMPLE || DEFAULT_SAMPLE);
+  const staleDays = positiveIntOr(process.env.WORKFLOW_STALE_DAYS, DEFAULT_STALE_DAYS);
+  const sample = positiveIntOr(process.env.WORKFLOW_SAMPLE, DEFAULT_SAMPLE);
 
   if (!token || !repo) {
     console.error('Usage: node check-workflow-health.mjs');
@@ -238,10 +263,26 @@ async function main() {
     // The endpoint above is trusted for the filter; this proves it held. A
     // silently unfiltered response would otherwise be indistinguishable from a
     // healthy workflow, which is how the first draft passed.
-    const foreign = runs.filter((r) => r.path && r.path !== w.path);
+    //
+    // IT ASSERTS ON `workflow_id`, AND IT FAILS CLOSED. The first version of
+    // this guard read `r.path && r.path !== w.path`, and that leading truthy
+    // check made it fail OPEN: a run whose `path` was absent or empty was
+    // silently counted as belonging here. A guard against a response that
+    // quietly carries the wrong rows must not itself quietly accept a row it
+    // cannot identify. Caught in review on PR #426.
+    //
+    // `workflow_id` rather than `path` because it is the exact value the
+    // request filtered on — a numeric identity comparison, not a string one —
+    // and because a workflow that is renamed keeps its id. A run missing the
+    // field fails the comparison and stops the script, which is the intended
+    // direction: this tool's whole claim is that the rows it read are the rows
+    // it asked for.
+    const foreign = runs.filter((r) => r.workflow_id !== w.id);
     if (foreign.length > 0) {
+      const first = foreign[0];
+      const seen = first.workflow_id ?? '(no workflow_id on the run)';
       console.error(
-        `Run listing for ${w.path} contained ${foreign.length} run(s) from other workflows (e.g. ${foreign[0].path}). The filter did not hold; nothing is asserted.`
+        `Run listing for ${w.path} contained ${foreign.length} run(s) that are not workflow ${w.id} (first: ${seen}). The filter did not hold; nothing is asserted.`
       );
       process.exit(2);
     }
