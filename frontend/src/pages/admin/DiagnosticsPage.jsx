@@ -851,7 +851,12 @@ export default function DiagnosticsPage() {
       await navigator.clipboard.writeText(report);
       toast({
         title: 'Report copied',
-        description: 'Paste it as the closing comment on #355 and #356.',
+        // NOT "paste it on #355 and #356". Those two issues were closed on
+        // 2026-09-07 by the first run of this page, so the instruction named a
+        // destination that no longer exists and told anyone running it since
+        // to file evidence against finished work. A tool that outlives the
+        // ticket it was built for should not keep quoting the ticket.
+        description: 'Paste it wherever this run needs recording.',
       });
     } catch (err) {
       toast({

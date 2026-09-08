@@ -385,14 +385,40 @@ function ConnectionTab({ onStatusChange }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button onClick={handleTest} disabled={testing} className="gap-2">
-            {testing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Test Connection
-          </Button>
+          {/*
+            THE BUTTON AND THE LINK SHARE A FLEX ROW, because `space-y-4` on
+            this CardContent cannot separate them. `space-y-*` sets margin-top
+            on a following sibling, and both the Button and the anchor render
+            as `inline-flex` — so whenever there is no result panel between
+            them they land on the same line and the vertical spacing does
+            nothing at all. They were touching.
+
+            `flex-wrap` lets the link drop below the button on a narrow card
+            instead of being squeezed, and `gap-x-4` is the horizontal
+            separation `space-y-4` was never going to provide.
+
+            The result panel stays OUTSIDE this row, as its own block child of
+            the `space-y-4` stack, because it is a full-width message and would
+            be laid out inline if it were part of the row.
+          */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Button onClick={handleTest} disabled={testing} className="gap-2">
+              {testing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Test Connection
+            </Button>
+            <a
+              href="https://www.klaviyo.com/settings/account/api-keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+            >
+              Manage API Keys in Klaviyo <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
           {result && (
             <div
               className={`flex items-start gap-2 p-3 rounded-lg border text-sm ${
@@ -409,14 +435,6 @@ function ConnectionTab({ onStatusChange }) {
               <p>{result.message}</p>
             </div>
           )}
-          <a
-            href="https://www.klaviyo.com/settings/account/api-keys"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-          >
-            Manage API Keys in Klaviyo <ExternalLink className="h-3.5 w-3.5" />
-          </a>
         </CardContent>
       </Card>
     </div>

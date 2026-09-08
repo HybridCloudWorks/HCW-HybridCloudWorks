@@ -567,23 +567,65 @@ export default function CalendarPage() {
             <CardHeader>
               <CardTitle className="text-sm">Summary</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Scheduled:</span>
-                <span className="font-medium">{scheduledContent.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Instant Ready:</span>
-                <span className="font-medium">{instantPublishContent.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Queue:</span>
-                <span className="font-medium">{totalQueueCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Social Posts:</span>
-                <span className="font-medium">{socialPosts.length}</span>
-              </div>
+            {/*
+              EVERY COUNT GOES SOMEWHERE. These were four static numbers, so a
+              reviewer who saw "Social Posts: 15" had to know on their own
+              which page the fifteen live on and how to filter it. This board
+              is read by people deciding what to review, and a count with no
+              way through to the things it counts makes them hunt.
+
+              Each row is a real button rather than a clickable div: it lands
+              in the tab order, answers the keyboard, and reads as an action.
+              A count of zero is deliberately still navigable — an empty
+              destination answers "is there anything there?" as well as a full
+              one, and disabling it would make zero look like a broken row.
+
+              THE ARIA LABEL LEADS WITH THE VISIBLE TEXT. WCAG 2.5.3 (Label in
+              Name) requires the accessible name to contain the label a sighted
+              user reads, and the first version was `${hint} (${value})`, which
+              never contained "Scheduled" at all. Someone driving the page by
+              voice could see the row and have no phrase that worked on it.
+              Caught in review on PR #427.
+            */}
+            <CardContent className="space-y-1 text-xs">
+              {[
+                {
+                  label: 'Scheduled',
+                  value: scheduledContent.length,
+                  to: '/admin/queue?status=ready_to_publish',
+                  hint: 'Open the queue filtered to content ready to publish',
+                },
+                {
+                  label: 'Instant Ready',
+                  value: instantPublishContent.length,
+                  to: '/admin/queue?status=approved_blog',
+                  hint: 'Open the queue filtered to approved content',
+                },
+                {
+                  label: 'Total Queue',
+                  value: totalQueueCount,
+                  to: '/admin/queue?status=all',
+                  hint: 'Open the full review queue',
+                },
+                {
+                  label: 'Social Posts',
+                  value: socialPosts.length,
+                  to: '/admin/social?tab=queue',
+                  hint: 'Open the scheduled social queue',
+                },
+              ].map(({ label, value, to, hint }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => navigate(to)}
+                  title={hint}
+                  aria-label={`${label}: ${value}. ${hint}`}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="text-muted-foreground">{label}:</span>
+                  <span className="font-medium">{value}</span>
+                </button>
+              ))}
             </CardContent>
           </Card>
         </div>
