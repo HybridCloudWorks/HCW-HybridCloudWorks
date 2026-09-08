@@ -936,8 +936,12 @@ Add for the migration:
   > until 2026-09-07. All 18 timers were armed on **2026-09-05** (#345), and
   > the owner decided in the same session that the per-wave observation read is
   > no longer a gate — the arming apply closes a wave, and
-  > `scripts/cutover/05-verify-timer.ps1` stays available to anyone who wants
-  > the reading. The two paragraphs below are left as written because they are
+  > `scripts/cutover/05-verify-timer.ps1` stayed available to anyone who wanted
+  > the reading. **That script was deleted on 2026-09-08** (see
+  > [Cutover runbook](cutover-runbook.md)): #321 had already switched off the
+  > `ScheduleStatus` trace it read, so it could no longer produce the reading it
+  > offered. `scripts/verify-timer-witness.mjs` carries the clock method that
+  > replaced it. The two paragraphs below are left as written because they are
   > the clearest statement of *why* firing and running are different questions,
   > and that distinction did not stop being true when the gate closed.
 
