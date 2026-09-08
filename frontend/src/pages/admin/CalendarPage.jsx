@@ -579,6 +579,13 @@ export default function CalendarPage() {
               A count of zero is deliberately still navigable — an empty
               destination answers "is there anything there?" as well as a full
               one, and disabling it would make zero look like a broken row.
+
+              THE ARIA LABEL LEADS WITH THE VISIBLE TEXT. WCAG 2.5.3 (Label in
+              Name) requires the accessible name to contain the label a sighted
+              user reads, and the first version was `${hint} (${value})`, which
+              never contained "Scheduled" at all. Someone driving the page by
+              voice could see the row and have no phrase that worked on it.
+              Caught in review on PR #427.
             */}
             <CardContent className="space-y-1 text-xs">
               {[
@@ -612,7 +619,7 @@ export default function CalendarPage() {
                   type="button"
                   onClick={() => navigate(to)}
                   title={hint}
-                  aria-label={`${hint} (${value})`}
+                  aria-label={`${label}: ${value}. ${hint}`}
                   className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="text-muted-foreground">{label}:</span>
