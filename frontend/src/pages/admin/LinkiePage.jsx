@@ -456,7 +456,16 @@ function LinksTab({ recentContent, profileId, profileNotice }) {
           {recentContent.map((item) => {
             const title = item.Title || item.title || 'Untitled';
             const url = getLiveUrl(item);
+            // `posts` is [] while the fetch is in flight, so alreadyLinked is
+            // false for EVERYTHING until it settles — which would light up
+            // Push on articles already in Linkie and let a fast operator
+            // create duplicates. "Not answered yet" is not "not linked", so
+            // the button waits for the answer. Caught in review on PR #429.
             const alreadyLinked = posts.some((post) => post.url === url);
+            const cannotTellYet = loading;
+            let pushTitle;
+            if (!canWrite) pushTitle = profileNotice || 'No Linkie profile selected';
+            else if (cannotTellYet) pushTitle = 'Checking what is already linked…';
             return (
               <div
                 key={item.id}
@@ -477,8 +486,10 @@ function LinksTab({ recentContent, profileId, profileNotice }) {
                   size="sm"
                   variant={alreadyLinked ? 'outline' : 'default'}
                   className="gap-1.5 shrink-0"
-                  disabled={!url || !canWrite || alreadyLinked || pushingId === item.id}
-                  title={canWrite ? undefined : profileNotice || 'No Linkie profile selected'}
+                  disabled={
+                    !url || !canWrite || cannotTellYet || alreadyLinked || pushingId === item.id
+                  }
+                  title={pushTitle}
                   onClick={() => handlePushContent(item)}
                 >
                   {pushingId === item.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

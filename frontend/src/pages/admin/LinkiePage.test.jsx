@@ -24,6 +24,8 @@ import LinkiePage from './LinkiePage';
 const postJSON = vi.fn();
 const getJSON = vi.fn();
 const toast = vi.fn();
+/** Which tab the page renders on; the setter is a no-op, so tests set this. */
+let searchParams = 'tab=connection';
 
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
@@ -35,7 +37,7 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 // clicking a tab would not move `activeTab` — starting there tests the same
 // thing without needing a stateful router mock.
 vi.mock('react-router', () => ({
-  useSearchParams: () => [new URLSearchParams('tab=connection'), vi.fn()],
+  useSearchParams: () => [new URLSearchParams(searchParams), vi.fn()],
 }));
 
 /** The proxy's envelope, which is HTTP 200 whatever the upstream said. */
@@ -47,6 +49,7 @@ const ONE_PROFILE = envelope(true, 200, {
 });
 
 beforeEach(() => {
+  searchParams = 'tab=connection';
   postJSON.mockReset();
   getJSON.mockReset();
   toast.mockReset();
@@ -92,5 +95,38 @@ describe('a Connection test that succeeds re-resolves the profile', () => {
     // review on PR #429.
     await act(async () => {});
     expect(postJSON).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Push waits until it knows what is already linked', () => {
+  // `posts` is [] while the fetch is in flight, so `alreadyLinked` is false
+  // for every row until it settles. Leaving Push enabled through that window
+  // offers a one-click duplicate on exactly the articles that are already
+  // there — and "not answered yet" is not "not linked". Caught in review on
+  // PR #429.
+  const ARTICLE = {
+    id: 'c1',
+    Title: 'Landing zones',
+    Live: true,
+    contentStatus: 'published_live',
+    slugPageUrl: 'https://hybridcloudworks.com/azure/blog/landing-zones',
+  };
+
+  it('disables Push while the linked set is still loading', async () => {
+    searchParams = 'tab=links';
+    getJSON.mockResolvedValue({ items: [ARTICLE] });
+
+    // /profiles resolves; the posts fetch never settles, so the page stays in
+    // the loading window this test is about.
+    postJSON.mockImplementation((_fn, body) => {
+      if (String(body?.path || '').includes('/posts')) return new Promise(() => {});
+      return Promise.resolve(ONE_PROFILE);
+    });
+
+    render(<LinkiePage />);
+
+    const push = await screen.findByRole('button', { name: /^Push$/i });
+    expect(push).toBeDisabled();
+    expect(push).toHaveAttribute('title', expect.stringMatching(/Checking what is already linked/));
   });
 });
