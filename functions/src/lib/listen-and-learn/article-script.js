@@ -178,7 +178,12 @@ export function prepareArticleForSpeech(body) {
   let codeBlocks = [];
   let tables = [];
 
-  let text = String(body || '');
+  // Only a string is a body. Neither `String(body || '')` nor
+  // `String(body ?? '')` is right here — they only argue about which
+  // non-string becomes what, and both turn an object into "[object Object]",
+  // which is the exact coercion `resolveArticleBody` refuses one screen up.
+  // An episode scripted from that text would be about nothing, confidently.
+  let text = typeof body === 'string' ? body : '';
 
   // 1. Fenced code. First, for the reason in the header.
   // The info string is `lang` plus anything else the author put on that line.

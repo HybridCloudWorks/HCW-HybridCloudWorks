@@ -142,6 +142,17 @@ describe('prepareArticleForSpeech', () => {
     expect(prepareArticleForSpeech('![](x.png)').text).toBe('');
   });
 
+  it('treats any non-string body as empty rather than coercing it', () => {
+    // The bug this forecloses is not `0` becoming `''` — it is an object
+    // becoming "[object Object]" and being scripted as if it were prose. That
+    // is the same coercion resolveArticleBody refuses, and this helper is
+    // exported, so it has to refuse it independently.
+    expect(prepareArticleForSpeech({ html: '<p>hi</p>' }).text).toBe('');
+    expect(prepareArticleForSpeech(['a', 'b']).text).toBe('');
+    expect(prepareArticleForSpeech(0).text).toBe('');
+    expect(prepareArticleForSpeech(undefined).text).toBe('');
+  });
+
   it('strips HTML to a fixed point', () => {
     // A single pass leaves a live tag behind on overlapping constructs.
     expect(prepareArticleForSpeech('<scr<script>ipt>alert(1)</script>').text).toContain('alert(1)');
