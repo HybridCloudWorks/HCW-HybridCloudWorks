@@ -44,9 +44,11 @@ beat — §1b and §2a say what changed and, more importantly, what did not.
 ## Purpose and decision drivers
 
 - **Cost.** The platform bills in the tens of dollars a month under a USD 150
-  ceiling (ADR 0015). A podcast that publishes a handful of episodes a month
-  does not justify USD 37 a month for an upload the owner can do by hand, or
-  a speech subscription when the configured provider is effectively free.
+  ceiling (ADR 0015). On 2026-09-07 a podcast publishing a handful of episodes
+  a month did not justify USD 37 a month for an upload the owner could do by
+  hand, or a speech subscription when the configured provider was effectively
+  free. The ceiling has not moved; what changed on 2026-09-08 is what is being
+  weighed against it (§1b, §2a).
 - **Reliability of the public surface.** Whatever the host does, a visitor to
   `/azure/podcast` should find every episode the site has and be able to
   play and seek it. Two disconnected audio systems, one of which had just
@@ -65,13 +67,17 @@ beat — §1b and §2a say what changed and, more importantly, what did not.
 
 ### 1. Hosting: RSS.com, and the feed is the integration boundary (plan and upload amended in §1b)
 
-The show lives on RSS.com's Free plan. Episodes — human recordings and
-generated ones alike — are uploaded by hand in the RSS.com dashboard. The
-site ingests the show's public feed exactly as it ingested the previous
+**Decided 2026-09-07; the plan, the upload and the API claim amended by §1b.**
+The show lived on RSS.com's Free plan, and episodes — human recordings and
+generated ones alike — were uploaded by hand in the RSS.com dashboard. Nothing
+in the repository knew the host's API, and at that date nothing needed to.
+
+**The ingest half of this decision is unchanged and §1b keeps it deliberately.**
+The site ingests the show's public feed exactly as it ingested the previous
 host's: `fetchPodcastFeeds` reads `admin_config/podcast_feeds`
 (`{ feeds: [{ provider, url }] }`, #348) every two hours and upserts one
-`podcasts` row per episode. Nothing in the repository knows the host's API
-and nothing needs to.
+`podcasts` row per episode. That is still the only way an episode reaches the
+site, whoever uploaded it and however.
 
 The owner seeds the feed URL into `admin_config/podcast_feeds` through the
 admin platform page. `PODCAST_FEEDS` in `timers/podcasts.js` stays empty;
@@ -260,10 +266,11 @@ ever run, is a YouTube embed on a page, not an integration.
 
 ## Consequences and accepted risks
 
-- **One manual upload per episode.** That is the cost of ownership of the
-  Free plan, and it is the whole cost. Generated Listen & Learn episodes are
-  not on the public feed unless the owner uploads them; on the site they are
-  already on the podcast page, which is where a visitor looks.
+- **One manual upload per episode — accepted 2026-09-07, ended by §1b.** That was
+  the cost of ownership of the Free plan, and it was the whole cost. Generated
+  Listen & Learn episodes were not on the public feed unless the owner uploaded
+  them; on the site they were already on the podcast page, which is where a
+  visitor looks. §1b is what made that cost worth removing rather than bearing.
 - **No download analytics beyond the host's.** RSS.com's dashboard reports
   plays of feed episodes; Listen & Learn plays through the media route are
   visible only as Function invocations.
@@ -328,9 +335,13 @@ ever run, is a YouTube embed on a page, not an integration.
 - **Revisit toward self-hosting (option 3)** when any of these holds: the
   manual upload is missed for more than one episode; the owner wants
   generated episodes on the public feed without the upload step; RSS.com's
-  Free plan changes what it distributes. The media route is ready; the work
+  plan changes what it distributes. The media route is ready; the work
   is the feed route, the directory submissions, and deciding what replaces
   the host's analytics.
+  **The second condition fired on 2026-09-08 and was answered by §1b instead**,
+  which buys the same outcome without leaving the directories or giving up the
+  host's analytics. Self-hosting stays the fallback if the host's API does not
+  hold up; it is no longer the only route to publishing without an upload.
 - **Revisit ElevenLabs** when a paid plan is approved. **Met 2026-09-08**
   (§2a, #436). The trial the issue describes — one certification through both
   providers, compared on cost and listenability — is the evidence that issue
