@@ -176,6 +176,30 @@ describe('the input ceiling', () => {
     expect(prepared.text).not.toContain('�');
   });
 
+  it('drops set-aside entries whose markers were cut away', () => {
+    // Otherwise the prompt lists a code block the model cannot see and tells
+    // it to refer to that, and `setAside` reports coverage the episode does
+    // not have. The fence sits past the limit, so its marker is cut.
+    const prepared = prepareArticleForSpeech(
+      `${'x'.repeat(MAX_ARTICLE_INPUT_BYTES)}\n\n\`\`\`hcl\nresource "a" "b" {}\n\`\`\`\n`
+    );
+    expect(prepared.truncated).toBe(true);
+    expect(prepared.codeBlocks).toEqual([]);
+    expect(
+      buildArticlePrompt({ article: { title: 'T' }, prepared })
+    ).not.toContain('[code block 1]');
+  });
+
+  it('keeps set-aside entries whose markers survive the cut', () => {
+    // The other half of the rule: a block early in a truncated article is
+    // still there and must still be declared.
+    const prepared = prepareArticleForSpeech(
+      `\`\`\`hcl\nresource "a" "b" {}\n\`\`\`\n\n${'x'.repeat(MAX_ARTICLE_INPUT_BYTES)}`
+    );
+    expect(prepared.truncated).toBe(true);
+    expect(prepared.codeBlocks).toEqual([{ index: 1, language: 'hcl', lines: 1 }]);
+  });
+
   it('tells the model the article was cut, so it cannot invent the ending', () => {
     const prompt = buildArticlePrompt({
       article: { title: 'Long one' },

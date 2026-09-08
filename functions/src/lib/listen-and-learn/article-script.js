@@ -175,8 +175,8 @@ function lineCount(n) {
  * @returns {{ text: string, codeBlocks: object[], tables: object[], truncated: boolean, sourceBytes: number }}
  */
 export function prepareArticleForSpeech(body) {
-  const codeBlocks = [];
-  const tables = [];
+  let codeBlocks = [];
+  let tables = [];
 
   let text = String(body || '');
 
@@ -189,9 +189,15 @@ export function prepareArticleForSpeech(body) {
   // line; only the first token is kept as the language.
   text = text.replace(/```([\w+-]*)[^\r\n]*\r?\n([\s\S]*?)```/g, (_match, lang, code) => {
     const lines = code.replace(/\s+$/, '').split(/\r?\n/).length;
-    codeBlocks.push({ index: codeBlocks.length + 1, language: String(lang || '').trim(), lines });
     const label = String(lang || '').trim() || 'code';
-    return `\n[code block ${codeBlocks.length}: ${label}, ${lineCount(lines)}]\n`;
+    const marker = `[code block ${codeBlocks.length + 1}: ${label}, ${lineCount(lines)}]`;
+    codeBlocks.push({
+      index: codeBlocks.length + 1,
+      language: String(lang || '').trim(),
+      lines,
+      marker,
+    });
+    return `\n${marker}\n`;
   });
 
   // 2. HTML, before the inline rules — a tag can wrap a link or emphasis.
@@ -205,9 +211,10 @@ export function prepareArticleForSpeech(body) {
       .split('|')
       .map((cell) => cell.trim())
       .filter(Boolean);
-    tables.push({ index: tables.length + 1, columns, rows: rows.length });
     const named = columns.length ? `columns ${columns.join(', ')}` : `${rows.length} rows`;
-    return `\n[table ${tables.length}: ${named}]\n`;
+    const marker = `[table ${tables.length + 1}: ${named}]`;
+    tables.push({ index: tables.length + 1, columns, rows: rows.length, marker });
+    return `\n${marker}\n`;
   });
 
   // 4. Images carry their alt text or nothing; a URL is never spoken.
@@ -245,9 +252,25 @@ export function prepareArticleForSpeech(body) {
       .toString('utf8')
       .replace(/�$/, '')
       .trimEnd();
+
+    // Markers cut away with the text must leave the set-aside list with them.
+    // Otherwise the prompt's "PARTS THAT CANNOT BE READ ALOUD" names a block
+    // the model cannot see and tells it to refer to that — and `setAside`
+    // reports coverage the episode does not have. Matching on the whole marker
+    // rather than its prefix, so one bisected by the cut counts as gone.
+    codeBlocks = codeBlocks.filter((block) => text.includes(block.marker));
+    tables = tables.filter((table) => text.includes(table.marker));
   }
 
-  return { text, codeBlocks, tables, truncated, sourceBytes: full };
+  // `marker` is bookkeeping for the step above, not part of the contract.
+  const strip = ({ marker, ...rest }) => rest;
+  return {
+    text,
+    codeBlocks: codeBlocks.map(strip),
+    tables: tables.map(strip),
+    truncated,
+    sourceBytes: full,
+  };
 }
 
 /**
