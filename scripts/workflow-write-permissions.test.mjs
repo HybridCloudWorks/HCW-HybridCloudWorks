@@ -56,16 +56,18 @@ const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), '..', '.github',
  *
  * A justification is required, and it should say what the workflow writes and
  * why that cannot be done without the grant.
+ *
+ * IT IS EMPTY, AND THAT IS THE STRONGEST STATE THIS LIST HAS EVER BEEN IN.
+ * `retire-wiki.yml` was the last entry and was deleted on 2026-09-08: it was a
+ * one-shot that ran on 2026-09-06, and the Wiki feature is now switched off in
+ * repository settings (`has_wiki: false`), so it could not clone its target
+ * even if dispatched. With the map empty the assertion below reads "NO
+ * workflow in this repository holds `contents: write`" — a tighter claim than
+ * "exactly this one does", and the emptiness is load-bearing rather than
+ * incidental. Adding an entry back is a deliberate widening and should be
+ * argued for in the pull request that does it.
  */
-const ALLOWED = new Map([
-  [
-    'retire-wiki.yml',
-    'Overwrites every GitHub Wiki page with a pointer to the docs site ' +
-      '(workflow_dispatch, dry-run by default). The wiki is a separate git ' +
-      'repository, but the grant is repository-scoped and therefore counts here. ' +
-      'Replaced sync-wiki.yml on 2026-09-06 when docs/ superseded wiki/ (#360).',
-  ],
-]);
+const ALLOWED = new Map();
 
 /**
  * `publish-content-manifest.yml` left this list on 2026-08-31 and should not
@@ -148,6 +150,12 @@ describe('workflows holding contents: write', () => {
     expect(found).toEqual([...ALLOWED.keys()].sort());
   });
 
+  // VACUOUS TODAY, said out loud rather than left to be discovered. ALLOWED is
+  // empty, so this loop runs zero times and passes. It is kept because it
+  // re-arms the moment somebody adds an entry, which is the only moment it has
+  // ever mattered — and because deleting it would mean the next person to
+  // widen the list faces no justification requirement at all. The assertion
+  // above is the one doing work while the map is empty.
   it('records why each one has it', () => {
     for (const [file, why] of ALLOWED) {
       expect(why.length, `${file} needs a justification, not a placeholder`).toBeGreaterThan(40);

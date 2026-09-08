@@ -27,9 +27,10 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   `.claude/CLAUDE.md`).
 
 ### PowerShell (`*.ps1`)
-- Must pass `scripts/validate-powershell.ps1` and the hygiene test
-  (`powershell-hygiene.test.mjs`). Owner-pasteable commands follow the
-  CLAUDE.md rules: no placeholders, no bash-isms, one line where possible.
+- Must pass `scripts/validate-powershell.ps1` (parse and encoding) and its
+  own tests, `scripts/validate-powershell.tests.ps1`. Owner-pasteable commands
+  follow the CLAUDE.md rules: no placeholders, no bash-isms, one line where
+  possible.
 - `validate-repository-structure.ps1` is the Markdown allowlist — a diff
   extending the allowlist deserves scrutiny: the usual right fix is moving
   the doc to `docs/`, not growing the allowlist.
@@ -46,10 +47,11 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   makes deployment automatic on push/merge is blocking.
 - **Untrusted input**: no `pull_request_target` with checkout of PR code, no
   interpolation of PR titles/bodies/branch names into `run:` shells.
-- **Monitors** (`monitor-*.yml`, `verify-alert-state.yml`,
-  `validate-deployed.yml`): check schedule frequency against cost/noise and
-  that failure actually surfaces (creates an issue / fails visibly) rather
-  than dying silently.
+- **Monitors** (`monitor-*.yml`, `verify-alert-state.yml`): check schedule
+  frequency against cost/noise and that failure actually surfaces (creates an
+  issue / fails visibly) rather than dying silently. A monitor that cannot
+  pass from a GitHub-hosted runner is not a monitor: `validate-deployed.yml`
+  was deleted on 2026-09-08 after twenty-one days red.
 
 ## Verification commands
 

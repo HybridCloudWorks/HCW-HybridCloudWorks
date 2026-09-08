@@ -15,8 +15,11 @@ import { pathToFileURL } from 'node:url';
 // The obvious second design fails too. A workflow cannot simply curl
 // /api/health: through Cloudflare a GitHub-hosted runner gets a Bot Fight Mode
 // 403, and direct to origin it gets the origin lock's 403, because the site
-// denies every address outside Cloudflare's ranges. validate-deployed.yml
-// documents that it cannot pass from a runner for exactly this reason.
+// denies every address outside Cloudflare's ranges. validate-deployed.yml was
+// the workflow that documented this at length; it could never pass from a
+// runner for exactly this reason and was deleted on 2026-09-08. The check it
+// could not do is run from an operator machine — see
+// docs/runbooks/edge-dns-verification.md and `node scripts/smoke-deployed.mjs`.
 //
 // So this reads the CONDITION through ARM instead, which is the same argument
 // monitor-functions-registered.yml already makes and wins on the same axes: it
@@ -118,11 +121,13 @@ export function parseReferenceStatuses(payload) {
 /**
  * Turn an unrecognised payload into a stop, not a clean bill of health.
  *
- * This is the same guard as workspace-query.psm1's row-shape assertion, for the
- * same reason. A call that succeeds and answers a different question is worse
- * than one that fails, because its output looks like data. On 2026-08-30 a
- * truncated query reported 57,984 invocations and no worker traces in the same
- * run, and both numbers were real — about the wrong subject.
+ * This is the same guard as the row-shape assertion that used to live in
+ * scripts/cutover/workspace-query.psm1 (retired 2026-09-08 with the timer
+ * script it served), for the same reason. A call that succeeds and answers a
+ * different question is worse than one that fails, because its output looks
+ * like data. On 2026-08-30 a truncated query reported 57,984 invocations and
+ * no worker traces in the same run, and both numbers were real — about the
+ * wrong subject.
  */
 export function assertKnownShape(statuses, raw) {
   if (statuses !== null) return statuses;
