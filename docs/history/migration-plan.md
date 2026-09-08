@@ -944,6 +944,17 @@ Add for the migration:
   > replaced it. The two paragraphs below are left as written because they are
   > the clearest statement of *why* firing and running are different questions,
   > and that distinction did not stop being true when the gate closed.
+  > **Read their METHOD as a historical record and not as an instruction.**
+  > Their "answerable now, from history, with nothing armed" depended on two
+  > things that have since gone: the host writing
+  > `Trigger Details: ScheduleStatus` on every invocation — #321 dropped the
+  > `Function` log category to `Warning`, so it is no longer written at all —
+  > and `05-verify-timer.ps1` being present to read it. An operator following
+  > those paragraphs today would query an empty table with a deleted script.
+  > The question they pose is still the right one; the way to answer it now is
+  > `scripts/verify-timer-witness.mjs`, which compares a fixed-hour timer's
+  > observed firing times against its schedule and needs no host verbosity at
+  > all.
 
   **This gate has two halves, and only one of them needs anything armed.** This
   entry ended "nothing is armed, so nothing has been observed" until 2026-08-29,
