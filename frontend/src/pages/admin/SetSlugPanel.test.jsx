@@ -5,6 +5,7 @@ import SetSlugPanel, {
   SET_SLUG_ROUTE,
   currentSlugOf,
   describeSetSlugResult,
+  sourceLinkHref,
   suggestedSlugFor,
 } from './SetSlugPanel';
 
@@ -111,6 +112,96 @@ describe('pure helpers', () => {
     expect(older.message).toContain('Slug unchanged');
     const olderMoved = describeSetSlugResult({ changed: true, previousSlug: HELD, slug: WANTED });
     expect(olderMoved.message).toContain('Moved from');
+  });
+});
+
+describe('identifying which article the panel is editing', () => {
+  // The case this exists for: three articles that share a title, a provider
+  // and a date, so the list rows are identical and the suggestion is the same
+  // contested slug three times. Measured on production 2026-09-08. Without an
+  // identity line the operator guesses, and guessing wrong puts an article on
+  // another article's URL.
+  const indistinguishable = {
+    id: '7MCkl1cSf7GGCgJxlCwZ',
+    Title:
+      'Enable AI-Powered Discovery of Azure Updates with Microsoft Release Communications MCP Server',
+    slug: HELD,
+    Slug: HELD,
+    sourceUrl: 'https://azure.microsoft.com/updates?id=562894',
+  };
+
+  it('names the content id even when the title and both slug fields collide', () => {
+    render(<SetSlugPanel item={indistinguishable} onApplied={() => {}} />);
+    // Exact, not substring: a shorter id must not pass by being a prefix.
+    const id = screen.getByText('7MCkl1cSf7GGCgJxlCwZ');
+    expect(id.textContent).toBe('7MCkl1cSf7GGCgJxlCwZ');
+  });
+
+  it('links the source URL, which says what the article is when the title does not', () => {
+    render(<SetSlugPanel item={indistinguishable} onApplied={() => {}} />);
+    const link = screen.getByRole('link', { name: 'source' });
+    expect(link).toHaveAttribute('href', 'https://azure.microsoft.com/updates?id=562894');
+  });
+
+  it('refuses a sourceUrl that is not an absolute http(s) URL', () => {
+    // sourceUrl arrives from an upstream feed this site does not control, so
+    // it is an href sink. Caught in review on #421.
+    for (const hostile of [
+      'javascript:alert(1)',
+      'JavaScript:alert(1)',
+      'java\tscript:alert(1)', // the parser strips the tab, the prefix check would not
+      'data:text/html;base64,PHNjcmlwdD4=',
+      'vbscript:msgbox(1)',
+      'file:///etc/passwd',
+      '//evil.example/post', // a relative reference by the grammar, but off-site
+      '/relative/path',
+      'mailto:someone@example.com',
+      '',
+      '   ',
+      null,
+      undefined,
+      42,
+      // These two are why `safeUrl` is called and not just the http(s) prefix
+      // test: both START with a clean `https://`, so the prefix check admits
+      // them, and both carry an embedded control or space character that the
+      // URL parser strips before navigating. What is stored and what is
+      // fetched then differ, which is the whole class safeUrl exists to refuse.
+      'https://ex\tample.com/a',
+      'https://example.com/a b',
+    ]) {
+      expect(sourceLinkHref(hostile), `expected ${String(hostile)} to be refused`).toBe('');
+    }
+  });
+
+  it('keeps a legitimate absolute source URL exactly as given', () => {
+    const url = 'https://azure.microsoft.com/updates?id=562894';
+    expect(sourceLinkHref(url)).toBe(url);
+    expect(sourceLinkHref('http://example.com/a')).toBe('http://example.com/a');
+  });
+
+  it('renders no link when the sourceUrl is hostile, and still shows the id', () => {
+    render(
+      <SetSlugPanel
+        item={{ ...indistinguishable, sourceUrl: 'javascript:alert(1)' }}
+        onApplied={() => {}}
+      />
+    );
+    expect(screen.queryByRole('link', { name: 'source' })).toBeNull();
+    expect(screen.getByText(indistinguishable.id).textContent).toBe(indistinguishable.id);
+  });
+
+  it('opens the source in a new tab without handing it a window reference', () => {
+    render(<SetSlugPanel item={indistinguishable} onApplied={() => {}} />);
+    const link = screen.getByRole('link', { name: 'source' });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('renders no source link for an authored article that has none', () => {
+    render(<SetSlugPanel item={collided} onApplied={() => {}} />);
+    expect(screen.queryByRole('link', { name: 'source' })).toBeNull();
+    // The id still shows: it is the half that always exists.
+    expect(screen.getByText(collided.id).textContent).toBe(collided.id);
   });
 });
 

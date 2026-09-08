@@ -41,16 +41,45 @@ import { Link2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { postJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
+import { safeUrl } from '@/lib/safeUrl';
 
 export const SET_SLUG_ROUTE = 'cms/content/slug';
 
 /**
- * The value to offer. `Slug` FIRST, and that ordering is the whole point: on
- * every article in #400 `slug` holds the contested URL and `Slug` still holds
- * the source publisher's, which is the only surviving record of what the
- * article actually is — and therefore the right answer. `slug` is the fallback
- * for an article that only needs its URLs re-derived; neither present means
- * there is nothing to suggest and the operator types one.
+ * The `sourceUrl` to render as a link, or `''` when it must not be one.
+ *
+ * `sourceUrl` IS ATTACKER-INFLUENCED. It arrives on curated articles from an
+ * upstream feed this site does not control, and putting it straight into an
+ * `href` is the `javascript:` sink `safeUrl` exists for. Caught in review on
+ * PR #421.
+ *
+ * `safeUrl` alone is necessary and not sufficient here. It also permits
+ * `mailto:` and relative references, and its own header warns that a leading
+ * `//` is a relative reference by the URL grammar — `//evil.example` passes and
+ * navigates off-site. None of those is ever a legitimate upstream source, so
+ * this narrows to an ABSOLUTE http/https URL and rejects everything else,
+ * including the empty string, which would render a link to the current page.
+ */
+export function sourceLinkHref(value) {
+  const safe = safeUrl(value, '');
+  if (!safe) return '';
+  return /^https?:\/\//i.test(safe) ? safe : '';
+}
+
+/**
+ * The value to offer. `Slug` FIRST, because where the two differ, `slug` holds
+ * the contested URL and `Slug` holds the source publisher's — the surviving
+ * record of what the article actually is, and therefore the right answer.
+ *
+ * THE SUGGESTION CAN BE USELESS, AND ON #400's OWN ARTICLES IT NOW IS. This
+ * was written expecting `Slug` to still differ per article. Measured against
+ * production on 2026-09-08, all three of them carry the SAME value in both
+ * fields, so the suggestion is the contested slug three times over and tells
+ * an operator nothing. That is why the panel identifies the article
+ * independently of the slug — see the identity line in the render.
+ *
+ * `slug` is the fallback for an article that only needs its URLs re-derived;
+ * neither present means there is nothing to suggest and the operator types one.
  */
 export function suggestedSlugFor(item = {}) {
   return String(item.Slug || item.slug || '').trim();
@@ -115,6 +144,7 @@ export function describeSetSlugResult(result = {}) {
 export default function SetSlugPanel({ item, onApplied }) {
   const suggested = suggestedSlugFor(item);
   const current = currentSlugOf(item);
+  const sourceHref = sourceLinkHref(item.sourceUrl);
   const [value, setValue] = useState(suggested);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -147,6 +177,40 @@ export default function SetSlugPanel({ item, onApplied }) {
 
   return (
     <div className="space-y-2 border-t pt-3 text-sm">
+      {/*
+        WHO THIS ARTICLE IS, independent of anything that can collide.
+
+        A slug collision is the one case where several rows look identical in
+        the list — same title, same provider, same date — because sharing a
+        title is how they collided in the first place. #400's three articles
+        are exactly that, and neither the row nor the "current slug" line below
+        can tell them apart: all three carry the same value in `slug` AND in
+        `Slug`. Without this line the operator has to guess which row is which,
+        and guessing wrong puts an article on another article's URL.
+
+        The content id always exists and is what every other admin surface and
+        the API refer to. The source URL is the human-readable half — for a
+        curated article it is the upstream post, which says what the article is
+        in a way a title that has been overwritten cannot. Rendered only when
+        present, because an authored article has none.
+      */}
+      <p className="text-xs text-muted-foreground">
+        Article: <code>{item.id}</code>
+        {sourceHref ? (
+          <>
+            {' · '}
+            <a
+              href={sourceHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2"
+            >
+              source
+            </a>
+          </>
+        ) : null}
+      </p>
+
       <p className="text-xs text-muted-foreground">
         Current slug: <code>{current || 'none'}</code>
       </p>
