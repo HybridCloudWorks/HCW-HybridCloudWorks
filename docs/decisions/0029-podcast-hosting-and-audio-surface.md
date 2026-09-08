@@ -35,7 +35,11 @@ shaped this record:
   feed was ruled out because Apple requires byte-range support of an
   enclosure host.
 
-The owner's decision on 2026-09-07 was **no paid upgrades**.
+The owner's decision on 2026-09-07 was **no paid upgrades**. That held for one
+day: on 2026-09-08 the owner approved both ElevenLabs and RSS.com Max. Those
+amend §1 and §2 below rather than replacing this record, because the reasoning
+that produced the Free-plan design is still the reasoning the paid design has to
+beat — §1b and §2a say what changed and, more importantly, what did not.
 
 ## Purpose and decision drivers
 
@@ -133,6 +137,40 @@ were.
 Nothing about hosting changes: the upload is still manual, the API is still not
 integrated, and the feed is still the integration boundary.
 
+#### 1b. RSS.com Max is approved; publishing becomes an API step — amended 2026-09-08
+
+The owner approved the Max plan on 2026-09-08, meeting half of the trigger this
+record wrote for itself — "only if the automated publish step is wanted and the
+API has left beta". The other half is a fact about the API rather than about the
+budget, so it is checked before code is written rather than assumed: #349 found
+the API in public beta on 2026-09-05, warning that endpoints may change. If it
+still is, that is a constraint to design against and not a blocker — an
+idempotent, retryable publish whose failure does not un-approve the episode, and
+the manual path left intact underneath it.
+
+**What changes.** Approving an episode uploads it to RSS.com. The manual
+dashboard upload stops being the only way an episode reaches the feed, which is
+what the Consequences section below called "the cost of ownership of the Free
+plan, and it is the whole cost". With five source paths feeding the pipeline
+(#432) rather than one, that cost stopped being small.
+
+**What does not.** The feed is still the integration boundary. The site learns
+about a published episode by ingesting the show's feed into `podcasts`, exactly
+as it does for an episode uploaded by hand — not by writing the row at publish
+time from what it just uploaded. That shortcut is tempting and wrong: it creates
+a row the feed did not produce, and when the two disagree there is no longer a
+single answer to what is published. The accepted cost is a visible lag between
+approval and appearance, which the admin surface explains rather than leaving an
+operator refreshing.
+
+**Generation still does not publish.** `setEpisodeStatus` moving an episode to
+`published` is the trigger, never the end of a generation run. Drafts are
+AI-written content going out under the owner's name; the review gate is why the
+Consequences section says episodes land as drafts, and an automated publish path
+must not route around it.
+
+Tracked by #437.
+
 ### 2. Speech: Gemini first, Azure AI Speech second, ElevenLabs deferred
 
 `speech/index.js` keeps its order: Gemini TTS when `GEMINI-API-KEY` is
@@ -142,6 +180,31 @@ licence requires a paid plan, and the owner has declined paid services; the
 provider switch already rejects `elevenlabs` by name in its tests, so the
 shape a third provider takes is recorded and the trial is a bounded piece of
 work when a plan is approved.
+
+#### 2a. ElevenLabs is selected — amended 2026-09-08
+
+The owner approved a paid ElevenLabs plan on 2026-09-08. The trigger this record
+wrote for itself — "Revisit ElevenLabs when a paid plan is approved" — is met
+literally, so the deferral above is superseded rather than argued with.
+
+**What changes.** A third entry in `PROVIDERS`, selected when its key is
+present, under the same contract as its siblings: MP3 out, so the blob path, the
+stored `contentType` and the player are untouched and the provider stays an
+implementation detail of that directory. The test asserting `elevenlabs` is not
+a configured provider was the record of the deferral; it is replaced by tests of
+the provider rather than deleted quietly.
+
+**What the preference order has to answer.** Gemini is first today because it
+costs nothing beyond a key already seeded, and Azure AI Speech is kept because
+every Gemini TTS model is a *preview* model and preview endpoints get retired on
+notice. Paying for ElevenLabs changes the first half of that reasoning and none
+of the second. So it runs when configured — it is what the owner is paying for
+and chose — and Gemini remains the fallback for a state a paid provider has and
+a free one does not: out of credit. The estimated cost of a run is stated before
+the run starts, because roughly USD 4 per certification is a number an operator
+should see beforehand rather than find in the usage table afterwards.
+
+Tracked by #436.
 
 ### 3. The podcast page is the single audio surface
 
@@ -221,8 +284,9 @@ ever run, is a YouTube embed on a page, not an integration.
   would push each finished MP3 to the host and the feed would round-trip it
   into `podcasts`. USD 37 a month for automating something that happens a
   handful of times a month, on a beta API whose endpoints may change.
-  Declined by the owner; the site side was built so that adding it later is
-  a publish step and a configuration change, not a redesign.
+  Declined on 2026-09-07 and **approved on 2026-09-08** (§1b, #437); the site
+  side was built so that adding it later is a publish step and a configuration
+  change, not a redesign, which is what that issue now does.
 - **Self-host the feed (option 3 on #349).** A new `GET
   /api/public/podcast/{provider}/feed.xml` built from `podcasts` plus
   published Listen & Learn episodes and submitted to the directories
@@ -230,8 +294,9 @@ ever run, is a YouTube embed on a page, not an integration.
   support and it forfeits the host's analytics. The blocker is removed by
   this record; the option is the revisit path below.
 - **ElevenLabs now, on a Starter plan.** About USD 4 per certification and a
-  dialogue endpoint that matches the stored format. Deferred: a paid plan is
-  required for commercial use, and the configured provider costs nothing.
+  dialogue endpoint that matches the stored format. Deferred on 2026-09-07
+  because a paid plan is required for commercial use and the configured provider
+  costs nothing; **approved on 2026-09-08** (§2a, #436).
 - **Serve Listen & Learn audio straight from blob storage.** Requires
   reversing `allow_nested_items_to_be_public` and the account's network
   deny, which ADR 0014 and T-105 chose not to do; the media route with
@@ -261,11 +326,14 @@ ever run, is a YouTube embed on a page, not an integration.
   Free plan changes what it distributes. The media route is ready; the work
   is the feed route, the directory submissions, and deciding what replaces
   the host's analytics.
-- **Revisit ElevenLabs** when a paid plan is approved. The trial the issue
-  describes — one certification through both providers, compared on cost
-  and listenability — is the evidence a new ADR would record.
+- **Revisit ElevenLabs** when a paid plan is approved. **Met 2026-09-08**
+  (§2a, #436). The trial the issue describes — one certification through both
+  providers, compared on cost and listenability — is the evidence that issue
+  records.
 - **Revisit RSS.com Max** only if the automated publish step is wanted and
-  the API has left beta.
+  the API has left beta. **The first condition was met 2026-09-08** (§1b, #437);
+  the second is a fact about the API today, verified on that issue before the
+  client is written.
 
 ## Related decisions and references
 
@@ -275,6 +343,9 @@ ever run, is a YouTube embed on a page, not an integration.
   presence, which is the shape the speech order follows.
 - [ADR 0015](0015-cost-governance.md) — the ceiling every "no paid upgrade"
   above is measured against.
+- Issue #432 (the audio pipeline project §1b and §2a are the spend decisions
+  for, and where the four source paths that made the manual upload expensive
+  are specified), #436 (ElevenLabs), #437 (RSS.com publish).
 - Issue #349 (the evaluation and the owner's decisions), #348 (the feed list
   moved to `admin_config`), #372 (retired media hidden from the list); PR
   #363 removed the previous host's remaining references.
