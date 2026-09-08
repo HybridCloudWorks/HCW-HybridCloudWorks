@@ -243,6 +243,13 @@ async function api(path, token) {
     headers: {
       accept: 'application/vnd.github+json',
       authorization: `Bearer ${token}`,
+      // Pinned, matching check-deploy-drift.mjs (the other job in the same
+      // workflow file), github-app-token.mjs and open-manifest-pr.mjs. An
+      // unpinned request follows GitHub's default, and this tool's verdicts
+      // are read off two response fields; a silent shape change would be
+      // indistinguishable from a repository where nothing runs. Raised in
+      // review on PR #428.
+      'X-GitHub-Api-Version': '2022-11-28',
       'user-agent': 'hcw-check-workflow-health',
     },
   });
@@ -297,6 +304,15 @@ export function positiveIntOr(raw, fallback, max = Infinity) {
  * it has never fired; it is here because the failure would be invisible when
  * it did.
  *
+ * FAILS CLOSED ON AN ENTRY IT CANNOT READ, for the same reason one level down.
+ * `main` filters on `w.path` and asks for runs by `w.id`; an entry missing
+ * either used to reach `w.path.startsWith(...)` and throw a TypeError, and an
+ * uncaught throw exits **1** — which in this tool means "a workflow is
+ * broken". So an unreadable listing would have reported a broken workflow: the
+ * exact collapse of `broken` into `unproven` that the three-way exit split
+ * exists to prevent, arriving through the error path instead of the verdict.
+ * Raised in review on PR #428.
+ *
  * THE MESSAGE DOES NOT SAY "RAISE per_page". The request already asks for the
  * API's ceiling, so that would be an impossible instruction — and sending an
  * operator toward a fix that cannot work is worse than saying nothing, because
@@ -313,6 +329,12 @@ export function listingRefusal(listing) {
   }
   if (Number.isFinite(listing.total_count) && listing.total_count > listing.workflows.length) {
     return `The workflow listing is paginated — ${listing.total_count} workflows, ${listing.workflows.length} read at the API's ${MAX_PER_PAGE} ceiling. Following pages is a change to the caller; nothing is asserted.`;
+  }
+  const bad = listing.workflows.findIndex(
+    (w) => typeof w?.path !== 'string' || w.path === '' || typeof w?.id !== 'number'
+  );
+  if (bad !== -1) {
+    return `Workflow listing entry ${bad} does not carry both a usable \`path\` and a numeric \`id\`; it cannot be filtered or asked for runs, so nothing is asserted.`;
   }
   return null;
 }

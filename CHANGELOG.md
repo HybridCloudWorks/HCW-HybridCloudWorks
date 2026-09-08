@@ -85,9 +85,19 @@ This project has not cut a tagged release; entries are grouped under
   capture-then-read-`$?` shape, because `node ... | tee` would report tee's
   status and never fail.
 
-  Covered by `scripts/check-workflow-health.test.mjs` (36 tests, real run
+  **Every refusal path exits 2, including the ones that used to throw.**
+  `main` filters the listing on `w.path` and asks for runs by `w.id`; an entry
+  carrying neither reached `w.path.startsWith(...)` and threw a TypeError, and
+  an uncaught throw from the awaited `main()` exits **1** — measured — which in
+  this tool means "a workflow is broken". An unreadable listing would have
+  reported a broken workflow. `listingRefusal` now checks entry shape
+  alongside pagination. The requests also pin `X-GitHub-Api-Version:
+  2022-11-28`, matching `check-deploy-drift.mjs` (the other job in the same
+  workflow file), `github-app-token.mjs` and `open-manifest-pr.mjs`.
+
+  Covered by `scripts/check-workflow-health.test.mjs` (38 tests, real run
   histories as fixtures), `check-workflow-health.invocation.test.mjs` (4), and
-  one case in `entrypoint-guards.test.mjs`; the suite goes 300 → 341. Proven load-bearing by mutation: implementing the
+  one case in `entrypoint-guards.test.mjs`; the suite goes 300 → 343. Proven load-bearing by mutation: implementing the
   stricter `broken` rule failed four tests, two of them written for earlier
   review rounds, with `expected 'unproven' to be 'broken'` and the demoted
   workflow printing `2 run(s), none of which reached a verdict`; making the

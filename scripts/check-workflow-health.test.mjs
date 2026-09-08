@@ -405,8 +405,18 @@ describe('what `broken` claims, and what it does not', () => {
 });
 
 describe('listingRefusal', () => {
+  // FIXTURE CHANGED DELIBERATELY, AND SAID OUT LOUD: this read
+  // `new Array(19)` — nineteen holes, a shape the API never produces. Once
+  // listingRefusal started reading each entry's `path` and `id` (below), that
+  // stand-in became a listing of nineteen unreadable entries and the refusal
+  // fired correctly on it. The fixture is now what the endpoint actually
+  // returns. No assertion was weakened; the subject was made real, which is
+  // the same reason `the fixtures are the real thing` exists in this file.
+  const listingOf = (n) =>
+    Array.from({ length: n }, (_, i) => ({ id: 100 + i, path: `.github/workflows/w${i}.yml` }));
+
   it('accepts a complete listing', () => {
-    expect(listingRefusal({ total_count: 19, workflows: new Array(19) })).toBeNull();
+    expect(listingRefusal({ total_count: 19, workflows: listingOf(19) })).toBeNull();
     // total_count absent is not evidence of truncation.
     expect(listingRefusal({ workflows: [] })).toBeNull();
   });
@@ -421,6 +431,38 @@ describe('listingRefusal', () => {
     for (const bad of [null, undefined, {}, { workflows: 'nope' }]) {
       expect(listingRefusal(bad)).toContain('nothing is asserted');
     }
+  });
+
+  it('refuses an entry it cannot filter or ask for runs, instead of crashing', () => {
+    // main() does `w.path.startsWith(...)` and requests `/workflows/${w.id}/runs`.
+    // Before this guard an entry missing either threw a TypeError, and an
+    // uncaught throw from the awaited main() exits 1 — measured. Exit 1 in this
+    // tool means "a workflow is broken", so an unreadable LISTING reported a
+    // broken WORKFLOW: the collapse of `broken` into `unproven` that the
+    // three-way exit split exists to prevent, arriving by the error path.
+    // Raised in review on #428.
+    for (const entry of [
+      {},
+      { id: 1 },
+      { path: 42, id: 1 },
+      { path: '', id: 1 },
+      { path: 'a.yml' },
+      { path: 'a.yml', id: '1' },
+      null,
+    ]) {
+      const got = listingRefusal({ total_count: 1, workflows: [entry] });
+      expect(got, `listingRefusal accepted ${JSON.stringify(entry)}`).not.toBeNull();
+      expect(got).toContain('nothing is asserted');
+    }
+  });
+
+  it('names which entry, so the payload can be found', () => {
+    const got = listingRefusal({
+      total_count: 2,
+      workflows: [{ id: 1, path: '.github/workflows/ci.yml' }, { id: 2 }],
+    });
+    expect(got).not.toBeNull();
+    expect(got).toContain('entry 1');
   });
 
   it('does not tell the reader to raise per_page, which is already at the ceiling', () => {
