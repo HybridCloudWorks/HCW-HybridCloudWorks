@@ -138,24 +138,56 @@ export function measuredColumn(body) {
 }
 
 /**
+ * The KQL text of every `query` attribute in a block, and nothing else.
+ *
+ * THIS BOUNDARY IS THE WHOLE POINT, and the first version of this file did
+ * not have it. `producedColumns` was run over the entire resource block, and
+ * because the last pipeline segment has no trailing `|` to stop at, the match
+ * ran past the end of the query and read the Terraform attributes underneath
+ * it as though they were columns:
+ *
+ *   cosmos_export_full_missing -> ["fulls", "missing_full",
+ *     "time_aggregation_method", "metric_measure_column", "operator",
+ *     "threshold", "number_of_evaluation_periods", "action_groups", …]
+ *
+ * That is not cosmetic. `metric_measure_column` is itself in that list, so a
+ * rule that measured a column called `operator` or `threshold` would have
+ * satisfied the agreement assertion against a Terraform attribute rather than
+ * against its own query — the exact check being claimed, quietly not
+ * happening. Caught in review on PR #414.
+ *
+ * Both spellings this file uses are handled: the indented heredoc, and the
+ * one-line quoted string that `function_response_time` and
+ * `cosmos_export_daily_missing` use.
+ */
+export function queryTexts(body) {
+  const heredocs = [
+    ...body.matchAll(/query\s*=\s*<<-?([A-Za-z_]\w*)\r?\n([\s\S]*?)\r?\n[ \t]*\1\b/g),
+  ].map((m) => m[2]);
+  const quoted = [...body.matchAll(/query\s*=\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+  return [...heredocs, ...quoted];
+}
+
+/**
  * Every column name the KQL introduces, from any operator that can name one.
  *
  * `summarize` belongs here as much as `project` and `extend`, and leaving it
- * out is not a harmless omission: the first version of this file matched only
- * the latter two and reported `function_response_time` as measuring a column
- * its query never produced. Two of the three measured columns in this file
- * come from `summarize`, so the narrow version would have failed on real,
- * correct rules — a guard that cries wolf gets deleted, and then the case it
- * was written for ships.
+ * out is not a harmless omission: an earlier version matched only the latter
+ * two and reported `function_response_time` as measuring a column its query
+ * never produced. Two of the three measured columns in this file come from
+ * `summarize`, so the narrow version would have failed on real, correct rules
+ * — a guard that cries wolf gets deleted, and then the case it was written
+ * for ships.
  *
  * `=(?!=)` is what separates an assignment from a comparison, so the `fulls
  * == 0` inside an `iff()` is not read as a column called `fulls`. Names after
  * a `by` are not assignments and are correctly ignored.
  */
 export function producedColumns(body) {
-  const segments = [...body.matchAll(/\|\s*(?:summarize|project|extend)\s+([^|]*)/g)];
-  return segments.flatMap((segment) =>
-    [...segment[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/g)].map((m) => m[1])
+  return queryTexts(body).flatMap((query) =>
+    [...query.matchAll(/\|\s*(?:summarize|project|extend)\s+([^|]*)/g)].flatMap((segment) =>
+      [...segment[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/g)].map((m) => m[1])
+    )
   );
 }
 
@@ -189,6 +221,48 @@ describe('scheduled-query alerts in infra/observability.tf', () => {
         ).toBe(false);
       }
     }
+  });
+});
+
+describe('the query/Terraform boundary', () => {
+  const blocks = alertBlocks(observability);
+
+  it('reads columns out of the KQL only, never out of the HCL around it', () => {
+    // The regression PR #414 was reviewed for. Before `queryTexts`, the match
+    // ran off the end of the last pipeline segment and returned these as
+    // columns, which let the agreement assertion be satisfied by a Terraform
+    // attribute instead of by the query it is supposed to check.
+    const hcl = [
+      'action_groups',
+      'depends_on',
+      'identity_ids',
+      'metric_measure_column',
+      'minimum_failing_periods_to_trigger_alert',
+      'number_of_evaluation_periods',
+      'operator',
+      'tags',
+      'threshold',
+      'time_aggregation_method',
+      'type',
+    ];
+    for (const block of blocks) {
+      const found = producedColumns(block.body);
+      for (const attribute of hcl) {
+        expect(
+          found,
+          `${block.name} read the HCL attribute "${attribute}" as a column`
+        ).not.toContain(attribute);
+      }
+    }
+  });
+
+  it('still reads the columns that are really there', () => {
+    // The other half. A boundary that returns nothing would pass every
+    // assertion above it, so the extraction is pinned to exact values.
+    const byName = Object.fromEntries(blocks.map((b) => [b.name, producedColumns(b.body)]));
+    expect(byName.cosmos_export_full_missing).toEqual(['fulls', 'missing_full']);
+    expect(byName.function_response_time).toEqual(['P95DurationMs']);
+    expect(byName.logs_daily_cap).toEqual(['IngestedGb']);
   });
 });
 
