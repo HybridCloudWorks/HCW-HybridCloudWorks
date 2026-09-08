@@ -274,6 +274,16 @@ describe('buildArticlePrompt', () => {
     expect(prompt.split('<<<END ARTICLE>>>')).toHaveLength(2);
   });
 
+  it('reads either title spelling, since callers pass the stored document', () => {
+    // The migrated half of the catalogue carries `Title`. This helper is
+    // exported, so a caller handing it the raw document would otherwise get a
+    // blank TITLE line — beside an instruction to name the article by it.
+    const prepared = prepareArticleForSpeech('Prose.');
+    for (const article of [{ title: 'Backends' }, { Title: 'Backends' }]) {
+      expect(buildArticlePrompt({ article, prepared })).toContain('TITLE: Backends');
+    }
+  });
+
   it('says there is nothing set aside when the article is all prose', () => {
     const prompt = buildArticlePrompt({
       article: { title: 'Backends' },
