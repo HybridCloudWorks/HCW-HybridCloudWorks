@@ -254,18 +254,17 @@ export function createInspector({
         // fetch-image.js validates the protocol, refuses localhost, resolves
         // the host to IPv4, refuses private ranges, and re-checks on every
         // redirect hop (T-734).
-        const { buffer, contentType } = await fetchImageImpl(url, { fetch: fetchImpl });
-        // Prefer the served content-type; fall back to the extension, which is
-        // what this used before and is still better than nothing.
-        const lower = url.toLowerCase();
-        const mimeType =
-          contentType && contentType.startsWith('image/')
-            ? contentType
-            : lower.endsWith('.png')
-              ? 'image/png'
-              : lower.endsWith('.webp')
-                ? 'image/webp'
-                : 'image/jpeg';
+        const fetched = await fetchImageImpl(url, { fetch: fetchImpl });
+        // A scraped `<img src>` that turns out to be a video gets no alt text
+        // rather than being posted to a vision model as an image (#415). One
+        // image skipped, the other four still described.
+        if (fetched.refused) {
+          log.warn?.(`[alt-text] ${url}: ${fetched.reason}`);
+          continue;
+        }
+        // The fetcher's gate guarantees a mapped `image/*` type, so this is
+        // the measured type and there is no extension guess left to make.
+        const { buffer, contentType: mimeType } = fetched;
         const altText = await ai.generateTextResponse({
           parts: [
             {

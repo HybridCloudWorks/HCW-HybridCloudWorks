@@ -237,9 +237,15 @@ export async function generateCoversForContent(
   for (const target of targets) {
     const slotPrompt = `${prompt}\n\nImage slot: ${target}. Keep composition distinct while preserving style continuity.`;
     const imageUrl = await replicate.generate(slotPrompt);
-    const { buffer, contentType } = await fetchImage(imageUrl);
+    const fetched = await fetchImage(imageUrl);
+    // A generation that came back as something other than an image is a failed
+    // generation, so it fails the slot rather than being skipped (#415): the
+    // caller's catch writes `altCoverImageError` and the doc never claims a
+    // cover it has no bytes for.
+    if (fetched.refused) throw new Error(`Generated ${target} cover refused: ${fetched.reason}`);
+    const { buffer, contentType } = fetched;
     const blobPath = `${contentId}-ai-${target}.png`;
-    await storage.uploadBlob('covers', blobPath, buffer, contentType || 'image/png', {
+    await storage.uploadBlob('covers', blobPath, buffer, contentType, {
       contentId,
       slot: target,
     });

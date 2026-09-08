@@ -265,6 +265,27 @@ describe('createInspector', () => {
     });
   });
 
+  it('skips alt text for a scraped image that is not an image, and says so (#415)', async () => {
+    const d = deps({
+      env: { CONTENTFORGE_METADATA_ONLY: 'true', CONTENTFORGE_ALT_TEXT_ENABLED: 'true' },
+      fetchImage: vi.fn(async () => ({
+        refused: 'not-an-image',
+        contentType: 'video/mp4',
+        reason: 'Content-Type video/mp4 is not an image',
+      })),
+      log: { log: vi.fn(), warn: vi.fn() },
+    });
+    d.ai.generateJsonResponse.mockResolvedValue({ ...metadata, postContent: undefined });
+    const inspector = createInspector(d);
+    await inspector.executeInspection({ docId: 'doc-4', newData: { url: 'https://src/p' } });
+    // The video is never posted to the vision model as an image.
+    expect(d.ai.generateTextResponse).not.toHaveBeenCalled();
+    expect(d.store.patchDoc.mock.calls[0][2].imageAltTexts).toBe(null);
+    expect(d.log.warn).toHaveBeenCalledWith(
+      '[alt-text] https://s/a.png: Content-Type video/mp4 is not an image'
+    );
+  });
+
   it('fails loudly for a missing URL, a failed scrape, and the unported architecture path', async () => {
     const d = deps();
     const inspector = createInspector(d);

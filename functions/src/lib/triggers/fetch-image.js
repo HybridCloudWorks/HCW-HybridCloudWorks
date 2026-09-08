@@ -6,9 +6,30 @@
  * localhost, the hostname resolved to IPv4 and refused if private — and
  * re-checked on every redirect hop (redirects are followed manually, up to
  * five), so a public host cannot bounce the fetch onto the private network.
+ *
+ * The second guard is the media type (issue #415). Until then the fetcher
+ * returned whatever bytes came back and let the caller name the blob, and the
+ * only mapping from type to extension defaulted to `png` — so a `video/mp4`
+ * an article body hotlinked from an `<img src>` would have been stored as a
+ * `.png`, and nothing downstream would have noticed: the blob exists, the
+ * rewrite succeeds, and the page renders an `<img>` at a file that will never
+ * paint. #413 closed the same hole on the frontend, where only the URL can be
+ * tested; here the response itself is in hand, so the gate is on the measured
+ * `Content-Type`, which is strictly stronger than an extension guess.
  */
 import { lookup } from 'node:dns/promises';
 
+/**
+ * The image types this site stores, and the extension each is stored under.
+ *
+ * This map is the gate as well as the naming table: a type that is not a key
+ * here is refused, whether it is a video, an octet-stream, or an image format
+ * (`image/tiff`, `image/heic`) no browser paints into an `<img>`. Refusing an
+ * unmapped image type rather than defaulting its extension is deliberate —
+ * a default is precisely the silent mislabel #415 is about, and a refusal is
+ * visible (it lands in `inlineImages.failed` and in the log), so the day a
+ * real format shows up we add a line here instead of finding a broken image.
+ */
 export const MIME_TO_EXT = Object.freeze({
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -18,6 +39,55 @@ export const MIME_TO_EXT = Object.freeze({
   'image/x-icon': 'ico',
   'image/avif': 'avif',
 });
+
+/**
+ * A response's media type without its parameters and lower-cased, so
+ * `IMAGE/PNG; charset=binary` and `image/png` are the same key. `''` when the
+ * header was absent or empty.
+ */
+export function normalizeMediaType(value) {
+  return String(value ?? '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+}
+
+/** The extension this media type is stored under, or null when it must not be stored. */
+export function imageExtensionFor(contentType) {
+  return MIME_TO_EXT[normalizeMediaType(contentType)] ?? null;
+}
+
+/**
+ * The extension for a media type that has already passed the gate.
+ *
+ * Throws rather than defaulting. Every caller of this reaches it with a type
+ * `fetchImage` measured and accepted, so a null here is a bug in this module,
+ * not a bad upstream — and a thrown error is caught per-image by every caller,
+ * where a defaulted `.png` would have been written to storage.
+ */
+export function requireImageExtension(contentType) {
+  const ext = imageExtensionFor(contentType);
+  if (ext) return ext;
+  throw new Error(
+    `No stored extension for media type ${normalizeMediaType(contentType) || '(none)'}`
+  );
+}
+
+/**
+ * Why a response with this media type must not be stored, or null when it may
+ * be. The `code` is what a caller branches on; `reason` is the sentence that
+ * goes in a log line or a failure record, and it never contains a URL.
+ *
+ * @returns {{ code: string, reason: string } | null}
+ */
+function mediaTypeRefusal(contentType) {
+  const type = normalizeMediaType(contentType);
+  if (!type) return { code: 'no-media-type', reason: 'the response declared no Content-Type' };
+  if (imageExtensionFor(type)) return null;
+  return type.startsWith('image/')
+    ? { code: 'unsupported-image-type', reason: `image type ${type} is not one this site stores` }
+    : { code: 'not-an-image', reason: `Content-Type ${type} is not an image` };
+}
 
 export function isPrivateIp(ip) {
   const parts = String(ip).split('.').map(Number);
@@ -61,17 +131,37 @@ export function isExternalUrlString(value) {
 }
 
 /**
- * @param {string} url
- * @param {{ fetch?: typeof fetch, resolve?: Function, maxRedirects?: number, timeoutMs?: number }} [deps]
- * @returns {Promise<{ buffer: Buffer, contentType: string }>}
- */
-/**
  * Ceiling on a fetched image, in bytes (T-734). Generous for a cover or an
  * in-article picture, and small enough that a hostile or broken origin cannot
  * make the host buffer an arbitrary amount of memory.
  */
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
+/**
+ * Fetch an external image, or say why it will not be stored.
+ *
+ * TWO RESULTS, ONE OF THEM NOT AN EXCEPTION. A media-type refusal is returned,
+ * not thrown, because it is not a failure of the fetch: the request succeeded
+ * and the response was read, it simply is not an image this site can serve.
+ * That distinction matters to the inline re-hoster, which leaves the original
+ * URL in place and carries on with the article's other images — a decision it
+ * can now make from a field rather than from an error message. `refused` is
+ * absent on success, so `if (result.refused)` is the whole test.
+ *
+ * Everything else still throws: a bad protocol, a private address, a non-2xx,
+ * a redirect loop, a timeout, an oversized body. Those are fetch failures and
+ * every call site already catches them.
+ *
+ * The gate runs on the headers, before `arrayBuffer()`, so a refused response
+ * is never buffered at all.
+ *
+ * @param {string} url
+ * @param {{ fetch?: typeof fetch, resolve?: Function, maxRedirects?: number, timeoutMs?: number, maxBytes?: number }} [deps]
+ * @returns {Promise<
+ *   { buffer: Buffer, contentType: string } |
+ *   { refused: 'no-media-type'|'not-an-image'|'unsupported-image-type', contentType: string, reason: string }
+ * >}
+ */
 export async function fetchImage(
   url,
   {
@@ -110,8 +200,14 @@ export async function fetchImage(
       }
       if (response.status < 200 || response.status >= 300)
         throw new Error(`HTTP ${response.status} fetching ${current}`);
-      const rawType = response.headers.get('content-type') || '';
-      const contentType = rawType.split(';')[0].trim() || 'image/png';
+      const contentType = normalizeMediaType(response.headers.get('content-type'));
+      // Before the bytes: a type this site will not store is refused here, so
+      // a video or an octet-stream is never buffered, never named and never
+      // uploaded. Note there is no `|| 'image/png'` fallback any more — a
+      // missing Content-Type means nothing was measured, and inventing one is
+      // the same mislabel as accepting the wrong one.
+      const refusal = mediaTypeRefusal(contentType);
+      if (refusal) return { refused: refusal.code, contentType, reason: refusal.reason };
       // Refuse before buffering when the server declares an oversized body
       // (T-734). Content-Length is a hint, not a guarantee, so the buffered
       // length is re-checked below — but honouring it avoids pulling the bytes

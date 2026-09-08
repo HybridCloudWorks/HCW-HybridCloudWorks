@@ -8,7 +8,15 @@ import {
   CLAIM_REASONS,
 } from './rising-edge-claim.js';
 import { evaluateActivationNotice } from './activation-notice.js';
-import { fetchImage, isExternalUrlString, isPrivateIp, validateFetchUrl } from './fetch-image.js';
+import {
+  fetchImage,
+  imageExtensionFor,
+  isExternalUrlString,
+  isPrivateIp,
+  normalizeMediaType,
+  requireImageExtension,
+  validateFetchUrl,
+} from './fetch-image.js';
 import { buildCoverSvg, wrapText, brandingFor } from './cover-svg.js';
 import { createImageMirror, downloadUrlFor } from './image-mirror.js';
 import {
@@ -186,6 +194,86 @@ describe('fetch-image', () => {
       fetchImage('https://a.test/x', { fetch: bad, resolve: async () => ({ address: '1.1.1.1' }) })
     ).rejects.toThrow('HTTP 404');
   });
+
+  it('refuses a video response and never reads its body (#415)', async () => {
+    const arrayBuffer = vi.fn(async () => new Uint8Array([0, 0, 0, 32]).buffer);
+    const fetch = vi.fn(async () => ({
+      status: 200,
+      headers: new Map([
+        ['content-type', 'video/mp4'],
+        ['content-length', '5500000'],
+      ]),
+      arrayBuffer,
+    }));
+    const result = await fetchImage('https://cdn.test/RUBRIC-EVALUATOR.mp4', {
+      fetch,
+      resolve: async () => ({ address: '1.1.1.1' }),
+    });
+    expect(result).toEqual({
+      refused: 'not-an-image',
+      contentType: 'video/mp4',
+      reason: 'Content-Type video/mp4 is not an image',
+    });
+    // The gate is on the headers, so the 5.5 MB body is never pulled.
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(result.buffer).toBeUndefined();
+  });
+
+  it('refuses an image type it cannot name and a response that declared none', async () => {
+    const respondWith = (headers) =>
+      vi.fn(async () => ({
+        status: 200,
+        headers: new Map(headers),
+        arrayBuffer: async () => new Uint8Array([1]).buffer,
+      }));
+    const resolve = async () => ({ address: '1.1.1.1' });
+    expect(
+      await fetchImage('https://cdn.test/scan.tiff', {
+        fetch: respondWith([['content-type', 'image/tiff']]),
+        resolve,
+      })
+    ).toEqual({
+      refused: 'unsupported-image-type',
+      contentType: 'image/tiff',
+      reason: 'image type image/tiff is not one this site stores',
+    });
+    // No Content-Type header at all: nothing was measured, and the old
+    // `|| 'image/png'` default is exactly the mislabel #415 is about.
+    expect(
+      await fetchImage('https://cdn.test/mystery', { fetch: respondWith([]), resolve })
+    ).toEqual({
+      refused: 'no-media-type',
+      contentType: '',
+      reason: 'the response declared no Content-Type',
+    });
+  });
+
+  it('normalizes the measured type and derives every stored extension from it', async () => {
+    expect(normalizeMediaType('IMAGE/PNG; charset=binary')).toBe('image/png');
+    expect(normalizeMediaType('  image/webp  ')).toBe('image/webp');
+    expect(normalizeMediaType(null)).toBe('');
+    expect(imageExtensionFor('IMAGE/JPEG')).toBe('jpg');
+    expect(imageExtensionFor('image/svg+xml')).toBe('svg');
+    expect(imageExtensionFor('video/mp4')).toBe(null);
+    expect(imageExtensionFor('image/tiff')).toBe(null);
+    expect(requireImageExtension('image/avif')).toBe('avif');
+    expect(() => requireImageExtension('video/mp4')).toThrow(
+      'No stored extension for media type video/mp4'
+    );
+    expect(() => requireImageExtension('')).toThrow('No stored extension for media type (none)');
+    const fetch = vi.fn(async () => ({
+      status: 200,
+      headers: new Map([['content-type', 'IMAGE/WEBP; charset=binary']]),
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    }));
+    const ok = await fetchImage('https://cdn.test/a.webp', {
+      fetch,
+      resolve: async () => ({ address: '1.1.1.1' }),
+    });
+    expect(ok.contentType).toBe('image/webp');
+    expect(ok.refused).toBeUndefined();
+    expect(ok.buffer.length).toBe(3);
+  });
 });
 
 describe('cover svg + image mirror', () => {
@@ -256,6 +344,38 @@ describe('cover svg + image mirror', () => {
       (await mirror.mirror('blogs', { id: 'b2', contentImageUrl: 'https://cdn.test/z.png' })).reason
     ).toBe('error: HTTP 403');
     expect(store.data.blogs.get('b2')).toBeUndefined(); // no marker on failure
+  });
+
+  it('refuses a cover the fetcher says is not an image, storing no blob and no marker (#415)', async () => {
+    // The #413 path on this side: the curated feed put a real 5.3 MB
+    // `video/mp4` in `contentImageUrl` once already.
+    const store = memStore({ blogs: [{ id: 'b1', contentImageUrl: 'https://cdn.test/clip.mp4' }] });
+    const storage = { uploadBlob: vi.fn(async () => 'https://blob/x') };
+    const fetchImage = vi.fn(async () => ({
+      refused: 'not-an-image',
+      contentType: 'video/mp4',
+      reason: 'Content-Type video/mp4 is not an image',
+    }));
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const mirror = createImageMirror({ store, storage, fetchImage, log });
+    expect(await mirror.mirror('blogs', store.data.blogs.get('b1'))).toEqual({
+      mirrored: false,
+      reason: 'refused: not-an-image',
+    });
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(store.data.blogs.get('b1').contentImageSourceUrl).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toBe(
+      '[blogCoverImage] Refused blogs/b1: Content-Type video/mp4 is not an image'
+    );
+    // No marker, so an editor who swaps the video for a picture gets it
+    // mirrored on the next write.
+    expect(await mirror.mirror('blogs', store.data.blogs.get('b1'))).toEqual({
+      mirrored: false,
+      reason: 'refused: not-an-image',
+    });
+    expect(fetchImage).toHaveBeenCalledTimes(2);
   });
 
   it('generates a template SVG cover only for a titled blog with no image source and no cover', async () => {
@@ -435,6 +555,34 @@ describe('AI cover', () => {
       altCoverImageRunId: null,
       altCoverImageError: 'Replicate HTTP 503',
     });
+  });
+
+  it('fails the slot rather than storing a generation that is not an image (#415)', async () => {
+    const store = memStore({
+      content: [{ id: 'c1', altCoverImageTrigger: true, aiImageTargets: ['hero'], _etag: 'e' }],
+    });
+    const storage = { uploadBlob: vi.fn(async () => 'u') };
+    const gen = createAiCoverGenerator({
+      store,
+      storage,
+      replicate: { generate: vi.fn(async () => 'https://img/x') },
+      fetchImage: vi.fn(async () => ({
+        refused: 'not-an-image',
+        contentType: 'video/mp4',
+        reason: 'Content-Type video/mp4 is not an image',
+      })),
+      now,
+      uuid: () => 'g1',
+    });
+    expect((await gen.run('c1', 'ev1')).reason).toBe(
+      'error: Generated hero cover refused: Content-Type video/mp4 is not an image'
+    );
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+    expect(store.data.content.get('c1')).toMatchObject({
+      altCoverImageTrigger: false,
+      altCoverImageError: 'Generated hero cover refused: Content-Type video/mp4 is not an image',
+    });
+    expect(store.data.generated_content_images).toBeUndefined();
   });
 
   it('assigns the curated default hero on failure when a mapping exists (T-606)', async () => {
