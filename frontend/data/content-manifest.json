@@ -1,11 +1,13 @@
 {
-  "generatedAt": "2026-09-08T01:23:57.980Z",
+  "generatedAt": "2026-09-08T02:18:49.268Z",
   "routes": [
     "/azure/blog/azure-foundry-hosted-agents-accelerating-ai-agent-deployment-optimization-featur",
-    "/azure/blog/enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
+    "/azure/blog/in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code",
     "/azure/blog/enterprise-hub-and-spoke-zero-trust-edge",
     "/azure/blog/operationalizing-azure-updates-with-microsoft-release-communications-and-proacti",
     "/azure/blog/autonomous-self-healing-for-azure-vmware-solution-private-clouds",
+    "/azure/blog/launched-generally-available-azure-api-management-premium-v2-and-standard-v2-now",
+    "/azure/blog/launched-generally-available-agent-kit-for-azure-cosmos-db",
     "/azure/blog/microsoft-foundry-end-to-end-observability-and-roi-for-production-ai-agents",
     "/azure/blog/leveraging-ai-for-efficient-azure-update-discovery-with-microsoft-release-commun",
     "/azure/blog/unveiling-microsofts-secure-future-initiative-sfi-a-blueprint-for-next-generatio-91IWYg",
@@ -60,9 +62,9 @@
       "sourceUrl": "https://devblogs.microsoft.com/foundry/hosted-agents-build26/",
       "CD Url": "https://devblogs.microsoft.com/foundry/hosted-agents-build26/"
     },
-    "article:enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio": {
+    "article:in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code": {
       "id": "1k5ayjbEdYdo7NzvXIWW",
-      "slug": "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio",
+      "slug": "in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code",
       "Slug": "in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code",
       "cloudProvider": "Azure",
       "Cloud Provider": "Azure",
@@ -192,6 +194,81 @@
       "contentImageUrl": "",
       "sourceUrl": "https://techcommunity.microsoft.com/t5/azure-migration-and/autonomous-self-healing-for-azure-vmware-solution-private-clouds/ba-p/4506374",
       "CD Url": "https://techcommunity.microsoft.com/t5/azure-migration-and/autonomous-self-healing-for-azure-vmware-solution-private-clouds/ba-p/4506374"
+    },
+    "article:launched-generally-available-azure-api-management-premium-v2-and-standard-v2-now": {
+      "id": "7MCkl1cSf7GGCgJxlCwZ",
+      "slug": "launched-generally-available-azure-api-management-premium-v2-and-standard-v2-now",
+      "Slug": "launched-generally-available-azure-api-management-premium-v2-and-standard-v2-now",
+      "cloudProvider": "Azure",
+      "Cloud Provider": "Azure",
+      "Content": "As API\r\nestates grow, managing individual custom domains and certificates for every\r\nsubdomain can quickly become operationally complex and difficult to\r\nscale. Without wildcard support, every new subdomain — whether\r\npayments.api.contoso.com, inventory.api.c",
+      "content": " \n\nEnable AI-powered discovery of Azure Updates using Microsoft Release Communications MCP server.\n\n[Explore MRC MCP server​](https://go.microsoft.com/fwlink/?linkid=2360302&clcid=0x409)\n\n![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/cf29770756570b20.jpg)\n\n# Azure Updates\n\nGet the latest updates on Azure products and features to meet your cloud investment needs. Subscribe to notifications to stay informed.\n\n[\n\n](https://go.microsoft.com/fwlink/?linkid=2289891&clcid=0x409)[\n\n](https://www.microsoft.com/releasecommunications/api/v2/azure/rss)[\n\n![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/7a8a837e14dd94e7.png)\n\n\n\n](https://go.microsoft.com/fwlink/?linkid=2360302&clcid=0x409)\n\nFilter\n\nSave filters\n\nClear filters\n\nApply filters\n\nFilter\n\nFilter\n\nSort\n\n*   RECENTLY MODIFIED\n    \n*    Newest to oldest\n    \n*    Oldest to newest\n    \n\nFilter\n\nProducts\n\nStatus\n\nUpdate type\n\nNew or updated\n\nSave filters\n\nClear filters\n\nApply filters\n\nIn development\n\nLimited offering to select customers for non-production use and testing.\n\nIn preview\n\nAvailable to all Azure customers for non-production use and testing.\n\nLaunched\n\nFully released, production-ready product available to all Azure customers.\n\n\"test2\"\n\n\"test3\"\n\nSort by\n\nRecently Modified: Newest to oldest\n\n*   RECENTLY MODIFIED\n    \n*    Newest to oldest\n    \n*    Oldest to newest\n    \n\n0 Updates found\n\nPlease update your selections\n\n## Additional Resources\n\n![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/277fcf122bf44fd7.svg)\n\n### Microsoft Azure Blog\n\nLearn about the latest Microsoft Security solutions.\n\n[Learn more](https://azure.microsoft.com/en-us/blog)\n\n![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/29f0e0d25820a6d7.svg)\n\n### Community support\n\nGet answers to your questions from Microsoft and Community experts.\n\n[Learn more](https://azure.microsoft.com/en-us/support/community/)\n\n![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/b8053f53a4ae0ff9.svg)\n\n### Provide feedback\n\nTell us what you think of Azure and what you want to see in the future.\n\n[Learn more](https://go.microsoft.com/fwlink/?linkid=2295127&clcid=0x409)\n\n![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/c718d38eee79797b.svg)\n\n### Product availability by region\n\nAzure is available in more regions than any other cloud provider.\n\n[Learn more](https://azure.microsoft.com/en-us/explore/global-infrastructure/products-by-region)\n\n*    [![](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/e1d2dc009ef44b66.svg)Get the Azure mobile app](https://azure.microsoft.com/en-us/get-started/azure-portal/mobile-app)\n\n*   [![Twitter](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/69eca35cb6b98eb4.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2275431)\n*   [![Instagram](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/6da13c203c186054.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2275352)\n*   [![LinkedIn](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/ea4394d12f9920f9.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2268687)\n*   [![YouTube](/api/public/media/covers/7MCkl1cSf7GGCgJxlCwZ/inline/3bc78c4f9bcb9743.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2239941)",
+      "Title": "[Launched] Generally Available: Azure API Management Premium v2 and Standard v2 now support wildcard custom hostnames. ",
+      "title": "Enable AI-Powered Discovery of Azure Updates with Microsoft Release Communications MCP Server",
+      "Summary": "As API estates grow, managing individual custom domains and certificates for every subdomain can quickly become operationally complex and difficult to scale. Without wildcard support, every new subdomain — whether payments.api.contoso.com, inventory.api.c",
+      "summary": "Staying abreast of the rapid pace of Azure product and feature updates is a significant challenge for cloud practitioners managing complex enterprise environments. This announcement introduces the capability to enable AI-powered discovery of these critical Azure Updates through the Microsoft Release Communications (MRC) MCP server. The key insight is the shift towards leveraging artificial intelligence to intelligently surface relevant platform changes, thereby reducing the manual overhead associated with tracking new services, features, and policy alterations. This functionality is particularly relevant for Cloud Architects, Platform Engineers, and DevOps Leads who require timely information to inform design decisions, optimize operations, and maintain compliance across their Azure deployments. While the announcement highlights the AI-driven discovery, practitioners should understand that this involves engaging with the specific MRC MCP server to unlock these capabilities for enhanced update management.",
+      "keyTopics": [
+        "Azure Updates",
+        "Microsoft Release Communications",
+        "AI-driven Information Discovery",
+        "Cloud Governance",
+        "Platform Engineering"
+      ],
+      "type": "blog",
+      "category": "AI/ML",
+      "Tags": [
+        "Launched",
+        "Integration",
+        "Internet of Things",
+        "Mobile",
+        "Web",
+        "API Management",
+        "Microsoft Build"
+      ],
+      "Author": "Microsoft Azure Updates API",
+      "Published At": "2026-06-02T20:45:52.000Z",
+      "publishedAt": "2026-06-18T07:31:52.771Z",
+      "readTime": "1 min",
+      "contentImageUrl": "",
+      "sourceUrl": "https://azure.microsoft.com/updates?id=562894",
+      "CD Url": "https://azure.microsoft.com/updates?id=562894"
+    },
+    "article:launched-generally-available-agent-kit-for-azure-cosmos-db": {
+      "id": "7ZCmiOEIlWMg99xQHY0A",
+      "slug": "launched-generally-available-agent-kit-for-azure-cosmos-db",
+      "Slug": "launched-generally-available-agent-kit-for-azure-cosmos-db",
+      "cloudProvider": "Azure",
+      "Cloud Provider": "Azure",
+      "Content": "Your AI coding agents just got smarter about building high-performance database applications. The Azure Cosmos DB Agent Kit is now generally available, bringing proven best practices directly into your development workflow. Whether you're designing data m",
+      "content": " \n\nEnable AI-powered discovery of Azure Updates using Microsoft Release Communications MCP server.\n\n[Explore MRC MCP server​](https://go.microsoft.com/fwlink/?linkid=2360302&clcid=0x409)\n\n![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/cf29770756570b20.jpg)\n\n# Azure Updates\n\nGet the latest updates on Azure products and features to meet your cloud investment needs. Subscribe to notifications to stay informed.\n\n[\n\n](https://go.microsoft.com/fwlink/?linkid=2289891&clcid=0x409)[\n\n](https://www.microsoft.com/releasecommunications/api/v2/azure/rss)[\n\n![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/7a8a837e14dd94e7.png)\n\n\n\n](https://go.microsoft.com/fwlink/?linkid=2360302&clcid=0x409)\n\nFilter\n\nSave filters\n\nClear filters\n\nApply filters\n\nFilter\n\nFilter\n\nSort\n\n*   RECENTLY MODIFIED\n    \n*    Newest to oldest\n    \n*    Oldest to newest\n    \n\nFilter\n\nProducts\n\nStatus\n\nUpdate type\n\nNew or updated\n\nSave filters\n\nClear filters\n\nApply filters\n\nIn development\n\nLimited offering to select customers for non-production use and testing.\n\nIn preview\n\nAvailable to all Azure customers for non-production use and testing.\n\nLaunched\n\nFully released, production-ready product available to all Azure customers.\n\n\"test2\"\n\n\"test3\"\n\nSort by\n\nRecently Modified: Newest to oldest\n\n*   RECENTLY MODIFIED\n    \n*    Newest to oldest\n    \n*    Oldest to newest\n    \n\n0 Updates found\n\nPlease update your selections\n\n## Additional Resources\n\n![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/277fcf122bf44fd7.svg)\n\n### Microsoft Azure Blog\n\nLearn about the latest Microsoft Security solutions.\n\n[Learn more](https://azure.microsoft.com/en-us/blog)\n\n![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/29f0e0d25820a6d7.svg)\n\n### Community support\n\nGet answers to your questions from Microsoft and Community experts.\n\n[Learn more](https://azure.microsoft.com/en-us/support/community/)\n\n![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/b8053f53a4ae0ff9.svg)\n\n### Provide feedback\n\nTell us what you think of Azure and what you want to see in the future.\n\n[Learn more](https://go.microsoft.com/fwlink/?linkid=2295127&clcid=0x409)\n\n![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/c718d38eee79797b.svg)\n\n### Product availability by region\n\nAzure is available in more regions than any other cloud provider.\n\n[Learn more](https://azure.microsoft.com/en-us/explore/global-infrastructure/products-by-region)\n\n*    [![](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/e1d2dc009ef44b66.svg)Get the Azure mobile app](https://azure.microsoft.com/en-us/get-started/azure-portal/mobile-app)\n\n*   [![Twitter](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/69eca35cb6b98eb4.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2275431)\n*   [![Instagram](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/6da13c203c186054.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2275352)\n*   [![LinkedIn](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/ea4394d12f9920f9.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2268687)\n*   [![YouTube](/api/public/media/covers/7ZCmiOEIlWMg99xQHY0A/inline/3bc78c4f9bcb9743.jpg \" \")](https://go.microsoft.com/fwlink/?linkid=2239941)",
+      "Title": "[Launched] Generally Available: Agent kit for Azure Cosmos DB",
+      "title": "Enable AI-Powered Discovery of Azure Updates with Microsoft Release Communications MCP Server",
+      "Summary": "Your AI coding agents just got smarter about building high-performance database applications. The Azure Cosmos DB Agent Kit is now generally available, bringing proven best practices directly into your development workflow. Whether you're designing data m",
+      "summary": "The rapid evolution of cloud platforms like Azure presents a significant challenge for senior practitioners to keep pace with an incessant stream of product updates, feature releases, and deprecations, often impacting architectural decisions and operational stability. This article introduces the capability for AI-powered discovery of Azure Updates via the Microsoft Release Communications (MRC) MCP server, aiming to streamline the traditionally manual and time-consuming process of monitoring cloud changes. The core insight is that integrating advanced AI capabilities into update notification systems can proactively surface relevant information, allowing enterprise teams to anticipate changes and optimize their cloud investments more effectively. This is particularly relevant for Cloud Architects and Platform Engineers responsible for maintaining robust, up-to-date, and secure Azure environments. It's crucial to note that this communication serves as an announcement for the capability, directing users to an external link for exploration rather than providing intricate technical implementation details.",
+      "keyTopics": [
+        "Azure Updates",
+        "AI-Powered Discovery",
+        "Microsoft Release Communications",
+        "Cloud Notification Systems",
+        "Change Management"
+      ],
+      "type": "blog",
+      "category": "AI/ML",
+      "Tags": [
+        "Launched",
+        "Databases",
+        "Internet of Things",
+        "Azure Cosmos DB",
+        "Microsoft Build",
+        "Feature"
+      ],
+      "Author": "Microsoft Azure Updates API",
+      "Published At": "2026-06-02T22:30:49.000Z",
+      "publishedAt": "2026-06-18T07:31:52.771Z",
+      "readTime": "1 min",
+      "contentImageUrl": "",
+      "sourceUrl": "https://azure.microsoft.com/updates?id=563022",
+      "CD Url": "https://azure.microsoft.com/updates?id=563022"
     },
     "article:microsoft-foundry-end-to-end-observability-and-roi-for-production-ai-agents": {
       "id": "80Th4HPuTPioeeCpS5n9",
@@ -912,10 +989,7 @@
       "CD Url": "https://blogs.microsoft.com/blog/2025/06/16/announcing-comprehensive-sovereign-solutions-empowering-european-organizations/"
     }
   },
-  "skipped": [
-    "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio: duplicate slug (item 7MCkl1cSf7GGCgJxlCwZ); first occurrence kept",
-    "enable-ai-powered-discovery-of-azure-updates-with-microsoft-release-communicatio: duplicate slug (item 7ZCmiOEIlWMg99xQHY0A); first occurrence kept"
-  ],
+  "skipped": [],
   "sections": {
     "aws": {
       "blog": 2,
