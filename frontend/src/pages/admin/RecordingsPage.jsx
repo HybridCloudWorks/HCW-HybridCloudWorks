@@ -808,9 +808,9 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                     Get-Content &quot;$env:USERPROFILE\.plaud\tokens-mcp.json&quot;
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    <code>expires_at</code> in that file is in <strong>milliseconds</strong>. Read
-                    as seconds it looks like a date far in the past or future, which reads as
-                    expired when it is not.
+                    <code>expires_at</code> in that file is in <strong>milliseconds</strong>. A
+                    converter that assumes seconds returns a date tens of thousands of years out,
+                    which is easily misread as the token being unusable when it has a day left.
                   </p>
                 </>
               ),
@@ -832,7 +832,7 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                     <Input
                       type="password"
                       className="h-9 text-xs font-mono flex-1"
-                      placeholder="refresh_token — eyJ… (optional, needed for auto-refresh)"
+                      placeholder="refresh_token — eyJ… (required to stay connected)"
                       aria-label="Plaud refresh token"
                       value={refreshToken}
                       onChange={(e) => setRefreshToken(e.target.value)}
@@ -849,8 +849,10 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
                   <p className="text-xs text-slate-400 flex items-center gap-1">
                     <ShieldCheck className="h-3 w-3" />
                     Both values are stored server-side in Cosmos DB and never sent back to the
-                    browser after saving. Leaving the refresh token blank keeps whatever was stored
-                    before.
+                    browser after saving. Leaving the refresh field blank keeps the token already
+                    stored — right when you are only replacing an expired access token, wrong after
+                    re-authorizing, because that issued a new refresh token and retired the stored
+                    one.
                   </p>
                 </div>
               ),
