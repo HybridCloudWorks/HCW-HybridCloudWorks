@@ -12,10 +12,14 @@
  *
  * IT MEASURES, IT DOES NOT ASSERT. There is no list of workflows in this file
  * to keep in step with the directory, and no per-workflow expectation to
- * update. The verdict comes from `/actions/runs` — what actually happened —
- * which means a workflow added tomorrow is covered tomorrow, and a workflow
- * deleted today stops being checked today. A hand-maintained list would have
- * needed someone to notice the thing it exists to notice.
+ * update. The verdict comes from run history — what actually happened — read
+ * per workflow from `/actions/workflows/{id}/runs`, and deliberately NOT from
+ * `/actions/runs?workflow_id=…`, which accepts the filter and ignores it. That
+ * trap is recorded in full at the call site, and naming the wrong endpoint here
+ * would undercut it. Measuring rather than asserting is what means a workflow
+ * added tomorrow is covered tomorrow and one deleted today stops being checked
+ * today; a hand-maintained list would have needed someone to notice the thing
+ * this file exists to notice.
  *
  * THE THREE VERDICTS ARE KEPT APART, because collapsing them is the mistake
  * this repository keeps paying for (T-514; `05-verify-timer.ps1` 2026-08-30;
