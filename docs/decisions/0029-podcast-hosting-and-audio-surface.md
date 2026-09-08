@@ -1,4 +1,4 @@
-# ADR 0029: Podcast hosting is RSS.com Free with manual upload, the podcast page is the one audio surface, and the media route serves byte ranges
+# ADR 0029: Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges
 
 **Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a)
 **Decision date:** 2026-09-07
@@ -63,7 +63,7 @@ beat — §1b and §2a say what changed and, more importantly, what did not.
 
 ## Decision
 
-### 1. Hosting: RSS.com Free, manual upload, the feed is the integration boundary
+### 1. Hosting: RSS.com, and the feed is the integration boundary (plan and upload amended in §1b)
 
 The show lives on RSS.com's Free plan. Episodes — human recordings and
 generated ones alike — are uploaded by hand in the RSS.com dashboard. The
@@ -174,11 +174,13 @@ must not route around it.
 
 Tracked by #437.
 
-### 2. Speech: Gemini first, Azure AI Speech second, ElevenLabs deferred
+### 2. Speech: providers selected by key presence, Gemini then Azure AI Speech (ElevenLabs added in §2a)
 
 **Decided 2026-09-07; superseded by §2a below.** `speech/index.js` keeps its
-order: Gemini TTS when `GEMINI-API-KEY` is present, Azure AI Speech as the
-fallback, pinnable with `LISTEN_AND_LEARN_TTS_PROVIDER`. ElevenLabs was not
+order: Gemini TTS when the `GEMINI_API_KEY` app setting is present — a Key Vault
+reference to the `GEMINI-API-KEY` secret, which is why the two spellings differ
+(`infra/functionapp.tf`) — Azure AI Speech as the fallback, pinnable with
+`LISTEN_AND_LEARN_TTS_PROVIDER`. ElevenLabs was not
 added: its commercial licence requires a paid plan, and at that date the owner
 had declined paid services. The provider switch rejects `elevenlabs` by name in
 its tests, so the shape a third provider takes was recorded and the trial was a
