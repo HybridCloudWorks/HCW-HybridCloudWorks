@@ -3,10 +3,10 @@
  * events (beta launches, retirements, GA, exam updates) from the Microsoft
  * Skills Hub blog feed into `certEvents`. Never creates articles.
  *
- * Ported from Site-Main index.js (088f458). Upstream ran at 09:00 UTC; the
- * app clock here is America/Chicago, so the schedule is expressed in local
- * time and drifts an hour across DST (Migration-Plan §4.2) — a weekly
- * digest-style scrape does not care.
+ * Ported from Site-Main index.js (088f458). Upstream ran at 09:00 UTC and so
+ * does this: `0 0 9 * * 5` on a UTC app clock (#416). It was `0 0 4 * * 5`
+ * while the clock was America/Chicago — the same instant in summer, an hour
+ * late in winter. That DST drift is gone.
  */
 
 export const MS_SKILLS_RSS =

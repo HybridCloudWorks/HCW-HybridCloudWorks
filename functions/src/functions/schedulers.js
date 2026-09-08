@@ -6,14 +6,21 @@
  * `FEATURE_FLAG_SCHEDULERS` is not explicitly "false" AND its own
  * `FEATURE_FLAG_<NAME>` is "true". Timers fire on schedule regardless — the
  * flags make them safe no-ops — and every flag is "false" in `infra/main.tf`
- * until that timer has been observed firing at the intended local time
- * (§6 step 7).
+ * until that timer has been observed firing at the intended time (§6 step 7).
  *
- * The clock is `WEBSITE_TIME_ZONE = America/Chicago` (app-wide); the NCRONTAB
- * expressions below are the §4.2 translations. One timer from the upstream
- * sixteen is not here: `refreshToolServiceCacheScheduled` (demoted with Cloud
- * Tools, T-322). Two delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages`
- * — and both are dry-run until their own `*_DELETE=true` setting (T-302).
+ * **Every hour below is a UTC hour.** Owner decision 2026-09-07 (#416): all
+ * times in this app are UTC. The Function App sets no `WEBSITE_TIME_ZONE`, so
+ * NCRONTAB gets the platform default — infra/functionapp.tf carries the
+ * citation and says why the setting was removed rather than set to "UTC", and
+ * `timer-schedules-utc.test.js` fails if either half drifts. Until that
+ * decision the app clock was `America/Chicago` and a bare hour here meant
+ * Central; Migration-Plan §4.2 has the ported table and the note recording
+ * which instants moved.
+ *
+ * One timer from the upstream sixteen is not here:
+ * `refreshToolServiceCacheScheduled` (demoted with Cloud Tools, T-322). Two
+ * delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages` — and both
+ * are dry-run until their own `*_DELETE=true` setting (T-302).
  *
  * Every handler builds its dependencies per invocation, not at module load:
  * this file is imported by index.js on every cold start, including for
@@ -185,8 +192,13 @@ timer('reVerifyCertifications', 'REVERIFY_CERTIFICATIONS', '0 0 0 * * 0', (conte
   }).run();
 });
 
-timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 4 * * 5', async (context) => {
-  // Site-Main: `every friday 09:00` UTC; 04:00 CDT (03:00 CST) here.
+timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 9 * * 5', async (context) => {
+  // Site-Main: `every friday 09:00` UTC — the ONE upstream schedule that was
+  // declared in UTC, and the one this expression must not move. It read
+  // `0 0 4 * * 5` while the app clock was America/Chicago, chosen because
+  // 04:00 CDT is 09:00 UTC; on a UTC clock the same four hours would have
+  // silently retimed it to 04:00 UTC. 09:00 here is the upstream instant, and
+  // it no longer drifts an hour across DST the way the Chicago form did.
   const { createRssParser } = await import('../lib/rss/ingest.js');
   return createSkillsHubScrape({ store, parser: await createRssParser(), log: context }).run();
 });

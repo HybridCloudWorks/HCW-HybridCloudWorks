@@ -6,11 +6,33 @@
     Migration-Plan §6 step 7 and §7's scheduled-job gate. Timers are armed one
     at a time, and each must be observed firing once before the next is added.
 
-    The gate is not "did it run". It is "did it run at the intended Chicago
-    local time". `WEBSITE_TIME_ZONE = America/Chicago` is set on the app, and a
-    timer that fires five hours early passes a naive "fired once" check and
+    The gate is not "did it run". It is "did it run at the intended time".
+    A timer that fires at the wrong hour passes a naive "fired once" check and
     fails the real one — that is the documented trap, and it is invisible unless
-    something converts the timestamp deliberately.
+    something reads the offset deliberately.
+
+    The size and DIRECTION of that error are not fixed. It is whatever offset
+    an app-setting clock introduces: five hours in summer and six in winter for
+    America/Chicago, either sign depending on which way the drift goes, and a
+    different number entirely for any other zone someone sets. Writing "five
+    hours early" here would pin the trap to one instance of it and quietly
+    excuse the rest.
+
+    ==========================================================================
+    THE APP CLOCK IS UTC AS OF 2026-09-07 (#416). THE PASS CONDITION FLIPPED.
+    ==========================================================================
+    `WEBSITE_TIME_ZONE = America/Chicago` used to be set, so a `ScheduleStatus`
+    offset of `-05:00` was the proof this script was written to find and
+    `+00:00` was the failure. The owner decided all times in this app are UTC,
+    the setting is gone, and the two now read the other way round: **`+00:00`
+    is correct, and any non-zero offset means something re-introduced
+    `WEBSITE_TIME_ZONE` or `TZ`.**
+
+    That inverts a printed conclusion at the bottom of this file, which is why
+    the whole script was revisited rather than just the setting. Runs against
+    history from before 2026-09-07 will show `-05:00` and were correct then.
+    `functions/src/functions/timer-schedules-utc.test.js` is the guard that
+    fails in CI if the setting returns.
 
     ==========================================================================
     REWRITTEN 2026-08-29. THE PREVIOUS VERSION COULD NOT SUCCEED.
@@ -470,11 +492,13 @@ $timers | Sort-Object Name | Format-Table -AutoSize | Out-String | Write-Host
 # ---------------------------------------------------------------------------
 # The evidence
 # ---------------------------------------------------------------------------
-# `Trigger Details: ScheduleStatus: {"Last":"...-05:00","Next":"...-05:00"}` is
+# `Trigger Details: ScheduleStatus: {"Last":"...+00:00","Next":"...+00:00"}` is
 # written by the HOST on every invocation, armed or not, and its offsets are
-# already WEBSITE_TIME_ZONE. That is the comparison §7 asks for, delivered by
-# the platform rather than computed here — so a bug in this script's own
-# arithmetic cannot manufacture a pass.
+# the app clock itself. That is the comparison §7 asks for, delivered by the
+# platform rather than computed here — so a bug in this script's own arithmetic
+# cannot manufacture a pass. Since #416 the app clock is UTC, so the offset to
+# expect is `+00:00`; rows older than 2026-09-07 carry `-05:00` and were right
+# at the time.
 # ---------------------------------------------------------------------------
 # Since #321 the workspace no longer carries the rows this section reads
 # ---------------------------------------------------------------------------
@@ -621,12 +645,13 @@ else {
 # ---------------------------------------------------------------------------
 # The clock
 # ---------------------------------------------------------------------------
-# `Trigger Details: ScheduleStatus: {"Last":"...-05:00","Next":"...-05:00"}` is
+# `Trigger Details: ScheduleStatus: {"Last":"...+00:00","Next":"...+00:00"}` is
 # written by the HOST on every invocation, armed or not, and its offsets are
-# already WEBSITE_TIME_ZONE. That is the comparison §7 asks for, delivered by
-# the platform rather than computed here — so a bug in this script's own
-# arithmetic cannot manufacture a pass. Bounded to the ten most recent, because
-# the whole point is to read them, and ten is more than enough to see an offset.
+# the app clock itself. That is the comparison §7 asks for, delivered by the
+# platform rather than computed here — so a bug in this script's own arithmetic
+# cannot manufacture a pass. Since #416 the app clock is UTC, so the offset to
+# expect is `+00:00`. Bounded to the ten most recent, because the whole point is
+# to read them, and ten is more than enough to see an offset.
 Write-Step 'Schedule status, as the host itself reported it'
 $schedule = Invoke-WorkspaceQuery -ExpectColumns 'timerName', 'Message' -What 'the ScheduleStatus query' -Kql @"
 AppTraces
@@ -658,14 +683,17 @@ foreach ($r in $schedule) {
 if (-not $sawSchedule) { Write-Warn '  (none in this window)' }
 
 Write-Step 'How to read this'
-Write-Host 'NCRONTAB is {second} {minute} {hour} {day} {month} {day-of-week}, and the hour is'
-Write-Host 'interpreted in WEBSITE_TIME_ZONE (America/Chicago).'
+Write-Host 'NCRONTAB is {second} {minute} {hour} {day} {month} {day-of-week}, and since #416'
+Write-Host 'the hour is UTC: the app sets no WEBSITE_TIME_ZONE, so NCRONTAB gets the default.'
 Write-Host ''
 if ($sawSchedule) {
-    Write-Host 'The Last/Next offsets above are the host''s own words, and they are already local.'
-    Write-Host 'A daily 04:00 job whose Last reads 04:00:00-05:00 is CORRECT. One reading'
-    Write-Host '04:00:00+00:00 means WEBSITE_TIME_ZONE is NOT being applied and every ported'
-    Write-Host 'expression is off by five or six hours.'
+    Write-Host 'The Last/Next offsets above are the host''s own words, and they are the app clock.'
+    Write-Host 'A daily 04:00 job whose Last reads 04:00:00+00:00 is CORRECT. Any non-zero'
+    Write-Host 'offset means WEBSITE_TIME_ZONE or TZ has been re-introduced, and every'
+    Write-Host 'clock-dependent schedule is retimed by exactly that offset — read it off the'
+    Write-Host 'line above rather than assuming a figure, because it is whatever zone was set.'
+    Write-Host '(Before 2026-09-07 this read the other way round: -05:00 was the pass.'
+    Write-Host 'History from before that date is not a failure.)'
 }
 else {
     Write-Warn 'No ScheduleStatus row was seen, so the CLOCK is still unproven.'
@@ -680,6 +708,8 @@ Write-Host 'A RAN invocation is one whose traces carry no skip line — which is
 Write-Host 'sounds, since a dropped .User trace would look the same. Pair it with the timer''s'
 Write-Host 'own durable side effect (Cutover-Runbook, "Gate 4 needs two independent witnesses").'
 Write-Host ''
-Write-Host 'first/last are the Chicago local times of the earliest and latest invocation seen.'
+Write-Host 'first/last are the earliest and latest invocation seen, rendered in Chicago local'
+Write-Host 'time for the reader''s convenience only — the app clock is UTC and these are a'
+Write-Host 'display conversion, not evidence about the schedule. The offsets above are that.'
 Write-Host 'For a 5-minute timer they should straddle most of the window with no long gap.'
 

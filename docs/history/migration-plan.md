@@ -436,6 +436,58 @@ time and will drift an hour across DST, or be pinned with an explicit offset in 
 `every 24 hours` in Cloud Scheduler means "24 hours after deploy", which is an hour nobody chose;
 the NCRONTAB column below picks one. Change the hour, not the intent.
 
+> **The Zone column below is history as of 2026-09-07 (#416): the app clock is now UTC.**
+>
+> The two paragraphs above and the `Zone` and `NCRONTAB here` columns describe the world in
+> which `WEBSITE_TIME_ZONE = America/Chicago` was set on the Function App, so a bare hour in an
+> NCRONTAB expression meant Central. The owner decided on 2026-09-07 that all times in this app
+> are UTC. The setting was removed — it is also
+> [documented as unsupported on Flex Consumption](https://learn.microsoft.com/azure/azure-functions/functions-bindings-timer)
+> — so a bare hour is now a **UTC** hour, and every fixed-hour expression below fires five hours
+> earlier in absolute time than it did (six in CST). The rows are left exactly as ported; this
+> note is the correction.
+>
+> **Exactly one NCRONTAB expression changed in the code.** `scrapeSkillsHubRss` is the row this
+> section already flagged as "the one UTC schedule … the casualty": it was ported as
+> `0 0 4 * * 5` *because* 04:00 Central is 09:00 UTC, so leaving it alone would have moved the
+> one job whose intent was already UTC. It is now `0 0 9 * * 5` — the upstream instant, and no
+> longer drifting an hour across DST, which retires the "casualty" sentence above.
+>
+> **The §4.2 port table further down still reads `0 0 4 * * 5` for that row, and stays that
+> way.** It records what was ported in August 2026, which is the job of a history document, and
+> rewriting it would destroy the only evidence of why the expression was chosen. Read that table
+> as the August port and this note as what is live: for `scrapeSkillsHubRss` alone the two now
+> differ, and this note is the current one. Every other row in it is still the running schedule.
+>
+> | Timer | NCRONTAB (unchanged unless noted) | Fired (Central clock) | Fires now (UTC clock) | Move |
+> | --- | --- | --- | --- | --- |
+> | `cleanupTempStorage` | `0 0 0 * * *` | 05:00 UTC | 00:00 UTC | 5 h earlier |
+> | `cosmosExportScheduler` | `0 0 3 * * *` | 08:00 UTC | 03:00 UTC | 5 h earlier |
+> | `forgeScheduled` | `0 30 3 * * *` | 08:30 UTC | 03:30 UTC | 5 h earlier |
+> | `cleanupRejectedContent` | `0 0 4 * * *` | 09:00 UTC | 04:00 UTC | 5 h earlier |
+> | `cleanupUnusedCertImages` | `0 0 5 * * *` | 10:00 UTC | 05:00 UTC | 5 h earlier |
+> | `generateReviewerDigest` | `0 0 7 * * *` | 12:00 UTC | 07:00 UTC | 5 h earlier |
+> | `checkLiveLinks` | `0 0 6 * * 1` | Mon 11:00 UTC | Mon 06:00 UTC | 5 h earlier |
+> | `reVerifyCertifications` | `0 0 0 * * 0` | Sun 05:00 UTC | Sun 00:00 UTC | 5 h earlier |
+> | `scrapeSkillsHubRss` | **`0 0 4 * * 5` → `0 0 9 * * 5`** | Fri 09:00 UTC | Fri 09:00 UTC | **none — the point** |
+> | `syncRssFeeds` | `0 0 */2 * * *` | odd UTC hours | even UTC hours | 1 h phase, same cadence |
+> | `fetchPodcastFeeds` | `0 30 */2 * * *` | odd UTC hours :30 | even UTC hours :30 | 1 h phase, same cadence |
+> | `monitorPublishingPipeline` | `0 0 */6 * * *` | 05/11/17/23 UTC | 00/06/12/18 UTC | 1 h phase, same cadence |
+> | `fetchBlogListings` | `0 15 */6 * * *` | 05/11/17/23 UTC :15 | 00/06/12/18 UTC :15 | 1 h phase, same cadence |
+> | `cleanupSoftDeletedContent` | `0 0 */4 * * *` | 01/05/…/21 UTC | 00/04/…/20 UTC | 1 h phase, same cadence |
+> | `refreshPlaudToken` | `0 0 */12 * * *` | 05/17 UTC | 00/12 UTC | 5 h phase, same cadence |
+>
+> The four minute-interval timers — `publishScheduledContent` and `platformJobSweeper`
+> (`0 */15 * * * *`), `syncSocialCalendarScheduled` and `checkAgentHealth` (`0 */5 * * * *`) —
+> do not move at all: Central is a whole-hour offset from UTC, so a minute pattern fires on the
+> same instants in either zone. The "hours" moves above are CDT (UTC−5), which is the offset in
+> force on the decision date; in CST (UTC−6) the fixed-hour jobs move six hours instead of five,
+> the `*/2` and `*/6` timers do not move at all, `*/4` moves two hours and `*/12` six.
+>
+> `functions/src/functions/timer-schedules-utc.test.js` is the guard: it fails if
+> `WEBSITE_TIME_ZONE` or `TZ` reappears in `infra/*.tf`, and it pins every clock-dependent
+> schedule to the UTC time it is meant to mean.
+
 | Site-Main export | Schedule | Zone | NCRONTAB here | Status here |
 | --- | --- | --- | --- | --- |
 | `publishScheduledContent` | `*/15 * * * *` | Chicago | `0 */15 * * * *` | **implemented**, flag off |
@@ -883,6 +935,16 @@ Add for the migration:
 
   What arming proves is the *handler*, which is a different question and still
   owner-held, still one timer at a time.
+
+  > **2026-09-07 (#416): the clock this gate was written around is gone.**
+  > `WEBSITE_TIME_ZONE` is no longer set, so the app evaluates NCRONTAB in UTC
+  > and the `ScheduleStatus` offsets read `+00:00` rather than `-05:00`. The
+  > gate itself is unchanged in shape — it is still "did it fire at the
+  > intended time" and not "did it fire" — but the intended time is now the
+  > bare hour in the expression, and §4.2's note above lists which instants
+  > moved. `05-verify-timer.ps1` was updated in the same change; its old
+  > reading of a `+00:00` offset as proof the setting was being ignored is
+  > exactly backwards now.
 - **Cost gate — RETIRED as an exit criterion, 2026-08-29 (owner decision); replaced by a standing
   requirement.** It read "actual spend measured against USD 150 after one full week, before
   decommissioning". There is nothing left to decommission: GCP is dead and Azure is the production
@@ -917,7 +979,7 @@ nobody is updating is worse than an archived one nobody expects to be current.
 | Risk                                               | Severity | Mitigation                                                          |
 | -------------------------------------------------- | -------- | ------------------------------------------------------------------- |
 | ~~Telegram/webhook re-registration forgotten~~ | Closed 2026-08-28 | §6 step 6 / T-526. `getWebhookInfo` returns the Azure URL and `/help` answers in the chat. The risk was real and the mitigation worked; what this row got wrong at the end was the *state* — it read "now a deadline" for a step already taken |
-| ~~Cron syntax differences silently disable a job, or time zone shifts it~~ | Closed 2026-08-29 | **Owner decision: the configuration is as correct as it can be made without arming.** §4.2's timer table is ported, `WEBSITE_TIME_ZONE = America/Chicago` is set, and `scripts/cutover/05-verify-timer.ps1` can settle the clock from history whenever anyone wants it. Closed as a MIGRATION risk, not as engineering work: arming the timers is T-518 in [TODO.md](../repo/todo.md) and is unaffected by this row |
+| ~~Cron syntax differences silently disable a job, or time zone shifts it~~ | Closed 2026-08-29 | **Owner decision: the configuration is as correct as it can be made without arming.** §4.2's timer table is ported, `WEBSITE_TIME_ZONE = America/Chicago` **was** set at the time this row was closed — it has since been removed, see the 2026-09-07 note below — and `scripts/cutover/05-verify-timer.ps1` can settle the clock from history whenever anyone wants it. Closed as a MIGRATION risk, not as engineering work: arming the timers is T-518 in [TODO.md](../repo/todo.md) and is unaffected by this row. **Reopened and re-closed 2026-09-07 (#416):** the time zone did shift a job — not silently disabling one, but making six pieces of prose about the Cosmos exporter describe an instant five hours from the real one. The owner's answer was to make the app clock UTC, which is where §4.2's note above picks it up |
 | ~~Cost overrun from hourly resources~~ | Closed 2026-08-29 | **Owner decision: there is no longer a decision this risk feeds.** A migration risk exists to inform a go/no-go, and Azure is the permanent and only environment — an overrun changes what gets built, not where it runs. Architecture-Plan §3 removed the hourly resources by design. Staying inside budget continues as a standing requirement on every deployment; it is simply not a *migration* risk any more |
 | ~~Authorisation rules not faithfully re-implemented~~ | Closed | The server-side guard suite replaced `firestore.rules`; `route-inventory.test.js` fails on a route that reaches the database without a guard |
 | ~~AI handlers default to Vertex / ADC, which has no Azure equivalent~~ | Closed | §4.4 — `ai/router.js` resolves Anthropic → OpenAI → Gemini by key presence; Vertex is a disabled provider id, not a default |

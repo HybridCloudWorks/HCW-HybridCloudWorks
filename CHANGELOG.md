@@ -19,6 +19,54 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Every timer now runs on UTC; nine live jobs moved five hours earlier
+  (#416).** Owner decision: all times in this app are UTC. `WEBSITE_TIME_ZONE
+  = America/Chicago` was set app-wide on the Function App, so a bare NCRONTAB
+  hour meant Central — and six places in `infra/observability.tf`,
+  `infra/variables.tf`, `infra/functionapp.tf` and ADR 0028 said the Cosmos
+  exporter ran at "03:00 UTC" when it ran at 08:00 UTC in summer and 09:00 in
+  winter. The most expensive of the six is the `alert-cosmos-export-daily`
+  description, which is the sentence that arrives in the alert mail: an
+  operator reading it at 05:00 UTC would have gone looking for a run that was
+  not due for another three hours. The issue offered correcting the prose or
+  correcting the clock; the owner chose the clock, so those six sentences
+  became true rather than being rewritten.
+
+  **The setting was removed, not set to `"UTC"`.** UTC is already the platform
+  default — "The default time zone used with the CRON expressions is
+  Coordinated Universal Time (UTC)" — and Microsoft documents both
+  `WEBSITE_TIME_ZONE` and `TZ` as unsupported on the plan this app runs on:
+  "aren't currently supported when running on Linux in a Flex Consumption or
+  Consumption plan … can create SSL-related issues and cause metrics to stop
+  working for your app" (Learn, *Timer trigger for Azure Functions*, retrieved
+  2026-09-07). Setting it to `"UTC"` would have kept an unsupported setting on
+  an unsupported plan in exchange for nothing. Nothing in `functions/src`
+  formats a local time for a human — every date it derives comes from
+  `toISOString()` or a `getUTC*` method — so the app clock reached NCRONTAB
+  and the host's own log stamps and nothing else.
+
+  **`scrapeSkillsHubRss` is the one schedule that changed, so that it would
+  NOT move.** Its upstream schedule was `every friday 09:00` in UTC and it was
+  ported as `0 0 4 * * 5` *because* 04:00 Central is 09:00 UTC. Left alone it
+  would have retimed the one job whose intent was already UTC; it is now
+  `0 0 9 * * 5`, the same instant, and no longer an hour late every winter.
+  The nine fixed-hour jobs — `cleanupTempStorage`, `cosmosExportScheduler`,
+  `forgeScheduled`, `cleanupRejectedContent`, `cleanupUnusedCertImages`,
+  `generateReviewerDigest`, `checkLiveLinks`, `reVerifyCertifications` — all
+  moved five hours earlier in absolute time (six once CST starts), and the
+  six hour-interval timers kept their cadence and shifted phase. The four
+  minute-interval timers did not move at all. Migration-Plan §4.2 carries the
+  per-timer table of what moved, appended rather than rewritten.
+
+  `functions/src/functions/timer-schedules-utc.test.js` is the new guard. It
+  reads the real `app.timer()` registrations rather than the source text,
+  fails if `WEBSITE_TIME_ZONE` or `TZ` reappears in `infra/*.tf`, computes
+  which schedules depend on the app clock instead of trusting a list, and
+  requires each of them to carry the UTC time it is meant to mean.
+  `scripts/cutover/05-verify-timer.ps1` printed "`04:00:00+00:00` means
+  `WEBSITE_TIME_ZONE` is NOT being applied", which is now exactly backwards;
+  it prints the inverse, and says so.
+
 - **A publisher can give a published article the right slug, from the row where
   they already look at its URL (#400).** Publisher, not editor: this changes
   the URL a live article is served at, which is the same authority

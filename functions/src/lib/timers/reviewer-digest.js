@@ -1,5 +1,5 @@
 /**
- * reviewer-digest.js — the 07:00 Chicago snapshot of the review queue.
+ * reviewer-digest.js — the 07:00 UTC snapshot of the review queue.
  *
  * Ported from Site-Main `generateReviewerDigestSnapshot` (index.js, 088f458):
  * per-status queue counts (capped at 200 each, as the upstream `.limit(200)`

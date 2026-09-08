@@ -1117,7 +1117,8 @@ variable "schedulers_master_enabled" {
 
     Migration-Plan §6 step 7 arms timers ONE AT A TIME. Set this true first,
     then add timers to enabled_timers one per apply, each observed firing at
-    its intended Chicago local time before the next.
+    its intended UTC time before the next. (The app sets no WEBSITE_TIME_ZONE,
+    so every NCRONTAB hour is a UTC hour — owner decision 2026-09-07, #416.)
   EOT
   type        = bool
   default     = false
@@ -1131,8 +1132,9 @@ variable "enabled_timers" {
     explicitly, so a timer is never merely absent.
 
     Migration-Plan §6 step 7 turns these on ONE AT A TIME, each observed firing
-    once at the intended Chicago local time before the next is added. Set this
-    in the HCP Terraform workspace so a cutover flip is a variable edit and an
+    once at the intended UTC time before the next is added — the app clock is
+    UTC (#416), so a schedule's bare hour is the hour to expect. Set this in
+    the HCP Terraform workspace so a cutover flip is a variable edit and an
     apply, not a pull request.
 
     schedulers_master_enabled above is a separate master kill switch and is

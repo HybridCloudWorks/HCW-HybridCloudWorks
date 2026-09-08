@@ -702,11 +702,18 @@ line, which is what retroactively settled Wave 1 — and it now warns at the top
 of its invocation section when `host.json` gates `Function` above Information,
 so a zero after the cut reads as "instrument off" rather than "timer dead".
 
-The gate is not "did it run". It is "did it run at the intended **Chicago**
-local time". That clock half came from the host's `ScheduleStatus` line and is
-not available from a side effect; for a timer on local hours, compare the
-witness stamp against the schedule by hand — a `refreshedAt` of `05:00Z` on a
-`0 0 */2` timer is 00:00 CDT, which is the even-hour tick it should be.
+The gate is not "did it run". It is "did it run at the intended time". That
+clock half came from the host's `ScheduleStatus` line and is not available from
+a side effect; for a timer on fixed hours, compare the witness stamp against the
+schedule by hand.
+
+> **Amended 2026-09-07 (#416): the intended time is UTC.** This paragraph read
+> "the intended **Chicago** local time", and its worked example was "a
+> `refreshedAt` of `05:00Z` on a `0 0 */2` timer is 00:00 CDT, which is the
+> even-hour tick it should be". `WEBSITE_TIME_ZONE` is no longer set, so the
+> app evaluates NCRONTAB in UTC: the same timer now ticks on **even UTC**
+> hours, and `05:00Z` would be the failure the old example called a pass.
+> Migration-Plan §4.2 lists every schedule that moved.
 
 ### Superseded on 2026-09-02: the remaining timers are armed in waves
 
@@ -779,10 +786,14 @@ Function.syncSocialCalendarScheduled       Trigger Details: ScheduleStatus: {"La
 Function.syncSocialCalendarScheduled.User  [syncSocialCalendarScheduled] disabled — skipping
 ```
 
-`Last` and `Next` are already in **Chicago local time**, which is the
+`Last` and `Next` are already in the **app's own clock**, which is the
 comparison §7 actually asks for — `AppRequests` would not have given that. The
 `.User` row is the handler's own `context.log`, and it is how you tell "the
 timer fired and the flag gate skipped it" from "the timer never fired".
+
+Since #416 that clock is UTC, so those offsets read `+00:00`; the `-05:00` in
+the sample above is what the same rows looked like before 2026-09-07, and any
+non-zero offset seen today means `WEBSITE_TIME_ZONE` or `TZ` has come back.
 
 **Query the workspace, never `az monitor app-insights query --app <appId>`.**
 The component is workspace-based with the workspace in another subscription, and

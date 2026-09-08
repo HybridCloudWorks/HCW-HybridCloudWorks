@@ -963,14 +963,28 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "edge_probe_availabili
 #
 # The exporter behind FEATURE_FLAG_COSMOS_EXPORT (functionapp.tf) runs at
 # 03:00 UTC every day: a full read of every exported container on Sunday, the
-# change feed since the previous run on the other six. A run that completes
-# emits one Application Insights custom event named cosmosExportCompleted
-# with customDimensions.mode set to "full" or "delta" — nothing else about
-# the run is in the event, and nothing in these queries wants more. Success
-# is silent and only absence pages, for the reason the edge-probe rule above
-# gives: a dead timer, a flag left off, a poisoned queue and a failed write
-# all produce NO rows, and a rule that counted failures reads every one of
-# them as health.
+# change feed since the previous run on the other six.
+#
+# "03:00 UTC" IS LOAD-BEARING IN THIS FILE AND WAS ONCE UNTRUE. The schedule
+# is the bare NCRONTAB hour `0 0 3 * * *`, which means whatever the app clock
+# means. Until 2026-09-07 that clock was WEBSITE_TIME_ZONE = America/Chicago,
+# so the exporter actually ran at 08:00 UTC in summer and 09:00 in winter
+# while every sentence here — and the daily rule's DESCRIPTION, which is what
+# arrives in the alert mail — said 03:00 UTC. An operator reading that at
+# 05:00 UTC would have gone looking for a run that was not due for another
+# three hours (#416). The owner's answer was that all times in this app are
+# UTC: the setting is gone, the app clock is the platform default, and these
+# sentences became true rather than being rewritten. The guard against the
+# setting coming back is
+# functions/src/functions/timer-schedules-utc.test.js.
+#
+# A run that completes emits one Application Insights custom event named
+# cosmosExportCompleted with customDimensions.mode set to "full" or "delta"
+# — nothing else about the run is in the event, and nothing in these queries
+# wants more. Success is silent and only absence pages, for the reason the
+# edge-probe rule above gives: a dead timer, a flag left off, a poisoned queue
+# and a failed write all produce NO rows, and a rule that counted failures
+# reads every one of them as health.
 #
 # TWO DAYS IS AS FAR BACK AS A LOG ALERT CAN LOOK, and both rules are shaped
 # by that. Azure caps a log search alert's query time range at two days —

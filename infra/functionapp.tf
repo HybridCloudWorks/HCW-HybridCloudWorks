@@ -58,14 +58,14 @@ locals {
   timer_catalogue = {
     PUBLISH_SCHEDULED_CONTENT    = "publishScheduledContent — publishes content whose scheduledPublishDate is due"
     SYNC_RSS_FEEDS               = "syncRssFeeds — RSS ingest, every 2 hours"
-    FORGE_SCHEDULED              = "forgeScheduled — nightly content forge run"
+    FORGE_SCHEDULED              = "forgeScheduled — daily 03:30 UTC content forge run"
     MONITOR_PUBLISHING_PIPELINE  = "monitorPublishingPipeline — publishing watchdog, every 6 hours"
-    GENERATE_REVIEWER_DIGEST     = "generateReviewerDigest — daily 07:00 reviewer digest e-mail"
-    CHECK_LIVE_LINKS             = "checkLiveLinks — weekly Monday link check"
-    CLEANUP_REJECTED_CONTENT     = "cleanupRejectedContent — daily 04:00, deletes rejected documents"
+    GENERATE_REVIEWER_DIGEST     = "generateReviewerDigest — daily 07:00 UTC reviewer digest e-mail"
+    CHECK_LIVE_LINKS             = "checkLiveLinks — weekly Monday 06:00 UTC link check"
+    CLEANUP_REJECTED_CONTENT     = "cleanupRejectedContent — daily 04:00 UTC, deletes rejected documents"
     CLEANUP_SOFT_DELETED_CONTENT = "cleanupSoftDeletedContent — every 4 hours, purges soft-deleted documents (dry-run unless CONTENT_HARD_DELETE; a mark with no recorded origin is never deleted)"
-    REVERIFY_CERTIFICATIONS      = "reVerifyCertifications — weekly Sunday certification re-verify"
-    SCRAPE_SKILLS_HUB_RSS        = "scrapeSkillsHubRss — weekly Friday Skills Hub scrape"
+    REVERIFY_CERTIFICATIONS      = "reVerifyCertifications — weekly Sunday 00:00 UTC certification re-verify"
+    SCRAPE_SKILLS_HUB_RSS        = "scrapeSkillsHubRss — weekly Friday 09:00 UTC Skills Hub scrape"
     REFRESH_PLAUD_TOKEN          = "refreshPlaudToken — Plaud OAuth token refresh, every 12 hours"
     CHECK_AGENT_HEALTH           = "checkAgentHealth — VPS agent heartbeat check, every 5 minutes"
     FETCH_PODCAST_FEEDS          = "fetchPodcastFeeds — podcast ingest, every 2 hours"
@@ -74,8 +74,8 @@ locals {
     # delta import means importing over rows this timer is actively rewriting.
     SYNC_SOCIAL_CALENDAR = "syncSocialCalendarScheduled — Publer calendar sync, every 5 minutes. NOT before the delta import"
     # T-302: both stay dry-run until their matching *_DELETE setting is true.
-    CLEANUP_TEMP_STORAGE       = "cleanupTempStorage — daily, deletes temp blobs (dry-run unless TEMP_STORAGE_CLEANUP_DELETE)"
-    CLEANUP_UNUSED_CERT_IMAGES = "cleanupUnusedCertImages — daily 05:00, deletes unused cert images (dry-run unless CERT_IMAGE_CLEANUP_DELETE)"
+    CLEANUP_TEMP_STORAGE       = "cleanupTempStorage — daily 00:00 UTC, deletes temp blobs (dry-run unless TEMP_STORAGE_CLEANUP_DELETE)"
+    CLEANUP_UNUSED_CERT_IMAGES = "cleanupUnusedCertImages — daily 05:00 UTC, deletes unused cert images (dry-run unless CERT_IMAGE_CLEANUP_DELETE)"
     PLATFORM_JOB_SWEEPER       = "platformJobSweeper — re-enqueues jobs left queued by a failed output binding (T-322)"
   }
 
@@ -476,13 +476,35 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 
     "NODE_ENV" = "production"
 
-    # Timer clock. NCRONTAB on Linux Flex Consumption evaluates in UTC unless
-    # told otherwise; 7 of Site-Main's 16 schedules are declared in
-    # America/Chicago (the Friday 09:00 digest, the overnight publishers).
-    # Porting the expressions verbatim without this would shift every one of
-    # them by five or six hours depending on DST. Migration-Plan §4 carries the
-    # per-timer table; the ported NCRONTAB expressions assume this setting.
-    "WEBSITE_TIME_ZONE" = "America/Chicago"
+    # Timer clock: UTC, and there is deliberately NO app setting here.
+    #
+    # Owner decision 2026-09-07 (#416): all times in this app are UTC. Every
+    # NCRONTAB hour in functions/src/functions/ is therefore a UTC hour, and
+    # the six places that already claimed "03:00 UTC" for the Cosmos exporter
+    # became true rather than wrong.
+    #
+    # WEBSITE_TIME_ZONE = "America/Chicago" used to sit on this line, so that
+    # the 7 of Site-Main's 16 schedules declared in Central could be ported
+    # verbatim. It was removed rather than re-set to "UTC" for two reasons.
+    # UTC is already the platform default — "The default time zone used with
+    # the CRON expressions is Coordinated Universal Time (UTC)" — so the
+    # setting would buy nothing. And Microsoft documents it as UNSUPPORTED on
+    # the plan this app runs on: "WEBSITE_TIME_ZONE and TZ aren't currently
+    # supported when running on Linux in a Flex Consumption or Consumption
+    # plan. In this case, the setting WEBSITE_TIME_ZONE or TZ can create
+    # SSL-related issues and cause metrics to stop working for your app."
+    # (learn.microsoft.com/azure/azure-functions/functions-bindings-timer,
+    # "NCRONTAB time zones", retrieved 2026-09-07; the support table lists
+    # Linux Premium and Dedicated only.) Setting it to "UTC" would keep an
+    # unsupported setting on an unsupported plan in exchange for nothing.
+    #
+    # Nothing in functions/src formats a local time for a human: every date it
+    # derives comes from toISOString() or a getUTC* method, so the app clock
+    # reaches NCRONTAB and the host's own log stamps and nothing else.
+    #
+    # timer-schedules-utc.test.js is the guard — it fails if this setting (or
+    # TZ) returns, and it pins each clock-dependent schedule to the UTC time
+    # it is meant to mean.
 
     # T-206, last step. With "1" the public content list asks Cosmos for the
     # NEWEST N documents (ORDER BY c.cp_sortDate DESC) instead of an arbitrary
