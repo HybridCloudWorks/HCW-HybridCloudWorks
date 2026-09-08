@@ -13,9 +13,11 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
 - Several scripts are **workflow contracts** — they're invoked by a workflow
   with specific inputs/outputs, and some have invocation tests pinning that
   (`check-unresolved-secrets.invocation.test.mjs`,
-  `manifest-workflow.test.mjs`, `workflow-write-permissions.test.mjs`,
-  `oidc-subjects.test.mjs`). When a script's CLI or output changes, find and
-  review the workflow that calls it in the same pass.
+  `check-workflow-health.invocation.test.mjs`, `manifest-workflow.test.mjs`,
+  `workflow-write-permissions.test.mjs`, `oidc-subjects.test.mjs`). When a
+  script's CLI or output changes, find and review the workflow that calls it
+  in the same pass — a script that writes its refusal to stderr and a job that
+  captures only stdout each look correct alone.
 - Scripts that hit Azure (`smoke-deployed.mjs`, container-spec generation)
   use `@azure/identity` — no keys, no connection strings. Scripts that hit
   GitHub use the app-token helper (`github-app-token.mjs`), not PATs.

@@ -145,7 +145,17 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail
-          report=$(node scripts/check-workflow-health.mjs)
+          # `2>&1` IS LOAD-BEARING. Every exit-2 path in the script writes with
+          # console.error and nothing to stdout: the usage banner, the
+          # paginated-listing refusal, the run-filter refusal. Without the
+          # redirect this captured 0 bytes on exit 2 — measured — so the job
+          # went red with a BLANK step summary, in the one case an operator most
+          # needs to read why. Caught in review on this PR;
+          # scripts/check-workflow-health.invocation.test.mjs is the tripwire.
+          report=$(node scripts/check-workflow-health.mjs 2>&1)
+          # Immediately, and from the assignment rather than from a pipeline.
+          # `node ... | tee` would report tee's status, which is always 0 — a
+          # monitor that can never fail.
           status=$?
           # Both destinations: the summary is readable from the mobile app, and
           # stdout is what the REST logs API exposes. verify-alert-state.yml's

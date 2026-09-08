@@ -73,9 +73,18 @@ This project has not cut a tagged release; entries are grouped under
   "a workflow has been failing since August" are different findings, and one
   job conclusion would merge them into a red X that says neither.
 
+  **The job captures stderr, and that is load-bearing.** Every exit-2 path in
+  the script writes with `console.error` and nothing to stdout, while the job
+  captured the report with `report=$(node ...)`. Measured: exit 2, zero bytes
+  captured — a red job with a blank step summary, in the one case an operator
+  most needs to read why. The invocation now redirects with `2>&1`, and
+  `check-workflow-health.invocation.test.mjs` pins both that and the
+  capture-then-read-`$?` shape, because `node ... | tee` would report tee's
+  status and never fail.
+
   Covered by `scripts/check-workflow-health.test.mjs` (36 tests, real run
-  histories as fixtures) and one case in `entrypoint-guards.test.mjs`; the
-  suite goes 300 → 337. Proven load-bearing by mutation: implementing the
+  histories as fixtures), `check-workflow-health.invocation.test.mjs` (4), and
+  one case in `entrypoint-guards.test.mjs`; the suite goes 300 → 341. Proven load-bearing by mutation: implementing the
   stricter `broken` rule failed four tests, two of them written for earlier
   review rounds, with `expected 'unproven' to be 'broken'` and the demoted
   workflow printing `2 run(s), none of which reached a verdict`; making the
