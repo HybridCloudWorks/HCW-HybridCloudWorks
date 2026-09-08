@@ -335,3 +335,38 @@ describe('readTuning — the wiring, not just the helper', () => {
     expect(Number.isFinite(got.staleDays)).toBe(true);
   });
 });
+
+describe('the messages say what was actually measured', () => {
+  const now = new Date('2026-09-08T00:00:00Z');
+
+  it('does not call a cancellation a failure when dating recent activity', () => {
+    // ageDays comes from the newest run of ANY kind. A message saying "the
+    // newest failure is 1d old" when the newest failure is 30d old and the
+    // 1d-old run was cancelled claims a failure that does not exist.
+    // Caught in review on #426, after the age source changed two commits
+    // earlier and this string was not swept with it.
+    const got = assessWorkflow(
+      {
+        path: '.github/workflows/x.yml',
+        runs: [
+          { conclusion: 'failure', created_at: '2026-08-09T00:00:00Z' },
+          { conclusion: 'cancelled', created_at: '2026-09-07T00:00:00Z' },
+        ],
+      },
+      { now, staleDays: 10 }
+    );
+    expect(got.why).not.toContain('newest failure');
+    expect(got.why).toContain('newest run of any kind');
+  });
+
+  it('says the same thing in the broken message', () => {
+    const got = assessWorkflow(
+      {
+        path: '.github/workflows/x.yml',
+        runs: [{ conclusion: 'failure', created_at: '2026-08-09T00:00:00Z' }],
+      },
+      { now, staleDays: 10 }
+    );
+    expect(got.why).toContain('newest attempt of any kind');
+  });
+});

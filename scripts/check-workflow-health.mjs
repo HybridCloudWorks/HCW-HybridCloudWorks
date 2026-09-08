@@ -140,7 +140,7 @@ export function assessWorkflow(workflow, { now, staleDays }) {
     return {
       path: workflow.path,
       verdict: 'unproven',
-      why: `failing, but the newest failure is ${ageDays.toFixed(1)}d old — inside the ${staleDays}d window, so this is work in progress`,
+      why: `failing, and the newest run of any kind is ${ageDays.toFixed(1)}d old — inside the ${staleDays}d window, so this is work in progress`,
       ageDays,
     };
   }
