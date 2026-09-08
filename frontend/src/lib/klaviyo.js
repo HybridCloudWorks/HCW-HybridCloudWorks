@@ -41,8 +41,14 @@ export const SERVICE = 'Klaviyo';
 /**
  * Reach the collection inside a Klaviyo body.
  *
+ * `null` rather than `[]` for a shape it does not recognise, because the
+ * caller has to tell "unreadable" from "empty" — that distinction is the whole
+ * point of this module, and returning an empty array here would erase it one
+ * layer below where it is decided.
+ *
  * @param {unknown} body - the upstream body, already out of the envelope
- * @returns {unknown} the array, or whatever was found so the caller can reject it
+ * @returns {unknown[] | null} the collection, or null if the shape is not one
+ *   this page recognises
  */
 export function pickKlaviyoCollection(body) {
   if (Array.isArray(body)) return body;
