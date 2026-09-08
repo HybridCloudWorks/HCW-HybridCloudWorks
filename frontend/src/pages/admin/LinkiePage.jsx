@@ -541,14 +541,31 @@ function ConnectionTab({ onStatusChange }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button onClick={handleTest} disabled={testing} className="gap-2">
-            {testing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Test Connection
-          </Button>
+          {/*
+            The button and the link share a flex row. `space-y-4` sets
+            margin-top on a following sibling, and both render as `inline-flex`
+            — so with no result panel between them they land on the same line
+            with no separation at all. The result panel stays outside the row,
+            as its own block child, because it is a full-width message.
+          */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Button onClick={handleTest} disabled={testing} className="gap-2">
+              {testing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Test Connection
+            </Button>
+            <a
+              href="https://linkie.bio/dashboard"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+            >
+              Manage your Linkie <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
           {result && (
             <div
               className={`flex items-start gap-2 p-3 rounded-lg border text-sm ${
@@ -572,14 +589,6 @@ function ConnectionTab({ onStatusChange }) {
               </div>
             </div>
           )}
-          <a
-            href="https://linkie.bio/dashboard"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-          >
-            Manage your Linkie <ExternalLink className="h-3.5 w-3.5" />
-          </a>
         </CardContent>
       </Card>
     </div>
