@@ -121,10 +121,17 @@ export function readProxyBody(service, response) {
  * operator seeing an empty mailing list concludes the audience is empty —
  * the exact wrong conclusion, and an expensive one.
  *
+ * There are THREE ways to get an empty list and only one of them is an empty
+ * audience. A 2xx whose body this page cannot read is the third, and it
+ * reports as an error rather than as emptiness: the call succeeded, so
+ * `failed` is false, but nothing was learned about the audience and saying
+ * "there is nothing there" would be a claim we cannot support.
+ *
  * @param {string} service
  * @param {unknown} response
  * @param {(body: unknown) => unknown} [pick] - reach the array inside the
- *   upstream body when it is not the body itself
+ *   upstream body when it is not the body itself; return a non-array to say
+ *   the shape was not recognised
  * @returns {{ items: unknown[], error: string }}
  */
 export function readProxyList(service, response, pick = (body) => body) {
@@ -136,5 +143,11 @@ export function readProxyList(service, response, pick = (body) => body) {
     return { items: [], error: describeProxyFailure(service, unwrapped) };
   }
   const picked = pick(unwrapped.body);
-  return { items: Array.isArray(picked) ? picked : [], error: '' };
+  if (!Array.isArray(picked)) {
+    return {
+      items: [],
+      error: `${service} answered ${unwrapped.status || '2xx'} with a body this page cannot read`,
+    };
+  }
+  return { items: picked, error: '' };
 }

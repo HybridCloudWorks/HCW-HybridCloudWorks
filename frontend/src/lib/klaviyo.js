@@ -33,7 +33,7 @@
  * each depth is a shape that actually occurs, and anything else yields an
  * empty list with an error rather than a silent zero.
  */
-import { readProxyBody, readProxyList, unwrapProxy } from '@/lib/integrationEnvelope';
+import { readProxyList } from '@/lib/integrationEnvelope';
 
 /** The operator-facing name, used in every message this module produces. */
 export const SERVICE = 'Klaviyo';
@@ -69,21 +69,20 @@ export function klaviyoCollection(response) {
  * The collection, or a throw — for Test Connection and the connected
  * indicator, where "not ok" must never pass for success.
  *
- * A 2xx whose body is not a collection still throws: the connection test
- * claims Klaviyo answered *and was understood*, and a body this page cannot
- * read is not a working connection even when the credential is fine.
+ * Built on `klaviyoCollection` rather than beside it, so the throwing and
+ * non-throwing readers cannot disagree about what counts as a failure or word
+ * it differently. A 2xx whose body is not a collection is a failure to both:
+ * the connection test claims Klaviyo answered *and was understood*, and a body
+ * this page cannot read is not a working connection even when the credential
+ * is fine.
  *
  * @param {unknown} response
  * @returns {unknown[]}
  * @throws {Error} unconfigured, refused, failed, or an unreadable body
  */
 export function requireKlaviyoCollection(response) {
-  const body = readProxyBody(SERVICE, response);
-  const items = pickKlaviyoCollection(body);
-  if (!items) {
-    const { status } = unwrapProxy(response);
-    throw new Error(`${SERVICE} answered ${status || '2xx'} with a body this page cannot read`);
-  }
+  const { items, error } = klaviyoCollection(response);
+  if (error) throw new Error(error);
   return items;
 }
 

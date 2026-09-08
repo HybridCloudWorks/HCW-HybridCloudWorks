@@ -116,8 +116,12 @@ describe('readProxyList', () => {
     expect(error).toBe('');
   });
 
-  it('yields an empty list rather than a non-array when the shape is wrong', () => {
-    const { items } = readProxyList('Klaviyo', { ok: true, status: 200, data: { nope: 1 } });
+  it('calls an unreadable 2xx an error, not an empty result', () => {
+    // The third way to get an empty list, and the one that is not an empty
+    // audience. The call succeeded, so `failed` is false — but nothing was
+    // learned, and "there is nothing there" is a claim we cannot support.
+    const { items, error } = readProxyList('Klaviyo', { ok: true, status: 200, data: { nope: 1 } });
     expect(items).toEqual([]);
+    expect(error).toBe('Klaviyo answered 200 with a body this page cannot read');
   });
 });

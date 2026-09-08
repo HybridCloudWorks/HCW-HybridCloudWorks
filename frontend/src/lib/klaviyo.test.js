@@ -61,6 +61,23 @@ describe('klaviyoCollection', () => {
     expect(error).toBe('');
   });
 
+  it('reports an unreadable 2xx body as an error rather than an empty audience', () => {
+    // Three ways to get an empty list; only one of them is an empty audience.
+    // A body this page cannot parse says nothing about the audience, so
+    // rendering "No lists found" would be a claim the data does not support.
+    const { items, error } = klaviyoCollection(envelope(true, 200, { unexpected: 'shape' }));
+    expect(items).toEqual([]);
+    expect(error).toBe('Klaviyo answered 200 with a body this page cannot read');
+  });
+
+  it('agrees with requireKlaviyoCollection about what counts as a failure', () => {
+    // The throwing and non-throwing readers are one implementation, so a
+    // future change cannot make Test Connection and the Lists tab disagree
+    // about whether the same response worked.
+    const unreadable = envelope(true, 200, { unexpected: 'shape' });
+    expect(() => requireKlaviyoCollection(unreadable)).toThrow(klaviyoCollection(unreadable).error);
+  });
+
   it('reports an unconfigured key without calling it a fault', () => {
     const { error } = klaviyoCollection({
       ok: false,
