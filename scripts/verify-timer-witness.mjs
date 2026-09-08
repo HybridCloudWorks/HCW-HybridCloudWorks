@@ -30,6 +30,49 @@
  * the last scheduled tick. No cron parser here on purpose: the schedule is
  * something the operator already knows, and a parser is a second thing to be
  * wrong about.
+ *
+ * ===========================================================================
+ * HOW TO PROVE THE APP CLOCK, NOW THAT NOTHING PRINTS IT
+ * ===========================================================================
+ * Kept here on 2026-09-08, when `scripts/cutover/05-verify-timer.ps1` was
+ * retired. That script proved the clock by reading the host's own
+ * `Trigger Details: ScheduleStatus: {"Last":"...+00:00"}` line out of
+ * AppTraces, where the offset was the app clock stated by the platform. Since
+ * #321 dropped host.json's `Function` category to Warning to stay under the
+ * workspace's 0.25 GB/day cap, the host writes no such line: measured
+ * 2026-09-08, 4,179 AppTraces rows in 24 hours and NOT ONE containing
+ * `ScheduleStatus`. The instrument is off, and turning it back on costs the
+ * cap. So the method below replaces it, and it needs no verbosity at all.
+ *
+ * COMPARE OBSERVED FIRING TIMES AGAINST THE SCHEDULE, AND READ THE OFFSET.
+ * Pick a timer whose NCRONTAB fires at a fixed hour — not a 5-minute timer,
+ * which fires at :00 :05 :10 in every zone on earth and can therefore never
+ * prove anything about the clock, however many times you watch it. Take its
+ * witness timestamps from this script over a window that spans several fires.
+ * The gap between the scheduled hour and the observed hour IS the app clock's
+ * offset from UTC.
+ *
+ * The worked example, which is why this paragraph is trustworthy rather than
+ * plausible. `fetchPodcastFeeds` has an hour field with a step of 2 and a
+ * minute field of 30 — every second hour at half past; read the literal off
+ * schedulers.js, because writing an NCRONTAB step in a block comment ends the
+ * comment. Its observed fires either side of #416, the change that removed
+ * `WEBSITE_TIME_ZONE = America/Chicago`:
+ *
+ *     2026-09-07T23:30Z   odd UTC hour   ← America/Chicago (18:30 local, even)
+ *     2026-09-08T01:30Z   odd UTC hour   ← America/Chicago (20:30 local, even)
+ *     2026-09-08T04:30Z   even UTC hour  ← UTC, after the switch
+ *
+ * A step of 2 fires on EVEN hours of whatever clock the host holds. Under a
+ * UTC-5 offset those even local hours land on odd UTC hours, and the parity
+ * flip at 04:30Z is the switch itself, visible without a single trace row. Any
+ * timer with an even-hour or fixed-hour schedule gives the same reading.
+ *
+ * Read the expected schedule from `functions/src/functions/schedulers.js`, and
+ * note that `functions/src/functions/timer-schedules-utc.test.js` is the CI
+ * guard that fails if `WEBSITE_TIME_ZONE` or `TZ` is re-introduced — so this
+ * is a way to confirm the clock from outside, not the only thing standing
+ * between the estate and a silent retiming.
  */
 
 import process from 'node:process';

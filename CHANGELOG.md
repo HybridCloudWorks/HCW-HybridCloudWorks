@@ -17,11 +17,96 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Removed
+
+- **Two workflows and the spent half of `scripts/cutover/`, after an audit of
+  all nineteen.** Owner instruction 2026-09-08: "if the ps1 is no longer
+  needed, we need to clean that workflow — also any other workflow that is
+  not needed has to go". Each removal below is a workflow that had already
+  finished, or one that could not succeed by its own design. Everything else
+  was kept, including two that looked dead and are not.
+
+  **`validate-deployed.yml` — twenty-one days red, structurally.** Dispatched
+  twice on 2026-08-18 and failed both times; never run again. Both jobs fail
+  for one reason: they run on a GitHub-hosted runner, and through Cloudflare a
+  datacenter IP is answered by Bot Fight Mode with a 403 while direct to
+  origin the origin lock answers 403. The `surface` job asserts
+  `test "$code" = "200"` against the apex, so it cannot pass either — the
+  deployment runbook's claim that it "still runs the DNS, TLS and
+  frontend-surface job usefully" is contradicted by its own last run, where
+  that job also failed. `deploy-functions.yml` depends on exactly this
+  behaviour: it curls the same URL from a runner and FAILS the deploy on a
+  200, which is how the origin lock is proven. The checks themselves are not
+  lost — they are `docs/runbooks/edge-dns-verification.md` and
+  `node scripts/smoke-deployed.mjs`, both run from an operator machine
+  Cloudflare admits. The script is untouched and still has its own tests.
+
+  **`retire-wiki.yml` — a one-shot that ran, whose target no longer exists.**
+  It overwrote all 141 Wiki pages with pointers to the docs site on
+  2026-09-06 (dry run, then the real one). The Wiki feature is now off in
+  repository settings — measured `has_wiki: false` on 2026-09-08 — so its
+  first step, `git clone ...wiki.git`, could not succeed if dispatched.
+  `scripts/docs/wiki-redirects.json` is deliberately KEPT: ADR 0027 cites it
+  as the record of what moved where, and that sentence should stay true.
+
+  **`scripts/cutover/05-verify-timer.ps1` and its `workspace-query` helpers.**
+  The script proved a timer fired at its intended time by reading
+  `Trigger Details: ScheduleStatus` from Log Analytics. Two owner decisions
+  took that away from opposite directions: #321 dropped `host.json`'s
+  `Function` category to Warning to stay under the workspace's 0.25 GB/day
+  cap, so the host stopped writing the line (measured 2026-09-08: 4,179
+  `AppTraces` rows in 24 hours, zero containing `ScheduleStatus`); and #345
+  closed the gate it served outright — "all 18 timers are armed and the
+  per-wave observation read is no longer a gate". A tool whose instrument is
+  switched off and whose question has been answered is not waiting for
+  better days.
+
+  **The clock method survives, in the successor.** `verify-timer-witness.mjs`
+  now carries it: compare a fixed-hour timer's observed firing times against
+  its schedule and read the offset, which needs no host verbosity at all.
+  The worked example is `fetchPodcastFeeds` either side of #416 — fires at
+  23:30Z and 01:30Z (odd UTC hours, so an even-numbered Central hour) and
+  then 04:30Z (even, so UTC). The parity flip is the clock change, visible
+  without a single trace row.
+
+  **Two CI steps and one test file went with them, said plainly rather than
+  quietly.** `repository-policy.yml` no longer runs
+  `scripts/cutover/workspace-query.tests.ps1` — a STEP inside
+  `validate-structure`, never the job, so the required context
+  "Validate root and documentation policy" is unchanged.
+  `scripts/powershell-hygiene.test.mjs` (5 tests) was deleted: every one of
+  its assertions read the deleted `.ps1` to pin its skip regex against the
+  JavaScript log lines, so it had no subject left. And
+  `workflow-write-permissions.test.mjs` lost its only `ALLOWED` entry, which
+  TIGHTENS it: the assertion now reads "no workflow in this repository holds
+  `contents: write`" rather than "exactly `retire-wiki.yml` does".
+
+  **What was examined and KEPT**, so the audit does not get repeated.
+  `heal-computed-properties.yml` stays despite the standing "no healers"
+  principle, because the wipe is still real at source: the content and blogs
+  containers are still `azurerm_cosmosdb_sql_container`
+  (`infra/cosmos.tf:243`), that resource still cannot express
+  `computedProperties`, and `PUBLIC_LIST_SQL_ORDER = "1"` is live
+  (`infra/functionapp.tf:518`), so an unhealed wipe breaks the public content
+  list. It can go the day the two containers move to `azapi_resource`.
+  `tfc-plan-check.yml` stays: its 2026-08-31 red was the `Report` step
+  emitting a verdict, which is what that step is for, not a broken workflow.
+  `verify-alert-state.yml` stays: read-only, dispatch-only, green on
+  2026-08-30, and the only way to see `autoMitigate`, which is invisible from
+  the repository and from the TFC run list. In `scripts/cutover/`,
+  `06-seed-secret.ps1` is named as the break-glass path by
+  `docs/runbooks/deployment-runbook.md` and
+  `docs/standards/variables-and-secrets.md`; `04-telegram-webhook.ps1` is the
+  remediation `functions/src/lib/secret-catalog.js` tells an operator to run
+  after a bot-token rotation; and `01-entra-spa.ps1` is parameterised for
+  granting the Admin app role to a named user, which is a recurring operation
+  with no other tool. None is spent.
+
 ### Added
 
 - **`scripts/check-workflow-health.mjs` — the guard that would have caught
-  the three weeks.** Split out of #426, which retires the workflow that
-  prompted it. `validate-deployed.yml` explained in its own header why it
+  the three weeks.** Split out of #426, which retired the workflow that
+  prompted it on 2026-09-08. `validate-deployed.yml` explained in its own header why it
   could not pass from a GitHub-hosted runner, and still sat in
   `.github/workflows/` from 2026-08-18 to 2026-09-08: the knowledge was not
   missing, nothing was reading it. This reads run history from the Actions
@@ -97,14 +182,22 @@ This project has not cut a tagged release; entries are grouped under
 
   Covered by `scripts/check-workflow-health.test.mjs` (38 tests, real run
   histories as fixtures), `check-workflow-health.invocation.test.mjs` (4), and
-  one case in `entrypoint-guards.test.mjs`; the suite goes 300 → 343. Proven load-bearing by mutation: implementing the
-  stricter `broken` rule failed four tests, two of them written for earlier
-  review rounds, with `expected 'unproven' to be 'broken'` and the demoted
-  workflow printing `2 run(s), none of which reached a verdict`; making the
-  message claim "every sampled run failed" failed the arithmetic test; and
-  reverting the entry-point guard to the `file://` template form failed with
-  `expected +0 to be 2`, the script exiting 0 on Windows having run nothing,
-  the same bug that once shipped in `smoke-deployed.mjs`.
+  one case in `entrypoint-guards.test.mjs`; the suite goes 295 → 338, `main`
+  having dropped from 300 to 295 when #426 deleted `powershell-hygiene.test.mjs`
+  with the script it read.
+
+  **Every one proven load-bearing by mutation**, each reverted afterwards.
+  Implementing the stricter `broken` rule failed four tests, two of them
+  written for earlier review rounds, with `expected 'unproven' to be 'broken'`
+  and the demoted workflow printing `2 run(s), none of which reached a
+  verdict`. Making the broken message claim "every sampled run failed" failed
+  the arithmetic test. Removing `2>&1` from the workflow invocation, and
+  replacing the capture with a `| tee` pipeline, each failed their own
+  assertion in the invocation test. Removing the entry-shape guard from
+  `listingRefusal` failed with `listingRefusal accepted {}: expected null not
+  to be null`. And reverting the entry-point guard to the `file://` template
+  form failed with `expected +0 to be 2`, the script exiting 0 on Windows
+  having run nothing — the same bug that once shipped in `smoke-deployed.mjs`.
 
 ### Changed
 

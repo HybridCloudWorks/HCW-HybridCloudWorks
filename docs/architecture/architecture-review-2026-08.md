@@ -1143,7 +1143,9 @@ dispatching requires write access — but it is the only deviation from the
 env-var pattern the repository otherwise applies deliberately.
 
 **Recommendation.** Pass via `env:` and reference `"$MODE"`, matching
-`validate-deployed.yml:106-109`.
+`validate-deployed.yml:106-109` — a file deleted on 2026-09-08, so the
+pattern is now read from any other workflow that passes a value through
+`env:`. The recommendation itself was applied at the time and is unaffected.
 
 ### T-757 — Gate coverage gaps (Low, reported)
 

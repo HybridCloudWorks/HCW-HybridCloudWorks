@@ -79,6 +79,19 @@ residential IP remains the only end-to-end origin evidence.
 skip rule (secret header → bypass challenge) so `validate-deployed.yml` can
 reach the origin; without it, synthetic validation ends at the edge.
 
+> **This follow-up is closed, and not by doing it (2026-09-08).**
+> `validate-deployed.yml` was deleted after twenty-one days red: both its jobs
+> asserted a 200 from a GitHub-hosted runner and both got the 403 described
+> above, and `deploy-functions.yml` *depends* on that 403 to prove the origin
+> lock — it fails the deploy when the same URL answers 200 from a runner — so
+> the skip rule proposed here would have weakened the thing it was meant to
+> let us test. The synthetic validation still ends at the edge, deliberately.
+> The checks run from an operator machine instead:
+> [Edge and DNS verification](../runbooks/edge-dns-verification.md) and
+> `node scripts/smoke-deployed.mjs`. The two run links elsewhere on this page —
+> in the evidence table above and in the addendum — stay as written: they are
+> evidence of what happened, not instructions.
+
 ## 2. Plan-vs-code parity
 
 The approved plan (`hcw-azure-foundation-001`, v0.1-approved, 2026-07-22)

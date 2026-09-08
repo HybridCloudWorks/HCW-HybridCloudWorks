@@ -1,7 +1,9 @@
 # Documentation site: https://docs.hybridcloudworks.com (issue #360).
 #
-# docs/ is the reviewed source. It replaced wiki/ on 2026-09-06; the GitHub Wiki
-# is retired by .github/workflows/retire-wiki.yml once the domain is live.
+# docs/ is the reviewed source. It replaced wiki/ on 2026-09-06. The GitHub Wiki
+# was retired the same day by retire-wiki.yml — every page overwritten with a
+# pointer here — and the Wiki feature is now off in repository settings
+# (`has_wiki: false`), so that one-shot workflow was deleted on 2026-09-08.
 # Build and deploy: .github/workflows/docs-pages.yml. `mkdocs build --strict`
 # turns every warning below — a broken link, a page missing from nav that is
 # not meant to be, an unknown anchor — into a failed check.

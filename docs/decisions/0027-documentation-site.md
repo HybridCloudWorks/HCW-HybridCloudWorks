@@ -69,10 +69,12 @@ and several archived guides carried a contributor's local file paths.
   on any link to the GitHub Wiki, any GUID that is not a
   `00000000-0000-0000-0000-0000000000NN` placeholder or an allowlisted
   Microsoft constant, and any contributor-local path.
-- **The Wiki is retired, not deleted.** `retire-wiki.yml` overwrote all 141
-  pages with a pointer to the page's new URL on 2026-09-06, driven by
-  `scripts/docs/wiki-redirects.json`; the Wiki feature is switched off in
-  repository settings after the stubs have been live for a week.
+- **The Wiki is retired, not deleted.** A `retire-wiki.yml` workflow overwrote
+  all 141 pages with a pointer to the page's new URL on 2026-09-06, driven by
+  `scripts/docs/wiki-redirects.json`. The Wiki feature is now switched off —
+  `has_wiki` reads `false` — so that workflow could no longer clone the wiki
+  and was **removed on 2026-09-08**. The redirect mapping is kept as the
+  historical record of where each page went.
 - **Policy:** `scripts/validate-repository-structure.ps1` sanctions `docs/` as
   the one home for narrative Markdown, allows `mkdocs.yml` at the root, and
   requires the README to name the docs site.

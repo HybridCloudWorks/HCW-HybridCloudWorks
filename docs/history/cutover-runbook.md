@@ -691,11 +691,21 @@ If telemetry and the witness disagree, believe the witness.
 
 ### Then, per timer
 
-```powershell
-pwsh -File scripts/cutover/05-verify-timer.ps1 -Name syncRssFeeds -Hours 24
+```text
+scripts/cutover/05-verify-timer.ps1   (removed from the repository on 2026-09-08)
 ```
 
-**Read this one for history only.** It still answers correctly for anything
+It was invoked as `pwsh -File scripts/cutover/05-verify-timer.ps1 -Name syncRssFeeds -Hours 24`.
+Both halves of its job are gone: `host.json` gates `Function` logs at `Warning`
+(#321), so the `ScheduleStatus` line it read is no longer written at all, and
+#345 recorded that all 18 timers are armed and the per-wave observation read is
+no longer a gate. The clock can still be proven without any host verbosity, by
+comparing a timer's actual firing times against its schedule — the method and a
+worked example live in the header of `scripts/verify-timer-witness.mjs`. The
+step is kept here rather than deleted because a runbook that silently loses a
+step is worse than one that says a step retired.
+
+**Read the rest of this section for history only.** It still answers correctly for anything
 before 2026-09-02 17:59Z — on 2026-09-03 it returned the sweeper's 37
 invocations from before the cut with `-05:00` offsets on every `ScheduleStatus`
 line, which is what retroactively settled Wave 1 — and it now warns at the top

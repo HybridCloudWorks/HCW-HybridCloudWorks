@@ -50,11 +50,12 @@
 # `validate-deployed.yml` was dispatched twice on 2026-08-18, failed both
 # times, and sat in the directory for three weeks. Its own header explained
 # why it could not pass from a GitHub-hosted runner; nothing was reading it.
-# PR #426 retires it. `scripts/check-workflow-health.mjs` is the part that
-# stops the next one sitting there: it reads run history and names any
-# workflow with no success in the sampled window, at least one failure among
-# those runs, and no attempt of any kind inside the staleness window. Run
-# against this repository on 2026-09-08 it named that one and nothing else.
+# #426 retired it on 2026-09-08. `scripts/check-workflow-health.mjs` is the
+# part that stops the next one sitting there: it reads run history and names
+# any workflow with no success in the sampled window, at least one failure
+# among those runs, and no attempt of any kind inside the staleness window.
+# Run against this repository on 2026-09-08 it named that one and nothing
+# else.
 #
 # WHY IT LIVES HERE AND NOT IN A FILE OF ITS OWN. The owner's instruction on
 # 2026-09-08 was that there are too many workflows. This one already holds the
