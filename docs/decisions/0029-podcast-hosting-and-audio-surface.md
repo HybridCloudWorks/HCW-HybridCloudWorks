@@ -1,6 +1,6 @@
 # ADR 0029: Podcast hosting is RSS.com Free with manual upload, the podcast page is the one audio surface, and the media route serves byte ranges
 
-**Status:** Accepted
+**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a)
 **Decision date:** 2026-09-07
 **Owners:** Workload owner
 
@@ -134,8 +134,10 @@ were.
   run would overwrite the other's `provider` and an episode would flip between
   the show and a provider every two hours.
 
-Nothing about hosting changes: the upload is still manual, the API is still not
-integrated, and the feed is still the integration boundary.
+Nothing about hosting changed with 1a. As of 2026-09-07 the upload was still
+manual and the host's API still not integrated; §1b changes both. The feed being
+the integration boundary is the part that outlived them, and §1b keeps it
+deliberately.
 
 #### 1b. RSS.com Max is approved; publishing becomes an API step — amended 2026-09-08
 
@@ -151,8 +153,9 @@ the manual path left intact underneath it.
 **What changes.** Approving an episode uploads it to RSS.com. The manual
 dashboard upload stops being the only way an episode reaches the feed, which is
 what the Consequences section below called "the cost of ownership of the Free
-plan, and it is the whole cost". With five source paths feeding the pipeline
-(#432) rather than one, that cost stopped being small.
+plan, and it is the whole cost". That was costed against one source of episodes.
+#432 adds three (#433, #434, #435), and a per-episode manual step scales with
+the number of things producing episodes.
 
 **What does not.** The feed is still the integration boundary. The site learns
 about a published episode by ingesting the show's feed into `podcasts`, exactly
@@ -173,13 +176,13 @@ Tracked by #437.
 
 ### 2. Speech: Gemini first, Azure AI Speech second, ElevenLabs deferred
 
-`speech/index.js` keeps its order: Gemini TTS when `GEMINI-API-KEY` is
-present, Azure AI Speech as the fallback, pinnable with
-`LISTEN_AND_LEARN_TTS_PROVIDER`. ElevenLabs is not added. Its commercial
-licence requires a paid plan, and the owner has declined paid services; the
-provider switch already rejects `elevenlabs` by name in its tests, so the
-shape a third provider takes is recorded and the trial is a bounded piece of
-work when a plan is approved.
+**Decided 2026-09-07; superseded by §2a below.** `speech/index.js` keeps its
+order: Gemini TTS when `GEMINI-API-KEY` is present, Azure AI Speech as the
+fallback, pinnable with `LISTEN_AND_LEARN_TTS_PROVIDER`. ElevenLabs was not
+added: its commercial licence requires a paid plan, and at that date the owner
+had declined paid services. The provider switch rejects `elevenlabs` by name in
+its tests, so the shape a third provider takes was recorded and the trial was a
+bounded piece of work for when a plan was approved.
 
 #### 2a. ElevenLabs is selected — amended 2026-09-08
 
@@ -344,8 +347,8 @@ ever run, is a YouTube embed on a page, not an integration.
 - [ADR 0015](0015-cost-governance.md) — the ceiling every "no paid upgrade"
   above is measured against.
 - Issue #432 (the audio pipeline project §1b and §2a are the spend decisions
-  for, and where the four source paths that made the manual upload expensive
-  are specified), #436 (ElevenLabs), #437 (RSS.com publish).
+  for), #433, #434, #435 (the three source paths that made a per-episode manual
+  upload expensive), #436 (ElevenLabs), #437 (RSS.com publish).
 - Issue #349 (the evaluation and the owner's decisions), #348 (the feed list
   moved to `admin_config`), #372 (retired media hidden from the list); PR
   #363 removed the previous host's remaining references.
