@@ -10,8 +10,8 @@
  * The second guard is the media type (issue #415). Until then the fetcher
  * returned whatever bytes came back and let the caller name the blob, and the
  * only mapping from type to extension defaulted to `png` — so a `video/mp4`
- * an article body hotlinked from an `<img src>` would have been stored as a
- * `.png`, and nothing downstream would have noticed: the blob exists, the
+ * hotlinked from an `<img src>` in an article body would have been stored as
+ * a `.png`, and nothing downstream would have noticed: the blob exists, the
  * rewrite succeeds, and the page renders an `<img>` at a file that will never
  * paint. #413 closed the same hole on the frontend, where only the URL can be
  * tested; here the response itself is in hand, so the gate is on the measured
