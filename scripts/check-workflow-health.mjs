@@ -99,12 +99,19 @@ export function assessWorkflow(workflow, { now, staleDays }) {
 
   const failures = finished.filter((r) => FAILING_CONCLUSIONS.has(r.conclusion));
   if (failures.length === 0) {
-    // Everything sampled was cancelled or some other non-verdict. Nothing was
-    // measured, so nothing is claimed.
+    // Everything sampled was cancelled, neutral, skipped, stale or
+    // action_required. Nothing was measured, so nothing is claimed — but HOW
+    // LONG nothing has been measured for is itself worth reporting, which is
+    // why the age rides along. A workflow nobody has concluded either way in
+    // months is the thing this audit was run to find, and it would otherwise
+    // sit in the collapsed section forever. Raised in review on PR #426.
+    const newest = finished.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+    const age = (now.getTime() - Date.parse(newest.created_at)) / 86_400_000;
     return {
       path: workflow.path,
       verdict: 'unproven',
       why: `${finished.length} run(s), none of which reached a verdict`,
+      ageDays: Number.isFinite(age) ? age : undefined,
     };
   }
 
@@ -161,9 +168,29 @@ export function renderReport(results, { staleDays }) {
     for (const r of broken) lines.push(`- \`${r.path}\` — ${r.why}`);
   }
 
-  if (unproven.length > 0) {
+  // An unproven verdict is not a failure and never exits non-zero — nothing was
+  // measured, so nothing is claimed. But one that has been unproven for longer
+  // than the staleness window is the case this audit existed to surface, and
+  // burying it in a collapsed block is how it stays buried. Split, not
+  // reclassified.
+  const stalled = unproven.filter((r) => Number.isFinite(r.ageDays) && r.ageDays >= staleDays);
+  const recent = unproven.filter((r) => !stalled.includes(r));
+
+  if (stalled.length > 0) {
+    lines.push(
+      '',
+      `**${stalled.length} workflow(s) have concluded nothing either way for over ${staleDays} days.**`,
+      '',
+      'Not a failure — but nothing here is evidence it still works. Confirm or delete.',
+      ''
+    );
+    for (const r of stalled)
+      lines.push(`- \`${r.path}\` — ${r.why}, newest ${r.ageDays.toFixed(1)}d ago`);
+  }
+
+  if (recent.length > 0) {
     lines.push('', '<details><summary>Not concluded either way</summary>', '');
-    for (const r of unproven) lines.push(`- \`${r.path}\` — ${r.why}`);
+    for (const r of recent) lines.push(`- \`${r.path}\` — ${r.why}`);
     lines.push('', '</details>');
   }
 

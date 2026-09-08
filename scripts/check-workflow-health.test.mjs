@@ -189,3 +189,47 @@ describe('positiveIntOr', () => {
     expect(String(positiveIntOr('soon', 10))).toBe('10');
   });
 });
+
+describe('a workflow nobody has concluded either way', () => {
+  // Review asked for neutral/action_required/stale to be counted as failures.
+  // They are not, and must not be: both gated deploys in this repository carry
+  // cancelled runs today, and action_required is the terminal state of a
+  // deploy nobody approved — counting either would report a healthy workflow
+  // as broken. The real gap it found was that such a workflow hides in the
+  // collapsed block forever, however long it sits there. That is what these
+  // pin: the classification is unchanged, the visibility is not.
+  const now = new Date('2026-09-08T00:00:00Z');
+  const nonVerdict = (created_at, conclusion = 'cancelled') => ({
+    path: '.github/workflows/x.yml',
+    runs: [{ conclusion, created_at }],
+  });
+
+  it('is still unproven, not broken, whatever the conclusion was', () => {
+    for (const c of ['cancelled', 'neutral', 'action_required', 'stale', 'skipped']) {
+      const got = assessWorkflow(nonVerdict('2026-01-01T00:00:00Z', c), { now, staleDays: 10 });
+      expect(got.verdict, `${c} should not be a failure verdict`).toBe('unproven');
+    }
+  });
+
+  it('carries how long it has been unproven', () => {
+    const got = assessWorkflow(nonVerdict('2026-01-01T00:00:00Z'), { now, staleDays: 10 });
+    expect(got.ageDays).toBe(250);
+  });
+
+  it('is surfaced outside the collapsed block once it is older than the window', () => {
+    const old = assessWorkflow(nonVerdict('2026-01-01T00:00:00Z'), { now, staleDays: 10 });
+    const report = renderReport([old], { staleDays: 10 });
+    const [visible, collapsed] = report.split('<details>');
+    expect(visible).toContain('concluded nothing either way for over 10 days');
+    expect(visible).toContain('.github/workflows/x.yml');
+    expect(collapsed ?? '').not.toContain('.github/workflows/x.yml');
+  });
+
+  it('stays collapsed while it is inside the window', () => {
+    const fresh = assessWorkflow(nonVerdict('2026-09-07T00:00:00Z'), { now, staleDays: 10 });
+    const report = renderReport([fresh], { staleDays: 10 });
+    const [visible, collapsed] = report.split('<details>');
+    expect(visible).not.toContain('.github/workflows/x.yml');
+    expect(collapsed ?? '').toContain('.github/workflows/x.yml');
+  });
+});
