@@ -1,0 +1,202 @@
+/**
+ * Article-grounded episode scripts.
+ *
+ * The assertions that matter are the refusals and the omissions. An article
+ * episode is a spoken claim published beside a written one under the same
+ * name, so the failures worth catching are not crashes — they are the runs
+ * that succeed and produce something subtly untrue: an episode generated from
+ * an empty body, or one that read a Terraform block aloud as prose.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import {
+  ARTICLE_DISCLAIMER,
+  MIN_ARTICLE_SCRIPT_BYTES,
+  ScriptError,
+  buildArticlePrompt,
+  generateArticleScript,
+  prepareArticleForSpeech,
+  resolveArticleBody,
+  targetBytesForArticle,
+} from './article-script.js';
+import { MAX_SCRIPT_BYTES } from './script.js';
+
+const script = (overrides = {}) => ({
+  title: 'Picking a state backend',
+  summary: 'Why remote state matters and when to shard it.',
+  keyTakeaways: ['Lock your state', 'Shard by blast radius'],
+  dialogue: [
+    { speaker: 'Maya', text: `${ARTICLE_DISCLAIMER} Today we are on remote state.` },
+    { speaker: 'Elena', text: 'So what breaks without locking?' },
+  ],
+  ...overrides,
+});
+
+describe('resolveArticleBody', () => {
+  it('prefers a published body over a draft one', () => {
+    // A document carrying both must generate from what was published; the
+    // reverse would put a superseded draft on the public feed.
+    expect(resolveArticleBody({ content: 'published', blogDraft: 'stale draft' })).toBe(
+      'published'
+    );
+  });
+
+  it('falls through the capitalisation split the detail consumers already handle', () => {
+    expect(resolveArticleBody({ Content: 'legacy field' })).toBe('legacy field');
+    expect(resolveArticleBody({ postContent: 'older field' })).toBe('older field');
+  });
+
+  it('throws naming the article rather than returning an empty body', () => {
+    // The failure this defends against is not an exception, it is a plausible
+    // episode written from the title alone.
+    expect(() => resolveArticleBody({ id: 'art-7', content: '   ' })).toThrow(
+      /art-7 has no body/
+    );
+  });
+});
+
+describe('prepareArticleForSpeech', () => {
+  it('replaces a code block with a marker and removes the code', () => {
+    const { text, codeBlocks } = prepareArticleForSpeech(
+      'Before.\n\n```hcl\nresource "azurerm_storage_account" "a" {\n  name = "x"\n}\n```\n\nAfter.'
+    );
+    expect(text).toContain('[code block 1: hcl, 3 lines]');
+    expect(text).not.toContain('azurerm_storage_account');
+    expect(codeBlocks).toEqual([{ index: 1, language: 'hcl', lines: 3 }]);
+  });
+
+  it('extracts code before every other rule, so a fence is never re-parsed', () => {
+    // The ordering claim in the module header, and the case that proves it has
+    // to use constructs the LATER rules actually match: lines beginning with a
+    // pipe, which the table rule claims, and with a hash, which the heading
+    // rule claims. An article demonstrating markdown — or any shell snippet
+    // with a comment — hits both. Inline pipes do not, because the table rule
+    // anchors to the start of a line.
+    const { text, codeBlocks, tables } = prepareArticleForSpeech(
+      'Here is the table syntax:\n\n```markdown\n# heading\n| Plan | Price |\n| --- | --- |\n```\n'
+    );
+    expect(codeBlocks).toEqual([{ index: 1, language: 'markdown', lines: 3 }]);
+    expect(tables).toHaveLength(0);
+    expect(text).not.toContain('Section:');
+    expect(text).not.toContain('Plan');
+  });
+
+  it('names a table by its columns instead of reading the cells', () => {
+    const { text, tables } = prepareArticleForSpeech(
+      '| Plan | Price |\n| --- | --- |\n| Free | 0 |\n| Max | 37 |\n'
+    );
+    expect(tables[0].columns).toEqual(['Plan', 'Price']);
+    expect(text).toContain('[table 1: columns Plan, Price]');
+    expect(text).not.toContain('37');
+  });
+
+  it('keeps link text and drops the target', () => {
+    const { text } = prepareArticleForSpeech('See [the pricing page](https://rss.com/pricing/).');
+    expect(text).toBe('See the pricing page.');
+  });
+
+  it('speaks headings as sections rather than dropping the structure', () => {
+    const { text } = prepareArticleForSpeech('## Why it matters\n\nBecause.');
+    expect(text).toContain('Section: Why it matters');
+  });
+
+  it('keeps an image only when its alt text says something', () => {
+    expect(prepareArticleForSpeech('![A topology diagram](x.png)').text).toBe(
+      '[image: A topology diagram]'
+    );
+    expect(prepareArticleForSpeech('![](x.png)').text).toBe('');
+  });
+
+  it('strips HTML to a fixed point', () => {
+    // A single pass leaves a live tag behind on overlapping constructs.
+    expect(prepareArticleForSpeech('<scr<script>ipt>alert(1)</script>').text).toContain('alert(1)');
+    expect(prepareArticleForSpeech('<scr<script>ipt>alert(1)</script>').text).not.toContain('<');
+  });
+});
+
+describe('targetBytesForArticle', () => {
+  it('floors a short note so it does not become a fragment', () => {
+    expect(targetBytesForArticle('tiny')).toBe(MIN_ARTICLE_SCRIPT_BYTES);
+  });
+
+  it('caps a long article at the shared editorial bound', () => {
+    expect(targetBytesForArticle('x'.repeat(200000))).toBe(MAX_SCRIPT_BYTES);
+  });
+
+  it('asks for roughly a third of the article between those bounds', () => {
+    expect(targetBytesForArticle('x'.repeat(12000))).toBe(4000);
+  });
+});
+
+describe('buildArticlePrompt', () => {
+  it('carries the disclaimer and lists what must not be read aloud', () => {
+    const prepared = prepareArticleForSpeech('Intro.\n\n```sql\nSELECT 1\n```\n');
+    const prompt = buildArticlePrompt({ article: { title: 'Backends' }, prepared });
+    expect(prompt).toContain(ARTICLE_DISCLAIMER);
+    expect(prompt).toContain('[code block 1] sql, 1 lines');
+    expect(prompt).toContain('never read it out');
+  });
+
+  it('says there is nothing set aside when the article is all prose', () => {
+    const prompt = buildArticlePrompt({
+      article: { title: 'Backends' },
+      prepared: prepareArticleForSpeech('Just words.'),
+    });
+    expect(prompt).toContain('(none)');
+  });
+});
+
+describe('generateArticleScript', () => {
+  const article = {
+    id: 'art-1',
+    Title: 'Picking a state backend',
+    slug: 'picking-a-state-backend',
+    content: 'Remote state matters because two applies can race.',
+  };
+
+  it('returns the stored script shape with the source article on it', async () => {
+    const generate = vi.fn().mockResolvedValue(script());
+    const result = await generateArticleScript({ article, generate });
+
+    expect(result.dialogue).toHaveLength(2);
+    expect(result.sourceArticleId).toBe('art-1');
+    expect(result.sourceArticleSlug).toBe('picking-a-state-backend');
+    expect(result.sourceArticleTitle).toBe('Picking a state backend');
+    expect(result.byteLength).toBeGreaterThan(0);
+  });
+
+  it('refuses an article with no body without spending a call', async () => {
+    // The guard has to run BEFORE the model, or the refusal costs money and
+    // the failure it prevents has already been paid for.
+    const generate = vi.fn();
+    await expect(generateArticleScript({ article: { Title: 'x' }, generate })).rejects.toThrow(
+      ScriptError
+    );
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a speaker the voices cannot map, reusing the sibling validation', async () => {
+    // Pins that this module shares script.js's validation rather than having
+    // grown its own copy: an unmapped name is a hard synthesis error later.
+    const generate = vi
+      .fn()
+      .mockResolvedValue(script({ dialogue: [{ speaker: 'Rex', text: 'Hello.' }] }));
+    await expect(generateArticleScript({ article, generate })).rejects.toThrow(/unknown speaker/);
+  });
+
+  it('reports how much of the article could not be spoken', async () => {
+    const generate = vi.fn().mockResolvedValue(script());
+    const result = await generateArticleScript({
+      article: { ...article, content: '```js\nx\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n' },
+      generate,
+    });
+    expect(result.setAside).toEqual({ codeBlocks: 1, tables: 1 });
+  });
+
+  it('records the call for the spend page', async () => {
+    const generate = vi.fn().mockResolvedValue(script());
+    const usageOut = [];
+    await generateArticleScript({ article, generate, usageOut });
+    expect(generate.mock.calls[0][0].usageOut).toBe(usageOut);
+    expect(generate.mock.calls[0][0].feature).toBe('listenAndLearn');
+  });
+});
