@@ -19,7 +19,7 @@ import { ARTICLE_PROSE_CLASS, HEADING_PROSE_CLASS } from '@/lib/articleStyles';
 import ShareVia from '@/components/shared/ShareVia';
 import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
 import NewsletterSignup from '@/components/shared/NewsletterSignup';
-import { normalizePublicImageUrl } from '@/lib/blogUtils';
+import { pickPublicImageUrl } from '@/lib/blogUtils';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 
 /**
@@ -91,12 +91,14 @@ export default function BlogDetailTemplate({
     // Firebase-GCP-Cost-Inventory.md). Falls back to null variants when
     // the chosen source doesn't have them, in which case the consumer
     // renders the plain PNG.
-    const resolvedImageUrl = normalizePublicImageUrl(
-      article.contentImageUrl ||
-        article.heroImageUrl ||
-        article.altCoverImage ||
-        article.imageUrl ||
-        null
+    // `pickPublicImageUrl`, not a `||` chain: a feed-supplied video in
+    // `contentImageUrl` is skipped rather than rendered into an `<img>` and
+    // rather than shadowing a real cover behind it (issue #374).
+    const resolvedImageUrl = pickPublicImageUrl(
+      article.contentImageUrl,
+      article.heroImageUrl,
+      article.altCoverImage,
+      article.imageUrl
     );
     let resolvedImageVariants = null;
     if (resolvedImageUrl === article.altCoverImage && article.altCoverImageVariants) {

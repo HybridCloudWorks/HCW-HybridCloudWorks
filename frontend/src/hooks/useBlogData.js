@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList, PUBLIC_CORPUS_LIMIT } from '@/lib/publicApi';
-import { formatPostDate, normalizePublicImageUrl } from '@/lib/blogUtils';
+import { formatPostDate, normalizePublicImageUrl, pickPublicImageUrl } from '@/lib/blogUtils';
 // One canonicaliser for the whole app (T-738). This hook used to carry its own
 // copy, and that copy did not know `vmware`, `broadcom`, `ansible` or `redhat`
 // while useProviderLandingContent's did — so those documents appeared on the
@@ -125,16 +125,16 @@ const normalizePost = (doc) => {
   );
   const complexity = firstPresent(doc.technicalLevel, doc.complexity, doc.TechnicalLevel, null);
   const slug = firstPresent(doc.slug, doc.Slug, doc.id);
-  const imageUrl = normalizePublicImageUrl(
-    firstPresent(
-      doc.contentImageUrl,
-      doc.altCoverImage,
-      doc.imageUrl,
-      doc.ImageUrl,
-      doc.coverImage,
-      doc.thumbnail,
-      null
-    )
+  // `pickPublicImageUrl`, not `firstPresent` then normalize: a feed-supplied
+  // video in `contentImageUrl` is skipped rather than rendered into a card's
+  // `<img>` and rather than shadowing a real cover behind it (issue #374).
+  const imageUrl = pickPublicImageUrl(
+    doc.contentImageUrl,
+    doc.altCoverImage,
+    doc.imageUrl,
+    doc.ImageUrl,
+    doc.coverImage,
+    doc.thumbnail
   );
   // F9 — surface WebP variants when the chosen imageUrl comes from
   // altCoverImage (the only field that currently has matching variants).
