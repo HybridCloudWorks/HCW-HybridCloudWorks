@@ -192,6 +192,34 @@ describe('per-integration path allowlist', () => {
     }
   });
 
+  it('passes every request the Linkie Hub actually sends, so the allowlist needs no widening', async () => {
+    // The claim above this test used to be aspirational: the admin page called
+    // /links, /links/:id and /analytics — none of which exist upstream, and all
+    // of which this allowlist correctly refused. The page now calls the real
+    // API (frontend/src/lib/linkie.js), and these six requests are its entire
+    // surface. If a seventh appears, this test is where widening the allowlist
+    // has to be argued for rather than done quietly.
+    const requests = [
+      { path: '/profiles', method: 'GET' },
+      { path: '/profiles/p1/posts', method: 'GET' },
+      { path: '/profiles/p1/posts', method: 'POST', body: [{ url: 'https://a.test' }] },
+      { path: '/profiles/p1/posts/x9', method: 'PATCH', body: { url: 'https://b.test' } },
+      { path: '/profiles/p1/posts/x9', method: 'DELETE' },
+      { path: '/analytics/traffic-stats?link_in_bio_id=p1', method: 'GET' },
+    ];
+    for (const request of requests) {
+      const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' }));
+      const response = await handlerFor(fetchImpl)(makeRequest(request), context);
+      const label = `${request.method} ${request.path}`;
+      expect(response.status, label).toBe(200);
+      expect(JSON.parse(response.body).ok, label).toBe(true);
+      expect(fetchImpl, label).toHaveBeenCalledWith(
+        `https://app.linkie.bio/api/v1${request.path}`,
+        expect.objectContaining({ method: request.method })
+      );
+    }
+  });
+
   it('blocks the rest of the upstream API', () => {
     // The key's scopes are broader than any one screen needs, so an allowlist
     // is worth more than trusting whatever path the caller sends.
