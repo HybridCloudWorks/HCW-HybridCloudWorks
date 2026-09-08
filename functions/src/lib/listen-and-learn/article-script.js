@@ -37,6 +37,10 @@ import {
   fitToByteLimit,
   validateScript,
 } from './script.js';
+// The same predicate the anonymous reads use, so "published" cannot come to
+// mean two things. It has no imports of its own, so this adds no transitive
+// dependency to a module that is otherwise pure.
+import { isPublicDocument } from '../public-reads.js';
 
 export { DEFAULT_SPEAKERS, ScriptError };
 
@@ -333,6 +337,19 @@ export async function generateArticleScript({
   generate,
   usageOut,
 }) {
+  // Eligibility before anything else. A caller is expected to have filtered
+  // already, and this is the guard for when one forgets: an episode is an
+  // audio version of something the site *published*, so scripting a draft
+  // would put unreviewed writing into a second medium — and the review that
+  // catches it is looking at the script, not at the article behind it.
+  //
+  // isPublicDocument also rejects a soft-deleted article, which matters on its
+  // own: generating from one resurrects retracted content as audio.
+  if (!isPublicDocument(article)) {
+    const id = article?.id || resolveArticleSlug(article) || '(no id)';
+    throw new ScriptError(`Article ${id} is not published; only published articles are scripted`);
+  }
+
   const title = resolveArticleTitle(article);
   if (!title) throw new ScriptError('article title is required');
   if (typeof generate !== 'function') throw new ScriptError('generate is required');

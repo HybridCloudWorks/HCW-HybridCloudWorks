@@ -210,6 +210,9 @@ describe('generateArticleScript', () => {
     Title: 'Picking a state backend',
     slug: 'picking-a-state-backend',
     content: 'Remote state matters because two applies can race.',
+    // Not decoration: generateArticleScript refuses anything isPublicDocument
+    // rejects, so every fixture here has to be a genuinely published article.
+    contentStatus: 'published',
   };
 
   it('returns the stored script shape with the source article on it', async () => {
@@ -225,12 +228,56 @@ describe('generateArticleScript', () => {
 
   it('refuses an article with no body without spending a call', async () => {
     // The guard has to run BEFORE the model, or the refusal costs money and
-    // the failure it prevents has already been paid for.
+    // the failure it prevents has already been paid for. Published, so this
+    // fails on the body rather than on eligibility.
     const generate = vi.fn();
-    await expect(generateArticleScript({ article: { Title: 'x' }, generate })).rejects.toThrow(
-      ScriptError
-    );
+    await expect(
+      generateArticleScript({
+        article: { id: 'art-2', Title: 'x', contentStatus: 'published' },
+        generate,
+      })
+    ).rejects.toThrow(/has no body/);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a draft, so a caller that forgets to filter cannot script one', async () => {
+    // An episode is an audio version of something the site PUBLISHED.
+    // Scripting a draft puts unreviewed writing into a second medium, and the
+    // review that would catch it is looking at the script, not at the article
+    // behind it.
+    const generate = vi.fn();
+    await expect(
+      generateArticleScript({ article: { ...article, contentStatus: 'draft' }, generate })
+    ).rejects.toThrow(/art-1 is not published/);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a soft-deleted article, which is retracted rather than unpublished', async () => {
+    // Generating from one resurrects retracted content as audio — a separate
+    // reason from the draft case, and the reason to reuse isPublicDocument
+    // rather than test contentStatus here.
+    const generate = vi.fn();
+    await expect(
+      generateArticleScript({
+        article: { ...article, softDeletedAt: '2026-09-01T00:00:00.000Z' },
+        generate,
+      })
+    ).rejects.toThrow(/not published/);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('accepts the legacy published markers, not only contentStatus', async () => {
+    // `Live: true` and `Status: 'Live'` are how migrated documents say
+    // published. Refusing them would silently exclude the older half of the
+    // catalogue — the failure would look like "that article just is not
+    // eligible" rather than like a bug.
+    const generate = vi.fn().mockResolvedValue(script());
+    for (const marker of [{ Live: true }, { Status: 'Live' }]) {
+      const { contentStatus, ...rest } = article;
+      // eslint-disable-next-line no-await-in-loop
+      const result = await generateArticleScript({ article: { ...rest, ...marker }, generate });
+      expect(result.sourceArticleId).toBe('art-1');
+    }
   });
 
   it('rejects a speaker the voices cannot map, reusing the sibling validation', async () => {
