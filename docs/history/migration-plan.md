@@ -414,17 +414,33 @@ TODO T-322.
 > of the six is now "port the worker, `registerJobType()`, switch the page to `runJob()`"; the order
 > and blockers are in TODO T-322.
 
-### ~~4.2 The 16 timers — NCRONTAB, and the clock~~ — PORTED; arming is T-518
+### ~~4.2 The 16 timers — NCRONTAB, and the clock~~ — PORTED; all 18 armed 2026-09-05
 
-> Eighteen timers are implemented and every one is flag-off. The porting
-> question this section asks — NCRONTAB's seconds column, and the app-wide
-> `WEBSITE_TIME_ZONE` replacing per-job time zones — is answered in the table
-> below and settled. **Arming them is not:** it needs both
-> `schedulers_master_enabled` and a name in `enabled_timers`, one at a time,
-> which is the owner gate T-518 in [TODO.md](../repo/todo.md). A guard added on
-> 2026-08-28 (T-751) now fails CI if the catalogue and the `enabled_timers`
-> allowlist ever drift, because a timer in one and not the other is impossible
-> to arm and the failure looks like a typo in the cutover procedure.
+> Eighteen timers are implemented. The porting question this section asks —
+> NCRONTAB's seconds column, and the app-wide `WEBSITE_TIME_ZONE` replacing
+> per-job time zones — is answered in the table below and settled. A guard
+> added on 2026-08-28 (T-751) fails CI if the catalogue and the
+> `enabled_timers` allowlist ever drift, because a timer in one and not the
+> other is impossible to arm and the failure looks like a typo in the cutover
+> procedure.
+>
+> **Arming is done, and this block used to say it was not.** Until 2026-09-07
+> the paragraph above ended "**Arming them is not:** … the owner gate T-518 in
+> TODO.md", and the `Status here` column below still reads *flag off* for every
+> row. That was true when written and stopped being true on **2026-09-05**,
+> when `T-518` closed and **all 18 timers were armed** (#345): waves 3a and 3b
+> one apply each because they delete content, then waves 4, 5 and 6 together in
+> the last apply. `T-518` is no longer in [TODO.md](../repo/todo.md) at all.
+> The mechanism the old sentence described is still exactly right — arming
+> needs both `schedulers_master_enabled` and a name in `enabled_timers` — so
+> only the state is corrected here.
+>
+> **The `Status here` column below stays as ported**, on the same principle as
+> the `Zone` column: it records the August 2026 port, and a history document
+> that is rewritten to be currently true stops being evidence. Read *flag off*
+> in that table as *flag off at the time of the port*, and this note as the
+> live state. The running flags are `enabled_timers` in the HCP Terraform
+> workspace, not anything in this file.
 
 Two things change, not one. Cloud Scheduler accepts five-field cron *and* natural language
 (`every 24 hours`, `every friday 09:00`); Azure timer triggers take six-field NCRONTAB with a
@@ -911,9 +927,19 @@ Add for the migration:
   visible to a crawler. 11 provider/section combinations have no content and are skipped by design
   — they are listed on every run. Article detail pages are NOT pre-rendered: they need the API at
   build time, which CI cannot reach (issue #175).
-- **Scheduled-job proof — OPEN (T-518).** Each of the 18 timers observed firing at least once in
-  Azure — **at the right local time**. `WEBSITE_TIME_ZONE = America/Chicago` is set on the app; a
-  timer that fires five hours early passed the "fired once" test and failed the real one.
+- **Scheduled-job proof — CLOSED 2026-09-05 (T-518).** Each of the 18 timers observed firing at
+  least once in Azure — **at the right local time**. `WEBSITE_TIME_ZONE = America/Chicago` **was**
+  set on the app when this gate was written; a timer that fired five hours early passed the
+  "fired once" test and failed the real one.
+
+  > **Read the status line first: this gate is closed.** It said `OPEN (T-518)`
+  > until 2026-09-07. All 18 timers were armed on **2026-09-05** (#345), and
+  > the owner decided in the same session that the per-wave observation read is
+  > no longer a gate — the arming apply closes a wave, and
+  > `scripts/cutover/05-verify-timer.ps1` stays available to anyone who wants
+  > the reading. The two paragraphs below are left as written because they are
+  > the clearest statement of *why* firing and running are different questions,
+  > and that distinction did not stop being true when the gate closed.
 
   **This gate has two halves, and only one of them needs anything armed.** This
   entry ended "nothing is armed, so nothing has been observed" until 2026-08-29,

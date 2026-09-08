@@ -19,6 +19,24 @@ isolation.
 Deploy prerendered public HTML and versioned public data to Azure Static Web Apps Standard behind
 Cloudflare. Publish operations trigger a controlled GitHub rebuild. The admin SPA remains dynamic.
 
+> **Amended 2026-09-07 — two details in that sentence, not the decision.** The
+> static-first decision holds exactly as written; two facts named alongside it
+> have changed and would mislead a reader taking them as current.
+>
+> - **"Standard" is now Free.** The Static Web App moved to the Free plan on
+>   2026-09-05 (owner decision, #341; `sku_tier = "Free"` in
+>   `infra/frontend.tf`). Nothing this ADR relies on was Standard-only —
+>   managed SSL on custom domains, global distribution and SPA routing are all
+>   in Free. Microsoft documents the move in either direction, so this is a
+>   two-way door rather than a new decision.
+> - **"Behind Cloudflare" is not how the site is served.** Only
+>   `api-azure.hybridcloudworks.com` is Cloudflare-proxied; the apex and `www`
+>   resolve to Azure and are not proxied, because a Static Web App root domain
+>   validates against a token Azure reissues. Cloudflare is still authoritative
+>   DNS for the zone ([ADR 0002](../decisions/0002-cloudflare-edge.md)), which
+>   is what makes the sentence half-true rather than wrong. See
+>   [Edge and DNS verification](../runbooks/edge-dns-verification.md).
+
 ## Consequences and accepted risks
 
 - Published-content freshness depends on successful rebuild/deployment.

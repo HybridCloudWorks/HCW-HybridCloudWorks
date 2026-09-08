@@ -1,11 +1,29 @@
-# Documentation Index
+# Archive index (Firebase era)
 
-Central documentation hub for Hybrid Cloud Works. All filenames follow the convention
-`<domain>-<topic>[-<detail>].md`, lowercase kebab-case.
+!!! warning "Archived record"
+    This page is the **Firebase-era documentation index**, kept as history. It
+    is not a current runbook and the pages it lists are not current references.
+    Every page below carries the same warning. The current platform is Azure
+    and is described from the [home page](../index.md).
 
-The docs here are the current living references for the active site, admin tooling, Firebase
-architecture, security, testing, and platform roadmap. Older or superseded material is archived
-under `../archive/docs/` *(historical target unavailable)*.
+Every page linked from here describes the Firebase/GCP platform that this
+workload ran on before the Azure migration, or a migration step that has since
+completed. They are retained as evidence of how the previous system worked —
+several ADRs are only legible next to them — and none of them is maintained.
+
+> **This page said the opposite until 2026-09-07.** It was moved into the
+> archive wholesale, still opening "The docs here are the current living
+> references for the active site", still titled "Documentation Index", and
+> still the one page in `docs/archive/` without the *Archived record* warning
+> its 78 siblings carry. A reader landing here was told these pages were
+> current. The heading, that sentence and the warning are the correction;
+> nothing in the link lists below was changed.
+
+All filenames follow the convention `<domain>-<topic>[-<detail>].md`, lowercase
+kebab-case. Links below to `../archive/docs/`, `reports/` and other paths marked
+*(historical target unavailable)* pointed at directories in the old repository
+that were not carried across; they are left visible rather than deleted so the
+shape of the original index survives.
 
 ## Getting Started
 
@@ -122,7 +140,7 @@ under `../archive/docs/` *(historical target unavailable)*.
 
 ## Live Smoke Tests
 
-- [`live-smoke-tests/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/frontend/documentation/live-smoke-tests) - `SMOKE-TEST.md` + `SMOKE-TEST-SIGNOFF.md`.
+- `frontend/documentation/live-smoke-tests/` *(historical target unavailable)* - `SMOKE-TEST.md` + `SMOKE-TEST-SIGNOFF.md`. The link here pointed at a directory that was not carried across and returned 404; de-linked 2026-09-07. The Azure platform's own smoke test and signoff are [Smoke test](../history/smoke-test.md) and [Smoke test signoff](../history/smoke-test-signoff.md), which are separate documents rather than a rename of these.
 
 ## Reports
 
