@@ -22,6 +22,7 @@ import {
   positiveIntOr,
   DEFAULT_SAMPLE,
   MAX_PER_PAGE,
+  listingRefusal,
   readTuning,
 } from './check-workflow-health.mjs';
 
@@ -368,5 +369,36 @@ describe('the messages say what was actually measured', () => {
       { now, staleDays: 10 }
     );
     expect(got.why).toContain('newest attempt of any kind');
+  });
+});
+
+describe('listingRefusal', () => {
+  it('accepts a complete listing', () => {
+    expect(listingRefusal({ total_count: 19, workflows: new Array(19) })).toBeNull();
+    // total_count absent is not evidence of truncation.
+    expect(listingRefusal({ workflows: [] })).toBeNull();
+  });
+
+  it('refuses a truncated one', () => {
+    const got = listingRefusal({ total_count: 150, workflows: new Array(100) });
+    expect(got).toContain('paginated');
+    expect(got).toContain('nothing is asserted');
+  });
+
+  it('refuses a listing whose shape it cannot read', () => {
+    for (const bad of [null, undefined, {}, { workflows: 'nope' }]) {
+      expect(listingRefusal(bad)).toContain('nothing is asserted');
+    }
+  });
+
+  it('does not tell the reader to raise per_page, which is already at the ceiling', () => {
+    // The request asks for MAX_PER_PAGE already, so "raise per_page" is an
+    // impossible instruction — an operator would try it, watch nothing change
+    // and conclude the tool is broken rather than the situation. Caught in
+    // review on #426.
+    const got = listingRefusal({ total_count: 150, workflows: new Array(100) });
+    expect(got).not.toMatch(/raise per_page/i);
+    expect(got).toContain(String(MAX_PER_PAGE));
+    expect(got).toContain('Following pages');
   });
 });

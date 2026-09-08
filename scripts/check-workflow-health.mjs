@@ -262,6 +262,37 @@ export function positiveIntOr(raw, fallback, max = Infinity) {
 }
 
 /**
+ * Why the workflow listing cannot be trusted, or null when it can.
+ *
+ * FAILS CLOSED ON A TRUNCATED LISTING. One page is `MAX_PER_PAGE` workflows
+ * and GitHub paginates: past that, the rest would be dropped silently and
+ * every one of them reported as nothing at all — a healthy answer to a
+ * question that was never asked, which is the exact shape this file exists to
+ * catch, one level up from the run-filter guard. Nineteen workflows today, so
+ * it has never fired; it is here because the failure would be invisible when
+ * it did.
+ *
+ * THE MESSAGE DOES NOT SAY "RAISE per_page". The request already asks for the
+ * API's ceiling, so that would be an impossible instruction — and sending an
+ * operator toward a fix that cannot work is worse than saying nothing, because
+ * they try it and conclude the tool is broken rather than the situation.
+ * Following pages is the only real remedy, and it is a change to the caller.
+ * Both points raised in review on PR #426.
+ *
+ * Pure and exported so the wording is pinned by a test rather than by reading
+ * it — the same reason the rest of this file's logic is.
+ */
+export function listingRefusal(listing) {
+  if (!Array.isArray(listing?.workflows)) {
+    return 'The workflow listing had no `workflows` array; nothing is asserted.';
+  }
+  if (Number.isFinite(listing.total_count) && listing.total_count > listing.workflows.length) {
+    return `The workflow listing is paginated — ${listing.total_count} workflows, ${listing.workflows.length} read at the API's ${MAX_PER_PAGE} ceiling. Following pages is a change to the caller; nothing is asserted.`;
+  }
+  return null;
+}
+
+/**
  * The two tunables, read from an environment.
  *
  * A FUNCTION AND NOT TWO LINES INSIDE main(), so the WIRING is testable and
@@ -294,28 +325,16 @@ async function main() {
 
   let listing;
   try {
-    listing = await api(`/repos/${repo}/actions/workflows?per_page=100`, token);
+    listing = await api(`/repos/${repo}/actions/workflows?per_page=${MAX_PER_PAGE}`, token);
   } catch (err) {
     console.error(`Could not read the workflow listing: ${err.message}`);
     console.error('Nothing was asserted either way.');
     process.exit(2);
   }
 
-  // FAIL CLOSED ON A TRUNCATED LISTING. `per_page=100` is one page, and GitHub
-  // paginates: past 100 workflows the rest would be dropped silently and every
-  // one of them reported as nothing at all — a healthy answer to a question
-  // that was never asked, which is the exact shape this file exists to catch,
-  // one level up from the run-filter guard below. Nineteen today, so this has
-  // never fired; it is here because the failure would be invisible when it
-  // did. Raised in review on PR #426.
-  if (!Array.isArray(listing?.workflows)) {
-    console.error('The workflow listing had no `workflows` array; nothing is asserted.');
-    process.exit(2);
-  }
-  if (Number.isFinite(listing.total_count) && listing.total_count > listing.workflows.length) {
-    console.error(
-      `The workflow listing is paginated — ${listing.total_count} workflows, ${listing.workflows.length} read. Raise per_page or follow the pages; nothing is asserted.`
-    );
+  const refusal = listingRefusal(listing);
+  if (refusal) {
+    console.error(refusal);
     process.exit(2);
   }
 
