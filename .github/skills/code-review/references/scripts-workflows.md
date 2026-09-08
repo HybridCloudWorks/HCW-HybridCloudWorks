@@ -46,10 +46,12 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   makes deployment automatic on push/merge is blocking.
 - **Untrusted input**: no `pull_request_target` with checkout of PR code, no
   interpolation of PR titles/bodies/branch names into `run:` shells.
-- **Monitors** (`monitor-*.yml`, `verify-alert-state.yml`,
-  `validate-deployed.yml`): check schedule frequency against cost/noise and
-  that failure actually surfaces (creates an issue / fails visibly) rather
-  than dying silently.
+- **Monitors** (`monitor-*.yml`, `verify-alert-state.yml`): check schedule
+  frequency against cost/noise and that failure actually surfaces (creates an
+  issue / fails visibly) rather than dying silently. A monitor that cannot
+  pass from a GitHub-hosted runner is not a monitor: `validate-deployed.yml`
+  was deleted on 2026-09-08 after twenty-one days red, and
+  `scripts/check-workflow-health.mjs` now measures for that shape.
 
 ## Verification commands
 

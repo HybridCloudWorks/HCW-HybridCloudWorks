@@ -34,8 +34,9 @@ $harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 #
 # `docs` is the documentation source (2026-09-06, issue #360): MkDocs builds it
 # into https://docs.hybridcloudworks.com through docs-pages.yml. It replaced
-# `wiki/`, whose pages were overlaid onto the GitHub Wiki; the Wiki is retired
-# by retire-wiki.yml. `site` is the build output and is gitignored, but this
+# `wiki/`, whose pages were overlaid onto the GitHub Wiki; the Wiki was retired
+# on 2026-09-06 and its feature is now switched off in repository settings.
+# `site` is the build output and is gitignored, but this
 # check walks the filesystem, so it is allowed here for local runs.
 $allowedDirectories = @('.azure', '.github', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
 

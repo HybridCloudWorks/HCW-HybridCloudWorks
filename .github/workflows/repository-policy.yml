@@ -50,7 +50,9 @@ jobs:
       # BOM — and none by a check, because nothing in CI had ever loaded a
       # PowerShell file other than the validator above. A syntax error in a
       # cutover script surfaces when an operator runs it, which is the worst
-      # possible time to find one.
+      # possible time to find one. (That script was retired on 2026-09-08; the
+      # remaining cutover scripts are the ones an operator still runs, which is
+      # exactly the set this needs to cover.)
       - name: Validate PowerShell syntax and encoding
         shell: pwsh
         run: ./scripts/validate-powershell.ps1
@@ -64,15 +66,16 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-powershell.tests.ps1
 
-      # 05-verify-timer.ps1 hands a multi-line KQL query to `az`, which on a
-      # Windows operator's machine is a batch file that cannot receive an
-      # argument containing a newline — so the query arrived truncated at the
-      # first line break and the call still exited 0. Azure answered a
-      # different question with tens of thousands of unfiltered rows, four
-      # times, over a week, and the wrong number was reported as a count each
-      # time. Nothing caught it because the script's internals could not run
-      # without an Azure login. These cover the flatten and the row-shape
-      # assertion off-line, which is the only reason either is testable.
-      - name: Test the workspace query helpers
-        shell: pwsh
-        run: ./scripts/cutover/workspace-query.tests.ps1
+      # A step that ran ./scripts/cutover/workspace-query.tests.ps1 stood here
+      # until 2026-09-08. It covered the KQL transport helpers used by
+      # 05-verify-timer.ps1 — the multi-line-query-to-`az.cmd` truncation that
+      # made Azure answer a different question and still exit 0. Both the
+      # script and its helpers were retired with the timer-arming gate they
+      # served (#345 closed that gate; #321 had already switched off the
+      # `Function.*` traces they read), so the step now had no subject.
+      #
+      # The lesson it encoded did not go with it: a helper whose internals can
+      # only run against a live cloud is a helper nobody can change safely.
+      # scripts/check-workflow-health.test.mjs is the current expression of it
+      # — pure verdict logic, real fixtures, no token — and it runs in the
+      # `scripts (operations)` job of ci.yml.
