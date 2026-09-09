@@ -154,11 +154,33 @@ export function HostLine({ item, onRetry, retrying }) {
     );
   }
   if (host.skipped) {
-    const reason =
-      typeof host.skipped === 'string' ? host.skipped : host.skipped.reason || 'skipped';
-    return <p className="text-xs text-slate-500">Host: skipped — {reason}</p>;
+    return <p className="text-xs text-slate-500">Host: skipped — {describeSkip(host)}</p>;
   }
   return null;
+}
+
+/**
+ * Readable fallbacks for the skip codes `publish-transcript.js` records
+ * (`HOST_SKIP`), used only when the record carries no `reason` sentence.
+ */
+const SKIP_PHRASES = Object.freeze({
+  not_configured:
+    'RSS.com is not configured (RSSCOM_API_KEY / RSSCOM_PODCAST_ID are not seeded), so nothing was sent',
+  no_audio: 'the transcript has no audio, so nothing was sent to RSS.com',
+  not_published: 'the transcript was returned to draft before the publish ran',
+});
+
+/**
+ * The sentence for a skipped host publish. The backend stores the code in
+ * `skipped` and the human sentence beside it in `reason`; the sentence is
+ * what a reviewer needs, the code is the fallback of last resort.
+ */
+export function describeSkip(host) {
+  if (!host || typeof host !== 'object') return '';
+  const reason = typeof host.reason === 'string' ? host.reason.trim() : '';
+  if (reason) return reason;
+  const code = typeof host.skipped === 'string' ? host.skipped : host.skipped?.reason;
+  return SKIP_PHRASES[code] || String(code || 'skipped');
 }
 
 function TranscriptRow({ item, onOpen, onReview, onRetry, busy }) {
@@ -484,7 +506,7 @@ export default function PodcastTab() {
       const host = res?.host && typeof res.host === 'object' ? res.host : null;
       let hostNote = '';
       if (res?.jobId) hostNote = ` Publishing to RSS.com (job ${res.jobId}).`;
-      else if (host?.skipped) hostNote = ` Host publish skipped: ${host.reason || host.skipped}.`;
+      else if (host?.skipped) hostNote = ` Host publish skipped: ${describeSkip(host)}.`;
       toast({
         title: status === 'published' ? 'Transcript approved' : 'Returned to draft',
         description: `${item.title || item.id}.${hostNote}`,

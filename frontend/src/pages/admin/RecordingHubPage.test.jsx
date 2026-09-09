@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RecordingHubPage from './RecordingHubPage';
 import { SCRIPT_QUEUED_TOAST } from '@/components/admin/recording-hub/PlaudTab';
+import { HostLine, describeSkip } from '@/components/admin/recording-hub/PodcastTab';
 
 const postJSON = vi.fn();
 const getJSON = vi.fn();
@@ -79,6 +80,29 @@ const transcripts = [
     audioError: null,
     generatedAt: '2026-09-08T14:00:00.000Z',
     host: { rsscom: { pending: true, jobId: 'job-7', queuedAt: '2026-09-08T14:01:00.000Z' } },
+  },
+  {
+    id: 'article_skipped',
+    sourceKind: 'article',
+    sourceId: 'content-3',
+    sourceSlug: 'skipped-host',
+    sourceTitle: 'Skipped at the host',
+    sourceProvider: 'gcp',
+    title: 'Approved, nothing sent',
+    status: 'failed',
+    truncated: false,
+    audioUrl: null,
+    audioError: null,
+    generatedAt: '2026-09-08T15:00:00.000Z',
+    // The shape publish-transcript.js stores: the code in `skipped`, the
+    // human sentence beside it in `reason`.
+    host: {
+      rsscom: {
+        skipped: 'not_configured',
+        reason: 'RSSCOM_API_KEY and RSSCOM_PODCAST_ID are not set; seed both to publish episodes.',
+        lastAttemptAt: '2026-09-08T15:01:00.000Z',
+      },
+    },
   },
 ];
 
@@ -219,6 +243,32 @@ describe('Podcast tab', () => {
       'href',
       'https://media.rss.com/hcw/feed.xml'
     );
+  });
+
+  it('renders a skipped host publish as its reason sentence, never the bare code', async () => {
+    renderPage();
+    expect(
+      await screen.findByText(
+        'Host: skipped — RSSCOM_API_KEY and RSSCOM_PODCAST_ID are not set; seed both to publish episodes.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/not_configured/)).not.toBeInTheDocument();
+  });
+
+  it('falls back to a readable phrase per skip code when no reason was stored', () => {
+    expect(describeSkip({ skipped: 'no_audio' })).toBe(
+      'the transcript has no audio, so nothing was sent to RSS.com'
+    );
+    expect(describeSkip({ skipped: 'not_published' })).toMatch(/returned to draft/);
+    expect(describeSkip({ skipped: 'not_configured' })).toMatch(/RSS\.com is not configured/);
+    expect(describeSkip({ skipped: 'something_new' })).toBe('something_new');
+    expect(describeSkip({ skipped: 'no_audio', reason: '  ' })).toMatch(/no audio/);
+    render(<HostLine item={{ id: 'x', host: { rsscom: { skipped: 'no_audio' } } }} />);
+    expect(
+      screen.getByText(
+        'Host: skipped — the transcript has no audio, so nothing was sent to RSS.com'
+      )
+    ).toBeInTheDocument();
   });
 
   it('shows "publishing…" while approval’s host job is pending', async () => {
