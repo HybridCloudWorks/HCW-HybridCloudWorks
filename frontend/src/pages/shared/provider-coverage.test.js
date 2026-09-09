@@ -26,6 +26,22 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { VALID_PROVIDERS } from '@/context/ProviderContext';
+import { CANONICAL_PROVIDERS, PROVIDER_ALIASES } from '@/lib/providers';
+import { findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
+
+/**
+ * Every education catalogue under src/data, keyed by provider directory.
+ *
+ * Found by glob rather than listed, for the same reason the tables above are
+ * read from source: a list here is one more thing to remember when a provider
+ * is added, and forgetting it is the bug this file exists to catch. The two
+ * file names are the ones the existing catalogues use.
+ */
+const EDUCATION_DATA = Object.fromEntries(
+  Object.entries(
+    import.meta.glob('../../data/*/{certifications,education}.js', { eager: true })
+  ).map(([path, mod]) => [path.split('/').at(-2), mod])
+);
 
 /**
  * Read the table's keys from source rather than importing the component.
@@ -126,4 +142,50 @@ describe('provider coverage on shared pages', () => {
       );
     }
   });
+});
+
+/**
+ * Every provider in the registry has a Learn catalogue that says when it was
+ * checked and whose rows have not been overtaken by the calendar (#461 item
+ * 11). `education-catalogues.test.js` runs the deeper checks on the catalogues
+ * it imports by name; this is the coverage — the list is the provider
+ * registry, so a provider with no catalogue at all fails here by name rather
+ * than being silently absent from that file's import list.
+ */
+describe('every provider has a dated education catalogue', () => {
+  const registry = PROVIDER_ALIASES.map((alias) => alias.provider);
+
+  it('the alias registry is the router list, so this is checked against every provider', () => {
+    // A vacuous pass if either list drifts from the other or the glob reads
+    // nothing.
+    expect([...registry].sort()).toEqual([...CANONICAL_PROVIDERS].sort());
+    expect([...CANONICAL_PROVIDERS].sort()).toEqual([...VALID_PROVIDERS].sort());
+    expect(Object.keys(EDUCATION_DATA).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('every provider has an education data module under src/data', () => {
+    const missing = registry.filter((provider) => !EDUCATION_DATA[provider]);
+    expect(
+      missing,
+      'providers with no src/data/<provider>/certifications.js or education.js — their Learn ' +
+        'page is a hard-coded list nothing checks against the calendar'
+    ).toEqual([]);
+  });
+
+  it.each(registry)(
+    '%s states the day it was checked against the vendor and has no past-dated row',
+    (provider) => {
+      const mod = EDUCATION_DATA[provider];
+      expect(mod, `${provider} has no education data module under src/data`).toBeDefined();
+      expect(isIsoDate(mod.DATA_AS_OF), `${provider} DATA_AS_OF must be a real YYYY-MM-DD`).toBe(
+        true
+      );
+      expect(mod.DATA_AS_OF <= todayIso(), `${provider} DATA_AS_OF is in the future`).toBe(true);
+      expect(Array.isArray(mod.certifications), `${provider} exports no certifications`).toBe(true);
+      expect(
+        findStaleStatuses(mod.certifications, todayIso()),
+        `${provider}: re-verify these rows against the vendor and update the catalogue`
+      ).toEqual([]);
+    }
+  );
 });

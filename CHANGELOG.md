@@ -19,6 +19,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Listen & Learn is mounted on the AWS certification pages, its "coming
+  soon" copy no longer names GitHub, every provider in the registry is
+  checked for a dated Learn catalogue, and a flag-disabled timer is visible
+  in Log Analytics once per restart (#461, items 10–12).** The audit found
+  `ListenAndLearn.jsx` telling readers that study podcasts were "live for
+  Azure, GitHub and AWS" while only the Azure detail page mounted the
+  component: AWS had a detail page without it, and GitHub has no detail page
+  at all. `aws/education/CertDetailPage.jsx` now mounts `ListenAndLearn` with
+  `platform="aws"` under the same gate the Azure page uses — the block, and
+  the audio control inside it, render only when published episodes exist —
+  and the backend's `SUPPORTED_PLATFORMS` already accepted `aws`, so nothing
+  changed there; a page test covers both the populated and the empty case.
+  The copy now says Azure and AWS (owner decision: honesty over building a
+  GitHub page). Audio stays Gemini TTS; the speech provider code is
+  untouched. `provider-coverage.test.js` gains a registry-driven check:
+  every provider in `PROVIDER_ALIASES` must have a
+  `src/data/<provider>/certifications.js` or `education.js` exporting a real
+  `DATA_AS_OF` and no row `findStaleStatuses` flags, and it names the
+  provider that has none. And `functions/src/functions/schedulers.js` logs
+  the first "disabled — skipping" of each timer per process at Warning —
+  `host.json` holds the `Function` category at Warning, so the Information
+  line it used to write never reached Log Analytics and a timer whose flag
+  was off left no trace but a short `DurationMs` — then drops to Information
+  for later skips, so a deliberately-off timer is seen once after every
+  restart without a Warning per tick; `schedulers.test.js` runs the real
+  registered handler twice and asserts one Warning then one Information.
 - **The GitHub, AWS, Terraform, Google Cloud and VMware Learn catalogues
   match the vendors again, say when they were last checked, and derive
   "retiring"/"beta" from dates instead of a typed field (#461, items 5–9).**
