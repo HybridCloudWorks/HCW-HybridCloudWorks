@@ -45,10 +45,14 @@ import { INFRA, terraformSource } from './terraform-source.mjs';
  * Guards the guard. A regex that stopped matching would yield an empty
  * declared set, every live map would satisfy it, and the check would pass
  * while verifying nothing — the failure mode this whole file exists to
- * prevent, reproduced inside the prevention. `secret-catalog.test.js` sets the
- * same floor for the same reason.
+ * prevent, reproduced inside the prevention.
+ *
+ * 16 because `secret-catalog.test.js` asserts `> 15` against the same source,
+ * and a floor here that is weaker than the one CI already enforces would be a
+ * gap dressed as parity. The live parse currently finds 26, so this is a
+ * broken-parse detector rather than a ceiling on how small infra/ may get.
  */
-export const MIN_DECLARED = 15;
+export const MIN_DECLARED = 16;
 
 /**
  * Every app-setting name Terraform points at a Key Vault secret.

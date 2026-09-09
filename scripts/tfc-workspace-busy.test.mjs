@@ -65,11 +65,25 @@ describe('firstBusyRun', () => {
     expect(firstBusyRun(undefined)).toBeNull();
   });
 
-  it('skips a run carrying no status rather than calling it busy', () => {
-    // isBusy says busy for an empty status, but a run object with no status at
-    // all is malformed data rather than a running apply — reporting it would
-    // block deploys with an id the operator cannot act on.
-    expect(firstBusyRun([{ id: 'run-x', attributes: {} }])).toBeNull();
+  it('treats a run carrying no status as busy, agreeing with isBusy', () => {
+    // The first draft skipped these, calling them malformed data rather than a
+    // running apply. That contradicted isBusy('') and pointed the wrong way: a
+    // run object that exists is a run that exists, and reading an unparseable
+    // one as settled is the direction that loses the settings map.
+    expect(firstBusyRun([{ id: 'run-x', attributes: {} }])).toEqual({
+      id: 'run-x',
+      status: 'unknown',
+    });
+  });
+
+  it('reports a run with neither id nor status rather than waving it through', () => {
+    expect(firstBusyRun([{}])).toEqual({ id: '(unidentified run)', status: 'unknown' });
+  });
+
+  it('steps over a null entry in the list', () => {
+    // A hole in the array is absent data, not a run — distinct from a run
+    // object whose status is missing.
+    expect(firstBusyRun([null, run('run-ok', 'applied')])).toBeNull();
   });
 });
 

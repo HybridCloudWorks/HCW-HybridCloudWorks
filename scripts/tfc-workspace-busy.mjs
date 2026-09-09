@@ -67,13 +67,21 @@ export function isBusy(status) {
  * a queued run sitting behind an applying one is exactly the case where the
  * newest entry alone could read as settled.
  *
+ * A run whose status is missing or empty counts as BUSY, like every other
+ * status `isBusy` cannot positively identify as over. The first draft skipped
+ * those as "malformed data rather than a running apply", which contradicted
+ * `isBusy('')` and — worse — pointed the wrong way: a run object that exists
+ * is a run that exists, and treating an unreadable one as settled is the
+ * direction that loses the settings map. Caught in review on 2026-09-09.
+ *
  * @param {Array<{id: string, attributes: {status: string}}>} runs
  * @returns {{id: string, status: string} | null}
  */
 export function firstBusyRun(runs) {
   for (const run of runs || []) {
-    const status = run?.attributes?.status;
-    if (status && isBusy(status)) return { id: run.id, status };
+    if (!run) continue;
+    const status = run.attributes?.status ?? '';
+    if (isBusy(status)) return { id: run.id ?? '(unidentified run)', status: status || 'unknown' };
   }
   return null;
 }
