@@ -26,6 +26,9 @@ This project has not cut a tagged release; entries are grouped under
   2026-09-09) failed on a catalogue that was already current. The refresh job
   now exports `changed` and the commit job runs only when it is `true`, so an
   unchanged week shows the job as skipped; the tripwire test asserts the gate.
+- **js-yaml 4.3.1 → 4.3.2 in the frontend lockfile** (Dependabot alert 148,
+  GHSA-2883-xcg3-v3hh, high: `maxTotalMergeKeys` did not bound CPU use for
+  empty merge sources). Lock-only: `package.json` already allowed the patch.
 
 - **Listen & Learn is mounted on the AWS certification pages, its "coming
   soon" copy no longer names GitHub, every provider in the registry is
