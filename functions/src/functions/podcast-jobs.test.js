@@ -21,7 +21,7 @@ vi.mock('../lib/cosmos-client.js', () => ({
   upsertDoc: vi.fn(),
   patchDoc: (...args) => patchDoc(...args),
 }));
-vi.mock('../lib/blob-storage.js', () => ({ uploadBlob: vi.fn(), readBlobForDelivery: vi.fn() }));
+vi.mock('../lib/blob-storage.js', () => ({ uploadBlob: vi.fn(), readBlobForDelivery: vi.fn(), deleteBlob: vi.fn() }));
 vi.mock('../lib/ai/router.js', async (importOriginal) => ({
   ...(await importOriginal()),
   generateJsonResponse: vi.fn(),

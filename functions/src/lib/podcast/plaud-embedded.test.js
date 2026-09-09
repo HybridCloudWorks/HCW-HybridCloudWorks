@@ -9,6 +9,7 @@ import {
   API_KEY_SETTING,
   CLIENT_ID_SETTING,
   DEFAULT_BASE_URL,
+  DEFAULT_WAIT_TIMEOUT_MS,
   PlaudEmbeddedNotConfiguredError,
   createTranscription,
   getTranscription,
@@ -177,6 +178,35 @@ describe('waitForTranscription', () => {
     });
     // 0 → poll, sleep to 10 → poll, sleep to 20 → poll, 30 > 25 → stop.
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('defaults timeoutMs to the documented constant, under the upload job budget', async () => {
+    const fetch = vi.fn(async () => response({ transcription_id: 't5', status: 'PROGRESS' }));
+    const clock = ticking();
+    await expect(
+      waitForTranscription({ transcriptionId: 't5', env, fetch, intervalMs: 60_000, ...clock })
+    ).rejects.toMatchObject({
+      code: 'PLAUD_EMBEDDED_TIMEOUT',
+      message: expect.stringMatching(/after 1200 s/),
+    });
+    expect(DEFAULT_WAIT_TIMEOUT_MS).toBe(20 * 60 * 1000);
+    expect(DEFAULT_WAIT_TIMEOUT_MS).toBeLessThan(25 * 60 * 1000);
+    // Polled at 0, 60 s … 1200 s (21 reads) and stopped when the next poll
+    // would land past the deadline: ended by the clock, not by exhaustion.
+    expect(fetch).toHaveBeenCalledTimes(21);
+  });
+
+  it('refuses a non-finite or non-positive budget by name instead of looping forever', async () => {
+    const fetch = vi.fn();
+    for (const timeoutMs of [NaN, 0, -1, Infinity, '5000', null]) {
+      await expect(
+        waitForTranscription({ transcriptionId: 't6', env, fetch, timeoutMs, ...ticking() })
+      ).rejects.toThrow(/positive timeoutMs in milliseconds/);
+    }
+    await expect(
+      waitForTranscription({ transcriptionId: 't6', env, fetch, timeoutMs: 1000, intervalMs: 0, ...ticking() })
+    ).rejects.toThrow(/positive intervalMs/);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('SUCCESS with no data is an error rather than an empty transcript', async () => {

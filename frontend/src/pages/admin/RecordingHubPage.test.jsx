@@ -15,8 +15,10 @@ vi.mock('@/components/ui/use-toast', () => ({
   useToast: () => ({ toast: (...args) => toast(...args) }),
 }));
 
+// Mutable so one test can drive the not-ready → ready sequence.
+let authReady = true;
 vi.mock('@/hooks/useAuthReady', () => ({
-  useAuthReady: () => ({ authReady: true }),
+  useAuthReady: () => ({ authReady }),
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -116,6 +118,7 @@ const openPlaudTab = () => fireEvent.click(screen.getByRole('tab', { name: 'Plau
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authReady = true;
   routeGets();
   mcpTool.mockResolvedValue({
     ok: true,
@@ -129,6 +132,45 @@ beforeEach(() => {
     ]),
   });
   postJSON.mockResolvedValue({ ok: true, jobId: 'job-1' });
+});
+
+describe('Plaud connection check', () => {
+  it('waits for auth, then checks once readiness flips', async () => {
+    authReady = false;
+    const { rerender } = renderPage();
+    expect(screen.getByText('Checking Plaud…')).toBeInTheDocument();
+    // Nothing is read before the token exists — not the transcripts either.
+    await waitFor(() => expect(getJSON).not.toHaveBeenCalled());
+
+    authReady = true;
+    rerender(
+      <MemoryRouter>
+        <RecordingHubPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByText('Plaud connected')).toBeInTheDocument();
+    expect(getJSON).toHaveBeenCalledWith('cms/config/mcp-servers');
+  });
+
+  it('reads a thrown check as unknown, not disconnected, and can check again', async () => {
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/config/mcp-servers') throw new Error('Not authenticated. Please sign in.');
+      return { items: [] };
+    });
+    renderPage();
+    expect(await screen.findByText('Plaud status unknown')).toBeInTheDocument();
+    expect(screen.queryByText('Plaud disconnected')).not.toBeInTheDocument();
+
+    routeGets();
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText('Plaud connected')).toBeInTheDocument();
+  });
+
+  it('says disconnected only when the check ran and said so', async () => {
+    routeGets({ connected: false });
+    renderPage();
+    expect(await screen.findByText('Plaud disconnected')).toBeInTheDocument();
+  });
 });
 
 describe('Podcast tab', () => {

@@ -18,7 +18,7 @@
  * article document carries one.
  */
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
-import { readBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
+import { deleteBlob, readBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getCostEstimate } from '../lib/ai/router.js';
 import { publicUrlOf } from '../lib/cms/publish.js';
 import { registerJobType } from '../lib/jobs.js';
@@ -238,12 +238,14 @@ export async function runUploadTranscription(payload, { context } = {}) {
   const report = await transcribeUpload({
     ...parsed.value,
     store: { readDoc, upsertDoc, patchDoc },
+    storage: { deleteBlob },
     timeoutMs: UPLOAD_POLL_BUDGET_MS,
+    log: context,
   });
 
   context?.log?.(
     `${UPLOAD_JOB_TYPE}: recording ${report.id} stored from Plaud transcription ${report.transcriptionId} ` +
-      `(${report.segments} segments)`
+      `(${report.segments} segments, upload ${report.uploadDeleted ? 'deleted' : 'kept'})`
   );
 
   return report;

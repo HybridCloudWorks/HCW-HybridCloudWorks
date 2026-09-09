@@ -325,6 +325,38 @@ resource "azurerm_storage_management_policy" "cleanup" {
       }
     }
   }
+
+  # Backstop for recording uploads (#442). The Recording Hub's upload flow
+  # writes audio to podcast/uploads/<uuid>.<ext> so the Plaud Embedded
+  # Transcription API can fetch it through the public media route — an
+  # unguessable but UNAUTHENTICATED URL. The transcribe-recording-upload job
+  # deletes the blob itself as soon as the transcription reaches a terminal
+  # state (functions/src/lib/podcast/recording-upload.js); this rule is for
+  # the blob that outlives the job — a timed-out poll, a worker that died
+  # mid-run, a queue message that was never delivered — so no upload stays
+  # reachable indefinitely. Seven days: Plaud retains the transcription for
+  # seven days by default, so after that there is nothing the audio could
+  # still be re-read for. days_since_creation, like the export rule above:
+  # an upload is written once with overwrite:false and never touched again.
+  #
+  # Only `uploads/` inside the podcast container. The generated episode audio
+  # beside it (article/, plaud/, recording/) is the product and is not
+  # expired here.
+  rule {
+    name    = "expire-recording-uploads"
+    enabled = true
+
+    filters {
+      prefix_match = ["podcast/uploads/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_creation_greater_than = 7
+      }
+    }
+  }
 }
 
 

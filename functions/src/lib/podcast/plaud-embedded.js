@@ -96,6 +96,14 @@ export const TERMINAL_STATUSES = Object.freeze([STATUS.success, STATUS.failure, 
 /** 60 req/min documented; a poll every 10 s uses a tenth of it. */
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * How long `waitForTranscription` polls when the caller says nothing: twenty
+ * minutes, under the 25-minute `transcribe-recording-upload` job budget so
+ * the loop ends with a named error rather than the worker being killed. The
+ * job passes its own budget explicitly; this is the floor under a caller
+ * that forgot, and a missing value must never become a NaN deadline.
+ */
+export const DEFAULT_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
 
 export class PlaudEmbeddedError extends Error {
   constructor(message, { status = 0, code = null } = {}) {
@@ -276,9 +284,21 @@ export async function waitForTranscription({
   fetch: fetchImpl = globalThis.fetch,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   intervalMs = DEFAULT_POLL_INTERVAL_MS,
-  timeoutMs,
+  timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
   now = () => Date.now(),
 }) {
+  // A NaN or non-positive budget would make `deadline` NaN and the loop
+  // below endless; refuse it by name instead.
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new PlaudEmbeddedError(
+      `waitForTranscription needs a positive timeoutMs in milliseconds; got ${JSON.stringify(timeoutMs)}`
+    );
+  }
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    throw new PlaudEmbeddedError(
+      `waitForTranscription needs a positive intervalMs in milliseconds; got ${JSON.stringify(intervalMs)}`
+    );
+  }
   const deadline = now() + timeoutMs;
   for (;;) {
     const task = await getTranscription({ transcriptionId, env, fetch: fetchImpl });

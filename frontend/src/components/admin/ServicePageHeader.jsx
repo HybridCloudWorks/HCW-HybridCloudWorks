@@ -14,7 +14,9 @@ import React from 'react';
  *   icon         — Lucide icon component (required)
  *   title        — Page title (required)
  *   service      — Service name shown in status line, e.g. "Publer" or "Plaud"
- *   connected    — boolean | 'checking'  (controls dot color + text)
+ *   connected    — boolean | 'checking' | 'unknown'  (controls dot color + text)
+ *                  'unknown' is for a status check that could not run — not
+ *                  the same as disconnected, and shown as neither.
  *   description  — Short paragraph under the status line
  *   poweredBy    — Service brand name for the top-right pill (defaults to `service`)
  *   accent       — Tailwind color stem for the pill border/text, e.g. 'pink' | 'violet'
@@ -34,6 +36,9 @@ export default function ServicePageHeader({
   if (connected === 'checking') {
     dotClass = 'bg-slate-300 animate-pulse';
     statusText = `Checking ${service}…`;
+  } else if (connected === 'unknown') {
+    dotClass = 'bg-amber-400';
+    statusText = `${service} status unknown`;
   } else if (connected) {
     dotClass = 'bg-emerald-500';
     statusText = `${service} connected`;

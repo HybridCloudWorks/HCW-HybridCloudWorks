@@ -15,6 +15,21 @@
  * — a v4 UUID, never caller-chosen — so the URL is unguessable, and it is
  * still unauthenticated for as long as the blob exists.
  *
+ * **So the blob does not exist for long.** Two things bound it:
+ *
+ *   1. The job deletes the upload as soon as the transcription reaches a
+ *      terminal state — SUCCESS, FAILURE, REVOKED, or a submission that never
+ *      happened — in a `finally`, best-effort (a failed delete is logged by
+ *      job id and never changes the outcome). The one case that keeps it is
+ *      a poll that ran out of time (`PLAUD_EMBEDDED_TIMEOUT`): Plaud may still
+ *      be reading the file, and the transcription can be re-read by id for
+ *      seven days.
+ *   2. A lifecycle rule in infra/storage.tf (`expire-recording-uploads`)
+ *      deletes anything under `podcast/uploads/` seven days after creation —
+ *      the blob a dead worker or an undelivered message left behind. Seven,
+ *      because Plaud retains the transcription for seven days, after which
+ *      there is nothing the audio could be re-read for.
+ *
  * **Why this route writes to a generated-media container.** blob-paths.js
  * keeps `PUBLIC_MEDIA_CONTAINERS ∩ UPLOAD_CONTAINERS` empty so an editor
  * cannot put an arbitrary file behind an anonymous URL through the generic
@@ -195,8 +210,9 @@ export function toRecordingDoc({ id, title, uploadPath, transcriptionId, result,
     durationMs: result.durationMs,
     language: result.language,
     transcriptionId,
+    // Recorded for provenance. The blob itself is deleted once Plaud is done
+    // with it (see the header), so this is where the audio WAS, not a player.
     uploadPath,
-    audioUrl: mediaUrlFor(PODCAST_AUDIO_CONTAINER, uploadPath),
     createdAt: now,
   };
 }
@@ -208,19 +224,23 @@ export function toRecordingDoc({ id, title, uploadPath, transcriptionId, result,
  * @param {string} params.uploadPath
  * @param {string} params.title
  * @param {{ upsertDoc: Function }} params.store
+ * @param {{ deleteBlob: Function }} [params.storage] deletes the upload once Plaud is done with it
  * @param {object} [params.env]
  * @param {string} [params.now]
  * @param {number} [params.timeoutMs] the poll budget; the job's own minus headroom
+ * @param {{ warn?: Function }} [params.log] content-free; job-level only
  * @param {object} [params.deps] test seams
- * @returns {Promise<{ id: string, transcriptionId: string, segments: number, durationMs: number|null }>}
+ * @returns {Promise<{ id: string, transcriptionId: string, segments: number, durationMs: number|null, uploadDeleted: boolean }>}
  */
 export async function transcribeUpload({
   uploadPath,
   title,
   store,
+  storage = null,
   env = process.env,
   now = new Date().toISOString(),
   timeoutMs = 20 * 60 * 1000,
+  log = console,
   deps = {},
 }) {
   const parsed = parseUploadPayload({ uploadPath, title });
@@ -234,10 +254,34 @@ export async function transcribeUpload({
   // caller that enqueued through the generic route.
   if (!isPlaudEmbeddedConfigured(env)) throw new PlaudEmbeddedNotConfiguredError();
 
-  const fileUrl = publicAudioUrlFor(parsed.value.uploadPath, env);
-  const { transcriptionId } = await create({ fileUrl, env });
-  const task = await wait({ transcriptionId, env, timeoutMs });
-  const result = normalizeEmbeddedResult(task.data);
+  // The upload is deleted whatever happens below, except when the poll ran
+  // out of time — see the header. Best effort: a delete that fails is logged
+  // and the transcription's own outcome stands.
+  let keepForPlaud = false;
+  let uploadDeleted = false;
+  const deleteUpload = async () => {
+    if (!storage?.deleteBlob) return;
+    try {
+      await storage.deleteBlob(PODCAST_AUDIO_CONTAINER, parsed.value.uploadPath);
+      uploadDeleted = true;
+    } catch (err) {
+      log?.warn?.(`${UPLOAD_JOB_TYPE}: upload blob not deleted (${err?.code || err?.statusCode || 'error'})`);
+    }
+  };
+
+  let transcriptionId;
+  let result;
+  try {
+    const fileUrl = publicAudioUrlFor(parsed.value.uploadPath, env);
+    ({ transcriptionId } = await create({ fileUrl, env }));
+    const task = await wait({ transcriptionId, env, timeoutMs });
+    result = normalizeEmbeddedResult(task.data);
+  } catch (err) {
+    keepForPlaud = err?.code === 'PLAUD_EMBEDDED_TIMEOUT';
+    throw err;
+  } finally {
+    if (!keepForPlaud) await deleteUpload();
+  }
 
   const doc = toRecordingDoc({
     id: uuid(),
@@ -254,5 +298,6 @@ export async function transcribeUpload({
     transcriptionId,
     segments: result.segments.length,
     durationMs: result.durationMs,
+    uploadDeleted,
   };
 }

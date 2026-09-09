@@ -133,7 +133,6 @@ describe('toRecordingDoc', () => {
       language: 'en',
       transcriptionId: 'task_exec_1',
       uploadPath: 'uploads/u1.mp3',
-      audioUrl: '/api/public/media/podcast/uploads/u1.mp3',
       createdAt: NOW,
     });
   });
@@ -183,7 +182,127 @@ describe('transcribeUpload', () => {
       transcriptionId: 'task_exec_1',
       uploadPath,
     });
-    expect(report).toEqual({ id: 'rec-u1', transcriptionId: 'task_exec_1', segments: 1, durationMs: 2000 });
+    expect(report).toEqual({
+      id: 'rec-u1',
+      transcriptionId: 'task_exec_1',
+      segments: 1,
+      durationMs: 2000,
+      uploadDeleted: false,
+    });
+  });
+
+  describe('the upload blob is deleted once Plaud is done with it', () => {
+    const success = () =>
+      vi.fn(async () => ({ transcriptionId: 't1', status: 'SUCCESS', data: { results: [] } }));
+    const create = () => vi.fn(async () => ({ transcriptionId: 't1', status: 'PENDING' }));
+    const failing = (code) =>
+      vi.fn(async () => {
+        throw Object.assign(new Error(`Plaud Embedded transcription t1 ended with status ${code}`), {
+          code: `PLAUD_EMBEDDED_${code}`,
+        });
+      });
+
+    it('on SUCCESS, after the wait and before the document is stored', async () => {
+      const order = [];
+      const store = { upsertDoc: vi.fn(async () => order.push('store')) };
+      const storage = { deleteBlob: vi.fn(async () => order.push('delete')) };
+      const report = await transcribeUpload({
+        uploadPath,
+        title: 't',
+        store,
+        storage,
+        env,
+        deps: { createTranscription: create(), waitForTranscription: success(), uuid: () => 'u' },
+      });
+      expect(storage.deleteBlob).toHaveBeenCalledWith('podcast', uploadPath);
+      expect(order).toEqual(['delete', 'store']);
+      expect(report.uploadDeleted).toBe(true);
+    });
+
+    it('on FAILURE and REVOKED, and when the submission itself failed', async () => {
+      for (const wait of [failing('FAILURE'), failing('REVOKED')]) {
+        const storage = { deleteBlob: vi.fn() };
+        await expect(
+          transcribeUpload({
+            uploadPath,
+            title: 't',
+            store: makeStore(),
+            storage,
+            env,
+            deps: { createTranscription: create(), waitForTranscription: wait },
+          })
+        ).rejects.toThrow(/ended with status/);
+        expect(storage.deleteBlob).toHaveBeenCalledWith('podcast', uploadPath);
+      }
+      const storage = { deleteBlob: vi.fn() };
+      await expect(
+        transcribeUpload({
+          uploadPath,
+          title: 't',
+          store: makeStore(),
+          storage,
+          env,
+          deps: {
+            createTranscription: vi.fn(async () => {
+              throw new Error('HTTP 500');
+            }),
+          },
+        })
+      ).rejects.toThrow('HTTP 500');
+      expect(storage.deleteBlob).toHaveBeenCalledTimes(1);
+    });
+
+    it('is kept on a poll timeout — Plaud may still be reading it; the lifecycle rule expires it', async () => {
+      const storage = { deleteBlob: vi.fn() };
+      await expect(
+        transcribeUpload({
+          uploadPath,
+          title: 't',
+          store: makeStore(),
+          storage,
+          env,
+          deps: { createTranscription: create(), waitForTranscription: failing('TIMEOUT') },
+        })
+      ).rejects.toThrow(/TIMEOUT/);
+      expect(storage.deleteBlob).not.toHaveBeenCalled();
+    });
+
+    it('a delete that fails is logged content-free and does not change the outcome', async () => {
+      const storage = {
+        deleteBlob: vi.fn(async () => {
+          throw Object.assign(new Error('Server busy; secret-path-in-message'), { statusCode: 503 });
+        }),
+      };
+      const log = { warn: vi.fn() };
+      const store = makeStore();
+      const report = await transcribeUpload({
+        uploadPath,
+        title: 't',
+        store,
+        storage,
+        env,
+        log,
+        deps: { createTranscription: create(), waitForTranscription: success(), uuid: () => 'u' },
+      });
+      expect(report.uploadDeleted).toBe(false);
+      expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      const line = log.warn.mock.calls[0][0];
+      expect(line).toMatch(/upload blob not deleted \(503\)/);
+      expect(line).not.toContain(uploadPath);
+      expect(line).not.toContain('secret-path');
+    });
+
+    it('does nothing without a storage seam, so the pure path still works', async () => {
+      const report = await transcribeUpload({
+        uploadPath,
+        title: 't',
+        store: makeStore(),
+        env,
+        deps: { createTranscription: create(), waitForTranscription: success(), uuid: () => 'u' },
+      });
+      expect(report.uploadDeleted).toBe(false);
+    });
   });
 
   it('not configured → the plain sentence, and nothing is called or stored', async () => {
