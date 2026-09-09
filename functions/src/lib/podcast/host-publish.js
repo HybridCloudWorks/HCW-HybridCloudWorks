@@ -66,7 +66,15 @@ const clean = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-/** Cut at a word boundary with an ellipsis; never mid-word, never over `max`. */
+/**
+ * Cut to at most `max` characters with an ellipsis. The cut lands on the
+ * last space inside the prefix when that space is past the halfway point;
+ * otherwise it is a hard character cut. So a long sentence is cut between
+ * words, and one unbroken run of characters — a URL, a slug, a pasted hash —
+ * is cut mid-run rather than dropped to almost nothing. That is the right
+ * trade for a title and a description: the host shows them, nothing parses
+ * them, and a visibly truncated token is better than a half-empty field.
+ */
 function truncate(text, max) {
   if (text.length <= max) return text;
   const cut = text.slice(0, max - 1);
