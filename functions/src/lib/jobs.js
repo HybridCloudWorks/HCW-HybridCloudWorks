@@ -70,10 +70,16 @@ const json = (status, body) => ({
  *
  * Throws on anything JSON.stringify refuses (BigInt, a cycle), so the caller's
  * try/catch sees it BEFORE the response is built rather than json() seeing it
- * after the job is queued. Anything that is not a plain object — an array, a
- * string, null — is `{}`: spreading those into a body is never intended.
+ * after the job is queued. A Promise throws too: the hook is synchronous by
+ * contract, and a thenable would otherwise stringify to `{}` and hide the
+ * author's mistake without a word. Anything else that is not a plain object
+ * — an array, a string, null — is `{}`: spreading those into a body is never
+ * intended.
  */
 function serialisableObject(value) {
+  if (typeof value?.then === 'function') {
+    throw new Error('acceptedDetails returned a Promise; the hook must be synchronous');
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const clean = JSON.parse(JSON.stringify(value));
   return clean && typeof clean === 'object' && !Array.isArray(clean) ? clean : {};

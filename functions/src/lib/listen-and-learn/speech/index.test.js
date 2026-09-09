@@ -307,10 +307,14 @@ describe('synthesizeDialogue', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('names every setting so the message says what to do', async () => {
+  it('names each provider’s real requirement so the message says what to do', async () => {
+    // Azure is not configured by its key alone (PROVIDERS.extra); a message
+    // that said so would send an operator to seed a key that changes nothing.
     await expect(
       synthesizeDialogue({ dialogue: DIALOGUE, env: {}, fetchImpl: vi.fn() })
-    ).rejects.toThrow(/ELEVENLABS_API_KEY.*GEMINI_API_KEY.*AZURE_SPEECH_KEY/);
+    ).rejects.toThrow(
+      /ELEVENLABS_API_KEY.*GEMINI_API_KEY.*AZURE_SPEECH_KEY together with AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT/
+    );
   });
 
   it('refuses an empty dialogue before choosing a provider', async () => {

@@ -70,7 +70,9 @@ export class SpeechError extends Error {
 /** Thrown when no key is configured, so a caller can degrade instead of fail. */
 export class SpeechNotConfiguredError extends SpeechError {
   constructor(
-    message = 'No speech provider is configured — set ELEVENLABS_API_KEY, GEMINI_API_KEY or AZURE_SPEECH_KEY'
+    // Each provider's REAL requirement, matching PROVIDERS below: Azure needs
+    // somewhere to send its key, so the key alone does not configure it.
+    message = 'No speech provider is configured — set ELEVENLABS_API_KEY, or GEMINI_API_KEY, or AZURE_SPEECH_KEY together with AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT'
   ) {
     super(message);
     this.name = 'SpeechNotConfiguredError';

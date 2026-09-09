@@ -211,6 +211,9 @@ describe('enqueueJob', () => {
     const cases = [
       ['bigint', () => ({ speech: { characters: 9000n } })],
       ['cycle', () => circular],
+      // The hook is synchronous by contract; a Promise would otherwise
+      // stringify to {} and hide the mistake without a word.
+      ['promise', async () => ({ speech: { estimatedCostUsd: 7.2 } })],
       ['array', () => [{ speech: 1 }]],
       ['string', () => 'not an object'],
     ];
@@ -239,11 +242,11 @@ describe('enqueueJob', () => {
       });
       expect(store.upsertDoc, name).toHaveBeenCalledTimes(1);
       expect(enqueue, name).toHaveBeenCalledTimes(1);
-      if (name === 'bigint' || name === 'cycle') {
+      if (name === 'bigint' || name === 'cycle' || name === 'promise') {
         expect(warn, name).toHaveBeenCalledWith(
           'enqueueJob: acceptedDetails failed for',
           `unserialisable-${name}`,
-          expect.stringMatching(/BigInt|circular/i)
+          expect.stringMatching(/BigInt|circular|Promise.*synchronous/i)
         );
       }
     }
