@@ -57,6 +57,32 @@ const masterDisabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'false';
 const timerEnabled = (name) => !masterDisabled() && process.env[`FEATURE_FLAG_${name}`] === 'true';
 
 /**
+ * Timers that have already logged a flag-disabled skip in this process.
+ *
+ * `host.json` holds the `Function` category at Warning, so an Information
+ * line never reaches Log Analytics — and from 2026-09-02 a timer whose flag
+ * was left off left no trace there beyond a suspiciously short `DurationMs`
+ * (#461 item 12). The first skip after every restart is therefore logged at
+ * Warning, which ships; every later skip in the same process drops back to
+ * Information, so a timer that is deliberately off does not raise a Warning
+ * on each schedule tick. Module-level on purpose: the set lives exactly as
+ * long as the process, which is what "once per restart" means.
+ */
+const skipWarned = new Set();
+
+/** @param {import('@azure/functions').InvocationContext} context */
+function logDisabledSkip(context, name) {
+  if (skipWarned.has(name)) {
+    context.log(`[${name}] disabled — skipping`);
+    return;
+  }
+  skipWarned.add(name);
+  context.warn(
+    `[${name}] disabled — skipping (first skip since this process started; later skips log at Information)`
+  );
+}
+
+/**
  * Register a flag-gated timer. `run(context)` returns a small summary that is
  * logged; a thrown error is logged and rethrown so the host records the
  * failure.
@@ -66,7 +92,7 @@ function timer(name, flag, schedule, run) {
     schedule,
     handler: async (_timer, context) => {
       if (!timerEnabled(flag)) {
-        context.log(`[${name}] disabled — skipping`);
+        logDisabledSkip(context, name);
         return;
       }
       const result = await run(context);
