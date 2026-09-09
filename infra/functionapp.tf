@@ -475,6 +475,26 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "RSSCOM_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RSSCOM-API-KEY)"
     "RSSCOM_PODCAST_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RSSCOM-PODCAST-ID)"
 
+    # Plaud Embedded Transcription API (#442): the direction the Plaud MCP
+    # lacks — transcribing audio the owner uploads. A DIFFERENT credential from
+    # the MCP OAuth token pair, which lives on the mcp_servers/plaud document
+    # and never in the vault; both are needed, one per direction. The pair is
+    # issued in the Plaud Embedded portal (docs.plaud.ai/plaud-embedded) and
+    # sent as the X-Client-Id / X-Client-Api-Key headers
+    # (functions/src/lib/podcast/plaud-embedded.js). Unseeded, readKey() sees
+    # the unresolved references as "not configured" and the upload route
+    # answers 503 with a sentence naming them, before any audio is stored.
+    "PLAUD_EMBEDDED_CLIENT_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PLAUD-EMBEDDED-CLIENT-ID)"
+    "PLAUD_EMBEDDED_API_KEY"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PLAUD-EMBEDDED-API-KEY)"
+
+    # The origin the media route is reachable on from the internet — the API's
+    # own Cloudflare-fronted hostname, not the storage account (closed by
+    # network rule) and not the SPA's. The transcription job hands Plaud
+    # `${PUBLIC_API_ORIGIN}/api/public/media/podcast/uploads/<uuid>.<ext>` as
+    # the file to fetch; without this there is no URL a third party can read.
+    # Not a secret: a hostname derived from var.domain.
+    "PUBLIC_API_ORIGIN" = "https://api-azure.${var.domain}"
+
     # Telegram notifications.
     "TELEGRAM_BOT_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-BOT-TOKEN)"
     "TELEGRAM_CHAT_ID"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-CHAT-ID)"

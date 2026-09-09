@@ -68,7 +68,7 @@ const NAV_GROUPS = [
     label: 'Amplify',
     items: [
       { to: '/admin/calendar', icon: Calendar, label: 'Calendar' },
-      { to: '/admin/recordings', icon: Radio, label: 'Recordings Hub', pill: 'Plaud' },
+      { to: '/admin/recording-hub', icon: Radio, label: 'Recording Hub', pill: 'Podcast' },
       { to: '/admin/social', icon: Share2, label: 'Social Hub', pill: 'Publer' },
       { to: '/admin/linkie', icon: Link2, label: 'Linkie Hub', pill: 'Linkie' },
       { to: '/admin/mailing-list', icon: Mail, label: 'Mailing List', pill: 'Klaviyo' },

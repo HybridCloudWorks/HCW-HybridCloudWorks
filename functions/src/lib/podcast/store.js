@@ -14,9 +14,18 @@
  * `listen-and-learn/publish.js` without sharing its storage.
  *
  * Layout
- *   Cosmos   podcast_transcripts/article_{slug} @ /id     — one per article
- *            (Plaud later: podcast_transcripts/plaud_{recordingId})
- *   Blob     podcast/article/{slug}.mp3
+ *   Cosmos   podcast_transcripts/article_{slug} @ /id       — one per article
+ *            podcast_transcripts/plaud_{recordingId}          — one per Plaud
+ *                                                              library recording
+ *            podcast_transcripts/recording_{id}               — one per stored
+ *                                                              recording (#442)
+ *   Blob     podcast/article/{slug}.mp3, podcast/plaud/{recordingId}.mp3,
+ *            podcast/recording/{id}.mp3
+ *
+ * Every write keys on a source descriptor (`describeArticleSource`,
+ * `describeRecordingSource`) so the three kinds share one document shape and
+ * one set of writers; the `article`-shaped functions are wrappers kept for
+ * the callers that predate the second kind.
  *
  * `/id` rather than a set partition because a transcript has no set: the id is
  * globally unique by construction — `article_` plus the article's slug, which
@@ -52,8 +61,22 @@ export const STATUS = Object.freeze({
   failed: 'failed',
 });
 
+/**
+ * What a transcript was scripted from. One discriminator field rather than
+ * several field prefixes, for the reason `recording-script.js` nests its
+ * provenance under `source.kind`: the hub lists every kind in one column.
+ *
+ *   article    — a published article (#435); id `article_<slug>`
+ *   plaud      — a Plaud library recording read through the MCP (#434);
+ *                id `plaud_<recordingId>`
+ *   recording  — a recording stored in the `recordings` container: a manual
+ *                paste, or an upload transcribed by Plaud Embedded (#442);
+ *                id `recording_<recordingId>`
+ */
 export const SOURCE_KINDS = Object.freeze({
   article: 'article',
+  plaud: 'plaud',
+  recording: 'recording',
 });
 
 /**
@@ -77,14 +100,72 @@ export function articleKey(article) {
   );
 }
 
-/** `article_` + the key; Plaud transcripts will be `plaud_` + the recording id. */
-export function transcriptId(article) {
-  return `${SOURCE_KINDS.article}_${articleKey(article)}`;
+/**
+ * A recording id as a transcript key. Plaud file ids and the `recordings`
+ * container's UUIDs both pass the blob-path character class; anything that
+ * does not is refused by name rather than stored under a mangled key.
+ */
+export function recordingKey(recordingId) {
+  const candidate = String(recordingId ?? '').trim();
+  if (candidate && KEY_PATTERN.test(candidate)) return candidate;
+  throw new Error(`Recording id ${JSON.stringify(candidate)} is not usable as a transcript key`);
 }
 
-/** Blob path for one article transcript's audio. Validated by blob-paths `isValidBlobPath`. */
+/**
+ * The source descriptor every write below keys on: `{ kind, key, id, slug,
+ * title, provider }`. `kind` + `key` name the document and the audio blob;
+ * the rest is what the listing shows beside the transcript.
+ */
+export function describeArticleSource(article) {
+  return {
+    kind: SOURCE_KINDS.article,
+    key: articleKey(article),
+    id: article?.id || null,
+    slug: resolveArticleSlug(article) || null,
+    title: resolveArticleTitle(article) || null,
+    provider: resolveArticleProvider(article),
+  };
+}
+
+/**
+ * @param {object} params
+ * @param {'plaud'|'recording'} [params.kind] where the recording came from
+ * @param {string} params.recordingId the Plaud file id, or the `recordings` document id
+ * @param {string} [params.title]
+ */
+export function describeRecordingSource({ kind = SOURCE_KINDS.plaud, recordingId, title }) {
+  if (kind !== SOURCE_KINDS.plaud && kind !== SOURCE_KINDS.recording) {
+    throw new Error(`Unknown recording source kind "${kind}"`);
+  }
+  const key = recordingKey(recordingId);
+  return {
+    kind,
+    key,
+    id: key,
+    slug: null,
+    title: String(title || '').trim() || null,
+    provider: null,
+  };
+}
+
+/** `<kind>_<key>`: `article_<slug>`, `plaud_<recordingId>`, `recording_<id>`. */
+export function transcriptIdFor(source) {
+  return `${source.kind}_${source.key}`;
+}
+
+/** Blob path for one transcript's audio. Validated by blob-paths `isValidBlobPath`. */
+export function audioPathFor(source) {
+  return `${source.kind}/${source.key}.mp3`;
+}
+
+/** `article_` + the key. The article-shaped door onto `transcriptIdFor`. */
+export function transcriptId(article) {
+  return transcriptIdFor(describeArticleSource(article));
+}
+
+/** Blob path for one article transcript's audio. */
 export function audioPath(article) {
-  return `${SOURCE_KINDS.article}/${articleKey(article)}.mp3`;
+  return audioPathFor(describeArticleSource(article));
 }
 
 /**
@@ -108,16 +189,20 @@ export function resolveArticleProvider(article) {
  * `uploadEpisodeAudio` gives: the storage account denies anonymous reads, and
  * a stored absolute URL breaks on any topology change.
  */
-export async function uploadTranscriptAudio({ storage, article, audio, contentType }) {
-  const path = audioPath(article);
+export async function uploadSourceAudio({ storage, source, audio, contentType }) {
+  const path = audioPathFor(source);
 
   await storage.uploadBlob(PODCAST_AUDIO_CONTAINER, path, audio, contentType, {
-    sourceKind: SOURCE_KINDS.article,
-    sourceId: String(article?.id || ''),
-    sourceSlug: resolveArticleSlug(article) || '',
+    sourceKind: source.kind,
+    sourceId: String(source.id || ''),
+    sourceSlug: source.slug || '',
   });
 
   return { path, url: mediaUrlFor(PODCAST_AUDIO_CONTAINER, path), bytes: audio.length };
+}
+
+export function uploadTranscriptAudio({ storage, article, audio, contentType }) {
+  return uploadSourceAudio({ storage, source: describeArticleSource(article), audio, contentType });
 }
 
 /**
@@ -126,15 +211,22 @@ export async function uploadTranscriptAudio({ storage, article, audio, contentTy
  * `host` is reserved for #437: the RSS.com publish record (episode id, URL,
  * published-at) lands there when an approval pushes the episode to the host.
  * Null until then, and present from the start so the hub can key on it.
+ *
+ * `source` is the generator's own provenance when it supplies one
+ * (`recording-script.js` nests `{ kind: 'plaud', recordingId, … }`) and null
+ * for an article, whose provenance is the flat `source*` fields above it.
+ * `attributionLeaks` is the recording generator's measurement — transcript
+ * speaker labels the finished dialogue repeated — for the hub to show as a
+ * review warning; an empty list for every other kind.
  */
-export function toTranscriptDoc({ article, script, audio, now }) {
+export function toTranscriptDocFor({ source, script, audio, now }) {
   return {
-    id: transcriptId(article),
-    sourceKind: SOURCE_KINDS.article,
-    sourceId: article?.id || null,
-    sourceSlug: resolveArticleSlug(article) || null,
-    sourceTitle: resolveArticleTitle(article) || null,
-    sourceProvider: resolveArticleProvider(article),
+    id: transcriptIdFor(source),
+    sourceKind: source.kind,
+    sourceId: source.id ?? null,
+    sourceSlug: source.slug ?? null,
+    sourceTitle: source.title ?? null,
+    sourceProvider: source.provider ?? null,
     title: script.title,
     summary: script.summary,
     keyTakeaways: script.keyTakeaways,
@@ -155,12 +247,18 @@ export function toTranscriptDoc({ article, script, audio, now }) {
     // a rejected one, or a blob container Terraform has not created yet. The
     // hub shows it so "no player" is explained rather than mysterious.
     audioError: audio?.error || null,
+    source: script.source && typeof script.source === 'object' ? script.source : null,
+    attributionLeaks: Array.isArray(script.attributionLeaks) ? script.attributionLeaks : [],
     status: STATUS.draft,
     generatedAt: now,
     approvedAt: null,
     approvedBy: null,
     host: null,
   };
+}
+
+export function toTranscriptDoc({ article, script, audio, now }) {
+  return toTranscriptDocFor({ source: describeArticleSource(article), script, audio, now });
 }
 
 /**
@@ -212,14 +310,18 @@ function explainWriteFailure(err) {
  * same article. A whole-document replace, deliberately: a regenerated
  * transcript must not inherit the approval of the version it replaced.
  */
-export async function saveTranscript(store, { article, script, audio, now }) {
-  const doc = toTranscriptDoc({ article, script, audio, now });
+export async function saveTranscriptFor(store, { source, script, audio, now }) {
+  const doc = toTranscriptDocFor({ source, script, audio, now });
   try {
     await store.upsertDoc(TRANSCRIPT_CONTAINER, doc);
   } catch (err) {
     throw explainWriteFailure(err);
   }
   return doc;
+}
+
+export function saveTranscript(store, { article, script, audio, now }) {
+  return saveTranscriptFor(store, { source: describeArticleSource(article), script, audio, now });
 }
 
 /**
@@ -230,18 +332,18 @@ export async function saveTranscript(store, { article, script, audio, now }) {
  * it wholesale would destroy a working transcript because its *re*generation
  * failed.
  */
-export async function markTranscriptFailed(store, { article, error, now }) {
-  const id = transcriptId(article);
+export async function markTranscriptFailedFor(store, { source, error, now }) {
+  const id = transcriptIdFor(source);
   const existing = (await store.readDoc(TRANSCRIPT_CONTAINER, id, id)) || {};
 
   const doc = {
     ...existing,
     id,
-    sourceKind: SOURCE_KINDS.article,
-    sourceId: article?.id || existing.sourceId || null,
-    sourceSlug: resolveArticleSlug(article) || existing.sourceSlug || null,
-    sourceTitle: resolveArticleTitle(article) || existing.sourceTitle || null,
-    sourceProvider: resolveArticleProvider(article) ?? existing.sourceProvider ?? null,
+    sourceKind: source.kind,
+    sourceId: source.id || existing.sourceId || null,
+    sourceSlug: source.slug || existing.sourceSlug || null,
+    sourceTitle: source.title || existing.sourceTitle || null,
+    sourceProvider: source.provider ?? existing.sourceProvider ?? null,
     status: STATUS.failed,
     error: String(error).slice(0, 500),
     generatedAt: now,
@@ -253,6 +355,10 @@ export async function markTranscriptFailed(store, { article, error, now }) {
     throw explainWriteFailure(err);
   }
   return doc;
+}
+
+export function markTranscriptFailed(store, { article, error, now }) {
+  return markTranscriptFailedFor(store, { source: describeArticleSource(article), error, now });
 }
 
 /**

@@ -50,6 +50,7 @@ export const ADMIN_ROUTES = {
   CALENDAR: '/admin/calendar',
   SUBMIT: '/admin/submit',
   // Amplify integrations
+  RECORDING_HUB: '/admin/recording-hub',
   SOCIAL_HUB: '/admin/social',
   LINKIE: '/admin/linkie',
   MAILING_LIST: '/admin/mailing-list',

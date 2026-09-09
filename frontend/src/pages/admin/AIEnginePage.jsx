@@ -1153,10 +1153,10 @@ const SITE_PAGES = [
     services: ['gemini', 'anthropic', 'perplexity', 'replicate', 'firecrawl'],
   },
   {
-    id: 'recordings',
-    label: 'Recordings',
-    path: '/admin/recordings',
-    description: 'Plaud MCP integration — browse recordings, transcripts, AI notes',
+    id: 'recording-hub',
+    label: 'Recording Hub',
+    path: '/admin/recording-hub',
+    description: 'Podcast transcripts and the Plaud MCP — browse recordings, transcripts, AI notes',
     services: ['plaud', 'anthropic', 'gemini'],
   },
   {

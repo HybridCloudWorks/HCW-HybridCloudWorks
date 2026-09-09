@@ -141,6 +141,50 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **One Recording Hub at `/admin/recording-hub` — podcast transcripts and
+  Plaud in two tabs (#442; wires #434, presents #435).** `/admin/recordings`
+  redirects there and `RecordingsPage.jsx` is gone. The **Podcast tab** lists
+  every `podcast_transcripts` document with its source chip (an article,
+  linked to the editor and the public page; or a recording with its title),
+  status, `truncated` and `audioError` badges and a player; opens the review
+  view with the transcript beside its source — key takeaways for an article,
+  the recording id and the generator's `attributionLeaks` as a warning for a
+  recording; approves or returns to draft through the review route; renders
+  the `host.rsscom` line (publishing… while approval's publish job is
+  pending / published / error with Retry / skipped), accepting the review
+  route's 202-with-job-id as well as its 200, with Retry keeping a plain-toast
+  guard for a deployment that predates the publish route; and lists the
+  show's episodes from `public/podcasts`
+  (read-only — season metadata editing is not in this change). The **Plaud
+  tab** carries the Library, Upload and Connect behaviour unchanged, adds
+  **Script this** on every library and stored recording (`POST
+  cms/podcast/transcripts/generate-from-recording`, job
+  `generate-podcast-transcript-from-recording`: `get_file` + `get_transcript`
+  through the MCP with the stored token, `source_list` as the fallback,
+  `generateRecordingScript` under the `podcastScript` feature, then the same
+  voice → upload → save → spend tail the article pipeline uses — now one
+  shared `finishTranscript` in `lib/podcast/generate.js` rather than two
+  copies; stored as `plaud_<recordingId>` or `recording_<id>` with the
+  generator's provenance and `attributionLeaks`), and **audio upload for
+  transcription** through the Plaud Embedded Transcription API — verified
+  against docs.plaud.ai on 2026-09-08 and written into the header of
+  `lib/podcast/plaud-embedded.js` — as `POST cms/podcast/recordings/upload`
+  (mp3/m4a/wav, 40 MiB, refused before storage when unconfigured) and job
+  `transcribe-recording-upload`, which hands Plaud the media route URL on the
+  new `PUBLIC_API_ORIGIN` setting (the storage account denies direct and SAS
+  reads; the URL is unguessable but unauthenticated), polls to a terminal
+  status — bounded by a documented default budget under the job's own —
+  stores the transcript in `recordings` as `plaud-embedded`, and **deletes
+  the upload blob** once Plaud is done with it (every terminal outcome; a
+  timed-out poll keeps it, and a new `expire-recording-uploads` lifecycle
+  rule in `infra/storage.tf` removes anything under `podcast/uploads/` seven
+  days after creation, Plaud's own retention). A
+  missing or revoked Plaud credential is refused with one sentence naming the
+  Connect tab, at the door (409) and in the job, before any model call. Two
+  new Key Vault references, `PLAUD-EMBEDDED-CLIENT-ID` and
+  `PLAUD-EMBEDDED-API-KEY`, catalogued and documented; `callMcpTool` extracted
+  from `mcpProxy` so a job can call an MCP tool server-side.
+
 - **Approving a podcast transcript publishes it to RSS.com (#437, slice 2;
   ADR 0029 §1b).** `POST cms/podcast/transcripts/review` moving a transcript
   to `published` now runs the host step slice 1 built: it queues a

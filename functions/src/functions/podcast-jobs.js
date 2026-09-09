@@ -18,7 +18,7 @@
  * article document carries one.
  */
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
-import { readBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
+import { deleteBlob, readBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getCostEstimate } from '../lib/ai/router.js';
 import { publicUrlOf } from '../lib/cms/publish.js';
 import { registerJobType } from '../lib/jobs.js';
@@ -36,6 +36,16 @@ import {
   runHostPublish,
 } from '../lib/podcast/publish-transcript.js';
 import { createRssComClient } from '../lib/podcast/rsscom.js';
+import {
+  RECORDING_JOB_TYPE,
+  generateTranscriptFromRecording,
+  parseRecordingPayload,
+} from '../lib/podcast/recording-generate.js';
+import {
+  UPLOAD_JOB_TYPE,
+  parseUploadPayload,
+  transcribeUpload,
+} from '../lib/podcast/recording-upload.js';
 
 /**
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rule
@@ -175,4 +185,82 @@ registerJobType(PUBLISH_JOB_TYPE, {
       now,
     });
   },
+});
+
+// ---------------------------------------------------------------------------
+// Recording side (#442): script a recording; transcribe an upload.
+// ---------------------------------------------------------------------------
+
+/** One recording → transcript run against production dependencies. */
+export async function runRecordingGeneration(payload, { context } = {}) {
+  const parsed = parseRecordingPayload(payload);
+  if (parsed.error) throw new Error(parsed.error);
+
+  const report = await generateTranscriptFromRecording({
+    ...parsed.value,
+    store: { readDoc, upsertDoc, patchDoc },
+    storage: { uploadBlob },
+    ai: { generateJsonResponse, getCostEstimate },
+  });
+
+  context?.log?.(
+    `${RECORDING_JOB_TYPE}: ${report.id} drafted` +
+      (report.audioError ? ` without audio (${report.audioError})` : ` with ${report.audioBytes} B of audio`) +
+      (report.attributionLeaks.length ? `, ${report.attributionLeaks.length} attribution leak(s) to review` : '') +
+      `, $${report.costUsd} spent`
+  );
+
+  return report;
+}
+
+registerJobType(RECORDING_JOB_TYPE, {
+  // Same level as generate-podcast-transcript and the route that enqueues
+  // it: a draft, with approval a separate publisher-gated act.
+  role: 'editor',
+  description:
+    'Script a two-host podcast episode from one Plaud library recording (read through the MCP with the stored token) or one stored recording, synthesise the audio and save the transcript as a draft for review on the Recording Hub.',
+  // One recording id, either kind.
+  maxPayloadBytes: 512,
+  // Two MCP reads, one model call, one or two synthesis requests, an upload.
+  timeoutMs: 10 * 60 * 1000,
+  worker: runRecordingGeneration,
+});
+
+/** Headroom under the job timeout so the poll loop ends with a named error, not a kill. */
+const UPLOAD_JOB_TIMEOUT_MS = 25 * 60 * 1000;
+const UPLOAD_POLL_BUDGET_MS = UPLOAD_JOB_TIMEOUT_MS - 60 * 1000;
+
+/** One upload → Plaud Embedded → stored transcript, against production dependencies. */
+export async function runUploadTranscription(payload, { context } = {}) {
+  const parsed = parseUploadPayload(payload);
+  if (parsed.error) throw new Error(parsed.error);
+
+  const report = await transcribeUpload({
+    ...parsed.value,
+    store: { readDoc, upsertDoc, patchDoc },
+    storage: { deleteBlob },
+    timeoutMs: UPLOAD_POLL_BUDGET_MS,
+    log: context,
+  });
+
+  context?.log?.(
+    `${UPLOAD_JOB_TYPE}: recording ${report.id} stored from Plaud transcription ${report.transcriptionId} ` +
+      `(${report.segments} segments, upload ${report.uploadDeleted ? 'deleted' : 'kept'})`
+  );
+
+  return report;
+}
+
+registerJobType(UPLOAD_JOB_TYPE, {
+  // The route that enqueues it is editor; the result is a stored transcript
+  // that nothing publishes.
+  role: 'editor',
+  description:
+    'Hand one uploaded audio file to the Plaud Embedded Transcription API, poll until it is transcribed and store the transcript in recordings for the Recording Hub.',
+  // A blob path and a title.
+  maxPayloadBytes: 1024,
+  // Plaud transcribes at roughly real time or faster; a two-hour recording
+  // fits, and the poll loop stops with a named error a minute before this.
+  timeoutMs: UPLOAD_JOB_TIMEOUT_MS,
+  worker: runUploadTranscription,
 });

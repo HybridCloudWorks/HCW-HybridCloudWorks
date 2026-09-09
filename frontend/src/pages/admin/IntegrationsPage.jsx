@@ -82,7 +82,7 @@ async function testPubler() {
 }
 
 async function testPlaud() {
-  // Same path the Recordings Hub uses — credentials stay server-side in mcpProxy.
+  // Same path the Recording Hub's Plaud tab uses — credentials stay server-side in mcpProxy.
   await postJSON('mcpProxy', {
     serverId: 'plaud',
     tool: 'list_files',
@@ -135,15 +135,15 @@ export const SERVICES = Object.freeze([
     id: 'plaud',
     icon: Radio,
     name: 'Plaud',
-    description: 'Voice recordings sync for the Recordings Hub.',
-    manageHref: '/admin/recordings',
+    description: 'Voice recordings sync for the Recording Hub’s Plaud tab.',
+    manageHref: '/admin/recording-hub',
     test: testPlaud,
     secrets: [],
     // Not an omission: the OAuth pair lives on the mcp_servers/plaud document
     // and refreshPlaudToken rotates it every 12 hours. There is no vault
     // secret to paste, and a row here would imply there was one.
     credentialNote:
-      'No Key Vault secret. The OAuth token pair lives on the mcp_servers/plaud document and refreshes every 12 hours — reconnect from the Recordings Hub Connect tab.',
+      'No Key Vault secret for the MCP. The OAuth token pair lives on the mcp_servers/plaud document and refreshes every 12 hours — reconnect from the Recording Hub → Plaud tab → Connect. Plaud Embedded (audio upload transcription) is a separate pair, PLAUD-EMBEDDED-CLIENT-ID / PLAUD-EMBEDDED-API-KEY, seeded on the API Keys page.',
   },
   {
     id: 'sessionize',

@@ -474,6 +474,138 @@ async function markServerError(store, serverId, message, now) {
   }
 }
 
+/**
+ * Call one tool on one configured MCP server, server-side, with the stored
+ * credential — the same transport, auth resolution and error mapping
+ * `mcpProxy` uses, without the HTTP request around it.
+ *
+ * Extracted so a platform job can read a Plaud transcript with the token the
+ * Connect tab stored (lib/podcast/recording-generate.js) instead of routing
+ * through the browser proxy it cannot call. `mcpProxy` is a thin wrapper over
+ * this, so the two cannot drift.
+ *
+ * Returns an outcome rather than throwing: `{ ok: true, result, raw }` on a
+ * tool result, or `{ ok: false, error, code?, httpStatus }` where `httpStatus`
+ * is what the proxy answers for that failure (404 unknown server, 403
+ * disabled, 400 bad URL or arguments, 500 configuration read failed) and 200
+ * for an upstream failure the proxy reports in the body. `code` is
+ * `UNAUTHENTICATED` when the upstream rejected the credential (401/402/403 or
+ * `invalid_token`), which is the signal a caller uses to say "reconnect"
+ * rather than "retry".
+ *
+ * @param {object} params
+ * @param {{ readDoc: Function }} params.store
+ * @param {string} params.serverId
+ * @param {string} params.tool
+ * @param {object} [params.arguments]
+ * @param {object} [params.env]
+ * @param {Function} [params.fetch]
+ * @param {{ warn?: Function, error?: Function }} [params.log]
+ * @param {number} [params.timeoutMs]
+ */
+export async function callMcpTool({
+  store,
+  serverId: rawServerId,
+  tool: rawTool,
+  arguments: toolArguments = {},
+  env = process.env,
+  fetch: fetchImpl = globalThis.fetch,
+  log = console,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}) {
+  const serverId = String(rawServerId || "").trim();
+  const tool = String(rawTool || "").trim();
+  if (!serverId || !tool) {
+    return { ok: false, error: "serverId and tool are required", httpStatus: 400 };
+  }
+
+  let server;
+  try {
+    server = await store.readDoc(MCP_CONTAINER, serverId, serverId);
+  } catch (error) {
+    log.error?.(
+      `[mcp] configuration read failed: server=${serverId} code=${error?.code ?? error?.statusCode ?? "n/a"} ${error?.message || error}`,
+    );
+    return {
+      ok: false,
+      error: "Failed to read MCP server configuration",
+      httpStatus: 500,
+    };
+  }
+  if (!server) return { ok: false, error: "MCP server not found", httpStatus: 404 };
+  if (server.enabled !== true) {
+    return { ok: false, error: "MCP server is disabled", httpStatus: 403 };
+  }
+
+  let url;
+  try {
+    url = validateMcpUrl(server.url);
+  } catch (error) {
+    return { ok: false, error: error.message, httpStatus: 400 };
+  }
+
+  if (
+    !toolArguments ||
+    typeof toolArguments !== "object" ||
+    Array.isArray(toolArguments)
+  ) {
+    return { ok: false, error: "arguments must be a JSON object", httpStatus: 400 };
+  }
+
+  try {
+    const rpcResult = await callMcpRpc({
+      serverId,
+      url,
+      transport: server.transport || "http",
+      authHeaders: resolveMcpAuthHeaders({
+        oauthToken: server.oauthToken,
+        apiKeyEnvVar: server.apiKeyEnvVar,
+        env,
+      }),
+      rpcBody: {
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { name: tool, arguments: toolArguments },
+        id: 2,
+      },
+      options: { fetchImpl, log, timeoutMs },
+    });
+
+    if (rpcResult?.error) {
+      return {
+        ok: false,
+        error: rpcResult.error.message || "MCP error",
+        code: rpcResult.error.code,
+        httpStatus: 200,
+      };
+    }
+    if (!rpcResult || !Object.hasOwn(rpcResult, "result")) {
+      return { ok: false, error: "MCP server returned no tool result", httpStatus: 200 };
+    }
+
+    const rawResult = rpcResult.result;
+    const result = extractMcpText(rawResult);
+    if (rawResult?.isError) {
+      return { ok: false, error: result || "MCP tool error", httpStatus: 200 };
+    }
+    return { ok: true, result, raw: rawResult, httpStatus: 200 };
+  } catch (error) {
+    // Content-free on purpose: a McpUpstreamError carries `responseBody`,
+    // which for a tool call can be the tool's output — a transcript — and
+    // logging the error object whole would put that in Function logs. The
+    // server, the tool, the HTTP status and the error's own message are all
+    // an operator needs; the body reaches only the caller, through
+    // `mcpAuthError`, and only as an OAuth error description.
+    log.error?.(
+      `[mcp] upstream call failed: server=${serverId} tool=${tool} status=${error?.status ?? "n/a"} ${error?.message || error}`,
+    );
+    return {
+      ...failureBody(mcpAuthError(error, "MCP tool call failed")),
+      httpStatus: 200,
+    };
+  }
+}
+
 /** Create the two admin MCP handlers with injectable dependencies for tests. */
 export function createMcpHandlers({
   guard,
@@ -492,93 +624,20 @@ export function createMcpHandlers({
       if (auth.error) return auth.error;
 
       const body = await request.json().catch(() => null);
-      const serverId = String(body?.serverId || "").trim();
-      const tool = String(body?.tool || "").trim();
-      if (!serverId || !tool)
-        return json(400, {
-          ok: false,
-          error: "serverId and tool are required",
-        });
-
-      let server;
-      try {
-        server = await store.readDoc(MCP_CONTAINER, serverId, serverId);
-      } catch (error) {
-        context.error?.("[mcpProxy] configuration read failed:", error);
-        return json(500, {
-          ok: false,
-          error: "Failed to read MCP server configuration",
-        });
-      }
-      if (!server)
-        return json(404, { ok: false, error: "MCP server not found" });
-      if (server.enabled !== true)
-        return json(403, { ok: false, error: "MCP server is disabled" });
-
-      let url;
-      try {
-        url = validateMcpUrl(server.url);
-      } catch (error) {
-        return json(400, { ok: false, error: error.message });
-      }
-
-      const toolArguments = body?.arguments ?? {};
-      if (
-        !toolArguments ||
-        typeof toolArguments !== "object" ||
-        Array.isArray(toolArguments)
-      ) {
-        return json(400, {
-          ok: false,
-          error: "arguments must be a JSON object",
-        });
-      }
-
-      try {
-        const rpcResult = await callMcpRpc({
-          serverId,
-          url,
-          transport: server.transport || "http",
-          authHeaders: resolveMcpAuthHeaders({
-            oauthToken: server.oauthToken,
-            apiKeyEnvVar: server.apiKeyEnvVar,
-            env,
-          }),
-          rpcBody: {
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: { name: tool, arguments: toolArguments },
-            id: 2,
-          },
-          options: transportOptions,
-        });
-
-        if (rpcResult?.error) {
-          return json(200, {
-            ok: false,
-            error: rpcResult.error.message || "MCP error",
-            code: rpcResult.error.code,
-          });
-        }
-        if (!rpcResult || !Object.hasOwn(rpcResult, "result")) {
-          return json(200, {
-            ok: false,
-            error: "MCP server returned no tool result",
-          });
-        }
-
-        const rawResult = rpcResult.result;
-        const result = extractMcpText(rawResult);
-        if (rawResult?.isError)
-          return json(200, { ok: false, error: result || "MCP tool error" });
-        return json(200, { ok: true, result, raw: rawResult });
-      } catch (error) {
-        context.error?.("[mcpProxy] upstream call failed:", error);
-        return json(
-          200,
-          failureBody(mcpAuthError(error, "MCP tool call failed")),
-        );
-      }
+      const { httpStatus, ...outcome } = await callMcpTool({
+        store,
+        serverId: body?.serverId,
+        tool: body?.tool,
+        arguments: body?.arguments ?? {},
+        env,
+        fetch: fetchImpl,
+        log: {
+          warn: (...args) => log.warn?.(...args),
+          error: (...args) => context.error?.("[mcpProxy]", ...args),
+        },
+        timeoutMs,
+      });
+      return json(httpStatus, outcome);
     },
 
     async syncMcpTools(request, context) {

@@ -157,7 +157,7 @@ const AdminCoderCornerPage = lazyPage(() => import('@/pages/admin/CoderCornerPag
 const AdminSpeakingEventsPage = lazyPage(() => import('@/pages/admin/SpeakingEventsPage'));
 const AdminCertificationsPage = lazyPage(() => import('@/pages/admin/CertificationsPage'));
 const AdminSocialHubPage = lazyPage(() => import('@/pages/admin/SocialHubPage'));
-const AdminRecordingsPage = lazyPage(() => import('@/pages/admin/RecordingsPage'));
+const AdminRecordingHubPage = lazyPage(() => import('@/pages/admin/RecordingHubPage'));
 const AdminAIEnginePage = lazyPage(() => import('@/pages/admin/AIEnginePage'));
 const AdminServiceDocsPage = lazyPage(() => import('@/pages/admin/ServiceDocsPage'));
 const AdminForgeStudioPage = lazyPage(() => import('@/pages/admin/ForgeStudioPage'));
@@ -404,7 +404,9 @@ function App() {
                 <Route path="health" element={<AdminHealthPage />} />
                 <Route path="integrations" element={<AdminIntegrationsPage />} />
                 <Route path="social" element={<AdminSocialHubPage />} />
-                <Route path="recordings" element={<AdminRecordingsPage />} />
+                <Route path="recording-hub" element={<AdminRecordingHubPage />} />
+                {/* #442: /admin/recordings became the Plaud tab of the Recording Hub. */}
+                <Route path="recordings" element={<Navigate to="/admin/recording-hub" replace />} />
                 <Route path="forge-studio" element={<AdminForgeStudioPage />} />
                 <Route path="ai-engine" element={<AdminAIEnginePage />} />
                 <Route path="ai-engine/docs/:serviceId" element={<AdminServiceDocsPage />} />

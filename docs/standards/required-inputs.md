@@ -213,7 +213,8 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The twenty-one names below are what the Terraform root module
+correct posture. The twenty-three names below (as of `main` at #442; #447 adds
+one more when it merges) are what the Terraform root module
 in `infra/` references — the app-settings map that holds them is in
 `infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
 every `.tf` file in that directory as one module rather than any one file, so a
@@ -239,6 +240,8 @@ problem. The two cost very different amounts to diagnose.
 | `PERPLEXITY-API-KEY` | AI router | |
 | `REPLICATE-API-KEY` | AI router | |
 | `AZURE-SPEECH-KEY` | Listen & Learn fallback TTS | Inert until a Cognitive Services resource exists, which is a spend decision |
+| `PLAUD-EMBEDDED-CLIENT-ID` | Recording Hub — upload transcription | Plaud Embedded Transcription API (#442), sent as `X-Client-Id`. A different credential from the Plaud MCP OAuth token pair, which lives on `mcp_servers/plaud` and never in the vault. Unseeded, the upload form answers 503 naming both settings |
+| `PLAUD-EMBEDDED-API-KEY` | Recording Hub — upload transcription | Sent as `X-Client-Api-Key` beside the client id; issued in the Plaud Embedded portal (`docs.plaud.ai/plaud-embedded`) |
 | `YOUTUBE-API-KEY` | Listen & Learn "watch next" links | Optional; without it episodes publish with an empty video list |
 | `FIRECRAWL-API-KEY` | Content research | |
 | `LINKIE-API-KEY` | Link tooling | |
