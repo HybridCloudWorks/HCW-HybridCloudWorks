@@ -372,9 +372,13 @@ export async function unpublishFromPubler(publer, doc, log = {}) {
     if (missingIds.length) {
       // Warned, not thrown: the caller is a delete that has already happened
       // on our side, and the operator's next move is the Publer queue itself.
+      //
+      // Counts only. A Publer post id is an identifier and traces stay
+      // content-free — the same rule `cleanupSoftDeletedContent` states at
+      // `timers/content-cleanup.js` for refused document ids.
       log.warn?.(
         `[unpublishFromPubler] Publer did not delete ${missingIds.length} of ${ids.length} ` +
-          `post(s): ${missingIds.join(', ')}`
+          'post(s) — check the Publer queue'
       );
     }
     return { attempted: ids.length, removed: deletedIds.length };

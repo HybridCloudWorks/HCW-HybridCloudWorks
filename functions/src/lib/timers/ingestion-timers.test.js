@@ -127,7 +127,7 @@ describe('Publer reconcile', () => {
       return {
         ok: true,
         headers: { get: () => '87' },
-        json: async () => ({ posts, total_pages: 2 }),
+        text: async () => JSON.stringify({ posts, total_pages: 2 }),
       };
     });
     const client = createPublerClient({
@@ -195,7 +195,12 @@ describe('Publer deletePosts — the documented bulk form (#463 item 2)', () => 
       fetch: fetchImpl,
     });
   const answering = (body, ok = true, status = 200) =>
-    vi.fn(async () => ({ ok, status, headers: { get: () => null }, json: async () => body }));
+    vi.fn(async () => ({
+      ok,
+      status,
+      headers: { get: () => null },
+      text: async () => JSON.stringify(body),
+    }));
 
   it('sends DELETE /posts with a post_ids[] array, not DELETE /posts/{id}', async () => {
     const fetch = answering({ deleted_ids: ['p1', 'p2'] });
@@ -252,7 +257,7 @@ describe('Publer paging stops before it exhausts the rate limit (#463 item 5)', 
       ok: true,
       status: 200,
       headers: { get: () => remaining },
-      json: async () => ({ posts: [], total_pages: totalPages }),
+      text: async () => JSON.stringify({ posts: [], total_pages: totalPages }),
     }));
     return { fetch, log, client: createPublerClient({ env: { PUBLER_API_KEY: 'k', PUBLER_WORKSPACE_ID: 'w' }, fetch, log }) };
   };
@@ -302,7 +307,8 @@ describe('Publer rejected credential (#358)', () => {
       ok: status < 400,
       status,
       headers: { get: () => null },
-      json: async () => ({ posts: [], total_pages: 1, errors: ['Publer said why'] }),
+      text: async () =>
+        JSON.stringify({ posts: [], total_pages: 1, errors: ['Publer said why'] }),
     }));
   const quiet = () => ({ warn: vi.fn(), log: vi.fn() });
   const build = ({ status, onKeyVerdict = vi.fn(), log = quiet() }) => {
@@ -336,6 +342,22 @@ describe('Publer rejected credential (#358)', () => {
       status,
       detail: 'Publer said why',
     });
+  });
+
+  it('keeps a non-JSON error body instead of discarding it', async () => {
+    // An HTML error page from a gateway in front of Publer is exactly the
+    // failure where the body says more than the status, and `response.json()`
+    // alone threw it away (Copilot review of 200a532f).
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      headers: { get: () => null },
+      text: async () => '<html>502 Bad Gateway</html>',
+    }));
+    const client = createPublerClient({ env, fetch });
+    await expect(client.listPostsForSync()).rejects.toThrow(
+      'HTTP 502 — <html>502 Bad Gateway</html>'
+    );
   });
 
   it('carries the upstream sentence into the thrown message too', async () => {

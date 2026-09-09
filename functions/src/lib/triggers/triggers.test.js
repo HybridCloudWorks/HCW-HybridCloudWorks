@@ -835,6 +835,9 @@ describe('feed handlers', () => {
       await unpublishFromPubler(d.publer, { publerPostIds: ['p1', 'p2'] }, { warn })
     ).toEqual({ attempted: 2, removed: 1 });
     expect(warn.mock.calls[0][0]).toMatch(/did not delete 1 of 2/);
+    // Counts, never the ids: traces stay content-free (Copilot review of
+    // 200a532f; `timers/content-cleanup.js` states the same rule).
+    expect(warn.mock.calls[0][0]).not.toMatch(/p2/);
 
     // Best-effort: a thrown delete is warned, never propagated.
     d.publer.deletePosts = vi.fn(async () => {

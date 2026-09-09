@@ -204,7 +204,19 @@ export function createPublerClient({
       ...options,
       timeoutMs: PUBLER_TIMEOUT_MS,
     });
-    const data = await response.json().catch(() => ({}));
+    // Text first, then parse. `response.json().catch(() => ({}))` discarded
+    // every body that was not JSON — and an HTML error page from a gateway in
+    // front of Publer is exactly the failure where the body says more than the
+    // status. `rest-proxy.js` has always read it this way and parks the
+    // remains under `raw`, which `readUpstreamError` knows how to read; this
+    // client did not, so that branch was unreachable from here.
+    const text = await response.text().catch(() => '');
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text.slice(0, 2000) };
+    }
     // Absent on a mocked response and on any answer Publer serves without it;
     // `null` means "unknown", which the caller must not read as "exhausted".
     const remainingHeader = response.headers?.get?.('X-RateLimit-Remaining');
