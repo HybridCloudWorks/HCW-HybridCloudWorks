@@ -213,7 +213,7 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The nineteen names below are what `infra/main.tf` references,
+correct posture. The twenty-one names below are what `infra/main.tf` references,
 so each has a named consumer and a fixed spelling; presence is what is
 unconfirmed. [Accepted risks](../repo/todo.md#accepted-risks) records the vault as holding 18
 live secrets as of 2026-08-24.
@@ -243,6 +243,8 @@ problem. The two cost very different amounts to diagnose.
 | `PUBLER-WORKSPACE-ID` | Social publishing | |
 | `KLAVIYO-PRIVATE-KEY` | Email | |
 | `KLAVIYO-LIST-ID` | Email | |
+| `RSSCOM-API-KEY` | Podcast publishing | Issued at `https://dashboard.rss.com/api-access/` on the Max plan (ADR 0029 §1b, #437). Unseeded, approving an episode leaves it on the manual upload path |
+| `RSSCOM-PODCAST-ID` | Podcast publishing | The numeric `id` that `GET https://api.rss.com/v4/podcasts` returns for the show; an identifier, not a credential |
 | `TELEGRAM-BOT-TOKEN` | Notifications | |
 | `TELEGRAM-CHAT-ID` | Notifications | |
 

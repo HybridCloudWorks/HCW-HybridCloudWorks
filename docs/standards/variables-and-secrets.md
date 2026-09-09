@@ -340,6 +340,7 @@ Seeded by hand; referenced from `infra/main.tf` app settings as
 | `ANTHROPIC-API-KEY`, `OPENAI-API-KEY`, `PERPLEXITY-API-KEY`, `REPLICATE-API-KEY` | §4, partially | Third-party SaaS keys. Distinct from Azure OpenAI, which is keyless. `PERPLEXITY` and `REPLICATE` are referenced as app settings but no longer reachable through the AI router — it implements Gemini, OpenAI and Anthropic only |
 | `FIRECRAWL-API-KEY`, `LINKIE-API-KEY`, `YOUTUBE-API-KEY` | not inventoried | Third-party SaaS keys |
 | `PUBLER-API-KEY`, `PUBLER-WORKSPACE-ID`, `KLAVIYO-PRIVATE-KEY`, `KLAVIYO-LIST-ID` | not inventoried | The two `*-ID` values are identifiers rather than credentials, but they travel with their key and splitting them across stores buys nothing |
+| `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID` | not inventoried | Podcast publishing over the RSS.com Core API (ADR 0029 §1b, #437). The `-ID` is the show's numeric id, an identifier that travels with its key, as above |
 | `TELEGRAM-BOT-TOKEN`, `TELEGRAM-CHAT-ID` | not inventoried | As above |
 | `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
 | `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
