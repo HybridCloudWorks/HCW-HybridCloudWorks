@@ -41,6 +41,10 @@ import {
 // mean two things. It has no imports of its own, so this adds no transitive
 // dependency to a module that is otherwise pure.
 import { isPublicDocument } from '../public-reads.js';
+// The fence itself lives in an import-free module the AI router also loads;
+// see prompt-fence.js for why. Re-exported below under the names other
+// Listen & Learn modules import from here.
+import { ARTICLE_CLOSE, ARTICLE_OPEN, fenceArticleText } from '../ai/prompt-fence.js';
 
 export { DEFAULT_SPEAKERS, ScriptError };
 
@@ -324,10 +328,11 @@ function renderSetAside({ codeBlocks, tables }) {
  *
  * Article text is untrusted input to the model even though it is our own:
  * ContentForge drafts from external sources, an article about prompt injection
- * would quote the very phrases below, and #433 will feed this same prompt
- * arbitrary web pages and YouTube transcripts. A delimiter plus an explicit
- * instruction is the defence; `fenceArticleText` is the other half, because a
- * fence the source can close is not a fence.
+ * would quote the very phrases below, and #433 feeds the same fence arbitrary
+ * web pages and YouTube transcripts. A delimiter plus an explicit instruction
+ * is the defence; `fenceArticleText` is the other half, because a fence the
+ * source can close is not a fence. The markers and the function are defined
+ * in `ai/prompt-fence.js` (imported above) and re-exported here unchanged.
  *
  * **The title goes inside the fence too.** It was outside for one round, which
  * was worse than leaving the body unfenced would have been: a title is just as
@@ -336,17 +341,7 @@ function renderSetAside({ codeBlocks, tables }) {
  * that comes from the document is data, and there is no "but this field is
  * short" exception.
  */
-const ARTICLE_OPEN = '<<<BEGIN ARTICLE>>>';
-const ARTICLE_CLOSE = '<<<END ARTICLE>>>';
-
-/** Neutralise any delimiter the source carries, so it cannot break out. */
-export function fenceArticleText(text) {
-  return String(text || '')
-    .split(ARTICLE_OPEN)
-    .join('<<BEGIN ARTICLE>>')
-    .split(ARTICLE_CLOSE)
-    .join('<<END ARTICLE>>');
-}
+export { ARTICLE_CLOSE, ARTICLE_OPEN, fenceArticleText };
 
 /**
  * The prompt for one article episode.

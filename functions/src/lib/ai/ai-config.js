@@ -97,6 +97,11 @@ export const AI_FEATURES = Object.freeze({
     description: 'Writes a social-media caption for a published article.',
     route: 'The Social Hub Generate button and the on-publish auto-queue to Publer.',
   }),
+  sourceGrounding: Object.freeze({
+    label: 'Source grounding',
+    description: 'Reads owner-supplied web pages and YouTube videos to ground a generation.',
+    route: 'Listen & Learn source-grounded episodes (#433).',
+  }),
 });
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
