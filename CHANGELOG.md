@@ -41,8 +41,11 @@ This project has not cut a tagged release; entries are grouped under
   `lib/key-verdict.js` so the two reporters cannot disagree about what a
   rejected credential is — so the red light on
   https://hybridcloudworks.com/admin/integrations comes on whichever path
-  sees the rejection first, and the first success per worker turns it green
-  again. And `PUBLER_API_KEY` carries `probe: 'publer'` in the catalogue,
+  sees the rejection first, and the first success after that — the rotation
+  — turns it green again in the same worker: a recorded failure re-arms the
+  once-per-worker success report, which the router's private version had
+  never done (Copilot review of the PR). And `PUBLER_API_KEY` carries
+  `probe: 'publer'` in the catalogue,
   because the page prints "no liveness check for this one" beside any light
   nothing reports on, and `secret-catalog.test.js` holds that a probe exists
   only where a reporter is wired. The proxy's response shape and message are

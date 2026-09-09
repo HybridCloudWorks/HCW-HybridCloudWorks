@@ -59,14 +59,23 @@ describe('createKeyVerdictReporter', () => {
     ]);
   });
 
-  it('reports a failure after a success, and a success after a failure, on the same setting', async () => {
-    // Dedupe is for successes only. A key that stops working must be able to
-    // say so, and a rotated key must be able to turn the light green again.
+  it('re-arms the success report after a failure, so a rotated key turns the light green again', async () => {
+    // Dedupe is for successes only, and only until something goes wrong. A key
+    // that stops working must be able to say so, and the FIRST success after
+    // that — the rotation — must be written, or the light stays red until the
+    // worker restarts. Copilot caught the original version of this test never
+    // making the third call.
     const onKeyVerdict = vi.fn();
     const report = createKeyVerdictReporter({ onKeyVerdict, log: quiet() });
     await report('PUBLER_API_KEY', { ok: true });
     await report('PUBLER_API_KEY', { ok: false, status: 403 });
-    expect(onKeyVerdict).toHaveBeenCalledTimes(2);
+    await report('PUBLER_API_KEY', { ok: true });
+    await report('PUBLER_API_KEY', { ok: true });
+    expect(onKeyVerdict.mock.calls).toEqual([
+      ['PUBLER_API_KEY', { ok: true }],
+      ['PUBLER_API_KEY', { ok: false, status: 403 }],
+      ['PUBLER_API_KEY', { ok: true }],
+    ]);
   });
 
   it('warns and swallows a writer that throws, naming the source', async () => {
@@ -113,6 +122,15 @@ describe('recordKeyVerdict — the process-wide writer', () => {
     await recordKeyVerdict('OPENAI_API_KEY', { ok: true });
     expect(upsertDoc).toHaveBeenCalledTimes(1);
     expect(upsertDoc.mock.calls[0][1].secrets['OPENAI-API-KEY'].lastOkAt).toEqual(expect.any(String));
+  });
+
+  it('writes the first success after a failure, so the same worker can turn a light green again', async () => {
+    await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: true });
+    await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: false, status: 401 });
+    await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: true });
+    await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: true });
+    expect(upsertDoc).toHaveBeenCalledTimes(3);
+    expect(upsertDoc.mock.calls[2][1].secrets['ANTHROPIC-API-KEY'].lastOkAt).toEqual(expect.any(String));
   });
 
   it('records nothing for a setting outside the catalogue', async () => {

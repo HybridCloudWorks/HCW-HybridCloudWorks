@@ -20,11 +20,16 @@
  *     point. Issue #358: a stale Publer key failed a five-minute timer 429
  *     times in 36 hours and no monitor could see it, because the only thing
  *     that knew was Publer, and it was saying so into a log nobody reads.
- *   - **Successes are reported once per reporter per setting.** The
- *     hundredth successful call says what the first one did, and a Cosmos
- *     write per call is not free. The process-wide `recordKeyVerdict` below is
- *     itself a reporter, so a worker writes a success once however many
- *     clients it builds.
+ *   - **Successes are reported once per reporter per setting, until a
+ *     failure.** The hundredth successful call says what the first one did,
+ *     and a Cosmos write per call is not free. A recorded failure re-arms it,
+ *     so the first success after a rotation is written and the light turns
+ *     green again in the same worker. The router's private reporter never
+ *     re-armed — once it had reported a provider working, a later rejection
+ *     stayed red until the worker restarted — so moving it here fixes the
+ *     three AI providers' lights as well as Publer's. The process-wide
+ *     `recordKeyVerdict` below is itself a reporter, so a worker writes a
+ *     success once however many clients it builds.
  *
  * And one invariant: reporting can never fail the call it observed. A status
  * page that cannot record a verdict is a warning, not an outage.
@@ -63,6 +68,13 @@ export function createKeyVerdictReporter({ onKeyVerdict = null, log = console, s
     if (verdict.ok) {
       if (successReported.has(settingName)) return;
       successReported.add(settingName);
+    } else {
+      // A failure re-arms the success report. Without this, a worker that had
+      // already reported "the key works" would swallow the first success after
+      // a rotation, and the light would stay red until the process restarted —
+      // the one moment the page most needs to say green. (Copilot review of
+      // 5967cbe7; the router's private reporter had the same hole.)
+      successReported.delete(settingName);
     }
     try {
       await onKeyVerdict(settingName, verdict);
