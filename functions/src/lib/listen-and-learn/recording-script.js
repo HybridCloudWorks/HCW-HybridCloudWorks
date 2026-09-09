@@ -415,6 +415,12 @@ Return JSON only, matching exactly:
  * throwing here would discard the spend to enforce a rule the reviewer is
  * about to check anyway. Labels shorter than three characters are skipped —
  * a speaker called "A" matches every sentence.
+ *
+ * Whole labels only. A substring match reported "Speaker 1" whenever the
+ * dialogue said "Speaker 10", which is a false leak on every recording with
+ * ten or more voices — and a reviewer who learns the signal cries wolf stops
+ * reading it. The boundary is Unicode-aware because a label can be a name
+ * ("Zoë"), and case-insensitive because the model does not preserve case.
  */
 export function findAttributionLeaks(turns, segments) {
   const labels = new Set();
@@ -423,7 +429,10 @@ export function findAttributionLeaks(turns, segments) {
     if (label.length >= 3) labels.add(label);
   }
   const spoken = (Array.isArray(turns) ? turns : []).map((t) => String(t?.text ?? '')).join('\n');
-  return [...labels].filter((label) => spoken.includes(label));
+  return [...labels].filter((label) => {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(spoken);
+  });
 }
 
 /**

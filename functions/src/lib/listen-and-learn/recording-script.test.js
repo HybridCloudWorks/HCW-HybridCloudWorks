@@ -381,6 +381,29 @@ describe('findAttributionLeaks', () => {
     expect(findAttributionLeaks(turns, segments)).toEqual(['Speaker 2']);
   });
 
+  it('matches whole labels, so "Speaker 10" is not a "Speaker 1" leak', () => {
+    // Copilot on #446: a substring match reported Speaker 1 on every
+    // recording where the dialogue mentioned Speaker 10. A genuine mention
+    // still reports, in either case, and punctuation is a boundary.
+    const segments = segmentsFor(['Speaker 1', 'Speaker 2']);
+    expect(findAttributionLeaks([{ text: 'Then Speaker 10 raised locking.' }], segments)).toEqual(
+      []
+    );
+    expect(findAttributionLeaks([{ text: 'Then Speaker 1 raised locking.' }], segments)).toEqual([
+      'Speaker 1',
+    ]);
+    expect(findAttributionLeaks([{ text: 'As speaker 1, oddly, put it.' }], segments)).toEqual([
+      'Speaker 1',
+    ]);
+    // A name is bounded by letters too, and a label may carry regex syntax.
+    const named = [{ text: 'x', speaker: 'Zoë' }, { text: 'y', speaker: 'J. R. (host)' }];
+    expect(findAttributionLeaks([{ text: 'Zoës point stood.' }], named)).toEqual([]);
+    expect(findAttributionLeaks([{ text: 'Zoë made the point.' }], named)).toEqual(['Zoë']);
+    expect(findAttributionLeaks([{ text: 'J. R. (host) said so.' }], named)).toEqual([
+      'J. R. (host)',
+    ]);
+  });
+
   it('skips labels too short to mean anything', () => {
     expect(findAttributionLeaks([{ text: 'A point.' }], [{ text: 'x', speaker: 'A' }])).toEqual([]);
   });
