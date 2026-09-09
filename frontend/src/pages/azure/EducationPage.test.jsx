@@ -1,19 +1,48 @@
 /**
  * The Azure education landing page renders status from the dates, not from
  * the stored field, and says when its catalogue was last checked instead of
- * claiming a weekly refresh it never had (#461 item 1).
+ * claiming a weekly refresh it never had (#461 item 1). Its timeline merges
+ * the Friday scraper's events over the static entries and keeps the static
+ * ones when the API has nothing or is unreachable (#461 item 4).
  */
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import AzureEducationPage from './EducationPage';
-import { DATA_AS_OF, certifications } from '@/data/azure/certifications';
+import { DATA_AS_OF, certifications, timelineEvents } from '@/data/azure/certifications';
 import { deriveStatus, todayIso } from '@/lib/certStatus';
+import { clearPublicGetCache } from '@/lib/publicApi';
 
 vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
 }));
+
+// The public API base the page's fetch resolves; the fetch itself is stubbed
+// below, empty by default so every test sees the static timeline unless it
+// says otherwise.
+vi.mock('@/lib/functionsBase', () => ({
+  getFunctionsBase: () => 'https://api.test/api',
+  requireFunctionsBase: () => 'https://api.test/api',
+  resolveMediaUrl: (url) => url,
+}));
+
+const fetchMock = vi.fn();
+const jsonResponse = (body, status = 200) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => body,
+});
+
+beforeAll(() => {
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+beforeEach(() => {
+  clearPublicGetCache();
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue(jsonResponse({ success: true, items: [], total: 0 }));
+});
 
 // `today` as the page sees it, settable per test; everything else is real.
 const mockToday = vi.fn();
@@ -173,6 +202,83 @@ describe('AzureEducationPage', () => {
       'true'
     );
     mockToday.mockReset();
+  });
+
+  it('asks the public API for the azure scraper events, once, and keeps the static timeline when it is empty', async () => {
+    const { container } = renderPage();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.test/api/public/cert-events?platform=azure',
+        expect.objectContaining({ headers: { Accept: 'application/json' } })
+      )
+    );
+    for (const ev of timelineEvents) {
+      expect(container.querySelector(`[data-event-id="${ev.id}"]`), ev.id).not.toBeNull();
+    }
+    expect(container.textContent).not.toMatch(/Skills Hub blog/);
+  });
+
+  it('merges the scraper events over the static timeline by id, static first', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        total: 2,
+        items: [
+          {
+            id: 'live-az-305',
+            type: 'retirement',
+            certCodes: ['AZ-305'],
+            title: 'AZ-305 retires next year',
+            summary: 'Announced on the Skills Hub blog.',
+            link: 'https://techcommunity.microsoft.com/skills-hub/az-305',
+            pubDate: '2026-09-11T09:00:00.000Z',
+            mentionedDates: ['June 30, 2027'],
+            source: 'skills-hub-rss',
+          },
+          {
+            // Same id as a static entry: the live row wins.
+            id: 'ms-102-retire',
+            type: 'retirement',
+            certCodes: ['MS-102'],
+            title: 'MS-102 retirement moved',
+            summary: 'Now December.',
+            link: 'https://techcommunity.microsoft.com/skills-hub/ms-102',
+            pubDate: '2026-09-11T09:00:00.000Z',
+            mentionedDates: ['December 31, 2026'],
+            source: 'skills-hub-rss',
+          },
+        ],
+      })
+    );
+    const { container } = renderPage();
+    // Before the fetch resolves the static entries are what is on screen.
+    expect(container.querySelector('[data-event-id="ms-102-retire"]')).not.toBeNull();
+    expect(container.querySelector('[data-event-id="live-az-305"]')).toBeNull();
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-event-id="live-az-305"]')).not.toBeNull()
+    );
+    expect(container.querySelectorAll('[data-event-id="ms-102-retire"]')).toHaveLength(1);
+    // The track label is truncated at 17 characters; the live title replaced
+    // the static "MS-102 Retires".
+    expect(container.textContent).toMatch(/MS-102 retirement/);
+    expect(container.textContent).not.toMatch(/MS-102 Retires/);
+    expect(container.textContent).toMatch(/Plus 2 from the/);
+    expect(container.textContent).toMatch(/Microsoft Skills Hub blog/);
+    // The other static entries are untouched.
+    expect(container.querySelector('[data-event-id="az-800-az-801-retire"]')).not.toBeNull();
+  });
+
+  it('keeps the static timeline when the API is unreachable', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { container } = renderPage();
+    await waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    for (const ev of timelineEvents) {
+      expect(container.querySelector(`[data-event-id="${ev.id}"]`), ev.id).not.toBeNull();
+    }
+    expect(container.textContent).not.toMatch(/Skills Hub blog/);
+    errorSpy.mockRestore();
   });
 
   it('links every certification to its detail page', () => {

@@ -269,6 +269,54 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The Azure Learn catalogue refreshes itself every Monday, and the Friday
+  Skills Hub scrape finally has a reader (#461 items 3 and 4).**
+  `frontend/scripts/update-applied-skills.mjs` had only ever been run by hand
+  — the file said "Last manual sync: 2026-04-16" until #464 — so it now
+  follows three rules: every run stamps today's date into `DATA_AS_OF` and
+  the header line; a source that cannot be fetched or parses to zero items
+  ends the run with exit code 1 and one sentence, and the file is not written
+  (the title overrides no longer turn an empty poster into five entries); and
+  lifecycle only moves forward (beta → active → expiring → retired), so a
+  poster that still lists a retired exam, or an API that still says "(beta)"
+  for one #464 made active, keeps the file's value and prints the
+  disagreement — and an entry the sources no longer list is kept, never
+  deleted, because dropping AI-102 would break its `replacedBy` link and
+  the retired cards. A poster entry that neither the Learn API nor the file
+  knows is reported and not added: the first live run parsed the PDF's
+  "Full certification title" template label as exam MB-300. The regenerated
+  blocks go through Prettier so a run that changes nothing but the date is a
+  one-line diff. `.github/workflows/update-learn-catalogue.yml` runs it
+  Mondays 06:30 UTC (and by hand) in two jobs modelled on the manifest
+  workflow — `npm ci --ignore-scripts` and the updater with `contents:
+  read` and no Azure identity, then a branch pushed with the manifest App's
+  token and a pull request opened ready for review whose body lists every
+  entry added, changed, removed, kept or disputed; `scripts/learn-catalogue-
+  workflow.test.mjs` pins the single-file `git add`, the per-attempt branch
+  name, the masked token and the absence of `--draft`. Run live on
+  2026-09-09 it added four applied skills the browse API lists (Build an
+  agent in Microsoft Copilot Studio, Develop an agent with integrated tools,
+  Manage GitHub secret scanning by using GitHub Copilot, Protect information
+  in Microsoft 365 Copilot by using Microsoft Purview), renamed one (Build a
+  generative AI chat app → Develop a Generative AI Chat App Using the
+  Microsoft Foundry SDK), kept all twelve retired exams and five retired
+  applied skills, and changed no status. `GET /api/public/cert-events?
+  platform=` reads the `certEvents` container `scrapeSkillsHubRss` writes
+  (`lib/timers/skills-hub.js`: id from the feed guid, `type`,
+  `certCodes`, `title`, `summary`, `link`, `pubDate` stamped on
+  every row, `mentionedDates`, `source: 'skills-hub-rss'`, deduplicated
+  by id) — platform validated against the provider keys, answered by scraper
+  source since the documents carry no provider (only azure has one), projected
+  to a listing allowlist, `ORDER BY c.pubDate DESC`, capped at 100 —
+  registered in the route inventory and `.azure/api-surface.json`. The
+  Azure education page merges the result over its static `timelineEvents`
+  by id (`lib/certEvents.js`: the earliest date a post mentions on or after
+  its publication day is the event's day) in an effect, so the pre-rendered
+  HTML and the hydrating render carry the static entries alone and the
+  static entries remain when the list is empty or unreachable; the data
+  file's comment that claimed the array was scraper-sourced now says which
+  side is which. The first real scrape is Friday 2026-09-11 09:00 UTC; until
+  then the route answers an empty list.
 - **The owner's button: Listen & Learn reads with Gemini "Best" or "Economy",
   set as a default and overridable per run (#436, #432).** Owner instruction
   2026-09-09: "have a button to go from gemini 2.5 to 3.1 and back — for

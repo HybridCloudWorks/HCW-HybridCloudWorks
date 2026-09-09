@@ -2375,20 +2375,6 @@ export const appliedSkills = [
       'https://learn.microsoft.com/en-us/credentials/applied-skills/automate-azure-load-testing-by-using-github-actions/',
   },
   {
-    id: 'apl-gen-ai-chat-app',
-    slug: 'build-a-generative-ai-chat-app',
-    code: 'APL-GAIC',
-    officialCode: 'applied-skill.build-a-generative-ai-chat-app',
-    title: 'Build a generative AI chat app',
-    area: 'AI',
-    level: 'Intermediate',
-    status: 'active',
-    description:
-      'Build a generative AI chat application using Azure OpenAI Service, Azure AI Search, and RAG patterns for grounded responses.',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/applied-skills/build-a-generative-ai-chat-app/',
-  },
-  {
     id: 'apl-1006',
     slug: 'build-natural-language-solution-azure-ai',
     code: 'APL-1006',
@@ -2417,6 +2403,19 @@ export const appliedSkills = [
       'Validate hands-on skills for Build AI-powered solutions by using Microsoft Azure Database for PostgreSQL.',
     learnUrl:
       'https://learn.microsoft.com/en-us/credentials/applied-skills/build-ai-powered-solutions-by-using-microsoft-azure-database-for-postgresql/',
+  },
+  {
+    id: 'build-an-agent-in-microsoft-copilot-studio',
+    slug: 'build-an-agent-in-microsoft-copilot-studio',
+    code: 'APL-BAACS',
+    officialCode: 'applied-skill.build-an-agent-in-microsoft-copilot-studio',
+    title: 'Build an agent in Microsoft Copilot Studio',
+    area: 'AI Business',
+    level: 'Intermediate',
+    status: 'active',
+    description: 'Validate hands-on skills for Build an agent in Microsoft Copilot Studio.',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/applied-skills/build-an-agent-in-microsoft-copilot-studio/',
   },
   {
     id: 'apl-postgres',
@@ -2545,6 +2544,33 @@ export const appliedSkills = [
       'Deploy and scale cloud-native microservices applications using Azure Container Apps with DAPR and KEDA.',
     learnUrl:
       'https://learn.microsoft.com/en-us/credentials/applied-skills/deploy-cloud-native-apps-using-azure-container-apps/',
+  },
+  {
+    id: 'apl-gen-ai-chat-app',
+    slug: 'build-a-generative-ai-chat-app',
+    code: 'APL-GAIC',
+    officialCode: 'applied-skill.build-a-generative-ai-chat-app',
+    title: 'Develop a Generative AI Chat App Using the Microsoft Foundry SDK',
+    area: 'AI',
+    level: 'Intermediate',
+    status: 'active',
+    description:
+      'Build a generative AI chat application using Azure OpenAI Service, Azure AI Search, and RAG patterns for grounded responses.',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/applied-skills/build-a-generative-ai-chat-app/',
+  },
+  {
+    id: 'develop-an-agent-with-integrated-tools',
+    slug: 'develop-an-agent-with-integrated-tools',
+    code: 'APL-DAATO',
+    officialCode: 'applied-skill.develop-an-agent-with-integrated-tools',
+    title: 'Develop an agent with integrated tools',
+    area: 'AI',
+    level: 'Intermediate',
+    status: 'active',
+    description: 'Validate hands-on skills for Develop an agent with integrated tools.',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/applied-skills/develop-an-agent-with-integrated-tools/',
   },
   {
     id: 'develop-data-driven-applications-by-using-microsoft-azure-sql-database',
@@ -2746,6 +2772,20 @@ export const appliedSkills = [
       'https://learn.microsoft.com/en-us/credentials/applied-skills/integrate-model-context-protocol-tools-with-agents-in-microsoft-foundry/',
   },
   {
+    id: 'manage-github-secret-scanning-by-using-github-copilot',
+    slug: 'manage-github-secret-scanning-by-using-github-copilot',
+    code: 'APL-MGSSG',
+    officialCode: 'applied-skill.manage-github-secret-scanning-by-using-github-copilot',
+    title: 'Manage GitHub secret scanning by using GitHub Copilot',
+    area: 'DevTools',
+    level: 'Intermediate',
+    status: 'active',
+    description:
+      'Validate hands-on skills for Manage GitHub secret scanning by using GitHub Copilot.',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/applied-skills/manage-github-secret-scanning-by-using-github-copilot/',
+  },
+  {
     id: 'apl-1008',
     slug: 'migrate-sql-workloads-azure-sql-database',
     code: 'APL-1008',
@@ -2773,6 +2813,21 @@ export const appliedSkills = [
       'Validate hands-on skills for Prepare security and compliance to support Microsoft 365 Copilot.',
     learnUrl:
       'https://learn.microsoft.com/en-us/credentials/applied-skills/prepare-security-and-compliance-to-support-microsoft-365-copilot/',
+  },
+  {
+    id: 'protect-information-in-microsoft-365-copilot-by-using-microsoft-purview',
+    slug: 'protect-information-in-microsoft-365-copilot-by-using-microsoft-purview',
+    code: 'APL-PM3CP',
+    officialCode:
+      'applied-skill.protect-information-in-microsoft-365-copilot-by-using-microsoft-purview',
+    title: 'Protect information in Microsoft 365 Copilot by using Microsoft Purview',
+    area: 'Security',
+    level: 'Intermediate',
+    status: 'active',
+    description:
+      'Validate hands-on skills for Protect information in Microsoft 365 Copilot by using Microsoft Purview.',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/applied-skills/protect-information-in-microsoft-365-copilot-by-using-microsoft-purview/',
   },
   {
     id: 'resolve-github-issues-by-using-github-copilot',
@@ -2850,8 +2905,11 @@ export const appliedSkills = [
 // Timeline events — hand-maintained. The three entries added on 2026-09-09 (mb-240-retire,
 // az-800-az-801-retire, ms-102-retire) cite the Microsoft Learn pages they were verified
 // against; every earlier entry keeps its original Skills Hub blog sourceUrl and was not
-// re-verified. The Friday Skills Hub RSS scraper (functions/src/lib/timers/skills-hub.js)
-// writes certEvents, which nothing reads yet (#461 item 4); this array is not fed by it.
+// re-verified. This array is NOT written by the Friday Skills Hub RSS scraper
+// (functions/src/lib/timers/skills-hub.js). That timer writes the certEvents container, which
+// the Azure education page reads through GET /api/public/cert-events and merges over these
+// entries by id at render time (src/lib/certEvents.js, #461 item 4). These stay as the
+// fallback when that list is empty or unreachable, and are what the pre-rendered HTML carries.
 export const timelineEvents = [
   {
     id: 'ai-103-beta',

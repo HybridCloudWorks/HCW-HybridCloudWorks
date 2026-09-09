@@ -1,0 +1,249 @@
+name: Update Learn Catalogue
+
+# Refreshes frontend/src/data/azure/certifications.js from Microsoft Learn and
+# opens a pull request when it changed (#461 item 3).
+#
+# WHY A WORKFLOW. The updater, frontend/scripts/update-applied-skills.mjs, had
+# only ever been run by hand: the file said "Last manual sync: 2026-04-16"
+# until 2026-09-09, and in that gap the live page printed "Expiring" for ten
+# exams Microsoft had already retired and "BETA" for twelve that had gone GA.
+# The script now stamps DATA_AS_OF on every run, refuses to write when a
+# source fails or parses to nothing, and never moves an entry backwards in
+# its lifecycle; this workflow is what makes it run without anyone
+# remembering to.
+#
+# MODELLED ON publish-content-manifest.yml, and for the same reasons. Two
+# jobs, so that no job holds both third-party packages and a credential that
+# can write to this repository. `update` runs `npm ci --ignore-scripts` on the
+# frontend tree and the updater, and holds nothing but a checkout; it makes
+# only GET requests to learn.microsoft.com and the poster CDN, so it needs no
+# Azure identity and no origin window. `commit` installs nothing and holds
+# `contents: read`; the branch push and the pull request are done with a
+# GitHub App installation token minted for the length of a few API calls —
+# the same App the manifest uses (MANIFEST_APP_ID / MANIFEST_APP_PRIVATE_KEY),
+# because a second stored non-expiring key for the same ability would be a
+# second credential to rotate and nothing more.
+#
+# WHY A PULL REQUEST AND NOT A PUSH. The ruleset's `pull_request` rule refuses
+# a direct push to main from anyone, this token included, and the checks run
+# on the pull request precisely because it is opened with an App token rather
+# than GITHUB_TOKEN (GitHub does not trigger workflows for events its own
+# token creates). Opened READY FOR REVIEW, not as a draft (owner decision
+# 2026-09-05, .claude/CLAUDE.md), and without auto-merge: the diff is what
+# the site says about Microsoft's catalogue, and the body lists every entry
+# that changed so the reader can check it against Learn before merging.
+#
+# THE FILE ALWAYS CHANGES. DATA_AS_OF moves on every successful run, so a
+# Monday on which the catalogue did not move still opens a one-line pull
+# request; the body says "only the sync date moved" in that case. That is
+# deliberate: the page renders the date as "checked against Microsoft Learn
+# on", and a date that only moved when something else did would be a claim
+# the site could not back.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 06:30 UTC, after the Friday scrape and before the working week.
+    - cron: '30 6 * * 1'
+
+# No workflow-level permissions: each job declares its own, and the whole
+# point of the split below is that no job holds both.
+permissions: {}
+
+concurrency:
+  group: learn-catalogue
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Refresh the catalogue from Microsoft Learn
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout only — this job must never be able to push
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # `--ignore-scripts`: the updater needs pdf-parse and prettier, neither
+      # of which has an install-time script; nothing else in the tree is used.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      # A source that cannot be fetched or parses to zero items ends this step
+      # with exit code 1 and one sentence, and the file is not written.
+      - name: Run the updater
+        working-directory: frontend
+        run: node scripts/update-applied-skills.mjs --summary "${RUNNER_TEMP}/learn-catalogue-summary.md"
+
+      # The data tests fail the day a stored status contradicts its dates; a
+      # refresh that would open a pull request destined to go red stops here
+      # instead, with the offending line in the log.
+      - name: Check the refreshed catalogue
+        working-directory: frontend
+        run: npx vitest run src/data/azure/certifications.test.js
+
+      - name: Did the catalogue change?
+        id: changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- frontend/src/data/azure/certifications.js; then
+            echo "The catalogue did not change."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          cp "${RUNNER_TEMP}/learn-catalogue-summary.md" learn-catalogue-summary.md
+          cat learn-catalogue-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the refreshed catalogue
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: learn-catalogue
+          path: |
+            frontend/src/data/azure/certifications.js
+            learn-catalogue-summary.md
+          retention-days: 1
+          if-no-files-found: error
+
+  commit:
+    name: Open a pull request if the catalogue changed
+    needs: update
+    runs-on: ubuntu-latest
+    # `contents: read` for the checkout, and NOTHING ELSE. The writing is done
+    # by a GitHub App installation token, and this job cannot push to main
+    # with it either — the ruleset's `pull_request` rule has no bypass actor.
+    permissions:
+      contents: read # checkout only — this job cannot push anywhere on its own
+    steps:
+      # `persist-credentials: false`, or the push below authenticates as
+      # github-actions[bot] and is refused: checkout writes GITHUB_TOKEN into
+      # .git/config as an http.extraheader, which outranks the token in the
+      # remote URL (publish-content-manifest.yml, run 34092896715).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download the refreshed catalogue
+        id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: learn-catalogue
+          path: ${{ runner.temp }}/learn-catalogue
+
+      - name: Did the catalogue change?
+        id: changed
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/learn-catalogue/frontend/src/data/azure/certifications.js" frontend/src/data/azure/certifications.js
+          if git diff --quiet -- frontend/src/data/azure/certifications.js; then
+            echo "The catalogue did not change."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          as_of=$(grep -o "DATA_AS_OF = '[0-9-]*'" frontend/src/data/azure/certifications.js | grep -o '[0-9-]\{10\}')
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "as_of=${as_of}" >> "$GITHUB_OUTPUT"
+
+      # Self-arming, like the manifest workflow: before the App exists this
+      # reports honestly that it did not open anything rather than failing
+      # every Monday. `secrets` is not available to a job-level `if`.
+      - name: Is the App configured?
+        id: app
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          MANIFEST_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          MANIFEST_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANIFEST_APP_PRIVATE_KEY}" ] && [ -n "${MANIFEST_APP_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::The catalogue changed but the App is not configured, so no pull request was opened. Set the MANIFEST_APP_ID variable and the MANIFEST_APP_PRIVATE_KEY secret (T-726)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url and uses
+      # global fetch. This job holds the most powerful credential in the
+      # pipeline for the length of a few API calls, so it installs nothing.
+      - name: Mint an App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # `git add <path>` and never `-A` or `.`: the branch this pushes is the
+      # one thing the App's write permission can reach, so what goes on it is
+      # the boundary. scripts/learn-catalogue-workflow.test.mjs asserts the
+      # absence of the wildcard forms.
+      - name: Push the branch
+        if: steps.app.outputs.armed == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+          AS_OF: ${{ steps.changed.outputs.as_of }}
+        run: |
+          set -euo pipefail
+          # RUN_ATTEMPT as well as RUN_ID: a re-run keeps the id, and a branch
+          # that already exists on the remote fails the push (found in review
+          # of the manifest workflow).
+          branch="chore/learn-catalogue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "branch=${branch}" >> "$GITHUB_ENV"
+          git config user.name  'hcw-manifest[bot]'
+          git config user.email 'hcw-manifest[bot]@users.noreply.github.com'
+          git checkout -b "${branch}"
+          git add frontend/src/data/azure/certifications.js
+          git commit -m "chore: refresh the Azure Learn catalogue (checked ${AS_OF})"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "${branch}"
+
+      # Ready for review, not a draft. The body is the updater's own summary:
+      # every entry added, changed or removed, what was kept from the file
+      # because the sources no longer list it, and where a source disagreed
+      # with the file — so the reviewer can check each line against Learn.
+      - name: Open the pull request
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          AS_OF: ${{ steps.changed.outputs.as_of }}
+          SUMMARY: ${{ runner.temp }}/learn-catalogue/learn-catalogue-summary.md
+        run: |
+          set -euo pipefail
+          {
+            echo "## Summary"
+            echo
+            echo "Weekly refresh of \`frontend/src/data/azure/certifications.js\` from Microsoft Learn by \`.github/workflows/update-learn-catalogue.yml\` (#461 item 3). Opened by the App rather than pushed to \`main\`, so the required checks run on it. The only file it may touch is the catalogue."
+            echo
+            cat "${SUMMARY}"
+            echo
+            echo "## Related issue or decision"
+            echo
+            echo "Refs #461 (item 3)."
+            echo
+            echo "## Verification"
+            echo
+            echo "- Checks run: \`node scripts/update-applied-skills.mjs\` against the live sources; \`npx vitest run src/data/azure/certifications.test.js\` on the result (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "- Evidence level: [x] CI"
+          } > "${RUNNER_TEMP}/pr-body.md"
+          gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base main \
+            --head "${branch}" \
+            --title "chore: refresh the Azure Learn catalogue (checked ${AS_OF})" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"

@@ -152,6 +152,13 @@ const PUBLIC_ROUTES = new Set([
   // The provider-wide twin (#349): same `status === 'published'` gate, rows
   // projected to a listing allowlist with no transcript, for the podcast page.
   'public/listen-and-learn/episodes',
+  // Certification lifecycle events from the Friday Skills Hub RSS scraper
+  // (#461 item 4). Public because the Azure education timeline renders them
+  // to every anonymous visitor; safe because the rows are a projection of a
+  // public blog feed — title, summary, link, date, exam codes — filtered by
+  // scraper source for a platform validated against the provider list, and
+  // capped. No document id is accepted from the caller.
+  'public/cert-events',
   // Reads no database, returns four enum values. The reason it is here rather
   // than guarded is that it backs indicators rendered to every anonymous
   // visitor on the landing page; the reason it is safe is that its cache bounds
