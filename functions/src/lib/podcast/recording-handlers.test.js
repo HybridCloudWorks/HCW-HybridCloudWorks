@@ -37,7 +37,10 @@ const makeStore = (docs = {}) => ({
   readDoc: vi.fn(async (container, id) => docs[container]?.[id] ?? null),
   upsertDoc: vi.fn(async (_c, doc) => doc),
 });
-const makeStorage = () => ({ uploadBlob: vi.fn(async () => 'https://ignored') });
+const makeStorage = () => ({
+  uploadBlob: vi.fn(async () => 'https://ignored'),
+  deleteBlob: vi.fn(async () => {}),
+});
 
 const handlers = ({ store = makeStore(), storage = makeStorage(), guard = allowGuard, env = configured } = {}) =>
   createPodcastRecordingHandlers({
@@ -252,6 +255,86 @@ describe('uploadRecording', () => {
     expect((await at(audioBody({ dataBase64: '' }))).status).toBe(400);
     expect((await at(audioBody({ dataBase64: '!!!' }))).status).toBe(400);
     expect((await h.uploadRecording(makeRequest(), context, { enqueue: vi.fn() })).status).toBe(400);
+  });
+
+  describe('an upload whose job cannot be queued is deleted again', () => {
+    const expectedPath = 'uploads/0d5c3d3e-1f5a-4a1c-9f6d-2b3c4d5e6f70.mp3';
+
+    it('when the job document write throws: the blob is deleted and the 500 stands', async () => {
+      const store = makeStore();
+      store.upsertDoc = vi.fn(async () => {
+        throw new Error('cosmos down');
+      });
+      const storage = makeStorage();
+      const res = await handlers({ store, storage }).uploadRecording(
+        makeRequest({ body: audioBody() }),
+        context,
+        { enqueue: vi.fn() }
+      );
+      expect(res.status).toBe(500);
+      expect(JSON.parse(res.body).error).toBe('Failed to upload the recording');
+      expect(storage.uploadBlob).toHaveBeenCalledTimes(1);
+      expect(storage.deleteBlob).toHaveBeenCalledWith('podcast', expectedPath);
+    });
+
+    it('when the queue send throws, and when no queue output is wired', async () => {
+      const throwing = makeStorage();
+      const res = await handlers({ storage: throwing }).uploadRecording(
+        makeRequest({ body: audioBody() }),
+        context,
+        {
+          enqueue: () => {
+            throw new Error('queue unavailable');
+          },
+        }
+      );
+      expect(res.status).toBe(500);
+      expect(throwing.deleteBlob).toHaveBeenCalledWith('podcast', expectedPath);
+
+      const unwired = makeStorage();
+      const noQueue = await handlers({ storage: unwired }).uploadRecording(
+        makeRequest({ body: audioBody() }),
+        context
+      );
+      expect(noQueue.status).toBe(500);
+      expect(JSON.parse(noQueue.body).error).toBe('Job queue is not configured');
+      expect(unwired.deleteBlob).toHaveBeenCalledWith('podcast', expectedPath);
+    });
+
+    it('a delete that fails is logged content-free and does not mask the enqueue error', async () => {
+      const store = makeStore();
+      store.upsertDoc = vi.fn(async () => {
+        throw new Error('cosmos down');
+      });
+      const storage = makeStorage();
+      storage.deleteBlob = vi.fn(async () => {
+        throw Object.assign(new Error('Server busy; secret-path-in-message'), { statusCode: 503 });
+      });
+      const ctx = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
+      const res = await handlers({ store, storage }).uploadRecording(
+        makeRequest({ body: audioBody() }),
+        ctx,
+        { enqueue: vi.fn() }
+      );
+      expect(res.status).toBe(500);
+      expect(JSON.parse(res.body).error).toBe('Failed to upload the recording');
+      // The enqueue error is what reaches the error log; the delete is a warning.
+      expect(ctx.error.mock.calls[0][1].message).toBe('cosmos down');
+      expect(ctx.warn).toHaveBeenCalledTimes(1);
+      const line = ctx.warn.mock.calls[0][0];
+      expect(line).toMatch(/upload blob not deleted after a failed enqueue \(503\)/);
+      expect(line).not.toContain(expectedPath);
+      expect(line).not.toContain('secret-path');
+    });
+
+    it('is not attempted on the success path', async () => {
+      const storage = makeStorage();
+      const res = await handlers({ storage }).uploadRecording(makeRequest({ body: audioBody() }), context, {
+        enqueue: vi.fn(),
+      });
+      expect(res.status).toBe(202);
+      expect(storage.deleteBlob).not.toHaveBeenCalled();
+    });
   });
 
   it('names the Terraform apply when the blob container does not exist yet', async () => {

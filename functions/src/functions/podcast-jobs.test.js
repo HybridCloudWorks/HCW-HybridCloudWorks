@@ -21,13 +21,25 @@ vi.mock('../lib/cosmos-client.js', () => ({
   upsertDoc: vi.fn(),
   patchDoc: (...args) => patchDoc(...args),
 }));
-vi.mock('../lib/blob-storage.js', () => ({ uploadBlob: vi.fn(), readBlobForDelivery: vi.fn(), deleteBlob: vi.fn() }));
+const deleteBlob = vi.fn();
+vi.mock('../lib/blob-storage.js', () => ({
+  uploadBlob: vi.fn(),
+  readBlobForDelivery: vi.fn(),
+  deleteBlob: (...args) => deleteBlob(...args),
+}));
 vi.mock('../lib/ai/router.js', async (importOriginal) => ({
   ...(await importOriginal()),
   generateJsonResponse: vi.fn(),
   getCostEstimate: vi.fn(),
 }));
 vi.mock('../lib/cms/publish.js', () => ({ publicUrlOf: vi.fn(() => '') }));
+// The upload worker's pipeline is tested in lib/podcast/recording-upload.test.js;
+// here it is a seam so the dependencies the worker wires can be inspected.
+const transcribeUpload = vi.fn();
+vi.mock('../lib/podcast/recording-upload.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  transcribeUpload: (...args) => transcribeUpload(...args),
+}));
 
 const {
   parsePublishPayload,
@@ -188,6 +200,30 @@ describe('registration', () => {
 });
 
 describe('recording-side workers', () => {
+  it('wires the production deleteBlob into the upload worker, so the finally cleanup can run', async () => {
+    // Without this the job's `finally` would find no storage seam and leave
+    // every upload to the seven-day lifecycle rule.
+    transcribeUpload.mockResolvedValueOnce({
+      id: 'r1',
+      transcriptionId: 't1',
+      segments: 0,
+      durationMs: null,
+      uploadDeleted: true,
+    });
+    const ctx = { log: vi.fn(), warn: vi.fn() };
+    await runUploadTranscription(
+      { uploadPath: 'uploads/0d5c3d3e-1f5a-4a1c-9f6d-2b3c4d5e6f70.mp3', title: 't' },
+      { context: ctx }
+    );
+    const deps = transcribeUpload.mock.calls[0][0];
+    expect(typeof deps.storage?.deleteBlob).toBe('function');
+    await deps.storage.deleteBlob('podcast', 'uploads/x.mp3');
+    expect(deleteBlob).toHaveBeenCalledWith('podcast', 'uploads/x.mp3');
+    expect(deps.log).toBe(ctx);
+    expect(deps.timeoutMs).toBeLessThan(25 * 60 * 1000);
+    expect(ctx.log.mock.calls[0][0]).toMatch(/upload deleted/);
+  });
+
   it('fail a bad payload with the validation sentence before touching anything', async () => {
     const ctx = { context: { log: vi.fn() } };
     await expect(runRecordingGeneration({}, ctx)).rejects.toThrow(

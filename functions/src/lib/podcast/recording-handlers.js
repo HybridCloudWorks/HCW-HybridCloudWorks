@@ -52,7 +52,9 @@ function readContentLength(request) {
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
- * @param {{ uploadBlob: Function }} deps.storage
+ * @param {{ uploadBlob: Function, deleteBlob: Function }} deps.storage — `deleteBlob`
+ *   removes an upload whose job could not be queued; podcast-recordings-http.test.js
+ *   pins that the route wires it
  * @param {object} [deps.env]
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
@@ -81,6 +83,25 @@ export function createPodcastRecordingHandlers({
     await store.upsertDoc(JOBS_CONTAINER, doc);
     enqueue({ jobId, type });
     return { jobId };
+  }
+
+  /**
+   * Remove an upload nothing will consume. Best effort: the caller is
+   * already answering a failure, and this must not become a second one.
+   * The log carries the failure's status code, never the path.
+   */
+  async function discardUpload(uploadPath, context) {
+    if (typeof storage?.deleteBlob !== 'function') {
+      context.warn?.('uploadPodcastRecording: no deleteBlob wired; orphaned upload left to the lifecycle rule');
+      return;
+    }
+    try {
+      await storage.deleteBlob(PODCAST_AUDIO_CONTAINER, uploadPath);
+    } catch (err) {
+      context.warn?.(
+        `uploadPodcastRecording: upload blob not deleted after a failed enqueue (${err?.code || err?.statusCode || 'error'})`
+      );
+    }
   }
 
   return {
@@ -197,15 +218,31 @@ export function createPodcastRecordingHandlers({
           { overwrite: false }
         );
 
-        const queued = await enqueueJob({
-          type: UPLOAD_JOB_TYPE,
-          payload: { uploadPath, title },
-          auth,
-          enqueue,
-          context,
-          label: 'uploadPodcastRecording',
-        });
-        if (queued.error) return queued.error;
+        // The blob is reachable on the media route from this line on. If the
+        // job that would consume it cannot be queued — no output wired, a
+        // failed job-document write, a failed queue send — nothing will ever
+        // read or delete it before the seven-day lifecycle rule, so it is
+        // removed here, best-effort, and the enqueue's own error is answered
+        // exactly as before. A failed delete is logged content-free (status
+        // code only) and never replaces that error.
+        let queued;
+        try {
+          queued = await enqueueJob({
+            type: UPLOAD_JOB_TYPE,
+            payload: { uploadPath, title },
+            auth,
+            enqueue,
+            context,
+            label: 'uploadPodcastRecording',
+          });
+        } catch (err) {
+          await discardUpload(uploadPath, context);
+          throw err;
+        }
+        if (queued.error) {
+          await discardUpload(uploadPath, context);
+          return queued.error;
+        }
 
         context.log?.(`uploadPodcastRecording: queued ${queued.jobId} (${buffer.length} B)`);
         return json(202, {

@@ -12,7 +12,7 @@ import { output } from '@azure/functions';
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
-import { uploadBlob } from '../lib/blob-storage.js';
+import { deleteBlob, uploadBlob } from '../lib/blob-storage.js';
 import { JOBS_QUEUE } from '../lib/jobs.js';
 import { createPodcastRecordingHandlers } from '../lib/podcast/recording-handlers.js';
 
@@ -21,11 +21,14 @@ const queueOutput = output.storageQueue({
   connection: 'AzureWebJobsStorage',
 });
 
+// `deleteBlob` is not optional: the upload handler removes a blob whose job
+// could not be queued, and without it that blob stays reachable until the
+// lifecycle rule. podcast-recordings-http.test.js asserts it is wired.
 const handlers = () =>
   createPodcastRecordingHandlers({
     guard: getDefaultGuard(),
     store: { readDoc, upsertDoc },
-    storage: { uploadBlob },
+    storage: { uploadBlob, deleteBlob },
   });
 
 // A literal segment under `cms/podcast/transcripts/`; it cannot collide with
