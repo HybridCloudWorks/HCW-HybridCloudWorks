@@ -9,7 +9,7 @@ import {
   appliedSkills,
   timelineEvents,
 } from '@/data/azure/certifications';
-import { deriveStatus, useToday } from '@/lib/certStatus';
+import { daysUntil, deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -339,11 +339,6 @@ function formatDate(iso) {
     day: 'numeric',
     year: 'numeric',
   });
-}
-
-/** Whole days from `today` (`YYYY-MM-DD`, see useToday) to `iso`; negative when past. */
-function daysUntil(iso, today) {
-  return Math.ceil((new Date(`${iso}T00:00:00`) - new Date(`${today}T00:00:00`)) / 86400000);
 }
 
 /**

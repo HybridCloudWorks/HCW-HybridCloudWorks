@@ -3,9 +3,47 @@ import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import { act, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { deriveStatus, findStaleStatuses, isPastDate, todayIso, useToday } from './certStatus';
+import {
+  daysUntil,
+  deriveStatus,
+  findStaleStatuses,
+  isPastDate,
+  todayIso,
+  useToday,
+} from './certStatus';
 
 const TODAY = '2026-09-09';
+
+describe('daysUntil', () => {
+  it('counts calendar days: zero today, positive ahead, negative once past', () => {
+    expect(daysUntil('2026-09-09', TODAY)).toBe(0);
+    expect(daysUntil('2026-09-30', TODAY)).toBe(21);
+    expect(daysUntil('2026-06-30', TODAY)).toBe(-71);
+    expect(daysUntil('2027-01-01', '2026-12-31')).toBe(1);
+  });
+
+  it('is unaffected by a spring-forward boundary (US, 2026-03-08; EU, 2026-03-29)', () => {
+    // A local-midnight subtraction across the 23-hour day rounds or ceils to
+    // the wrong side; the calendar answer is exactly the day count.
+    expect(daysUntil('2026-03-09', '2026-03-07')).toBe(2);
+    expect(daysUntil('2026-03-08', '2026-03-07')).toBe(1);
+    expect(daysUntil('2026-03-30', '2026-03-28')).toBe(2);
+    expect(daysUntil('2026-04-01', '2026-03-01')).toBe(31);
+  });
+
+  it('is unaffected by a fall-back boundary (US, 2026-11-01; EU, 2026-10-25)', () => {
+    expect(daysUntil('2026-11-02', '2026-10-31')).toBe(2);
+    expect(daysUntil('2026-11-01', '2026-10-31')).toBe(1);
+    expect(daysUntil('2026-10-26', '2026-10-24')).toBe(2);
+    expect(daysUntil('2026-11-30', '2026-10-01')).toBe(60);
+  });
+
+  it('returns null, not NaN, for a missing or malformed date', () => {
+    expect(daysUntil(undefined, TODAY)).toBeNull();
+    expect(daysUntil('June 30, 2026', TODAY)).toBeNull();
+    expect(daysUntil('2026-06-30', 'today')).toBeNull();
+  });
+});
 
 describe('useToday', () => {
   const FALLBACK = '2000-01-01';

@@ -77,6 +77,29 @@ export function isPastDate(iso, today) {
   return iso < today;
 }
 
+/** `YYYY-MM-DD` → the UTC millisecond timestamp of that calendar day. */
+function utcDay(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+/**
+ * Whole calendar days from `today` to `iso`, both `YYYY-MM-DD`: 0 on the day
+ * itself, positive ahead, negative once past. The parts are placed on the UTC
+ * calendar with `Date.UTC`, where every day is exactly 86,400,000 ms, so a
+ * span that crosses a daylight-saving change is not 23 or 25 hours long and
+ * the "Xd" countdown cannot be off by one. Returns `null` for a missing or
+ * malformed date rather than `NaN`.
+ *
+ * This is the canonical day-difference helper for the Learn pages; the
+ * provider pages share it rather than subtracting two local-midnight Dates.
+ */
+export function daysUntil(iso, today) {
+  if (typeof iso !== 'string' || !ISO_DATE.test(iso)) return null;
+  if (typeof today !== 'string' || !ISO_DATE.test(today)) return null;
+  return Math.round((utcDay(iso) - utcDay(today)) / 86400000);
+}
+
 /**
  * The status to render for a certification (or applied skill) on `today`.
  *
