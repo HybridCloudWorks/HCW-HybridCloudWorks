@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import { getProviderPath } from '@/lib/routeFactory';
@@ -10,6 +10,9 @@ import {
   timelineEvents,
 } from '@/data/azure/certifications';
 import { daysUntil, deriveStatus, formatIsoDate, isPastDate, useToday } from '@/lib/certStatus';
+import { certEventToTimelineEvent, mergeTimelineEvents } from '@/lib/certEvents';
+import { fetchPublicCertEvents } from '@/lib/publicApi';
+import { usePublicData } from '@/hooks/usePublicData';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -452,6 +455,7 @@ function HorizontalTimeline({ events }) {
   const [todayYear, todayMonth] = today.split('-').map(Number);
 
   const { months, minDate, maxDate } = buildMonthColumns(events);
+  const liveCount = events.filter((ev) => ev.live).length;
 
   // Check scroll position to enable/disable buttons
   const checkScrollPosition = React.useCallback(() => {
@@ -533,6 +537,21 @@ function HorizontalTimeline({ events }) {
           Microsoft Learn
         </a>{' '}
         on {formatDate(DATA_AS_OF)}.
+        {liveCount > 0 && (
+          <>
+            {' '}
+            Plus {liveCount} from the{' '}
+            <a
+              href="https://techcommunity.microsoft.com/category/skills-hub/blog/skills-hub-blog"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              Microsoft Skills Hub blog
+            </a>
+            , as last scraped.
+          </>
+        )}
       </p>
 
       {/* Legend */}
@@ -881,7 +900,23 @@ export default function AzureEducationPage() {
     return () => window.removeEventListener('resize', updateColumns);
   }, []);
 
-  const sortedTimeline = [...timelineEvents, ...appliedSkillRetirementEvents].sort(byIsoDate);
+  // The Friday Skills Hub scraper's events (GET public/cert-events), merged
+  // over the hand-maintained entries by id (#461 item 4). Fetched in an
+  // effect, so the pre-render and the hydrating render carry the static
+  // entries alone and agree; when the list is empty or the request fails the
+  // static entries are what the page shows, exactly as before.
+  const liveCertEvents = usePublicData(
+    () => fetchPublicCertEvents({ platform: 'azure' }),
+    'cert-events:azure'
+  );
+  const liveTimelineEvents = useMemo(
+    () => (liveCertEvents.data || []).map(certEventToTimelineEvent).filter(Boolean),
+    [liveCertEvents.data]
+  );
+  const sortedTimeline = mergeTimelineEvents(
+    [...timelineEvents, ...appliedSkillRetirementEvents],
+    liveTimelineEvents
+  );
 
   return (
     <>

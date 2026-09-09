@@ -219,6 +219,19 @@ export async function fetchPublicListenAndLearnEpisodes({ platform } = {}) {
 }
 
 /**
+ * GET public/cert-events?platform= — the certification lifecycle events the
+ * Friday Skills Hub scraper has recorded for a provider, newest first, for
+ * the education timeline (#461 item 4; lib/certEvents.js merges them over
+ * the static entries). Empty when nothing has been scraped for the provider.
+ */
+export async function fetchPublicCertEvents({ platform } = {}) {
+  if (!platform) return [];
+  const params = new URLSearchParams({ platform });
+  const body = await publicGet(`public/cert-events?${params}`);
+  return body?.items || [];
+}
+
+/**
  * GET public/feed — rss_cache documents for one provider, in a single round
  * trip (the old code ran two Firestore queries; the second, `ai_insights`,
  * fed a panel retired on 2026-09-05 — T-765).

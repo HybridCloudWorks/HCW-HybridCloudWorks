@@ -1,0 +1,370 @@
+// @vitest-environment node
+/**
+ * The three rules of the catalogue updater (#461 item 3), with every source
+ * stubbed: the sync date is stamped, a source that fails or parses to zero
+ * items refuses to write, and lifecycle never moves backwards — a stale
+ * poster or API cannot undo a retirement #464 recorded by hand.
+ */
+import { describe, expect, it } from 'vitest';
+import {
+  SourceError,
+  assertSourceItems,
+  buildCatalogue,
+  collectSources,
+  reconcileLifecycle,
+  stampSyncDate,
+  summarizeChanges,
+} from './update-applied-skills.mjs';
+
+const okJson = (body) => ({ ok: true, status: 200, json: async () => body });
+const okHtml = (html) => ({ ok: true, status: 200, text: async () => html });
+const failed = (status) => ({ ok: false, status, text: async () => '', json: async () => ({}) });
+
+/** Poster text with one certification per line, as the PDF parses. */
+const posterText = (codes) => codes.map((code) => `Some Title\n${code}`).join('\n');
+
+describe('rule 1 — the sync date', () => {
+  it('stamps today into both the header line and DATA_AS_OF', () => {
+    const source = [
+      '// Verified by hand on the date below.',
+      '// Last manual sync: 2026-04-16',
+      '',
+      "export const DATA_AS_OF = '2026-04-16';",
+      'export const x = 1;',
+      '',
+    ].join('\n');
+    const stamped = stampSyncDate(source, '2026-09-14');
+    expect(stamped).toContain('// Last manual sync: 2026-09-14');
+    expect(stamped).toContain("export const DATA_AS_OF = '2026-09-14';");
+    expect(stamped).not.toContain('2026-04-16');
+  });
+
+  it('refuses a file that lost either marker rather than stamping half of it', () => {
+    expect(() => stampSyncDate("export const DATA_AS_OF = '2026-04-16';", '2026-09-14')).toThrow(
+      /Last manual sync/
+    );
+    expect(() => stampSyncDate('// Last manual sync: 2026-04-16', '2026-09-14')).toThrow(
+      /DATA_AS_OF/
+    );
+  });
+});
+
+describe('rule 2 — an empty or unreachable source writes nothing', () => {
+  it('names the source that parsed to zero items, in one sentence', () => {
+    expect(() => assertSourceItems('certifications browse API', [], 'https://x')).toThrow(
+      SourceError
+    );
+    expect(() => assertSourceItems('Applied Skills poster', '   ', 'https://x')).toThrow(
+      'The Applied Skills poster (https://x) was fetched but parsed to zero items, so the catalogue was not written.'
+    );
+    expect(assertSourceItems('ok', [1], 'https://x')).toEqual([1]);
+  });
+
+  it('refuses when the browse API answers with zero results', async () => {
+    const fetchImpl = async () => okJson({ count: 0, results: [] });
+    const readPdf = async (label) =>
+      label === 'Certifications poster' ? posterText(['AZ-104']) : 'Create an AI agent';
+    await expect(collectSources({ fetchImpl, readPdf })).rejects.toThrow(
+      /browse API .* parsed to zero items, so the catalogue was not written\./
+    );
+  });
+
+  it('refuses when a poster parses to no certifications', async () => {
+    const fetchImpl = async () =>
+      okJson({ count: 1, results: [{ title: 'Microsoft Certified: X', url: '/x/', exams: [] }] });
+    const readPdf = async () => 'No codes on this poster at all';
+    await expect(collectSources({ fetchImpl, readPdf })).rejects.toThrow(
+      'The Certifications poster (https://aka.ms/CertificationsPoster) was fetched but parsed to zero items, so the catalogue was not written.'
+    );
+  });
+
+  it('turns a non-2xx answer and a network failure into sentences naming the source', async () => {
+    const readPdf = async () => posterText(['AZ-104']);
+    await expect(collectSources({ fetchImpl: async () => failed(503), readPdf })).rejects.toThrow(
+      /browse API \(https:\/\/learn\.microsoft\.com\/.*\) answered HTTP 503/
+    );
+    await expect(
+      collectSources({
+        fetchImpl: async () => {
+          throw new Error('getaddrinfo ENOTFOUND learn.microsoft.com');
+        },
+        readPdf,
+      })
+    ).rejects.toThrow(/could not be fetched \(getaddrinfo ENOTFOUND learn\.microsoft\.com\)/);
+  });
+});
+
+describe('rule 3 — lifecycle only moves forward', () => {
+  it('keeps a retirement the file records when the source says beta or active', () => {
+    const report = [];
+    expect(
+      reconcileLifecycle({
+        existing: { status: 'retired', expiryDate: '2026-06-30' },
+        sourced: { status: 'beta' },
+        label: 'AI-102',
+        report,
+      })
+    ).toEqual({ status: 'retired', expiryDate: '2026-06-30' });
+    expect(
+      reconcileLifecycle({
+        existing: { status: 'retired', expiryDate: '2026-06-30' },
+        sourced: { status: 'active' },
+        label: 'AI-102',
+        report,
+      })
+    ).toEqual({ status: 'retired', expiryDate: '2026-06-30' });
+    expect(report).toEqual([
+      "AI-102: the source says 'beta' but the file says 'retired' (2026-06-30); kept the file's value.",
+      "AI-102: the source says 'active' but the file says 'retired' (2026-06-30); kept the file's value.",
+    ]);
+  });
+
+  it('keeps the file when the source names a different retirement date', () => {
+    const report = [];
+    expect(
+      reconcileLifecycle({
+        existing: { status: 'expiring', expiryDate: '2026-09-30' },
+        sourced: { status: 'expiring', expiryDate: '2026-12-31' },
+        label: 'AZ-800',
+        report,
+      })
+    ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
+    expect(report).toEqual([
+      "AZ-800: the source gives retirement date 2026-12-31 but the file has 2026-09-30; kept the file's value.",
+    ]);
+  });
+
+  it('keeps an exam #464 made active when a stale source still says beta', () => {
+    const report = [];
+    expect(
+      reconcileLifecycle({
+        existing: { status: 'active', betaEndDate: '2026-05-07' },
+        sourced: { status: 'beta' },
+        label: 'AI-103',
+        report,
+      })
+    ).toEqual({ status: 'active' });
+    expect(report).toHaveLength(1);
+  });
+
+  it('moves forward: active to expiring with the date, and a new entry takes the source', () => {
+    const report = [];
+    expect(
+      reconcileLifecycle({
+        existing: { status: 'active' },
+        sourced: { status: 'expiring', expiryDate: '2026-11-30' },
+        label: 'MS-102',
+        report,
+      })
+    ).toEqual({ status: 'expiring', expiryDate: '2026-11-30' });
+    expect(reconcileLifecycle({ existing: {}, sourced: { status: 'beta' }, report })).toEqual({
+      status: 'beta',
+    });
+    expect(reconcileLifecycle({ existing: {}, sourced: {}, report })).toEqual({
+      status: 'active',
+    });
+    expect(report).toEqual([]);
+  });
+
+  it('leaves the file alone when the source has no opinion', () => {
+    const report = [];
+    expect(
+      reconcileLifecycle({
+        existing: { status: 'expiring', expiryDate: '2026-09-30' },
+        sourced: {},
+        label: 'AZ-801',
+        report,
+      })
+    ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
+    expect(report).toEqual([]);
+  });
+});
+
+describe('buildCatalogue — the rules applied to the whole file', () => {
+  const existingCertifications = [
+    {
+      id: 'ai-102',
+      slug: 'ai-102',
+      code: 'AI-102',
+      officialCode: 'AI-102',
+      title: 'Designing and Implementing a Microsoft Azure AI Solution',
+      level: 'Associate',
+      status: 'retired',
+      expiryDate: '2026-06-30',
+      replacedBy: 'ai-103',
+      description: 'd',
+      longDescription: 'ld',
+      topics: [],
+      hours: 45,
+      prepTime: '~3 months',
+      successRate: null,
+      learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-engineer/',
+      studyGuideUrl: 's',
+      practiceUrl: 'p',
+      modules: [],
+      appliedSkills: [],
+      prerequisites: 'none',
+      nextCerts: [],
+    },
+    {
+      id: 'ai-103',
+      slug: 'ai-103',
+      code: 'AI-103',
+      officialCode: 'AI-103',
+      title: 'Azure AI Apps and Agents Developer Associate',
+      level: 'Associate',
+      status: 'active',
+      betaEndDate: '2026-05-07',
+      description: 'd',
+      longDescription: 'ld',
+      topics: [],
+      hours: 45,
+      prepTime: '~3 months',
+      successRate: null,
+      learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/ai-103/',
+      studyGuideUrl: 's',
+      practiceUrl: 'p',
+      modules: [],
+      appliedSkills: [],
+      prerequisites: 'none',
+      nextCerts: [],
+    },
+  ];
+  const existingSkills = [
+    {
+      id: 'apl-csa',
+      slug: 'create-agents-in-microsoft-copilot-studio',
+      code: 'APL-CSA',
+      officialCode: 'applied-skill.create-agents-in-microsoft-copilot-studio',
+      title: 'Create agents in Microsoft Copilot Studio',
+      area: 'AI Business',
+      level: 'Intermediate',
+      status: 'retired',
+      expiryDate: '2026-07-08',
+      description: 'd',
+      learnUrl:
+        'https://learn.microsoft.com/en-us/credentials/applied-skills/create-agents-in-microsoft-copilot-studio/',
+    },
+    {
+      id: 'apl-fdw',
+      slug: 'implement-a-data-warehouse-in-microsoft-fabric',
+      code: 'APL-FDW',
+      officialCode: 'applied-skill.implement-a-data-warehouse-in-microsoft-fabric',
+      title: 'Implement a data warehouse in Microsoft Fabric',
+      area: 'Data',
+      level: 'Intermediate',
+      status: 'expiring',
+      expiryDate: '2026-09-30',
+      description: 'd',
+      learnUrl:
+        'https://learn.microsoft.com/en-us/credentials/applied-skills/implement-a-data-warehouse-in-microsoft-fabric/',
+    },
+  ];
+  const sources = {
+    // The API still says "(beta)" for AI-103, which #464 made active.
+    certificationApiResults: [
+      {
+        title: 'Microsoft Certified: Azure AI Apps and Agents Developer Associate (beta)',
+        url: '/credentials/certifications/ai-103/',
+        exams: [{ display_name: 'Exam AI-103' }],
+      },
+      {
+        title: 'Microsoft Certified: Azure Administrator Associate',
+        url: '/credentials/certifications/azure-administrator/',
+        exams: [{ display_name: 'Exam AZ-104' }],
+      },
+    ],
+    // The poster lists AI-103 and AZ-104, has dropped the retired AI-102, and
+    // carries a template label that parsed as an exam.
+    posterCertificationEntries: [
+      { code: 'AI-103', title: 'Azure AI Apps and Agents Developer Associate (Beta)' },
+      { code: 'AZ-104', title: 'Azure Administrator Associate' },
+      { code: 'MB-300', title: 'Full certification title' },
+    ],
+    // The browse API no longer lists the retired skill, and its page names a
+    // later date for the expiring one.
+    browseResults: [
+      {
+        uid: 'applied-skill.implement-a-data-warehouse-in-microsoft-fabric',
+        title: 'Microsoft Applied Skills: Implement a data warehouse in Microsoft Fabric',
+        url: '/credentials/applied-skills/implement-a-data-warehouse-in-microsoft-fabric/',
+        display_levels: ['Intermediate'],
+        display_subjects: ['fabric'],
+      },
+    ],
+    appliedPosterText: 'Create an AI agent',
+  };
+  const fetchImpl = async () =>
+    okHtml(
+      '<h2>Overview</h2><p>Text</p> This credential will retire on December 31, 2026 </section>'
+    );
+
+  it('keeps retirements, refuses the poster artefact, and reports every decision', async () => {
+    const out = await buildCatalogue({
+      existingSkills,
+      existingCertifications,
+      sources,
+      fetchImpl,
+    });
+
+    const certs = new Map(out.nextCertifications.map((c) => [c.code, c]));
+    expect([...certs.keys()]).toEqual(['AI-102', 'AI-103', 'AZ-104']);
+    expect(certs.get('AI-102')).toMatchObject({ status: 'retired', expiryDate: '2026-06-30' });
+    expect(certs.get('AI-103')).toMatchObject({ status: 'active', betaEndDate: '2026-05-07' });
+    expect(certs.get('AZ-104')).toMatchObject({ status: 'active', slug: 'azure-administrator' });
+
+    const skills = new Map(out.nextSkills.map((s) => [s.code, s]));
+    expect(skills.get('APL-CSA')).toMatchObject({ status: 'retired', expiryDate: '2026-07-08' });
+    expect(skills.get('APL-FDW')).toMatchObject({ status: 'expiring', expiryDate: '2026-09-30' });
+
+    expect(out.kept).toEqual([
+      'APL-CSA — Create agents in Microsoft Copilot Studio (retired)',
+      'AI-102 — Designing and Implementing a Microsoft Azure AI Solution (retired)',
+    ]);
+    expect(out.disagreements).toEqual([
+      "APL-FDW (implement-a-data-warehouse-in-microsoft-fabric): the source gives retirement date 2026-12-31 but the file has 2026-09-30; kept the file's value.",
+      "AI-103: the source says 'beta' but the file says 'active'; kept the file's value.",
+    ]);
+    expect(out.unverified).toEqual(['MB-300 — Full certification title']);
+  });
+
+  it('treats a detail page that does not answer as no opinion, not as a reprieve', async () => {
+    const out = await buildCatalogue({
+      existingSkills,
+      existingCertifications,
+      sources,
+      fetchImpl: async () => failed(404),
+    });
+    expect(out.nextSkills.find((s) => s.code === 'APL-FDW')).toMatchObject({
+      status: 'expiring',
+      expiryDate: '2026-09-30',
+    });
+    expect(out.disagreements.filter((line) => line.startsWith('APL-FDW'))).toEqual([]);
+  });
+});
+
+describe('summarizeChanges — the pull request body', () => {
+  it('lists additions, changes and removals by code, and says when only the date moved', () => {
+    const before = {
+      certifications: [{ code: 'AZ-104', title: 'Admin', status: 'active' }],
+      appliedSkills: [{ code: 'APL-A', title: 'A', status: 'active' }],
+    };
+    const after = {
+      certifications: [
+        { code: 'AZ-104', title: 'Admin', status: 'expiring', expiryDate: '2026-12-31' },
+        { code: 'AZ-802', title: 'Hybrid', status: 'active' },
+      ],
+      appliedSkills: [],
+    };
+    const summary = summarizeChanges({ before, after, today: '2026-09-14', kept: ['x — y'] });
+    expect(summary).toContain('Catalogue checked against Microsoft Learn on 2026-09-14.');
+    expect(summary).toContain('- AZ-802 — Hybrid (active)');
+    expect(summary).toContain('- AZ-104: status active → expiring, expiryDate — → 2026-12-31');
+    expect(summary).toContain('- APL-A — A');
+    expect(summary).toContain('### Kept from the file');
+    expect(summary).not.toContain('only the sync date moved');
+
+    const unchanged = summarizeChanges({ before, after: before, today: '2026-09-14' });
+    expect(unchanged).toContain('No entry changed; only the sync date moved.');
+  });
+});

@@ -62,6 +62,16 @@ httpRoute('publicListListenAndLearnEpisodes', {
   handler: (request, context) => handlers().listListenAndLearnEpisodes(request, context),
 });
 
+// Certification lifecycle events the Friday Skills Hub scraper writes to
+// certEvents (#461 item 4). Anonymous, platform validated against the known
+// provider list, projected to a listing allowlist, newest first, capped.
+httpRoute('publicListCertEvents', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/cert-events',
+  handler: (request, context) => handlers().listCertEvents(request, context),
+});
+
 httpRoute('publicGetCuratedImage', {
   methods: ['GET'],
   authLevel: 'anonymous',

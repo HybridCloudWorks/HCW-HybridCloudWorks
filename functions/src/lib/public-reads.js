@@ -498,6 +498,47 @@ const LISTEN_AND_LEARN_SET_PROJECTION = ['id', 'certTitle', 'certSlug', ...SOFT_
   .join(', ');
 
 /**
+ * Certification lifecycle events (#461 item 4). Written by the Friday Skills
+ * Hub RSS scraper (timers/skills-hub.js `buildCertEvent`): one document per
+ * feed item that matched a lifecycle pattern, id derived from the feed guid,
+ * `pubDate` stamped on every row (the scraper substitutes its own clock when
+ * the feed omits one), `source: 'skills-hub-rss'`. Until this route existed
+ * nothing read the container, and the Azure timeline was a static array
+ * whose comment said otherwise.
+ *
+ * The documents carry no provider field — the one writer is Microsoft's
+ * feed — so the platform query is answered by SOURCE: each platform names
+ * the scraper sources that feed it, and a platform with none listed answers
+ * an empty list without a query. A second scraper registers here by adding
+ * its `source` value under its platform. Names copied rather than imported
+ * for the reason the Listen & Learn names above are: this module has no
+ * imports, and public-reads.test.js asserts the copies agree with the writer.
+ *
+ * `ORDER BY c.pubDate DESC` is safe where the header's rule 2 forbids the
+ * content aliases: the writer stamps `pubDate` on every document, so no row
+ * is dropped by the sort. Allowlisted projection, for the same reason as the
+ * episode list: `createdAt` is the scraper's clock and stays off the list.
+ */
+const CERT_EVENTS_CONTAINER = 'certEvents';
+const CERT_EVENT_SOURCES_BY_PLATFORM = Object.freeze({ azure: Object.freeze(['skills-hub-rss']) });
+const CERT_EVENT_FIELDS = [
+  'id',
+  'type',
+  'certCodes',
+  'title',
+  'summary',
+  'link',
+  'pubDate',
+  'mentionedDates',
+  'source',
+];
+const CERT_EVENTS_MAX_LISTED = 100;
+const CERT_EVENTS_CACHE_SECONDS = 3600;
+const CERT_EVENT_PROJECTION = [...CERT_EVENT_FIELDS, ...SOFT_DELETE_MARKERS]
+  .map((f) => `c["${f}"]`)
+  .join(', ');
+
+/**
  * Where the podcast timer reads its feed list (`fetchPodcastFeeds`, #348):
  * `admin_config/podcast_feeds`, shape
  * `{ mainFeedUrl, feeds: [{ provider, url }] }`. The public podcasts list
@@ -1219,6 +1260,60 @@ export function createPublicReadHandlers({ store }) {
       } catch (error) {
         context.error('publicListListenAndLearnEpisodes failed:', error);
         return json(500, { error: 'Failed to list Listen & Learn episodes' });
+      }
+    },
+
+    /**
+     * GET /api/public/cert-events?platform= — the certification lifecycle
+     * events the Friday scraper has recorded for a platform, newest
+     * publication first (#461 item 4; pages/azure/EducationPage.jsx merges
+     * them over the hand-maintained timeline).
+     *
+     * `platform` must be one of the known provider keys, and is answered by
+     * source: a known platform with no scraper feeding it gets an empty list
+     * and no query, which is what "nothing has been scraped for this
+     * provider" looks like to the page — the static timeline stays.
+     */
+    async listCertEvents(request, context) {
+      try {
+        const platform = String(request.query.get('platform') || '')
+          .trim()
+          .toLowerCase();
+        if (!platform) return json(400, { error: 'platform is required' });
+        if (!Object.prototype.hasOwnProperty.call(PROVIDER_ALIASES, platform)) {
+          return json(400, { error: 'platform is not a known provider' });
+        }
+
+        const sources = CERT_EVENT_SOURCES_BY_PLATFORM[platform] || [];
+        if (sources.length === 0) {
+          return json(200, { success: true, items: [], total: 0 }, CERT_EVENTS_CACHE_SECONDS);
+        }
+
+        const docs = await store.queryDocs(
+          CERT_EVENTS_CONTAINER,
+          `SELECT TOP ${CERT_EVENTS_MAX_LISTED} ${CERT_EVENT_PROJECTION} FROM c WHERE ARRAY_CONTAINS(@sources, c.source) ORDER BY c.pubDate DESC`,
+          [{ name: '@sources', value: [...sources] }]
+        );
+
+        const items = docs
+          .filter((doc) => !isSoftDeleted(doc))
+          .map((doc) => {
+            const row = {};
+            for (const field of CERT_EVENT_FIELDS) {
+              if (doc[field] !== undefined) row[field] = doc[field];
+            }
+            return row;
+          })
+          .sort(
+            (a, b) =>
+              resolvePublishedDateValue({ publishedAt: b.pubDate }) -
+              resolvePublishedDateValue({ publishedAt: a.pubDate })
+          );
+
+        return json(200, { success: true, items, total: items.length }, CERT_EVENTS_CACHE_SECONDS);
+      } catch (error) {
+        context.error('publicListCertEvents failed:', error);
+        return json(500, { error: 'Failed to list certification events' });
       }
     },
   };
