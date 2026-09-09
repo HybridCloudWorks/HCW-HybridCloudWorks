@@ -35,6 +35,7 @@ import {
   resolveSpeechProvider,
 } from '../lib/listen-and-learn/speech/index.js';
 import {
+  listenAndLearnModelOptions,
   parseTtsModel,
   readStoredListenAndLearnModel,
   resolveListenAndLearnModel,
@@ -81,16 +82,19 @@ export const MAX_AREAS_PER_RUN = 8;
  * audio step will fail with a sentence naming the pin).
  *
  * `model` is the Gemini model the run will read with when the payload names
- * a valid `ttsModel` (`modelSource: 'run'`). This hook is synchronous and
- * sees only the payload, so when the payload names none it prices the
- * setting/module default (`modelSource: 'default'`) — the worker then reads
- * the stored default, which may differ. The generation form always sends
- * `ttsModel`, so the 202 an operator sees names the model that will run; a
- * caller going around the form gets the honest label instead.
+ * a valid `ttsModel` (`modelSource: 'run'`). When it names none — the
+ * generation form sends none when the operator leaves "Stored default" or
+ * when the settings failed to load, and any other caller may omit it — the
+ * worker will read the stored default from `admin_config`, and this hook is
+ * synchronous and sees only the payload, so it cannot know which model that
+ * is. It does not guess: `model` is null, `modelSource` is `'stored'`,
+ * `modelNote` says where the default lives, and the ceiling is priced at
+ * the DEARER of the two offered models so that it is still a ceiling
+ * whichever one is stored (Copilot on #462).
  *
  * @param {object} payload the raw enqueue payload
  * @param {object} [env]
- * @returns {{provider: string|null, model: string|null, modelSource: 'run'|'default'|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
+ * @returns {{provider: string|null, model: string|null, modelSource: 'run'|'stored'|null, modelNote?: string, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
  */
 export function speechEstimateForRun(payload, env = process.env) {
   const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
@@ -101,7 +105,7 @@ export function speechEstimateForRun(payload, env = process.env) {
   const perEpisode = estimateSpeechCostUsd({
     product: PRODUCT,
     ceilingBytes: MAX_SCRIPT_BYTES,
-    model: requested,
+    model: requested || dearestOfferedModel(),
     env,
   });
   if (!perEpisode) {
@@ -116,14 +120,30 @@ export function speechEstimateForRun(payload, env = process.env) {
     };
   }
   const perEpisodeUsd = perEpisode.estimatedCostUsd;
+  // Only Gemini has a model to name; Azure's is null with nothing to say.
+  const unknownStored = perEpisode.provider === 'gemini' && !requested;
   return {
     provider: perEpisode.provider,
-    model: perEpisode.model,
-    modelSource: perEpisode.model ? (requested ? 'run' : 'default') : null,
+    model: unknownStored ? null : perEpisode.model,
+    modelSource: perEpisode.model ? (requested ? 'run' : 'stored') : null,
+    ...(unknownStored ? { modelNote: STORED_MODEL_NOTE } : {}),
     episodes,
     perEpisodeUsd,
     estimatedCostUsd: typeof perEpisodeUsd === 'number' ? roundUpUsd(perEpisodeUsd * episodes) : null,
   };
+}
+
+/** What the 202 says in place of a model it cannot know. */
+export const STORED_MODEL_NOTE = 'the stored default applies; see Platform settings';
+
+/**
+ * The offered model with the highest per-episode ceiling, so an estimate made
+ * without knowing which is stored is never below the one that will run.
+ */
+function dearestOfferedModel() {
+  return listenAndLearnModelOptions().reduce((dearest, option) =>
+    (option.perEpisodeUsd ?? -1) > (dearest.perEpisodeUsd ?? -1) ? option : dearest
+  ).id;
 }
 
 /**

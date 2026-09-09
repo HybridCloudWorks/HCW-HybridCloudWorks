@@ -71,6 +71,21 @@ const modelLabel = (model) =>
   GEMINI_TTS_MODEL_TIERS[model] ? `${GEMINI_TTS_MODEL_TIERS[model]} (${model})` : model;
 
 /**
+ * "Gemini Best (gemini-3.1-flash-tts-preview)", or — for a run that named
+ * no model — "Gemini (the stored default applies; see Platform settings)".
+ * The 202 cannot know the stored default, so it says so and prices the
+ * dearer model rather than guessing; the toast repeats its sentence.
+ */
+function voiceLabel(speech) {
+  const name = PROVIDER_LABEL[speech.provider] || speech.provider;
+  if (speech.model) return `${name} ${modelLabel(speech.model)}`;
+  if (speech.modelSource === 'stored') {
+    return `${name} (${speech.modelNote || 'the stored default model applies'})`;
+  }
+  return name;
+}
+
+/**
  * The progress line for a run that has just been accepted.
  *
  * The server's 202 says what the run is expected to spend on speech BEFORE it
@@ -94,8 +109,7 @@ export function queuedMessage(speech) {
       return 'Queued — no speech provider is configured, so episodes will have transcripts only';
     return 'Queued — no usable speech provider (none configured, or the pinned one is not), so episodes will have transcripts only';
   }
-  const name = PROVIDER_LABEL[speech.provider] || speech.provider;
-  const voice = speech.model ? `${name} ${modelLabel(speech.model)}` : name;
+  const voice = voiceLabel(speech);
   if (typeof speech.estimatedCostUsd !== 'number') return `Queued — speech by ${voice}`;
   const perEpisode =
     typeof speech.perEpisodeUsd === 'number' && speech.episodes

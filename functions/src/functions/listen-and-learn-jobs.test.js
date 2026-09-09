@@ -27,8 +27,14 @@ vi.mock('../lib/ai/router.js', async (importOriginal) => ({
   getActiveAiProvider: vi.fn(),
 }));
 
-const { parseGeneratePayload, resolveRunModel, roundUpUsd, speechEstimateForRun, MAX_AREAS_PER_RUN } =
-  await import('./listen-and-learn-jobs.js');
+const {
+  parseGeneratePayload,
+  resolveRunModel,
+  roundUpUsd,
+  speechEstimateForRun,
+  MAX_AREAS_PER_RUN,
+  STORED_MODEL_NOTE,
+} = await import('./listen-and-learn-jobs.js');
 const { MAX_SCRIPT_BYTES } = await import('../lib/listen-and-learn/script.js');
 const { estimateGeminiCostUsd } = await import('../lib/listen-and-learn/speech/index.js');
 const { LISTEN_AND_LEARN_SPEECH_CONFIG_ID } = await import(
@@ -208,18 +214,46 @@ describe('speechEstimateForRun', () => {
   const perEpisode = (model) => estimateGeminiCostUsd(model, MAX_SCRIPT_BYTES);
 
   it('prices every requested area at the script ceiling, with Gemini', () => {
-    const estimate = speechEstimateForRun(valid({ areas: ['a', 'b'] }), GEMINI);
+    const estimate = speechEstimateForRun(valid({ areas: ['a', 'b'], ttsModel: BEST }), GEMINI);
     expect(MAX_SCRIPT_BYTES).toBe(9000);
     expect(perEpisode(BEST)).toBeGreaterThan(0);
     expect(estimate).toEqual({
       provider: 'gemini',
       model: BEST,
-      modelSource: 'default',
+      modelSource: 'run',
       episodes: 2,
       perEpisodeUsd: perEpisode(BEST),
       estimatedCostUsd: roundUpUsd(perEpisode(BEST) * 2),
     });
     expect(estimate.estimatedCostUsd).toBeGreaterThanOrEqual(perEpisode(BEST) * 2);
+  });
+
+  it('does not name a model it cannot know: no ttsModel means the stored default, priced at the dearer model', () => {
+    // The hook is synchronous and sees only the payload; the worker reads the
+    // stored default from admin_config. Saying "3.1" here when "2.5" is
+    // stored would be a 202 that disagrees with the run (Copilot on #462), so
+    // the model is null with a sentence, and the figure is the ceiling
+    // whichever is stored.
+    for (const payload of [valid({ areas: ['a', 'b'] }), valid({ areas: ['a', 'b'], ttsModel: '' })]) {
+      const estimate = speechEstimateForRun(payload, GEMINI);
+      expect(estimate).toEqual({
+        provider: 'gemini',
+        model: null,
+        modelSource: 'stored',
+        modelNote: STORED_MODEL_NOTE,
+        episodes: 2,
+        perEpisodeUsd: perEpisode(BEST),
+        estimatedCostUsd: roundUpUsd(perEpisode(BEST) * 2),
+      });
+      expect(estimate.perEpisodeUsd).toBeGreaterThan(perEpisode(ECONOMY));
+    }
+    expect(STORED_MODEL_NOTE).toBe('the stored default applies; see Platform settings');
+    // A LISTEN_AND_LEARN_TTS_MODEL setting naming a cheaper model does not
+    // lower the figure either: the stored default could still be Best.
+    expect(
+      speechEstimateForRun(valid({ areas: ['a'] }), { ...GEMINI, LISTEN_AND_LEARN_TTS_MODEL: ECONOMY })
+        .perEpisodeUsd
+    ).toBe(perEpisode(BEST));
   });
 
   it('trims the run total to six decimals without ever dropping below the exact figure', () => {
@@ -235,7 +269,7 @@ describe('speechEstimateForRun', () => {
   });
 
   it('describes Gemini even when the ElevenLabs key is present — that key is the podcast’s', () => {
-    const estimate = speechEstimateForRun(valid({ areas: ['a'] }), ALL);
+    const estimate = speechEstimateForRun(valid({ areas: ['a'], ttsModel: BEST }), ALL);
     expect(estimate.provider).toBe('gemini');
     expect(estimate.model).toBe(BEST);
     expect(estimate.perEpisodeUsd).toBe(perEpisode(BEST));
@@ -257,13 +291,13 @@ describe('speechEstimateForRun', () => {
     // The worker refuses it by sentence; the estimate is best effort and
     // must not let an untrusted field choose a path or appear in the 202.
     const estimate = speechEstimateForRun(valid({ ttsModel: 'gemini-2.5-pro-preview-tts' }), GEMINI);
-    expect(estimate.model).toBe(BEST);
-    expect(estimate.modelSource).toBe('default');
+    expect(estimate.model).toBeNull();
+    expect(estimate.modelSource).toBe('stored');
     expect(JSON.stringify(estimate)).not.toContain('pro-preview');
   });
 
   it('assumes the most a run may generate when the areas are not yet known', () => {
-    const estimate = speechEstimateForRun(valid(), GEMINI);
+    const estimate = speechEstimateForRun(valid({ ttsModel: BEST }), GEMINI);
     expect(estimate.episodes).toBe(MAX_AREAS_PER_RUN);
     expect(estimate.estimatedCostUsd).toBeCloseTo(perEpisode(BEST) * MAX_AREAS_PER_RUN, 6);
   });
