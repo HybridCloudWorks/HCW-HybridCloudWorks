@@ -12,6 +12,8 @@
  * of the product table, as §2b says they would be.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { getCostEstimate } from '../../ai/router.js';
+import { SPEECH_LIMITS } from './azure.js';
 import {
   CONTENT_TYPE,
   DEFAULT_VOICES,
@@ -614,6 +616,29 @@ describe('estimateSpeechCostUsd', () => {
     expect(estimate.estimatedCostUsd).toBeGreaterThan(0.34);
     expect(estimate.estimatedCostUsd).toBeLessThan(0.6);
     expect(estimate.estimatedCostUsd).toBe(estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 9000));
+  });
+
+  it('rounds a fractional token count UP, so the ceiling is never below the exact value', () => {
+    // 1 byte ÷ 13 bytes/s × 32 tokens/s ≈ 2.46 tokens: Math.round gave 2,
+    // below the exact figure a "ceiling" must not sit under (Copilot on the
+    // PR). Checked across a spread of sizes, and for the byte ceiling too.
+    const exact = (model, bytes) =>
+      getCostEstimate('gemini', model, 0, (bytes / SPEECH_LIMITS.BYTES_PER_SECOND) * 32);
+    for (const bytes of [1, 7, 13, 100, 8999, 9000]) {
+      for (const model of ['gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts']) {
+        expect(estimateGeminiCostUsd(model, bytes)).toBeGreaterThanOrEqual(exact(model, bytes));
+      }
+    }
+    expect(estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 1)).toBe(
+      getCostEstimate('gemini', 'gemini-3.1-flash-tts-preview', 0, 3)
+    );
+    // A fractional byte ceiling is taken up to the next whole byte, not to nearest.
+    expect(estimateSpeechCostUsd({ ...LL, ceilingBytes: 12.2, env: GEMINI })).toMatchObject({
+      bytes: 13,
+    });
+    expect(estimateSpeechCostUsd({ ...POD, ceilingBytes: 12.2, env: ELEVEN }).estimatedCostUsd).toBe(
+      getCostEstimate('elevenlabs', 'eleven_v3', 0, 13)
+    );
   });
 
   it('prices the Economy model at half the Best model, from the cost table', () => {

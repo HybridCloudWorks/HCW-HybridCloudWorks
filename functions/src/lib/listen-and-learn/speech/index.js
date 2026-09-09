@@ -320,9 +320,11 @@ function modelFor(providerName, env, model) {
  *
  * Best-effort and deliberately high: bytes → seconds at the pessimistic
  * speaking rate azure.js chunks with → audio tokens at the published
- * per-second rate → the model's output price in `COST_TABLE`. Every step
- * over-estimates, which is the right direction for a figure shown before
- * spending. Exported so the settings page can price each model choice at the
+ * per-second rate, rounded UP to a whole token → the model's output price in
+ * `COST_TABLE`. Every step over-estimates, which is the right direction for
+ * a figure shown before spending — `Math.round` here could round a fractional
+ * token count down and put the "ceiling" below the exact value (Copilot on
+ * the PR). Exported so the settings page can price each model choice at the
  * script ceiling with the same arithmetic the 202 uses.
  *
  * @param {string} model a Gemini TTS model id
@@ -331,7 +333,7 @@ function modelFor(providerName, env, model) {
  */
 export function estimateGeminiCostUsd(model, bytes) {
   const seconds = Math.max(0, Number(bytes) || 0) / SPEECH_LIMITS.BYTES_PER_SECOND;
-  const audioTokens = Math.round(seconds * GEMINI_AUDIO_TOKENS_PER_SECOND);
+  const audioTokens = Math.ceil(seconds * GEMINI_AUDIO_TOKENS_PER_SECOND);
   return getCostEstimate('gemini', model, 0, audioTokens);
 }
 
@@ -389,7 +391,8 @@ export function estimateSpeechCostUsd({
   // never counted.
   const hasCeiling =
     ceilingBytes !== null && ceilingBytes !== undefined && Number.isFinite(Number(ceilingBytes));
-  const ceiling = hasCeiling ? Math.max(0, Math.round(Number(ceilingBytes))) : null;
+  // Up, never to nearest: a fractional ceiling must not price below itself.
+  const ceiling = hasCeiling ? Math.max(0, Math.ceil(Number(ceilingBytes))) : null;
   // The same filter synthesis applies, so a blank turn is never priced — and
   // a dialogue that is nothing but blank turns is "nothing to price", not $0.
   const turns = speakableTurns(dialogue);

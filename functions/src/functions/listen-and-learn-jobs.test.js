@@ -27,7 +27,7 @@ vi.mock('../lib/ai/router.js', async (importOriginal) => ({
   getActiveAiProvider: vi.fn(),
 }));
 
-const { parseGeneratePayload, resolveRunModel, speechEstimateForRun, MAX_AREAS_PER_RUN } =
+const { parseGeneratePayload, resolveRunModel, roundUpUsd, speechEstimateForRun, MAX_AREAS_PER_RUN } =
   await import('./listen-and-learn-jobs.js');
 const { MAX_SCRIPT_BYTES } = await import('../lib/listen-and-learn/script.js');
 const { estimateGeminiCostUsd } = await import('../lib/listen-and-learn/speech/index.js');
@@ -217,8 +217,21 @@ describe('speechEstimateForRun', () => {
       modelSource: 'default',
       episodes: 2,
       perEpisodeUsd: perEpisode(BEST),
-      estimatedCostUsd: parseFloat((perEpisode(BEST) * 2).toFixed(6)),
+      estimatedCostUsd: roundUpUsd(perEpisode(BEST) * 2),
     });
+    expect(estimate.estimatedCostUsd).toBeGreaterThanOrEqual(perEpisode(BEST) * 2);
+  });
+
+  it('trims the run total to six decimals without ever dropping below the exact figure', () => {
+    // toFixed rounds to nearest; a ceiling rounds up (Copilot on the PR).
+    expect(roundUpUsd(0.4400004)).toBe(0.440001);
+    expect(roundUpUsd(0.4400006)).toBe(0.440001);
+    expect(roundUpUsd(0.44)).toBe(0.44);
+    expect(roundUpUsd(0)).toBe(0);
+    for (const usd of [0.1234561, 1.9999999, 3.5200001, 7 / 3]) {
+      expect(roundUpUsd(usd)).toBeGreaterThanOrEqual(usd);
+      expect(roundUpUsd(usd) - usd).toBeLessThan(1e-6);
+    }
   });
 
   it('describes Gemini even when the ElevenLabs key is present — that key is the podcast’s', () => {

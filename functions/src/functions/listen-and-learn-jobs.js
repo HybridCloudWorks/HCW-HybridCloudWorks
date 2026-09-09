@@ -44,6 +44,16 @@ import {
 const PRODUCT = 'listenAndLearn';
 
 /**
+ * A USD figure to six decimals that never sits below the exact value. The
+ * run total is a ceiling, and `toFixed` rounds to nearest, so the trimmed
+ * figure is nudged up by one micro-dollar whenever trimming lowered it.
+ */
+export function roundUpUsd(usd) {
+  const trimmed = parseFloat(usd.toFixed(6));
+  return trimmed < usd ? parseFloat((trimmed + 1e-6).toFixed(6)) : trimmed;
+}
+
+/**
  * Bound so a single run cannot spend an unbounded amount: the largest real
  * guide is 6 areas, and a request asking for more is a bug or abuse.
  */
@@ -112,8 +122,7 @@ export function speechEstimateForRun(payload, env = process.env) {
     modelSource: perEpisode.model ? (requested ? 'run' : 'default') : null,
     episodes,
     perEpisodeUsd,
-    estimatedCostUsd:
-      typeof perEpisodeUsd === 'number' ? parseFloat((perEpisodeUsd * episodes).toFixed(6)) : null,
+    estimatedCostUsd: typeof perEpisodeUsd === 'number' ? roundUpUsd(perEpisodeUsd * episodes) : null,
   };
 }
 
