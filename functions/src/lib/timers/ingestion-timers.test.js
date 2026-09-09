@@ -189,6 +189,98 @@ describe('Publer reconcile', () => {
   });
 });
 
+describe('Publer rejected credential (#358)', () => {
+  // Measured 2026-09-09: a stale key had failed this timer 429 times in 36
+  // hours, 0 successes, and no alert read it. A rejected credential is a
+  // configuration state, so the run skips with one warning and the API-keys
+  // page hears about it; a 500 or a timeout is transient and still throws.
+  const env = { PUBLER_API_KEY: 'k', PUBLER_WORKSPACE_ID: 'w' };
+  const answering = (status) =>
+    vi.fn(async () => ({
+      ok: status < 400,
+      status,
+      json: async () => ({ posts: [], total_pages: 1 }),
+    }));
+  const quiet = () => ({ warn: vi.fn(), log: vi.fn() });
+  const build = ({ status, onKeyVerdict = vi.fn(), log = quiet() }) => {
+    const fetch = answering(status);
+    const client = createPublerClient({ env, fetch, onKeyVerdict, log });
+    const store = memStore();
+    const reconcile = createPublerReconcile({ store, client, now, log });
+    return { fetch, client, store, reconcile, onKeyVerdict, log };
+  };
+
+  it.each([401, 403])('skips the run on a %i with one warning naming the pair, instead of throwing', async (status) => {
+    const { reconcile, fetch, store, onKeyVerdict, log } = build({ status });
+    await expect(reconcile.run()).resolves.toEqual({
+      skipped: true,
+      reason: 'credential_rejected',
+      status,
+      fetched: 0,
+      updated: 0,
+      created: 0,
+    });
+    // One page, one warning: the list stops at the first rejection and nothing
+    // is reconciled against a workspace that was never read.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(store.queryDocs).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toMatch(/HTTP \d{3}/);
+    expect(log.warn.mock.calls[0][0]).toMatch(/PUBLER_API_KEY \/ PUBLER_WORKSPACE_ID/);
+    expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', { ok: false, status });
+  });
+
+  it('still throws on a 500 — that IS transient, and a failed invocation is its record', async () => {
+    const { reconcile, onKeyVerdict, log } = build({ status: 500 });
+    await expect(reconcile.run()).rejects.toThrow(/Publer GET .* failed with HTTP 500/);
+    expect(onKeyVerdict).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it.each([404, 429])('does not turn the light red for a %i, which says nothing about the key', async (status) => {
+    const { reconcile, onKeyVerdict } = build({ status });
+    await expect(reconcile.run()).rejects.toThrow(`HTTP ${status}`);
+    expect(onKeyVerdict).not.toHaveBeenCalled();
+  });
+
+  it('reports a working key once across two runs, under the SETTING name', async () => {
+    // Three states are listed per run, so a per-request report would be three
+    // writes a run and 864 a day; the reporter dedupes successes.
+    const { reconcile, fetch, onKeyVerdict } = build({ status: 200 });
+    await expect(reconcile.run()).resolves.toMatchObject({ skipped: false, fetched: 0 });
+    await expect(reconcile.run()).resolves.toMatchObject({ skipped: false, fetched: 0 });
+    expect(fetch).toHaveBeenCalledTimes(6);
+    expect(onKeyVerdict).toHaveBeenCalledTimes(1);
+    expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', { ok: true });
+  });
+
+  it('never fails the run because the verdict writer threw', async () => {
+    const onKeyVerdict = vi.fn(async () => {
+      throw new Error('Cosmos is having a day');
+    });
+    const working = build({ status: 200, onKeyVerdict });
+    await expect(working.reconcile.run()).resolves.toMatchObject({ skipped: false });
+    expect(working.log.warn.mock.calls[0][0]).toMatch(/\[publer\] could not record a key verdict/);
+
+    // The rejection path too: a page that cannot record the verdict must not
+    // turn a skipped run back into the thrown one this change removes.
+    const rejected = build({ status: 401, onKeyVerdict });
+    await expect(rejected.reconcile.run()).resolves.toMatchObject({
+      skipped: true,
+      reason: 'credential_rejected',
+    });
+  });
+
+  it('works with no writer at all, which is how the change-feed and admin handlers build it', async () => {
+    const client = createPublerClient({ env, fetch: answering(401) });
+    await expect(createPublerReconcile({ store: memStore(), client, now }).run()).resolves.toMatchObject({
+      skipped: true,
+      reason: 'credential_rejected',
+      status: 401,
+    });
+  });
+});
+
 describe('blog listings (Firecrawl)', () => {
   it('calls the v1 scrape endpoint with the schema and resolves relative URLs', async () => {
     const fetch = vi.fn(async () => ({

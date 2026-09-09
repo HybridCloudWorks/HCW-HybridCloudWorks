@@ -28,7 +28,15 @@
  * bodies, because these pages show upstream errors to the operator and a
  * flattened "request failed" would remove the only useful information. Status
  * codes are passed through for the same reason.
+ *
+ * WHAT IS OBSERVED ON THE WAY THROUGH: for an integration that declared
+ * `reportsKeyVerdict`, a 401/403 from upstream is also recorded against its
+ * key on the API-keys page (#358), through the same `lib/key-verdict.js` the
+ * AI router and the Publer timer use — so the page goes red whichever path
+ * sees the rejection first. The response is not changed by it: the page that
+ * made the call still gets the status and the body it always did.
  */
+import { createKeyVerdictReporter, isCredentialRejected } from '../key-verdict.js';
 
 const json = (status, body) => ({
   status,
@@ -80,8 +88,21 @@ export function assertSafePath(path) {
  * than repeated — `lib/timers/publer-sync.js` has been calling this API since
  * the port and is the one place that already knows the answer.
  */
-export function createIntegration({ name, baseUrl, keyEnv, headers, extraEnv = [], allowedPaths = null }) {
-  return { name, baseUrl, keyEnv, headers, extraEnv, allowedPaths };
+export function createIntegration({
+  name,
+  baseUrl,
+  keyEnv,
+  headers,
+  extraEnv = [],
+  allowedPaths = null,
+  // Opt-in, not default: a verdict turns a light red on the API-keys page, and
+  // the catalogue promises a probe only where one is wired (`secret-catalog.js`
+  // and its test hold the two in step). Publer's 401/403 semantics are known;
+  // Klaviyo's and Linkie's have not been read, and a scope-limited key that
+  // answers 403 on one endpoint and 200 on the next would flap the light.
+  reportsKeyVerdict = false,
+}) {
+  return { name, baseUrl, keyEnv, headers, extraEnv, allowedPaths, reportsKeyVerdict };
 }
 
 /**
@@ -112,11 +133,28 @@ export function isAllowedPath(allowed, pathOnly) {
  * @param {Record<string,string|undefined>} [deps.env]
  * @param {typeof fetch} [deps.fetch]
  * @param {(env: string) => string} deps.readKey
+ * @param {Function|null} [deps.onKeyVerdict] The API-keys page's verdict
+ *   writer, in the shape `createAiRouter` takes it. Consulted only for an
+ *   integration that declared `reportsKeyVerdict`.
  */
-export function createRestProxy({ guard, env = process.env, fetch: fetchImpl = globalThis.fetch, readKey }) {
+export function createRestProxy({
+  guard,
+  env = process.env,
+  fetch: fetchImpl = globalThis.fetch,
+  readKey,
+  onKeyVerdict = null,
+}) {
   /** @returns {Function} an Azure Functions handler for one integration. */
   return function handlerFor(integration) {
     return async function handler(request, context) {
+      // Per request so a failed write warns into this invocation's log. The
+      // once-per-worker rule for successes lives in the process-wide writer,
+      // not here.
+      const reportVerdict = createKeyVerdictReporter({
+        onKeyVerdict: integration.reportsKeyVerdict ? onKeyVerdict : null,
+        log: context,
+        source: `${integration.name}Proxy`,
+      });
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
 
@@ -183,6 +221,11 @@ export function createRestProxy({ guard, env = process.env, fetch: fetchImpl = g
 
       try {
         const response = await fetchImpl(`${integration.baseUrl}${path}`, options);
+        if (response.ok) {
+          await reportVerdict(integration.keyEnv, { ok: true });
+        } else if (isCredentialRejected(response.status)) {
+          await reportVerdict(integration.keyEnv, { ok: false, status: response.status });
+        }
         const text = await response.text();
         let data = null;
         try {

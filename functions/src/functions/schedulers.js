@@ -47,6 +47,7 @@ import { createTempStorageCleanup } from '../lib/timers/temp-storage.js';
 import { createForgeScheduled } from '../lib/timers/forge-scheduled.js';
 import { findDuplicateContent, buildDedupFields } from '../lib/cms/content-dedup.js';
 import { createPublerClient, createPublerReconcile } from '../lib/timers/publer-sync.js';
+import { recordKeyVerdict } from '../lib/key-verdict.js';
 import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
 import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
 
@@ -208,7 +209,16 @@ timer('scrapeSkillsHubRss', 'SCRAPE_SKILLS_HUB_RSS', '0 0 9 * * 5', async (conte
 timer('syncSocialCalendarScheduled', 'SYNC_SOCIAL_CALENDAR', '0 */5 * * * *', (context) =>
   // Site-Main: `every 5 minutes`. D12: the live writer of social_posts — this
   // flag stays off until the cutover delta import is done (§6).
-  createPublerReconcile({ store, client: createPublerClient(), log: context }).run()
+  //
+  // `recordKeyVerdict` is the same process-wide writer the AI router's default
+  // instance uses: a 401/403 from Publer turns PUBLER_API_KEY red on the
+  // API-keys page and the run skips instead of failing (#358). The client is
+  // still built per invocation; the writer dedupes successes per worker.
+  createPublerReconcile({
+    store,
+    client: createPublerClient({ onKeyVerdict: recordKeyVerdict, log: context }),
+    log: context,
+  }).run()
 );
 
 timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>

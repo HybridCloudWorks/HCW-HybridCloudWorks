@@ -264,3 +264,104 @@ describe('per-integration path allowlist', () => {
     expect(isAllowedPath(null, '/anything/at/all')).toBe(true);
   });
 });
+
+describe('reporting a credential verdict to the API-keys page (#358)', () => {
+  // The Social Hub saw Publer's 401 before the timer did, and the API-keys page
+  // learned nothing from either. The proxy now records the verdict on the way
+  // through — and changes nothing about what the page that made the call gets.
+  const REPORTING = createIntegration({
+    name: 'Reporting',
+    baseUrl: 'https://api.example.test/v1',
+    keyEnv: 'TEST_API_KEY',
+    headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+    reportsKeyVerdict: true,
+  });
+  const upstream = (status, body = { hi: true }) =>
+    vi.fn(async () => ({ ok: status < 400, status, text: async () => JSON.stringify(body) }));
+  const quiet = () => ({ log: vi.fn(), error: vi.fn(), warn: vi.fn() });
+  const buildReporting = ({ integration = REPORTING, status, body, onKeyVerdict = vi.fn() }) => {
+    const handler = createRestProxy({
+      guard: allowGuard,
+      env: { TEST_API_KEY: 'secret' },
+      fetch: upstream(status, body),
+      readKey,
+      onKeyVerdict,
+    })(integration);
+    return { handler, onKeyVerdict };
+  };
+  const call = (handler, ctx = quiet()) =>
+    handler(makeRequest({ path: '/accounts', method: 'GET' }), ctx);
+
+  it.each([401, 403])(
+    'reports a %i under the key setting and leaves the response exactly as it was',
+    async (status) => {
+      const { handler, onKeyVerdict } = buildReporting({ status, body: { error: 'nope' } });
+      const response = await call(handler);
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body)).toEqual({ ok: false, status, data: { error: 'nope' } });
+      expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: false, status });
+    }
+  );
+
+  it('reports a success, so a rotated key turns the light green from this path too', async () => {
+    const { handler, onKeyVerdict } = buildReporting({ status: 200 });
+    expect(JSON.parse((await call(handler)).body)).toEqual({
+      ok: true,
+      status: 200,
+      data: { hi: true },
+    });
+    expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: true });
+  });
+
+  it.each([404, 429, 500])('does not report a %i — it says nothing about the key', async (status) => {
+    const { handler, onKeyVerdict } = buildReporting({ status, body: { error: 'x' } });
+    expect(JSON.parse((await call(handler)).body)).toEqual({
+      ok: false,
+      status,
+      data: { error: 'x' },
+    });
+    expect(onKeyVerdict).not.toHaveBeenCalled();
+  });
+
+  it('reports nothing for an integration that did not opt in, even with a writer wired', async () => {
+    // Klaviyo and Linkie: their 401/403 semantics have not been read, and the
+    // catalogue promises a probe only where one is wired.
+    const { handler, onKeyVerdict } = buildReporting({
+      integration: TEST,
+      status: 401,
+      body: { error: 'nope' },
+    });
+    expect(JSON.parse((await call(handler)).body)).toEqual({
+      ok: false,
+      status: 401,
+      data: { error: 'nope' },
+    });
+    expect(onKeyVerdict).not.toHaveBeenCalled();
+  });
+
+  it('never fails the proxied call because the writer threw, and warns into the invocation log', async () => {
+    const onKeyVerdict = vi.fn(async () => {
+      throw new Error('Cosmos is having a day');
+    });
+    const { handler } = buildReporting({ status: 401, body: { error: 'nope' }, onKeyVerdict });
+    const ctx = quiet();
+    const response = await call(handler, ctx);
+    expect(JSON.parse(response.body)).toEqual({ ok: false, status: 401, data: { error: 'nope' } });
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0][0]).toMatch(/^\[ReportingProxy\] could not record a key verdict/);
+  });
+
+  it('works with no writer, which is how every other test here builds the proxy', async () => {
+    const handler = createRestProxy({
+      guard: allowGuard,
+      env: { TEST_API_KEY: 'secret' },
+      fetch: upstream(401, { error: 'nope' }),
+      readKey,
+    })(REPORTING);
+    expect(JSON.parse((await call(handler)).body)).toEqual({
+      ok: false,
+      status: 401,
+      data: { error: 'nope' },
+    });
+  });
+});

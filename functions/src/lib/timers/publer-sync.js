@@ -13,9 +13,21 @@
  * cutover delta import happens with it paused there and this flag still off
  * here (Migration-Plan §6). The API key and workspace id come from app
  * settings (Key Vault references); a missing key skips the run.
+ *
+ * So does a REJECTED one (#358). A 401 or 403 from Publer is a configuration
+ * state — the key is stale, revoked, or valid for another workspace — not a
+ * transient fault, and a timer that throws on it every five minutes turns
+ * one fact into 288 exceptions a day that no alert reads. Measured on
+ * 2026-09-09: 429 failed invocations in 36 hours, 0 successes. The run now
+ * skips with one warning naming the pair, and the client reports the verdict
+ * to the API-keys page through `lib/key-verdict.js`, the same path the AI
+ * router uses — the red light `secrets-health.js` says only the upstream
+ * service can switch on. A 500 or a timeout still throws: those ARE transient,
+ * and a failed invocation is the right record of them.
  */
 import { readKey } from '../ai/router.js';
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
+import { createKeyVerdictReporter, isCredentialRejected } from '../key-verdict.js';
 
 // Outbound deadline (T-712): Node's fetch has none, and these calls are
 // reached from change-feed handlers where a hung socket holds the lease.
@@ -106,15 +118,28 @@ export function buildSocialPostSyncPatch(
 }
 
 /**
- * @param {{ env?: object, fetch?: typeof fetch }} deps
+ * @param {object} [deps]
+ * @param {object} [deps.env]
+ * @param {typeof fetch} [deps.fetch]
+ * @param {Function|null} [deps.onKeyVerdict] The API-keys page's verdict
+ *   writer, in the shape `createAiRouter` takes it. `null` — every unit test —
+ *   reports nothing.
+ * @param {{ warn?: Function }} [deps.log]
  * @returns {{ configured: boolean, request: Function, listPostsForSync: Function }}
  */
 export function createPublerClient({
   env = process.env,
   fetch: fetchImpl = globalThis.fetch,
+  onKeyVerdict = null,
+  log = console,
 } = {}) {
   const apiKey = readKey(env, 'PUBLER_API_KEY');
   const workspaceId = readKey(env, 'PUBLER_WORKSPACE_ID');
+  // The verdict is recorded against the key, not the workspace id: the id is
+  // an identifier rather than a credential, and the catalogue maps one setting
+  // to one secret. The warning in `createPublerReconcile` names both, because
+  // a key valid for a different workspace answers 401 exactly like a stale one.
+  const reportVerdict = createKeyVerdictReporter({ onKeyVerdict, log, source: 'publer' });
 
   async function request(path, method = 'GET', body) {
     const options = {
@@ -134,10 +159,17 @@ export function createPublerClient({
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
+      // Only a 401/403 is a verdict on the key. A 404 is a wrong path, a 429
+      // a busy account, a 5xx Publer's problem — none of them says the
+      // credential is bad, and the light stays as it was.
+      if (isCredentialRejected(response.status)) {
+        await reportVerdict('PUBLER_API_KEY', { ok: false, status: response.status });
+      }
       const error = new Error(`Publer ${method} ${path} failed with HTTP ${response.status}`);
       error.status = response.status;
       throw error;
     }
+    await reportVerdict('PUBLER_API_KEY', { ok: true });
     return data;
   }
 
@@ -169,10 +201,30 @@ export function createPublerReconcile({ store, client, now = () => new Date(), l
       );
       return { skipped: true, reason: 'not_configured', fetched: 0, updated: 0, created: 0 };
     }
-    const [publerPosts, socialPosts] = await Promise.all([
-      client.listPostsForSync(),
-      store.queryDocs('social_posts', 'SELECT TOP 500 * FROM c', []),
-    ]);
+    // Publer first, then Cosmos — no longer in parallel. The list is the gate:
+    // a rejected credential fails on its first page, and there is nothing to
+    // reconcile 500 social posts against when it does. Only Publer's own
+    // status is read here; a Cosmos error carries `code`, not `status`, and
+    // still throws as it always did.
+    let publerPosts;
+    try {
+      publerPosts = await client.listPostsForSync();
+    } catch (error) {
+      if (!isCredentialRejected(error?.status)) throw error;
+      log.warn?.(
+        `[syncSocialCalendar] Publer rejected the credential (HTTP ${error.status}); ` +
+          'PUBLER_API_KEY / PUBLER_WORKSPACE_ID need rotating together — skipping until they are'
+      );
+      return {
+        skipped: true,
+        reason: 'credential_rejected',
+        status: error.status,
+        fetched: 0,
+        updated: 0,
+        created: 0,
+      };
+    }
+    const socialPosts = await store.queryDocs('social_posts', 'SELECT TOP 500 * FROM c', []);
     const publerById = new Map(publerPosts.map((post) => [String(post.id), post]));
     const matchedIds = new Set();
     const stamp = now().toISOString();

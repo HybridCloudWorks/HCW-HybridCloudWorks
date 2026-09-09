@@ -40,7 +40,10 @@
  * A setting whose reference resolves to the WRONG secret. That value looks
  * entirely normal from here — it is a real string, not a reference — and only
  * the upstream service can say it is wrong. This detects unresolved, not
- * incorrect.
+ * incorrect. The "incorrect" signal is `lib/key-verdict.js`: the upstream
+ * service's 401/403, recorded against the setting by whichever caller saw it
+ * (the AI router; the Publer client and proxy since #358), and rendered as the
+ * red light on the API-keys page.
  */
 
 /** The prefix an unresolved Key Vault reference arrives as, verbatim. */

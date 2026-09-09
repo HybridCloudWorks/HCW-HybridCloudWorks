@@ -100,6 +100,7 @@ import {
 // It lives in an import-free module of its own so that reusing it does not
 // pull Listen & Learn into every function that loads the router.
 import { fenceArticleText } from './prompt-fence.js';
+import { createKeyVerdictReporter, recordKeyVerdict } from '../key-verdict.js';
 
 /**
  * The providers this platform implements, in default preference order.
@@ -644,31 +645,20 @@ export function createAiRouter({
   /**
    * Tell the API-keys page whether a provider accepted its credential.
    *
-   * This is the ONLY source of the red light: a key that resolved but is not
-   * working. `secrets-health.js` cannot see that state by design — "only the
-   * upstream service can say it is wrong" — and this is the upstream service
-   * saying so.
+   * This is one of the two sources of the red light — the Publer client is the
+   * other — for a key that resolved but is not working. `secrets-health.js`
+   * cannot see that state by design — "only the upstream service can say it is
+   * wrong" — and this is the upstream service saying so.
    *
-   * Two rules keep it off the hot path. Failures are always reported, because
-   * they are rare and they are the whole point. Successes are reported once per
-   * worker per provider, because the hundredth successful call says exactly
-   * what the first one did and a Cosmos write per AI call would not be free.
+   * The reporter holds the two rules that keep it off the hot path (failures
+   * always, successes once per worker per provider) and the invariant that a
+   * status page which cannot record a verdict never fails the AI call it was
+   * observing. Reported under the SETTING name: the recorder maps a setting to
+   * its vault secret through the catalogue, and a provider name would map to
+   * nothing.
    */
-  const successReported = new Set();
-  async function reportKeyVerdict(provider, verdict) {
-    if (!onKeyVerdict) return;
-    if (verdict.ok) {
-      if (successReported.has(provider)) return;
-      successReported.add(provider);
-    }
-    try {
-      await onKeyVerdict(KEY_ENV[provider], verdict);
-    } catch (error) {
-      // A status page that cannot record a verdict must never fail the AI call
-      // it was observing.
-      log.warn?.(`[ai-router] could not record a key verdict: ${error?.message ?? error}`);
-    }
-  }
+  const reportVerdict = createKeyVerdictReporter({ onKeyVerdict, log, source: 'ai-router' });
+  const reportKeyVerdict = (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict);
 
   const pinnedProvider = () =>
     String(env.CONTENTFORGE_AI_PROVIDER || '')
@@ -1205,19 +1195,11 @@ const defaultRouter = createAiRouter({
     queryDocs: async (...args) => (await import('../cosmos-client.js')).queryDocs(...args),
     readDoc: async (...args) => (await import('../cosmos-client.js')).readDoc(...args),
   },
-  // Lazily imported for the same reason the store is: nothing on the cold-start
-  // path of the six modules that import only `readKey` from here.
-  onKeyVerdict: async (settingName, verdict) => {
-    const [{ recordSecretVerdict, settingToSecret }, cosmos] = await Promise.all([
-      import('../admin-secrets.js'),
-      import('../cosmos-client.js'),
-    ]);
-    await recordSecretVerdict(
-      { readDoc: cosmos.readDoc, upsertDoc: cosmos.upsertDoc },
-      settingToSecret(settingName),
-      verdict
-    );
-  },
+  // The same process-wide writer the Publer timer and proxy use, so the two
+  // reporters cannot disagree about what a rejected credential is. It imports
+  // Cosmos lazily for the same reason the store does: nothing on the
+  // cold-start path of the six modules that import only `readKey` from here.
+  onKeyVerdict: recordKeyVerdict,
 });
 
 export const {

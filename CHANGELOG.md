@@ -17,6 +17,40 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Fixed
+
+- **A rejected Publer key no longer fails `syncSocialCalendarScheduled` every
+  five minutes, and the API-keys page now says the key is rejected (#358).**
+  Measured in Log Analytics on 2026-09-09: Publer answering 401 to a stale
+  key had failed the timer **429 times in 36 hours, 0 successes** — 288
+  exceptions a day, and `alert-app-exceptions-prod-cus` never fired, because
+  the only thing that knew the key was wrong was Publer, saying so into a log
+  nobody reads. That is the blind spot `secrets-health.js` names in its own
+  header: it detects unresolved, not incorrect. A rejected credential is a
+  configuration state, not a transient fault, and `createPublerClient` was
+  treating a 401 like a 500.
+
+  Three things change. The timer's run now returns `{ skipped: true, reason:
+  'credential_rejected', status }` on a 401/403 after one warning naming
+  `PUBLER_API_KEY / PUBLER_WORKSPACE_ID` — the pair travels together, and a
+  key valid for a different workspace answers 401 exactly like a stale one;
+  a 500 or a timeout still throws, because those ARE transient. The Publer
+  client and `publerProxy` report the verdict for `PUBLER_API_KEY` through
+  the path the AI router already had — its `onKeyVerdict` writer, promoted
+  from a private function on the router's default instance into
+  `lib/key-verdict.js` so the two reporters cannot disagree about what a
+  rejected credential is — so the red light on
+  https://hybridcloudworks.com/admin/integrations comes on whichever path
+  sees the rejection first, and the first success per worker turns it green
+  again. And `PUBLER_API_KEY` carries `probe: 'publer'` in the catalogue,
+  because the page prints "no liveness check for this one" beside any light
+  nothing reports on, and `secret-catalog.test.js` holds that a probe exists
+  only where a reporter is wired. The proxy's response shape and message are
+  untouched; the Social Hub still reads "Publer answered 401". Klaviyo and
+  Linkie do not opt in: their 401/403 semantics have not been read, and a
+  scope-limited key answering 403 on one endpoint and 200 on the next would
+  flap the light.
+
 ### Removed
 
 - **Two workflows and the spent half of `scripts/cutover/`, after an audit of
