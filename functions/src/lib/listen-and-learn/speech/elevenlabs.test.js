@@ -333,6 +333,26 @@ describe('usage and cost', () => {
     expect(result.estimatedTokens).toBe(false);
   });
 
+  it('keeps every billed count that did arrive when only some chunks carry the header', async () => {
+    // Two chunks of 1,200 characters; the header comes back on the first
+    // only. The billed 1,150 is kept, the second chunk is counted as posted,
+    // and the row is flagged estimated because one chunk had to be (Copilot
+    // on #447). Discarding the header would have thrown away a real figure.
+    let call = 0;
+    const fetchImpl = vi.fn(async () =>
+      call++ === 0 ? okResponse([1], { characterCost: 1150 }) : okResponse([2])
+    );
+    const result = await synthesizeWithElevenLabs({
+      dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
+      env: KEYED_ENV,
+      fetchImpl,
+      sleep: noSleep,
+    });
+    expect(result.requests).toBe(2);
+    expect(result.completionTokens).toBe(1150 + 1200);
+    expect(result.estimatedTokens).toBe(true);
+  });
+
   it('falls back to its own count, flagged as estimated, when the header is absent', async () => {
     const fetchImpl = vi.fn(async () => okResponse());
     const result = await synthesizeWithElevenLabs({

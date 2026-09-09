@@ -367,8 +367,13 @@ export async function synthesizeWithElevenLabs({
   );
 
   const parts = [];
-  let billed = 0;
-  let everyChunkBilled = true;
+  // Per chunk: the API's own count when the `character-cost` header came
+  // back, else the code points this chunk actually posted. Summed that way,
+  // a header present on some chunks and absent on others still counts every
+  // billed figure that did arrive, and the row is flagged estimated if any
+  // chunk had to be counted by us.
+  let completionTokens = 0;
+  let anyEstimated = false;
   for (const inputs of chunks) {
     // Sequential on purpose: the parts are concatenated in order, and a
     // parallel burst is the reliable way to meet the per-account 429.
@@ -379,16 +384,19 @@ export async function synthesizeWithElevenLabs({
       sleep,
     });
     parts.push(audio);
-    if (billedCharacters === null) everyChunkBilled = false;
-    else billed += billedCharacters;
+    if (billedCharacters === null) {
+      // Counted over the inputs actually posted — after the chunker trimmed
+      // and split them — not over the dialogue as handed in. This is a
+      // billing row: what was sent is what counts, and a turn's surrounding
+      // whitespace was not sent.
+      completionTokens += inputs.reduce((total, input) => total + characterCount(input.text), 0);
+      anyEstimated = true;
+    } else {
+      completionTokens += billedCharacters;
+    }
   }
 
   const audio = Buffer.concat(parts);
-  // Counted over the inputs actually posted — after the chunker trimmed and
-  // split them — not over the dialogue as handed in. This is a billing row:
-  // when the API's own count is absent, ours must be what was sent, and a
-  // turn's surrounding whitespace was not.
-  const sent = chunks.flat().reduce((total, input) => total + characterCount(input.text), 0);
 
   return {
     audio,
@@ -399,8 +407,8 @@ export async function synthesizeWithElevenLabs({
     // CBR, so the byte count is the duration; no estimate needed.
     estimatedSeconds: Math.round((audio.length * 8) / OUTPUT_BITS_PER_SECOND),
     promptTokens: 0,
-    completionTokens: everyChunkBilled ? billed : sent,
-    estimatedTokens: !everyChunkBilled,
+    completionTokens,
+    estimatedTokens: anyEstimated,
   };
 }
 
