@@ -94,10 +94,12 @@ import {
   isFeatureEnabled,
   resolveProviderOrder,
 } from './ai-config.js';
-// The prompt-injection fence from the article episodes (#435). A source URL
+// The prompt-injection fence the article episodes use (#435). A source URL
 // is owner-supplied data that ends up inside the prompt, and #433 is the reason
 // that fence exists; it is reused rather than restated so the two cannot drift.
-import { fenceArticleText } from '../listen-and-learn/article-script.js';
+// It lives in an import-free module of its own so that reusing it does not
+// pull Listen & Learn into every function that loads the router.
+import { fenceArticleText } from './prompt-fence.js';
 
 /**
  * The providers this platform implements, in default preference order.
