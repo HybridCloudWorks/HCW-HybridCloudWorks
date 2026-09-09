@@ -12,20 +12,22 @@ import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getCostEstimate } from '../lib/ai/router.js';
 import { registerJobType } from '../lib/jobs.js';
-import { TRANSCRIPT_JOB_TYPE, generateTranscriptFromArticle } from '../lib/podcast/generate.js';
-
-/** Cosmos ids are bounded at 255 bytes; an article id longer than this is not one. */
-const MAX_ID_CHARS = 200;
+import {
+  TRANSCRIPT_JOB_TYPE,
+  generateTranscriptFromArticle,
+  parseArticleId,
+} from '../lib/podcast/generate.js';
 
 /**
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rule
- * is testable on its own and the worker stays a thin adapter.
+ * is testable on its own and the worker stays a thin adapter. The rule
+ * itself is `parseArticleId`, shared with the route that enqueues, so a
+ * refusal reads the same whichever door it came through.
  */
 export function parseTranscriptPayload(payload) {
-  const articleId = typeof payload?.articleId === 'string' ? payload.articleId.trim() : '';
-  if (!articleId) return { error: 'articleId is required' };
-  if (articleId.length > MAX_ID_CHARS) return { error: 'articleId is too long' };
-  return { value: { articleId } };
+  const parsed = parseArticleId(payload?.articleId);
+  if (parsed.error) return { error: parsed.error };
+  return { value: { articleId: parsed.value } };
 }
 
 /** One generation run against production dependencies. */

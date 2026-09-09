@@ -167,18 +167,29 @@ describe('generateTranscript', () => {
     expect(JSON.parse(res.body).error).toMatch(/ghost was not found/);
   });
 
-  it('400s a missing, non-string or oversized articleId, and a body that is not JSON', async () => {
+  it('400s a missing, non-string or oversized articleId with the worker\'s own sentences', async () => {
+    // One validator behind both doors: the route must refuse with exactly the
+    // message the job would have failed with, or the same input reads as two
+    // different faults depending on how it arrived.
     const h = handlers(makeStore());
     const io = { enqueue: vi.fn() };
-    expect((await h.generateTranscript(makeRequest({ body: {} }), context, io)).status).toBe(400);
-    expect(
-      (await h.generateTranscript(makeRequest({ body: { articleId: 42 } }), context, io)).status
-    ).toBe(400);
-    expect(
-      (await h.generateTranscript(makeRequest({ body: { articleId: 'x'.repeat(201) } }), context, io))
-        .status
-    ).toBe(400);
-    expect((await h.generateTranscript(makeRequest(), context, io)).status).toBe(400);
+    const refuse = async (body) => {
+      const res = await h.generateTranscript(makeRequest({ body }), context, io);
+      expect(res.status).toBe(400);
+      return JSON.parse(res.body).error;
+    };
+    expect(await refuse({})).toBe('articleId is required');
+    expect(await refuse({ articleId: '   ' })).toBe('articleId is required');
+    expect(await refuse({ articleId: 42 })).toBe('articleId is required');
+    expect(await refuse({ articleId: 'x'.repeat(201) })).toBe('articleId is too long');
+    expect(io.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('400s a body that is not JSON', async () => {
+    const io = { enqueue: vi.fn() };
+    expect((await handlers(makeStore()).generateTranscript(makeRequest(), context, io)).status).toBe(
+      400
+    );
     expect(io.enqueue).not.toHaveBeenCalled();
   });
 
@@ -221,17 +232,23 @@ describe('listTranscripts', () => {
     for (const field of TRANSCRIPT_LIST_FIELDS) expect(query).toContain(`c.${field}`);
   });
 
-  it('returns transcripts newest generation first', async () => {
-    const store = makeStore({
-      queryDocs: vi.fn(async () => [
-        { id: 'article_a', generatedAt: '2026-01-01T00:00:00Z' },
-        { id: 'article_b', generatedAt: '2026-06-01T00:00:00Z' },
-        { id: 'article_c' },
-      ]),
-    });
+  it('orders newest first in the query, not in memory, so the TOP bound keeps the newest rows', async () => {
+    // A bounded query with no ORDER BY hands back any MAX rows; sorting those
+    // afterwards would present a stale window as "newest first".
+    const store = makeStore();
+    await handlers(store).listTranscripts(makeRequest(), context);
+    expect(store.queryDocs.mock.calls[0][1]).toMatch(/ ORDER BY c\.generatedAt DESC$/);
+  });
+
+  it('returns the rows in the order Cosmos gave them, with a total', async () => {
+    const rows = [
+      { id: 'article_b', generatedAt: '2026-06-01T00:00:00Z' },
+      { id: 'article_a', generatedAt: '2026-01-01T00:00:00Z' },
+    ];
+    const store = makeStore({ queryDocs: vi.fn(async () => rows) });
     const body = JSON.parse((await handlers(store).listTranscripts(makeRequest(), context)).body);
-    expect(body.items.map((t) => t.id)).toEqual(['article_b', 'article_a', 'article_c']);
-    expect(body.total).toBe(3);
+    expect(body.items.map((t) => t.id)).toEqual(['article_b', 'article_a']);
+    expect(body.total).toBe(2);
   });
 });
 

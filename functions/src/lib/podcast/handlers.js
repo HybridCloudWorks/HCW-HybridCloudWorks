@@ -18,7 +18,12 @@
  * podcast transcript goes to a host and every subscriber.
  */
 import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
-import { ARTICLE_CONTAINER, TRANSCRIPT_JOB_TYPE, refusalFor } from './generate.js';
+import {
+  ARTICLE_CONTAINER,
+  TRANSCRIPT_JOB_TYPE,
+  parseArticleId,
+  refusalFor,
+} from './generate.js';
 import {
   STATUS,
   TRANSCRIPT_CONTAINER,
@@ -39,13 +44,17 @@ const json = (status, body) => ({
  */
 const MAX_TRANSCRIPTS = 200;
 
-/** Cosmos ids are bounded at 255 bytes; an article id longer than this is not one. */
-const MAX_ID_CHARS = 200;
-
 const LIST_PROJECTION = TRANSCRIPT_LIST_FIELDS.map((field) => `c.${field}`).join(', ');
 
-/** Newest generation first; a row with no generatedAt sorts last rather than throwing. */
-const byNewest = (a, b) => String(b.generatedAt || '').localeCompare(String(a.generatedAt || ''));
+/**
+ * Newest generation first, ordered by Cosmos rather than in memory: with the
+ * TOP bound, an unordered query could hand back any MAX_TRANSCRIPTS rows and
+ * the newest would be the ones missing. A single-property ORDER BY needs only
+ * the range index every path has under the container's `/*` policy — the
+ * same shape `public-reads.js` uses for `approvedAt`. Every document
+ * store.js writes carries `generatedAt`, so none is excluded by the sort.
+ */
+const LIST_QUERY = `SELECT TOP ${MAX_TRANSCRIPTS} ${LIST_PROJECTION} FROM c ORDER BY c.generatedAt DESC`;
 
 /**
  * @param {object} deps
@@ -76,10 +85,10 @@ export function createPodcastHandlers({
         if (!body || typeof body !== 'object') {
           return json(400, { error: 'Body must be a JSON object' });
         }
-        const articleId = typeof body.articleId === 'string' ? body.articleId.trim() : '';
-        if (!articleId || articleId.length > MAX_ID_CHARS) {
-          return json(400, { error: 'articleId is required' });
-        }
+        // The worker's validator, so the route and the job say the same thing.
+        const parsedId = parseArticleId(body.articleId);
+        if (parsedId.error) return json(400, { error: parsedId.error });
+        const articleId = parsedId.value;
 
         const article = await store.readDoc(ARTICLE_CONTAINER, articleId, articleId);
         const refusal = refusalFor(article, articleId);
@@ -128,12 +137,7 @@ export function createPodcastHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        const rows = await store.queryDocs(
-          TRANSCRIPT_CONTAINER,
-          `SELECT TOP ${MAX_TRANSCRIPTS} ${LIST_PROJECTION} FROM c`,
-          []
-        );
-        const items = [...rows].sort(byNewest);
+        const items = await store.queryDocs(TRANSCRIPT_CONTAINER, LIST_QUERY, []);
         return json(200, { success: true, items, total: items.length });
       } catch (error) {
         context.error('listPodcastTranscripts failed:', error);

@@ -54,6 +54,21 @@ export class TranscriptError extends Error {
   }
 }
 
+/** Cosmos ids are bounded at 255 bytes; an article id longer than this is not one. */
+export const MAX_ARTICLE_ID_CHARS = 200;
+
+/**
+ * The one validator for an `articleId`, shared by the route that enqueues
+ * and the worker that runs, so the two answer the same sentence for the
+ * same input. Returns `{ value }` or `{ error }`.
+ */
+export function parseArticleId(raw) {
+  const articleId = typeof raw === 'string' ? raw.trim() : '';
+  if (!articleId) return { error: 'articleId is required' };
+  if (articleId.length > MAX_ARTICLE_ID_CHARS) return { error: 'articleId is too long' };
+  return { value: articleId };
+}
+
 /**
  * The refusal, in one place, so the handler that enqueues and the job that
  * runs give the same sentence for the same article.
@@ -144,8 +159,9 @@ export async function generateTranscriptFromArticle({
   now = new Date().toISOString(),
   deps = {},
 }) {
-  const id = String(articleId || '').trim();
-  if (!id) throw new TranscriptError('articleId is required');
+  const parsedId = parseArticleId(articleId);
+  if (parsedId.error) throw new TranscriptError(parsedId.error);
+  const id = parsedId.value;
 
   const { writeScript, synthesize, uploadAudio, persistTranscript, persistFailure, recordUsage } =
     resolveDeps(deps);

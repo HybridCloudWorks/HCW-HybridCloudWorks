@@ -217,8 +217,9 @@ describe('refusals cost nothing', () => {
     await expect(run({ store })).rejects.toThrow(/content-1 was not found/);
   });
 
-  it('requires an article id', async () => {
+  it('requires an article id, and bounds it, with the sentences the route uses', async () => {
     await expect(run({ articleId: '  ' })).rejects.toThrow('articleId is required');
+    await expect(run({ articleId: 'x'.repeat(201) })).rejects.toThrow('articleId is too long');
   });
 });
 
