@@ -181,6 +181,34 @@ describe('normalizePlaudTranscript', () => {
     ]);
   });
 
+  it('lifts only speaker-like labels, leaving an all-caps topical prefix in the text', () => {
+    // Copilot on #446: `AWS:` and `TODO:` at the start of a line are what
+    // somebody said, not who said it. Names and Speaker N, either case, are
+    // still labels.
+    const { segments } = normalizePlaudTranscript(
+      [
+        'AWS: the region choice drives the latency.',
+        'TODO: revisit the backend split.',
+        'Speaker 2: We agreed on that.',
+        'speaker 2: And on the naming.',
+        'Maria Lopez: Locking is the real risk.',
+        "J. Smith: O'Brien raised it first.",
+        "O'Brien: I did.",
+        'CI: green on both.',
+      ].join('\n')
+    );
+    expect(segments.map((s) => [s.speaker, s.text])).toEqual([
+      [null, 'AWS: the region choice drives the latency.'],
+      [null, 'TODO: revisit the backend split.'],
+      ['Speaker 2', 'We agreed on that.'],
+      ['speaker 2', 'And on the naming.'],
+      ['Maria Lopez', 'Locking is the real risk.'],
+      ['J. Smith', "O'Brien raised it first."],
+      ["O'Brien", 'I did.'],
+      [null, 'CI: green on both.'],
+    ]);
+  });
+
   it('reads the { transcript } shape the recordings container already stores', () => {
     const { recording: rec, segments } = normalizePlaudTranscript({
       id: 'local-1',

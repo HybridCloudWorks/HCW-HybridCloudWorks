@@ -183,9 +183,18 @@ function findUtterances(entry) {
  * every transcript export puts at the start of a line. The label is kept as
  * `speaker` so the normalised shape is honest about what the text carried;
  * `renderTranscriptForPrompt` is where it is dropped.
+ *
+ * Only something that reads as a speaker counts as a label: `Speaker 2` in
+ * either case, or up to three name-like tokens, each a dotted initial
+ * (`J.`) or an uppercase-initial word with at least one lowercase letter in
+ * it (`Maria`, `O'Brien`, `McDonald`). An all-caps token followed by a colon
+ * — `AWS: the region…`, `TODO: fix this` — is a topical prefix and stays in
+ * the text. Copilot on #446 caught the earlier pattern stripping those.
  */
-const PLAIN_LINE =
-  /^\s*(?:\[?(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\]?\s*[-–—]?\s*)?(?:((?:Speaker\s*\d+)|(?:[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*){0,2})):\s+)?(.*\S)\s*$/;
+const NAME_TOKEN = String.raw`(?:[A-Z]\.|[A-Z][\w'-]*[a-z][\w'-]*)`;
+const PLAIN_LINE = new RegExp(
+  String.raw`^\s*(?:\[?(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\]?\s*[-–—]?\s*)?(?:((?:[Ss]peaker\s*\d+)|(?:${NAME_TOKEN}(?:\s+${NAME_TOKEN}){0,2})):\s+)?(.*\S)\s*$`
+);
 
 function fromPlainText(text) {
   const segments = [];
