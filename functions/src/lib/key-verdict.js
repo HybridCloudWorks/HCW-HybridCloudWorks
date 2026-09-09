@@ -65,10 +65,8 @@ export function createKeyVerdictReporter({ onKeyVerdict = null, log = console, s
   const successReported = new Set();
   return async function report(settingName, verdict) {
     if (!onKeyVerdict) return;
-    if (verdict.ok) {
-      if (successReported.has(settingName)) return;
-      successReported.add(settingName);
-    } else {
+    if (verdict.ok && successReported.has(settingName)) return;
+    if (!verdict.ok) {
       // A failure re-arms the success report. Without this, a worker that had
       // already reported "the key works" would swallow the first success after
       // a rotation, and the light would stay red until the process restarted —
@@ -78,6 +76,12 @@ export function createKeyVerdictReporter({ onKeyVerdict = null, log = console, s
     }
     try {
       await onKeyVerdict(settingName, verdict);
+      // Marked only once the write has landed. Marking before the await would
+      // let a Cosmos hiccup on the first success count as reported, and the
+      // light would stay red until the next failure or restart (Copilot review
+      // of 9f388d69). Two successes racing before the first resolves may both
+      // write; one spare upsert is the cheaper side of that trade.
+      if (verdict.ok) successReported.add(settingName);
     } catch (error) {
       log.warn?.(`[${source}] could not record a key verdict: ${error?.message ?? error}`);
     }

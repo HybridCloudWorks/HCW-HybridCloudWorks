@@ -92,6 +92,22 @@ describe('createKeyVerdictReporter', () => {
     expect(log.warn.mock.calls[0][0]).toMatch(/^\[publer\] could not record a key verdict: Cosmos/);
   });
 
+  it('retries a success whose write failed, and dedupes only once one has landed', async () => {
+    // Marking the success before the write would let one Cosmos hiccup leave
+    // the light red until the next failure or a restart.
+    const log = quiet();
+    const onKeyVerdict = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('503 from Cosmos'))
+      .mockResolvedValue(undefined);
+    const report = createKeyVerdictReporter({ onKeyVerdict, log });
+    await report('PUBLER_API_KEY', { ok: true });
+    await report('PUBLER_API_KEY', { ok: true });
+    await report('PUBLER_API_KEY', { ok: true });
+    expect(onKeyVerdict).toHaveBeenCalledTimes(2);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
   it('is a no-op without a writer, which is how every unit test builds a client', async () => {
     const report = createKeyVerdictReporter({ log: quiet() });
     await expect(report('PUBLER_API_KEY', { ok: false, status: 401 })).resolves.toBeUndefined();
