@@ -517,24 +517,36 @@ export default function PublishedPage() {
    */
   const queuePodcastTranscript = async (item) => {
     setQueuingTranscriptId(item.id);
+    let result;
     try {
-      const result = await postJSON('cms/podcast/transcripts/generate', { articleId: item.id });
-      await logAdminAction('podcast_transcript_queued', {
-        contentId: item.id,
-        title: item.Title || item.title,
-        jobId: result?.jobId || null,
-        transcriptId: result?.transcriptId || null,
-      });
-      toast({
-        title: 'Podcast transcript queued',
-        description: 'Listed under Recording Hub → Podcast when generated.',
-      });
+      result = await postJSON('cms/podcast/transcripts/generate', { articleId: item.id });
     } catch (err) {
       toast({
         title: 'Podcast transcript not queued',
         description: err.message,
         variant: 'destructive',
       });
+      setQueuingTranscriptId('');
+      return;
+    }
+    // The job is queued whatever happens next, so say so now. The audit row
+    // is in its own try: logAdminAction swallows its own POST failure, but a
+    // throw from the identity lookup before it must not turn a queued job
+    // into a "not queued" toast — the same posture the helper takes, warn
+    // and carry on.
+    toast({
+      title: 'Podcast transcript queued',
+      description: 'Listed under Recording Hub → Podcast when generated.',
+    });
+    try {
+      await logAdminAction('podcast_transcript_queued', {
+        contentId: item.id,
+        title: item.Title || item.title,
+        jobId: result?.jobId || null,
+        transcriptId: result?.transcriptId || null,
+      });
+    } catch (err) {
+      console.warn('Audit log failed for podcast_transcript_queued:', err);
     } finally {
       setQueuingTranscriptId('');
     }

@@ -543,6 +543,40 @@ describe('PublishedPage', () => {
     });
   });
 
+  it('still reports a queued transcript when the audit write fails (#448 review)', async () => {
+    // The enqueue succeeded, so the job IS queued; an audit failure after it
+    // must not be reported as "not queued". The audit is its own try and at
+    // most warns.
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/podcast/transcripts/generate') {
+        return { ok: true, jobId: 'job-1', transcriptId: 'article_existing-live-article' };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+    logAdminAction.mockRejectedValueOnce(new Error('identity lookup failed'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Podcast transcript' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate' }));
+
+    await waitFor(() => expect(logAdminAction).toHaveBeenCalledTimes(1));
+    expect(toast).toHaveBeenCalledWith({
+      title: 'Podcast transcript queued',
+      description: 'Listed under Recording Hub → Podcast when generated.',
+    });
+    expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({ variant: 'destructive' }));
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    warn.mockRestore();
+  });
+
   it('shows the API refusal verbatim when a transcript is not queued (#435)', async () => {
     // The API's sentence names the fix — not published, or the container not
     // provisioned yet — so it is the message, not a paraphrase of it.
