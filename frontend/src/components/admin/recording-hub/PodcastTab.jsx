@@ -13,12 +13,15 @@
  * Approve / return-to-draft go through `POST cms/podcast/transcripts/review`,
  * which is publisher-gated: an editor sees the button and the API's 403.
  *
- * The Host line reads `doc.host.rsscom` (#437): `episodeId` means the
- * episode is on RSS.com; `error` shows the host's message with a Retry that
- * POSTs `cms/podcast/transcripts/{id}/publish`; `skipped` shows its reason.
- * The publish route is being added by #437 slice 2 in parallel, so Retry
- * treats a 404 as "not on this deployment yet" and says so in a toast rather
- * than assuming the route exists.
+ * The Host line reads `doc.host.rsscom` (#437): `pending` means approval
+ * queued the publish job and it has not written its outcome yet ("publishing…");
+ * `episodeId` means the episode is on RSS.com; `error` shows the host's
+ * message with a Retry that POSTs `cms/podcast/transcripts/{id}/publish`;
+ * `skipped` shows its reason. Approval answers 202 with a job id while a
+ * publish is in flight and 200 otherwise; `postJSON` returns the body for
+ * either, and the toast says which. Retry keeps a guard for a 404 on the
+ * publish route — a deployment that predates #437 slice 2 — and says so in a
+ * plain toast rather than reporting a failure.
  *
  * Episodes below the transcripts are `GET public/podcasts?provider=main` —
  * the show under the reserved `main` provider (ADR 0029 §1a) — read-only.
@@ -109,6 +112,16 @@ function StatusBadge({ status }) {
 export function HostLine({ item, onRetry, retrying }) {
   const host = item.host?.rsscom;
   if (!host || typeof host !== 'object') return null;
+  if (host.pending) {
+    // Approval queued the publish-podcast-transcript job (#437 slice 2);
+    // the record says so until the job writes its outcome.
+    return (
+      <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" /> Host: publishing…
+        {host.jobId ? ` (job ${host.jobId})` : ''}
+      </p>
+    );
+  }
   if (host.episodeId) {
     return (
       <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
@@ -464,10 +477,17 @@ export default function PodcastTab() {
   const review = async (item, status) => {
     setBusy(`review:${item.id}`);
     try {
-      await postJSON('cms/podcast/transcripts/review', { id: item.id, status });
+      // 200 or 202: authedFetch returns the body for any 2xx, and the review
+      // route answers 202 with `jobId` (and `host.pending`) while the host
+      // publish it queued is in flight, 200 when there was nothing to queue.
+      const res = await postJSON('cms/podcast/transcripts/review', { id: item.id, status });
+      const host = res?.host && typeof res.host === 'object' ? res.host : null;
+      let hostNote = '';
+      if (res?.jobId) hostNote = ` Publishing to RSS.com (job ${res.jobId}).`;
+      else if (host?.skipped) hostNote = ` Host publish skipped: ${host.reason || host.skipped}.`;
       toast({
         title: status === 'published' ? 'Transcript approved' : 'Returned to draft',
-        description: item.title || item.id,
+        description: `${item.title || item.id}.${hostNote}`,
       });
       await load();
     } catch (err) {
@@ -484,14 +504,14 @@ export default function PodcastTab() {
       toast({ title: 'Host publish retried', description: item.title || item.id });
       await load();
     } catch (err) {
-      // The publish route lands with #437 slice 2; until it is deployed the
-      // API answers 404 for the path, which authedFetch reports as
-      // "… failed with HTTP 404". Say so plainly rather than as a failure.
+      // A deployment that predates the publish route (#437 slice 2) answers
+      // 404 for the path, which authedFetch reports as "… failed with HTTP
+      // 404". Kept as a guard: say so plainly rather than as a failure.
       const notHere = /HTTP 404/.test(err.message || '');
       toast({
         title: notHere ? 'Host retry is not available yet' : 'Host retry failed',
         description: notHere
-          ? 'The publish route is not on this deployment yet; approve again once it lands.'
+          ? 'This deployment does not have the publish route yet; retry once it is deployed.'
           : err.message,
         variant: notHere ? undefined : 'destructive',
       });

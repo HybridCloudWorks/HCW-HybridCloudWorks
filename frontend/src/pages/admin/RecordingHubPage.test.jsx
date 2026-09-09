@@ -65,6 +65,21 @@ const transcripts = [
     generatedAt: '2026-09-08T13:00:00.000Z',
     host: { rsscom: { episodeId: null, error: { status: 502, message: 'host said no' } } },
   },
+  {
+    id: 'article_publishing',
+    sourceKind: 'article',
+    sourceId: 'content-2',
+    sourceSlug: 'publishing-now',
+    sourceTitle: 'Publishing now',
+    sourceProvider: 'aws',
+    title: 'On its way to the host',
+    status: 'published',
+    truncated: false,
+    audioUrl: null,
+    audioError: null,
+    generatedAt: '2026-09-08T14:00:00.000Z',
+    host: { rsscom: { pending: true, jobId: 'job-7', queuedAt: '2026-09-08T14:01:00.000Z' } },
+  },
 ];
 
 const detail = {
@@ -196,7 +211,7 @@ describe('Podcast tab', () => {
     expect(screen.getByText('plaud')).toBeInTheDocument();
     expect(screen.getByText('Landing zone review')).toBeInTheDocument();
     expect(screen.getByText('audio failed')).toBeInTheDocument();
-    expect(screen.getByText('published')).toBeInTheDocument();
+    expect(screen.getAllByText('published')).toHaveLength(2);
 
     // The show's episodes, read-only.
     expect(await screen.findByText('Episode one')).toBeInTheDocument();
@@ -206,7 +221,21 @@ describe('Podcast tab', () => {
     );
   });
 
-  it('approves a draft through the review route and reloads', async () => {
+  it('shows "publishing…" while approval’s host job is pending', async () => {
+    renderPage();
+    expect(await screen.findByText(/Host: publishing…/)).toHaveTextContent('(job job-7)');
+  });
+
+  it('approves a draft through the review route, reads its 202 body, and reloads', async () => {
+    // The review route answers 202 with the queued host job while a publish
+    // is in flight; postJSON returns the body for 200 and 202 alike.
+    postJSON.mockResolvedValueOnce({
+      success: true,
+      id: 'article_picking-a-state-backend',
+      status: 'published',
+      jobId: 'job-8',
+      host: { pending: true, jobId: 'job-8' },
+    });
     renderPage();
     await screen.findByText('State backends, spoken');
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
@@ -218,7 +247,12 @@ describe('Podcast tab', () => {
       })
     );
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Transcript approved' }))
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Transcript approved',
+          description: 'State backends, spoken. Publishing to RSS.com (job job-8).',
+        })
+      )
     );
     // Reloaded after the review.
     expect(getJSON.mock.calls.filter(([r]) => r === 'cms/podcast/transcripts')).toHaveLength(2);
@@ -228,7 +262,8 @@ describe('Podcast tab', () => {
     postJSON.mockRejectedValueOnce(new Error('Forbidden'));
     renderPage();
     await screen.findByText('Landing zones, retold');
-    fireEvent.click(screen.getByRole('button', { name: 'Return to draft' }));
+    // Two published rows carry the button; the Plaud one is listed first.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Return to draft' })[0]);
     await waitFor(() =>
       expect(postJSON).toHaveBeenCalledWith('cms/podcast/transcripts/review', {
         id: 'plaud_rec-1',

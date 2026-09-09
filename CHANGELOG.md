@@ -150,9 +150,11 @@ This project has not cut a tagged release; entries are grouped under
   view with the transcript beside its source — key takeaways for an article,
   the recording id and the generator's `attributionLeaks` as a warning for a
   recording; approves or returns to draft through the review route; renders
-  the `host.rsscom` line (published / error with Retry / skipped), with Retry
-  treating a 404 on the not-yet-deployed publish route as "not on this
-  deployment yet"; and lists the show's episodes from `public/podcasts`
+  the `host.rsscom` line (publishing… while approval's publish job is
+  pending / published / error with Retry / skipped), accepting the review
+  route's 202-with-job-id as well as its 200, with Retry keeping a plain-toast
+  guard for a deployment that predates the publish route; and lists the
+  show's episodes from `public/podcasts`
   (read-only — season metadata editing is not in this change). The **Plaud
   tab** carries the Library, Upload and Connect behaviour unchanged, adds
   **Script this** on every library and stored recording (`POST
@@ -171,7 +173,12 @@ This project has not cut a tagged release; entries are grouped under
   `transcribe-recording-upload`, which hands Plaud the media route URL on the
   new `PUBLIC_API_ORIGIN` setting (the storage account denies direct and SAS
   reads; the URL is unguessable but unauthenticated), polls to a terminal
-  status and stores the transcript in `recordings` as `plaud-embedded`. A
+  status — bounded by a documented default budget under the job's own —
+  stores the transcript in `recordings` as `plaud-embedded`, and **deletes
+  the upload blob** once Plaud is done with it (every terminal outcome; a
+  timed-out poll keeps it, and a new `expire-recording-uploads` lifecycle
+  rule in `infra/storage.tf` removes anything under `podcast/uploads/` seven
+  days after creation, Plaud's own retention). A
   missing or revoked Plaud credential is refused with one sentence naming the
   Connect tab, at the door (409) and in the job, before any model call. Two
   new Key Vault references, `PLAUD-EMBEDDED-CLIENT-ID` and
