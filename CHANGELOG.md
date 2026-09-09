@@ -175,6 +175,56 @@ This project has not cut a tagged release; entries are grouped under
   the article-side player lands, and nothing in the portal lists them until
   the Recording Hub (#442) ships — the confirmation says so.
 
+- **Groundwork for publishing episodes to RSS.com: the API client, the
+  idempotent host-publish step, and the two Key Vault references (#437,
+  slice 1; ADR 0029 §1b).** Nothing calls the new step yet. The owner
+  approved RSS.com Max on 2026-09-08 so that, eventually, approving an
+  episode uploads it to the show rather than leaving the owner to upload it
+  by hand; the approval hook that makes that happen, and the admin retry,
+  are the next slice. What this slice settles is how the host is spoken to
+  and what a publish writes on the document, so that the hook is a wiring
+  change rather than a design one. The issue's first task was to confirm
+  whether the API had left beta; it has not. Checked 2026-09-09: RSS.com's help
+  article says the API "was introduced in December 2025 and is currently in
+  beta" and that "small changes to the documentation or endpoints may occur".
+  So the client is written to the issue's beta-tolerant design rather than
+  waiting for a date nobody has given.
+
+  **`functions/src/lib/podcast/rsscom.js`** is the API, read from
+  `https://api.rss.com/v4/openapi.json` on that date and recorded in the
+  module header: `X-Api-Key`; `GET /v4/podcasts`; a presigned upload
+  (`POST …/assets/presigned-uploads`, then the bytes `PUT` to the returned
+  URL with no key attached, because it is a storage host); `POST` and
+  `PATCH …/episodes`; `GET` one or many; `PUT …/transcript`. It has
+  timeouts, a typed `RssComError` carrying the upstream status and detail,
+  and no retries — retrying a `POST …/episodes` inside a client is how a
+  duplicate lands on a public feed. `isConfigured(env)` answers with a
+  sentence naming which of `RSSCOM_API_KEY` and `RSSCOM_PODCAST_ID` is
+  missing, and an unresolved Key Vault reference counts as missing, the
+  same rule every other key here follows.
+
+  **`functions/src/lib/podcast/host-publish.js`** is the step, and it is
+  idempotent on the document: `host.rsscom.episodeId` present means `PATCH`
+  that episode, with audio re-uploaded only when `audioPath` changed since
+  the last publish; absent means upload, create, and record the id. It
+  returns the patch to store and never throws — a failure lands as
+  `host.rsscom.error = { status, code, message, retryable }` beside the
+  previous host record, and `status`, `approvedAt` and `approvedBy` are
+  never in the patch, so a failed publish cannot un-approve anything. The
+  host is told the truth: `ai_content: true` on every episode, plain-text
+  notes built from the summary and key takeaways, and `schedule_datetime`
+  set on create because the spec documents that as "auto-publishing as soon
+  as transcode completes" — without it the episode would sit as a draft on
+  the host and the feed would never carry it. One gap is recorded rather
+  than hidden: a create whose response is lost before the id is stored
+  would be repeated, because the spec offers no client-chosen key.
+
+  The two settings are Key Vault references in `infra/functionapp.tf`
+  (`RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID`), catalogued on the API-keys page
+  under Social & audience, and listed in Required-Inputs §4.6. Not in this
+  slice, by design: the approval hook, the admin retry, and any ingest
+  change — the feed stays the way an episode reaches `podcasts`.
+
 - **`scripts/check-workflow-health.mjs` — the guard that would have caught
   the three weeks.** Split out of #426, which retired the workflow that
   prompted it on 2026-09-08. `validate-deployed.yml` explained in its own header why it

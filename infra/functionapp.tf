@@ -465,6 +465,16 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "KLAVIYO_PRIVATE_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/KLAVIYO-PRIVATE-KEY)"
     "KLAVIYO_LIST_ID"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/KLAVIYO-LIST-ID)"
 
+    # Podcast publishing to RSS.com over its Core API (#437, ADR 0029 §1b). The
+    # key is issued at https://dashboard.rss.com/api-access/ on the Max plan;
+    # the PODCAST_ID is the numeric `id` that `GET /v4/podcasts` returns for
+    # the show and is the path segment on every episode call, so it travels
+    # with the key like the Publer workspace id does. Unseeded, readKey() sees
+    # the unresolved reference as "not configured" and approving an episode
+    # leaves it on the manual dashboard-upload path rather than failing.
+    "RSSCOM_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RSSCOM-API-KEY)"
+    "RSSCOM_PODCAST_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RSSCOM-PODCAST-ID)"
+
     # Telegram notifications.
     "TELEGRAM_BOT_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-BOT-TOKEN)"
     "TELEGRAM_CHAT_ID"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TELEGRAM-CHAT-ID)"

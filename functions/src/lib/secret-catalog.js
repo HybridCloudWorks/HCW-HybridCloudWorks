@@ -172,6 +172,26 @@ export const SECRET_CATALOG = Object.freeze([
     probe: null,
   },
   {
+    setting: 'RSSCOM_API_KEY',
+    secret: 'RSSCOM-API-KEY',
+    section: 'social',
+    label: 'RSS.com — API key',
+    help:
+      'Publishes approved podcast episodes to the show over the RSS.com API (Max plan). ' +
+      'Absent, approval leaves the episode on the manual dashboard-upload path.',
+    probe: null,
+  },
+  {
+    setting: 'RSSCOM_PODCAST_ID',
+    secret: 'RSSCOM-PODCAST-ID',
+    section: 'social',
+    label: 'RSS.com — podcast id',
+    help:
+      'The numeric id GET /v4/podcasts returns for the show. An identifier rather than a ' +
+      'credential, but it travels with its key.',
+    probe: null,
+  },
+  {
     setting: 'TELEGRAM_BOT_TOKEN',
     secret: 'TELEGRAM-BOT-TOKEN',
     section: 'social',
