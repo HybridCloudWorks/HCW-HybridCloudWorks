@@ -43,7 +43,11 @@ export const MAX_AREAS_PER_RUN = 8;
  * the run starts (ADR 0029 §2a).
  *
  * A ceiling, not a forecast: no script exists yet, so each episode is priced
- * at `MAX_SCRIPT_BYTES` — the most characters an episode can hold — and the
+ * at `MAX_SCRIPT_BYTES` — the most UTF-8 BYTES a script may hold, which
+ * `estimateSpeechCostUsd` treats as bytes. That is an over-estimate for both
+ * providers: ElevenLabs bills characters, and a script's character count is
+ * never more than its byte count (lower, for anything non-ASCII); Gemini's
+ * duration is derived from bytes at a deliberately slow speaking rate. The
  * episode count is the areas requested or, when the guide has not been parsed
  * to know, the most a run may generate. The run cannot spend more than this
  * figure on speech; it usually spends less. `provider` is null when no speech

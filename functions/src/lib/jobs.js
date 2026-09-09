@@ -96,12 +96,17 @@ const registry = new Map();
  *   for failure-only Telegram notifications (T-607) — successes already ride
  *   the forge_ready rising edge, so hooks should stay quiet on success.
  * @param {(payload: any) => object|null|undefined} [spec.acceptedDetails]
- *   Extra fields merged into the 202 body, computed from the validated
- *   payload BEFORE the job runs. Exists so a caller can be told what a run is
- *   expected to cost at the moment it asks for one (ADR 0029 §2a: Listen &
- *   Learn states its speech spend before starting rather than in the usage
- *   table afterwards). Best effort and synchronous: a throw is logged and the
- *   job is still enqueued, and the base fields (`ok`, `jobId`, …) always win.
+ *   Extra fields merged into the 202 body, computed BEFORE the job runs.
+ *   Exists so a caller can be told what a run is expected to cost at the
+ *   moment it asks for one (ADR 0029 §2a: Listen & Learn states its speech
+ *   spend before starting rather than in the usage table afterwards). The
+ *   argument is the RAW `body.payload`: at that point it has passed the role
+ *   check, is JSON-serialisable and is under `maxPayloadBytes`, and nothing
+ *   else — no per-type validation has run (the worker does that). Hook
+ *   authors treat every field as untrusted: read shapes defensively, never
+ *   echo values back, and never let a field choose a path. Best effort and
+ *   synchronous: a throw is logged and the job is still enqueued, and the
+ *   base fields (`ok`, `jobId`, …) always win over anything returned.
  */
 export function registerJobType(type, spec) {
   if (typeof type !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(type)) {
