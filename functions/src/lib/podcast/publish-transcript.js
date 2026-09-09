@@ -258,6 +258,45 @@ export async function scheduleHostPublish({
 }
 
 /**
+ * The approval was written but the host step could not be queued — a jobs
+ * container write or the pending patch threw. Persist that as a terminal,
+ * retryable record so the hub shows "publish failed, retry" after a refresh
+ * rather than the stale `host` it would otherwise read. Best effort: this
+ * never throws, because the approval has already happened and must be
+ * reported as such whatever the second write does. Returns whether the
+ * record was stored.
+ *
+ * @param {object} deps
+ * @param {{ patchDoc: Function }} deps.store
+ * @param {object} deps.doc the transcript as read before the approval
+ * @param {() => Date} [deps.now]
+ * @returns {Promise<boolean>}
+ */
+export async function recordScheduleFailure({ store, doc, now = () => new Date() }) {
+  const patch = {
+    host: {
+      rsscom: {
+        ...stableHostRecord(doc?.host),
+        lastAttemptAt: now().toISOString(),
+        error: {
+          status: null,
+          code: 'SCHEDULE_FAILED',
+          message:
+            'The approval was saved, but the RSS.com publish could not be queued; use Publish to retry.',
+          retryable: true,
+        },
+      },
+    },
+  };
+  try {
+    await patchTranscript(store, doc.id, patch);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Adapt a `readBlobForDelivery`-shaped reader to what `publishEpisodeToHost`
  * wants from `readAudio`. Null stays null (the step records it as a
  * validation failure naming the path). A blob stored without a real content

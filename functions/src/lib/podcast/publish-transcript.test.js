@@ -16,6 +16,7 @@ import {
   hostSkipFor,
   parseTranscriptId,
   recordHostJobFailure,
+  recordScheduleFailure,
   runHostPublish,
   scheduleHostPublish,
   stableHostRecord,
@@ -458,6 +459,41 @@ describe('runHostPublish', () => {
     expect(error.message).not.toContain('article_picking-a-state-backend');
     expect(error.code).toBe('TRANSCRIPT_NOT_FOUND');
     expect(error.transcriptId).toBe('article_picking-a-state-backend');
+  });
+});
+
+describe('recordScheduleFailure', () => {
+  it('stores a terminal, retryable SCHEDULE_FAILED record over the stable host fields, touching nothing else', async () => {
+    const store = makeStore();
+    const stable = { episodeId: 9001, guid: 'g', audioPath: 'a.mp3', publishedAt: '2026-09-01T00:00:00.000Z' };
+    const ok = await recordScheduleFailure({
+      store,
+      doc: doc({ host: { rsscom: { ...stable, pending: true, jobId: 'stale' } } }),
+      now,
+    });
+    expect(ok).toBe(true);
+    const patch = hostPatch(store);
+    expect(Object.keys(patch)).toEqual(['host']);
+    expect(patch.host.rsscom).toEqual({
+      ...stable,
+      lastAttemptAt: AT,
+      error: {
+        status: null,
+        code: 'SCHEDULE_FAILED',
+        message: expect.stringMatching(/use Publish to retry/),
+        retryable: true,
+      },
+    });
+    expect(patch.host.rsscom).not.toHaveProperty('pending');
+  });
+
+  it('never throws — a failed write answers false', async () => {
+    const store = makeStore({
+      patchDoc: vi.fn(async () => {
+        throw new Error('cosmos down');
+      }),
+    });
+    await expect(recordScheduleFailure({ store, doc: doc(), now })).resolves.toBe(false);
   });
 });
 

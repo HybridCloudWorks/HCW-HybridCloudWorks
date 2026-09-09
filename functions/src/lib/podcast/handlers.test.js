@@ -426,10 +426,12 @@ describe('reviewTranscript', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('keeps the approval and says so when the host step cannot be queued', async () => {
+  it('keeps the approval, persists SCHEDULE_FAILED on the document and says so when the host step cannot be queued', async () => {
     // The status patch succeeds; the job write fails. The approval happened
-    // and must be reported as such — the retry route recovers the rest.
-    const store = storeWith(transcript(), {
+    // and must be reported as such — and stored, so a refreshed hub shows
+    // the failure and the retry rather than the stale host record.
+    const previous = { episodeId: 9001, guid: 'g', audioPath: 'article/x.mp3', error: null };
+    const store = storeWith(transcript({ host: { rsscom: { ...previous, skipped: 'no_audio' } } }), {
       upsertDoc: vi.fn(async () => {
         throw new Error('jobs container down');
       }),
@@ -440,6 +442,43 @@ describe('reviewTranscript', () => {
     expect(body).toMatchObject({ success: true, status: 'published' });
     expect(body.host.error.code).toBe('SCHEDULE_FAILED');
     expect(res.body).not.toContain('jobs container down');
+
+    const patches = transcriptPatches(store);
+    expect(patches).toHaveLength(2);
+    expect(patches[0]).toMatchObject({ status: 'published', approvedBy: 'oid-1' });
+    expect(patches[1]).toEqual({
+      host: {
+        rsscom: {
+          ...previous,
+          lastAttemptAt: NOW.toISOString(),
+          error: {
+            status: null,
+            code: 'SCHEDULE_FAILED',
+            message: expect.stringMatching(/use Publish to retry/),
+            retryable: true,
+          },
+        },
+      },
+    });
+  });
+
+  it('still answers 200 with the approval when the SCHEDULE_FAILED record itself cannot be written', async () => {
+    const store = storeWith(transcript(), {
+      upsertDoc: vi.fn(async () => {
+        throw new Error('jobs container down');
+      }),
+      patchDoc: vi.fn(async (_c, id, updates) => {
+        if (updates.host) throw new Error('cosmos down');
+        return { id, ...updates };
+      }),
+    });
+    const res = await review({ id: 'article_x', status: 'published' }, store);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({ success: true, status: 'published' });
+    expect(body.host.error.code).toBe('SCHEDULE_FAILED');
+    expect(res.body).not.toContain('cosmos down');
+    expect(store.patchDoc).toHaveBeenCalledTimes(2);
   });
 
   it('returns a transcript to draft, clearing the stamp, and runs no host step', async () => {

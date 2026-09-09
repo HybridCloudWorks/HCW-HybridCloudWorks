@@ -40,7 +40,12 @@ import {
   parseArticleId,
   refusalFor,
 } from './generate.js';
-import { PUBLISH_JOB_TYPE, parseTranscriptId, scheduleHostPublish } from './publish-transcript.js';
+import {
+  PUBLISH_JOB_TYPE,
+  parseTranscriptId,
+  recordScheduleFailure,
+  scheduleHostPublish,
+} from './publish-transcript.js';
 import { isConfigured as hostIsConfigured } from './rsscom.js';
 import {
   STATUS,
@@ -229,6 +234,7 @@ export function createPodcastHandlers({
       if (auth.error) return auth.error;
       let id = '';
       let status = '';
+      let existing = null;
       let updated = null;
       try {
         const body = await request.json().catch(() => null);
@@ -250,7 +256,7 @@ export function createPodcastHandlers({
         if (parsedId.error) return json(400, { error: parsedId.error });
         id = parsedId.value;
 
-        const existing = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
+        existing = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
         if (!existing) return json(404, { error: `No podcast transcript ${id}` });
 
         updated = await setTranscriptStatus(store, {
@@ -285,7 +291,13 @@ export function createPodcastHandlers({
         if (!updated) return json(500, { error: 'Failed to update the transcript' });
         // The approval is written; only the host step failed to queue. Say
         // so rather than reporting a change that did happen as a failure —
-        // the retry route exists for exactly this.
+        // and persist it, so a refreshed hub shows the failure and the retry
+        // rather than the stale host record. Best effort: the second write
+        // must not turn a saved approval into a 500.
+        const stored = await recordScheduleFailure({ store, doc: existing, now });
+        context.log?.(
+          `reviewPodcastTranscript: host step not queued (SCHEDULE_FAILED ${stored ? 'recorded' : 'not recorded'})`
+        );
         return json(200, {
           success: true,
           id,
