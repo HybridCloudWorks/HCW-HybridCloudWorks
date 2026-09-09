@@ -5,9 +5,11 @@
  * and the omissions — but the omission that matters most here is a different
  * one. An article episode must not say what the article did not; a recording
  * episode must not say what a *person* did, in their name. So the tests that
- * carry the weight are the ones proving the transcript's speaker labels
- * never reach the prompt as attribution, and that the two hosts are told, in
- * so many words, not to become the people in the room.
+ * carry the weight are the ones proving Plaud's structured speaker labels
+ * never reach the prompt, that recognised leading labels in a paste are
+ * lifted, and that the two hosts are told, in so many words, not to become
+ * the people in the room. A name spoken mid-utterance is not a label; that
+ * case belongs to the prompt's ATTRIBUTION rule and to `attributionLeaks`.
  */
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
@@ -232,6 +234,28 @@ describe('normalizePlaudTranscript', () => {
     ]);
   });
 
+  it('lifts honorific labels, and still leaves an all-caps prefix in the text', () => {
+    // Copilot on #446: "Dr. Smith:" was not a name token because of the
+    // trailing period. An abbreviation token — uppercase initial, one to
+    // four lowercase letters, a period — now counts beside a dotted initial.
+    const { segments } = normalizePlaudTranscript(
+      [
+        'Dr. Smith: The locking point first.',
+        "Mrs. O'Brien: Then the naming.",
+        'Prof. Łukasz Nowak: And the split.',
+        'AWS: the region drives latency.',
+        'TODO: revisit the backend split.',
+      ].join('\n')
+    );
+    expect(segments.map((s) => [s.speaker, s.text])).toEqual([
+      ['Dr. Smith', 'The locking point first.'],
+      ["Mrs. O'Brien", 'Then the naming.'],
+      ['Prof. Łukasz Nowak', 'And the split.'],
+      [null, 'AWS: the region drives latency.'],
+      [null, 'TODO: revisit the backend split.'],
+    ]);
+  });
+
   it('reads the { transcript } shape the recordings container already stores', () => {
     const { recording: rec, segments } = normalizePlaudTranscript({
       id: 'local-1',
@@ -415,10 +439,12 @@ describe('buildRecordingPrompt', () => {
     expect(prompt.split(ARTICLE_CLOSE)).toHaveLength(2);
   });
 
-  it('never carries a participant name or label into the prompt', () => {
+  it('carries no structured speaker label into the prompt, whatever it holds', () => {
     // Real names are what Plaud stores once the owner renames a speaker, and
-    // "Speaker 1" is what it stores before. Neither may appear anywhere in
-    // the prompt — not as a label, not in a list, not in an instruction.
+    // "Speaker 1" is what it stores before. The `speaker` field is a field,
+    // not a parse, so this is the unconditional half of the guarantee:
+    // nothing in it may appear anywhere in the prompt — not as a label, not
+    // in a list, not in an instruction.
     const named = segmentsFor(['Priya', 'Tomasz', 'Tomasz', 'Priya']);
     const prompt = buildRecordingPrompt({ recording, rendered: renderTranscriptForPrompt(named) });
     expect(prompt).not.toContain('Priya');

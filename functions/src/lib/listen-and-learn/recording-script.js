@@ -29,6 +29,15 @@
  * that can say "the second participant argued" is one sentence away from
  * "Speaker 2 said".
  *
+ * **What is guaranteed, exactly.** Plaud's structured `speaker` field is
+ * always stripped — that is a field, not a parse. For pasted plain text, a
+ * recognised leading label is stripped: `Speaker N`, name-like tokens,
+ * honorifics, dotted initials (see `PLAIN_LINE`). A name spoken inside an
+ * utterance is not a label, is left in place, and is handled by two other
+ * things: the prompt's ATTRIBUTION rule, which forbids repeating it, and the
+ * reviewer-facing `attributionLeaks` measurement on the result. No regex over
+ * free text can promise more than that, and this module does not.
+ *
  * **Empty or trivially short transcripts are refused before any spend.** The
  * same reasoning as `resolveArticleBody` throwing: a prompt with nothing in it
  * produces a plausible episode about the title, and a 28-second recording of
@@ -229,12 +238,16 @@ function findUtterances(entry) {
  *
  * The letter classes are Unicode property escapes, not `[A-Z]`/`[a-z]`/`\w`.
  * An ASCII matcher does not see `Zoë:` or `Łukasz:` as a name, so it leaves
- * the label in the segment text — and that carries a participant's name
- * into the prompt, which is the one thing this module promises not to do.
- * "Uppercase initial with at least one lowercase letter" is the same rule
- * in any script that has case; `ÉCOLE:` stays in the text like `AWS:`.
+ * the label in the segment text — a leading label this module says it
+ * strips. "Uppercase initial with at least one lowercase letter" is the same
+ * rule in any script that has case; `ÉCOLE:` stays in the text like `AWS:`.
+ * The bound is the header's: leading labels of the recognised shapes, not
+ * every name a transcript can contain.
  */
-const NAME_TOKEN = String.raw`(?:\p{Lu}\.|\p{Lu}[\p{L}\p{N}'-]*\p{Ll}[\p{L}\p{N}'-]*)`;
+// Three token shapes: a dotted initial (`J.`), an honorific or other
+// abbreviation — uppercase initial, one to four lowercase letters, a period
+// (`Dr.`, `Mrs.`, `Prof.`, `St.`) — and a name-like word.
+const NAME_TOKEN = String.raw`(?:\p{Lu}\.|\p{Lu}\p{Ll}{1,4}\.|\p{Lu}[\p{L}\p{N}'-]*\p{Ll}[\p{L}\p{N}'-]*)`;
 const PLAIN_LINE = new RegExp(
   String.raw`^\s*(?:\[?(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\]?\s*[-–—]?\s*)?(?:((?:[Ss]peaker\s*\d+)|(?:${NAME_TOKEN}(?:\s+${NAME_TOKEN}){0,2})):\s+)?(.*\S)\s*$`,
   'u'
