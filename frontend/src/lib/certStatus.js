@@ -101,6 +101,23 @@ export function daysUntil(iso, today) {
 }
 
 /**
+ * `2026-06-30` → `Jun 30, 2026`, the calendar day itself in every zone. The
+ * day is placed on the UTC calendar and formatted in UTC, so neither the
+ * parse nor the print applies the viewer's offset; `new Date('2026-06-30')`
+ * formatted locally reads "Jun 29, 2026" west of Greenwich. Returns the input
+ * unchanged when it is not a `YYYY-MM-DD` string.
+ */
+export function formatIsoDate(iso) {
+  if (typeof iso !== 'string' || !ISO_DATE.test(iso)) return iso;
+  return new Date(utcDay(iso)).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/**
  * The status to render for a certification (or applied skill) on `today`.
  *
  * Rules, in order:

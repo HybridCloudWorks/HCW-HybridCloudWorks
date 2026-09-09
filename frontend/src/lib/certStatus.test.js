@@ -7,12 +7,58 @@ import {
   daysUntil,
   deriveStatus,
   findStaleStatuses,
+  formatIsoDate,
   isPastDate,
   todayIso,
   useToday,
 } from './certStatus';
 
 const TODAY = '2026-09-09';
+
+describe('viewer offset', () => {
+  // The timeline used to compare `new Date(ev.date)` (a bare YYYY-MM-DD, so
+  // UTC midnight) against `new Date(`${today}T00:00:00`)` (local midnight).
+  // For a viewer west of Greenwich — the owner is in Chicago, UTC-5 — local
+  // midnight is later than UTC midnight, so on the day of an event the old
+  // comparison already said "past", and the build runner (UTC) disagreed
+  // with the browser. The string helpers cannot see an offset at all.
+  const DAY = '2026-09-30';
+  const oldIsPast = (offset) => new Date(DAY) < new Date(`${DAY}T00:00:00${offset}`);
+
+  it('shows the old Date comparison flipping with the offset', () => {
+    expect(oldIsPast('Z')).toBe(false);
+    expect(oldIsPast('-05:00')).toBe(true);
+  });
+
+  it('keeps isPastDate and daysUntil at the calendar answer regardless of offset', () => {
+    expect(isPastDate(DAY, DAY)).toBe(false);
+    expect(daysUntil(DAY, DAY)).toBe(0);
+    expect(isPastDate(DAY, '2026-10-01')).toBe(true);
+    expect(daysUntil(DAY, '2026-10-01')).toBe(-1);
+  });
+});
+
+describe('formatIsoDate', () => {
+  it('prints the calendar day itself, never the day before', () => {
+    expect(formatIsoDate('2026-06-30')).toBe('Jun 30, 2026');
+    expect(formatIsoDate('2026-01-01')).toBe('Jan 1, 2026');
+    // The local-format path this replaces shows the previous day when the
+    // viewer's offset is negative.
+    expect(
+      new Date('2026-06-30').toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'America/Chicago',
+      })
+    ).toBe('Jun 29, 2026');
+  });
+
+  it('returns anything that is not YYYY-MM-DD unchanged', () => {
+    expect(formatIsoDate(undefined)).toBeUndefined();
+    expect(formatIsoDate('June 30, 2026')).toBe('June 30, 2026');
+  });
+});
 
 describe('daysUntil', () => {
   it('counts calendar days: zero today, positive ahead, negative once past', () => {

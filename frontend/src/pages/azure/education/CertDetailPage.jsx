@@ -4,7 +4,7 @@ import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import ListenAndLearn from '@/components/education/ListenAndLearn';
 import { DATA_AS_OF, certifications } from '@/data/azure/certifications';
-import { deriveStatus, useToday } from '@/lib/certStatus';
+import { deriveStatus, formatIsoDate, useToday } from '@/lib/certStatus';
 
 // ── Presentation ────────────────────────────────────────────────────────────
 //
@@ -53,13 +53,7 @@ function getNextCertDotClass(level) {
   }
 }
 
-function formatDate(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
+const formatDate = formatIsoDate;
 
 /**
  * The one line a reader must not miss: retired, retiring, or beta — derived

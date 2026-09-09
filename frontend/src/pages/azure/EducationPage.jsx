@@ -9,7 +9,7 @@ import {
   appliedSkills,
   timelineEvents,
 } from '@/data/azure/certifications';
-import { daysUntil, deriveStatus, useToday } from '@/lib/certStatus';
+import { daysUntil, deriveStatus, formatIsoDate, isPastDate, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -333,13 +333,14 @@ const resources = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(iso) {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
+// A bare YYYY-MM-DD parsed with `new Date(iso)` is UTC midnight, and
+// formatting that in a zone west of Greenwich printed the previous day — so
+// "Jun 30, 2026" read "Jun 29, 2026" for a viewer in Chicago. formatIsoDate
+// formats the calendar day itself.
+const formatDate = formatIsoDate;
+
+/** Sort comparator on `date` (`YYYY-MM-DD`): the strings order correctly as text, no Date, no zone. */
+const byIsoDate = (a, b) => a.date.localeCompare(b.date);
 
 /**
  * `status` is the DERIVED status (see lib/certStatus.js), never the stored
@@ -414,19 +415,24 @@ function TimelineCredentialTypeIcon({ credentialType, className = 'h-4 w-4' }) {
 
 // ── Horizontal Timeline ───────────────────────────────────────────────────────
 
+// Every Date in the timeline is a UTC calendar day: a bare YYYY-MM-DD parses
+// as UTC midnight, and only the UTC getters are used, so the month grid and
+// the x positions are the same for every viewer and on the build runner. The
+// comparisons that decide "past" and the day counts never touch a Date at all
+// (isPastDate / daysUntil compare the ISO strings).
 function buildMonthColumns(events) {
   if (!events.length) return { months: [], minDate: null, maxDate: null };
-  const dates = events.map((e) => new Date(e.date));
-  const minDate = new Date(Math.min(...dates));
-  const maxDate = new Date(Math.max(...dates));
+  const days = events.map((e) => Date.parse(e.date));
+  const minDate = new Date(Math.min(...days));
+  const maxDate = new Date(Math.max(...days));
   // Start from the first day of minDate's month, end last day of maxDate's month + 1 buffer
-  const start = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-  const end = new Date(maxDate.getFullYear(), maxDate.getMonth() + 2, 0);
+  const start = new Date(Date.UTC(minDate.getUTCFullYear(), minDate.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(maxDate.getUTCFullYear(), maxDate.getUTCMonth() + 2, 0));
   const months = [];
   let cur = new Date(start);
   while (cur <= end) {
     months.push(new Date(cur));
-    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
   }
   return { months, minDate: start, maxDate: end };
 }
@@ -442,8 +448,8 @@ function HorizontalTimeline({ events }) {
   const scrollContainerRef = React.useRef(null);
   // The catalogue date while pre-rendering and hydrating, the real date after;
   // called before any early return so the hook order is stable. See lib/certStatus.js.
-  const todayStr = useToday(DATA_AS_OF);
-  const today = new Date(`${todayStr}T00:00:00`);
+  const today = useToday(DATA_AS_OF);
+  const [todayYear, todayMonth] = today.split('-').map(Number);
 
   const { months, minDate, maxDate } = buildMonthColumns(events);
 
@@ -485,13 +491,13 @@ function HorizontalTimeline({ events }) {
   const totalWidth = months.length * COL_WIDTH;
 
   function xForDate(iso) {
-    const ms = new Date(iso) - minDate;
+    const ms = Date.parse(iso) - minDate;
     return Math.round((ms / totalMs) * totalWidth);
   }
 
   // Assign events to non-overlapping rows (greedy lane packing)
   const lanes = [];
-  const sortedEvts = [...events].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const sortedEvts = [...events].sort(byIsoDate);
   const laneEnds = []; // x-end per lane
   const EVENT_W = 130;
   const eventLanes = sortedEvts.map((ev) => {
@@ -590,7 +596,7 @@ function HorizontalTimeline({ events }) {
               {months.map((m, i) => {
                 const x = i * COL_WIDTH;
                 const isCurrentMonth =
-                  m.getFullYear() === today.getFullYear() && m.getMonth() === today.getMonth();
+                  m.getUTCFullYear() === todayYear && m.getUTCMonth() + 1 === todayMonth;
                 return (
                   <g key={i}>
                     {/* Alternating column shading */}
@@ -620,7 +626,11 @@ function HorizontalTimeline({ events }) {
                       fontWeight={isCurrentMonth ? '700' : '500'}
                       fontFamily="inherit"
                     >
-                      {m.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
+                      {m.toLocaleDateString('en-US', {
+                        month: 'short',
+                        year: '2-digit',
+                        timeZone: 'UTC',
+                      })}
                     </text>
                   </g>
                 );
@@ -638,7 +648,7 @@ function HorizontalTimeline({ events }) {
 
               {/* Event markers */}
               {sortedEvts.map((ev, idx) => {
-                const isPast = new Date(ev.date) < today;
+                const isPast = isPastDate(ev.date, today);
                 const x = xForDate(ev.date);
                 const lane = eventLanes[idx];
                 const y = HEADER_HEIGHT + lane * TRACK_HEIGHT + TRACK_HEIGHT / 2;
@@ -674,6 +684,8 @@ function HorizontalTimeline({ events }) {
                 return (
                   <g
                     key={ev.id}
+                    data-event-id={ev.id}
+                    data-past={isPast ? 'true' : 'false'}
                     style={{ cursor: 'pointer', opacity: isPast ? 0.55 : 1 }}
                     onMouseEnter={() => setTooltip(ev.id)}
                     onMouseLeave={() => setTooltip(null)}
@@ -750,7 +762,8 @@ function HorizontalTimeline({ events }) {
             const meta = getTimelineStatusMeta(ev.type);
             const credentialType = getTimelineCredentialType(ev);
             const credentialMeta = TIMELINE_CREDENTIAL_TYPE_META[credentialType];
-            const isPast = new Date(ev.date) < today;
+            const isPast = isPastDate(ev.date, today);
+            const days = daysUntil(ev.date, today);
             return (
               <div className="absolute bottom-3 right-3 max-w-xs bg-background/95 backdrop-blur-md border border-card/60 rounded-xl px-4 py-3 shadow-2xl z-20 pointer-events-none">
                 <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -778,7 +791,7 @@ function HorizontalTimeline({ events }) {
                   <span>{formatDate(ev.date)}</span>
                   {!isPast && (
                     <span className="text-primary font-semibold">
-                      in {daysUntil(ev.date, todayStr)}d
+                      {days === 0 ? 'today' : `in ${days}d`}
                     </span>
                   )}
                 </div>
@@ -868,9 +881,7 @@ export default function AzureEducationPage() {
     return () => window.removeEventListener('resize', updateColumns);
   }, []);
 
-  const sortedTimeline = [...timelineEvents, ...appliedSkillRetirementEvents].sort(
-    (a, b) => new Date(a.date) - new Date(b.date)
-  );
+  const sortedTimeline = [...timelineEvents, ...appliedSkillRetirementEvents].sort(byIsoDate);
 
   return (
     <>

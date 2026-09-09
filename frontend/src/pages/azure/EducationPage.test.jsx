@@ -15,6 +15,13 @@ vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
 }));
 
+// `today` as the page sees it, settable per test; everything else is real.
+const mockToday = vi.fn();
+vi.mock('@/lib/certStatus', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, useToday: (fallback) => mockToday() ?? actual.useToday(fallback) };
+});
+
 // jsdom has no matchMedia; the page reads it for the applied-skills column count.
 beforeAll(() => {
   window.matchMedia = vi.fn((query) => ({
@@ -146,6 +153,26 @@ describe('AzureEducationPage', () => {
     const { container } = renderPage();
     expect(screen.getByTestId('data-as-of')).toHaveAttribute('dateTime', DATA_AS_OF);
     expect(container.textContent).not.toMatch(/weekly|Updated Monthly|each month/i);
+  });
+
+  it('decides "past" on the timeline by calendar day, not by the viewer offset', () => {
+    // AZ-800 and AZ-801 retire on 2026-09-30. With today set to that very day
+    // the event is not past; the old `new Date(ev.date) < localMidnight`
+    // comparison said it was for any viewer west of Greenwich. The next day
+    // it is past everywhere.
+    mockToday.mockReturnValue('2026-09-30');
+    const first = renderPage();
+    const onTheDay = first.container.querySelector('[data-event-id="az-800-az-801-retire"]');
+    expect(onTheDay).not.toBeNull();
+    expect(onTheDay.dataset.past).toBe('false');
+    first.unmount();
+
+    mockToday.mockReturnValue('2026-10-01');
+    const { container } = renderPage();
+    expect(container.querySelector('[data-event-id="az-800-az-801-retire"]').dataset.past).toBe(
+      'true'
+    );
+    mockToday.mockReset();
   });
 
   it('links every certification to its detail page', () => {
