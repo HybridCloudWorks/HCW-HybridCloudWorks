@@ -5,15 +5,27 @@
  * an unpublished article is refused at the door rather than as a failed job,
  * the enqueue writes the same job document `enqueueJob` does, the listing
  * never carries a transcript body, and a reviewer cannot set `failed`.
+ *
+ * Slice 2 of #437 adds: approval runs the host step and reports it; a host
+ * skip or failure never changes what the review wrote; the retry route
+ * refuses a draft and re-runs the step for a published one.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createPodcastHandlers } from './handlers.js';
 import { ARTICLE_CONTAINER, TRANSCRIPT_JOB_TYPE } from './generate.js';
+import { PUBLISH_JOB_TYPE } from './publish-transcript.js';
 import { STATUS, TRANSCRIPT_CONTAINER, TRANSCRIPT_LIST_FIELDS } from './store.js';
 import { JOBS_CONTAINER } from '../jobs.js';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 const context = { log: vi.fn(), error: vi.fn() };
+
+const CONFIGURED = { ok: true, podcastId: '4242' };
+const NOT_CONFIGURED = {
+  ok: false,
+  reason:
+    'RSS.com publishing is not configured: RSSCOM_API_KEY (Key Vault secret RSSCOM-API-KEY) is not set, so episodes stay on the manual upload path.',
+};
 
 const USER = { oid: 'oid-1', email: 'editor@example.test' };
 const allowGuard = {
@@ -55,8 +67,24 @@ const makeStore = (over = {}) => ({
   ...over,
 });
 
-const handlers = (store, guard = allowGuard) =>
-  createPodcastHandlers({ guard, store, now: () => NOW, uuid: () => 'job-1' });
+/** A stored transcript, as the review and retry routes read it. */
+const transcript = (over = {}) => ({
+  id: 'article_x',
+  sourceId: 'content-1',
+  title: 'Picking a state backend',
+  summary: 'Where state lives.',
+  keyTakeaways: [],
+  audioPath: 'article/x.mp3',
+  audioError: null,
+  status: STATUS.draft,
+  approvedAt: null,
+  approvedBy: null,
+  host: null,
+  ...over,
+});
+
+const handlers = (store, guard = allowGuard, { hostConfigured = () => CONFIGURED } = {}) =>
+  createPodcastHandlers({ guard, store, now: () => NOW, uuid: () => 'job-1', hostConfigured });
 
 describe('auth', () => {
   it('every handler passes a guard denial through with zero store reads', async () => {
@@ -70,16 +98,19 @@ describe('auth', () => {
       h.listTranscripts(makeRequest(), context),
       h.getTranscript(makeRequest({ params: { id: 'article_x' } }), context),
       h.reviewTranscript(makeRequest({ body: { id: 'article_x', status: 'published' } }), context),
+      h.publishTranscript(makeRequest({ params: { id: 'article_x' } }), context, {
+        enqueue: vi.fn(),
+      }),
     ]);
 
-    expect(responses.map((r) => r.status)).toEqual([403, 403, 403, 403]);
+    expect(responses.map((r) => r.status)).toEqual([403, 403, 403, 403, 403]);
     expect(store.queryDocs).not.toHaveBeenCalled();
     expect(store.readDoc).not.toHaveBeenCalled();
     expect(store.upsertDoc).not.toHaveBeenCalled();
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
 
-  it('review is gated at publisher; generate and the reads at editor', async () => {
+  it('review and the retry are gated at publisher; generate and the reads at editor', async () => {
     const store = makeStore({ readDoc: vi.fn(async () => published()) });
     const h = handlers(store, editorOnlyGuard);
 
@@ -88,7 +119,12 @@ describe('auth', () => {
       context
     );
     expect(review.status).toBe(403);
+    const retry = await h.publishTranscript(makeRequest({ params: { id: 'article_x' } }), context, {
+      enqueue: vi.fn(),
+    });
+    expect(retry.status).toBe(403);
     expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
 
     const generate = await h.generateTranscript(
       makeRequest({ body: { articleId: 'content-1' } }),
@@ -265,6 +301,19 @@ describe('getTranscript', () => {
     expect(store.readDoc).toHaveBeenCalledWith(TRANSCRIPT_CONTAINER, 'article_x', 'article_x');
   });
 
+  it('carries the host record, on the detail and in the listing allowlist, so the hub can read it', async () => {
+    // The hub reads `host` to say published / publishing… / not configured /
+    // failed. It is a stored field; no separate route is needed for it.
+    const host = { rsscom: { episodeId: 9001, pending: false, error: null } };
+    const store = makeStore({ readDoc: vi.fn(async () => transcript({ host })) });
+    const res = await handlers(store).getTranscript(
+      makeRequest({ params: { id: 'article_x' } }),
+      context
+    );
+    expect(JSON.parse(res.body).item.host).toEqual(host);
+    expect(TRANSCRIPT_LIST_FIELDS).toContain('host');
+  });
+
   it('404s an unknown id and 400s a missing one', async () => {
     const h = handlers(makeStore());
     expect((await h.getTranscript(makeRequest({ params: { id: 'nope' } }), context)).status).toBe(
@@ -275,14 +324,29 @@ describe('getTranscript', () => {
 });
 
 describe('reviewTranscript', () => {
-  const review = (body, store = makeStore()) =>
-    handlers(store).reviewTranscript(makeRequest({ body }), context);
+  /** A store holding one draft transcript with audio, ready to approve. */
+  const storeWith = (doc = transcript(), over = {}) =>
+    makeStore({
+      readDoc: vi.fn(async (container, id) =>
+        container === TRANSCRIPT_CONTAINER && id === doc.id ? doc : null
+      ),
+      ...over,
+    });
+
+  const review = (body, store = storeWith(), { guard, hostConfigured, enqueue = vi.fn() } = {}) =>
+    handlers(store, guard, { hostConfigured }).reviewTranscript(makeRequest({ body }), context, {
+      enqueue,
+    });
+
+  /** The patch calls on the transcript, in order. */
+  const transcriptPatches = (store) =>
+    store.patchDoc.mock.calls.filter(([c]) => c === TRANSCRIPT_CONTAINER).map((c) => c[2]);
 
   it('publishes a transcript and stamps the approver from the guard identity', async () => {
-    const store = makeStore();
+    const store = storeWith();
     const res = await review({ id: 'article_x', status: 'published' }, store);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
     expect(store.patchDoc).toHaveBeenCalledWith(
       TRANSCRIPT_CONTAINER,
       'article_x',
@@ -292,18 +356,106 @@ describe('reviewTranscript', () => {
     expect(JSON.parse(res.body)).toMatchObject({ success: true, id: 'article_x', status: 'published' });
   });
 
-  it('returns a transcript to draft, clearing the stamp', async () => {
-    const store = makeStore();
-    await review({ id: 'article_x', status: 'draft' }, store);
-    expect(store.patchDoc.mock.calls[0][2]).toEqual({
-      status: 'draft',
-      approvedAt: null,
-      approvedBy: null,
+  it('runs the host step after approval: writes the publish job, marks the transcript pending, answers 202 with the job', async () => {
+    const store = storeWith();
+    const enqueue = vi.fn();
+    const res = await review({ id: 'article_x', status: 'published' }, store, { enqueue });
+
+    expect(res.status).toBe(202);
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({
+      success: true,
+      status: 'published',
+      jobId: 'job-1',
+      poll: 'getJob?jobId=job-1',
+      host: { pending: true, jobId: 'job-1', queuedAt: NOW.toISOString() },
+    });
+    expect(store.upsertDoc).toHaveBeenCalledWith(
+      JOBS_CONTAINER,
+      expect.objectContaining({
+        id: 'job-1',
+        type: PUBLISH_JOB_TYPE,
+        payload: { transcriptId: 'article_x' },
+        status: 'queued',
+        requestedBy: USER,
+      })
+    );
+    expect(enqueue).toHaveBeenCalledWith({ jobId: 'job-1', type: PUBLISH_JOB_TYPE });
+    // Status first, host second, and the host patch never carries the approval fields.
+    const patches = transcriptPatches(store);
+    expect(patches).toHaveLength(2);
+    expect(patches[0]).toHaveProperty('status', 'published');
+    expect(patches[1]).toEqual({
+      host: { rsscom: { pending: true, jobId: 'job-1', queuedAt: NOW.toISOString() } },
     });
   });
 
+  it('records not_configured as a skip on the document — status stays published — and answers 200', async () => {
+    const store = storeWith();
+    const enqueue = vi.fn();
+    const res = await review({ id: 'article_x', status: 'published' }, store, {
+      enqueue,
+      hostConfigured: () => NOT_CONFIGURED,
+    });
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).host).toEqual({
+      skipped: 'not_configured',
+      reason: NOT_CONFIGURED.reason,
+      lastAttemptAt: NOW.toISOString(),
+      error: null,
+    });
+    const patches = transcriptPatches(store);
+    expect(patches[0]).toMatchObject({ status: 'published', approvedBy: 'oid-1' });
+    expect(patches[1].host.rsscom.skipped).toBe('not_configured');
+    expect(patches[1]).not.toHaveProperty('status');
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('records no_audio when the transcript has none and uploads nothing', async () => {
+    const store = storeWith(transcript({ audioPath: null, audioError: 'no speech key' }));
+    const enqueue = vi.fn();
+    const res = await review({ id: 'article_x', status: 'published' }, store, { enqueue });
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.status).toBe('published');
+    expect(body.host.skipped).toBe('no_audio');
+    expect(body.host.reason).toMatch(/no speech key/);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('keeps the approval and says so when the host step cannot be queued', async () => {
+    // The status patch succeeds; the job write fails. The approval happened
+    // and must be reported as such — the retry route recovers the rest.
+    const store = storeWith(transcript(), {
+      upsertDoc: vi.fn(async () => {
+        throw new Error('jobs container down');
+      }),
+    });
+    const res = await review({ id: 'article_x', status: 'published' }, store);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({ success: true, status: 'published' });
+    expect(body.host.error.code).toBe('SCHEDULE_FAILED');
+    expect(res.body).not.toContain('jobs container down');
+  });
+
+  it('returns a transcript to draft, clearing the stamp, and runs no host step', async () => {
+    const store = storeWith(transcript({ status: STATUS.published }));
+    const enqueue = vi.fn();
+    const res = await review({ id: 'article_x', status: 'draft' }, store, { enqueue });
+    expect(res.status).toBe(200);
+    expect(transcriptPatches(store)).toEqual([
+      { status: 'draft', approvedAt: null, approvedBy: null },
+    ]);
+    expect(JSON.parse(res.body).host).toBeNull();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('refuses "failed", which belongs to the generator, and any unknown status', async () => {
-    const store = makeStore();
+    const store = storeWith();
     const res = await review({ id: 'article_x', status: 'failed' }, store);
     expect(res.status).toBe(400);
     expect(JSON.parse(res.body).error).toMatch(/status must be "published" or "draft"/);
@@ -311,18 +463,126 @@ describe('reviewTranscript', () => {
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
 
-  it('400s a missing id and a body that is not a JSON object', async () => {
+  it('400s a missing id and a body that is not a JSON object; 404s an unknown transcript', async () => {
     expect((await review({ status: 'published' })).status).toBe(400);
-    expect((await handlers(makeStore()).reviewTranscript(makeRequest(), context)).status).toBe(400);
+    expect(
+      (await handlers(makeStore()).reviewTranscript(makeRequest(), context, { enqueue: vi.fn() }))
+        .status
+    ).toBe(400);
+    const store = storeWith();
+    expect((await review({ id: 'ghost', status: 'published' }, store)).status).toBe(404);
+    expect(store.patchDoc).not.toHaveBeenCalled();
   });
 
   it('500s a store failure rather than reporting a change that did not happen', async () => {
-    const store = makeStore({
+    const store = storeWith(transcript(), {
       patchDoc: vi.fn(async () => {
         throw new Error('cosmos down');
       }),
     });
     const res = await review({ id: 'article_x', status: 'published' }, store);
+    expect(res.status).toBe(500);
+    expect(res.body).not.toContain('cosmos down');
+  });
+});
+
+describe('publishTranscript — the retry', () => {
+  const storeWith = (doc, over = {}) =>
+    makeStore({
+      readDoc: vi.fn(async (container, id) =>
+        container === TRANSCRIPT_CONTAINER && id === doc?.id ? doc : null
+      ),
+      ...over,
+    });
+
+  const retry = (store, { hostConfigured, enqueue = vi.fn(), id = 'article_x' } = {}) =>
+    handlers(store, allowGuard, { hostConfigured }).publishTranscript(
+      makeRequest({ params: { id } }),
+      context,
+      { enqueue }
+    );
+
+  it('refuses a draft with 409 and queues nothing — approval is what publishes', async () => {
+    const store = storeWith(transcript({ status: STATUS.draft }));
+    const enqueue = vi.fn();
+    const res = await retry(store, { enqueue });
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body).error).toMatch(/is draft; approve it first/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('re-runs the host step for a published transcript that already has an episode, keeping its id under the pending marker', async () => {
+    const previous = { episodeId: 9001, guid: 'g', hostStatus: 'published', error: null };
+    const store = storeWith(
+      transcript({ status: STATUS.published, host: { rsscom: { ...previous, error: { code: 'TIMEOUT' } } } })
+    );
+    const enqueue = vi.fn();
+    const res = await retry(store, { enqueue });
+
+    expect(res.status).toBe(202);
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      id: 'article_x',
+      jobId: 'job-1',
+      type: PUBLISH_JOB_TYPE,
+      status: 'queued',
+      poll: 'getJob?jobId=job-1',
+      host: { ...previous, error: { code: 'TIMEOUT' }, pending: true, jobId: 'job-1', queuedAt: NOW.toISOString() },
+    });
+    expect(store.upsertDoc).toHaveBeenCalledWith(
+      JOBS_CONTAINER,
+      expect.objectContaining({ type: PUBLISH_JOB_TYPE, payload: { transcriptId: 'article_x' } })
+    );
+    expect(enqueue).toHaveBeenCalledWith({ jobId: 'job-1', type: PUBLISH_JOB_TYPE });
+    // The retry never touches the approval.
+    for (const [, , patch] of store.patchDoc.mock.calls) {
+      expect(Object.keys(patch)).toEqual(['host']);
+    }
+  });
+
+  it('answers 200 with the skip when RSS.com is not configured or the transcript has no audio', async () => {
+    const enqueue = vi.fn();
+    let res = await retry(storeWith(transcript({ status: STATUS.published })), {
+      enqueue,
+      hostConfigured: () => NOT_CONFIGURED,
+    });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).host).toMatchObject({ skipped: 'not_configured' });
+
+    res = await retry(storeWith(transcript({ status: STATUS.published, audioPath: null })), { enqueue });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).host).toMatchObject({ skipped: 'no_audio' });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('409s while a publish job for the transcript is still in flight, naming it', async () => {
+    const doc = transcript({ status: STATUS.published, host: { rsscom: { pending: true, jobId: 'job-old' } } });
+    const store = makeStore({
+      readDoc: vi.fn(async (container, id) => {
+        if (container === TRANSCRIPT_CONTAINER) return doc;
+        if (container === JOBS_CONTAINER) return { id, status: 'running' };
+        return null;
+      }),
+    });
+    const enqueue = vi.fn();
+    const res = await retry(store, { enqueue });
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body)).toMatchObject({ jobId: 'job-old', poll: 'getJob?jobId=job-old' });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('404s an unknown id, 400s a missing one, 500s a store failure without leaking it', async () => {
+    expect((await retry(storeWith(null))).status).toBe(404);
+    expect((await retry(storeWith(null), { id: ' ' })).status).toBe(400);
+    const res = await retry(
+      makeStore({
+        readDoc: vi.fn(async () => {
+          throw new Error('cosmos down');
+        }),
+      })
+    );
     expect(res.status).toBe(500);
     expect(res.body).not.toContain('cosmos down');
   });

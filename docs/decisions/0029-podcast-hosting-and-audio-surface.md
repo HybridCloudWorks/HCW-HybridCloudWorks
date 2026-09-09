@@ -163,6 +163,19 @@ plan, and it is the whole cost". That was costed against one source of episodes.
 #432 adds three (#433, #434, #435), and a per-episode manual step scales with
 the number of things producing episodes.
 
+*Landed 2026-09-09 for one of the three sources.* Approving a podcast
+transcript — `POST cms/podcast/transcripts/review` moving a
+`podcast_transcripts` document to `published` — now queues the
+`publish-podcast-transcript` job, which uploads the transcript's MP3 and
+creates (or, on a re-run, updates) the RSS.com episode; the outcome lives on the
+document under `host.rsscom`, the retry is
+`POST cms/podcast/transcripts/{id}/publish`, and a publish that fails or is
+skipped (no audio, RSS.com not configured) leaves the approval as written.
+Listen & Learn episodes do **not** publish yet: whether the exam-prep playlist
+belongs on the show at all is the fourth decision still open on #349, and
+`setEpisodeStatus` on `listen_and_learn_episodes` runs no host step until it is
+made.
+
 **What does not.** The feed is still the integration boundary. The site learns
 about a published episode by ingesting the show's feed into `podcasts`, exactly
 as it does for an episode uploaded by hand — not by writing the row at publish

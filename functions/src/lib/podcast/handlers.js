@@ -16,6 +16,22 @@
  * content to live" is what that role is for. Listen & Learn approves at
  * editor; the difference is that a Learn episode goes on a study page and a
  * podcast transcript goes to a host and every subscriber.
+ *
+ * Approval publishes (#437, ADR 0029 §1b). Once the review has written
+ * `published`, the host step runs through `scheduleHostPublish`: a skip
+ * (no audio, RSS.com not configured) is recorded on the document at once,
+ * otherwise a `publish-podcast-transcript` job is queued and the document
+ * is marked `host.rsscom.pending`. The response carries that outcome under
+ * `host` so the hub can toast it, and answers 202 when a job is in flight.
+ * Three rules hold whatever the host does: a publish failure never
+ * un-approves — `status`/`approvedAt` are written here and nowhere in the
+ * host path; the retry route below re-runs the same step rather than
+ * regenerating, and PATCHes an episode the document already names; and
+ * nothing here or in the job writes `podcasts` — the feed stays the ingest
+ * boundary, and the site learns of the episode when the timer reads the
+ * show's feed. The `host` record itself is read through the existing
+ * detail and list routes: it is a stored field, in `TRANSCRIPT_LIST_FIELDS`
+ * and in the full document.
  */
 import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
 import {
@@ -24,6 +40,8 @@ import {
   parseArticleId,
   refusalFor,
 } from './generate.js';
+import { PUBLISH_JOB_TYPE, scheduleHostPublish } from './publish-transcript.js';
+import { isConfigured as hostIsConfigured } from './rsscom.js';
 import {
   STATUS,
   TRANSCRIPT_CONTAINER,
@@ -62,13 +80,40 @@ const LIST_QUERY = `SELECT TOP ${MAX_TRANSCRIPTS} ${LIST_PROJECTION} FROM c ORDE
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, patchDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
+ * @param {() => { ok: boolean, reason?: string }} [deps.hostConfigured] `isConfigured` for RSS.com; injected for tests
  */
 export function createPodcastHandlers({
   guard,
   store,
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
+  hostConfigured = () => hostIsConfigured(),
 }) {
+  /**
+   * Queue or skip the host step for one published transcript and shape the
+   * outcome for a response. A throw here is the caller's to handle, because
+   * what it means differs: after an approval the status write has already
+   * happened and must be reported; on the retry route nothing has.
+   */
+  async function runHostStep({ doc, enqueue, requestedBy, context }) {
+    const outcome = await scheduleHostPublish({
+      store,
+      doc,
+      configured: hostConfigured(),
+      enqueue,
+      requestedBy,
+      uuid,
+      now,
+    });
+    context.log?.(
+      `podcast host step: ${doc.id} ${outcome.outcome}${outcome.jobId ? ` (${outcome.jobId})` : ''}`
+    );
+    return {
+      ...outcome,
+      ...(outcome.jobId ? { poll: `getJob?jobId=${outcome.jobId}` } : {}),
+    };
+  }
+
   return {
     /**
      * POST /api/cms/podcast/transcripts/generate — `{ articleId }`.
@@ -167,17 +212,27 @@ export function createPodcastHandlers({
 
     /**
      * POST /api/cms/podcast/transcripts/review — `{ id, status: 'published' | 'draft' }`.
+     *
+     * Publishing also runs the host step (see the header). The response's
+     * `host` is the outcome — `{ pending, jobId, … }`, `{ skipped, reason }`
+     * — or null when the transcript was withdrawn; the status is 202 while
+     * a publish job is in flight and 200 otherwise.
+     *
+     * @param {{ enqueue: (message: {jobId: string, type: string}) => void }} io - the queue output
      */
-    async reviewTranscript(request, context) {
+    async reviewTranscript(request, context, { enqueue } = {}) {
       const auth = await guard.requireRole(request, 'publisher');
       if (auth.error) return auth.error;
+      let id = '';
+      let status = '';
+      let updated = null;
       try {
         const body = await request.json().catch(() => null);
         if (!body || typeof body !== 'object') {
           return json(400, { error: 'Body must be a JSON object' });
         }
-        const id = String(body.id || '').trim();
-        const status = String(body.status || '').trim();
+        id = String(body.id || '').trim();
+        status = String(body.status || '').trim();
 
         // 'failed' is written by the generator, never chosen by a reviewer:
         // `draft` is how a reviewer withdraws one, and it leaves a record.
@@ -188,18 +243,110 @@ export function createPodcastHandlers({
         }
         if (!id) return json(400, { error: 'id is required' });
 
-        const updated = await setTranscriptStatus(store, {
+        const existing = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
+        if (!existing) return json(404, { error: `No podcast transcript ${id}` });
+
+        updated = await setTranscriptStatus(store, {
           id,
           status,
           actorId: auth.user?.oid || null,
           now: now().toISOString(),
         });
-
         context.log?.(`reviewPodcastTranscript: ${id} → ${status} by ${auth.user?.oid || 'unknown'}`);
-        return json(200, { success: true, id, status, item: updated || null });
+
+        if (status !== STATUS.published) {
+          return json(200, { success: true, id, status, item: updated || null, host: null });
+        }
+
+        const host = await runHostStep({
+          doc: { ...existing, ...(updated || {}) },
+          enqueue,
+          requestedBy: auth.user,
+          context,
+        });
+        const inFlight = host.outcome === 'queued' || host.outcome === 'in_flight';
+        return json(inFlight ? 202 : 200, {
+          success: true,
+          id,
+          status,
+          item: updated || null,
+          host: host.host,
+          ...(host.jobId ? { jobId: host.jobId, poll: host.poll } : {}),
+        });
       } catch (error) {
         context.error('reviewPodcastTranscript failed:', error);
-        return json(500, { error: 'Failed to update the transcript' });
+        if (!updated) return json(500, { error: 'Failed to update the transcript' });
+        // The approval is written; only the host step failed to queue. Say
+        // so rather than reporting a change that did happen as a failure —
+        // the retry route exists for exactly this.
+        return json(200, {
+          success: true,
+          id,
+          status,
+          item: updated,
+          host: {
+            error: {
+              status: null,
+              code: 'SCHEDULE_FAILED',
+              message:
+                'The approval was saved, but the RSS.com publish could not be queued; use Publish to retry.',
+              retryable: true,
+            },
+          },
+        });
+      }
+    },
+
+    /**
+     * POST /api/cms/podcast/transcripts/{id}/publish — the retry. Refuses
+     * anything not `published` with 409 (approval is what publishes), then
+     * runs the same host step approval does: 202 with the job id, 200 with
+     * `{ skipped, reason }` when there is nothing to send, 409 when a
+     * publish job for this transcript is still in flight.
+     *
+     * @param {{ enqueue: (message: {jobId: string, type: string}) => void }} io - the queue output
+     */
+    async publishTranscript(request, context, { enqueue } = {}) {
+      const auth = await guard.requireRole(request, 'publisher');
+      if (auth.error) return auth.error;
+      try {
+        const id = String(request.params?.id || '').trim();
+        if (!id) return json(400, { error: 'id is required' });
+
+        const doc = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
+        if (!doc) return json(404, { error: `No podcast transcript ${id}` });
+        if (doc.status !== STATUS.published) {
+          return json(409, {
+            error:
+              `Podcast transcript ${id} is ${doc.status || 'not published'}; ` +
+              'approve it first — publishing to RSS.com is what approval does.',
+          });
+        }
+
+        const host = await runHostStep({ doc, enqueue, requestedBy: auth.user, context });
+        if (host.outcome === 'in_flight') {
+          return json(409, {
+            error: `Podcast transcript ${id} is already being published (job ${host.jobId}).`,
+            host: host.host,
+            jobId: host.jobId,
+            poll: host.poll,
+          });
+        }
+        if (host.outcome === 'queued') {
+          return json(202, {
+            ok: true,
+            id,
+            jobId: host.jobId,
+            type: PUBLISH_JOB_TYPE,
+            status: 'queued',
+            poll: host.poll,
+            host: host.host,
+          });
+        }
+        return json(200, { ok: true, id, host: host.host });
+      } catch (error) {
+        context.error('publishPodcastTranscript failed:', error);
+        return json(500, { error: 'Failed to queue the publish' });
       }
     },
   };

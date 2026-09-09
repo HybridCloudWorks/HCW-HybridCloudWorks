@@ -141,6 +141,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Approving a podcast transcript publishes it to RSS.com (#437, slice 2;
+  ADR 0029 §1b).** `POST cms/podcast/transcripts/review` moving a transcript
+  to `published` now runs the host step slice 1 built: it queues a
+  `publish-podcast-transcript` platform job, marks the document
+  `host.rsscom.pending` with the job id, and answers 202 so the Recording Hub
+  can show "publishing…". The job (`functions/src/functions/podcast-jobs.js`)
+  reads the MP3 from the `podcast` container, calls `publishEpisodeToHost`,
+  and stores the record — `episodeId`, `guid`, `hostStatus`, `publishedAt`,
+  or `error` — under `host.rsscom`; the platform's `onComplete` clears the
+  pending marker if the job dies around the step. A job rather than an
+  inline call because the client's own deadlines (30 s presign, 300 s PUT,
+  30 s create) sum past the 230 s HTTP budget, and because a step whose
+  failure must not change the approval has no business holding the
+  approval's response.
+
+  Three outcomes are recorded as `skipped`, never as an error, so the hub
+  says what is true: `not_configured` when `RSSCOM_API_KEY` or
+  `RSSCOM_PODCAST_ID` is not seeded (the reason is `isConfigured`'s own
+  sentence), `no_audio` when the transcript generated without audio (nothing
+  is uploaded without audio), and `not_published` when a transcript was
+  withdrawn to draft between enqueue and run. A publish failure never
+  un-approves: `status`, `approvedAt` and `approvedBy` are written by the
+  review and by nothing in the host path, and the tests assert the host
+  patch carries only `host`.
+
+  **Retry is a route, not a regeneration.** `POST
+  cms/podcast/transcripts/{id}/publish` (publisher) refuses anything not
+  `published` with 409, refuses to double-queue while a publish job is still
+  in flight, and otherwise runs the same step — which PATCHes the host
+  episode the document already names rather than creating a second one.
+  `custom_link` carries the article's public URL when the article document
+  has one (`publicUrlOf`, the Social Hub's precedence). The feed remains the
+  ingest boundary: nothing here writes `podcasts`, and the site learns of the
+  episode when `timers/podcasts.js` reads the show's feed. Listen & Learn
+  episodes still do not publish, pending the fourth decision on #349.
+  Nothing has been sent to the live API yet — the two secrets are unseeded —
+  so the first real publish is the owner's, with the key.
+  `lib/podcast/publish-transcript.js` + tests; `handlers.js`,
+  `podcast-http.js`, `podcast-jobs.js`; `.azure/api-surface.json`.
+
 - **The AI router can ground a generation on web pages and YouTube videos,
   and can no longer lose a prompt part on the way to a model (#433, slice
   1).** `generateGroundedJsonResponse({ prompt, sources, feature, … })` takes
