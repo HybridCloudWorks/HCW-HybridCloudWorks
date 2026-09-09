@@ -463,6 +463,18 @@ describe('reviewTranscript', () => {
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
 
+  it('400s an id over Cosmos\'s 1,023-byte bound with the worker\'s sentence, before any store call', async () => {
+    // Bytes, not characters: 400 three-byte characters is 1,200 bytes.
+    for (const id of ['x'.repeat(1024), '語'.repeat(400)]) {
+      const store = storeWith();
+      const res = await review({ id, status: 'published' }, store);
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toBe('id is too long');
+      expect(store.readDoc).not.toHaveBeenCalled();
+      expect(store.patchDoc).not.toHaveBeenCalled();
+    }
+  });
+
   it('400s a missing id and a body that is not a JSON object; 404s an unknown transcript', async () => {
     expect((await review({ status: 'published' })).status).toBe(400);
     expect(
@@ -571,6 +583,23 @@ describe('publishTranscript — the retry', () => {
     expect(res.status).toBe(409);
     expect(JSON.parse(res.body)).toMatchObject({ jobId: 'job-old', poll: 'getJob?jobId=job-old' });
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('400s an id over Cosmos\'s 1,023-byte bound before reading, with the same sentence as review', async () => {
+    for (const id of ['x'.repeat(1024), '語'.repeat(400)]) {
+      const store = storeWith(null);
+      const res = await retry(store, { id });
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toBe('id is too long');
+      expect(store.readDoc).not.toHaveBeenCalled();
+    }
+    // The detail route reads the same container by the same id: same rule.
+    const detail = await handlers(makeStore()).getTranscript(
+      makeRequest({ params: { id: '語'.repeat(400) } }),
+      context
+    );
+    expect(detail.status).toBe(400);
+    expect(JSON.parse(detail.body).error).toBe('id is too long');
   });
 
   it('404s an unknown id, 400s a missing one, 500s a store failure without leaking it', async () => {

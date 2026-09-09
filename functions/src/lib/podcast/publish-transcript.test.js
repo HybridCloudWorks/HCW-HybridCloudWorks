@@ -79,6 +79,11 @@ const hostPatch = (store) => {
 };
 
 describe('parseTranscriptId', () => {
+  it('names the field the caller asked for, so a route says "id" and the worker "transcriptId"', () => {
+    expect(parseTranscriptId('', { field: 'id' }).error).toBe('id is required');
+    expect(parseTranscriptId('x'.repeat(1024), { field: 'id' }).error).toBe('id is too long');
+  });
+
   it('trims and accepts an id; refuses blank, non-string and oversized', () => {
     expect(parseTranscriptId(' article_x ')).toEqual({ value: 'article_x' });
     expect(parseTranscriptId(undefined).error).toBe('transcriptId is required');
@@ -460,10 +465,11 @@ describe('recordHostJobFailure', () => {
       now,
     });
 
-  it('clears a pending marker the job left behind and records a retryable error', async () => {
+  it('clears a pending marker the job left behind and records a retryable error on a published transcript', async () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({
         id: 'article_x',
+        status: 'published',
         host: { rsscom: { episodeId: 9001, pending: true, jobId: 'j' } },
       })),
     });
@@ -478,10 +484,40 @@ describe('recordHostJobFailure', () => {
       },
     });
     const failed = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'article_x', host: { rsscom: { pending: true } } })),
+      readDoc: vi.fn(async () => ({
+        id: 'article_x',
+        status: 'published',
+        host: { rsscom: { pending: true } },
+      })),
     });
     await failure(failed, 'failed');
     expect(hostPatch(failed).host.rsscom.error.code).toBe('JOB_FAILED');
+  });
+
+  it('records not_published — not a publish error — when the transcript was returned to draft meanwhile', async () => {
+    // A draft showing "publish failed" with a retry the retry route refuses
+    // is the wrong record; the worker would have written this skip itself.
+    for (const status of ['draft', undefined]) {
+      const store = makeStore({
+        readDoc: vi.fn(async () => ({
+          id: 'article_x',
+          status,
+          host: { rsscom: { episodeId: 9001, pending: true, jobId: 'j' } },
+        })),
+      });
+      expect(await failure(store)).toBe(true);
+      expect(hostPatch(store)).toEqual({
+        host: {
+          rsscom: {
+            episodeId: 9001,
+            skipped: 'not_published',
+            reason: expect.stringMatching(new RegExp(`is ${status || 'not published'}`)),
+            lastAttemptAt: AT,
+            error: null,
+          },
+        },
+      });
+    }
   });
 
   it('does not overwrite an outcome the worker stored before the timer fired, nor touch a missing document', async () => {

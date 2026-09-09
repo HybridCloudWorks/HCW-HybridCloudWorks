@@ -40,7 +40,7 @@ import {
   parseArticleId,
   refusalFor,
 } from './generate.js';
-import { PUBLISH_JOB_TYPE, scheduleHostPublish } from './publish-transcript.js';
+import { PUBLISH_JOB_TYPE, parseTranscriptId, scheduleHostPublish } from './publish-transcript.js';
 import { isConfigured as hostIsConfigured } from './rsscom.js';
 import {
   STATUS,
@@ -199,8 +199,11 @@ export function createPodcastHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        const id = String(request.params?.id || '').trim();
-        if (!id) return json(400, { error: 'id is required' });
+        // Same rule as the write routes: an oversized id is a 400 here, not
+        // a Cosmos error surfacing as a 500.
+        const parsedId = parseTranscriptId(request.params?.id, { field: 'id' });
+        if (parsedId.error) return json(400, { error: parsedId.error });
+        const id = parsedId.value;
 
         const item = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
         if (!item) return json(404, { error: `No podcast transcript ${id}` });
@@ -232,7 +235,6 @@ export function createPodcastHandlers({
         if (!body || typeof body !== 'object') {
           return json(400, { error: 'Body must be a JSON object' });
         }
-        id = String(body.id || '').trim();
         status = String(body.status || '').trim();
 
         // 'failed' is written by the generator, never chosen by a reviewer:
@@ -242,7 +244,11 @@ export function createPodcastHandlers({
             error: `status must be "${STATUS.published}" or "${STATUS.draft}"`,
           });
         }
-        if (!id) return json(400, { error: 'id is required' });
+        // The worker's validator (Cosmos's 1,023-byte id bound), so an
+        // oversized id is a 400 with the job's own sentence, not a 500.
+        const parsedId = parseTranscriptId(body.id, { field: 'id' });
+        if (parsedId.error) return json(400, { error: parsedId.error });
+        id = parsedId.value;
 
         const existing = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
         if (!existing) return json(404, { error: `No podcast transcript ${id}` });
@@ -311,8 +317,9 @@ export function createPodcastHandlers({
       const auth = await guard.requireRole(request, 'publisher');
       if (auth.error) return auth.error;
       try {
-        const id = String(request.params?.id || '').trim();
-        if (!id) return json(400, { error: 'id is required' });
+        const parsedId = parseTranscriptId(request.params?.id, { field: 'id' });
+        if (parsedId.error) return json(400, { error: parsedId.error });
+        const id = parsedId.value;
 
         const doc = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
         if (!doc) return json(404, { error: `No podcast transcript ${id}` });

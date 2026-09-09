@@ -90,15 +90,20 @@ export const HOST_SKIP = Object.freeze({
 export const MAX_TRANSCRIPT_ID_BYTES = 1023;
 
 /**
- * The one validator for a `transcriptId`, shared by the routes that enqueue
- * and the worker that runs, so both refuse the same input with the same
- * sentence. Returns `{ value }` or `{ error }`.
+ * The one validator for a transcript id, shared by the routes that read or
+ * enqueue (`field: 'id'`, the request's name for it) and the worker that runs
+ * (`transcriptId`, the payload's), so every door refuses the same input with
+ * the same sentence and an oversized id is a 400 here rather than a Cosmos
+ * error surfacing as a 500. Returns `{ value }` or `{ error }`.
+ *
+ * @param {unknown} raw
+ * @param {{ field?: string }} [options] the name the sentence uses for the field
  */
-export function parseTranscriptId(raw) {
+export function parseTranscriptId(raw, { field = 'transcriptId' } = {}) {
   const id = typeof raw === 'string' ? raw.trim() : '';
-  if (!id) return { error: 'transcriptId is required' };
+  if (!id) return { error: `${field} is required` };
   if (Buffer.byteLength(id, 'utf8') > MAX_TRANSCRIPT_ID_BYTES) {
-    return { error: 'transcriptId is too long' };
+    return { error: `${field} is too long` };
   }
   return { value: id };
 }
@@ -147,6 +152,14 @@ export function hostSkipFor(doc, configured) {
   }
   return null;
 }
+
+/** The skip for a transcript that is no longer `published` when the job looks. */
+const notPublishedSkip = (doc) => ({
+  skipped: HOST_SKIP.notPublished,
+  reason:
+    `The transcript is ${doc?.status || 'not published'}, so nothing was sent to RSS.com; ` +
+    'approving it is what publishes it.',
+});
 
 const skippedPatch = (doc, skip, at) => ({
   host: {
@@ -292,17 +305,8 @@ export async function runHostPublish({
   if (!doc) throw new Error(`Podcast transcript ${id} was not found`);
   const at = now().toISOString();
 
-  let skip = null;
-  if (doc.status !== STATUS.published) {
-    skip = {
-      skipped: HOST_SKIP.notPublished,
-      reason:
-        `The transcript is ${doc.status || 'not published'}, so nothing was sent to RSS.com; ` +
-        'approving it is what publishes it.',
-    };
-  } else {
-    skip = hostSkipFor(doc, client?.configured);
-  }
+  const skip =
+    doc.status !== STATUS.published ? notPublishedSkip(doc) : hostSkipFor(doc, client?.configured);
   if (skip) {
     const patch = skippedPatch(doc, skip, at);
     await patchTranscript(store, id, patch);
@@ -331,6 +335,12 @@ export async function runHostPublish({
  * that stored its outcome a moment before the timer fired has already said
  * something better, and this must not overwrite it.
  *
+ * The document's current status decides what is written. A transcript
+ * returned to draft while the job was running gets `skipped:
+ * 'not_published'`, the same record the worker would have stored had it got
+ * that far — not a publish error, which would leave a draft showing a
+ * failure and offering a retry the retry route refuses.
+ *
  * @param {object} deps
  * @param {{ readDoc: Function, patchDoc: Function }} deps.store
  * @param {string} deps.id
@@ -342,20 +352,25 @@ export async function runHostPublish({
 export async function recordHostJobFailure({ store, id, status, error, now = () => new Date() }) {
   const doc = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
   if (!doc || doc.host?.rsscom?.pending !== true) return false;
-  const patch = {
-    host: {
-      rsscom: {
-        ...stableHostRecord(doc.host),
-        lastAttemptAt: now().toISOString(),
-        error: {
-          status: null,
-          code: status === 'timeout' ? 'JOB_TIMEOUT' : 'JOB_FAILED',
-          message: error || `The publish job ended as ${status}.`,
-          retryable: true,
-        },
-      },
-    },
-  };
+  const at = now().toISOString();
+
+  const patch =
+    doc.status !== STATUS.published
+      ? skippedPatch(doc, notPublishedSkip(doc), at)
+      : {
+          host: {
+            rsscom: {
+              ...stableHostRecord(doc.host),
+              lastAttemptAt: at,
+              error: {
+                status: null,
+                code: status === 'timeout' ? 'JOB_TIMEOUT' : 'JOB_FAILED',
+                message: error || `The publish job ended as ${status}.`,
+                retryable: true,
+              },
+            },
+          },
+        };
   await patchTranscript(store, id, patch);
   return true;
 }

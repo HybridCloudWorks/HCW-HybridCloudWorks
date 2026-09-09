@@ -147,7 +147,11 @@ describe('registration', () => {
     const now = () => new Date('2026-09-09T10:00:00.000Z');
     readDoc.mockReset();
     patchDoc.mockReset();
-    readDoc.mockResolvedValue({ id: 'article_x', host: { rsscom: { pending: true, jobId: 'job-1' } } });
+    readDoc.mockResolvedValue({
+      id: 'article_x',
+      status: 'published',
+      host: { rsscom: { pending: true, jobId: 'job-1' } },
+    });
     patchDoc.mockResolvedValue({});
 
     await spec.onComplete(
