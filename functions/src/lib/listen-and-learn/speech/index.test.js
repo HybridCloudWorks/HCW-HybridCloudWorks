@@ -39,7 +39,15 @@ const geminiOk = () =>
   vi.fn(async () => ({
     ok: true,
     status: 200,
-    json: async () => ({ output_audio: { data: pcmBase64(), sample_rate: 24000 } }),
+    json: async () => ({
+      status: 'completed',
+      steps: [
+        {
+          type: 'model_output',
+          content: [{ type: 'audio', data: pcmBase64(), mime_type: 'audio/L16', sample_rate: 24000 }],
+        },
+      ],
+    }),
   }));
 
 const azureOk = () =>
@@ -431,13 +439,14 @@ describe('estimateSpeechCostUsd', () => {
   });
 
   it('gives a best-effort figure for Gemini that over- rather than under-estimates', () => {
-    // 9,000 chars ÷ 13 chars/s ≈ 692 s × 32 tokens/s ≈ 22,154 tokens at
-    // USD 10 per 1M ≈ USD 0.22 — above the ~USD 0.17 an episode has measured.
+    // 9,000 bytes ÷ 13 bytes/s ≈ 692 s × 32 tokens/s ≈ 22,154 tokens at
+    // USD 20 per 1M (the 3.1 flash rate) ≈ USD 0.44 — above twice the
+    // ~USD 0.17 an episode measured on 2.5 flash, which is priced at half that.
     const estimate = estimateSpeechCostUsd({ ceilingBytes: 9000, env: GEMINI });
     expect(estimate.provider).toBe('gemini');
-    expect(estimate.model).toBe('gemini-2.5-flash-preview-tts');
-    expect(estimate.estimatedCostUsd).toBeGreaterThan(0.17);
-    expect(estimate.estimatedCostUsd).toBeLessThan(0.3);
+    expect(estimate.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(estimate.estimatedCostUsd).toBeGreaterThan(0.34);
+    expect(estimate.estimatedCostUsd).toBeLessThan(0.6);
   });
 
   it('measures Gemini in bytes, so a non-ASCII script is never priced below its ASCII twin', () => {
