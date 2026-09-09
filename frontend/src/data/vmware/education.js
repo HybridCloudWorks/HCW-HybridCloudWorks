@@ -3,7 +3,28 @@
  *
  * Extracted from src/pages/vmware/EducationPage.jsx when that page moved onto the
  * shared EducationTemplate.
+ *
+ * Certification catalogue verified 2026-09-09 (#461) against Broadcom's VMware
+ * certification pages and exam guides:
+ *   VCP-VVF Administrator 2V0-16.25, VCP-VCF Administrator 2V0-17.25 and
+ *   VCP-VCF Architect 2V0-13.25 (Broadcom certification pages);
+ *   VCAP-VCF Administrator 3V0-11.26, Architect 3V0-12.26 and Support
+ *   3V0-13.26 — the role-based VCAPs whose exam guides Broadcom dated
+ *   August 18, 2026 — replace the VCAP-DCV Deploy entry this file used to
+ *   carry, which no longer appears on Broadcom's certification path.
+ *   VCTA-DCV is the Data Center Virtualization track named in Broadcom's
+ *   VCTA FAQ; Broadcom publishes no per-track VCTA page today.
+ *
+ * `status` and any dates are read through `@/lib/certStatus` at render time;
+ * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
+export const DATA_AS_OF = '2026-09-09';
+
+export const DATA_SOURCE = {
+  label: 'Broadcom VMware certification',
+  url: 'https://www.broadcom.com/support/education/vmware/certification',
+};
+
 export const levelMeta = {
   Foundational: {
     badge: 'bg-sky-500/20 border-sky-500/40 text-sky-300',
@@ -44,10 +65,28 @@ export const certifications = [
     learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
   },
   {
+    id: 'vcp-vvf',
+    slug: 'vcp-vvf',
+    code: 'VCP-VVF',
+    examCode: '2V0-16.25',
+    title: 'VMware Certified Professional – vSphere Foundation Administrator',
+    level: 'Professional',
+    status: 'active',
+    description:
+      'Deploy, manage, and support private cloud environments built on VMware vSphere Foundation — vSphere, vSAN and VCF Operations without the full Cloud Foundation stack.',
+    topics: ['vSphere', 'vSAN', 'VCF Operations', 'Lifecycle'],
+    hours: 35,
+    prepTime: '~3 months',
+    featured: false,
+    learnUrl:
+      'https://www.broadcom.com/support/education/vmware/certification/vcp-vvf-administrator',
+  },
+  {
     id: 'vcp-vcf',
     slug: 'vcp-vcf',
     code: 'VCP-VCF',
-    title: 'VMware Certified Professional – Cloud Foundation Administrator',
+    examCode: '2V0-17.25',
+    title: 'VMware Certified Professional – VMware Cloud Foundation Administrator',
     level: 'Professional',
     status: 'active',
     description:
@@ -56,13 +95,15 @@ export const certifications = [
     hours: 40,
     prepTime: '~3 months',
     featured: true,
-    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    learnUrl:
+      'https://www.broadcom.com/support/education/vmware/certification/vcp-vcf-administrator',
   },
   {
     id: 'vcp-vcf-arch',
     slug: 'vcp-vcf-arch',
     code: 'VCP-VCF-ARCH',
-    title: 'VMware Certified Professional – Cloud Foundation Architect',
+    examCode: '2V0-13.25',
+    title: 'VMware Certified Professional – VMware Cloud Foundation Architect',
     level: 'Professional',
     status: 'active',
     description:
@@ -71,18 +112,51 @@ export const certifications = [
     hours: 45,
     prepTime: '~4 months',
     featured: false,
-    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification/vcp-vcf-architect',
   },
   {
-    id: 'vcap-dcv-deploy',
-    slug: 'vcap-dcv-deploy',
-    code: 'VCAP-DCV',
-    title: 'VMware Certified Advanced Professional – Data Center Virtualization Deploy',
+    id: 'vcap-vcf-admin',
+    slug: 'vcap-vcf-admin',
+    code: 'VCAP-VCF-ADMIN',
+    examCode: '3V0-11.26',
+    title: 'VMware Certified Advanced Professional – VMware Cloud Foundation Administrator',
     level: 'Advanced',
     status: 'active',
     description:
-      'Show advanced hands-on competence in deploying, optimizing, and operating complex enterprise-scale VMware vSphere environments.',
-    topics: ['vSphere Advanced', 'ESXi Command CLI', 'High Availability', 'DRS Tuning'],
+      'Manage, maintain, and scale multi-region VCF 9 private clouds — lifecycle management, workload domains, VCF Automation and Operations, NSX VPCs, and vSphere Kubernetes Service.',
+    topics: ['VCF 9 Operations', 'VCF Automation', 'NSX VPCs', 'VKS'],
+    hours: 60,
+    prepTime: '~6 months',
+    featured: false,
+    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+  },
+  {
+    id: 'vcap-vcf-arch',
+    slug: 'vcap-vcf-arch',
+    code: 'VCAP-VCF-ARCH',
+    examCode: '3V0-12.26',
+    title: 'VMware Certified Advanced Professional – VMware Cloud Foundation Architect',
+    level: 'Advanced',
+    status: 'active',
+    description:
+      'Architect scalable, resilient VCF 9 private cloud infrastructures that align with business requirements — design, strategic planning, and multi-site topologies.',
+    topics: ['VCF 9 Design', 'Requirements', 'Resilience', 'Multi-Site'],
+    hours: 60,
+    prepTime: '~6 months',
+    featured: false,
+    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+  },
+  {
+    id: 'vcap-vcf-support',
+    slug: 'vcap-vcf-support',
+    code: 'VCAP-VCF-SUPPORT',
+    examCode: '3V0-13.26',
+    title: 'VMware Certified Advanced Professional – VMware Cloud Foundation Support',
+    level: 'Advanced',
+    status: 'active',
+    description:
+      'Troubleshoot and maintain VCF 9 platforms — hands-on diagnostics, performance optimization, and root cause analysis across the stack.',
+    topics: ['Troubleshooting', 'Performance', 'Root Cause Analysis', 'VCF 9'],
     hours: 60,
     prepTime: '~6 months',
     featured: false,
@@ -125,17 +199,17 @@ export const learningPaths = [
   },
   {
     id: 2,
-    certCode: 'VCAP-DCV',
-    title: 'Advanced Data Center Engineering Path',
+    certCode: 'VCAP-VCF-ADMIN',
+    title: 'Advanced VCF Operations Path',
     level: 'Advanced',
     hours: 60,
     description:
-      'Deep dive into advanced vSphere command line operations, high availability engineering, and complex storage arrays.',
+      'Deep dive into VCF 9 day-2 operations — fleet lifecycle, VCF Automation and Operations, NSX VPCs with stateful services, and the vSphere Supervisor with VKS.',
     modules: [
-      { title: 'ESXi Advanced Shell CLI' },
-      { title: 'Distributed Resource Scheduler Customization' },
-      { title: 'vSphere HA Cluster Fine-Tuning' },
-      { title: 'Advanced Storage Multipathing' },
+      { title: 'Fleet Lifecycle & Workload Domains' },
+      { title: 'VCF Automation: Providers, Projects, Blueprints' },
+      { title: 'NSX VPCs & Stateful Gateway Services' },
+      { title: 'vSphere Supervisor & VKS at Scale' },
     ],
     certUrl: 'https://www.broadcom.com/support/education/vmware/certification',
   },

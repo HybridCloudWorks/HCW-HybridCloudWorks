@@ -10,6 +10,8 @@
  * resources that were three-card stubs before.
  */
 import React, { useMemo, useState } from 'react';
+import CertStatusBadge from '@/components/education/CertStatusBadge';
+import CatalogueFreshness from '@/components/education/CatalogueFreshness';
 
 function LevelBadge({ level, levelMeta }) {
   const meta = levelMeta?.[level];
@@ -30,6 +32,8 @@ export default function EducationTracks({
   resources = [],
   levelMeta = {},
   filterLevels = ['All'],
+  dataAsOf,
+  dataSource,
 }) {
   const [level, setLevel] = useState('All');
   const visible = useMemo(
@@ -41,10 +45,13 @@ export default function EducationTracks({
     <div className="flex flex-col gap-12">
       <section aria-label="Certification tracks">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
-            Certification Tracks
-          </h2>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
+              Certification Tracks
+            </h2>
+            <CatalogueFreshness asOf={dataAsOf} source={dataSource} className="mt-1" />
+          </div>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by level">
             {filterLevels.map((option) => (
               <button
@@ -80,6 +87,7 @@ export default function EducationTracks({
                 </span>
                 <LevelBadge level={cert.level} levelMeta={levelMeta} />
               </div>
+              <CertStatusBadge cert={cert} className="self-start" />
               <h3 className="text-sm font-bold text-foreground leading-snug">{cert.title}</h3>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                 {cert.description}
@@ -97,11 +105,9 @@ export default function EducationTracks({
                 </div>
               )}
               <div className="mt-auto flex items-center gap-3 text-[10px] text-slate-500">
+                {cert.examCode ? <span className="font-mono">{cert.examCode}</span> : null}
                 {cert.hours ? <span>{cert.hours} h</span> : null}
                 {cert.prepTime ? <span>{cert.prepTime}</span> : null}
-                {cert.status && cert.status !== 'active' ? (
-                  <span className="uppercase">{cert.status}</span>
-                ) : null}
               </div>
             </a>
           ))}

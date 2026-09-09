@@ -1,10 +1,19 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
+import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import CertStatusBadge from '@/components/education/CertStatusBadge';
+import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/aws/certifications';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const LEVEL_META = {
+  Business: {
+    badge: 'bg-rose-500/20 border-rose-500/40 text-rose-300',
+    accent: 'border-l-rose-500',
+    dot: 'bg-rose-500',
+    label: 'Business',
+  },
   Foundational: {
     badge: 'bg-sky-500/20 border-sky-500/40 text-sky-300',
     accent: 'border-l-sky-500',
@@ -31,7 +40,7 @@ const LEVEL_META = {
   },
 };
 
-const FILTER_LEVELS = ['All', 'Foundational', 'Associate', 'Professional', 'Specialty'];
+const FILTER_LEVELS = ['All', 'Business', 'Foundational', 'Associate', 'Professional', 'Specialty'];
 
 function getLevelFilterClass(levelFilter, level) {
   if (levelFilter !== level) {
@@ -46,188 +55,6 @@ function getLevelFilterClass(levelFilter, level) {
 const VISIBLE_COUNT = 4;
 
 // ── Data ─────────────────────────────────────────────────────────────────────
-
-const certifications = [
-  {
-    id: 'clf-c02',
-    slug: 'clf-c02',
-    code: 'CLF-C02',
-    title: 'AWS Certified Cloud Practitioner',
-    level: 'Foundational',
-    status: 'active',
-    description:
-      'Foundational cloud fluency across AWS services, billing, security, and global infrastructure.',
-    topics: ['Cloud Concepts', 'AWS Services', 'Billing', 'Security'],
-    hours: 10,
-    prepTime: '~4 weeks',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-cloud-practitioner/',
-  },
-  {
-    id: 'saa-c03',
-    slug: 'saa-c03',
-    code: 'SAA-C03',
-    title: 'AWS Certified Solutions Architect – Associate',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Design scalable, resilient, and cost-efficient architectures using core AWS services.',
-    topics: ['EC2', 'S3', 'VPC', 'IAM', 'RDS', 'CloudFormation'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: true,
-    learnUrl: 'https://aws.amazon.com/certification/certified-solutions-architect-associate/',
-  },
-  {
-    id: 'soa-c02',
-    slug: 'soa-c02',
-    code: 'SOA-C02',
-    title: 'AWS Certified CloudOps Engineer – Associate',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Deploy, manage, and operate scalable systems on AWS with a focus on monitoring and automation.',
-    topics: ['Monitoring', 'Automation', 'Storage', 'Networking'],
-    hours: 35,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-cloudops-engineer-associate/',
-  },
-  {
-    id: 'dva-c02',
-    slug: 'dva-c02',
-    code: 'DVA-C02',
-    title: 'AWS Certified Developer – Associate',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Develop and maintain applications on AWS with a focus on serverless and CI/CD patterns.',
-    topics: ['Lambda', 'API GW', 'DynamoDB', 'CodePipeline'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-developer-associate/',
-  },
-  {
-    id: 'sap-c02',
-    slug: 'sap-c02',
-    code: 'SAP-C02',
-    title: 'AWS Certified Solutions Architect – Professional',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Advanced design of complex, multi-region, hybrid, and cost-optimized AWS architectures.',
-    topics: ['Multi-Region', 'Hybrid', 'Migration', 'Cost'],
-    hours: 60,
-    prepTime: '~6 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-solutions-architect-professional/',
-  },
-  {
-    id: 'dop-c02',
-    slug: 'dop-c02',
-    code: 'DOP-C02',
-    title: 'AWS Certified DevOps Engineer – Professional',
-    level: 'Professional',
-    status: 'active',
-    description: 'Implement and manage continuous delivery systems and methodologies on AWS.',
-    topics: ['CI/CD', 'IaC', 'Monitoring', 'Incident'],
-    hours: 55,
-    prepTime: '~5 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-devops-engineer-professional/',
-  },
-  {
-    id: 'scs-c02',
-    slug: 'scs-c02',
-    code: 'SCS-C02',
-    title: 'AWS Certified Security – Specialty',
-    level: 'Specialty',
-    status: 'active',
-    description:
-      'Secure AWS workloads with advanced IAM, encryption, and threat detection services.',
-    topics: ['IAM', 'KMS', 'GuardDuty', 'Macie'],
-    hours: 45,
-    prepTime: '~4 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-security-specialty/',
-  },
-  {
-    id: 'ans-c01',
-    slug: 'ans-c01',
-    code: 'ANS-C01',
-    title: 'AWS Certified Advanced Networking – Specialty',
-    level: 'Specialty',
-    status: 'active',
-    description:
-      'Design and implement complex AWS networking architectures including hybrid connectivity.',
-    topics: ['VPC', 'Direct Connect', 'Transit Gateway'],
-    hours: 45,
-    prepTime: '~4 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-advanced-networking-specialty/',
-  },
-  {
-    id: 'aif-c01',
-    slug: 'aif-c01',
-    code: 'AIF-C01',
-    title: 'AWS Certified AI Practitioner',
-    level: 'Foundational',
-    status: 'active',
-    description: 'Understand generative AI, responsible AI, and core ML concepts on AWS.',
-    topics: ['Generative AI', 'Responsible AI', 'ML Basics'],
-    hours: 15,
-    prepTime: '~6 weeks',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-ai-practitioner/',
-  },
-  {
-    id: 'dea-c01',
-    slug: 'dea-c01',
-    code: 'DEA-C01',
-    title: 'AWS Certified Data Engineer – Associate',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Design, build, and maintain data pipelines and data architecture on AWS using services like Glue, Kinesis, and Redshift.',
-    topics: ['Glue', 'Kinesis', 'Redshift', 'Lake Formation'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-data-engineer-associate/',
-  },
-  {
-    id: 'mla-c01',
-    slug: 'mla-c01',
-    code: 'MLA-C01',
-    title: 'AWS Certified Machine Learning Engineer – Associate',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Implement ML solutions on AWS including model deployment, automation, and MLOps practices using SageMaker.',
-    topics: ['SageMaker', 'MLOps', 'Model Deployment', 'Automation'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://aws.amazon.com/certification/certified-machine-learning-engineer-associate/',
-  },
-  {
-    id: 'aip-c01',
-    slug: 'aip-c01',
-    code: 'AIP-C01',
-    title: 'AWS Certified Generative AI Developer – Professional',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Design, build, and optimize generative AI solutions using Amazon Bedrock and AWS AI services.',
-    topics: ['Amazon Bedrock', 'Generative AI', 'RAG', 'Agents'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl:
-      'https://aws.amazon.com/certification/certified-generative-ai-developer-professional/',
-  },
-];
 
 const learningPaths = [
   {
@@ -395,7 +222,7 @@ export default function AWSEducationPage() {
             from Cloud Practitioner through Professional and Specialty levels.
           </p>
           <div className="flex flex-wrap gap-2 mt-4 relative z-10">
-            {['Foundational', 'Associate', 'Professional', 'Specialty'].map((level) => (
+            {['Business', 'Foundational', 'Associate', 'Professional', 'Specialty'].map((level) => (
               <span
                 key={level}
                 className={`px-3 py-1 border text-xs font-bold rounded-full ${LEVEL_META[level].badge}`}
@@ -489,6 +316,7 @@ export default function AWSEducationPage() {
                       >
                         {featuredCert.level}
                       </span>
+                      <CertStatusBadge cert={featuredCert} />
                     </div>
                     <h2 className="text-2xl font-bold text-white mb-1">{featuredCert.title}</h2>
                     <div className="text-sm font-mono text-foreground/50 mb-2">
@@ -588,10 +416,13 @@ export default function AWSEducationPage() {
         {/* ── Browse Certifications Carousel ───────────────────────────── */}
         <section className="mb-12">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-amber-400 text-[24px] material-symbols-outlined">school</span>
-              Browse Certifications
-            </h3>
+            <div>
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <span className="text-amber-400 text-[24px] material-symbols-outlined">school</span>
+                Browse Certifications
+              </h3>
+              <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
+            </div>
           </div>
 
           {/* Filters */}
@@ -631,6 +462,7 @@ export default function AWSEducationPage() {
                       </span>
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
+                    <CertStatusBadge cert={cert} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-amber-300 transition-colors flex-1">
                       {cert.title}

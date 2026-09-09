@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
+import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import CertStatusBadge from '@/components/education/CertStatusBadge';
+import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/gcp/certifications';
+import { deriveCertStatus } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -39,143 +43,6 @@ function getLevelFilterClass(levelFilter, level) {
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────
-
-const certifications = [
-  {
-    id: 'cdl',
-    slug: 'cdl',
-    code: 'CDL',
-    title: 'Google Cloud Digital Leader',
-    level: 'Foundational',
-    status: 'active',
-    description:
-      'Understand how Google Cloud products can support digital transformation and drive business value.',
-    topics: ['Digital Transformation', 'Cloud Value', 'Products'],
-    hours: 10,
-    prepTime: '~4 weeks',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/cloud-digital-leader',
-  },
-  {
-    id: 'ace',
-    slug: 'ace',
-    code: 'ACE',
-    title: 'Associate Cloud Engineer',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Deploy applications, monitor operations, and manage enterprise cloud solutions on Google Cloud.',
-    topics: ['Compute', 'Storage', 'Networking', 'IAM', 'Billing'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/cloud-engineer',
-  },
-  {
-    id: 'pca',
-    slug: 'pca',
-    code: 'PCA',
-    title: 'Professional Cloud Architect',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Design, develop, and manage robust, secure, scalable, highly available, and dynamic solutions on Google Cloud.',
-    topics: ['Architecture', 'GKE', 'Multi-Region', 'Disaster Recovery'],
-    hours: 60,
-    prepTime: '~6 months',
-    featured: true,
-    learnUrl: 'https://cloud.google.com/certification/cloud-architect',
-  },
-  {
-    id: 'pcd',
-    slug: 'pcd',
-    code: 'PCD',
-    title: 'Professional Cloud Developer',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Build and deploy scalable, secure applications using Google Cloud services and developer tooling.',
-    topics: ['App Engine', 'Cloud Run', 'GKE', 'APIs', 'DevOps'],
-    hours: 55,
-    prepTime: '~5 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/cloud-developer',
-  },
-  {
-    id: 'pde',
-    slug: 'pde',
-    code: 'PDE',
-    title: 'Professional Data Engineer',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Design and build data processing systems and create machine learning models using Google Cloud.',
-    topics: ['BigQuery', 'Dataflow', 'Pub/Sub', 'Bigtable', 'ML'],
-    hours: 55,
-    prepTime: '~5 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/data-engineer',
-  },
-  {
-    id: 'pcse',
-    slug: 'pcse',
-    code: 'PCSE',
-    title: 'Professional Cloud Security Engineer',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Configure and manage security across Google Cloud services, including IAM, VPC, and compliance.',
-    topics: ['IAM', 'VPC', 'Encryption', 'Compliance', 'BeyondCorp'],
-    hours: 50,
-    prepTime: '~5 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/cloud-security-engineer',
-  },
-  {
-    id: 'pcne',
-    slug: 'pcne',
-    code: 'PCNE',
-    title: 'Professional Cloud Network Engineer',
-    level: 'Professional',
-    status: 'active',
-    description: 'Implement and manage networking infrastructure in Google Cloud environments.',
-    topics: ['VPC', 'Load Balancing', 'Cloud CDN', 'Interconnect'],
-    hours: 45,
-    prepTime: '~4 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/cloud-network-engineer',
-  },
-  {
-    id: 'pmle',
-    slug: 'pmle',
-    code: 'PMLE',
-    title: 'Professional Machine Learning Engineer',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Design, build, and productionize ML models using Vertex AI and MLOps on Google Cloud.',
-    topics: ['Vertex AI', 'TFX', 'MLOps', 'Feature Store', 'Pipelines'],
-    hours: 55,
-    prepTime: '~5 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/machine-learning-engineer',
-  },
-  {
-    id: 'pgd',
-    slug: 'pgd',
-    code: 'PGD',
-    title: 'Professional Google Workspace Administrator',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Manage Google Workspace environments including security, devices, and collaboration apps.',
-    topics: ['Admin Console', 'Security', 'Devices', 'Apps'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://cloud.google.com/certification/workspace-administrator',
-  },
-];
 
 const learningPaths = [
   {
@@ -298,7 +165,7 @@ export default function GCPEducationPage() {
 
   const filteredCerts = certifications.filter((c) => {
     const levelOk = levelFilter === 'All' || c.level === levelFilter;
-    const statusOk = statusFilter === 'All' || c.status === statusFilter.toLowerCase();
+    const statusOk = statusFilter === 'All' || deriveCertStatus(c) === statusFilter.toLowerCase();
     return levelOk && statusOk;
   });
 
@@ -430,10 +297,13 @@ export default function GCPEducationPage() {
         {/* ── Browse Certifications Carousel ───────────────────────────── */}
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-primary text-[24px] material-symbols-outlined">school</span>
-              Browse Certifications
-            </h3>
+            <div>
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <span className="text-primary text-[24px] material-symbols-outlined">school</span>
+                Browse Certifications
+              </h3>
+              <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
+            </div>
           </div>
 
           {/* Filters */}
@@ -489,6 +359,7 @@ export default function GCPEducationPage() {
                       </span>
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
+                    <CertStatusBadge cert={cert} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-primary transition-colors flex-1">
                       {cert.title}

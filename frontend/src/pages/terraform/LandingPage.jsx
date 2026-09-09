@@ -70,7 +70,7 @@ const QUICK_LINKS = [
 
 const LEARNING = [
   {
-    code: 'TA-003',
+    code: 'TA-004',
     title: 'Terraform Associate',
     difficulty: 'Associate',
     duration: '6 weeks',

@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
+import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import CertStatusBadge from '@/components/education/CertStatusBadge';
+import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/terraform/certifications';
+import { deriveCertStatus } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -10,15 +14,15 @@ const LEVEL_META = {
     dot: 'bg-emerald-500',
     label: 'Associate',
   },
-  Professional: {
+  Advanced: {
     badge: 'bg-violet-500/20 border-violet-500/40 text-violet-300',
     accent: 'border-l-violet-500',
     dot: 'bg-violet-500',
-    label: 'Professional',
+    label: 'Advanced',
   },
 };
 
-const FILTER_LEVELS = ['All', 'Associate', 'Professional'];
+const FILTER_LEVELS = ['All', 'Associate', 'Advanced'];
 const STATUS_FILTER = ['All', 'Active'];
 const VISIBLE_COUNT = 4;
 
@@ -34,55 +38,10 @@ function getLevelFilterClass(levelFilter, level) {
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
-const certifications = [
-  {
-    id: 'ta-003',
-    slug: 'ta-003',
-    code: 'TA-003',
-    title: 'HashiCorp Certified: Terraform Associate (003)',
-    level: 'Associate',
-    status: 'active',
-    description: 'Validate knowledge of infrastructure as code concepts and Terraform using HCL, state, providers, modules, variables, and workspaces.',
-    topics: ['HCL', 'State', 'Providers', 'Modules', 'Variables', 'Workspaces'],
-    hours: 25,
-    prepTime: '~6 weeks',
-    featured: true,
-    learnUrl: 'https://developer.hashicorp.com/certifications/infrastructure-automation',
-  },
-  {
-    id: 'tv-003',
-    slug: 'tv-003',
-    code: 'TV-003',
-    title: 'HashiCorp Certified: Vault Associate (003)',
-    level: 'Associate',
-    status: 'active',
-    description: 'Demonstrate knowledge of HashiCorp Vault for secrets management, auth methods, policies, and dynamic secret generation.',
-    topics: ['Secrets Management', 'Auth Methods', 'Policies', 'Dynamic Secrets'],
-    hours: 25,
-    prepTime: '~6 weeks',
-    featured: false,
-    learnUrl: 'https://developer.hashicorp.com/certifications/security-automation',
-  },
-  {
-    id: 'tc-002',
-    slug: 'tc-002',
-    code: 'TC-002',
-    title: 'HashiCorp Certified: Consul Associate (002)',
-    level: 'Associate',
-    status: 'active',
-    description: 'Validate knowledge of HashiCorp Consul for service mesh, KV store, health checks, and ACL-based access control.',
-    topics: ['Service Mesh', 'KV Store', 'Health Checks', 'ACLs'],
-    hours: 20,
-    prepTime: '~5 weeks',
-    featured: false,
-    learnUrl: 'https://developer.hashicorp.com/certifications/networking-automation',
-  },
-];
-
 const learningPaths = [
   {
     id: 0,
-    certCode: 'TA-003',
+    certCode: 'TA-004',
     title: 'Terraform Associate Path',
     level: 'Intermediate',
     hours: 25,
@@ -98,7 +57,7 @@ const learningPaths = [
   },
   {
     id: 1,
-    certCode: 'TA-003',
+    certCode: 'TA-004',
     title: 'Multi-Cloud IaC Path',
     level: 'Advanced',
     hours: 40,
@@ -191,7 +150,7 @@ export default function TerraformEducationPage() {
 
   const filteredCerts = certifications.filter((c) => {
     const levelOk = levelFilter === 'All' || c.level === levelFilter;
-    const statusOk = statusFilter === 'All' || c.status === statusFilter.toLowerCase();
+    const statusOk = statusFilter === 'All' || deriveCertStatus(c) === statusFilter.toLowerCase();
     return levelOk && statusOk;
   });
 
@@ -218,7 +177,7 @@ export default function TerraformEducationPage() {
         <title>Terraform &amp; HashiCorp Certifications | HCW</title>
         <meta
           name="description"
-          content="HashiCorp Terraform, Vault, and Consul certification prep, learning paths, and IaC resources."
+          content="HashiCorp Terraform and Vault certification prep — Associate and Advanced — with learning paths and IaC resources."
         />
         <meta property="og:title" content="Terraform & HashiCorp Certifications" />
         <meta
@@ -238,10 +197,10 @@ export default function TerraformEducationPage() {
           </h1>
           <p className="text-base sm:text-lg text-foreground max-w-3xl relative z-10">
             Master infrastructure as code and secrets management with HashiCorp certifications
-            covering Terraform, Vault, and Consul.
+            for Terraform and Vault — the Associate exams and the lab-based Advanced credentials.
           </p>
           <div className="flex flex-wrap gap-2 mt-4 relative z-10">
-            {['Associate', 'Professional'].map((level) => (
+            {['Associate', 'Advanced'].map((level) => (
               <span
                 key={level}
                 className={`px-3 py-1 border text-xs font-bold rounded-full ${LEVEL_META[level].badge}`}
@@ -277,7 +236,7 @@ export default function TerraformEducationPage() {
                 </div>
                 <p className="text-sm text-foreground mb-3">
                   The official HashiCorp developer portal — tutorials, documentation, and
-                  certification prep for Terraform, Vault, Consul, and all HashiCorp tools.
+                  certification prep for Terraform, Vault, and every HashiCorp tool.
                 </p>
                 <div className="flex items-center gap-1.5 text-purple-400 text-sm font-semibold">
                   <span className="material-symbols-outlined text-[16px]">open_in_new</span>
@@ -308,7 +267,7 @@ export default function TerraformEducationPage() {
                 </div>
                 <p className="text-sm text-foreground mb-3">
                   View all HashiCorp certifications, register for exams, review exam objectives,
-                  and access study guides for Terraform, Vault, and Consul.
+                  and access study guides for the Terraform and Vault credentials.
                 </p>
                 <div className="flex items-center gap-1.5 text-violet-400 text-sm font-semibold">
                   <span className="material-symbols-outlined text-[16px]">open_in_new</span>
@@ -322,10 +281,13 @@ export default function TerraformEducationPage() {
         {/* ── Browse Certifications Carousel ───────────────────────────── */}
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-purple-400 text-[24px] material-symbols-outlined">school</span>
-              Browse Certifications
-            </h3>
+            <div>
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <span className="text-purple-400 text-[24px] material-symbols-outlined">school</span>
+                Browse Certifications
+              </h3>
+              <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
+            </div>
           </div>
 
           {/* Filters */}
@@ -379,6 +341,7 @@ export default function TerraformEducationPage() {
                       </span>
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
+                    <CertStatusBadge cert={cert} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-purple-300 transition-colors flex-1">
                       {cert.title}
