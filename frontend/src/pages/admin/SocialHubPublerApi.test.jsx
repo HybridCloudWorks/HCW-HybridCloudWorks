@@ -151,15 +151,38 @@ describe('deleting a post (#463 item 2)', () => {
     });
   });
 
-  it('REFUSES to build the call without an id', async () => {
+  it('REFUSES to build the call without an id, whitespace included', async () => {
     // `DELETE /posts` with no `post_ids` is documented as "delete every
     // non-published post in the workspace". An id that goes missing must fail
-    // here, not interpolate `undefined` into a path and hope.
-    for (const id of [undefined, null, '']) {
+    // here, not interpolate `undefined` into a path and hope — and `String('  ')`
+    // is truthy, so a whitespace id used to sail past this guard and go out as
+    // `post_ids[]=%20%20`.
+    for (const id of [undefined, null, '', '   ', '\t\n']) {
       await expect(publerDeletePost(id)).rejects.toThrow(/without an id/);
     }
     expect(postJSON).not.toHaveBeenCalled();
   });
+
+  it('trims an id that has space around it rather than sending the spaces', async () => {
+    postJSON.mockResolvedValue(ok({ deleted_ids: ['p1'] }));
+    await publerDeletePost('  p1  ');
+    expect(postJSON.mock.calls[0][1].path).toBe('/posts?post_ids[]=p1');
+  });
+
+  it.each([
+    ['a string', 'p1'],
+    ['an object', { p1: true }],
+    ['a number', 7],
+  ])(
+    'treats deleted_ids arriving as %s as nothing deleted, rather than throwing a TypeError',
+    async (_label, value) => {
+      // `(value || []).map` reaches `.map` on anything non-falsy, so the
+      // operator would have seen "x.map is not a function" from inside a delete
+      // that may well have succeeded.
+      postJSON.mockResolvedValue(ok({ deleted_ids: value }));
+      await expect(publerDeletePost('p1')).rejects.toThrow(/did not report this post as deleted/);
+    }
+  );
 
   it('treats an id missing from deleted_ids as not deleted, despite the 200', async () => {
     postJSON.mockResolvedValue(ok({ deleted_ids: [] }));

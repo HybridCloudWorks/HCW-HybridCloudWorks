@@ -338,14 +338,25 @@ export const publerScheduleBulk = (bulk, { immediate = false } = {}) =>
  * name with nothing on the calendar to show for it.
  */
 export async function publerDeletePost(postId) {
-  const id = String(postId ?? '');
+  // Trimmed before the emptiness test, not after. `String('  ')` is truthy, so
+  // an id that is only whitespace passed the guard and went out as
+  // `post_ids[]=%20%20` — a request Publer answers for a post that does not
+  // exist, from a caller that meant to send nothing. `deletePosts` in
+  // `lib/timers/publer-sync.js` has always trimmed; this half had not, and the
+  // two must agree because they build the same call.
+  const id = String(postId ?? '').trim();
   if (!id) throw new Error('Cannot delete a Publer post without an id');
   const res = await publerFetch(`/posts?post_ids[]=${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
   if (res?.ok === false)
     throw new Error(`Publer refused the delete — ${describePublerEnvelope(res)}`);
-  const deleted = (res?.data?.deleted_ids || []).map(String);
+  // `Array.isArray`, not `|| []`. A `deleted_ids` that came back as a string or
+  // an object is falsy-free and would reach `.map`, throwing a TypeError from
+  // inside a delete that may well have succeeded — the operator would see
+  // "x.map is not a function" where the honest answer is "Publer did not say
+  // this post was deleted".
+  const deleted = Array.isArray(res?.data?.deleted_ids) ? res.data.deleted_ids.map(String) : [];
   if (!deleted.includes(id)) {
     throw new Error('Publer did not report this post as deleted — check the Publer queue');
   }
