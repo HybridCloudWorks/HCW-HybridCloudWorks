@@ -60,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read # checkout only — this job must never be able to push
+    outputs:
+      changed: ${{ steps.changed.outputs.changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -117,6 +119,10 @@ jobs:
   commit:
     name: Open a pull request if the catalogue changed
     needs: update
+    # Runs only when the refresh job reported a change. The upload above is
+    # conditional, so without this gate an unchanged catalogue fails here at
+    # "Artifact not found" instead of ending quietly (run 34408439025).
+    if: needs.update.outputs.changed == 'true'
     runs-on: ubuntu-latest
     # `contents: read` for the checkout, and NOTHING ELSE. The writing is done
     # by a GitHub App installation token, and this job cannot push to main
