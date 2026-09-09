@@ -62,8 +62,9 @@ const PROVIDER_LABEL = { elevenlabs: 'ElevenLabs', gemini: 'Gemini', azure: 'Azu
  * The progress line for a run that has just been accepted.
  *
  * The server's 202 says what the run is expected to spend on speech BEFORE it
- * starts (ADR 0029 §2a). It is a ceiling — every episode priced at the most
- * characters a script may hold — so it reads "up to". No provider means the
+ * starts (ADR 0029 §2a). It is a ceiling — every episode priced at
+ * `MAX_SCRIPT_BYTES`, the most UTF-8 bytes a script may hold, which is never
+ * fewer than its billed characters — so it reads "up to". No provider means the
  * run will publish transcripts with no audio, which is a normal state here
  * and is said in those words rather than shown as a zero.
  *
