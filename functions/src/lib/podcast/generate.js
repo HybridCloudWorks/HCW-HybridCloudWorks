@@ -105,11 +105,16 @@ export function resolvePipelineDeps(deps = {}, { writeScript = generateArticleSc
 /**
  * Synthesise and upload, or explain why there is no audio. Never throws —
  * see the module header.
+ *
+ * Always the `podcast` product: ElevenLabs, and only ElevenLabs
+ * (speech/index.js, ADR 0029 §2b). With no `ELEVENLABS_API_KEY` the switch
+ * reports itself not configured rather than reaching for Gemini, and that
+ * sentence is the draft's `audioError`.
  */
 async function renderAudio({ script, source, storage, env, synthesize, uploadAudio }) {
   let rendered;
   try {
-    rendered = await synthesize({ dialogue: script.dialogue, env });
+    rendered = await synthesize({ product: 'podcast', dialogue: script.dialogue, env });
   } catch (err) {
     return { error: err?.message || String(err) };
   }

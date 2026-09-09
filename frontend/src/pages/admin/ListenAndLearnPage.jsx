@@ -29,9 +29,11 @@ import {
   VolumeX,
 } from 'lucide-react';
 import {
+  GEMINI_TTS_MODEL_TIERS,
   SUPPORTED_PLATFORMS,
   fetchSetForReview,
   fetchSets,
+  fetchSpeechSettings,
   generateEpisodes,
   reviewEpisode,
 } from '@/lib/listenAndLearn';
@@ -56,21 +58,47 @@ const formatSize = (bytes) => (bytes > 0 ? `${(bytes / (1024 * 1024)).toFixed(1)
 /** Sub-cent runs are normal here, so two decimals would read as free. */
 const formatCost = (usd) => (usd >= 0.01 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`);
 
-const PROVIDER_LABEL = { elevenlabs: 'ElevenLabs', gemini: 'Gemini', azure: 'Azure AI Speech' };
+/**
+ * Listen & Learn is Gemini TTS with Azure AI Speech as the fallback, never
+ * ElevenLabs (owner rule 2026-09-09, ADR 0029 §2b); the server enforces it
+ * per product, so a 202 cannot name ElevenLabs here. Anything unlisted is
+ * shown as sent.
+ */
+const PROVIDER_LABEL = { gemini: 'Gemini', azure: 'Azure AI Speech' };
+
+/** "Best (gemini-3.1-flash-tts-preview)", or the bare id for a model not in the pair. */
+const modelLabel = (model) =>
+  GEMINI_TTS_MODEL_TIERS[model] ? `${GEMINI_TTS_MODEL_TIERS[model]} (${model})` : model;
+
+/**
+ * "Gemini Best (gemini-3.1-flash-tts-preview)", or — for a run that named
+ * no model — "Gemini (the stored default applies; see Platform settings)".
+ * The 202 cannot know the stored default, so it says so and prices the
+ * dearer model rather than guessing; the toast repeats its sentence.
+ */
+function voiceLabel(speech) {
+  const name = PROVIDER_LABEL[speech.provider] || speech.provider;
+  if (speech.model) return `${name} ${modelLabel(speech.model)}`;
+  if (speech.modelSource === 'stored') {
+    return `${name} (${speech.modelNote || 'the stored default model applies'})`;
+  }
+  return name;
+}
 
 /**
  * The progress line for a run that has just been accepted.
  *
  * The server's 202 says what the run is expected to spend on speech BEFORE it
  * starts (ADR 0029 §2a). It is a ceiling — every episode priced at
- * `MAX_SCRIPT_BYTES`, the most UTF-8 bytes a script may hold, which is never
- * fewer than its billed characters — so it reads "up to". No provider means the
- * run will publish transcripts with no audio; the server says which of the two
- * causes that is, because they call for different fixes — seeding a key, or
+ * `MAX_SCRIPT_BYTES`, the most UTF-8 bytes a script may hold — so it reads
+ * "up to", and it names the Gemini model the run will read with, because the
+ * two on offer differ by a factor of two. No provider means the run will
+ * publish transcripts with no audio; the server says which of the two causes
+ * that is, because they call for different fixes — seeding a key, or
  * correcting `LISTEN_AND_LEARN_TTS_PROVIDER` — and a 202 from an older server
  * carries no reason, so the wording without one covers both.
  *
- * @param {{provider?: string|null, reason?: string|null, estimatedCostUsd?: number|null, episodes?: number, perEpisodeUsd?: number|null}|null|undefined} speech
+ * @param {{provider?: string|null, model?: string|null, reason?: string|null, estimatedCostUsd?: number|null, episodes?: number, perEpisodeUsd?: number|null}|null|undefined} speech
  */
 export function queuedMessage(speech) {
   if (!speech) return 'Queued…';
@@ -81,13 +109,54 @@ export function queuedMessage(speech) {
       return 'Queued — no speech provider is configured, so episodes will have transcripts only';
     return 'Queued — no usable speech provider (none configured, or the pinned one is not), so episodes will have transcripts only';
   }
-  const name = PROVIDER_LABEL[speech.provider] || speech.provider;
-  if (typeof speech.estimatedCostUsd !== 'number') return `Queued — speech by ${name}`;
+  const voice = voiceLabel(speech);
+  if (typeof speech.estimatedCostUsd !== 'number') return `Queued — speech by ${voice}`;
   const perEpisode =
     typeof speech.perEpisodeUsd === 'number' && speech.episodes
       ? ` (${speech.episodes} episodes × ${formatCost(speech.perEpisodeUsd)})`
       : '';
-  return `Queued — speech by ${name}, up to ${formatCost(speech.estimatedCostUsd)}${perEpisode}`;
+  return `Queued — speech by ${voice}, up to ${formatCost(speech.estimatedCostUsd)}${perEpisode}`;
+}
+
+/**
+ * The owner's button, per run: Best (3.1) or Economy (2.5), defaulting to
+ * the stored choice on the Platform settings page. The labels and the
+ * per-episode ceiling come from the server, which prices them from the same
+ * table the 202 uses; if that load failed, the two ids are still offered by
+ * their short names. "Stored default" is always on the list — it means
+ * "send no model, let the stored default read" — so a per-run override can
+ * be undone without a reload (Copilot on #462).
+ */
+export function VoiceModelField({ value, options, onChange, disabled }) {
+  const choices = options?.length
+    ? options
+    : Object.entries(GEMINI_TTS_MODEL_TIERS).map(([id, tier]) => ({ id, label: tier }));
+  return (
+    <label className="text-xs font-medium space-y-1 block">
+      <span>Voice model</span>
+      <select
+        aria-label="Voice model"
+        className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+        value={value || ''}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">Stored default (set on Platform settings)</option>
+        {choices.map((choice) => (
+          <option key={choice.id} value={choice.id}>
+            {choice.label}
+            {typeof choice.perEpisodeUsd === 'number'
+              ? ` · up to ${formatCost(choice.perEpisodeUsd)} an episode`
+              : ''}
+          </option>
+        ))}
+      </select>
+      <span className="block font-normal text-[11px] text-muted-foreground">
+        Rule of thumb — newer certifications: Best; older ones: Economy. The default is set on
+        Platform settings; this choice applies to this run only.
+      </span>
+    </label>
+  );
 }
 
 function StatusBadge({ status }) {
@@ -245,7 +314,27 @@ export default function ListenAndLearnPage() {
     examCode: '',
     studyGuideUrl: '',
     certTitle: '',
+    ttsModel: '',
   });
+  const [speechOptions, setSpeechOptions] = useState([]);
+
+  // The stored model default and the priced choices, best effort: a failed
+  // load leaves the field on "Stored default", which is what the server
+  // applies to a run that names no model, so nothing is lost but the price.
+  useEffect(() => {
+    if (!ready) return undefined;
+    let cancelled = false;
+    fetchSpeechSettings()
+      .then(({ geminiModel, options }) => {
+        if (cancelled) return;
+        setSpeechOptions(options);
+        setForm((f) => (f.ttsModel || !geminiModel ? f : { ...f, ttsModel: geminiModel }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
 
   const loadSets = useCallback(async () => {
     try {
@@ -322,6 +411,9 @@ export default function ListenAndLearnPage() {
     try {
       const job = await generateEpisodes({
         ...form,
+        // "Stored default" is no model at all: the field is dropped, not sent
+        // blank, so the payload carries no ttsModel and the stored default reads.
+        ttsModel: form.ttsModel || undefined,
         // The expected speech spend arrives with the 202 and is shown then —
         // before the run starts is when it is worth knowing.
         onAccepted: (accepted) => setProgress(queuedMessage(accepted?.speech)),
@@ -425,6 +517,12 @@ export default function ListenAndLearnPage() {
                 placeholder="Azure Administrator Associate"
               />
             </label>
+            <VoiceModelField
+              value={form.ttsModel}
+              options={speechOptions}
+              disabled={generating}
+              onChange={(ttsModel) => setForm((f) => ({ ...f, ttsModel }))}
+            />
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={generating}>
                 {generating ? (
@@ -439,10 +537,9 @@ export default function ListenAndLearnPage() {
             <p className="text-[11px] text-muted-foreground">
               A run takes several minutes and saves each episode as it completes, so a timeout still
               leaves finished episodes behind. Re-running an exam code replaces its episodes and
-              clears their approval. Each run bills the configured speech provider — ElevenLabs at
-              about $0.10 per 1,000 characters, roughly $4 a certification — and the expected spend
-              is shown here as soon as the run is accepted; the actual spend is logged to the AI
-              Engine usage tab.
+              clears their approval. Each run is read by Gemini TTS on the chosen voice model (never
+              ElevenLabs, which is the podcast voice) and the expected spend is shown here as soon
+              as the run is accepted; the actual spend is logged to the AI Engine usage tab.
             </p>
           </form>
         </CardContent>

@@ -12,6 +12,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import PlatformSettingsPage, {
   DefaultCoversCard,
   HERO_PROVIDERS,
+  ListenAndLearnSpeechCard,
   PODCAST_PROVIDERS,
   PodcastFeedsCard,
   SocialAutopostCard,
@@ -19,6 +20,19 @@ import PlatformSettingsPage, {
   isAcceptableHeroUrl,
   settingRoute,
 } from './PlatformSettingsPage';
+
+const BEST = 'gemini-3.1-flash-tts-preview';
+const ECONOMY = 'gemini-2.5-flash-preview-tts';
+/** What the server offers, priced (functions/src/lib/listen-and-learn/speech-settings.js). */
+const SPEECH_OPTIONS = [
+  {
+    id: BEST,
+    tier: 'best',
+    label: 'Best — newest voice, about twice the cost',
+    perEpisodeUsd: 0.44,
+  },
+  { id: ECONOMY, tier: 'economy', label: 'Economy — cheaper', perEpisodeUsd: 0.22 },
+];
 
 // The Radix Switch measures its thumb with ResizeObserver, which jsdom lacks.
 if (typeof globalThis.ResizeObserver === 'undefined') {
@@ -46,9 +60,15 @@ const empty = {
   'default-heroes': { heroes: {} },
   'social-autopost': { enabled: false, accountIds: [], scheduleDelayMinutes: 60 },
   'podcast-feeds': { feeds: [] },
+  // Nothing stored shows the module default selected — that is what runs.
+  'listen-and-learn-speech': { geminiModel: BEST },
 };
 
 const settingFor = (route) => route.replace('cms/platform-settings/', '');
+
+/** The one setting that is a choice carries its options on GET and PUT. */
+const optionsFor = (setting) =>
+  setting === 'listen-and-learn-speech' ? { options: SPEECH_OPTIONS } : {};
 
 const meta = { exists: false, stored: null, updatedAt: null, problem: null };
 
@@ -60,6 +80,7 @@ beforeEach(() => {
     exists: false,
     stored: null,
     updatedAt: null,
+    ...optionsFor(settingFor(route)),
   }));
   sendJSON.mockReset().mockImplementation(async (route, _method, body) => ({
     success: true,
@@ -68,6 +89,7 @@ beforeEach(() => {
     exists: true,
     stored: 'valid',
     updatedAt: '2026-09-07T12:00:00.000Z',
+    ...optionsFor(settingFor(route)),
   }));
   // The proxy envelope for an unseeded key (rest-proxy.js), not a bare array.
   postJSON.mockReset().mockResolvedValue({ ok: false, code: 'INTEGRATION_NOT_CONFIGURED' });
@@ -391,6 +413,49 @@ describe('PodcastFeedsCard', () => {
 // tests moved with it to src/lib/publerAccounts.test.js. What stays here is
 // what this page does with the result.
 
+describe('ListenAndLearnSpeechCard', () => {
+  it('offers the two priced choices as radios with the owner’s labels, selecting the stored one', () => {
+    const onChange = vi.fn();
+    render(
+      <ListenAndLearnSpeechCard
+        value={{ geminiModel: BEST }}
+        options={SPEECH_OPTIONS}
+        meta={meta}
+        saving={false}
+        onChange={onChange}
+        onSave={vi.fn()}
+      />
+    );
+    const best = screen.getByLabelText(/Best — newest voice, about twice the cost/);
+    const economy = screen.getByLabelText(/Economy — cheaper/);
+    expect(best.checked).toBe(true);
+    expect(economy.checked).toBe(false);
+    expect(screen.getByText(/up to \$0\.44 an episode/)).toBeTruthy();
+    expect(screen.getByText(/up to \$0\.22 an episode/)).toBeTruthy();
+    expect(screen.getByText(/newer certifications: Best; older ones: Economy/)).toBeTruthy();
+    // ElevenLabs is named only to say it is never used here.
+    expect(screen.getByText(/ElevenLabs is the podcast voice and is never used here/)).toBeTruthy();
+
+    fireEvent.click(economy);
+    expect(onChange).toHaveBeenCalledWith({ geminiModel: ECONOMY });
+  });
+
+  it('says so, rather than rendering nothing, when the server offered no choices', () => {
+    render(
+      <ListenAndLearnSpeechCard
+        value={{ geminiModel: ECONOMY }}
+        options={[]}
+        meta={meta}
+        saving={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/The server offered no choices/)).toBeTruthy();
+    expect(screen.getByText(ECONOMY)).toBeTruthy();
+  });
+});
+
 describe('the page', () => {
   it('offers the accounts a configured Publer returns inside the proxy envelope', async () => {
     // The regression: the envelope is { ok, status, data }, and treating it as
@@ -432,15 +497,34 @@ describe('the page', () => {
     expect(screen.getByRole('button', { name: /Add account by id/ })).toBeTruthy();
   });
 
-  it('loads all three settings once auth is ready and asks Publer for accounts', async () => {
+  it('loads all four settings once auth is ready and asks Publer for accounts', async () => {
     render(<PlatformSettingsPage />);
     await waitFor(() => expect(screen.getByText('Podcast feeds')).toBeTruthy());
     expect(getJSON).toHaveBeenCalledWith(settingRoute('default-heroes'));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('social-autopost'));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('podcast-feeds'));
+    expect(getJSON).toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'));
     expect(postJSON).toHaveBeenCalledWith('publerProxy', { path: '/accounts', method: 'GET' });
     expect(screen.getByText('Default covers')).toBeTruthy();
     expect(screen.getByText('Social autoposting')).toBeTruthy();
+    expect(screen.getByText('Listen & Learn voice')).toBeTruthy();
+  });
+
+  it('PUTs the chosen Gemini model to the listen-and-learn-speech route, with the options from GET', async () => {
+    render(<PlatformSettingsPage />);
+    const economy = await screen.findByLabelText(/Economy — cheaper/);
+    expect(screen.getByLabelText(/Best — newest voice/).checked).toBe(true);
+    fireEvent.click(economy);
+    fireEvent.submit(economy.closest('form'));
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'), 'PUT', {
+        geminiModel: ECONOMY,
+      })
+    );
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Saved' }))
+    );
+    expect(screen.getByLabelText(/Economy — cheaper/).checked).toBe(true);
   });
 
   it('PUTs the bundled defaults to the default-heroes route', async () => {

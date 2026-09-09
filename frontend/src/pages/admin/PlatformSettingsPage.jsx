@@ -1,10 +1,11 @@
 /**
- * Platform settings — three `admin_config` documents that used to need a
- * Cosmos data-plane role and a hand-typed JSON body (#351, #352, #348):
+ * Platform settings — four `admin_config` documents, three of which used to
+ * need a Cosmos data-plane role and a hand-typed JSON body (#351, #352, #348):
  *
- *   Default covers      admin_config/default_heroes   read by ai-cover.js
- *   Social autoposting  admin_config/social_autopost  read by social-caption-trigger.js
- *   Podcast feeds       admin_config/podcast_feeds    read by timers/podcasts.js
+ *   Default covers          admin_config/default_heroes          read by ai-cover.js
+ *   Social autoposting      admin_config/social_autopost         read by social-caption-trigger.js
+ *   Podcast feeds           admin_config/podcast_feeds           read by timers/podcasts.js
+ *   Listen & Learn voice    admin_config/listen_and_learn_speech read by listen-and-learn-jobs.js
  *
  * Each card reads and writes ONE route, `cms/platform-settings/{setting}`,
  * and the server normalizes every save to exactly the shape its consumer
@@ -28,6 +29,7 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import {
   AlertTriangle,
+  Headphones,
   Images,
   Loader2,
   Plus,
@@ -138,11 +140,13 @@ const relativeTime = (iso) => {
 
 /**
  * One setting's load/save cycle. `value` is the working copy the card edits;
- * `meta` is what the server said about the stored document.
+ * `meta` is what the server said about the stored document; `options` is
+ * what the server offers to choose from, where a setting is a choice.
  */
 export function useSetting(name, authReady) {
   const [value, setValue] = useState(null);
   const [meta, setMeta] = useState({ exists: false, stored: null, updatedAt: null, problem: null });
+  const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -161,6 +165,7 @@ export function useSetting(name, authReady) {
           updatedAt: response.updatedAt ?? null,
           problem: response.problem ?? null,
         });
+        if (Array.isArray(response.options)) setOptions(response.options);
         setError(null);
       })
       .catch((err) => {
@@ -186,6 +191,7 @@ export function useSetting(name, authReady) {
           updatedAt: response.updatedAt ?? null,
           problem: null,
         });
+        if (Array.isArray(response.options)) setOptions(response.options);
         toast({ title: 'Saved', description: `${name} is stored.` });
         return true;
       } catch (err) {
@@ -202,7 +208,7 @@ export function useSetting(name, authReady) {
     [name, toast]
   );
 
-  return { value, setValue, meta, loading, saving, error, save };
+  return { value, setValue, meta, options, loading, saving, error, save };
 }
 
 function StoredState({ meta }) {
@@ -619,6 +625,84 @@ export function PodcastFeedsCard({ value, onChange, onSave, saving, meta }) {
   );
 }
 
+// ── Listen & Learn voice ───────────────────────────────────────────────────
+
+/** Sub-cent figures are not what these are; two decimals read right. */
+const formatUsd = (usd) => (typeof usd === 'number' ? `$${usd.toFixed(2)}` : null);
+
+/**
+ * The owner's button: which Gemini TTS model reads a Listen & Learn episode
+ * by default. Two choices, priced by the server from the same table the
+ * generation 202 uses; the generation form can override per run. The rule of
+ * thumb is guidance for the person choosing, not automation.
+ */
+export function ListenAndLearnSpeechCard({ value, options, onChange, onSave, saving, meta }) {
+  const chosen = value?.geminiModel ?? '';
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Headphones className="h-5 w-5" /> Listen &amp; Learn voice
+        </CardTitle>
+        <CardDescription>
+          The Gemini TTS model that reads a study episode unless a run chooses otherwise. Listen
+          &amp; Learn is always Gemini (Azure AI Speech as the fallback); ElevenLabs is the podcast
+          voice and is never used here. Each figure is the most one episode can cost at the script
+          ceiling.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0">
+        <StoredState meta={meta} />
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave();
+          }}
+        >
+          <fieldset className="space-y-2" disabled={saving}>
+            <legend className="text-sm font-medium">Voice model</legend>
+            {(options ?? []).map((option) => (
+              <label
+                key={option.id}
+                htmlFor={`tts-${option.tier}`}
+                className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-input px-3 py-2 text-sm"
+              >
+                <input
+                  id={`tts-${option.tier}`}
+                  type="radio"
+                  name="geminiModel"
+                  value={option.id}
+                  checked={chosen === option.id}
+                  onChange={() => onChange({ geminiModel: option.id })}
+                  className="row-span-2 mt-1"
+                />
+                <span className="font-medium">{option.label}</span>
+                <span className="text-xs text-muted-foreground">
+                  <code>{option.id}</code>
+                  {formatUsd(option.perEpisodeUsd)
+                    ? ` · up to ${formatUsd(option.perEpisodeUsd)} an episode`
+                    : ''}
+                </span>
+              </label>
+            ))}
+            {(options ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                The server offered no choices; the stored value is <code>{chosen || 'unset'}</code>.
+              </p>
+            ) : null}
+          </fieldset>
+          <p className="text-xs text-muted-foreground">
+            Rule of thumb — newer certifications: Best; older ones: Economy. Applied by the person
+            generating, not by the certification&apos;s age.
+          </p>
+          <SaveRow saving={saving} />
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 function SettingSection({ setting, render }) {
@@ -644,6 +728,7 @@ export default function PlatformSettingsPage() {
   const heroes = useSetting('default-heroes', authReady);
   const autopost = useSetting('social-autopost', authReady);
   const podcasts = useSetting('podcast-feeds', authReady);
+  const speech = useSetting('listen-and-learn-speech', authReady);
   const [publerAccounts, setPublerAccounts] = useState([]);
   // 'loading' | 'ready' | 'not_configured' | 'error' — the card says which.
   const [publerStatus, setPublerStatus] = useState('loading');
@@ -724,6 +809,20 @@ export default function PlatformSettingsPage() {
         render={(s) => (
           <PodcastFeedsCard
             value={s.value}
+            meta={s.meta}
+            saving={s.saving}
+            onChange={s.setValue}
+            onSave={() => s.save(s.value)}
+          />
+        )}
+      />
+
+      <SettingSection
+        setting={speech}
+        render={(s) => (
+          <ListenAndLearnSpeechCard
+            value={s.value}
+            options={s.options}
             meta={s.meta}
             saving={s.saving}
             onChange={s.setValue}

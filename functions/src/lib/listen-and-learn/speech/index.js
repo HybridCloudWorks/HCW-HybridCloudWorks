@@ -7,30 +7,40 @@
  * generate.js treats as "publish the transcript, skip the audio" rather than as
  * a failed episode.
  *
- * Preference order, and why (ADR 0029 §2, amended by §2a on 2026-09-08):
+ * Which providers, and in what order, depends on the PRODUCT asking (owner rule
+ * 2026-09-09, ADR 0029 §2b). Until then one global order served every caller,
+ * with ElevenLabs first because its key was present — so the paid podcast voice
+ * read every Listen & Learn episode, and the `LISTEN_AND_LEARN_TTS_PROVIDER`
+ * pin, read for every caller, would have pinned the podcast too. Every entry
+ * point now takes `product` and refuses to guess without one:
  *
- *   1. **ElevenLabs** (`ELEVENLABS_API_KEY`). The owner approved a paid plan
- *      on 2026-09-08 and chose it for its dialogue quality, so when its key is
- *      present it is the provider that runs: it is what is being paid for.
- *      That also means every generation now spends money where the free path
- *      spent none — roughly USD 0.10 per 1,000 characters, about USD 4 per
- *      certification — which is why `estimateSpeechCostUsd` exists and the
- *      figure is stated before a run starts rather than found in the usage
- *      table afterwards.
- *   2. **Gemini** (`GEMINI_API_KEY`). The same key the text side of the site
- *      already uses, so it costs no new service, resource or credential. It
- *      stays as the fallback for a state a paid provider has and a free one
- *      does not: **out of credit**. An ElevenLabs run that fails with
- *      `quota_exceeded` falls through to the next configured provider (unless
- *      a pin says otherwise), because a certification with episodes in a
- *      different voice beats a certification with no audio.
- *   3. **Azure AI Speech** (`AZURE_SPEECH_KEY`). Kept for one concrete
- *      reason: every Gemini TTS model is a *preview* model (`…-preview-tts`,
- *      `…-tts-preview`), and preview endpoints get retired on notice. Azure
- *      Speech is GA. Having the path written and tested is the difference
- *      between a model retirement being a config change and being an outage.
- *      It needs a Cognitive Services resource, which is a spend decision, so
- *      nothing here assumes one exists.
+ *   product          providers, in order    pin setting                     why
+ *   ───────────────  ─────────────────────  ──────────────────────────────  ───────────────────────────────────
+ *   listenAndLearn   gemini, azure          LISTEN_AND_LEARN_TTS_PROVIDER   Gemini TTS is the study-podcast
+ *                                                                            voice, generated on demand and
+ *                                                                            stored as MP3, on the key the text
+ *                                                                            side already holds. Azure AI Speech
+ *                                                                            is the GA fallback for the day the
+ *                                                                            preview Gemini TTS models retire.
+ *   podcast          elevenlabs             PODCAST_TTS_PROVIDER            ElevenLabs is ONLY the podcast
+ *                                                                            voice — article and Plaud
+ *                                                                            transcripts to RSS.com. Never for
+ *                                                                            Listen & Learn.
+ *
+ * A pin is an instruction, not a preference: it must name one of ITS product's
+ * providers, and a pinned provider that is not configured FAILS rather than
+ * falling through, because falling through would silently produce episodes in
+ * a voice nobody chose. A pin naming a provider from the other product fails
+ * with the rule above in the message. Nothing falls through between products
+ * either: the podcast product with no ElevenLabs key is "not configured" — a
+ * saved draft with `audioError` naming `ELEVENLABS_API_KEY` — not a Gemini
+ * reading. The out-of-credit fallthrough #447 added (ElevenLabs → Gemini) is
+ * gone with it: its only use was the cross-product one this rule forbids.
+ *
+ * The Gemini model is a choice, not a fixed default: `synthesizeDialogue` and
+ * `estimateSpeechCostUsd` take `model`, and the job resolves it per run →
+ * stored setting → `LISTEN_AND_LEARN_TTS_MODEL` → the module default (see
+ * ../speech-settings.js).
  *
  * All three return MP3, so everything downstream — the blob path, the stored
  * `contentType`, the `<audio>` element — is identical whichever ran. That is
@@ -58,6 +68,9 @@ export { encodePcmToMp3, MP3_BITRATE_KBPS } from './mp3.js';
 /** Every provider returns this, so the caller never branches on which ran. */
 export const CONTENT_TYPE = 'audio/mpeg';
 
+/** The setting gemini.js reads its model from; `model` overrides it per call. */
+export const GEMINI_MODEL_SETTING = 'LISTEN_AND_LEARN_TTS_MODEL';
+
 export class SpeechError extends Error {
   constructor(message, { status = null, provider = null } = {}) {
     super(message);
@@ -69,11 +82,7 @@ export class SpeechError extends Error {
 
 /** Thrown when no key is configured, so a caller can degrade instead of fail. */
 export class SpeechNotConfiguredError extends SpeechError {
-  constructor(
-    // Each provider's REAL requirement, matching PROVIDERS below: Azure needs
-    // somewhere to send its key, so the key alone does not configure it.
-    message = 'No speech provider is configured — set ELEVENLABS_API_KEY, or GEMINI_API_KEY, or AZURE_SPEECH_KEY together with AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT'
-  ) {
+  constructor(message = 'No speech provider is configured') {
     super(message);
     this.name = 'SpeechNotConfiguredError';
   }
@@ -92,67 +101,128 @@ export function readSetting(env, name) {
 }
 
 const PROVIDERS = [
-  { name: 'elevenlabs', keys: ['ELEVENLABS_API_KEY'], synthesize: synthesizeWithElevenLabs },
-  { name: 'gemini', keys: ['GEMINI_API_KEY'], synthesize: synthesizeWithGemini },
+  {
+    name: 'elevenlabs',
+    keys: ['ELEVENLABS_API_KEY'],
+    requirement: 'ELEVENLABS_API_KEY',
+    synthesize: synthesizeWithElevenLabs,
+  },
+  {
+    name: 'gemini',
+    keys: ['GEMINI_API_KEY'],
+    requirement: 'GEMINI_API_KEY',
+    synthesize: synthesizeWithGemini,
+  },
   {
     name: 'azure',
     // Azure needs a key AND somewhere to send it; a key with no region is not
     // a usable configuration, so it does not count as one.
     keys: ['AZURE_SPEECH_KEY'],
     extra: ['AZURE_SPEECH_REGION', 'AZURE_SPEECH_ENDPOINT'],
+    requirement: 'AZURE_SPEECH_KEY together with AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT',
     synthesize: synthesizeWithAzure,
   },
 ];
 
-/** The providers with a usable configuration, in preference order. */
-function configuredProviders(env) {
-  return PROVIDERS.filter(
-    (p) =>
-      p.keys.every((k) => readSetting(env, k)) &&
-      (!p.extra || p.extra.some((k) => readSetting(env, k)))
-  );
+const providerByName = (name) => PROVIDERS.find((p) => p.name === name);
+
+/**
+ * Product → the providers it may use, in preference order. The table in the
+ * header, as code. Frozen: the rule is the owner's, not a caller's to extend.
+ */
+export const SPEECH_PRODUCTS = Object.freeze({
+  listenAndLearn: Object.freeze(['gemini', 'azure']),
+  podcast: Object.freeze(['elevenlabs']),
+});
+
+/** The pin setting each product reads — and the only one it reads. */
+export const SPEECH_PIN_SETTINGS = Object.freeze({
+  listenAndLearn: 'LISTEN_AND_LEARN_TTS_PROVIDER',
+  podcast: 'PODCAST_TTS_PROVIDER',
+});
+
+const PRODUCT_LABELS = Object.freeze({
+  listenAndLearn: 'Listen & Learn',
+  podcast: 'podcast',
+});
+
+/** The rule a cross-product pin is refused with, so the message teaches it. */
+const PRODUCT_RULE =
+  'ElevenLabs is only the podcast voice; Listen & Learn audio is Gemini TTS, with Azure AI Speech as the fallback (ADR 0029 §2b)';
+
+/**
+ * The product a caller named, or a plain-sentence error. Own-key lookup, so
+ * `constructor` and `__proto__` are unknown products rather than functions.
+ */
+function resolveProduct(product) {
+  const key = String(product ?? '');
+  if (product === undefined || product === null || !Object.hasOwn(SPEECH_PRODUCTS, key)) {
+    const known = Object.keys(SPEECH_PRODUCTS).join(', ');
+    throw new Error(
+      product === undefined || product === null
+        ? `Speech needs a product to choose a provider for (one of ${known}); none was given`
+        : `Speech was asked for on behalf of unknown product ${JSON.stringify(product)}; known products are ${known}`
+    );
+  }
+  return key;
+}
+
+const isConfigured = (env) => (p) =>
+  p.keys.every((k) => readSetting(env, k)) && (!p.extra || p.extra.some((k) => readSetting(env, k)));
+
+/** The product's providers with a usable configuration, in its preference order. */
+function configuredProviders(env, product) {
+  return SPEECH_PRODUCTS[product].map(providerByName).filter(isConfigured(env));
 }
 
 /**
- * The provider that would run, or null.
- *
- * `LISTEN_AND_LEARN_TTS_PROVIDER` pins one outright — an instruction rather
- * than a preference, so a pin that is not configured FAILS rather than falling
- * through to another provider. Falling through would silently produce
- * episodes in a voice nobody chose.
+ * "No Listen & Learn speech provider is configured — set GEMINI_API_KEY, or …":
+ * the sentence `synthesizeDialogue` degrades with, naming each of the
+ * product's providers' REAL requirement (Azure is not configured by its key
+ * alone). Exported so the pipelines' tests can assert the sentence their
+ * `audioError` will carry.
  */
-export function resolveSpeechProvider(env = process.env) {
-  const configured = configuredProviders(env);
+export function speechNotConfiguredMessage(product) {
+  const name = resolveProduct(product);
+  const needs = SPEECH_PRODUCTS[name].map((provider) => providerByName(provider).requirement);
+  return `No ${PRODUCT_LABELS[name]} speech provider is configured — set ${needs.join(', or ')}`;
+}
 
-  const pinned = readSetting(env, 'LISTEN_AND_LEARN_TTS_PROVIDER').toLowerCase();
+/**
+ * The provider that would run for a product, or null.
+ *
+ * The product's pin setting names one outright — an instruction rather than a
+ * preference, so a pin that is not configured FAILS rather than falling
+ * through, and a pin naming the other product's provider fails with the rule.
+ *
+ * @param {object} [env]
+ * @param {{product: keyof typeof SPEECH_PRODUCTS}} options
+ */
+export function resolveSpeechProvider(env = process.env, { product } = {}) {
+  const name = resolveProduct(product);
+  const allowed = SPEECH_PRODUCTS[name];
+  const configured = configuredProviders(env, name);
+  const pinSetting = SPEECH_PIN_SETTINGS[name];
+
+  const pinned = readSetting(env, pinSetting).toLowerCase();
   if (pinned) {
     const match = configured.find((p) => p.name === pinned);
     if (match) return match;
-    const known = PROVIDERS.some((p) => p.name === pinned);
+    if (allowed.includes(pinned)) {
+      throw new SpeechNotConfiguredError(`${pinSetting} pins "${pinned}", which is not configured`);
+    }
+    if (providerByName(pinned)) {
+      throw new SpeechNotConfiguredError(
+        `${pinSetting} pins "${pinned}", which is not a ${PRODUCT_LABELS[name]} provider — ${PRODUCT_RULE}. ${PRODUCT_LABELS[name]} may pin ${allowed.join(' or ')}`
+      );
+    }
     throw new SpeechNotConfiguredError(
-      known
-        ? `LISTEN_AND_LEARN_TTS_PROVIDER pins "${pinned}", which is not configured`
-        : `LISTEN_AND_LEARN_TTS_PROVIDER is "${pinned}"; known providers are ${PROVIDERS.map((p) => p.name).join(', ')}`
+      `${pinSetting} is "${pinned}"; ${PRODUCT_LABELS[name]} providers are ${allowed.join(', ')}`
     );
   }
 
   return configured[0] || null;
 }
-
-/**
- * The providers `synthesizeDialogue` may try, in order.
- *
- * A pin is exactly one provider. Otherwise it is every configured one, so
- * that the out-of-credit fallback has somewhere to go.
- */
-function candidateProviders(env) {
-  const first = resolveSpeechProvider(env);
-  if (!first) return [];
-  if (readSetting(env, 'LISTEN_AND_LEARN_TTS_PROVIDER')) return [first];
-  return configuredProviders(env);
-}
-
-const isOutOfCredit = (err) => err?.name === 'SpeechError' && err?.code === 'quota_exceeded';
 
 /**
  * The turns that will actually be spoken, as they will be spoken: blank turns
@@ -175,70 +245,96 @@ export function speakableTurns(dialogue) {
 }
 
 /**
+ * The environment a provider runs with. A chosen Gemini model is handed to
+ * gemini.js through the setting it already reads — an overlay on a COPY of the
+ * env, never a write to `process.env` — so the provider module is untouched and
+ * the precedence "caller's choice beats the setting" holds in one place.
+ */
+function providerEnv(provider, env, model) {
+  if (!model || provider.name !== 'gemini') return env;
+  return { ...env, [GEMINI_MODEL_SETTING]: model };
+}
+
+/**
  * Synthesise a whole dialogue, returning one MP3.
  *
- * Only ONE failure moves on to the next provider: the paid provider reporting
- * that its credit is spent, which is a state of the account rather than of
- * the request. A bad request, a rejected key or a 5xx that survived its
- * retries still fails the area, because retrying those elsewhere would hide
- * a fault behind a different voice. When a fallback ran, `fellBackFrom` says
- * which provider was skipped and why.
+ * Exactly one provider is tried: the product's resolved one. Any failure —
+ * a bad request, a rejected key, an exhausted account, a 5xx that survived
+ * its retries — fails the call, because retrying elsewhere would hide a fault
+ * behind a different voice, and because the other voice may belong to the
+ * other product.
  *
  * @param {object} params
+ * @param {keyof typeof SPEECH_PRODUCTS} params.product
  * @param {{speaker: string, text: string}[]} params.dialogue
  * @param {Record<string,string>} [params.voices] speaker name → provider voice
+ * @param {string|null} [params.model] a Gemini model id; ignored by the other providers
  * @param {object} [params.env]
  * @param {Function} [params.fetchImpl]
- * @returns {Promise<{audio: Buffer, contentType: string, bytes: number, provider: string, requests: number, fellBackFrom?: {provider: string, reason: string}}>}
+ * @returns {Promise<{audio: Buffer, contentType: string, bytes: number, provider: string, requests: number}>}
  */
 export async function synthesizeDialogue({
+  product,
   dialogue,
   voices = null,
+  model = null,
   env = process.env,
   fetchImpl = fetch,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
+  const name = resolveProduct(product);
   const turns = speakableTurns(dialogue);
   if (turns.length === 0) throw new SpeechError('No dialogue turns to synthesise');
 
-  const candidates = candidateProviders(env);
-  if (candidates.length === 0) throw new SpeechNotConfiguredError();
+  const provider = resolveSpeechProvider(env, { product: name });
+  if (!provider) throw new SpeechNotConfiguredError(speechNotConfiguredMessage(name));
 
-  let fellBackFrom = null;
-  for (let i = 0; i < candidates.length; i += 1) {
-    const provider = candidates[i];
-    try {
-      const result = await provider.synthesize({ dialogue: turns, voices, env, fetchImpl, sleep });
-      return {
-        ...result,
-        provider: provider.name,
-        contentType: CONTENT_TYPE,
-        ...(fellBackFrom ? { fellBackFrom } : {}),
-      };
-    } catch (err) {
-      if (!isOutOfCredit(err) || i === candidates.length - 1) throw err;
-      fellBackFrom = { provider: provider.name, reason: err.message };
-    }
-  }
-
-  // Unreachable: the loop returns or throws. Kept so a future edit that
-  // breaks that invariant fails loudly rather than resolving undefined.
-  throw new SpeechError('No speech provider produced audio');
+  const result = await provider.synthesize({
+    dialogue: turns,
+    voices,
+    env: providerEnv(provider, env, model),
+    fetchImpl,
+    sleep,
+  });
+  return { ...result, provider: provider.name, contentType: CONTENT_TYPE };
 }
 
 /**
  * The model the current settings would use for a provider — the same rule
  * each provider applies when it runs, so the estimate prices what will
- * actually be called.
+ * actually be called. For Gemini a caller's `model` wins, as it does in
+ * `providerEnv`.
  */
-function modelFor(providerName, env) {
+function modelFor(providerName, env, model) {
   if (providerName === 'elevenlabs') {
     return readSetting(env, ELEVENLABS_MODEL_SETTING) || ELEVENLABS_DEFAULT_MODEL;
   }
   if (providerName === 'gemini') {
-    return readSetting(env, 'LISTEN_AND_LEARN_TTS_MODEL') || GEMINI_DEFAULT_MODEL;
+    return model || readSetting(env, GEMINI_MODEL_SETTING) || GEMINI_DEFAULT_MODEL;
   }
   return null;
+}
+
+/**
+ * What Gemini TTS would charge to read this many UTF-8 bytes with `model`.
+ *
+ * Best-effort and deliberately high: bytes → seconds at the pessimistic
+ * speaking rate azure.js chunks with → audio tokens at the published
+ * per-second rate, rounded UP to a whole token → the model's output price in
+ * `COST_TABLE`. Every step over-estimates, which is the right direction for
+ * a figure shown before spending — `Math.round` here could round a fractional
+ * token count down and put the "ceiling" below the exact value (Copilot on
+ * the PR). Exported so the settings page can price each model choice at the
+ * script ceiling with the same arithmetic the 202 uses.
+ *
+ * @param {string} model a Gemini TTS model id
+ * @param {number} bytes UTF-8 bytes of dialogue
+ * @returns {number|null} USD, or null when the model is not priced
+ */
+export function estimateGeminiCostUsd(model, bytes) {
+  const seconds = Math.max(0, Number(bytes) || 0) / SPEECH_LIMITS.BYTES_PER_SECOND;
+  const audioTokens = Math.ceil(seconds * GEMINI_AUDIO_TOKENS_PER_SECOND);
+  return getCostEstimate('gemini', model, 0, audioTokens);
 }
 
 /**
@@ -246,11 +342,8 @@ function modelFor(providerName, env) {
  *
  * Provider-aware. ElevenLabs is exact in its unit — characters × the rate in
  * `COST_TABLE`, the same arithmetic the usage row is priced with afterwards.
- * Gemini is best-effort: UTF-8 bytes → seconds at the pessimistic speaking rate
- * azure.js chunks with → audio tokens at the published per-second rate → the
- * model's output price, an over-estimate in every step, which is the right
- * direction for a figure shown before spending. Azure Speech is not in the
- * cost table, so its estimate is honestly `null` rather than a guess.
+ * Gemini is `estimateGeminiCostUsd` above. Azure Speech is not in the cost
+ * table, so its estimate is honestly `null` rather than a guess.
  *
  * Pass `dialogue` when there is one, or `ceilingBytes` when there is not yet —
  * the enqueue handler estimates against the script's byte ceiling before any
@@ -264,8 +357,10 @@ function modelFor(providerName, env) {
  * that case rather than a byte count wearing the wrong name.
  *
  * @param {object} params
+ * @param {keyof typeof SPEECH_PRODUCTS} params.product
  * @param {{speaker: string, text: string}[]} [params.dialogue]
  * @param {number} [params.ceilingBytes] a ceiling in UTF-8 bytes (see above)
+ * @param {string|null} [params.model] a Gemini model id; ignored by the other providers
  * @param {object} [params.env]
  * @returns {{provider: string, model: string|null, bytes: number, characters: number|null, estimatedCostUsd: number|null}|null}
  *   `bytes` is what was measured or the ceiling; `characters` is the
@@ -276,13 +371,16 @@ function modelFor(providerName, env) {
  *   than read it for free.
  */
 export function estimateSpeechCostUsd({
+  product,
   dialogue = null,
   ceilingBytes = null,
+  model = null,
   env = process.env,
 } = {}) {
+  const name = resolveProduct(product);
   let provider;
   try {
-    provider = resolveSpeechProvider(env);
+    provider = resolveSpeechProvider(env, { product: name });
   } catch (err) {
     if (err?.name === 'SpeechNotConfiguredError') return null;
     throw err;
@@ -293,27 +391,26 @@ export function estimateSpeechCostUsd({
   // never counted.
   const hasCeiling =
     ceilingBytes !== null && ceilingBytes !== undefined && Number.isFinite(Number(ceilingBytes));
-  const ceiling = hasCeiling ? Math.max(0, Math.round(Number(ceilingBytes))) : null;
+  // Up, never to nearest: a fractional ceiling must not price below itself.
+  const ceiling = hasCeiling ? Math.max(0, Math.ceil(Number(ceilingBytes))) : null;
   // The same filter synthesis applies, so a blank turn is never priced — and
   // a dialogue that is nothing but blank turns is "nothing to price", not $0.
   const turns = speakableTurns(dialogue);
   if (!hasCeiling && turns.length === 0) return null;
   const characters = hasCeiling ? null : dialogueCharacters(turns);
   const bytes = hasCeiling ? ceiling : dialogueBytes(turns);
-  const model = modelFor(provider.name, env);
+  const chosenModel = modelFor(provider.name, env, model);
 
   let estimatedCostUsd = null;
   if (provider.name === 'elevenlabs') {
     // Characters when known; the byte ceiling otherwise, which is an upper
     // bound on characters.
-    estimatedCostUsd = getCostEstimate('elevenlabs', model, 0, characters ?? bytes);
+    estimatedCostUsd = getCostEstimate('elevenlabs', chosenModel, 0, characters ?? bytes);
   } else if (provider.name === 'gemini') {
-    const seconds = bytes / SPEECH_LIMITS.BYTES_PER_SECOND;
-    const audioTokens = Math.round(seconds * GEMINI_AUDIO_TOKENS_PER_SECOND);
-    estimatedCostUsd = getCostEstimate('gemini', model, 0, audioTokens);
+    estimatedCostUsd = estimateGeminiCostUsd(chosenModel, bytes);
   }
 
-  return { provider: provider.name, model, bytes, characters, estimatedCostUsd };
+  return { provider: provider.name, model: chosenModel, bytes, characters, estimatedCostUsd };
 }
 
 /** UTF-8 bytes of every turn's text — the unit azure.js's speaking rate is in. */
@@ -323,7 +420,7 @@ function dialogueBytes(turns) {
 
 /** Exposed so the admin surface can say which voices an episode was read in. */
 export const DEFAULT_VOICES = Object.freeze({
-  elevenlabs: ELEVENLABS_DEFAULT_VOICES,
   gemini: GEMINI_DEFAULT_VOICES,
   azure: AZURE_DEFAULT_VOICES,
+  elevenlabs: ELEVENLABS_DEFAULT_VOICES,
 });

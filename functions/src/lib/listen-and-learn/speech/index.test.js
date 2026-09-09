@@ -1,21 +1,27 @@
 /**
- * Provider selection.
+ * Provider selection, per product.
  *
- * The rule is the AI router's: a key makes a provider possible, and the first
- * configured one in preference order runs. ElevenLabs is first because it is
- * the provider the owner is paying for (ADR 0029 §2a); Gemini follows because
- * it runs on a key the site already holds; Azure needs a paid resource, so it
- * never gets chosen by accident.
+ * The rule is the AI router's — a key makes a provider possible, and the
+ * first configured one in preference order runs — applied per PRODUCT (owner
+ * rule 2026-09-09, ADR 0029 §2b): Listen & Learn is Gemini then Azure, the
+ * podcast is ElevenLabs alone, and nothing crosses over whatever keys exist.
  *
- * Until 2026-09-08 this file asserted that `elevenlabs` was NOT a known
- * provider — the record of the deferral in ADR 0029 §2. That assertion is
- * replaced here by tests of the provider, as §2a says it would be.
+ * Until 2026-09-09 one global order put ElevenLabs first for every caller,
+ * so the paid podcast voice read Listen & Learn and the Listen & Learn pin
+ * governed the podcast. The tests of that order are replaced here by tests
+ * of the product table, as §2b says they would be.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { getCostEstimate } from '../../ai/router.js';
+import { SPEECH_LIMITS } from './azure.js';
 import {
   CONTENT_TYPE,
   DEFAULT_VOICES,
+  GEMINI_MODEL_SETTING,
+  SPEECH_PIN_SETTINGS,
+  SPEECH_PRODUCTS,
   SpeechNotConfiguredError,
+  estimateGeminiCostUsd,
   estimateSpeechCostUsd,
   readSetting,
   resolveSpeechProvider,
@@ -26,6 +32,10 @@ import {
 const ELEVEN = { ELEVENLABS_API_KEY: 'e' };
 const GEMINI = { GEMINI_API_KEY: 'g' };
 const AZURE = { AZURE_SPEECH_KEY: 'a', AZURE_SPEECH_REGION: 'eastus' };
+const ALL = { ...ELEVEN, ...GEMINI, ...AZURE };
+
+const LL = { product: 'listenAndLearn' };
+const POD = { product: 'podcast' };
 
 const DIALOGUE = [
   { speaker: 'Maya', text: 'Hello' },
@@ -75,7 +85,7 @@ const elevenOutOfCredit = () =>
     text: async () => QUOTA_BODY,
   }));
 
-/** Route by host, so one fetch stub can serve a fallback sequence. */
+/** Route by host, so one fetch stub can prove which provider was reached. */
 const byHost = (handlers) =>
   vi.fn(async (url, init) => {
     const host = new URL(url).hostname;
@@ -96,109 +106,206 @@ describe('readSetting', () => {
   });
 });
 
-describe('resolveSpeechProvider', () => {
+describe('the product table', () => {
+  it('is the owner’s rule: Gemini then Azure for Listen & Learn, ElevenLabs alone for the podcast', () => {
+    expect(SPEECH_PRODUCTS).toEqual({
+      listenAndLearn: ['gemini', 'azure'],
+      podcast: ['elevenlabs'],
+    });
+    expect(Object.isFrozen(SPEECH_PRODUCTS)).toBe(true);
+    expect(Object.isFrozen(SPEECH_PRODUCTS.listenAndLearn)).toBe(true);
+  });
+
+  it('gives each product its own pin setting', () => {
+    expect(SPEECH_PIN_SETTINGS).toEqual({
+      listenAndLearn: 'LISTEN_AND_LEARN_TTS_PROVIDER',
+      podcast: 'PODCAST_TTS_PROVIDER',
+    });
+  });
+
+  it('refuses to choose without a product, in a sentence', () => {
+    // A caller that forgot the product is the defect this table exists to
+    // remove; guessing a default would reintroduce it silently.
+    expect(() => resolveSpeechProvider(ALL)).toThrow(
+      /Speech needs a product to choose a provider for \(one of listenAndLearn, podcast\); none was given/
+    );
+    expect(() => resolveSpeechProvider(ALL, {})).toThrow(/none was given/);
+    expect(() => resolveSpeechProvider(ALL, { product: 'newsletter' })).toThrow(
+      /unknown product "newsletter"; known products are listenAndLearn, podcast/
+    );
+    // Own-key lookup: inherited names are not products.
+    expect(() => resolveSpeechProvider(ALL, { product: 'constructor' })).toThrow(/unknown product/);
+    expect(() => estimateSpeechCostUsd({ ceilingBytes: 9000, env: ALL })).toThrow(/none was given/);
+  });
+
+  it('refuses to synthesise without a product before touching any provider', async () => {
+    const fetchImpl = vi.fn();
+    await expect(synthesizeDialogue({ dialogue: DIALOGUE, env: ALL, fetchImpl })).rejects.toThrow(
+      /none was given/
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveSpeechProvider — Listen & Learn', () => {
   it('returns nothing when no provider has a key', () => {
-    expect(resolveSpeechProvider({})).toBeNull();
+    expect(resolveSpeechProvider({}, LL)).toBeNull();
   });
 
-  it('prefers ElevenLabs, which is the provider the owner is paying for', () => {
-    expect(resolveSpeechProvider({ ...ELEVEN, ...GEMINI, ...AZURE }).name).toBe('elevenlabs');
-    expect(resolveSpeechProvider({ ...ELEVEN, ...GEMINI }).name).toBe('elevenlabs');
-    expect(resolveSpeechProvider(ELEVEN).name).toBe('elevenlabs');
+  it('chooses Gemini even when the ElevenLabs key is present', () => {
+    // The defect: ElevenLabs first in a global order read every study
+    // episode the moment its key landed. ElevenLabs is the podcast voice only.
+    expect(resolveSpeechProvider(ALL, LL).name).toBe('gemini');
+    expect(resolveSpeechProvider({ ...ELEVEN, ...GEMINI }, LL).name).toBe('gemini');
+    expect(resolveSpeechProvider(GEMINI, LL).name).toBe('gemini');
   });
 
-  it('falls back to Gemini when the ElevenLabs key is absent', () => {
-    // The shape of an episode does not change — only the voice does.
-    expect(resolveSpeechProvider({ ...GEMINI, ...AZURE }).name).toBe('gemini');
-    expect(resolveSpeechProvider(GEMINI).name).toBe('gemini');
+  it('never offers ElevenLabs, even as the only configured provider', () => {
+    expect(resolveSpeechProvider(ELEVEN, LL)).toBeNull();
+    expect(resolveSpeechProvider({ ...ELEVEN, ...AZURE }, LL).name).toBe('azure');
   });
 
   it('falls back to Azure when only it is configured', () => {
-    expect(resolveSpeechProvider(AZURE).name).toBe('azure');
+    expect(resolveSpeechProvider(AZURE, LL).name).toBe('azure');
+    expect(resolveSpeechProvider({ ...GEMINI, ...AZURE }, LL).name).toBe('gemini');
   });
 
   it('does not count an Azure key with nowhere to send it', () => {
     // A key and no region is not a usable configuration; treating it as one
     // would pick Azure and then fail every episode.
-    expect(resolveSpeechProvider({ AZURE_SPEECH_KEY: 'a' })).toBeNull();
+    expect(resolveSpeechProvider({ AZURE_SPEECH_KEY: 'a' }, LL)).toBeNull();
     expect(
-      resolveSpeechProvider({
-        AZURE_SPEECH_KEY: 'a',
-        AZURE_SPEECH_ENDPOINT: 'https://h/cognitiveservices/v1',
-      }).name
+      resolveSpeechProvider(
+        { AZURE_SPEECH_KEY: 'a', AZURE_SPEECH_ENDPOINT: 'https://h/cognitiveservices/v1' },
+        LL
+      ).name
     ).toBe('azure');
   });
 
   it('ignores an unresolved Key Vault reference when deciding', () => {
     expect(
-      resolveSpeechProvider({ ELEVENLABS_API_KEY: '@Microsoft.KeyVault(SecretUri=https://v/s/1)' })
+      resolveSpeechProvider({ GEMINI_API_KEY: '@Microsoft.KeyVault(SecretUri=https://v/s/1)' }, LL)
     ).toBeNull();
     expect(
-      resolveSpeechProvider({
-        ELEVENLABS_API_KEY: '@Microsoft.KeyVault(SecretUri=https://v/s/1)',
-        ...GEMINI,
-      }).name
-    ).toBe('gemini');
+      resolveSpeechProvider(
+        { GEMINI_API_KEY: '@Microsoft.KeyVault(SecretUri=https://v/s/1)', ...AZURE },
+        LL
+      ).name
+    ).toBe('azure');
   });
 
-  it('honours a pin', () => {
+  it('honours a pin naming one of its own providers', () => {
+    expect(resolveSpeechProvider({ ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'azure' }, LL).name).toBe(
+      'azure'
+    );
     expect(
-      resolveSpeechProvider({ ...ELEVEN, ...GEMINI, ...AZURE, LISTEN_AND_LEARN_TTS_PROVIDER: 'azure' })
-        .name
-    ).toBe('azure');
-    expect(
-      resolveSpeechProvider({ ...ELEVEN, ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' }).name
+      resolveSpeechProvider({ ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' }, LL).name
     ).toBe('gemini');
     expect(
-      resolveSpeechProvider({ ...ELEVEN, ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'ElevenLabs' })
-        .name
-    ).toBe('elevenlabs');
+      resolveSpeechProvider({ ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'Gemini' }, LL).name
+    ).toBe('gemini');
   });
 
   it('fails a pin that is not configured rather than falling through', () => {
     // Falling through would silently produce episodes in a voice nobody chose.
     expect(() =>
-      resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'azure' })
-    ).toThrow(/pins "azure", which is not configured/);
+      resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'azure' }, LL)
+    ).toThrow(/LISTEN_AND_LEARN_TTS_PROVIDER pins "azure", which is not configured/);
     expect(() =>
-      resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' })
-    ).toThrow(/pins "elevenlabs", which is not configured/);
+      resolveSpeechProvider({ ...AZURE, LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' }, LL)
+    ).toThrow(SpeechNotConfiguredError);
   });
 
-  it('names the known providers when the pin is not one of them', () => {
+  it('refuses a pin naming elevenlabs with a sentence quoting the rule, key or no key', () => {
+    const rule =
+      /LISTEN_AND_LEARN_TTS_PROVIDER pins "elevenlabs", which is not a Listen & Learn provider — ElevenLabs is only the podcast voice; Listen & Learn audio is Gemini TTS, with Azure AI Speech as the fallback \(ADR 0029 §2b\)\. Listen & Learn may pin gemini or azure/;
     expect(() =>
-      resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'polly' })
-    ).toThrow(/known providers are elevenlabs, gemini, azure/);
+      resolveSpeechProvider({ ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' }, LL)
+    ).toThrow(rule);
+    expect(() =>
+      resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'ElevenLabs' }, LL)
+    ).toThrow(rule);
+    expect(() =>
+      resolveSpeechProvider({ ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' }, LL)
+    ).toThrow(SpeechNotConfiguredError);
+  });
+
+  it('names its own providers when the pin is not one at all', () => {
+    expect(() =>
+      resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'polly' }, LL)
+    ).toThrow(/LISTEN_AND_LEARN_TTS_PROVIDER is "polly"; Listen & Learn providers are gemini, azure/);
+  });
+
+  it('does not read the podcast’s pin', () => {
+    expect(resolveSpeechProvider({ ...ALL, PODCAST_TTS_PROVIDER: 'polly' }, LL).name).toBe(
+      'gemini'
+    );
+  });
+});
+
+describe('resolveSpeechProvider — podcast', () => {
+  it('is ElevenLabs when its key is present', () => {
+    expect(resolveSpeechProvider(ALL, POD).name).toBe('elevenlabs');
+    expect(resolveSpeechProvider(ELEVEN, POD).name).toBe('elevenlabs');
+  });
+
+  it('never falls back to Gemini or Azure', () => {
+    // A podcast episode in the study-podcast voice is the wrong product's
+    // voice, not a degraded reading; without the key there is no provider.
+    expect(resolveSpeechProvider({ ...GEMINI, ...AZURE }, POD)).toBeNull();
+    expect(resolveSpeechProvider({}, POD)).toBeNull();
+  });
+
+  it('reads only its own pin, and only for its own provider', () => {
+    expect(resolveSpeechProvider({ ...ALL, PODCAST_TTS_PROVIDER: 'elevenlabs' }, POD).name).toBe(
+      'elevenlabs'
+    );
+    expect(() => resolveSpeechProvider({ ...GEMINI, PODCAST_TTS_PROVIDER: 'elevenlabs' }, POD)).toThrow(
+      /PODCAST_TTS_PROVIDER pins "elevenlabs", which is not configured/
+    );
+    expect(() => resolveSpeechProvider({ ...ALL, PODCAST_TTS_PROVIDER: 'gemini' }, POD)).toThrow(
+      /PODCAST_TTS_PROVIDER pins "gemini", which is not a podcast provider — ElevenLabs is only the podcast voice.*podcast may pin elevenlabs/
+    );
+    // The Listen & Learn pin — the one Terraform sets to "gemini" — does not
+    // reach the podcast. Before 2026-09-09 it did, which is what made the
+    // owner's setting unsafe to apply.
+    expect(
+      resolveSpeechProvider({ ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' }, POD).name
+    ).toBe('elevenlabs');
   });
 });
 
 describe('synthesizeDialogue', () => {
-  it('routes to ElevenLabs and reports which provider ran', async () => {
-    const fetchImpl = elevenOk();
-    const result = await synthesizeDialogue({
-      dialogue: DIALOGUE,
-      env: { ...ELEVEN, ...GEMINI },
-      fetchImpl,
-    });
+  it('reads Listen & Learn with Gemini when every key is present, and reports which provider ran', async () => {
+    const eleven = elevenOk();
+    const gemini = geminiOk();
+    const fetchImpl = byHost({ 'elevenlabs.io': eleven, 'googleapis.com': gemini });
+
+    const result = await synthesizeDialogue({ ...LL, dialogue: DIALOGUE, env: ALL, fetchImpl });
+
+    expect(result.provider).toBe('gemini');
+    expect(result.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(result).not.toHaveProperty('fellBackFrom');
+    expect(gemini).toHaveBeenCalledTimes(1);
+    expect(eleven).not.toHaveBeenCalled();
+  });
+
+  it('reads the podcast with ElevenLabs', async () => {
+    const eleven = elevenOk();
+    const gemini = geminiOk();
+    const fetchImpl = byHost({ 'elevenlabs.io': eleven, 'googleapis.com': gemini });
+
+    const result = await synthesizeDialogue({ ...POD, dialogue: DIALOGUE, env: ALL, fetchImpl });
 
     expect(result.provider).toBe('elevenlabs');
     expect(result.model).toBe('eleven_v3');
-    expect(result.fellBackFrom).toBeUndefined();
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl.mock.calls[0][0]).toContain('api.elevenlabs.io');
+    expect(eleven).toHaveBeenCalledTimes(1);
+    expect(gemini).not.toHaveBeenCalled();
   });
 
-  it('routes to Gemini when that is the configured one', async () => {
-    const fetchImpl = geminiOk();
-    const result = await synthesizeDialogue({ dialogue: DIALOGUE, env: GEMINI, fetchImpl });
-
-    expect(result.provider).toBe('gemini');
-    expect(fetchImpl.mock.calls[0][0]).toContain('generativelanguage.googleapis.com');
-  });
-
-  it('routes to Azure when that is the configured one', async () => {
+  it('routes Listen & Learn to Azure when that is the configured one', async () => {
     const fetchImpl = azureOk();
-    const result = await synthesizeDialogue({ dialogue: DIALOGUE, env: AZURE, fetchImpl });
+    const result = await synthesizeDialogue({ ...LL, dialogue: DIALOGUE, env: AZURE, fetchImpl });
 
     expect(result.provider).toBe('azure');
     expect(fetchImpl.mock.calls[0][0]).toContain('tts.speech.microsoft.com');
@@ -208,16 +315,19 @@ describe('synthesizeDialogue', () => {
     // The provider is an implementation detail of this directory: the blob
     // path, the stored contentType and the <audio> element must not vary.
     const viaEleven = await synthesizeDialogue({
+      ...POD,
       dialogue: DIALOGUE,
       env: ELEVEN,
       fetchImpl: elevenOk(),
     });
     const viaGemini = await synthesizeDialogue({
+      ...LL,
       dialogue: DIALOGUE,
       env: GEMINI,
       fetchImpl: geminiOk(),
     });
     const viaAzure = await synthesizeDialogue({
+      ...LL,
       dialogue: DIALOGUE,
       env: AZURE,
       fetchImpl: azureOk(),
@@ -229,61 +339,86 @@ describe('synthesizeDialogue', () => {
     expect(CONTENT_TYPE).toBe('audio/mpeg');
   });
 
-  describe('out of credit', () => {
-    it('falls back to Gemini when ElevenLabs reports its credit is spent', async () => {
-      // The state a paid provider has and a free one does not (ADR 0029 §2a).
+  describe('the Gemini model', () => {
+    const modelSent = (fetchImpl) => JSON.parse(fetchImpl.mock.calls[0][1].body).model;
+
+    it('is the caller’s choice when one is given', async () => {
+      const fetchImpl = geminiOk();
+      const result = await synthesizeDialogue({
+        ...LL,
+        dialogue: DIALOGUE,
+        model: 'gemini-2.5-flash-preview-tts',
+        env: { ...GEMINI, [GEMINI_MODEL_SETTING]: 'gemini-3.1-flash-tts-preview' },
+        fetchImpl,
+      });
+      expect(modelSent(fetchImpl)).toBe('gemini-2.5-flash-preview-tts');
+      expect(result.model).toBe('gemini-2.5-flash-preview-tts');
+    });
+
+    it('is the setting when the caller chose nothing, and the module default under that', async () => {
+      const pinned = geminiOk();
+      await synthesizeDialogue({
+        ...LL,
+        dialogue: DIALOGUE,
+        env: { ...GEMINI, [GEMINI_MODEL_SETTING]: 'gemini-2.5-flash-preview-tts' },
+        fetchImpl: pinned,
+      });
+      expect(modelSent(pinned)).toBe('gemini-2.5-flash-preview-tts');
+
+      const bare = geminiOk();
+      await synthesizeDialogue({ ...LL, dialogue: DIALOGUE, model: null, env: GEMINI, fetchImpl: bare });
+      expect(modelSent(bare)).toBe('gemini-3.1-flash-tts-preview');
+    });
+
+    it('never writes the choice into the caller’s env', async () => {
+      const env = { ...GEMINI };
+      await synthesizeDialogue({
+        ...LL,
+        dialogue: DIALOGUE,
+        model: 'gemini-2.5-flash-preview-tts',
+        env,
+        fetchImpl: geminiOk(),
+      });
+      expect(env).toEqual(GEMINI);
+    });
+
+    it('is ignored by the podcast, whose model is ElevenLabs’s own', async () => {
+      const fetchImpl = elevenOk();
+      const result = await synthesizeDialogue({
+        ...POD,
+        dialogue: DIALOGUE,
+        model: 'gemini-2.5-flash-preview-tts',
+        env: ELEVEN,
+        fetchImpl,
+      });
+      expect(result.model).toBe('eleven_v3');
+      expect(JSON.parse(fetchImpl.mock.calls[0][1].body).model_id).toBe('eleven_v3');
+    });
+  });
+
+  describe('nothing falls through', () => {
+    it('surfaces ElevenLabs’s out-of-credit error to the podcast rather than reading it with Gemini', async () => {
+      // #447 fell through to Gemini here. That was the cross-product path
+      // the owner's rule forbids, and it is gone rather than scoped.
       const eleven = elevenOutOfCredit();
       const gemini = geminiOk();
       const fetchImpl = byHost({ 'elevenlabs.io': eleven, 'googleapis.com': gemini });
 
-      const result = await synthesizeDialogue({
-        dialogue: DIALOGUE,
-        env: { ...ELEVEN, ...GEMINI },
-        fetchImpl,
-        sleep: noSleep,
-      });
-
-      expect(result.provider).toBe('gemini');
-      expect(result.fellBackFrom).toEqual({
-        provider: 'elevenlabs',
-        reason: expect.stringMatching(/out of credit \(HTTP 401 quota_exceeded\)/),
-      });
-      expect(eleven).toHaveBeenCalledTimes(1); // not retried
-      expect(gemini).toHaveBeenCalledTimes(1);
-    });
-
-    it('surfaces the out-of-credit error when there is nothing to fall back to', async () => {
-      const fetchImpl = elevenOutOfCredit();
       await expect(
-        synthesizeDialogue({ dialogue: DIALOGUE, env: ELEVEN, fetchImpl, sleep: noSleep })
+        synthesizeDialogue({ ...POD, dialogue: DIALOGUE, env: ALL, fetchImpl, sleep: noSleep })
       ).rejects.toMatchObject({
         name: 'SpeechError',
         provider: 'elevenlabs',
         status: 401,
         code: 'quota_exceeded',
       });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not fall back past a pin — a pin is an instruction', async () => {
-      const eleven = elevenOutOfCredit();
-      const gemini = geminiOk();
-      const fetchImpl = byHost({ 'elevenlabs.io': eleven, 'googleapis.com': gemini });
-
-      await expect(
-        synthesizeDialogue({
-          dialogue: DIALOGUE,
-          env: { ...ELEVEN, ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' },
-          fetchImpl,
-          sleep: noSleep,
-        })
-      ).rejects.toMatchObject({ code: 'quota_exceeded' });
+      expect(eleven).toHaveBeenCalledTimes(1); // not retried
       expect(gemini).not.toHaveBeenCalled();
     });
 
-    it('does not fall back on any other failure', async () => {
+    it('does not fall back on any other failure either', async () => {
       // A rejected key or a 5xx elsewhere would hide a fault behind a
-      // different voice; only the account state moves on.
+      // different voice.
       const eleven = vi.fn(async () => ({
         ok: false,
         status: 401,
@@ -294,45 +429,64 @@ describe('synthesizeDialogue', () => {
       const fetchImpl = byHost({ 'elevenlabs.io': eleven, 'googleapis.com': gemini });
 
       await expect(
-        synthesizeDialogue({
-          dialogue: DIALOGUE,
-          env: { ...ELEVEN, ...GEMINI },
-          fetchImpl,
-          sleep: noSleep,
-        })
+        synthesizeDialogue({ ...POD, dialogue: DIALOGUE, env: ALL, fetchImpl, sleep: noSleep })
       ).rejects.toThrow(/ElevenLabs HTTP 401/);
       expect(gemini).not.toHaveBeenCalled();
     });
   });
 
-  it('degrades with a distinguishable error when nothing is configured', async () => {
-    // generate.js keys off this name to publish a transcript-only episode
-    // rather than failing the area.
-    const fetchImpl = vi.fn();
-    await expect(
-      synthesizeDialogue({ dialogue: DIALOGUE, env: {}, fetchImpl })
-    ).rejects.toBeInstanceOf(SpeechNotConfiguredError);
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
+  describe('not configured', () => {
+    it('degrades Listen & Learn with a distinguishable error naming its own requirements', async () => {
+      // generate.js keys off this name to publish a transcript-only episode
+      // rather than failing the area. Azure is not configured by its key
+      // alone (PROVIDERS.extra), and ElevenLabs is not a thing to seed for
+      // this product, so it is not named.
+      const fetchImpl = vi.fn();
+      const attempt = synthesizeDialogue({ ...LL, dialogue: DIALOGUE, env: ELEVEN, fetchImpl });
+      await expect(attempt).rejects.toBeInstanceOf(SpeechNotConfiguredError);
+      await expect(attempt).rejects.toThrow(
+        /^No Listen & Learn speech provider is configured — set GEMINI_API_KEY, or AZURE_SPEECH_KEY together with AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT$/
+      );
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
 
-  it('names each provider’s real requirement so the message says what to do', async () => {
-    // Azure is not configured by its key alone (PROVIDERS.extra); a message
-    // that said so would send an operator to seed a key that changes nothing.
-    await expect(
-      synthesizeDialogue({ dialogue: DIALOGUE, env: {}, fetchImpl: vi.fn() })
-    ).rejects.toThrow(
-      /ELEVENLABS_API_KEY.*GEMINI_API_KEY.*AZURE_SPEECH_KEY together with AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT/
-    );
+    it('degrades the podcast naming ELEVENLABS_API_KEY, whatever other keys exist', async () => {
+      // lib/podcast/generate.js records this sentence as the draft's
+      // audioError; a Gemini key present is not a reason to read with it.
+      const fetchImpl = vi.fn();
+      const attempt = synthesizeDialogue({
+        ...POD,
+        dialogue: DIALOGUE,
+        env: { ...GEMINI, ...AZURE },
+        fetchImpl,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(SpeechNotConfiguredError);
+      await expect(attempt).rejects.toThrow(
+        /^No podcast speech provider is configured — set ELEVENLABS_API_KEY$/
+      );
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('reports an unusable pin by the same name, so the caller degrades the same way', async () => {
+      await expect(
+        synthesizeDialogue({
+          ...LL,
+          dialogue: DIALOGUE,
+          env: { ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' },
+          fetchImpl: vi.fn(),
+        })
+      ).rejects.toBeInstanceOf(SpeechNotConfiguredError);
+    });
   });
 
   it('refuses an empty dialogue before choosing a provider', async () => {
     await expect(
-      synthesizeDialogue({ dialogue: [{ speaker: 'Maya', text: '  ' }], env: ELEVEN })
+      synthesizeDialogue({ ...LL, dialogue: [{ speaker: 'Maya', text: '  ' }], env: GEMINI })
     ).rejects.toThrow(/No dialogue turns/);
   });
 
-  it('publishes a default voice map per provider, in preference order', () => {
-    expect(Object.keys(DEFAULT_VOICES)).toEqual(['elevenlabs', 'gemini', 'azure']);
+  it('publishes a default voice map for every provider', () => {
+    expect(Object.keys(DEFAULT_VOICES).sort()).toEqual(['azure', 'elevenlabs', 'gemini']);
     // All name the same two hosts the script writes.
     for (const voices of Object.values(DEFAULT_VOICES)) {
       expect(Object.keys(voices)).toEqual(['Maya', 'Elena']);
@@ -341,28 +495,40 @@ describe('synthesizeDialogue', () => {
 });
 
 describe('estimateSpeechCostUsd', () => {
-  it('is null when nothing is configured, or the pin is unusable', () => {
-    expect(estimateSpeechCostUsd({ dialogue: DIALOGUE, env: {} })).toBeNull();
+  it('is null when nothing is configured for the product, or the pin is unusable', () => {
+    expect(estimateSpeechCostUsd({ ...LL, dialogue: DIALOGUE, env: {} })).toBeNull();
+    // ElevenLabs alone configures nothing for Listen & Learn.
+    expect(estimateSpeechCostUsd({ ...LL, dialogue: DIALOGUE, env: ELEVEN })).toBeNull();
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: DIALOGUE, env: GEMINI })).toBeNull();
     expect(
       estimateSpeechCostUsd({
+        ...LL,
         dialogue: DIALOGUE,
-        env: { ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' },
+        env: { ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' },
       })
     ).toBeNull();
+  });
+
+  it('prices Listen & Learn with Gemini even when the ElevenLabs key is present', () => {
+    const estimate = estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: ALL });
+    expect(estimate.provider).toBe('gemini');
+    expect(estimate.model).toBe('gemini-3.1-flash-tts-preview');
   });
 
   it('returns null, not $0, for a dialogue synthesis would refuse', async () => {
     // Copilot review on #447: a whitespace-only dialogue estimated 0 while
     // synthesizeDialogue threw "No dialogue turns to synthesise".
     const blank = [{ speaker: 'Maya', text: '  ' }, { speaker: 'Elena', text: '' }];
-    expect(estimateSpeechCostUsd({ dialogue: blank, env: ELEVEN })).toBeNull();
-    expect(estimateSpeechCostUsd({ dialogue: [], env: ELEVEN })).toBeNull();
-    expect(estimateSpeechCostUsd({ env: ELEVEN })).toBeNull();
-    await expect(synthesizeDialogue({ dialogue: blank, env: ELEVEN })).rejects.toThrow(
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: blank, env: ELEVEN })).toBeNull();
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: [], env: ELEVEN })).toBeNull();
+    expect(estimateSpeechCostUsd({ ...POD, env: ELEVEN })).toBeNull();
+    await expect(synthesizeDialogue({ ...POD, dialogue: blank, env: ELEVEN })).rejects.toThrow(
       /No dialogue turns/
     );
     // A ceiling is still priced with no dialogue: that is the enqueue path.
-    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: ELEVEN }).estimatedCostUsd).toBe(0.9);
+    expect(estimateSpeechCostUsd({ ...POD, ceilingBytes: 9000, env: ELEVEN }).estimatedCostUsd).toBe(
+      0.9
+    );
   });
 
   it('counts exactly the turns synthesis would speak, through one shared filter', async () => {
@@ -381,13 +547,13 @@ describe('estimateSpeechCostUsd', () => {
       { speaker: 'Elena', text: 'Hi' },
     ]);
     expect(speakableTurns(null)).toEqual([]);
-    expect(estimateSpeechCostUsd({ dialogue: mixed, env: ELEVEN })).toEqual(
-      estimateSpeechCostUsd({ dialogue: speakableTurns(mixed), env: ELEVEN })
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: mixed, env: ELEVEN })).toEqual(
+      estimateSpeechCostUsd({ ...POD, dialogue: speakableTurns(mixed), env: ELEVEN })
     );
-    expect(estimateSpeechCostUsd({ dialogue: mixed, env: ELEVEN }).characters).toBe(7);
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: mixed, env: ELEVEN }).characters).toBe(7);
 
     const fetchImpl = elevenOk();
-    await synthesizeDialogue({ dialogue: mixed, env: ELEVEN, fetchImpl });
+    await synthesizeDialogue({ ...POD, dialogue: mixed, env: ELEVEN, fetchImpl });
     const sent = JSON.parse(fetchImpl.mock.calls[0][1].body).inputs.map((i) => i.text);
     expect(sent).toEqual(speakableTurns(mixed).map((t) => t.text));
   });
@@ -404,20 +570,23 @@ describe('estimateSpeechCostUsd', () => {
       { speaker: 'Elena', text: '\t Hi back   ' },
     ];
     expect(speakableTurns(padded)).toEqual(trimmed);
-    for (const env of [ELEVEN, GEMINI]) {
-      expect(estimateSpeechCostUsd({ dialogue: padded, env })).toEqual(
-        estimateSpeechCostUsd({ dialogue: trimmed, env })
+    for (const [product, env] of [
+      [POD, ELEVEN],
+      [LL, GEMINI],
+    ]) {
+      expect(estimateSpeechCostUsd({ ...product, dialogue: padded, env })).toEqual(
+        estimateSpeechCostUsd({ ...product, dialogue: trimmed, env })
       );
     }
-    expect(estimateSpeechCostUsd({ dialogue: padded, env: ELEVEN })).toMatchObject({
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: padded, env: ELEVEN })).toMatchObject({
       characters: 18,
       bytes: 18,
     });
   });
 
-  it('prices ElevenLabs by characters at the cost-table rate, before any request', () => {
+  it('prices the podcast by characters at the cost-table rate, before any request', () => {
     // 'Hello' + 'Hi' = 7 characters at USD 0.10 per 1,000.
-    expect(estimateSpeechCostUsd({ dialogue: DIALOGUE, env: { ...ELEVEN, ...GEMINI } })).toEqual({
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: DIALOGUE, env: ALL })).toEqual({
       provider: 'elevenlabs',
       model: 'eleven_v3',
       bytes: 7,
@@ -427,10 +596,9 @@ describe('estimateSpeechCostUsd', () => {
   });
 
   it('accepts a byte ceiling when there is no dialogue yet, and does not call it characters', () => {
-    // The enqueue handler estimates against MAX_SCRIPT_BYTES: a 9,000-byte
-    // ceiling is at most 9,000 characters, 90 cents an episode, roughly
-    // USD 4.50 for five. `characters` is null because none were counted.
-    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: ELEVEN })).toMatchObject({
+    // A 9,000-byte ceiling is at most 9,000 characters, 90 cents an episode.
+    // `characters` is null because none were counted.
+    expect(estimateSpeechCostUsd({ ...POD, ceilingBytes: 9000, env: ELEVEN })).toMatchObject({
       provider: 'elevenlabs',
       bytes: 9000,
       characters: null,
@@ -442,11 +610,43 @@ describe('estimateSpeechCostUsd', () => {
     // 9,000 bytes ÷ 13 bytes/s ≈ 692 s × 32 tokens/s ≈ 22,154 tokens at
     // USD 20 per 1M (the 3.1 flash rate) ≈ USD 0.44 — above twice the
     // ~USD 0.17 an episode measured on 2.5 flash, which is priced at half that.
-    const estimate = estimateSpeechCostUsd({ ceilingBytes: 9000, env: GEMINI });
+    const estimate = estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: GEMINI });
     expect(estimate.provider).toBe('gemini');
     expect(estimate.model).toBe('gemini-3.1-flash-tts-preview');
     expect(estimate.estimatedCostUsd).toBeGreaterThan(0.34);
     expect(estimate.estimatedCostUsd).toBeLessThan(0.6);
+    expect(estimate.estimatedCostUsd).toBe(estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 9000));
+  });
+
+  it('rounds a fractional token count UP, so the ceiling is never below the exact value', () => {
+    // 1 byte ÷ 13 bytes/s × 32 tokens/s ≈ 2.46 tokens: Math.round gave 2,
+    // below the exact figure a "ceiling" must not sit under (Copilot on the
+    // PR). Checked across a spread of sizes, and for the byte ceiling too.
+    const exact = (model, bytes) =>
+      getCostEstimate('gemini', model, 0, (bytes / SPEECH_LIMITS.BYTES_PER_SECOND) * 32);
+    for (const bytes of [1, 7, 13, 100, 8999, 9000]) {
+      for (const model of ['gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts']) {
+        expect(estimateGeminiCostUsd(model, bytes)).toBeGreaterThanOrEqual(exact(model, bytes));
+      }
+    }
+    expect(estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 1)).toBe(
+      getCostEstimate('gemini', 'gemini-3.1-flash-tts-preview', 0, 3)
+    );
+    // A fractional byte ceiling is taken up to the next whole byte, not to nearest.
+    expect(estimateSpeechCostUsd({ ...LL, ceilingBytes: 12.2, env: GEMINI })).toMatchObject({
+      bytes: 13,
+    });
+    expect(estimateSpeechCostUsd({ ...POD, ceilingBytes: 12.2, env: ELEVEN }).estimatedCostUsd).toBe(
+      getCostEstimate('elevenlabs', 'eleven_v3', 0, 13)
+    );
+  });
+
+  it('prices the Economy model at half the Best model, from the cost table', () => {
+    const best = estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 9000);
+    const economy = estimateGeminiCostUsd('gemini-2.5-flash-preview-tts', 9000);
+    expect(best).toBeGreaterThan(0);
+    expect(economy).toBeCloseTo(best / 2, 6);
+    expect(estimateGeminiCostUsd('gemini-2.5-flash-preview-tts', 0)).toBe(0);
   });
 
   it('measures Gemini in bytes, so a non-ASCII script is never priced below its ASCII twin', () => {
@@ -457,17 +657,14 @@ describe('estimateSpeechCostUsd', () => {
     const accented = [{ speaker: 'Maya', text: 'é'.repeat(1300) }]; // 2 bytes each
     const cjk = [{ speaker: 'Maya', text: '語'.repeat(1300) }]; // 3 bytes each
 
-    const asciiCost = estimateSpeechCostUsd({ dialogue: ascii, env: GEMINI }).estimatedCostUsd;
-    const accentedCost = estimateSpeechCostUsd({ dialogue: accented, env: GEMINI }).estimatedCostUsd;
-    const cjkCost = estimateSpeechCostUsd({ dialogue: cjk, env: GEMINI }).estimatedCostUsd;
-
-    expect(asciiCost).toBeGreaterThan(0);
-    expect(accentedCost).toBeCloseTo(asciiCost * 2, 6);
-    expect(cjkCost).toBeCloseTo(asciiCost * 3, 6);
+    const cost = (dialogue) => estimateSpeechCostUsd({ ...LL, dialogue, env: GEMINI }).estimatedCostUsd;
+    expect(cost(ascii)).toBeGreaterThan(0);
+    expect(cost(accented)).toBeCloseTo(cost(ascii) * 2, 6);
+    expect(cost(cjk)).toBeCloseTo(cost(ascii) * 3, 6);
     // The billed unit for ElevenLabs is still characters, unchanged by width.
-    expect(estimateSpeechCostUsd({ dialogue: cjk, env: ELEVEN }).characters).toBe(1300);
-    expect(estimateSpeechCostUsd({ dialogue: cjk, env: ELEVEN }).estimatedCostUsd).toBe(
-      estimateSpeechCostUsd({ dialogue: ascii, env: ELEVEN }).estimatedCostUsd
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: cjk, env: ELEVEN }).characters).toBe(1300);
+    expect(estimateSpeechCostUsd({ ...POD, dialogue: cjk, env: ELEVEN }).estimatedCostUsd).toBe(
+      estimateSpeechCostUsd({ ...POD, dialogue: ascii, env: ELEVEN }).estimatedCostUsd
     );
   });
 
@@ -475,20 +672,23 @@ describe('estimateSpeechCostUsd', () => {
     // The enqueue path passes MAX_SCRIPT_BYTES with no dialogue. A 9,000-byte
     // script of three-byte characters is the widest that fits.
     const widest = [{ speaker: 'Maya', text: '語'.repeat(3000) }];
-    for (const env of [GEMINI, ELEVEN]) {
-      const ceiling = estimateSpeechCostUsd({ ceilingBytes: 9000, env }).estimatedCostUsd;
-      const actual = estimateSpeechCostUsd({ dialogue: widest, env }).estimatedCostUsd;
+    for (const [product, env] of [
+      [LL, GEMINI],
+      [POD, ELEVEN],
+    ]) {
+      const ceiling = estimateSpeechCostUsd({ ...product, ceilingBytes: 9000, env }).estimatedCostUsd;
+      const actual = estimateSpeechCostUsd({ ...product, dialogue: widest, env }).estimatedCostUsd;
       expect(ceiling).toBeGreaterThanOrEqual(actual);
     }
     // And a plain ASCII script under the ceiling is priced strictly below it.
     const plain = [{ speaker: 'Maya', text: 'a'.repeat(8000) }];
-    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: GEMINI }).estimatedCostUsd).toBeGreaterThan(
-      estimateSpeechCostUsd({ dialogue: plain, env: GEMINI }).estimatedCostUsd
-    );
+    expect(
+      estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: GEMINI }).estimatedCostUsd
+    ).toBeGreaterThan(estimateSpeechCostUsd({ ...LL, dialogue: plain, env: GEMINI }).estimatedCostUsd);
   });
 
   it('is honest that Azure Speech is not priced', () => {
-    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: AZURE })).toEqual({
+    expect(estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: AZURE })).toEqual({
       provider: 'azure',
       model: null,
       bytes: 9000,
@@ -497,28 +697,42 @@ describe('estimateSpeechCostUsd', () => {
     });
   });
 
-  it('follows a pin and a model override', () => {
-    const estimate = estimateSpeechCostUsd({
-      ceilingBytes: 1000,
-      env: { ...ELEVEN, ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' },
-    });
-    expect(estimate.provider).toBe('gemini');
+  it('follows a pin, a model choice and a model setting, in that order', () => {
     expect(
       estimateSpeechCostUsd({
+        ...LL,
         ceilingBytes: 1000,
+        env: { ...ALL, LISTEN_AND_LEARN_TTS_PROVIDER: 'azure' },
+      }).provider
+    ).toBe('azure');
+    // The caller's choice beats the setting; the setting beats the default.
+    const chosen = estimateSpeechCostUsd({
+      ...LL,
+      ceilingBytes: 9000,
+      model: 'gemini-2.5-flash-preview-tts',
+      env: { ...GEMINI, [GEMINI_MODEL_SETTING]: 'gemini-3.1-flash-tts-preview' },
+    });
+    expect(chosen.model).toBe('gemini-2.5-flash-preview-tts');
+    expect(chosen.estimatedCostUsd).toBe(estimateGeminiCostUsd('gemini-2.5-flash-preview-tts', 9000));
+    expect(
+      estimateSpeechCostUsd({
+        ...LL,
+        ceilingBytes: 1000,
+        env: { ...GEMINI, [GEMINI_MODEL_SETTING]: 'gemini-2.5-pro-preview-tts' },
+      }).model
+    ).toBe('gemini-2.5-pro-preview-tts');
+    // The podcast prices its own model setting and ignores the Gemini one.
+    expect(
+      estimateSpeechCostUsd({
+        ...POD,
+        ceilingBytes: 1000,
+        model: 'gemini-2.5-flash-preview-tts',
         env: {
           ...ELEVEN,
-          LISTEN_AND_LEARN_TTS_MODEL: 'gemini-3.1-flash-tts-preview',
+          [GEMINI_MODEL_SETTING]: 'gemini-3.1-flash-tts-preview',
           LISTEN_AND_LEARN_ELEVENLABS_MODEL: 'eleven_v4',
         },
       })
     ).toMatchObject({ provider: 'elevenlabs', model: 'eleven_v4', estimatedCostUsd: 0.1 });
-    // The shared setting still steers Gemini, and prices what Gemini will call.
-    expect(
-      estimateSpeechCostUsd({
-        ceilingBytes: 1000,
-        env: { ...GEMINI, LISTEN_AND_LEARN_TTS_MODEL: 'gemini-2.5-pro-preview-tts' },
-      }).model
-    ).toBe('gemini-2.5-pro-preview-tts');
   });
 });

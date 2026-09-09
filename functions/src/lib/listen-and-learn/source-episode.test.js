@@ -17,7 +17,11 @@ import {
   resolveSources,
 } from './source-episode.js';
 import { EPISODE_CONTAINER, SET_CONTAINER, SOURCE_EPISODE_ORDER, STATUS } from './publish.js';
-import { SpeechNotConfiguredError, SpeechError } from './speech/index.js';
+import {
+  SpeechNotConfiguredError,
+  SpeechError,
+  speechNotConfiguredMessage,
+} from './speech/index.js';
 import { USAGE_SOURCES } from '../ai/usage.js';
 import {
   AiNotConfiguredError,
@@ -289,6 +293,20 @@ describe('generateSourceEpisode — the run', () => {
     expect(rows[0]).toMatchObject({ provider: 'gemini', promptTokens: 9000 });
   });
 
+  it('asks for the Listen & Learn product with the run’s model, like a guide run', async () => {
+    const deps = happyDeps();
+    await run({ deps, ttsModel: 'gemini-2.5-flash-preview-tts' });
+    expect(deps.synthesize).toHaveBeenCalledTimes(1);
+    expect(deps.synthesize.mock.calls[0][0]).toMatchObject({
+      product: 'listenAndLearn',
+      model: 'gemini-2.5-flash-preview-tts',
+    });
+
+    const bare = happyDeps();
+    await run({ deps: bare });
+    expect(bare.synthesize.mock.calls[0][0]).toMatchObject({ product: 'listenAndLearn', model: null });
+  });
+
   it('with Gemini unavailable: the sentence, no failover, nothing saved', async () => {
     // The refusal is the router's; here it is what the script step throws.
     const store = makeStore();
@@ -346,7 +364,7 @@ describe('generateSourceEpisode — the run', () => {
       store,
       deps: happyDeps({
         synthesize: vi.fn(async () => {
-          throw new SpeechNotConfiguredError();
+          throw new SpeechNotConfiguredError(speechNotConfiguredMessage('listenAndLearn'));
         }),
       }),
     });

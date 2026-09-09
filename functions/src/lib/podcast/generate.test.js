@@ -144,7 +144,10 @@ describe('a full run', () => {
       purpose: 'analysis',
       feature: 'podcastScript',
     });
+    // The podcast product, by name: ElevenLabs and only ElevenLabs
+    // (speech/index.js), never the Listen & Learn voice.
     expect(deps.synthesize).toHaveBeenCalledWith({
+      product: 'podcast',
       dialogue: [{ speaker: 'Maya', text: 'Hello' }],
       env: {},
     });
@@ -247,6 +250,39 @@ describe('audio failures degrade; the transcript is still saved', () => {
     expect(Object.values(store.docs.ai_usage).map((r) => r.source)).toEqual([
       USAGE_SOURCES.podcastScript,
     ]);
+  });
+
+  it('no ElevenLabs key: the real switch saves a draft naming ELEVENLABS_API_KEY and never reads with Gemini', async () => {
+    // Owner rule 2026-09-09 (ADR 0029 §2b), pinned through the real
+    // synthesizeDialogue rather than a stub: a Gemini key present is not a
+    // fallback for the podcast, and the sentence on the draft says what to
+    // seed.
+    const store = makeStore();
+    const storage = makeStorage();
+    const fetchImpl = vi.fn();
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+    try {
+      const report = await run({
+        store,
+        storage,
+        env: { GEMINI_API_KEY: 'g', AZURE_SPEECH_KEY: 'a', AZURE_SPEECH_REGION: 'eastus' },
+        deps: { synthesize: undefined },
+      });
+
+      const saved = store.docs[TRANSCRIPT_CONTAINER]['article_picking-a-state-backend'];
+      expect(saved.status).toBe(STATUS.draft);
+      expect(saved.audioUrl).toBeNull();
+      expect(saved.audioError).toBe(
+        'No podcast speech provider is configured — set ELEVENLABS_API_KEY'
+      );
+      expect(saved.speechProvider).toBeNull();
+      expect(report.audioError).toBe(saved.audioError);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(storage.uploadBlob).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   it('a broken provider: recorded, not thrown', async () => {

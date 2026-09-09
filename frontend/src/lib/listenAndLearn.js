@@ -53,6 +53,32 @@ export async function fetchPublishedEpisodes({ platform, examCode } = {}) {
 
 // ── admin ───────────────────────────────────────────────────────────────────
 
+/**
+ * The two Gemini TTS models the owner may choose between, by their short
+ * names — the owner's button (functions/src/lib/listen-and-learn/
+ * speech-settings.js is the source; the server prices them). Used to name
+ * the model on the queued line; the form's labels come from the server.
+ */
+export const GEMINI_TTS_MODEL_TIERS = Object.freeze({
+  'gemini-3.1-flash-tts-preview': 'Best',
+  'gemini-2.5-flash-preview-tts': 'Economy',
+});
+
+/**
+ * The stored default model and the offered choices with their per-episode
+ * ceiling, from the Platform settings route. The generation form defaults
+ * its per-run choice to `geminiModel`.
+ *
+ * @returns {Promise<{geminiModel: string|null, options: Array<{id: string, tier: string, label: string, perEpisodeUsd: number|null}>}>}
+ */
+export async function fetchSpeechSettings() {
+  const body = await getJSON('cms/platform-settings/listen-and-learn-speech');
+  return {
+    geminiModel: typeof body?.value?.geminiModel === 'string' ? body.value.geminiModel : null,
+    options: Array.isArray(body?.options) ? body.options : [],
+  };
+}
+
 /** Every generated set, newest generation first. */
 export async function fetchSets() {
   const body = await getJSON('cms/listen-and-learn');
@@ -91,10 +117,12 @@ export async function reviewEpisode({ platform, examCode, areaSlug, status }) {
  * out, because the areas that finished are already stored.
  *
  * @param {object} params
+ * @param {string} [params.ttsModel] the Gemini model for this run (one of
+ *   GEMINI_TTS_MODEL_TIERS); omitted, the stored default reads
  * @param {(job: object) => void} [params.onUpdate]
  * @param {(accepted: {speech?: object}) => void} [params.onAccepted] the 202,
- *   which carries `speech: { provider, estimatedCostUsd, … }` — what the run
- *   is expected to spend on audio, stated before it starts
+ *   which carries `speech: { provider, model, estimatedCostUsd, … }` — what
+ *   the run is expected to spend on audio, stated before it starts
  * @param {AbortSignal} [params.signal]
  */
 export async function generateEpisodes({
@@ -104,6 +132,7 @@ export async function generateEpisodes({
   certTitle,
   certSlug,
   areas,
+  ttsModel,
   onUpdate,
   onAccepted,
   signal,
@@ -117,6 +146,7 @@ export async function generateEpisodes({
       ...(certTitle ? { certTitle } : {}),
       ...(certSlug ? { certSlug } : {}),
       ...(areas?.length ? { areas } : {}),
+      ...(ttsModel ? { ttsModel } : {}),
     },
     {
       onUpdate,

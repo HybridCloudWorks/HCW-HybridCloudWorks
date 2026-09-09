@@ -95,7 +95,7 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'GEMINI-API-KEY',
     section: 'ai',
     label: 'Google Gemini',
-    help: 'First in the router’s preference order, and the Listen & Learn voice when ElevenLabs is absent or out of credit.',
+    help: 'First in the router’s preference order, and the Listen & Learn voice: Gemini TTS reads every study episode (ADR 0029 §2b).',
     probe: 'gemini',
   },
   {
@@ -135,7 +135,7 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'ELEVENLABS-API-KEY',
     section: 'ai',
     label: 'ElevenLabs',
-    help: 'Reads every Listen & Learn episode when present, at about USD 0.10 per 1,000 characters (ADR 0029 §2a). A re-minted key needs an app restart to take effect.',
+    help: 'The podcast voice only — article and Plaud transcripts to RSS.com — at about USD 0.10 per 1,000 characters (ADR 0029 §2a, scoped by §2b); never Listen & Learn. A re-minted key needs an app restart to take effect.',
     probe: null,
   },
   {

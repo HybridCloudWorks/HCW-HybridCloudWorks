@@ -2,10 +2,10 @@
  * Render a two-host dialogue to MP3 with ElevenLabs — the paid provider.
  *
  * Added when the owner approved a paid ElevenLabs plan on 2026-09-08 (ADR 0029
- * §2a, #436). It is what the owner is paying for and chose for its dialogue
- * quality, so it runs whenever `ELEVENLABS_API_KEY` is present; Gemini and
- * Azure stay behind it, in that order, for the states a paid provider has and
- * a free one does not — see speech/index.js.
+ * §2a, #436). It is the PODCAST voice — article and Plaud transcripts that go
+ * to RSS.com — and only that (owner rule 2026-09-09, §2b): Listen & Learn is
+ * read by Gemini TTS and never by this module, whatever keys are present.
+ * The product switch in speech/index.js is what enforces that.
  *
  * Contract, verified against the Text to Dialogue API reference and capability
  * guide on 2026-09-08:
@@ -76,9 +76,9 @@
  *
  * ElevenLabs has announced that its default voices are being replaced, with
  * the current set expiring on 2026-12-31. Override per host with
- * `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA` — the same settings the other
- * providers read, so set them together with a `LISTEN_AND_LEARN_TTS_PROVIDER`
- * pin: a Gemini voice name in that setting would be sent here as a voice id.
+ * `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA` — the same settings the Gemini
+ * and Azure providers read, so a value there must suit BOTH products: a
+ * Gemini voice name in that setting would be sent here as a voice id.
  */
 const DIALOGUE_URL = 'https://api.elevenlabs.io/v1/text-to-dialogue';
 

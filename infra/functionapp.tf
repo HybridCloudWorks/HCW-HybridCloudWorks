@@ -435,13 +435,24 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 
     # Listen & Learn audio.
     #
-    # Gemini TTS needs no setting of its own: it reads GEMINI_API_KEY, declared
+    # Gemini TTS needs no key of its own: it reads GEMINI_API_KEY, declared
     # above for the text models, so that path is switched on by a secret that
-    # is already seeded and costs no new service, resource or credential. It
-    # is the fallback for when ELEVENLABS_API_KEY below is absent or the
-    # account is out of credit (listen-and-learn/speech/index.js).
+    # is already seeded and costs no new service, resource or credential.
     #
-    # AZURE_SPEECH_* is the last fallback and is expected to stay unresolved.
+    # LISTEN_AND_LEARN_TTS_PROVIDER pins it. Owner rule 2026-09-09 (ADR 0029
+    # §2b): Listen & Learn audio is Gemini TTS, generated on demand and stored
+    # as MP3, with Azure AI Speech as the GA fallback; ElevenLabs is ONLY the
+    # podcast voice and is never used for Listen & Learn. The switch in
+    # listen-and-learn/speech/index.js enforces the rule per product, and this
+    # pin states it in the estate: the setting may name only "gemini" or
+    # "azure" (naming "elevenlabs" fails every run with a sentence quoting the
+    # rule), a pinned provider that is not configured fails rather than falls
+    # through, and the value is deliberately Terraform-managed rather than set
+    # by hand so a portal edit is drift the next plan shows. Not a secret: a
+    # provider name.
+    "LISTEN_AND_LEARN_TTS_PROVIDER" = "gemini"
+
+    # AZURE_SPEECH_* is the fallback and is expected to stay unresolved.
     # Every Gemini TTS model is a *preview* model, and preview endpoints get
     # retired; a GA second path is what makes that a config change rather
     # than an outage. An unseeded reference arrives as the literal
@@ -452,15 +463,16 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "AZURE_SPEECH_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AZURE-SPEECH-KEY)"
     "AZURE_SPEECH_REGION" = var.speech_region
 
-    # ELEVENLABS_API_KEY is first in preference order: the owner approved a
-    # paid ElevenLabs plan on 2026-09-08 (ADR 0029 §2a, #436), so when this
-    # resolves it is the provider that reads every episode, at about USD 0.10
-    # per 1,000 characters. The reference is versionless like every other
-    # one here, and App Service caches a versionless reference for the life
-    # of the process: a re-minted key needs an app restart to take effect.
-    # Until the secret is seeded the reference on the next line resolves to its
-    # own literal @Microsoft.KeyVault(...) string and the switch moves on to
-    # Gemini — declaring it here switches nothing on.
+    # ELEVENLABS_API_KEY is the PODCAST voice — article and Plaud transcripts
+    # to RSS.com — and only that: the owner approved a paid ElevenLabs plan on
+    # 2026-09-08 (ADR 0029 §2a, #436) and scoped it on 2026-09-09 (§2b). About
+    # USD 0.10 per 1,000 characters. The reference is versionless like every
+    # other one here, and App Service caches a versionless reference for the
+    # life of the process: a re-minted key needs an app restart to take
+    # effect. Until the secret is seeded the reference on the next line
+    # resolves to its own literal @Microsoft.KeyVault(...) string and the
+    # podcast saves transcript-only drafts naming this setting — it never
+    # falls back to Gemini, and declaring it here switches nothing on.
     "ELEVENLABS_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ELEVENLABS-API-KEY)"
 
     # Ingestion and enrichment.
