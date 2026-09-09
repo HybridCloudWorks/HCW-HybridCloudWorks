@@ -27,8 +27,22 @@ import { FEATURE_NAMES } from './ai-config.js';
 const SRC = fileURLToPath(new URL('../..', import.meta.url));
 const ROUTER = join(SRC, 'lib', 'ai', 'router.js');
 
-/** The two entry points that actually reach a model. */
-const CALLS = ['generateJsonResponse', 'generateTextResponse'];
+/** The three entry points that actually reach a model. */
+const CALLS = ['generateJsonResponse', 'generateTextResponse', 'generateGroundedJsonResponse'];
+
+/**
+ * Catalogue entries whose call site is a later slice of a named issue.
+ *
+ * The orphan check below exists so a toggle never reads as a working switch
+ * for something that cannot happen. An entry listed here is that, knowingly
+ * and briefly: the feature landed with the router change that makes it
+ * possible (#433 slice 1) and the call site is the next PR. The exception is
+ * checked in both directions — the feature must exist AND must still have no
+ * call site — so it cannot outlive the slice that removes the need for it.
+ */
+const PENDING_CALL_SITES = Object.freeze({
+  sourceGrounding: '#433 slice 2 adds the source-grounded episode kind that calls it',
+});
 
 function sourceFiles(dir) {
   const out = [];
@@ -124,9 +138,24 @@ describe('AI call sites', () => {
     const declared = new Set(
       SITES.map((s) => s.args.match(/\bfeature\s*:\s*'([^']+)'/)?.[1]).filter(Boolean)
     );
-    const orphans = FEATURE_NAMES.filter((name) => !declared.has(name));
+    const pending = Object.keys(PENDING_CALL_SITES);
+    const orphans = FEATURE_NAMES.filter((name) => !declared.has(name) && !pending.includes(name));
     expect(orphans, 'AI_FEATURES entries with no call site — the toggle would do nothing').toEqual(
       []
     );
+  });
+
+  it('a pending exception names a real feature that really has no call site yet', () => {
+    // Two ways for the exception to go stale, both caught: the feature was
+    // renamed or removed (the exception names nothing), or its call site landed
+    // (the exception is now hiding nothing and must be deleted with the slice).
+    for (const [name, why] of Object.entries(PENDING_CALL_SITES)) {
+      expect(FEATURE_NAMES, `${name} is exempted but is not in AI_FEATURES`).toContain(name);
+      const declared = SITES.some((s) => s.args.match(/\bfeature\s*:\s*'([^']+)'/)?.[1] === name);
+      expect(
+        declared,
+        `${name} now has a call site (${why}); remove it from PENDING_CALL_SITES`
+      ).toBe(false);
+    }
   });
 });

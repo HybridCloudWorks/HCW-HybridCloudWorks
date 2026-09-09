@@ -104,6 +104,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The AI router can ground a generation on web pages and YouTube videos,
+  and can no longer lose a prompt part on the way to a model (#433, slice
+  1).** `generateGroundedJsonResponse({ prompt, sources, feature, … })` takes
+  `{ kind: 'page' | 'video', url }` entries and sends them to Gemini's
+  Interactions endpoint — the same `/v1beta/interactions` the Listen & Learn
+  speech side has called since 2026-08-24 — as `url_context` for pages and
+  `{ type: 'video', uri }` input for videos. Nothing calls it yet; the
+  source-grounded episode kind is slice 2.
+
+  **It fails rather than fails over.** The call resolves the provider chain
+  exactly as every other call does — portal order, disabled providers,
+  `CONTENTFORGE_AI_PROVIDER` — and then requires Gemini to be in it, because
+  Gemini is the only provider that can read either source type. If it is not,
+  the call throws `AI_NOT_CONFIGURED` with the reason: the key is not set, it
+  is disabled in the portal, or the pin names another provider. It never
+  hands on to OpenAI or Anthropic, which would answer confidently from the
+  prompt alone. Sources are validated before anything is resolved — http(s)
+  only, YouTube URLs are `video` and only YouTube URLs are, duplicates
+  dropped, at most 20 pages (Google's `url_context` limit) and 10 videos —
+  and an over-cap list is refused in a sentence rather than truncated. The
+  prompt tells the model that whatever a source returns is data, never
+  instruction, and every URL passes through the same `fenceArticleText` the
+  article episodes use, so a source cannot close the caller's fence.
+
+  **A dropped part is now impossible.** `toGeminiParts`, `toOpenAiContent`
+  and `toAnthropicContent` used to return `null` for any part shape they did
+  not recognise and filter it out; a `fileData` part — the shape the issue's
+  first comment assumed a YouTube URL would take — reached the model as
+  nothing, and the model answered without it. Each converter now throws a
+  400 for a shape it cannot carry, which neither retries nor fails over. The
+  one production caller passing `parts` (`inspect.js` alt text) sends only
+  text and `image/*` inline data and is unaffected. The `Source grounding`
+  feature toggle joins the AI Engine catalogue; `ai-call-sites.test.js` scans
+  the new entry point and carries a checked, self-expiring exception for the
+  toggle until slice 2 gives it a call site.
+
 - **`scripts/check-workflow-health.mjs` — the guard that would have caught
   the three weeks.** Split out of #426, which retired the workflow that
   prompted it on 2026-09-08. `validate-deployed.yml` explained in its own header why it
