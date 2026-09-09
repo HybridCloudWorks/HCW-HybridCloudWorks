@@ -23,7 +23,7 @@ import {
   renderTranscriptForPrompt,
   targetBytesForRecording,
 } from './recording-script.js';
-import { ARTICLE_CLOSE, ARTICLE_OPEN } from './article-script.js';
+import { ARTICLE_CLOSE, ARTICLE_OPEN } from '../ai/prompt-fence.js';
 import { MAX_SCRIPT_BYTES } from './script.js';
 
 /**
@@ -439,16 +439,19 @@ describe('findAttributionLeaks', () => {
 
 describe('reuse of the siblings is pinned', () => {
   afterEach(() => {
-    vi.doUnmock('./article-script.js');
+    vi.doUnmock('../ai/prompt-fence.js');
     vi.resetModules();
   });
 
-  it('fences the transcript through article-script’s neutraliser, not a copy of it', async () => {
-    // Swap the sibling's fence for a marker and rebuild the prompt through a
+  it('fences the transcript through prompt-fence’s neutraliser, not a copy of it', async () => {
+    // Swap the shared fence for a marker and rebuild the prompt through a
     // fresh module graph. If this module had grown its own fence, the marker
     // would never appear and a divergence in one would not reach the other.
+    // The mock targets ai/prompt-fence.js — the single source since #445 —
+    // so the pin also fails if this module went back to importing the fence
+    // through article-script.js's re-export.
     vi.resetModules();
-    vi.doMock('./article-script.js', async (importOriginal) => {
+    vi.doMock('../ai/prompt-fence.js', async (importOriginal) => {
       const actual = await importOriginal();
       return { ...actual, fenceArticleText: (text) => `FENCED[${text}]` };
     });

@@ -139,13 +139,14 @@ This project has not cut a tagged release; entries are grouped under
   feature toggle joins the AI Engine catalogue; `ai-call-sites.test.js` scans
   the new entry point and carries a checked, self-expiring exception for the
   toggle until slice 2 gives it a call site.
+
 - **A script generator for recording transcripts, sibling to the article
   one (#434, generator only; #446).** `generateRecordingScript` in
   `functions/src/lib/listen-and-learn/recording-script.js` takes a Plaud
   transcript and returns the same script shape `generateEpisodeScript` and
   `generateArticleScript` return, through the same validation, byte fitting
   and prompt-injection fence — imported from `script.js` and
-  `article-script.js`, with tests that swap the sibling's fence for a marker
+  `ai/prompt-fence.js`, with tests that swap the shared fence for a marker
   and prove the marker reaches the prompt, so a copy cannot drift. Nothing
   calls it yet: the admin surface, the stored episode and the `USAGE_SOURCES`
   entry are the next slice, and the returned `source` object carries what

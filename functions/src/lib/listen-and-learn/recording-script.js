@@ -37,8 +37,13 @@
  *
  * **The transcript is untrusted input**, and more obviously so than an article:
  * it is whatever anyone in the room said, transcribed by a third party's
- * model. It goes inside the fence `article-script.js` defines, through the same
- * neutraliser, so a source that could break one fence could break neither.
+ * model. It goes inside the fence `ai/prompt-fence.js` defines — the one the
+ * article generator and the router's source grounding (#433) also use —
+ * through the same neutraliser, so a source that could break one fence could
+ * break none of them. Imported from the router-side module directly rather
+ * than through `article-script.js`'s re-export, for the reason that module
+ * was split out in #445: this one has no business pulling the article
+ * generator into its graph to borrow a delimiter.
  */
 import {
   DEFAULT_SPEAKERS,
@@ -48,7 +53,7 @@ import {
   fitToByteLimit,
   validateScript,
 } from './script.js';
-import { ARTICLE_CLOSE, ARTICLE_OPEN, fenceArticleText } from './article-script.js';
+import { ARTICLE_CLOSE, ARTICLE_OPEN, fenceArticleText } from '../ai/prompt-fence.js';
 
 export { DEFAULT_SPEAKERS, ScriptError };
 
