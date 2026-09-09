@@ -153,6 +153,20 @@ function candidateProviders(env) {
 const isOutOfCredit = (err) => err?.name === 'SpeechError' && err?.code === 'quota_exceeded';
 
 /**
+ * The turns that will actually be spoken: those with non-blank text.
+ *
+ * One helper for both `synthesizeDialogue` and `estimateSpeechCostUsd`, so
+ * the estimate can never count a turn synthesis would drop. Before this was
+ * shared, a whitespace-only dialogue estimated $0 while synthesis refused it.
+ *
+ * @param {{speaker: string, text: string}[]|null|undefined} dialogue
+ * @returns {{speaker: string, text: string}[]}
+ */
+export function speakableTurns(dialogue) {
+  return (dialogue || []).filter((t) => String(t?.text || '').trim());
+}
+
+/**
  * Synthesise a whole dialogue, returning one MP3.
  *
  * Only ONE failure moves on to the next provider: the paid provider reporting
@@ -176,7 +190,7 @@ export async function synthesizeDialogue({
   fetchImpl = fetch,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
-  const turns = (dialogue || []).filter((t) => String(t?.text || '').trim());
+  const turns = speakableTurns(dialogue);
   if (turns.length === 0) throw new SpeechError('No dialogue turns to synthesise');
 
   const candidates = candidateProviders(env);
@@ -246,7 +260,9 @@ function modelFor(providerName, env) {
  * @param {number} [params.characters] a ceiling in UTF-8 bytes (see above)
  * @param {object} [params.env]
  * @returns {{provider: string, model: string|null, characters: number, estimatedCostUsd: number|null}|null}
- *   null when no provider is configured (or the pin is unusable).
+ *   null when no provider is configured (or the pin is unusable), and null
+ *   when there is nothing to price — no ceiling and no speakable turn — since
+ *   synthesis would refuse that dialogue rather than read it for free.
  */
 export function estimateSpeechCostUsd({ dialogue = null, characters = null, env = process.env } = {}) {
   let provider;
@@ -263,7 +279,10 @@ export function estimateSpeechCostUsd({ dialogue = null, characters = null, env 
   const hasCeiling =
     characters !== null && characters !== undefined && Number.isFinite(Number(characters));
   const ceiling = hasCeiling ? Math.max(0, Math.round(Number(characters))) : null;
-  const turns = dialogue || [];
+  // The same filter synthesis applies, so a blank turn is never priced — and
+  // a dialogue that is nothing but blank turns is "nothing to price", not $0.
+  const turns = speakableTurns(dialogue);
+  if (!hasCeiling && turns.length === 0) return null;
   const count = hasCeiling ? ceiling : dialogueCharacters(turns);
   const bytes = hasCeiling ? ceiling : dialogueBytes(turns);
   const model = modelFor(provider.name, env);

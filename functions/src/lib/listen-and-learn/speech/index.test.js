@@ -19,6 +19,7 @@ import {
   estimateSpeechCostUsd,
   readSetting,
   resolveSpeechProvider,
+  speakableTurns,
   synthesizeDialogue,
 } from './index.js';
 
@@ -336,6 +337,47 @@ describe('estimateSpeechCostUsd', () => {
         env: { ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' },
       })
     ).toBeNull();
+  });
+
+  it('returns null, not $0, for a dialogue synthesis would refuse', async () => {
+    // Copilot review on #447: a whitespace-only dialogue estimated 0 while
+    // synthesizeDialogue threw "No dialogue turns to synthesise".
+    const blank = [{ speaker: 'Maya', text: '  ' }, { speaker: 'Elena', text: '' }];
+    expect(estimateSpeechCostUsd({ dialogue: blank, env: ELEVEN })).toBeNull();
+    expect(estimateSpeechCostUsd({ dialogue: [], env: ELEVEN })).toBeNull();
+    expect(estimateSpeechCostUsd({ env: ELEVEN })).toBeNull();
+    await expect(synthesizeDialogue({ dialogue: blank, env: ELEVEN })).rejects.toThrow(
+      /No dialogue turns/
+    );
+    // A ceiling is still priced with no dialogue: that is the enqueue path.
+    expect(estimateSpeechCostUsd({ characters: 9000, env: ELEVEN }).estimatedCostUsd).toBe(0.9);
+  });
+
+  it('counts exactly the turns synthesis would speak, through one shared filter', async () => {
+    // The estimate and the synthesis use the same exported helper, so a turn
+    // dropped by one is dropped by the other: the estimate of a dialogue with
+    // blank turns equals the estimate of the filtered dialogue, and the
+    // request synthesis sends contains only the filtered turns.
+    const mixed = [
+      { speaker: 'Maya', text: 'Hello' },
+      { speaker: 'Elena', text: '   ' },
+      { speaker: 'Elena', text: 'Hi' },
+      { speaker: 'Maya', text: '' },
+    ];
+    expect(speakableTurns(mixed)).toEqual([
+      { speaker: 'Maya', text: 'Hello' },
+      { speaker: 'Elena', text: 'Hi' },
+    ]);
+    expect(speakableTurns(null)).toEqual([]);
+    expect(estimateSpeechCostUsd({ dialogue: mixed, env: ELEVEN })).toEqual(
+      estimateSpeechCostUsd({ dialogue: speakableTurns(mixed), env: ELEVEN })
+    );
+    expect(estimateSpeechCostUsd({ dialogue: mixed, env: ELEVEN }).characters).toBe(7);
+
+    const fetchImpl = elevenOk();
+    await synthesizeDialogue({ dialogue: mixed, env: ELEVEN, fetchImpl });
+    const sent = JSON.parse(fetchImpl.mock.calls[0][1].body).inputs.map((i) => i.text);
+    expect(sent).toEqual(speakableTurns(mixed).map((t) => t.text));
   });
 
   it('prices ElevenLabs by characters at the cost-table rate, before any request', () => {
