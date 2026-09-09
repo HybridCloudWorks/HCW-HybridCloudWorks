@@ -89,10 +89,21 @@ describe('secret catalogue ↔ Terraform', () => {
     // `hasLivenessCheck: true` reaches the page and suppresses the "no liveness
     // check for this one" caveat beside a green light. If nothing records a
     // verdict for that secret, the light can never go red and the page has
-    // quietly promised a check it does not run. The AI router is the only
-    // reporter, so its providers are the only legal probes.
+    // quietly promised a check it does not run. Two things report, both
+    // through lib/key-verdict.js: the AI router for its providers, and the
+    // Publer client and proxy for PUBLER_API_KEY (#358). Those are the only
+    // legal probes; adding one here without a reporter is the lie this guards.
     const probed = SECRET_CATALOG.filter((e) => e.probe).map((e) => e.probe).sort();
-    expect(probed).toEqual([...PROVIDERS].sort());
+    expect(probed).toEqual([...PROVIDERS, 'publer'].sort());
+  });
+
+  it('carries the Publer probe on the key, not the workspace id', () => {
+    // The verdict is recorded against PUBLER_API_KEY; the id is an identifier
+    // that travels with it, and a probe there would promise a light that
+    // nothing switches.
+    const byProbe = Object.fromEntries(SECRET_CATALOG.map((e) => [e.setting, e.probe]));
+    expect(byProbe.PUBLER_API_KEY).toBe('publer');
+    expect(byProbe.PUBLER_WORKSPACE_ID).toBeNull();
   });
 
   it('declares probe explicitly on every entry, so "no liveness check" is a decision', () => {

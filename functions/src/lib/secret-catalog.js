@@ -76,16 +76,17 @@ export const SECRET_SECTIONS = Object.freeze([
  *
  * `setting` is the app-setting name (what `process.env` holds); `secret` is the
  * Key Vault secret name (what gets written). Both are asserted against
- * `infra/main.tf`. `probe` names the AI-router provider whose verdict can turn
- * this light red.
+ * `infra/main.tf`. `probe` names the reporter whose verdict can turn this
+ * light red.
  *
  * `null` is the honest default and most entries have it. A non-null probe is a
  * PROMISE that something reports this credential's health, and the page prints
- * "no liveness check for this one" beside a green light that has none. Today
- * the only reporter is `ai/router.js`, which distinguishes a rejected key
- * (401/403) from a bad request — so only its three providers may carry a probe,
- * and `secret-catalog.test.js` holds that. Wiring a new reporter and setting a
- * probe is one change, not two.
+ * "no liveness check for this one" beside a green light that has none. Two
+ * things report today, both through `lib/key-verdict.js`, which is what
+ * distinguishes a rejected key (401/403) from a bad request: `ai/router.js`
+ * for its three providers, and the Publer client and proxy for `PUBLER_API_KEY`
+ * (#358). Only those may carry a probe, and `secret-catalog.test.js` holds
+ * that. Wiring a new reporter and setting a probe is one change, not two.
  */
 export const SECRET_CATALOG = Object.freeze([
   // ── AI & generation ──────────────────────────────────────────────────────
@@ -144,8 +145,8 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'PUBLER-API-KEY',
     section: 'social',
     label: 'Publer — API key',
-    help: 'Social auto-post. Absent, scheduled posts no-op rather than failing.',
-    probe: null,
+    help: 'Social auto-post. Absent, scheduled posts no-op rather than failing; rejected, the calendar sync skips and this light goes red.',
+    probe: 'publer',
   },
   {
     setting: 'PUBLER_WORKSPACE_ID',

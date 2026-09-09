@@ -9,11 +9,17 @@ import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { readKey } from '../lib/ai/router.js';
 import { createRestProxy, createIntegration } from '../lib/integrations/rest-proxy.js';
 import { PUBLER_API_BASE_URL } from '../lib/timers/publer-sync.js';
+import { recordKeyVerdict } from '../lib/key-verdict.js';
 
-const proxy = () => createRestProxy({ guard: getDefaultGuard(), readKey });
+// `recordKeyVerdict` is the process-wide writer the AI router and the Publer
+// timer use, so the API-keys page hears about a rejected key from whichever
+// path sees it first (#358).
+const proxy = () => createRestProxy({ guard: getDefaultGuard(), readKey, onKeyVerdict: recordKeyVerdict });
 
 // Base URL and auth shape reused from the client that has been calling Publer
-// since the port, rather than restated here where the two could drift.
+// since the port, rather than restated here where the two could drift. The
+// verdict opt-in matches the timer's client: a 401/403 here is the same fact
+// the timer sees, recorded against the same setting.
 const PUBLER = createIntegration({
   name: 'Publer',
   baseUrl: PUBLER_API_BASE_URL,
@@ -23,6 +29,7 @@ const PUBLER = createIntegration({
     Authorization: `Bearer-API ${apiKey}`,
     'Publer-Workspace-Id': read(env, 'PUBLER_WORKSPACE_ID'),
   }),
+  reportsKeyVerdict: true,
 });
 
 // The admin UI sends paths already prefixed with /api (e.g. '/api/lists/'), so
