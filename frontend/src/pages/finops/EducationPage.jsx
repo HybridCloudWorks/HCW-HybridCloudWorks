@@ -197,7 +197,7 @@ export default function FinOpsEducationPage() {
         <title>FinOps Education &amp; Certifications | HCW</title>
         <meta
           name="description"
-          content="FinOps Foundation certification prep, learning paths, and resources — covering the FinOps Certified Practitioner, Engineer, and Professional credentials."
+          content="FinOps Foundation certification prep, learning paths, and resources — covering the FinOps Certified Practitioner, Engineer, FOCUS Analyst, AI Value, Technology Value, and Professional credentials."
         />
         <meta property="og:title" content="FinOps Education & Certifications" />
         <meta
@@ -364,7 +364,12 @@ export default function FinOpsEducationPage() {
                       >
                         {cert.level}
                       </span>
-                      <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
+                      {cert.hours ? (
+                        // Only where the Foundation publishes a duration. It
+                        // sizes AI Value and Technology Value in modules, not
+                        // hours, and `{undefined}h` would render "undefinedh".
+                        <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
+                      ) : null}
                     </div>
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
