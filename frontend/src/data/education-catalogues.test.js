@@ -25,13 +25,14 @@
  */
 import { describe, it, expect } from 'vitest';
 import { CERT_DATE_FIELDS, findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
+import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
 import * as gcp from '@/data/gcp/certifications';
 import * as github from '@/data/github/certifications';
 import * as terraform from '@/data/terraform/certifications';
 import * as vmware from '@/data/vmware/education';
 
-const CATALOGUES = { aws, gcp, github, terraform, vmware };
+const CATALOGUES = { ansible, aws, gcp, github, terraform, vmware };
 
 describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provider, mod) => {
   const { certifications, DATA_AS_OF, DATA_SOURCE } = mod;

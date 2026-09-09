@@ -39,6 +39,8 @@ export default function EducationTracks({
   const [level, setLevel] = useState('All');
   // "Today" for the status badges: the catalogue's own date while
   // pre-rendering and hydrating, the viewer's date after (see certStatus.js).
+  // Every caller passes its DATA_AS_OF; useToday still pins a fixed day if
+  // one does not, so hydration can never depend on the viewer's clock.
   const today = useToday(dataAsOf);
   const visible = useMemo(
     () => (level === 'All' ? certifications : certifications.filter((c) => c.level === level)),

@@ -14,6 +14,7 @@ import {
   isIsoDate,
   isPastDate,
   todayIso,
+  UNDATED_FALLBACK_ISO,
   useToday,
 } from './certStatus';
 
@@ -149,6 +150,38 @@ describe('useToday', () => {
     render(createElement(Probe));
     expect(seen[0]).toBe(todayIso());
   });
+
+  it('pins a fixed day, never the clock, when the fallback is missing or malformed', async () => {
+    // A page that forgot its DATA_AS_OF must still pre-render and hydrate on
+    // the same string; an undefined server snapshot would hydrate on the
+    // viewer's date and mismatch the HTML (#465 review).
+    const seen = [];
+    function Probe({ fallback }) {
+      const today = useToday(fallback);
+      seen.push(today);
+      return createElement('p', null, today);
+    }
+    for (const fallback of [undefined, null, '', 'not a date', '2026-02-30']) {
+      seen.length = 0;
+      const html = renderToString(createElement(Probe, { fallback }));
+      expect(html).toContain(UNDATED_FALLBACK_ISO);
+      expect(seen).toEqual([UNDATED_FALLBACK_ISO]);
+
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      document.body.appendChild(container);
+      const onRecoverableError = vi.fn();
+      let root;
+      await act(async () => {
+        root = hydrateRoot(container, createElement(Probe, { fallback }), { onRecoverableError });
+      });
+      expect(onRecoverableError, `fallback ${String(fallback)}`).not.toHaveBeenCalled();
+      expect(seen[1]).toBe(UNDATED_FALLBACK_ISO);
+      expect(container.textContent).toBe(todayIso());
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
 });
 
 describe('isPastDate', () => {
@@ -158,11 +191,14 @@ describe('isPastDate', () => {
     expect(isPastDate('2026-09-10', TODAY)).toBe(false);
   });
 
-  it('never treats a missing or malformed date as past', () => {
+  it('never treats a missing, malformed or impossible date as past', () => {
     expect(isPastDate(undefined, TODAY)).toBe(false);
     expect(isPastDate(null, TODAY)).toBe(false);
     expect(isPastDate('June 30, 2026', TODAY)).toBe(false);
     expect(isPastDate('2026-06-30', 'not-a-date')).toBe(false);
+    // Right shape, no such day: shape-only checks let this through.
+    expect(isPastDate('2026-02-30', TODAY)).toBe(false);
+    expect(isPastDate('2026-06-30', '2026-02-30')).toBe(false);
   });
 });
 
@@ -213,6 +249,29 @@ describe('deriveStatus', () => {
     expect(deriveStatus(cert, '2026-11-16')).toBe('upcoming');
     expect(deriveStatus(cert, '2026-11-17')).toBe('active');
     expect(deriveStatus({ status: 'upcoming' }, TODAY)).toBe('upcoming');
+  });
+
+  it('never lets an impossible day decide a status', () => {
+    // 2026-02-30 matches the YYYY-MM-DD shape; only a real-calendar check
+    // stops it flipping a status (#465 review).
+    const past = '2027-01-01';
+    expect(deriveStatus({ status: 'beta', gaDate: '2026-02-30' }, past)).toBe('beta');
+    expect(deriveStatus({ status: 'beta', betaEndDate: '2026-02-30' }, past)).toBe('beta');
+    expect(deriveStatus({ status: 'upcoming', availableDate: '2026-02-30' }, past)).toBe(
+      'upcoming'
+    );
+    expect(
+      deriveStatus(
+        { status: 'upcoming', availableDate: '2027-06-01', registrationOpens: '2026-02-30' },
+        past
+      )
+    ).toBe('upcoming');
+    expect(deriveStatus({ status: 'expiring', expiryDate: '2026-02-30' }, past)).toBe('expiring');
+    expect(deriveStatus({ status: 'active', expiryDate: '2026-02-30' }, past)).toBe('active');
+    // And an impossible "today" decides nothing either.
+    expect(deriveStatus({ status: 'upcoming', availableDate: '2026-01-01' }, '2026-02-30')).toBe(
+      'upcoming'
+    );
   });
 
   it('keeps a stored "retired" and an "active" with no dates', () => {
@@ -356,6 +415,21 @@ describe('findStaleStatuses', () => {
       "Z: unknown status 'sunset'",
       "W: gaDate '2027-02-30' is not YYYY-MM-DD",
     ]);
+  });
+
+  it('reports an impossible day exactly once, as a shape problem', () => {
+    // Before isPastDate validated the calendar, 2026-02-30 was reported both
+    // as "not YYYY-MM-DD" and as "has passed" (#465 review).
+    const past = '2027-01-01';
+    expect(
+      findStaleStatuses([{ code: 'A', status: 'expiring', expiryDate: '2026-02-30' }], past)
+    ).toEqual(["A: expiryDate '2026-02-30' is not YYYY-MM-DD"]);
+    expect(findStaleStatuses([{ code: 'B', status: 'beta', gaDate: '2026-02-30' }], past)).toEqual([
+      "B: gaDate '2026-02-30' is not YYYY-MM-DD",
+    ]);
+    expect(
+      findStaleStatuses([{ code: 'C', status: 'upcoming', availableDate: '2026-02-30' }], past)
+    ).toEqual(["C: availableDate '2026-02-30' is not YYYY-MM-DD"]);
   });
 
   it('validates every field in CERT_DATE_FIELDS, registrationOpens included', () => {

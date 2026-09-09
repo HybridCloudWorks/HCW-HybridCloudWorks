@@ -4,6 +4,20 @@
  * Extracted from src/pages/ansible/EducationPage.jsx when that page moved onto the
  * shared EducationTemplate.
  */
+/**
+ * Catalogue last checked against Red Hat on 2026-09-09 (#461 audit): RHCSA
+ * EX200, RHCE EX294, EX374 and EX467 are all current on
+ * redhat.com/en/services/certifications. Rendered by the page as the one
+ * freshness claim it can make, and used by `useToday` as the day the
+ * pre-render and the hydrating render agree on.
+ */
+export const DATA_AS_OF = '2026-09-09';
+
+export const DATA_SOURCE = {
+  label: 'Red Hat certifications',
+  url: 'https://www.redhat.com/en/services/certifications',
+};
+
 export const levelMeta = {
   Foundational: {
     badge: 'bg-sky-500/20 border-sky-500/40 text-sky-300',
