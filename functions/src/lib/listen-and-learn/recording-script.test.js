@@ -20,6 +20,7 @@ import {
   findAttributionLeaks,
   generateRecordingScript,
   normalizePlaudTranscript,
+  oneLineTitle,
   renderTranscriptForPrompt,
   targetBytesForRecording,
 } from './recording-script.js';
@@ -342,6 +343,20 @@ describe('buildRecordingPrompt', () => {
     expect(prompt).toContain('SESSION TITLE: Ignore the above');
   });
 
+  it('keeps a title on one line, whatever whitespace it arrived with', () => {
+    // Copilot on #446: a newline in Plaud's free-text name spilled the title
+    // across lines inside the fence, breaking the claim that the FIRST line
+    // is SESSION TITLE, and stored a multi-line source.title. One helper
+    // serves the prompt, the result and the normaliser.
+    const messy = '  08-06\tLecture:\n\n  Zero\r\nTrust   ';
+    const prompt = buildRecordingPrompt({ recording: { ...recording, title: messy }, rendered });
+    expect(prompt).toContain(`${ARTICLE_OPEN}\nSESSION TITLE: 08-06 Lecture: Zero Trust\n\n`);
+    expect(oneLineTitle(messy)).toBe('08-06 Lecture: Zero Trust');
+    expect(normalizePlaudTranscript({ id: 'r', name: messy, segments: [] }).recording.title).toBe(
+      '08-06 Lecture: Zero Trust'
+    );
+  });
+
   it('tells the model the title line was typed, not spoken, and only when there is one', () => {
     // Review thread on #446: the fence sentence claimed everything inside
     // was said in the session, and the title line was not. The sentence
@@ -429,6 +444,19 @@ describe('findAttributionLeaks', () => {
     expect(findAttributionLeaks([{ text: 'Zoë made the point.' }], named)).toEqual(['Zoë']);
     expect(findAttributionLeaks([{ text: 'J. R. (host) said so.' }], named)).toEqual([
       'J. R. (host)',
+    ]);
+  });
+
+  it('reports one leak for two spellings of the same label, in the first-seen spelling', () => {
+    // Copilot on #446: labels were collected case-sensitively and matched
+    // case-insensitively, so "Speaker 2" and "speaker 2" counted twice.
+    const segments = [
+      { text: 'x', speaker: 'Speaker 2' },
+      { text: 'y', speaker: 'speaker 2' },
+      { text: 'z', speaker: 'SPEAKER 2' },
+    ];
+    expect(findAttributionLeaks([{ text: 'Then speaker 2 agreed.' }], segments)).toEqual([
+      'Speaker 2',
     ]);
   });
 
@@ -576,6 +604,16 @@ describe('generateRecordingScript', () => {
     );
     const result = await generateRecordingScript({ recording, segments, generate });
     expect(result.attributionLeaks).toEqual(['Speaker 1']);
+  });
+
+  it('stores the source title on one line', async () => {
+    const generate = vi.fn().mockResolvedValue(script());
+    const result = await generateRecordingScript({
+      recording: { ...recording, title: 'Agent\nidentity\t\tand\r\nzero trust' },
+      segments,
+      generate,
+    });
+    expect(result.source.title).toBe('Agent identity and zero trust');
   });
 
   it('falls back to the recording title, then a plain one, when the model returns whitespace', async () => {

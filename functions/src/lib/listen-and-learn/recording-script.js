@@ -137,6 +137,23 @@ function stringOrNull(value) {
   return s || null;
 }
 
+/**
+ * A title on one line.
+ *
+ * Plaud's `name` is free text the owner typed, and a paste can carry
+ * anything. A newline inside it would spill the title across lines inside
+ * the fence — breaking the prompt's claim that the FIRST line is the
+ * SESSION TITLE — and would store a multi-line `source.title`. Every
+ * whitespace run, newlines and tabs included, collapses to one space; the
+ * same helper serves the prompt, the result and the normaliser so the three
+ * cannot disagree about what the title is.
+ */
+export function oneLineTitle(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** One Plaud utterance → one normalised segment, or null if it says nothing. */
 function fromPlaudSegment(item) {
   if (!item || typeof item !== 'object') return null;
@@ -229,7 +246,7 @@ function recordingFrom(...sources) {
   for (const src of sources) {
     if (!src || typeof src !== 'object') continue;
     out.id = out.id || stringOrNull(src.id ?? src.file_id ?? src.recordingId);
-    out.title = out.title || stringOrNull(src.title ?? src.name);
+    out.title = out.title || oneLineTitle(src.title ?? src.name) || null;
     out.recordedAt =
       out.recordedAt || stringOrNull(src.recordedAt ?? src.start_at ?? src.created_at);
     out.durationMs = out.durationMs ?? msOrNull(src.durationMs ?? src.duration);
@@ -378,7 +395,7 @@ function minutesOf(durationMs) {
 export function buildRecordingPrompt({ recording, rendered, speakers = DEFAULT_SPEAKERS }) {
   const targetBytes = targetBytesForRecording(rendered.text);
   const minutes = minutesOf(recording?.durationMs);
-  const title = String(recording?.title || '').trim();
+  const title = oneLineTitle(recording?.title);
 
   return `You are scripting one episode of a cloud engineering podcast that discusses a single recorded session — a talk, a lecture or a working conversation that was recorded and transcribed.
 
@@ -435,15 +452,19 @@ Return JSON only, matching exactly:
  * ten or more voices — and a reviewer who learns the signal cries wolf stops
  * reading it. The boundary is Unicode-aware because a label can be a name
  * ("Zoë"), and case-insensitive because the model does not preserve case.
+ * Labels are de-duplicated the same way — a transcript carrying both
+ * "Speaker 2" and "speaker 2" is one voice, and reporting it twice would
+ * inflate the count a reviewer reads; the first-seen spelling is reported.
  */
 export function findAttributionLeaks(turns, segments) {
-  const labels = new Set();
+  const labels = new Map();
   for (const s of Array.isArray(segments) ? segments : []) {
     const label = String(s?.speaker ?? '').trim();
-    if (label.length >= 3) labels.add(label);
+    const key = label.toLowerCase();
+    if (label.length >= 3 && !labels.has(key)) labels.set(key, label);
   }
   const spoken = (Array.isArray(turns) ? turns : []).map((t) => String(t?.text ?? '')).join('\n');
-  return [...labels].filter((label) => {
+  return [...labels.values()].filter((label) => {
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(spoken);
   });
@@ -496,7 +517,7 @@ export async function generateRecordingScript({
     );
   }
 
-  const title = String(recording?.title || '').trim();
+  const title = oneLineTitle(recording?.title);
   const parsed = await generate({
     prompt: buildRecordingPrompt({ recording: { ...recording, title }, rendered, speakers }),
     purpose: 'analysis',
