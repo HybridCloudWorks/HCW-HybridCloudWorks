@@ -33,7 +33,11 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: vi.fn() 
 
 const ok = (data) => ({ ok: true, status: 200, data });
 /** Publer refused. The proxy still answers HTTP 200, so this RESOLVES. */
-const refused = { ok: false, status: 401, data: { errors: ['Missing or invalid Authorization header'] } };
+const refused = {
+  ok: false,
+  status: 401,
+  data: { errors: ['Missing or invalid Authorization header'] },
+};
 
 beforeEach(() => postJSON.mockReset());
 
@@ -115,11 +119,13 @@ describe('polling a job (#463 item 1)', () => {
   });
 
   it('names the failure on a failed job', async () => {
-    postJSON.mockResolvedValue(ok({ status: 'failed', payload: { failures: { 'acc-2': 'Rejected' } } }));
+    postJSON.mockResolvedValue(
+      ok({ status: 'failed', payload: { failures: { 'acc-2': 'Rejected' } } })
+    );
     expect((await poll('j1')).error.message).toBe('Publer job failed — acc-2: Rejected');
   });
 
-  it('stops on a refused envelope with Publer\'s own sentence, rather than polling fifteen times', async () => {
+  it("stops on a refused envelope with Publer's own sentence, rather than polling fifteen times", async () => {
     postJSON.mockResolvedValue(refused);
     expect((await poll('j1')).error.message).toBe(
       'Publer job status unavailable — Publer answered 401 — Missing or invalid Authorization header'
@@ -180,9 +186,9 @@ describe('describePublerJobFailures', () => {
   });
 
   it('reads an array form too, in case the shape shifts', () => {
-    expect(
-      describePublerJobFailures({ failures: [{ account_id: 'a', message: 'one' }] })
-    ).toBe('a: one');
+    expect(describePublerJobFailures({ failures: [{ account_id: 'a', message: 'one' }] })).toBe(
+      'a: one'
+    );
   });
 
   it('is empty when there is nothing to report, so a clean job reads as clean', () => {
@@ -193,7 +199,7 @@ describe('describePublerJobFailures', () => {
 });
 
 describe('describePublerEnvelope', () => {
-  it('prefers the proxy\'s own explanation, which describes what happened to the call', () => {
+  it("prefers the proxy's own explanation, which describes what happened to the call", () => {
     expect(
       describePublerEnvelope({
         ok: false,
@@ -202,13 +208,15 @@ describe('describePublerEnvelope', () => {
     ).toBe('Publer is not configured: PUBLER_WORKSPACE_ID is not set');
   });
 
-  it('falls back to Publer\'s errors array', () => {
+  it("falls back to Publer's errors array", () => {
     expect(describePublerEnvelope(refused)).toBe(
       'Publer answered 401 — Missing or invalid Authorization header'
     );
   });
 
   it('is the status alone when the body carried no reason', () => {
-    expect(describePublerEnvelope({ ok: false, status: 500, data: {} })).toBe('Publer answered 500');
+    expect(describePublerEnvelope({ ok: false, status: 500, data: {} })).toBe(
+      'Publer answered 500'
+    );
   });
 });

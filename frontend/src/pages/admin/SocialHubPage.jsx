@@ -343,7 +343,8 @@ export async function publerDeletePost(postId) {
   const res = await publerFetch(`/posts?post_ids[]=${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
-  if (res?.ok === false) throw new Error(`Publer refused the delete — ${describePublerEnvelope(res)}`);
+  if (res?.ok === false)
+    throw new Error(`Publer refused the delete — ${describePublerEnvelope(res)}`);
   const deleted = (res?.data?.deleted_ids || []).map(String);
   if (!deleted.includes(id)) {
     throw new Error('Publer did not report this post as deleted — check the Publer queue');

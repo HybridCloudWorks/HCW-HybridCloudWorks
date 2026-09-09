@@ -65,7 +65,7 @@ describe('unwrapPublerAccounts', () => {
     });
   });
 
-  it('prefers the proxy\'s own explanation over the upstream body when it has one', () => {
+  it("prefers the proxy's own explanation over the upstream body when it has one", () => {
     // `error` is the PROXY speaking (it never called Publer, or its fetch
     // threw); `data.errors[0]` is Publer. Both can be present, and the
     // proxy's is the one that describes what actually happened to the call.
