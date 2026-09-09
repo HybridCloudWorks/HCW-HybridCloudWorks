@@ -64,6 +64,21 @@ jobs:
           cache: 'npm'
           cache-dependency-path: functions/package-lock.json
 
+      # `concurrency: function-app-host` above serialises deploys against each
+      # other and knows nothing about Terraform, which runs in HCP Terraform
+      # rather than in Actions. On 2026-09-09 a deploy and an apply wrote the
+      # app-settings map three minutes apart and six settings were lost, because
+      # ARM's appsettings PUT replaces rather than merges and the deploy's
+      # closing write replayed the map it had read before the apply (#454).
+      #
+      # Deliberately BEFORE the firewall windows open: a refusal here leaves
+      # nothing to unwind. Self-arming — no TFC_TOKEN and it says so and passes,
+      # because a guard that cannot run must not be why releases stop.
+      - name: Refuse to deploy while a Terraform apply is running
+        env:
+          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+        run: node scripts/tfc-workspace-busy.mjs
+
       - name: Install dependencies
         working-directory: functions
         run: npm ci
@@ -212,6 +227,19 @@ jobs:
             exit 1
           fi
           echo "AzureWebJobsStorage absent — as the apply-time strip guarantees"
+
+          # The other half of #454. The pre-flight guard refuses to START while
+          # a run is going; it cannot stop one that BEGINS after this job read
+          # the settings map. So detect the clobber here rather than leaving it
+          # to be found days later by a feature that quietly read nothing —
+          # which is how the 2026-09-09 loss was actually discovered.
+          #
+          # Key Vault-referenced settings only. Plain ones like
+          # PUBLIC_API_ORIGIN are out of scope because `app_settings` is a
+          # merge() with computed maps and no regex over it is safe enough to
+          # gate a release on; the script's header argues that in full.
+          az functionapp config appsettings list -n "$APP" -g "$RG" --query "[].name" -o tsv \
+            | node scripts/assert-live-app-settings.mjs
 
           # SyncTriggers is still worth doing explicitly: the Flex deploy does
           # not always register newly added triggers on its own, and the host

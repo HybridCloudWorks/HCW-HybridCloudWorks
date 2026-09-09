@@ -205,6 +205,49 @@ Bootstrap is done when a plan authenticates. Continue from section 1.
    required input.
 5. If the change alters an accepted ADR, write the superseding ADR first
    ([register](../decisions/index.md)).
+6. **A Terraform apply and a Functions deploy must never overlap.** Before
+   dispatching `deploy-functions.yml`, confirm the `hcw-azure` workspace has
+   no run in progress, and before confirming an apply, confirm no deploy is
+   running.
+
+### Why they cannot overlap
+
+Both writers rewrite the Function App's **entire** app-settings map, because
+ARM's `appsettings` PUT replaces rather than merges — the same property the
+T-511 strip depends on. Two writers that read-modify-write that map within a
+few minutes therefore discard each other's changes, and neither one errors.
+
+It happened on 2026-09-09 (#454). The deploy read the map at 04:37:56,
+Terraform wrote six new settings at 04:39:14, and the deploy's closing write
+at 04:39:50 replayed the map it had read three minutes earlier:
+
+| UTC | Writer | Effect |
+| --- | --- | --- |
+| 04:37:56 | deploy | reads and writes the map as it stands |
+| 04:39:14 | Terraform | writes six new settings |
+| 04:39:50 | deploy | writes the 04:37 map back — the six are gone |
+
+The Cosmos and blob containers from that same apply survived, so the apply
+itself was fine. Only the map lost, and the loss surfaced days later as
+integrations that read nothing.
+
+### What now prevents it
+
+- `deploy-functions.yml` runs `scripts/tfc-workspace-busy.mjs` before it opens
+  any firewall window and refuses to continue while `hcw-azure` has a run that
+  is not finished. It is self-arming: without `TFC_TOKEN` it reports that it
+  cannot check and passes, so a missing secret does not stop releases.
+- After the deploy, `scripts/assert-live-app-settings.mjs` compares the live
+  settings against every Key Vault reference Terraform declares and fails the
+  job naming what is absent. This is the half that catches a run which
+  *started* after the deploy read the map, which the pre-flight guard cannot.
+  Plain settings such as `PUBLIC_API_ORIGIN` are not covered — `app_settings`
+  is a `merge()` with computed maps, and a parse confident enough to gate a
+  release on cannot be written against it.
+
+**If the assertion fires, do not add the settings by hand.** Re-apply `infra/`
+and then rerun the deploy. Adding them manually leaves the race in place, and
+the next deploy loses them again.
 
 ## 2. Plan
 
