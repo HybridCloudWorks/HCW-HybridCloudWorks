@@ -202,6 +202,53 @@ describe('enqueueJob', () => {
     );
   });
 
+  it('answers the base 202 when acceptedDetails returns something JSON cannot carry', async () => {
+    // json() runs after the document is written and the message sent; a
+    // BigInt or a cycle surfacing there would report 500 for a job that IS
+    // queued and invite a duplicate on retry (Copilot review on #447).
+    const circular = {};
+    circular.self = circular;
+    const cases = [
+      ['bigint', () => ({ speech: { characters: 9000n } })],
+      ['cycle', () => circular],
+      ['array', () => [{ speech: 1 }]],
+      ['string', () => 'not an object'],
+    ];
+    for (const [name, hook] of cases) {
+      registerJobType(`unserialisable-${name}`, {
+        worker: async () => 1,
+        role: 'editor',
+        acceptedDetails: hook,
+      });
+      const store = makeStore();
+      const enqueue = vi.fn();
+      const warn = vi.fn();
+      const h = createJobHandlers({ guard: guardAs('editor'), store, ...fixed });
+      const res = await h.enqueueJob(
+        makeRequest({ type: `unserialisable-${name}` }),
+        { ...context, warn },
+        { enqueue }
+      );
+      expect(res.status, name).toBe(202);
+      expect(JSON.parse(res.body), name).toEqual({
+        ok: true,
+        jobId: 'job-1',
+        type: `unserialisable-${name}`,
+        status: 'queued',
+        poll: 'getJob?jobId=job-1',
+      });
+      expect(store.upsertDoc, name).toHaveBeenCalledTimes(1);
+      expect(enqueue, name).toHaveBeenCalledTimes(1);
+      if (name === 'bigint' || name === 'cycle') {
+        expect(warn, name).toHaveBeenCalledWith(
+          'enqueueJob: acceptedDetails failed for',
+          `unserialisable-${name}`,
+          expect.stringMatching(/BigInt|circular/i)
+        );
+      }
+    }
+  });
+
   it('enforces a stricter per-type role on top of editor', async () => {
     registerJobType('admin-only', { worker: async () => 1, role: 'super_admin' });
     const guard = {

@@ -65,6 +65,20 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+/**
+ * A hook's result as a plain, JSON-round-tripped object, or `{}`.
+ *
+ * Throws on anything JSON.stringify refuses (BigInt, a cycle), so the caller's
+ * try/catch sees it BEFORE the response is built rather than json() seeing it
+ * after the job is queued. Anything that is not a plain object — an array, a
+ * string, null — is `{}`: spreading those into a body is never intended.
+ */
+function serialisableObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const clean = JSON.parse(JSON.stringify(value));
+  return clean && typeof clean === 'object' && !Array.isArray(clean) ? clean : {};
+}
+
 // ---------------------------------------------------------------------------
 // Type registry
 // ---------------------------------------------------------------------------
@@ -319,10 +333,15 @@ export function createJobHandlers({
       });
       // Computed before the write so a hook that throws is logged against a
       // job that does not exist yet, and never against one already queued.
+      // Serialised HERE as well, not in json() below: json() runs after the
+      // document is written and the message sent, so a BigInt or a cycle in
+      // the hook's result would answer 500 for a job that IS queued and invite
+      // a duplicate on retry. Bookkeeping must not be able to report the work
+      // it is bookkeeping as failed — the same rule as recordAiUsage's header.
       let details = {};
       if (typeof spec.acceptedDetails === 'function') {
         try {
-          details = spec.acceptedDetails(payload) || {};
+          details = serialisableObject(spec.acceptedDetails(payload));
         } catch (error) {
           context.warn?.('enqueueJob: acceptedDetails failed for', type, error?.message);
           details = {};
