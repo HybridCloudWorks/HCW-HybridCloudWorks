@@ -240,7 +240,7 @@ function modelFor(providerName, env) {
  *
  * Provider-aware. ElevenLabs is exact in its unit — characters × the rate in
  * `COST_TABLE`, the same arithmetic the usage row is priced with afterwards.
- * Gemini is best-effort: characters → seconds at the pessimistic speaking rate
+ * Gemini is best-effort: UTF-8 bytes → seconds at the pessimistic speaking rate
  * azure.js chunks with → audio tokens at the published per-second rate → the
  * model's output price, an over-estimate in every step, which is the right
  * direction for a figure shown before spending. Azure Speech is not in the

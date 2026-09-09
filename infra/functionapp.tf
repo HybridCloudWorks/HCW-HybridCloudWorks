@@ -458,8 +458,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # per 1,000 characters. The reference is versionless like every other
     # one here, and App Service caches a versionless reference for the life
     # of the process: a re-minted key needs an app restart to take effect.
-    # Until the secret is seeded this resolves to the literal string above and
-    # the switch moves on to Gemini — declaring it here switches nothing on.
+    # Until the secret is seeded the reference on the next line resolves to its
+    # own literal @Microsoft.KeyVault(...) string and the switch moves on to
+    # Gemini — declaring it here switches nothing on.
     "ELEVENLABS_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ELEVENLABS-API-KEY)"
 
     # Ingestion and enrichment.
