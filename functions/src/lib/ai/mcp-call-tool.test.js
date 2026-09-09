@@ -55,6 +55,56 @@ describe("callMcpTool", () => {
     });
   });
 
+  it("logs an upstream failure as server, tool, status and message — never the response body", async () => {
+    // A tool call's error body can be the tool's output: a transcript. The
+    // log must carry none of it.
+    const secret = "Speaker 1: the quarterly numbers are confidential";
+    const fetch = vi.fn(async () =>
+      response({ error: "server_error", error_description: secret, content: secret }, 500),
+    );
+    const log = { warn: vi.fn(), error: vi.fn() };
+    const out = await callMcpTool({
+      store: store(),
+      serverId: "plaud",
+      tool: "get_transcript",
+      arguments: { file_id: "rec-1" },
+      env: {},
+      fetch,
+      log,
+    });
+
+    expect(out.ok).toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    const call = log.error.mock.calls[0];
+    // One string argument, not an error object with `responseBody` on it.
+    expect(call).toHaveLength(1);
+    expect(typeof call[0]).toBe("string");
+    expect(call[0]).toBe(
+      "[mcp] upstream call failed: server=plaud tool=get_transcript status=500 MCP server returned HTTP 500",
+    );
+    const logged = JSON.stringify(log.error.mock.calls) + JSON.stringify(log.warn.mock.calls);
+    for (const fragment of ["Speaker 1", "quarterly", "confidential", "responseBody"]) {
+      expect(logged).not.toContain(fragment);
+    }
+  });
+
+  it("logs a configuration read failure as server, code and message only", async () => {
+    const log = { warn: vi.fn(), error: vi.fn() };
+    const failing = {
+      readDoc: vi.fn(async () => {
+        throw Object.assign(new Error("Request rate is large"), {
+          code: 429,
+          body: '{"oauthToken":"stored-oauth"}',
+        });
+      }),
+    };
+    const out = await callMcpTool({ store: failing, serverId: "plaud", tool: "t", env: {}, log });
+    expect(out).toMatchObject({ ok: false, httpStatus: 500 });
+    expect(log.error.mock.calls[0]).toEqual([
+      "[mcp] configuration read failed: server=plaud code=429 Request rate is large",
+    ]);
+  });
+
   it("reports a rejected credential as UNAUTHENTICATED without leaking it", async () => {
     const fetch = vi.fn(async () => response({ error: "invalid_token" }, 401));
     const out = await callMcpTool({

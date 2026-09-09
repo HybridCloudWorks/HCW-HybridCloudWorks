@@ -523,7 +523,9 @@ export async function callMcpTool({
   try {
     server = await store.readDoc(MCP_CONTAINER, serverId, serverId);
   } catch (error) {
-    log.error?.("[mcp] configuration read failed:", error);
+    log.error?.(
+      `[mcp] configuration read failed: server=${serverId} code=${error?.code ?? error?.statusCode ?? "n/a"} ${error?.message || error}`,
+    );
     return {
       ok: false,
       error: "Failed to read MCP server configuration",
@@ -588,7 +590,15 @@ export async function callMcpTool({
     }
     return { ok: true, result, raw: rawResult, httpStatus: 200 };
   } catch (error) {
-    log.error?.("[mcp] upstream call failed:", error);
+    // Content-free on purpose: a McpUpstreamError carries `responseBody`,
+    // which for a tool call can be the tool's output — a transcript — and
+    // logging the error object whole would put that in Function logs. The
+    // server, the tool, the HTTP status and the error's own message are all
+    // an operator needs; the body reaches only the caller, through
+    // `mcpAuthError`, and only as an OAuth error description.
+    log.error?.(
+      `[mcp] upstream call failed: server=${serverId} tool=${tool} status=${error?.status ?? "n/a"} ${error?.message || error}`,
+    );
     return {
       ...failureBody(mcpAuthError(error, "MCP tool call failed")),
       httpStatus: 200,

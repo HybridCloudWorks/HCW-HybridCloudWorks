@@ -162,7 +162,9 @@ export function createPodcastRecordingHandlers({
           transcriptId,
         });
       } catch (error) {
-        context.error('generatePodcastTranscriptFromRecording failed:', error);
+        context.error(
+          `generatePodcastTranscriptFromRecording failed (${error?.code ?? error?.statusCode ?? 'n/a'}): ${error?.message || error}`
+        );
         return json(500, { error: 'Failed to queue the transcript' });
       }
     },
@@ -263,7 +265,11 @@ export function createPodcastRecordingHandlers({
               'infra/storage.tf — run the Terraform apply that creates it, then upload again.',
           });
         }
-        context.error('uploadPodcastRecording failed:', error);
+        // Code and message only — never the error object, whose properties
+        // (a storage response, a request body) are not for the log.
+        context.error(
+          `uploadPodcastRecording failed (${error?.code ?? error?.statusCode ?? 'n/a'}): ${error?.message || error}`
+        );
         return json(500, { error: 'Failed to upload the recording' });
       }
     },
