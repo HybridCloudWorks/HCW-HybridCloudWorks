@@ -188,11 +188,11 @@ function resolveDeps(deps = {}) {
  * @param {object} [params.deps] test seams; see resolveDeps
  */
 export async function generateSourceEpisode({
-  platform,
-  examCode,
-  title,
-  sources,
-  cert = {},
+  platform: rawPlatform,
+  examCode: rawExamCode,
+  title: rawTitle,
+  sources: rawSources,
+  cert: rawCert = {},
   store,
   storage,
   ai,
@@ -202,20 +202,24 @@ export async function generateSourceEpisode({
   deps = {},
 }) {
   const parsed = parseSourceEpisodePayload({
-    platform,
-    examCode,
-    title,
-    sources,
-    certTitle: cert?.title,
-    certSlug: cert?.slug,
+    platform: rawPlatform,
+    examCode: rawExamCode,
+    title: rawTitle,
+    sources: rawSources,
+    certTitle: rawCert?.title,
+    certSlug: rawCert?.slug,
   });
   if (parsed.error) {
     const err = new Error(parsed.error);
     err.code = 'AI_INVALID_SOURCES';
     throw err;
   }
-  const { areaSlug, sources: resolved } = parsed.value;
-  const normalisedPlatform = parsed.value.platform;
+  // From here on only the validated, normalised values exist: the raw
+  // arguments are named `raw*` above precisely so nothing below can reach
+  // one. A padded exam code (`' AZ-104 '`) validates, and the set id, the
+  // document id and the blob path must come from the trimmed value the route
+  // and the worker computed — not from the padding.
+  const { platform, examCode, title, areaSlug, sources: resolved, cert } = parsed.value;
 
   const {
     writeScript,
@@ -236,8 +240,8 @@ export async function generateSourceEpisode({
   // and the blob path segment, its name is the title. No weighting — the
   // official guide gives none, and inventing one would be the claim to exam
   // authority the prompt forbids.
-  const area = { slug: areaSlug, name: parsed.value.title, weightLabel: '', objectives: [] };
-  const certForScript = { examCode, title: cert?.title || examCode };
+  const area = { slug: areaSlug, name: title, weightLabel: '', objectives: [] };
+  const certForScript = { examCode, title: cert.title || examCode };
 
   const scriptUsage = [];
   let script;
@@ -252,7 +256,7 @@ export async function generateSourceEpisode({
 
     audio = await renderAudio({
       script,
-      platform: normalisedPlatform,
+      platform: platform,
       examCode,
       areaSlug,
       storage,
@@ -263,7 +267,7 @@ export async function generateSourceEpisode({
   } catch (err) {
     if (!isRefusal(err)) {
       await persistFailure(store, {
-        provider: normalisedPlatform,
+        provider: platform,
         examCode,
         area,
         error: err.message,
@@ -277,10 +281,10 @@ export async function generateSourceEpisode({
 
   // The set after the script, not before: a refused run leaves no trace, and
   // a set that exists is left exactly as it is (publish.js `ensureSet`).
-  await persistSet(store, { provider: normalisedPlatform, examCode, cert, now, actorId });
+  await persistSet(store, { provider: platform, examCode, cert, now, actorId });
 
   await persistEpisode(store, {
-    provider: normalisedPlatform,
+    provider: platform,
     examCode,
     area,
     script,
@@ -313,7 +317,7 @@ export async function generateSourceEpisode({
   return {
     kind: EPISODE_KIND.source,
     examCode,
-    platform: normalisedPlatform,
+    platform: platform,
     areaSlug,
     title: script.title,
     status: STATUS.draft,

@@ -371,6 +371,47 @@ describe('generateSourceEpisode — the run', () => {
     expect(store2.docs[EPISODE_CONTAINER]['source_entra-id-basics'].status).toBe(STATUS.failed);
   });
 
+  it('a padded exam code and platform build the same ids and blob path as the trimmed ones', async () => {
+    // The route and the worker validate the same payload and compute the
+    // partition and the document id from the trimmed values; the run must
+    // land the episode there, not under a set keyed on the padding.
+    const trimmed = makeStore();
+    const trimmedStorage = makeStorage();
+    await run({ store: trimmed, storage: trimmedStorage });
+
+    const padded = makeStore();
+    const paddedStorage = makeStorage();
+    const report = await run({
+      store: padded,
+      storage: paddedStorage,
+      platform: 'AZURE',
+      examCode: ' AZ-104 ',
+      title: '  Entra ID basics ',
+      cert: { title: ' Azure Administrator ', slug: ' az-104 ' },
+    });
+
+    expect(Object.keys(padded.docs[EPISODE_CONTAINER])).toEqual(
+      Object.keys(trimmed.docs[EPISODE_CONTAINER])
+    );
+    expect(Object.keys(padded.docs[SET_CONTAINER])).toEqual(Object.keys(trimmed.docs[SET_CONTAINER]));
+    const paddedDoc = padded.docs[EPISODE_CONTAINER]['source_entra-id-basics'];
+    const trimmedDoc = trimmed.docs[EPISODE_CONTAINER]['source_entra-id-basics'];
+    for (const field of ['setId', 'provider', 'examCode', 'areaSlug', 'areaName', 'audioPath']) {
+      expect(paddedDoc[field], field).toBe(trimmedDoc[field]);
+    }
+    expect(paddedDoc.examCode).toBe('AZ-104');
+    expect(padded.docs[SET_CONTAINER]['azure_az-104']).toMatchObject({
+      examCode: 'AZ-104',
+      certTitle: 'Azure Administrator',
+      certSlug: 'az-104',
+    });
+    // The blob upload and the report see the same trimmed values.
+    expect(paddedStorage.uploadBlob.mock.calls[0][1]).toBe(
+      trimmedStorage.uploadBlob.mock.calls[0][1]
+    );
+    expect(report).toMatchObject({ examCode: 'AZ-104', platform: 'azure' });
+  });
+
   it('regenerating the same title replaces the same document and clears its approval', async () => {
     const store = makeStore();
     await run({ store });
