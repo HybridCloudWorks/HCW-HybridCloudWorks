@@ -399,11 +399,16 @@ const GROUNDED_TIMEOUT_MS = 180_000;
 
 const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be']);
 
+/** A YouTube video id: the characters YouTube uses, and at least one of them. */
+const YOUTUBE_ID = /^[A-Za-z0-9_-]+$/;
+
 /**
- * Is this a YouTube VIDEO url — youtube.com/watch, youtube.com/shorts/…, or
- * youtu.be/…? A youtube.com playlist or channel page is neither a video the
- * model can watch nor a page `url_context` will read, so it is refused by
- * both branches of `validateGroundingSources`.
+ * Is this a YouTube VIDEO url — youtube.com/watch?v=<id>, youtube.com/shorts/<id>,
+ * or youtu.be/<id> — with an actual id? A youtube.com playlist or channel page
+ * is neither a video the model can watch nor a page `url_context` will read,
+ * and neither is `watch?v=` with nothing after it; all of them are refused by
+ * both branches of `validateGroundingSources`, in a sentence, rather than
+ * being sent to Gemini to fail there.
  */
 export function isYouTubeVideoUrl(url) {
   let parsed;
@@ -414,9 +419,10 @@ export function isYouTubeVideoUrl(url) {
   }
   const host = parsed.hostname.toLowerCase();
   if (!YOUTUBE_HOSTS.has(host)) return false;
-  if (host === 'youtu.be') return parsed.pathname.length > 1;
-  if (parsed.pathname === '/watch') return parsed.searchParams.has('v');
-  return /^\/shorts\/[^/]+/.test(parsed.pathname);
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (host === 'youtu.be') return segments.length === 1 && YOUTUBE_ID.test(segments[0]);
+  if (parsed.pathname === '/watch') return YOUTUBE_ID.test(parsed.searchParams.get('v') || '');
+  return segments.length === 2 && segments[0] === 'shorts' && YOUTUBE_ID.test(segments[1]);
 }
 
 function isYouTubeHost(url) {
@@ -473,7 +479,7 @@ export function validateGroundingSources(sources) {
     if (kind === 'video') {
       if (!isYouTubeVideoUrl(url)) {
         throw invalidSources(
-          `${label} (${url}) is kind 'video' but is not a YouTube video URL (youtube.com/watch, youtube.com/shorts or youtu.be); only YouTube videos can be watched.`
+          `${label} (${url}) is kind 'video' but is not a YouTube video URL with an id (youtube.com/watch?v=<id>, youtube.com/shorts/<id> or youtu.be/<id>); only YouTube videos can be watched.`
         );
       }
       if (!videos.includes(url)) videos.push(url);

@@ -772,6 +772,46 @@ describe('source grounding — validation (#433)', () => {
     expect(isYouTubeVideoUrl('not a url')).toBe(false);
   });
 
+  it('a YouTube URL with an empty id is not a video (Copilot, PR #445)', () => {
+    // `watch?v=` passed because only the presence of `v` was checked; the
+    // other two forms were checked by path length rather than by an id.
+    for (const url of [
+      'https://www.youtube.com/watch?v=',
+      'https://www.youtube.com/watch?v=&t=10',
+      'https://youtu.be/',
+      'https://youtu.be//',
+      'https://www.youtube.com/shorts/',
+      'https://www.youtube.com/shorts//',
+      'https://youtu.be/abc/extra',
+      'https://www.youtube.com/watch?v=has space',
+    ]) {
+      expect(isYouTubeVideoUrl(url), url).toBe(false);
+    }
+    for (const url of [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      'https://youtu.be/dQw4w9WgXcQ',
+      'https://youtu.be/dQw4w9WgXcQ/',
+      'https://www.youtube.com/shorts/dQw4w9WgXcQ',
+    ]) {
+      expect(isYouTubeVideoUrl(url), url).toBe(true);
+    }
+  });
+
+  it('an id-less YouTube URL is refused in a sentence under either kind, never sent to Gemini', () => {
+    for (const url of [
+      'https://www.youtube.com/watch?v=',
+      'https://youtu.be/',
+      'https://www.youtube.com/shorts/',
+    ]) {
+      expect(() => validateGroundingSources([video(url)]), url).toThrow(
+        /is kind 'video' but is not a YouTube video URL with an id/
+      );
+      expect(() => validateGroundingSources([page(url)]), url).toThrow(
+        /YouTube URL given as kind 'page'/
+      );
+    }
+  });
+
   it('splits a valid list into pages and videos, trimmed and deduplicated', () => {
     const out = validateGroundingSources([
       page(' https://example.com/a '),
