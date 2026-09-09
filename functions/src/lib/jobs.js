@@ -175,6 +175,33 @@ registerBuiltins();
 
 const SYSTEM_FIELDS = new Set(['_rid', '_self', '_etag', '_attachments', '_ts']);
 
+/**
+ * A fresh `queued` job document. One shape, shared by `enqueueJob` and every
+ * route that enqueues a job of its own (cms/podcast/transcripts/generate), so
+ * the worker's claim, the sweeper and `getJob` read the same fields wherever
+ * the job came from.
+ *
+ * @param {{ id: string, type: string, payload: any, requestedBy?: {oid?: string, email?: string}|null, createdAt: string }} fields
+ */
+export function newJobDoc({ id, type, payload, requestedBy, createdAt }) {
+  return {
+    id,
+    type,
+    payload,
+    status: 'queued',
+    createdAt,
+    startedAt: null,
+    finishedAt: null,
+    attempts: 0,
+    requestedBy: {
+      oid: requestedBy?.oid ?? null,
+      email: requestedBy?.email ?? null,
+    },
+    result: null,
+    error: null,
+  };
+}
+
 /** The document as a client sees it. */
 export function publicJob(doc) {
   const out = {};
@@ -271,23 +298,13 @@ export function createJobHandlers({
       }
 
       const jobId = uuid();
-      const createdAt = now().toISOString();
-      const doc = {
+      const doc = newJobDoc({
         id: jobId,
         type,
         payload,
-        status: 'queued',
-        createdAt,
-        startedAt: null,
-        finishedAt: null,
-        attempts: 0,
-        requestedBy: {
-          oid: auth.user?.oid ?? null,
-          email: auth.user?.email ?? null,
-        },
-        result: null,
-        error: null,
-      };
+        requestedBy: auth.user,
+        createdAt: now().toISOString(),
+      });
       try {
         await store.upsertDoc(JOBS_CONTAINER, doc);
         enqueue({ jobId, type });

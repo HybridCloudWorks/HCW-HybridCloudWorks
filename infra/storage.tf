@@ -189,6 +189,19 @@ resource "azurerm_storage_container" "listenandlearn" {
   container_access_type = "private" # episode MP3s, served via the media route
 }
 
+# Podcast transcript audio (#435), written by the generate-podcast-transcript
+# job at article/{slug}.mp3 and streamed through the same media route. Its own
+# container rather than a prefix in listenandlearn, because the Cosmos side is
+# its own container too (podcast_transcripts, in cosmos-containers.json): Listen
+# & Learn is the Learn section's product and the podcast is another. Same
+# settings as listenandlearn; PUBLIC_MEDIA_CONTAINERS in blob-paths.js already
+# names it, so it is reachable through the route the moment this applies.
+resource "azurerm_storage_container" "podcast" {
+  name                  = "podcast"
+  storage_account_id    = azurerm_storage_account.hcw.id
+  container_access_type = "private" # transcript MP3s, served via the media route
+}
+
 # Cosmos out-of-account export (ADR 0028, #231). The Function App's exporter
 # writes here: one prefix per run (`full/<date>/`, `delta/<date>/`) of
 # gzip-compressed NDJSON block blobs at the Cool tier, plus `state/` for the

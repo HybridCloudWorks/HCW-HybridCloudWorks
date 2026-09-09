@@ -27,7 +27,7 @@ account. The drill below measures both. Run it once a quarter.
 
 Say this before the drill, so nothing in it is a surprise:
 
-- **60 of the 72 containers**: the 43 authored and 10 configuration containers
+- **61 of the 73 containers**: the 44 authored and 10 configuration containers
   from every run, the 7 operational-record containers (`admin_audit_logs`,
   `audits`, `ai_usage`, `telegram_bot_activity`, `workflow_alerts`,
   `workflow_digests`, `content_stats_markers`) as of the last full only. The
@@ -59,8 +59,8 @@ CLI extension installs itself on first use; the resource is
 az monitor app-insights query --app appi-site-prod-cus-01 -g rg-web-site-prod-cus --offset 14d --analytics-query 'customEvents | where name == "cosmosExportCompleted" | project timestamp, mode = tostring(customDimensions.mode), runId = tostring(customDimensions.runId), containers = toint(customDimensions.containers), docs = tolong(customDimensions.docs), bytes = tolong(customDimensions.bytes), durationMs = tolong(customDimensions.durationMs) | order by timestamp desc' -o table
 ```
 
-A healthy fortnight shows two `full` rows with `containers` 60 and twelve
-`delta` rows with `containers` 53, one per UTC date. A gap in `runId` is a run
+A healthy fortnight shows two `full` rows with `containers` 61 and twelve
+`delta` rows with `containers` 54, one per UTC date. A gap in `runId` is a run
 that never wrote its manifest — a container job failed or timed out — and the
 missing-run alert will have fired on it. An empty table when the exporter has
 been armed for more than two days is the same finding as the alert. The
@@ -197,7 +197,7 @@ $spec = Get-Content infra/cosmos-containers.json -Raw | ConvertFrom-Json; foreac
 az cosmosdb sql container list -a cosmos-site-sbx-cus -g rg-db-site-sbx-cus -d hcw -o json | ConvertFrom-Json | Measure-Object | Select-Object Count
 ```
 
-Success is `Count` with `72` under it. Grant the signed-in user the built-in
+Success is `Count` with `73` under it. Grant the signed-in user the built-in
 data-plane contributor role on the new account (the role id is the same
 constant in every tenant):
 

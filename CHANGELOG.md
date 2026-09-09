@@ -140,6 +140,41 @@ This project has not cut a tagged release; entries are grouped under
   the new entry point and carries a checked, self-expiring exception for the
   toggle until slice 2 gives it a call site.
 
+- **Any published article can become a podcast transcript (#435, slice 2 of
+  #432).** The generator #439 left unwired is now wired: a per-item **Podcast
+  transcript** action on `/admin/published` — the end of the ContentForge
+  workflow, on the already-live list only, because "published" is what makes
+  an article final enough to read aloud — confirms, then
+  `POST /api/cms/podcast/transcripts/generate` enqueues the new
+  `generate-podcast-transcript` job. The job loads the article, refuses
+  unless `isPublicDocument` says it is published (before the model is called,
+  so a refusal costs nothing and writes nothing), scripts it through
+  `generateArticleScript`, synthesises the audio, uploads it and saves the
+  transcript as a **draft**. Reading and approving are
+  `GET /api/cms/podcast/transcripts`, `GET …/{id}` and `POST …/review` —
+  the last at `publisher`, because approval is what #437 will hang the
+  RSS.com publish on.
+
+  **Its own container, by owner ruling.** The earlier analysis on #435 had
+  article episodes borrowing `listen_and_learn_episodes` under a reserved
+  `setId`; the owner ruled on 2026-09-08 that Listen & Learn is the Learn
+  section's product and content transcripts are the podcast's, so they are
+  two containers: `podcast_transcripts` (Cosmos, `/id`, ids `article_<slug>`
+  with `plaud_<recordingId>` reserved for #434) and `podcast` (blob,
+  `article/<slug>.mp3`). Both are declared in Terraform and wait on an
+  owner-confirmed apply. Until it runs, the job fails with a sentence naming
+  the Cosmos container and the apply rather than a bare `Resource Not Found`,
+  and a missing blob container is recorded in `audioError` with the
+  transcript still saved — every audio-stage failure degrades that way here,
+  because the transcript is the artefact and #436 re-voices it. The container
+  is class A in the export (44 authored, 61 full, 54 delta), the audio is
+  served through the media route, spend is recorded under `podcast:script`
+  and `podcast:audio`, and the model call answers to its own `podcastScript`
+  portal toggle rather than Listen & Learn's. Section counts and the content
+  manifest do **not** count transcripts yet: nothing public reads them until
+  the article-side player lands, and nothing in the portal lists them until
+  the Recording Hub (#442) ships — the confirmation says so.
+
 - **`scripts/check-workflow-health.mjs` — the guard that would have caught
   the three weeks.** Split out of #426, which retired the workflow that
   prompted it on 2026-09-08. `validate-deployed.yml` explained in its own header why it

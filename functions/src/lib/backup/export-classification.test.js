@@ -31,8 +31,9 @@ function provisioned() {
 }
 
 describe('export classification against infra/cosmos-containers.json', () => {
-  it('the spec provisions the 72 containers the ADR counted — a different number means the ADR table is stale', () => {
-    expect(provisioned()).toHaveLength(72);
+  it('the spec provisions the 73 containers the ADR counted — a different number means the ADR table is stale', () => {
+    // 72 at the ADR's writing; podcast_transcripts (#435) made it 73.
+    expect(provisioned()).toHaveLength(73);
   });
 
   it('every provisioned container is classified exactly once', () => {
@@ -55,8 +56,8 @@ describe('export classification against infra/cosmos-containers.json', () => {
     expect(phantom, 'classified but not provisioned — remove it or provision it').toEqual([]);
   });
 
-  it('matches the ADR table: 43 authored, 10 configuration, 7 operational, 12 excluded', () => {
-    expect(AUTHORED).toHaveLength(43);
+  it('matches the ADR table: 44 authored, 10 configuration, 7 operational, 12 excluded', () => {
+    expect(AUTHORED).toHaveLength(44);
     expect(CONFIGURATION).toHaveLength(10);
     expect(OPERATIONAL).toHaveLength(7);
     const excluded = ['regenerable', 'seed', 'transient'].flatMap(
@@ -80,14 +81,14 @@ describe('export classification against infra/cosmos-containers.json', () => {
 });
 
 describe('exportPlanFor', () => {
-  it('full is A + B + C (60), delta is A + B (53), both sorted and duplicate-free', () => {
+  it('full is A + B + C (61), delta is A + B (54), both sorted and duplicate-free', () => {
     const full = exportPlanFor('full');
     const delta = exportPlanFor('delta');
-    expect(full).toHaveLength(60);
-    expect(delta).toHaveLength(53);
+    expect(full).toHaveLength(61);
+    expect(delta).toHaveLength(54);
     expect(full).toEqual([...full].sort());
     expect(delta).toEqual([...delta].sort());
-    expect(new Set(full).size).toBe(60);
+    expect(new Set(full).size).toBe(61);
     // Class C is exported on full runs only (owner decision, #231).
     for (const name of OPERATIONAL) {
       expect(full).toContain(name);

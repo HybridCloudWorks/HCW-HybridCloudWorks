@@ -7,8 +7,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
 import { byNewest } from '@/lib/dateUtils';
-import { PenSquare, Loader2, Calendar, Images } from 'lucide-react';
+import { PenSquare, Loader2, Calendar, Images, Headphones } from 'lucide-react';
 import { postJSON, getJSON } from '@/lib/api';
+import { useToast } from '@/components/ui/use-toast';
 import { logAdminAction } from '@/lib/auditLog';
 import { unpublishToInspected } from '@/lib/contentWorkflow';
 import { ADMIN_ROUTES } from '@/config/admin';
@@ -440,6 +441,12 @@ export default function PublishedPage() {
   // new URL without waiting for a snapshot refetch.
   const [expandedSlugId, setExpandedSlugId] = useState('');
   const [slugOverrides, setSlugOverrides] = useState({});
+  // #435: the podcast transcript trigger. It lives on this page, at the end
+  // of the ContentForge workflow, and only on the already-live list: an
+  // article is final once it is published, so the reading can be too.
+  const [transcriptTarget, setTranscriptTarget] = useState(null);
+  const [queuingTranscriptId, setQueuingTranscriptId] = useState('');
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!authReady) return;
@@ -499,6 +506,38 @@ export default function PublishedPage() {
       ...prev,
       [contentId]: { ...(prev[contentId] || {}), ...override },
     }));
+  };
+
+  /**
+   * Enqueue the generate-podcast-transcript job for one live article. The
+   * API answers 202 with a job id; the transcript itself lands minutes later
+   * as a draft in podcast_transcripts, which the Recording Hub (#442) lists.
+   * A refusal — not published, or the container not provisioned yet — is
+   * shown verbatim, because the API's sentence names the fix.
+   */
+  const queuePodcastTranscript = async (item) => {
+    setQueuingTranscriptId(item.id);
+    try {
+      const result = await postJSON('cms/podcast/transcripts/generate', { articleId: item.id });
+      await logAdminAction('podcast_transcript_queued', {
+        contentId: item.id,
+        title: item.Title || item.title,
+        jobId: result?.jobId || null,
+        transcriptId: result?.transcriptId || null,
+      });
+      toast({
+        title: 'Podcast transcript queued',
+        description: 'Listed under Recording Hub → Podcast when generated.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Podcast transcript not queued',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setQueuingTranscriptId('');
+    }
   };
 
   const {
@@ -796,6 +835,20 @@ export default function PublishedPage() {
                         setExpandedSlugId((current) => (current === blog.id ? '' : blog.id))
                       }
                     />
+                    {/* #435: read this article aloud for the podcast. Live rows only. */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setTranscriptTarget(blog)}
+                      disabled={queuingTranscriptId === blog.id}
+                    >
+                      {queuingTranscriptId === blog.id ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Headphones className="h-4 w-4 mr-2" />
+                      )}
+                      Podcast transcript
+                    </Button>
                     <Button size="sm" variant="outline" asChild>
                       <Link to={`${getReviewPath(blog.id)}?source=content`}>
                         <PenSquare className="h-4 w-4 mr-2" />
@@ -840,6 +893,20 @@ export default function PublishedPage() {
           doUnpublish(item);
         }}
         onCancel={() => setUnpublishTarget(null)}
+      />
+
+      <ConfirmModal
+        open={Boolean(transcriptTarget)}
+        title="Generate a podcast transcript?"
+        description="Generates a two-host script and audio from this article; lands as a draft."
+        confirmLabel="Generate"
+        destructive={false}
+        onConfirm={() => {
+          const item = transcriptTarget;
+          setTranscriptTarget(null);
+          queuePodcastTranscript(item);
+        }}
+        onCancel={() => setTranscriptTarget(null)}
       />
     </div>
   );

@@ -53,6 +53,7 @@ export const AUTHORED = freeze([
   'wiki_pages',
   'listen_and_learn',
   'listen_and_learn_episodes',
+  'podcast_transcripts',
   'designs',
   'frameworks',
   'pillar_details',
@@ -162,8 +163,8 @@ export function classify(container) {
 /**
  * The containers one run exports, sorted, for a run mode.
  *
- * `full` (Sundays) is classes A + B + C: 60 containers. `delta` (every other
- * day) is A + B: 53. The scheduler enqueues exactly this list and the worker
+ * `full` (Sundays) is classes A + B + C: 61 containers. `delta` (every other
+ * day) is A + B: 54. The scheduler enqueues exactly this list and the worker
  * that finds every one of its markers present writes the run manifest, so the
  * two halves must agree on the set — they do, because both call this.
  *

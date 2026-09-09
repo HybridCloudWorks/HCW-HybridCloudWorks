@@ -8,6 +8,11 @@ const postJSON = vi.fn();
 const getJSON = vi.fn();
 const logAdminAction = vi.fn();
 const unpublishToInspected = vi.fn();
+const toast = vi.fn();
+
+vi.mock('@/components/ui/use-toast', () => ({
+  useToast: () => ({ toast: (...args) => toast(...args) }),
+}));
 
 vi.mock('@/hooks/useAuthReady', () => ({
   useAuthReady: () => ({ authReady: true }),
@@ -160,6 +165,7 @@ describe('PublishedPage', () => {
     logAdminAction.mockReset();
     unpublishToInspected.mockReset();
     getJSON.mockReset();
+    toast.mockReset();
     // The validation step's full-document fetch: the body-length check reads
     // blogDraft, which the snapshot row deliberately omits.
     getJSON.mockResolvedValue({
@@ -472,6 +478,103 @@ describe('PublishedPage', () => {
     await waitFor(() => expect(postJSON).toHaveBeenCalledTimes(3));
     // Replacing rather than merging would blank the URL the first call set.
     expect(liveHrefs()).toContain('https://hybridcloudworks.com/aws/blog/renamed-once');
+  });
+
+  it('queues a podcast transcript from a live row, after confirming, and says where it will appear (#435)', async () => {
+    // The placement decision, pinned: the action is on the ALREADY-LIVE list
+    // and nowhere on the staged one — "published" is what makes an article
+    // final enough to read aloud. The row confirms, then enqueues; the
+    // transcript lands later as a draft, so the toast says where to look.
+    postJSON.mockImplementation(async (endpoint, body) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/podcast/transcripts/generate') {
+        expect(body).toEqual({ articleId: 'content-2' });
+        return {
+          ok: true,
+          jobId: 'job-1',
+          type: 'generate-podcast-transcript',
+          status: 'queued',
+          transcriptId: 'article_existing-live-article',
+        };
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+
+    // One live row, one staged row: exactly one trigger.
+    const triggers = screen.getAllByRole('button', { name: 'Podcast transcript' });
+    expect(triggers).toHaveLength(1);
+
+    fireEvent.click(triggers[0]);
+    expect(
+      await screen.findByText(
+        'Generates a two-host script and audio from this article; lands as a draft.'
+      )
+    ).toBeInTheDocument();
+    expect(postJSON).not.toHaveBeenCalledWith(
+      'cms/podcast/transcripts/generate',
+      expect.anything()
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/podcast/transcripts/generate', {
+        articleId: 'content-2',
+      })
+    );
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith({
+        title: 'Podcast transcript queued',
+        description: 'Listed under Recording Hub → Podcast when generated.',
+      })
+    );
+    expect(logAdminAction).toHaveBeenCalledWith('podcast_transcript_queued', {
+      contentId: 'content-2',
+      title: 'Existing live article',
+      jobId: 'job-1',
+      transcriptId: 'article_existing-live-article',
+    });
+  });
+
+  it('shows the API refusal verbatim when a transcript is not queued (#435)', async () => {
+    // The API's sentence names the fix — not published, or the container not
+    // provisioned yet — so it is the message, not a paraphrase of it.
+    postJSON.mockImplementation(async (endpoint) => {
+      if (endpoint === 'getPublishSnapshot') return sampleSnapshot;
+      if (endpoint === 'cms/podcast/transcripts/generate') {
+        throw new Error(
+          'Article content-2 is not published; only published articles produce a podcast transcript'
+        );
+      }
+      throw new Error(`Unexpected endpoint ${endpoint}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <PublishedPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByRole('heading', { name: 'Publish' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Podcast transcript' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate' }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith({
+        title: 'Podcast transcript not queued',
+        description:
+          'Article content-2 is not published; only published articles produce a podcast transcript',
+        variant: 'destructive',
+      })
+    );
+    expect(logAdminAction).not.toHaveBeenCalledWith('podcast_transcript_queued', expect.anything());
   });
 
   it('a refusal repaints nothing in the row (#400)', async () => {

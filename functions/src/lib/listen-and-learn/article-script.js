@@ -440,10 +440,15 @@ export async function generateArticleScript({
     throw new ScriptError(`Article ${article.id || title} has a body but no speakable text`);
   }
 
+  // No `feature` here, deliberately. The portal toggle belongs to the product
+  // that calls this — the podcast pipeline (lib/podcast/generate.js) declares
+  // `podcastScript` at its own `generateJsonResponse` call site, where
+  // ai-call-sites.test.js can see it. A name set here, behind the injected
+  // `generate`, is invisible to that scan: that is how `listenAndLearn` in
+  // script.js came to be declared by a call site and listed in no catalogue.
   const parsed = await generate({
     prompt: buildArticlePrompt({ article: { title }, prepared, speakers }),
     purpose: 'analysis',
-    feature: 'listenAndLearn',
     usageOut,
     systemPrompt:
       'You are a cloud engineer who turns written articles into faithful audio conversations. You return JSON only.',
