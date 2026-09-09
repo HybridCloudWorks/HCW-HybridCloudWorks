@@ -60,7 +60,7 @@ export const MAX_AREAS_PER_RUN = 8;
 export function speechEstimateForRun(payload, env = process.env) {
   const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
   const episodes = areas > 0 ? Math.min(areas, MAX_AREAS_PER_RUN) : MAX_AREAS_PER_RUN;
-  const perEpisode = estimateSpeechCostUsd({ characters: MAX_SCRIPT_BYTES, env });
+  const perEpisode = estimateSpeechCostUsd({ ceilingBytes: MAX_SCRIPT_BYTES, env });
   if (!perEpisode) {
     return { provider: null, model: null, episodes, perEpisodeUsd: null, estimatedCostUsd: null };
   }

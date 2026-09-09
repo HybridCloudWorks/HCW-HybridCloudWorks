@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { COST_TABLE, getCostEstimate } from '../../ai/router.js';
+import { chunkTurns } from './azure.js';
 import {
   ELEVENLABS_DEFAULT_MODEL,
   ELEVENLABS_DEFAULT_VOICES,
@@ -18,6 +19,7 @@ import {
   MAX_CHARACTERS_PER_REQUEST,
   buildInputs,
   characterCount,
+  chunkTurnsByCharacters,
   dialogueCharacters,
   isQuotaExceeded,
   readVoiceOverrides,
@@ -256,6 +258,41 @@ describe('chunking at the documented ceiling', () => {
         expect(input.voice_id).toBe(ELEVENLABS_DEFAULT_VOICES.Maya);
       }
     }
+  });
+
+  it('chunks by code points, so a CJK script is not sent in three times the requests', () => {
+    // The Azure chunker measures UTF-8 bytes; borrowing it capped every
+    // request at 2,000 BYTES, which for three-byte characters is 666
+    // characters and three times the requests (Copilot review on #447).
+    const turns = Array.from({ length: 6 }, (_, i) =>
+      turn(i % 2 ? 'Elena' : 'Maya', '語'.repeat(1000))
+    ); // 6,000 code points, 18,000 bytes
+    const byCharacters = chunkTurnsByCharacters(turns, MAX_CHARACTERS_PER_REQUEST);
+    const byBytes = chunkTurns(turns, MAX_CHARACTERS_PER_REQUEST);
+
+    expect(byCharacters).toHaveLength(3); // two 1,000-character turns per request
+    expect(byBytes.length).toBeGreaterThan(byCharacters.length);
+    for (const chunk of byCharacters) {
+      const total = chunk.reduce((n, t) => n + characterCount(t.text), 0);
+      expect(total).toBeLessThanOrEqual(MAX_CHARACTERS_PER_REQUEST);
+    }
+    // Every character survives the split, in order.
+    expect(byCharacters.flat().map((t) => t.text).join('')).toBe('語'.repeat(6000));
+  });
+
+  it('splits one over-long CJK turn on its own sentence marks, under the ceiling', () => {
+    // 2,500 code points with ideographic full stops: split on 。 rather than
+    // mid-sentence, and no part over the ceiling.
+    const text = ('日本語の文章です。'.repeat(280)).trim(); // 9 chars × 280 = 2,520
+    const chunks = chunkTurnsByCharacters([turn('Maya', text)]);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk).toHaveLength(1);
+      expect(chunk[0].speaker).toBe('Maya');
+      expect(characterCount(chunk[0].text)).toBeLessThanOrEqual(MAX_CHARACTERS_PER_REQUEST);
+      expect(chunk[0].text.endsWith('。')).toBe(true);
+    }
+    expect(chunks.flat().map((t) => t.text).join('')).toBe(text);
   });
 
   it('counts characters as code points, so a multi-byte script is not over-counted', () => {

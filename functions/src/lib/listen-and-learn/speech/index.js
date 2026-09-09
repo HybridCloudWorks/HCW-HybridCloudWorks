@@ -246,27 +246,34 @@ function modelFor(providerName, env) {
  * direction for a figure shown before spending. Azure Speech is not in the
  * cost table, so its estimate is honestly `null` rather than a guess.
  *
- * Pass `dialogue` when there is one, or `characters` when there is not yet —
+ * Pass `dialogue` when there is one, or `ceilingBytes` when there is not yet —
  * the enqueue handler estimates against the script's byte ceiling before any
- * script exists. Two units are in play and they are kept apart: ElevenLabs
- * bills CHARACTERS (code points), while the speaking-rate constant borrowed
- * from azure.js is UTF-8 BYTES per second. A dialogue is therefore measured
- * both ways, and a bare `characters` ceiling is treated as BYTES — a byte
- * count is never fewer than a character count, so the ceiling over-estimates
- * for both providers, which is the direction a figure shown before spending
- * must err in. Dividing characters by a bytes-per-second rate would have
- * under-estimated any non-ASCII script.
+ * script exists. Two units are in play and they are kept apart, in the names
+ * as well as the arithmetic: ElevenLabs bills CHARACTERS (code points), while
+ * the speaking-rate constant borrowed from azure.js is UTF-8 BYTES per second.
+ * A dialogue is therefore measured both ways and both counts are returned. A
+ * ceiling is BYTES only: a byte count is never fewer than a character count,
+ * so pricing ElevenLabs against it over-estimates, which is the direction a
+ * figure shown before spending must err in — and `characters` is `null` in
+ * that case rather than a byte count wearing the wrong name.
  *
  * @param {object} params
  * @param {{speaker: string, text: string}[]} [params.dialogue]
- * @param {number} [params.characters] a ceiling in UTF-8 bytes (see above)
+ * @param {number} [params.ceilingBytes] a ceiling in UTF-8 bytes (see above)
  * @param {object} [params.env]
- * @returns {{provider: string, model: string|null, characters: number, estimatedCostUsd: number|null}|null}
- *   null when no provider is configured (or the pin is unusable), and null
- *   when there is nothing to price — no ceiling and no speakable turn — since
- *   synthesis would refuse that dialogue rather than read it for free.
+ * @returns {{provider: string, model: string|null, bytes: number, characters: number|null, estimatedCostUsd: number|null}|null}
+ *   `bytes` is what was measured or the ceiling; `characters` is the
+ *   dialogue's code-point count (the ElevenLabs billing unit) or null when
+ *   only a ceiling was given. null when no provider is configured (or the
+ *   pin is unusable), and null when there is nothing to price — no ceiling
+ *   and no speakable turn — since synthesis would refuse that dialogue rather
+ *   than read it for free.
  */
-export function estimateSpeechCostUsd({ dialogue = null, characters = null, env = process.env } = {}) {
+export function estimateSpeechCostUsd({
+  dialogue = null,
+  ceilingBytes = null,
+  env = process.env,
+} = {}) {
   let provider;
   try {
     provider = resolveSpeechProvider(env);
@@ -279,26 +286,28 @@ export function estimateSpeechCostUsd({ dialogue = null, characters = null, env 
   // `Number(null)` is 0, so the null check comes first or a dialogue is
   // never counted.
   const hasCeiling =
-    characters !== null && characters !== undefined && Number.isFinite(Number(characters));
-  const ceiling = hasCeiling ? Math.max(0, Math.round(Number(characters))) : null;
+    ceilingBytes !== null && ceilingBytes !== undefined && Number.isFinite(Number(ceilingBytes));
+  const ceiling = hasCeiling ? Math.max(0, Math.round(Number(ceilingBytes))) : null;
   // The same filter synthesis applies, so a blank turn is never priced — and
   // a dialogue that is nothing but blank turns is "nothing to price", not $0.
   const turns = speakableTurns(dialogue);
   if (!hasCeiling && turns.length === 0) return null;
-  const count = hasCeiling ? ceiling : dialogueCharacters(turns);
+  const characters = hasCeiling ? null : dialogueCharacters(turns);
   const bytes = hasCeiling ? ceiling : dialogueBytes(turns);
   const model = modelFor(provider.name, env);
 
   let estimatedCostUsd = null;
   if (provider.name === 'elevenlabs') {
-    estimatedCostUsd = getCostEstimate('elevenlabs', model, 0, count);
+    // Characters when known; the byte ceiling otherwise, which is an upper
+    // bound on characters.
+    estimatedCostUsd = getCostEstimate('elevenlabs', model, 0, characters ?? bytes);
   } else if (provider.name === 'gemini') {
     const seconds = bytes / SPEECH_LIMITS.BYTES_PER_SECOND;
     const audioTokens = Math.round(seconds * GEMINI_AUDIO_TOKENS_PER_SECOND);
     estimatedCostUsd = getCostEstimate('gemini', model, 0, audioTokens);
   }
 
-  return { provider: provider.name, model, characters: count, estimatedCostUsd };
+  return { provider: provider.name, model, bytes, characters, estimatedCostUsd };
 }
 
 /** UTF-8 bytes of every turn's text — the unit azure.js's speaking rate is in. */

@@ -354,7 +354,7 @@ describe('estimateSpeechCostUsd', () => {
       /No dialogue turns/
     );
     // A ceiling is still priced with no dialogue: that is the enqueue path.
-    expect(estimateSpeechCostUsd({ characters: 9000, env: ELEVEN }).estimatedCostUsd).toBe(0.9);
+    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: ELEVEN }).estimatedCostUsd).toBe(0.9);
   });
 
   it('counts exactly the turns synthesis would speak, through one shared filter', async () => {
@@ -389,17 +389,20 @@ describe('estimateSpeechCostUsd', () => {
     expect(estimateSpeechCostUsd({ dialogue: DIALOGUE, env: { ...ELEVEN, ...GEMINI } })).toEqual({
       provider: 'elevenlabs',
       model: 'eleven_v3',
+      bytes: 7,
       characters: 7,
       estimatedCostUsd: 0.0007,
     });
   });
 
-  it('accepts a character count when there is no dialogue yet', () => {
-    // The enqueue handler estimates against the script ceiling: 9,000
-    // characters is 90 cents an episode, roughly USD 4.50 for five.
-    expect(estimateSpeechCostUsd({ characters: 9000, env: ELEVEN })).toMatchObject({
+  it('accepts a byte ceiling when there is no dialogue yet, and does not call it characters', () => {
+    // The enqueue handler estimates against MAX_SCRIPT_BYTES: a 9,000-byte
+    // ceiling is at most 9,000 characters, 90 cents an episode, roughly
+    // USD 4.50 for five. `characters` is null because none were counted.
+    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: ELEVEN })).toMatchObject({
       provider: 'elevenlabs',
-      characters: 9000,
+      bytes: 9000,
+      characters: null,
       estimatedCostUsd: 0.9,
     });
   });
@@ -407,7 +410,7 @@ describe('estimateSpeechCostUsd', () => {
   it('gives a best-effort figure for Gemini that over- rather than under-estimates', () => {
     // 9,000 chars ÷ 13 chars/s ≈ 692 s × 32 tokens/s ≈ 22,154 tokens at
     // USD 10 per 1M ≈ USD 0.22 — above the ~USD 0.17 an episode has measured.
-    const estimate = estimateSpeechCostUsd({ characters: 9000, env: GEMINI });
+    const estimate = estimateSpeechCostUsd({ ceilingBytes: 9000, env: GEMINI });
     expect(estimate.provider).toBe('gemini');
     expect(estimate.model).toBe('gemini-2.5-flash-preview-tts');
     expect(estimate.estimatedCostUsd).toBeGreaterThan(0.17);
@@ -441,35 +444,36 @@ describe('estimateSpeechCostUsd', () => {
     // script of three-byte characters is the widest that fits.
     const widest = [{ speaker: 'Maya', text: '語'.repeat(3000) }];
     for (const env of [GEMINI, ELEVEN]) {
-      const ceiling = estimateSpeechCostUsd({ characters: 9000, env }).estimatedCostUsd;
+      const ceiling = estimateSpeechCostUsd({ ceilingBytes: 9000, env }).estimatedCostUsd;
       const actual = estimateSpeechCostUsd({ dialogue: widest, env }).estimatedCostUsd;
       expect(ceiling).toBeGreaterThanOrEqual(actual);
     }
     // And a plain ASCII script under the ceiling is priced strictly below it.
     const plain = [{ speaker: 'Maya', text: 'a'.repeat(8000) }];
-    expect(estimateSpeechCostUsd({ characters: 9000, env: GEMINI }).estimatedCostUsd).toBeGreaterThan(
+    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: GEMINI }).estimatedCostUsd).toBeGreaterThan(
       estimateSpeechCostUsd({ dialogue: plain, env: GEMINI }).estimatedCostUsd
     );
   });
 
   it('is honest that Azure Speech is not priced', () => {
-    expect(estimateSpeechCostUsd({ characters: 9000, env: AZURE })).toEqual({
+    expect(estimateSpeechCostUsd({ ceilingBytes: 9000, env: AZURE })).toEqual({
       provider: 'azure',
       model: null,
-      characters: 9000,
+      bytes: 9000,
+      characters: null,
       estimatedCostUsd: null,
     });
   });
 
   it('follows a pin and a model override', () => {
     const estimate = estimateSpeechCostUsd({
-      characters: 1000,
+      ceilingBytes: 1000,
       env: { ...ELEVEN, ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' },
     });
     expect(estimate.provider).toBe('gemini');
     expect(
       estimateSpeechCostUsd({
-        characters: 1000,
+        ceilingBytes: 1000,
         env: {
           ...ELEVEN,
           LISTEN_AND_LEARN_TTS_MODEL: 'gemini-3.1-flash-tts-preview',
@@ -480,7 +484,7 @@ describe('estimateSpeechCostUsd', () => {
     // The shared setting still steers Gemini, and prices what Gemini will call.
     expect(
       estimateSpeechCostUsd({
-        characters: 1000,
+        ceilingBytes: 1000,
         env: { ...GEMINI, LISTEN_AND_LEARN_TTS_MODEL: 'gemini-2.5-pro-preview-tts' },
       }).model
     ).toBe('gemini-2.5-pro-preview-tts');

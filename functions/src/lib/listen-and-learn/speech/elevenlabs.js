@@ -32,9 +32,11 @@
  *     "keep the total length of all `inputs[].text` values at or below 2,000
  *     characters per request for reliable generation" and to concatenate the
  *     resulting audio, so a 9,000-byte episode is four or five requests.
- *     Chunking reuses `chunkTurns` from azure.js: its limit is UTF-8 BYTES,
- *     which is never fewer than characters, so a 2,000-byte chunk is at most
- *     2,000 characters. Conservative in the only direction that is safe.
+ *     `chunkTurnsByCharacters` below measures CODE POINTS, the unit the
+ *     ceiling is stated in and the unit the API bills. The Azure chunker
+ *     measures UTF-8 bytes; borrowing it was safe but wasteful — a CJK script
+ *     is three bytes a character and would have gone out in three times as
+ *     many requests as it needed.
  *   - **Billing is per character**, USD 0.10 per 1,000 on the plans in
  *     question, and the API reports what it charged in a `character-cost`
  *     response header. That figure is preferred over our own count for the
@@ -78,8 +80,6 @@
  * providers read, so set them together with a `LISTEN_AND_LEARN_TTS_PROVIDER`
  * pin: a Gemini voice name in that setting would be sent here as a voice id.
  */
-import { chunkTurns } from './azure.js';
-
 const DIALOGUE_URL = 'https://api.elevenlabs.io/v1/text-to-dialogue';
 
 /**
@@ -149,6 +149,92 @@ export const characterCount = (text) => [...String(text ?? '')].length;
 /** Sum of every turn's text, for the cost estimate and the usage row. */
 export function dialogueCharacters(turns) {
   return (turns || []).reduce((total, turn) => total + characterCount(turn?.text), 0);
+}
+
+/**
+ * Split one over-long turn on sentence boundaries, measured in code points.
+ *
+ * Both halves are spoken by the same voice, so the listener hears continuous
+ * speech. Falls back to a per-character split only when a single "sentence"
+ * is itself over the limit, which means punctuation-free text.
+ */
+function splitTurnText(text, limit) {
+  const sentences = String(text).match(/[^.!?。！？]+[.!?。！？]*\s*/g) || [String(text)];
+  const parts = [];
+  let buffer = '';
+
+  for (const sentence of sentences) {
+    if (buffer && characterCount(buffer) + characterCount(sentence) > limit) {
+      parts.push(buffer.trim());
+      buffer = '';
+    }
+    if (characterCount(sentence) > limit) {
+      if (buffer.trim()) parts.push(buffer.trim());
+      buffer = '';
+      let chunk = '';
+      for (const char of sentence) {
+        if (characterCount(chunk) + 1 > limit) {
+          parts.push(chunk.trim());
+          chunk = '';
+        }
+        chunk += char;
+      }
+      buffer = chunk;
+      continue;
+    }
+    buffer += sentence;
+  }
+
+  if (buffer.trim()) parts.push(buffer.trim());
+  return parts.filter(Boolean);
+}
+
+/**
+ * Group turns into requests of at most `limit` CODE POINTS of text.
+ *
+ * The same policy as azure.js's `chunkTurns` — whole turns wherever possible
+ * so a speaker change never falls across a request boundary mid-thought, an
+ * over-long turn split rather than sent whole and refused — in the unit this
+ * API states its ceiling and its bill in. `text.length` would count UTF-16
+ * units and over-count astral characters; bytes would over-count everything
+ * outside ASCII.
+ *
+ * @param {{speaker: string, text: string}[]} turns
+ * @param {number} [limit]
+ * @returns {{speaker: string, text: string}[][]}
+ */
+export function chunkTurnsByCharacters(turns, limit = MAX_CHARACTERS_PER_REQUEST) {
+  const chunks = [];
+  let current = [];
+  let currentCount = 0;
+
+  const flush = () => {
+    if (current.length) chunks.push(current);
+    current = [];
+    currentCount = 0;
+  };
+
+  for (const turn of turns) {
+    const text = String(turn?.text || '').trim();
+    if (!text) continue;
+    const speaker = turn.speaker;
+    const count = characterCount(text);
+
+    if (count > limit) {
+      flush();
+      for (const part of splitTurnText(text, limit)) {
+        chunks.push([{ speaker, text: part }]);
+      }
+      continue;
+    }
+
+    if (currentCount + count > limit) flush();
+    current.push({ speaker, text });
+    currentCount += count;
+  }
+
+  flush();
+  return chunks;
 }
 
 /**
@@ -276,7 +362,7 @@ export async function synthesizeWithElevenLabs({
 
   // Every chunk's inputs are built before the first request, so a missing
   // voice on the last turn fails the run before the first turn is billed.
-  const chunks = chunkTurns(turns, MAX_CHARACTERS_PER_REQUEST).map((chunk) =>
+  const chunks = chunkTurnsByCharacters(turns, MAX_CHARACTERS_PER_REQUEST).map((chunk) =>
     buildInputs(chunk, resolvedVoices)
   );
 

@@ -115,7 +115,7 @@ describe('parseGeneratePayload', () => {
 
 describe('speechEstimateForRun', () => {
   // Stated in the 202 before the run starts (ADR 0029 §2a). A ceiling: every
-  // episode priced at the most characters a script may hold.
+  // episode priced at MAX_SCRIPT_BYTES, the most UTF-8 bytes a script may hold.
   const ELEVEN = { ELEVENLABS_API_KEY: 'e', GEMINI_API_KEY: 'g' };
 
   it('prices every requested area at the script ceiling', () => {
