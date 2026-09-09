@@ -588,7 +588,7 @@ async function main() {
   const source = await fs.readFile(dataFile, 'utf8');
   const certificationStartMarker = "// status: 'active' | 'beta' | 'expiring' | 'retired'";
   const startMarker = '// Applied Skills — sourced from official Applied Skills Poster';
-  const endMarker = '// Timeline events — sourced from RSS feed scraper';
+  const endMarker = '// Timeline events';
 
   let nextSource = replaceBetween(
     source,

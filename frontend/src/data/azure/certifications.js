@@ -1,6 +1,16 @@
-// Microsoft Azure Certifications — sourced from official Certifications Poster
-// Scraped weekly from: https://techcommunity.microsoft.com/t5/s/gxcuf89792/rss/board?board.id=skills-hub-blog
-// Last manual sync: 2026-04-16
+// Microsoft Azure Certifications — sourced from the official Certifications Poster and Microsoft Learn.
+// Verified by hand against the Learn credentials browse API
+// (https://learn.microsoft.com/api/contentbrowser/search/credentials) and the credential-retirement page
+// (https://learn.microsoft.com/en-us/credentials/support/credential-retirement) on the date below.
+// Last manual sync: 2026-09-09
+
+/**
+ * The day this file was last checked against Microsoft. The Azure education
+ * pages render it where they used to claim a weekly refresh, and statuses are
+ * derived from the dates at render time (src/lib/certStatus.js) so a date that
+ * passes between syncs cannot keep showing "Expiring" or "Beta".
+ */
+export const DATA_AS_OF = '2026-09-09';
 
 export const LEVEL_META = {
   Fundamentals: {
@@ -72,12 +82,12 @@ export const certifications = [
     officialCode: 'AB-210',
     title: 'Dynamics 365 Sales AI Consultant Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-06-30',
     gaDate: '2026-06-01',
     description: 'Configure AI-powered sales capabilities in Dynamics 365 Sales.',
     longDescription:
-      'New beta certification covering AI-enhanced Dynamics 365 Sales features including Copilot for Sales, conversation intelligence, and predictive scoring. Beta May 2026.',
+      'Certification covering AI-enhanced Dynamics 365 Sales features including Copilot for Sales, conversation intelligence, and predictive scoring.',
     topics: [
       'Dynamics 365 Sales',
       'Copilot for Sales',
@@ -105,12 +115,12 @@ export const certifications = [
     officialCode: 'AB-250',
     title: 'Dynamics 365 Contact Center AI Engineer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-07-31',
     gaDate: '2026-08-01',
     description: 'Design and implement AI-powered contact center solutions with Dynamics 365.',
     longDescription:
-      'New beta certification for engineers building AI contact center solutions using Dynamics 365 Contact Center with Copilot and Azure AI Services. Beta June 2026.',
+      'Certification for engineers building AI contact center solutions using Dynamics 365 Contact Center with Copilot and Azure AI Services.',
     topics: ['Dynamics 365 Contact Center', 'Copilot', 'AI Routing', 'Omnichannel', 'Azure AI'],
     hours: 35,
     prepTime: '~6 weeks',
@@ -132,12 +142,12 @@ export const certifications = [
     officialCode: 'AB-410',
     title: 'Intelligent Applications Builder Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-05-30',
     gaDate: '2026-06-01',
     description: 'Build intelligent applications integrating AI into business workflows.',
     longDescription:
-      'Covers building AI-integrated apps using Azure AI Services, Copilot extensibility, and Power Platform. Beta expected April 2026, GA June 2026.',
+      'Covers building AI-integrated apps using Azure AI Services, Copilot extensibility, and Power Platform.',
     topics: [
       'Azure AI Services',
       'Copilot Extensibility',
@@ -165,12 +175,12 @@ export const certifications = [
     officialCode: 'AB-620',
     title: 'AI Agent Builder Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-05-30',
     gaDate: '2026-06-01',
     description: 'Build autonomous AI agents using Microsoft Copilot Studio and Azure AI.',
     longDescription:
-      'A new certification for professionals who build AI agents using Microsoft Copilot Studio, Azure AI Foundry, and related tools. Beta expected April 2026, GA June 2026.',
+      'A new certification for professionals who build AI agents using Microsoft Copilot Studio, Azure AI Foundry, and related tools.',
     topics: ['Copilot Studio', 'Azure AI Foundry', 'AI Agents', 'Power Platform', 'Connectors'],
     hours: 35,
     prepTime: '~6 weeks',
@@ -183,6 +193,40 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'Power Platform or Azure AI experience recommended.',
+    nextCerts: [],
+  },
+  {
+    id: 'ab-650',
+    slug: 'ab-650',
+    code: 'AB-650',
+    officialCode: 'AB-650',
+    title: 'Administering Microsoft 365 and AI Services',
+    level: 'Associate',
+    status: 'beta',
+    description:
+      'Administer Microsoft 365 tenants, workloads, and AI services, including Microsoft 365 Copilot and agents.',
+    longDescription:
+      'Configure, manage, secure, and govern Microsoft 365 tenants, workloads, and AI services — Microsoft 365 Copilot, agents, and connected AI capabilities — at enterprise scale. Earns Microsoft 365 Certified: Microsoft 365 and AI Services Administrator Associate, in beta on Microsoft Learn.',
+    topics: [
+      'Microsoft 365 Tenants',
+      'Governance & Security',
+      'Microsoft 365 Copilot',
+      'AI Services',
+      'Microsoft Graph PowerShell',
+    ],
+    hours: 35,
+    prepTime: '~6 weeks',
+    successRate: null,
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/ai-services-administrator-associate/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-650',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=ab-650',
+    modules: [],
+    appliedSkills: [],
+    prerequisites:
+      'Microsoft 365 workloads and Microsoft Entra ID experience; familiarity with Defender XDR and Microsoft Graph PowerShell.',
     nextCerts: [],
   },
   {
@@ -282,7 +326,7 @@ export const certifications = [
     officialCode: 'AI-102',
     title: 'Designing and Implementing a Microsoft Azure AI Solution',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     replacedBy: 'ai-103',
     description: 'Build AI solutions using Azure AI Services, AI Search, and Azure OpenAI.',
@@ -337,13 +381,13 @@ export const certifications = [
     officialCode: 'AI-103',
     title: 'Azure AI Apps and Agents Developer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-05-07',
     betaDiscount: '80% off first 300 — Code: AI103Claxton',
     gaDate: '2026-06-01',
     description: 'Design and build AI apps and agents using Azure AI and Azure OpenAI Service.',
     longDescription:
-      'The next-generation Azure AI Developer certification — covers building AI apps and autonomous agents using Azure AI Services, Azure OpenAI, LangChain, Semantic Kernel, and Azure AI Foundry. Replaces AI-102. Beta ends May 7, 2026.',
+      'The next-generation Azure AI Developer certification — covers building AI apps and autonomous agents using Azure AI Services, Azure OpenAI, LangChain, Semantic Kernel, and Azure AI Foundry. Replaces AI-102.',
     topics: [
       'Azure AI Foundry',
       'Azure OpenAI',
@@ -377,9 +421,9 @@ export const certifications = [
     slug: 'azure-ai-cloud-developer-associate',
     code: 'AI-200',
     officialCode: 'AI-200',
-    title: 'Microsoft Certified: Azure AI Cloud Developer Associate Certification (Beta)',
+    title: 'Microsoft Certified: Azure AI Cloud Developer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     description: 'Azure AI Cloud Developer Associate validates role-based Microsoft cloud skills.',
     longDescription:
       'Azure AI Cloud Developer Associate validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
@@ -403,14 +447,14 @@ export const certifications = [
     slug: 'ai-300',
     code: 'AI-300',
     officialCode: 'AI-300',
-    title: 'Machine Learning Operations (MLOps) Engineer Associate (Beta)',
+    title: 'Machine Learning Operations (MLOps) Engineer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-06-30',
     gaDate: '2026-07-01',
     description: 'Design and implement MLOps pipelines for machine learning models on Azure.',
     longDescription:
-      'New beta certification validating expertise implementing MLOps practices including model training, deployment, monitoring, and governance using Azure ML and Databricks.',
+      'Certification validating expertise implementing MLOps practices including model training, deployment, monitoring, and governance using Azure ML and Databricks.',
     topics: ['MLOps', 'Azure ML', 'Model Monitoring', 'Responsible AI', 'CI/CD for ML'],
     hours: 35,
     prepTime: '~6 weeks',
@@ -426,13 +470,48 @@ export const certifications = [
     nextCerts: [],
   },
   {
+    id: 'ai-500',
+    slug: 'ai-500',
+    code: 'AI-500',
+    officialCode: 'AI-500',
+    title: 'Designing and Implementing Multi-Agent AI Solutions',
+    level: 'Expert',
+    status: 'beta',
+    description:
+      'Design, build, and operate production-ready multi-agent AI solutions with Microsoft Foundry and Azure.',
+    longDescription:
+      'Expert-level exam for practitioners who architect, develop, evaluate, secure, and deploy scalable multi-agent AI systems using Microsoft Foundry, Microsoft Agent Framework, MCP, and Azure services. Earns Microsoft Certified: Multi-Agent AI Solutions Expert, in beta on Microsoft Learn.',
+    topics: [
+      'Multi-Agent Architecture',
+      'Microsoft Foundry',
+      'Agent Framework',
+      'MCP',
+      'Evaluation & Monitoring',
+      'Governance',
+    ],
+    hours: 60,
+    prepTime: '~10 weeks',
+    successRate: null,
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/multi-agent-ai-solutions-expert/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-500',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=ai-500',
+    modules: [],
+    appliedSkills: [],
+    prerequisites:
+      'AI and ML development experience, agentic systems in production, Python, and Azure compute, network, storage, and data services.',
+    nextCerts: [],
+  },
+  {
     id: 'ai-900',
     slug: 'ai-900',
     code: 'AI-900',
     officialCode: 'AI-900',
     title: 'Microsoft Azure AI Fundamentals',
     level: 'Fundamentals',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     replacedBy: 'ai-901',
     description: 'Core concepts of AI and machine learning on Azure.',
@@ -467,7 +546,7 @@ export const certifications = [
     ],
     appliedSkills: [],
     prerequisites: 'No prerequisites. AZ-900 recommended.',
-    nextCerts: ['ai-102', 'ai-901'],
+    nextCerts: ['ai-103', 'ai-901'],
   },
   {
     id: 'ai-901',
@@ -476,14 +555,14 @@ export const certifications = [
     officialCode: 'AI-901',
     title: 'Microsoft Azure AI Fundamentals (New)',
     level: 'Fundamentals',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-05-06',
     betaDiscount: '80% off first 300 — Code: AI901Medford',
     gaDate: '2026-06-01',
     description:
       'Refreshed AI fundamentals exam covering generative AI and latest Azure AI services.',
     longDescription:
-      'The refreshed AI Fundamentals certification replaces AI-900 and covers generative AI concepts, Azure OpenAI Service, and the latest Microsoft AI tools. Beta ends May 6, 2026; goes live June 2026.',
+      'The refreshed AI Fundamentals certification replaces AI-900 and covers generative AI concepts, Azure OpenAI Service, and the latest Microsoft AI tools.',
     topics: ['Generative AI', 'Azure OpenAI', 'AI Workloads', 'ML Principles', 'Responsible AI'],
     hours: 12,
     prepTime: '~4 weeks',
@@ -496,7 +575,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'No prerequisites.',
-    nextCerts: ['ai-102', 'ai-103'],
+    nextCerts: ['ai-103'],
   },
   {
     id: 'az-104',
@@ -553,7 +632,7 @@ export const certifications = [
       },
     ],
     prerequisites: 'AZ-900 recommended. 6+ months Azure experience.',
-    nextCerts: ['az-305', 'az-500', 'az-700', 'az-800'],
+    nextCerts: ['az-305', 'az-700', 'az-802'],
   },
   {
     id: 'az-120',
@@ -646,7 +725,7 @@ export const certifications = [
     officialCode: 'AZ-204',
     title: 'Developing Solutions for Microsoft Azure',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-07-31',
     description: 'Design, build, test, and maintain cloud solutions on Azure.',
     longDescription:
@@ -786,7 +865,7 @@ export const certifications = [
     officialCode: 'AZ-500',
     title: 'Microsoft Azure Security Engineer',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-08-31',
     description: 'Implement and manage security across Azure workloads.',
     longDescription:
@@ -885,7 +964,9 @@ export const certifications = [
     officialCode: 'AZ-800',
     title: 'Administering Windows Server Hybrid Core Infrastructure',
     level: 'Associate',
-    status: 'active',
+    status: 'expiring',
+    expiryDate: '2026-09-30',
+    replacedBy: 'az-802',
     description: 'Administer Windows Server in on-premises, hybrid, and IaaS workloads.',
     longDescription:
       'Validate your ability to configure and manage Windows Server on-premises, hybrid, and IaaS platform workloads including AD DS, identity, storage, and compute.',
@@ -924,7 +1005,9 @@ export const certifications = [
     officialCode: 'AZ-801',
     title: 'Microsoft Certified: Windows Server Hybrid Administrator Associate',
     level: 'Associate',
-    status: 'active',
+    status: 'expiring',
+    expiryDate: '2026-09-30',
+    replacedBy: 'az-802',
     description:
       'Windows Server Hybrid Administrator Associate validates role-based Microsoft cloud skills.',
     longDescription:
@@ -943,6 +1026,40 @@ export const certifications = [
     appliedSkills: [],
     prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
     nextCerts: [],
+  },
+  {
+    id: 'az-802',
+    slug: 'az-802',
+    code: 'AZ-802',
+    officialCode: 'AZ-802',
+    title: 'Administering Windows Server',
+    level: 'Associate',
+    status: 'active',
+    description: 'The single Windows Server exam that replaces the AZ-800 and AZ-801 pair.',
+    longDescription:
+      'Deploy, implement, manage, and troubleshoot Windows Server as a workload in on-premises, cloud, and hybrid environments — identity, security, compute, networking, storage, and monitoring. AZ-800 and AZ-801 retire on September 30, 2026; the credential is being renamed Windows Server Administrator Associate.',
+    topics: [
+      'AD DS',
+      'Hybrid Windows Server',
+      'Virtual Machines',
+      'Networking',
+      'Storage & File Services',
+      'Security',
+      'Monitoring',
+    ],
+    hours: 40,
+    prepTime: '~3 months',
+    successRate: null,
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/windows-server-hybrid-administrator/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-802',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-802',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Windows Server and Active Directory Domain Services experience.',
+    nextCerts: ['az-305'],
   },
   {
     id: 'az-900',
@@ -981,7 +1098,7 @@ export const certifications = [
     ],
     appliedSkills: [],
     prerequisites: 'No prerequisites — ideal for beginners.',
-    nextCerts: ['az-104', 'ai-900', 'dp-900', 'sc-900'],
+    nextCerts: ['az-104', 'ai-901', 'dp-900', 'sc-900'],
   },
   {
     id: 'dp-300',
@@ -1131,14 +1248,14 @@ export const certifications = [
     slug: 'dp-750',
     code: 'DP-750',
     officialCode: 'DP-750',
-    title: 'Azure Databricks Data Engineer Associate (Beta)',
+    title: 'Azure Databricks Data Engineer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-06-30',
     gaDate: '2026-07-01',
     description: 'Implement data engineering solutions using Azure Databricks.',
     longDescription:
-      'New beta certification validating expertise implementing data engineering pipelines and solutions using Azure Databricks and Delta Lake.',
+      'Certification validating expertise implementing data engineering pipelines and solutions using Azure Databricks and Delta Lake.',
     topics: ['Azure Databricks', 'Delta Lake', 'Spark', 'Data Pipelines', 'MLflow'],
     hours: 35,
     prepTime: '~6 weeks',
@@ -1158,14 +1275,14 @@ export const certifications = [
     slug: 'dp-800',
     code: 'DP-800',
     officialCode: 'DP-800',
-    title: 'SQL AI Developer Associate (Beta)',
+    title: 'SQL AI Developer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     betaEndDate: '2026-06-30',
     gaDate: '2026-07-01',
     description: 'Build AI-powered solutions using SQL and Azure AI Services.',
     longDescription:
-      'New beta certification for developers building intelligent applications with SQL Server, Azure SQL, and integrated Azure AI capabilities.',
+      'Certification for developers building intelligent applications with SQL Server, Azure SQL, and integrated Azure AI capabilities.',
     topics: ['Azure SQL', 'AI Integration', 'Vector Search', 'SQL Development', 'Azure OpenAI'],
     hours: 35,
     prepTime: '~6 weeks',
@@ -1221,7 +1338,7 @@ export const certifications = [
     ],
     appliedSkills: [],
     prerequisites: 'Basic data familiarity. AZ-900 recommended.',
-    nextCerts: ['dp-203', 'dp-300', 'dp-420'],
+    nextCerts: ['dp-700', 'dp-300', 'dp-420'],
   },
   {
     id: 'gh-100',
@@ -1329,9 +1446,9 @@ export const certifications = [
     slug: 'agentic-ai-developer',
     code: 'GH-600',
     officialCode: 'GH-600',
-    title: 'Microsoft Certified: GitHub Agentic AI Developer (Beta)',
+    title: 'Microsoft Certified: GitHub Agentic AI Developer',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     description: 'GitHub Agentic AI Developer validates role-based Microsoft cloud skills.',
     longDescription:
       'GitHub Agentic AI Developer validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
@@ -1413,7 +1530,8 @@ export const certifications = [
     officialCode: 'MB-240',
     title: 'Microsoft Certified: Dynamics 365 Field Service Functional Consultant Associate',
     level: 'Associate',
-    status: 'active',
+    status: 'retired',
+    expiryDate: '2026-06-30',
     description:
       'Dynamics 365 Field Service Functional Consultant Associate validates role-based Microsoft cloud skills.',
     longDescription:
@@ -1440,7 +1558,7 @@ export const certifications = [
     officialCode: 'MB-280',
     title: 'Dynamics 365 Customer Experience Analyst Associate',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-07-31',
     description: 'Analyze and improve customer experience using Dynamics 365 and Power Platform.',
     longDescription:
@@ -1490,7 +1608,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'Finance background recommended.',
-    nextCerts: ['mb-700'],
+    nextCerts: [],
   },
   {
     id: 'mb-330',
@@ -1522,7 +1640,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'Supply chain experience recommended.',
-    nextCerts: ['mb-335'],
+    nextCerts: [],
   },
   {
     id: 'mb-335',
@@ -1531,7 +1649,7 @@ export const certifications = [
     officialCode: 'MB-335',
     title: 'Dynamics 365 Supply Chain Management Functional Consultant Expert',
     level: 'Expert',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description: 'Advanced supply chain management solutions using Dynamics 365.',
     longDescription:
@@ -1582,7 +1700,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'Development experience. Finance & Operations knowledge.',
-    nextCerts: ['mb-700'],
+    nextCerts: [],
   },
   {
     id: 'mb-700',
@@ -1591,7 +1709,7 @@ export const certifications = [
     officialCode: 'MB-700',
     title: 'Dynamics 365: Finance and Operations Apps Solution Architect Expert',
     level: 'Expert',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description: 'Architect enterprise-scale Dynamics 365 Finance and Operations solutions.',
     longDescription:
@@ -1714,7 +1832,8 @@ export const certifications = [
     officialCode: 'MS-102',
     title: 'Microsoft 365 Administrator Expert',
     level: 'Expert',
-    status: 'active',
+    status: 'expiring',
+    expiryDate: '2026-11-30',
     description: 'Administer Microsoft 365 tenants, including identity, compliance, and security.',
     longDescription:
       'Validate expertise administering Microsoft 365 environments — tenant management, identity, security, compliance, and Microsoft 365 service integration.',
@@ -1798,7 +1917,7 @@ export const certifications = [
     officialCode: 'PL-200',
     title: 'Microsoft Power Platform Functional Consultant',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-08-31',
     description: 'Configure and extend Power Platform components to build business solutions.',
     longDescription:
@@ -1816,7 +1935,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'PL-900 recommended.',
-    nextCerts: ['pl-600'],
+    nextCerts: ['ab-100'],
   },
   {
     id: 'pl-300',
@@ -1880,7 +1999,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'PL-200 recommended. Development experience.',
-    nextCerts: ['pl-600'],
+    nextCerts: ['ab-100'],
   },
   {
     id: 'pl-500',
@@ -1889,7 +2008,7 @@ export const certifications = [
     officialCode: 'PL-500',
     title: 'Microsoft Power Automate RPA Developer',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description: 'Design and implement Robotic Process Automation solutions with Power Automate.',
     longDescription:
@@ -1916,7 +2035,7 @@ export const certifications = [
     officialCode: 'PL-600',
     title: 'Microsoft Power Platform Solution Architect Expert',
     level: 'Expert',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description: 'Lead successful implementations of Microsoft Power Platform solutions.',
     longDescription:
@@ -1961,7 +2080,7 @@ export const certifications = [
     modules: [],
     appliedSkills: [],
     prerequisites: 'No prerequisites.',
-    nextCerts: ['pl-200', 'pl-300', 'pl-400'],
+    nextCerts: ['pl-300', 'pl-400'],
   },
   {
     id: 'sc-100',
@@ -2111,9 +2230,9 @@ export const certifications = [
     slug: 'cloud-and-ai-security-engineer-associate',
     code: 'SC-500',
     officialCode: 'SC-500',
-    title: 'Microsoft Certified: Cloud and AI Security Engineer Associate Certification (Beta)',
+    title: 'Microsoft Certified: Cloud and AI Security Engineer Associate',
     level: 'Associate',
-    status: 'beta',
+    status: 'active',
     description:
       'Cloud and AI Security Engineer Associate validates role-based Microsoft cloud skills.',
     longDescription:
@@ -2138,12 +2257,12 @@ export const certifications = [
     slug: 'cybersecurity-business-professional',
     code: 'SC-730',
     officialCode: 'SC-730',
-    title: 'Microsoft Certified: Cybersecurity Business Professional Certification (Beta)',
+    title: 'Microsoft Certified: Cybersecurity Business Professional',
     level: 'Associate',
-    status: 'beta',
-    description: 'Cybersecurity Business Professional validates role-based Microsoft cloud skills.',
+    status: 'retired',
+    description: 'Withdrawn: Microsoft decided not to release this certification after its beta.',
     longDescription:
-      'Cybersecurity Business Professional validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+      'Microsoft ran SC-730 as a beta for business professionals and then, citing learner feedback, decided not to move forward with releasing it. No retirement date was published; the Learn page is hidden from the catalogue.',
     topics: [],
     hours: 35,
     prepTime: '~6 weeks',
@@ -2205,7 +2324,7 @@ export const certifications = [
     ],
     appliedSkills: [],
     prerequisites: 'General familiarity with Microsoft cloud.',
-    nextCerts: ['az-500', 'sc-200', 'sc-300', 'sc-400'],
+    nextCerts: ['sc-200', 'sc-300', 'sc-401'],
   },
 ];
 
@@ -2277,7 +2396,7 @@ export const appliedSkills = [
     title: 'Build a natural language processing solution with Azure AI Language',
     area: 'AI',
     level: 'Intermediate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description:
       'Use Azure AI Language to analyze text, extract key information, classify documents, and build conversational NLP solutions.',
@@ -2335,7 +2454,8 @@ export const appliedSkills = [
     title: 'Create agents in Microsoft Copilot Studio',
     area: 'AI Business',
     level: 'Intermediate',
-    status: 'active',
+    status: 'retired',
+    expiryDate: '2026-07-08',
     description:
       'Build and publish AI agents using Microsoft Copilot Studio with topics, actions, and knowledge sources.',
     learnUrl:
@@ -2377,7 +2497,7 @@ export const appliedSkills = [
     title: 'Create and manage model-driven apps with Power Apps and Dataverse',
     area: 'AI Business',
     level: 'Intermediate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description:
       'Build model-driven applications using Microsoft Power Apps and Dataverse with forms, views, and business rules.',
@@ -2545,7 +2665,8 @@ export const appliedSkills = [
     title: 'Implement a data warehouse in Microsoft Fabric',
     area: 'Data',
     level: 'Intermediate',
-    status: 'active',
+    status: 'retired',
+    expiryDate: '2026-06-30',
     description:
       'Design and implement a cloud-scale data warehouse using Microsoft Fabric, including data ingestion, modeling, and querying.',
     learnUrl:
@@ -2646,7 +2767,7 @@ export const appliedSkills = [
     title: 'Prepare security and compliance to support Microsoft 365 Copilot',
     area: 'Security',
     level: 'Intermediate',
-    status: 'expiring',
+    status: 'retired',
     expiryDate: '2026-06-30',
     description:
       'Validate hands-on skills for Prepare security and compliance to support Microsoft 365 Copilot.',
@@ -2726,8 +2847,11 @@ export const appliedSkills = [
   },
 ];
 
-// Timeline events — sourced from RSS feed scraper (runs every Friday)
-// Feed: https://techcommunity.microsoft.com/t5/s/gxcuf89792/rss/board?board.id=skills-hub-blog
+// Timeline events — hand-maintained. The three entries added on 2026-09-09 (mb-240-retire,
+// az-800-az-801-retire, ms-102-retire) cite the Microsoft Learn pages they were verified
+// against; every earlier entry keeps its original Skills Hub blog sourceUrl and was not
+// re-verified. The Friday Skills Hub RSS scraper (functions/src/lib/timers/skills-hub.js)
+// writes certEvents, which nothing reads yet (#461 item 4); this array is not fed by it.
 export const timelineEvents = [
   {
     id: 'ai-103-beta',
@@ -2823,5 +2947,36 @@ export const timelineEvents = [
     title: 'AZ-500 Retires',
     description: 'Azure Security Engineer Associate (AZ-500) retires August 31, 2026.',
     sourceUrl: 'https://techcommunity.microsoft.com/category/skills-hub/blog/skills-hub-blog',
+  },
+  {
+    id: 'mb-240-retire',
+    date: '2026-06-30',
+    type: 'retirement',
+    certCode: 'MB-240',
+    title: 'MB-240 Retires',
+    description:
+      'Dynamics 365 Field Service Functional Consultant Associate retires with no direct replacement.',
+    sourceUrl: 'https://learn.microsoft.com/en-us/credentials/support/credential-retirement',
+  },
+  {
+    id: 'az-800-az-801-retire',
+    date: '2026-09-30',
+    type: 'retirement',
+    certCode: 'AZ-800',
+    title: 'AZ-800 & AZ-801 Retire',
+    description:
+      'Both Windows Server Hybrid Administrator exams retire at 5:00 PM Central. Replaced by the single exam AZ-802.',
+    sourceUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/exams/az-800/',
+  },
+  {
+    id: 'ms-102-retire',
+    date: '2026-11-30',
+    type: 'retirement',
+    certCode: 'MS-102',
+    title: 'MS-102 Retires',
+    description:
+      'Microsoft 365 Certified: Administrator Expert and exam MS-102 retire; the certification can no longer be earned or renewed after this date.',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/m365-administrator-expert/',
   },
 ];
