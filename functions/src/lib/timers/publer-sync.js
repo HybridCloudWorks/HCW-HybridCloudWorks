@@ -164,7 +164,13 @@ export function buildSocialPostSyncPatch(
  *   writer, in the shape `createAiRouter` takes it. `null` — every unit test —
  *   reports nothing.
  * @param {{ warn?: Function }} [deps.log]
- * @returns {{ configured: boolean, request: Function, listPostsForSync: Function }}
+ * @returns {{
+ *   configured: boolean,
+ *   request: (path: string, method?: string, body?: unknown) => Promise<unknown>,
+ *   listPostsForSync: () => Promise<object[]>,
+ *   deletePosts: (ids: Array<string|number>) => Promise<{ deletedIds: string[], missingIds: string[] }>,
+ * }} `deletePosts` is the only documented way to delete — see its own note on
+ *    why an empty list is refused rather than sent.
  */
 export function createPublerClient({
   env = process.env,
