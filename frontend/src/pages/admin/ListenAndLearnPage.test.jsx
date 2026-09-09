@@ -5,7 +5,7 @@
  * the 202 and this page is where an operator reads it before the money goes.
  */
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ListenAndLearnPage, { queuedMessage } from './ListenAndLearnPage';
 
@@ -112,11 +112,15 @@ describe('ListenAndLearnPage', () => {
     render(<ListenAndLearnPage />);
     await waitFor(() => expect(fetchSets).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByPlaceholderText('AZ-104'), { target: { value: 'AZ-104' } });
-    fireEvent.change(screen.getByPlaceholderText(/study-guides\/az-104/), {
+    // Scoped to the study-guide form: since #452 the source-grounding panel
+    // has its own Generate button on the same page.
+    const examCode = screen.getByPlaceholderText('AZ-104');
+    const form = within(examCode.closest('form'));
+    fireEvent.change(examCode, { target: { value: 'AZ-104' } });
+    fireEvent.change(form.getByPlaceholderText(/study-guides\/az-104/), {
       target: { value: 'https://learn.microsoft.com/az-104' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /generate/i }));
+    fireEvent.click(form.getByRole('button', { name: /generate/i }));
 
     expect(
       await screen.findByText('Queued — speech by ElevenLabs, up to $7.20 (8 episodes × $0.90)')
