@@ -29,12 +29,47 @@ import { uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getActiveAiProvider, getCostEstimate } from '../lib/ai/router.js';
 import { registerJobType } from '../lib/jobs.js';
 import { generateEpisodes, isSupportedPlatform, SUPPORTED_PLATFORMS } from '../lib/listen-and-learn/generate.js';
+import { MAX_SCRIPT_BYTES } from '../lib/listen-and-learn/script.js';
+import { estimateSpeechCostUsd } from '../lib/listen-and-learn/speech/index.js';
 
 /**
  * Bound so a single run cannot spend an unbounded amount: the largest real
  * guide is 6 areas, and a request asking for more is a bug or abuse.
  */
 export const MAX_AREAS_PER_RUN = 8;
+
+/**
+ * What the speech for this run is expected to cost, stated in the 202 before
+ * the run starts (ADR 0029 §2a).
+ *
+ * A ceiling, not a forecast: no script exists yet, so each episode is priced
+ * at `MAX_SCRIPT_BYTES` — the most characters an episode can hold — and the
+ * episode count is the areas requested or, when the guide has not been parsed
+ * to know, the most a run may generate. The run cannot spend more than this
+ * figure on speech; it usually spends less. `provider` is null when no speech
+ * key is configured, which is the transcript-only state rather than an error.
+ *
+ * @param {object} payload the raw enqueue payload
+ * @param {object} [env]
+ * @returns {{provider: string|null, model: string|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null}}
+ */
+export function speechEstimateForRun(payload, env = process.env) {
+  const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
+  const episodes = areas > 0 ? Math.min(areas, MAX_AREAS_PER_RUN) : MAX_AREAS_PER_RUN;
+  const perEpisode = estimateSpeechCostUsd({ characters: MAX_SCRIPT_BYTES, env });
+  if (!perEpisode) {
+    return { provider: null, model: null, episodes, perEpisodeUsd: null, estimatedCostUsd: null };
+  }
+  const perEpisodeUsd = perEpisode.estimatedCostUsd;
+  return {
+    provider: perEpisode.provider,
+    model: perEpisode.model,
+    episodes,
+    perEpisodeUsd,
+    estimatedCostUsd:
+      typeof perEpisodeUsd === 'number' ? parseFloat((perEpisodeUsd * episodes).toFixed(6)) : null,
+  };
+}
 
 /**
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rules
@@ -144,5 +179,8 @@ registerJobType('generate-listen-and-learn', {
   // Five areas at roughly two minutes each — one model call plus one or two
   // synthesis requests plus an upload — with headroom for a slow guide fetch.
   timeoutMs: 25 * 60 * 1000,
+  // The expected speech spend, in the 202, so the admin page can show it at
+  // the moment the run is requested rather than after the usage rows land.
+  acceptedDetails: (payload) => ({ speech: speechEstimateForRun(payload) }),
   worker: runListenAndLearnGeneration,
 });

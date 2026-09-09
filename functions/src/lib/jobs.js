@@ -95,6 +95,13 @@ const registry = new Map();
  *   Best effort: a throw is logged and never changes the job's outcome. Added
  *   for failure-only Telegram notifications (T-607) — successes already ride
  *   the forge_ready rising edge, so hooks should stay quiet on success.
+ * @param {(payload: any) => object|null|undefined} [spec.acceptedDetails]
+ *   Extra fields merged into the 202 body, computed from the validated
+ *   payload BEFORE the job runs. Exists so a caller can be told what a run is
+ *   expected to cost at the moment it asks for one (ADR 0029 §2a: Listen &
+ *   Learn states its speech spend before starting rather than in the usage
+ *   table afterwards). Best effort and synchronous: a throw is logged and the
+ *   job is still enqueued, and the base fields (`ok`, `jobId`, …) always win.
  */
 export function registerJobType(type, spec) {
   if (typeof type !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(type)) {
@@ -305,11 +312,23 @@ export function createJobHandlers({
         requestedBy: auth.user,
         createdAt: now().toISOString(),
       });
+      // Computed before the write so a hook that throws is logged against a
+      // job that does not exist yet, and never against one already queued.
+      let details = {};
+      if (typeof spec.acceptedDetails === 'function') {
+        try {
+          details = spec.acceptedDetails(payload) || {};
+        } catch (error) {
+          context.warn?.('enqueueJob: acceptedDetails failed for', type, error?.message);
+          details = {};
+        }
+      }
       try {
         await store.upsertDoc(JOBS_CONTAINER, doc);
         enqueue({ jobId, type });
         context.log?.('enqueueJob', jobId, type, `${payloadBytes}B`);
         return json(202, {
+          ...details,
           ok: true,
           jobId,
           type,

@@ -25,6 +25,29 @@ describe('runJob', () => {
     expect(onUpdate).toHaveBeenCalledTimes(4);
   });
 
+  it('hands the 202 body to onAccepted once, before the first poll', async () => {
+    // Listen & Learn states its expected speech cost there; a page must see
+    // it at acceptance, not after the run.
+    const accepted = { ok: true, jobId: 'j1', status: 'queued', speech: { estimatedCostUsd: 7.2 } };
+    const enqueue = vi.fn(async () => accepted);
+    const get = vi.fn(async () => ({ ok: true, job: { id: 'j1', status: 'succeeded' } }));
+    const onAccepted = vi.fn(() => expect(get).not.toHaveBeenCalled());
+
+    await runJob('noop', {}, { fetchers: { enqueue, get }, sleep: noSleep, onAccepted });
+
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(onAccepted).toHaveBeenCalledWith(accepted);
+  });
+
+  it('does not call onAccepted for a rejected job', async () => {
+    const onAccepted = vi.fn();
+    const enqueue = vi.fn(async () => ({ ok: false, error: 'nope' }));
+    await expect(
+      runJob('nope', {}, { fetchers: { enqueue, get: vi.fn() }, sleep: noSleep, onAccepted })
+    ).rejects.toThrow('nope');
+    expect(onAccepted).not.toHaveBeenCalled();
+  });
+
   it('throws the server error when the job is not accepted', async () => {
     const enqueue = vi.fn(async () => ({ ok: false, error: 'Unknown job type' }));
     await expect(

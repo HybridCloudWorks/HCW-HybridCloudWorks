@@ -72,6 +72,10 @@ async function pollUntilTerminal(get, jobId, { onUpdate, signal, maxWaitMs, slee
  * @param {object} [payload]
  * @param {object} [options]
  * @param {(job: object) => void} [options.onUpdate] - every poll result
+ * @param {(accepted: object) => void} [options.onAccepted] - the 202 body, once,
+ *   before polling starts. Some types describe the run they are about to do
+ *   there — Listen & Learn states its expected speech cost — and that is the
+ *   moment a page should show it.
  * @param {AbortSignal} [options.signal]
  * @param {number} [options.maxWaitMs] - give up waiting (the job keeps running server-side)
  * @param {{ enqueue?: Function, get?: Function }} [options.fetchers] - test seam
@@ -82,6 +86,7 @@ async function pollUntilTerminal(get, jobId, { onUpdate, signal, maxWaitMs, slee
 export async function runJob(type, payload = {}, options = {}) {
   const {
     onUpdate,
+    onAccepted,
     signal,
     maxWaitMs = DEFAULT_MAX_WAIT_MS,
     fetchers = {},
@@ -95,5 +100,6 @@ export async function runJob(type, payload = {}, options = {}) {
   if (!accepted?.ok || !accepted.jobId) {
     throw new Error(accepted?.error || 'Job was not accepted');
   }
+  onAccepted?.(accepted);
   return pollUntilTerminal(get, accepted.jobId, { onUpdate, signal, maxWaitMs, sleep, now });
 }

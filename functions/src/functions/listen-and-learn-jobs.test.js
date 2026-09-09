@@ -17,12 +17,17 @@ vi.mock('../lib/cosmos-client.js', () => ({
   patchDoc: vi.fn(),
 }));
 vi.mock('../lib/blob-storage.js', () => ({ uploadBlob: vi.fn() }));
-vi.mock('../lib/ai/router.js', () => ({
+// The real cost table stays: the speech estimate below is priced through it,
+// and a stubbed getCostEstimate would make the arithmetic here meaningless.
+vi.mock('../lib/ai/router.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   generateJsonResponse: vi.fn(),
   getActiveAiProvider: vi.fn(),
 }));
 
-const { parseGeneratePayload, MAX_AREAS_PER_RUN } = await import('./listen-and-learn-jobs.js');
+const { parseGeneratePayload, speechEstimateForRun, MAX_AREAS_PER_RUN } =
+  await import('./listen-and-learn-jobs.js');
+const { MAX_SCRIPT_BYTES } = await import('../lib/listen-and-learn/script.js');
 
 const valid = (over = {}) => ({
   platform: 'azure',
@@ -105,5 +110,56 @@ describe('parseGeneratePayload', () => {
   it('refuses a missing payload without throwing', () => {
     expect(parseGeneratePayload(undefined).error).toBeTruthy();
     expect(parseGeneratePayload(null).error).toBeTruthy();
+  });
+});
+
+describe('speechEstimateForRun', () => {
+  // Stated in the 202 before the run starts (ADR 0029 §2a). A ceiling: every
+  // episode priced at the most characters a script may hold.
+  const ELEVEN = { ELEVENLABS_API_KEY: 'e', GEMINI_API_KEY: 'g' };
+
+  it('prices every requested area at the script ceiling', () => {
+    const estimate = speechEstimateForRun(valid({ areas: ['a', 'b'] }), ELEVEN);
+    expect(MAX_SCRIPT_BYTES).toBe(9000);
+    expect(estimate).toEqual({
+      provider: 'elevenlabs',
+      model: 'eleven_v3',
+      episodes: 2,
+      perEpisodeUsd: 0.9,
+      estimatedCostUsd: 1.8,
+    });
+  });
+
+  it('assumes the most a run may generate when the areas are not yet known', () => {
+    const estimate = speechEstimateForRun(valid(), ELEVEN);
+    expect(estimate.episodes).toBe(MAX_AREAS_PER_RUN);
+    expect(estimate.estimatedCostUsd).toBeCloseTo(0.9 * MAX_AREAS_PER_RUN, 6);
+  });
+
+  it('never prices more areas than a run may generate', () => {
+    const areas = Array.from({ length: MAX_AREAS_PER_RUN + 3 }, (_, i) => `area-${i}`);
+    expect(speechEstimateForRun(valid({ areas }), ELEVEN).episodes).toBe(MAX_AREAS_PER_RUN);
+  });
+
+  it('says there is no provider rather than pricing nothing at zero', () => {
+    expect(speechEstimateForRun(valid(), {})).toEqual({
+      provider: null,
+      model: null,
+      episodes: MAX_AREAS_PER_RUN,
+      perEpisodeUsd: null,
+      estimatedCostUsd: null,
+    });
+  });
+
+  it('follows the switch: Gemini when the ElevenLabs key is absent', () => {
+    const estimate = speechEstimateForRun(valid({ areas: ['a'] }), { GEMINI_API_KEY: 'g' });
+    expect(estimate.provider).toBe('gemini');
+    expect(estimate.estimatedCostUsd).toBeGreaterThan(0);
+    expect(estimate.estimatedCostUsd).toBeLessThan(0.9);
+  });
+
+  it('does not throw on a payload the worker would refuse', () => {
+    expect(() => speechEstimateForRun(null, ELEVEN)).not.toThrow();
+    expect(speechEstimateForRun({ areas: 'not-a-list' }, ELEVEN).episodes).toBe(MAX_AREAS_PER_RUN);
   });
 });

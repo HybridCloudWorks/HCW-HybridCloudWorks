@@ -92,6 +92,9 @@ export async function reviewEpisode({ platform, examCode, areaSlug, status }) {
  *
  * @param {object} params
  * @param {(job: object) => void} [params.onUpdate]
+ * @param {(accepted: {speech?: object}) => void} [params.onAccepted] the 202,
+ *   which carries `speech: { provider, estimatedCostUsd, … }` — what the run
+ *   is expected to spend on audio, stated before it starts
  * @param {AbortSignal} [params.signal]
  */
 export async function generateEpisodes({
@@ -102,6 +105,7 @@ export async function generateEpisodes({
   certSlug,
   areas,
   onUpdate,
+  onAccepted,
   signal,
 } = {}) {
   return runJob(
@@ -116,6 +120,7 @@ export async function generateEpisodes({
     },
     {
       onUpdate,
+      onAccepted,
       signal,
       // A run is bounded server-side at 25 minutes; waiting slightly longer
       // means a timeout here reports the job's own outcome rather than

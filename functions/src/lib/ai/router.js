@@ -206,6 +206,17 @@ export const COST_TABLE = Object.freeze({
     'amazon.nova-pro-v1:0': [0.8, 3.2],
     default: [0.06, 0.24],
   },
+  // ElevenLabs speech (Listen & Learn), priced PER CHARACTER: the "output"
+  // unit of a row is the billed character count, promptTokens is always 0,
+  // and USD 0.10 per 1,000 characters is USD 100 per 1M. Read from the API
+  // pricing page for the Starter and Creator plans on 2026-09-08. Expressed
+  // in the table's per-1M shape so getCostEstimate and the admin usage page
+  // price these rows without learning a new unit — see the header of
+  // listen-and-learn/speech/elevenlabs.js.
+  elevenlabs: {
+    eleven_v3: [0, 100.0],
+    default: [0, 100.0],
+  },
   replicate: {
     'meta/llama-3.1-405b-instruct': [0.65, 2.75],
     'meta/llama-3.1-70b-instruct': [0.35, 1.4],

@@ -52,6 +52,8 @@ const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/inter
  *   gemini-3.1-flash-tts-preview   newest
  */
 const DEFAULT_MODEL = 'gemini-2.5-flash-preview-tts';
+/** Named for index.js, which prices a run against this model before it starts. */
+export { DEFAULT_MODEL as GEMINI_DEFAULT_MODEL };
 
 /** Source format of `output_audio.data`. Not configurable at the API. */
 const PCM_SAMPLE_RATE = 24000;
@@ -67,6 +69,7 @@ const PCM_SAMPLE_RATE = 24000;
  * kind of fact.
  */
 const AUDIO_TOKENS_PER_SECOND = 32;
+export { AUDIO_TOKENS_PER_SECOND as GEMINI_AUDIO_TOKENS_PER_SECOND };
 
 /**
  * Voices for the two hosts, chosen by the descriptor the voice list publishes

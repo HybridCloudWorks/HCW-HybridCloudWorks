@@ -234,7 +234,8 @@ problem. The two cost very different amounts to diagnose.
 | `CLIENT-IP-SALT` | Request hashing | |
 | `AWS-ACCESS-KEY-ID` | AWS pricing | |
 | `AWS-SECRET-ACCESS-KEY` | AWS pricing | |
-| `GEMINI-API-KEY` | AI router; **Listen & Learn TTS** | Provider chosen by key presence, Gemini first. Episode audio is billed against this key |
+| `GEMINI-API-KEY` | AI router; **Listen & Learn TTS fallback** | Provider chosen by key presence, ElevenLabs first. Reads episodes when `ELEVENLABS-API-KEY` is absent or the ElevenLabs account is out of credit, and audio is then billed against this key |
+| `ELEVENLABS-API-KEY` | **Listen & Learn TTS** | First in preference order since the paid plan was approved on 2026-09-08 (ADR 0029 §2a). About USD 0.10 per 1,000 characters, roughly USD 4 per certification; the expected spend is shown when a run is requested. Versionless reference: a re-minted key needs an app restart to take effect |
 | `ANTHROPIC-API-KEY` | AI router | First in the router's provider order |
 | `OPENAI-API-KEY` | AI router | Second |
 | `PERPLEXITY-API-KEY` | AI router | |

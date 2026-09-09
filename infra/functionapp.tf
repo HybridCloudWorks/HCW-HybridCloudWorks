@@ -435,22 +435,32 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 
     # Listen & Learn audio.
     #
-    # There is deliberately NO new setting for the default path: Gemini TTS
-    # reads GEMINI_API_KEY, declared above for the text models, so the feature
-    # is switched on by a secret that is already seeded and costs no new
-    # service, resource or credential. That is also why it is first in
-    # preference order (listen-and-learn/speech/index.js).
+    # Gemini TTS needs no setting of its own: it reads GEMINI_API_KEY, declared
+    # above for the text models, so that path is switched on by a secret that
+    # is already seeded and costs no new service, resource or credential. It
+    # is the fallback for when ELEVENLABS_API_KEY below is absent or the
+    # account is out of credit (listen-and-learn/speech/index.js).
     #
-    # AZURE_SPEECH_* is the fallback and is expected to stay unresolved. Every
-    # Gemini TTS model is a *preview* model, and preview endpoints get retired;
-    # a GA second path is what makes that a config change rather than an
-    # outage. An unseeded reference arrives as the literal
+    # AZURE_SPEECH_* is the last fallback and is expected to stay unresolved.
+    # Every Gemini TTS model is a *preview* model, and preview endpoints get
+    # retired; a GA second path is what makes that a config change rather
+    # than an outage. An unseeded reference arrives as the literal
     # @Microsoft.KeyVault(...) string, which readSetting() treats as no key at
     # all — so the provider simply is not offered, and declaring it here
     # switches nothing on and provisions nothing. Using it means creating a
     # Cognitive Services resource, which is a spend decision (TODO.md).
     "AZURE_SPEECH_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AZURE-SPEECH-KEY)"
     "AZURE_SPEECH_REGION" = var.speech_region
+
+    # ELEVENLABS_API_KEY is first in preference order: the owner approved a
+    # paid ElevenLabs plan on 2026-09-08 (ADR 0029 §2a, #436), so when this
+    # resolves it is the provider that reads every episode, at about USD 0.10
+    # per 1,000 characters. The reference is versionless like every other
+    # one here, and App Service caches a versionless reference for the life
+    # of the process: a re-minted key needs an app restart to take effect.
+    # Until the secret is seeded this resolves to the literal string above and
+    # the switch moves on to Gemini — declaring it here switches nothing on.
+    "ELEVENLABS_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ELEVENLABS-API-KEY)"
 
     # Ingestion and enrichment.
     "FIRECRAWL_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/FIRECRAWL-API-KEY)"

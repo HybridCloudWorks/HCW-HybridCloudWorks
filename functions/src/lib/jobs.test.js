@@ -150,6 +150,58 @@ describe('enqueueJob', () => {
     expect(enqueue).toHaveBeenCalledWith({ jobId: 'job-1', type: 'noop' });
   });
 
+  it('merges a type’s acceptedDetails into the 202 body, and the base fields win', async () => {
+    // A caller is told what a run is expected to cost at the moment it asks
+    // for one (ADR 0029 §2a); the hook cannot masquerade as acceptance.
+    registerJobType('priced', {
+      worker: async () => 1,
+      role: 'editor',
+      acceptedDetails: (payload) => ({
+        speech: { provider: 'elevenlabs', estimatedCostUsd: payload.n * 0.9 },
+        ok: false,
+        jobId: 'forged',
+      }),
+    });
+    const h = createJobHandlers({ guard: guardAs('editor'), store: makeStore(), ...fixed });
+    const res = await h.enqueueJob(makeRequest({ type: 'priced', payload: { n: 2 } }), context, {
+      enqueue: vi.fn(),
+    });
+    expect(res.status).toBe(202);
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      jobId: 'job-1',
+      type: 'priced',
+      status: 'queued',
+      poll: 'getJob?jobId=job-1',
+      speech: { provider: 'elevenlabs', estimatedCostUsd: 1.8 },
+    });
+  });
+
+  it('still enqueues when acceptedDetails throws, and says so', async () => {
+    registerJobType('priced-badly', {
+      worker: async () => 1,
+      role: 'editor',
+      acceptedDetails: () => {
+        throw new Error('no cost table');
+      },
+    });
+    const store = makeStore();
+    const enqueue = vi.fn();
+    const warn = vi.fn();
+    const h = createJobHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const res = await h.enqueueJob(makeRequest({ type: 'priced-badly' }), { ...context, warn }, {
+      enqueue,
+    });
+    expect(res.status).toBe(202);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, jobId: 'job-1' });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'enqueueJob: acceptedDetails failed for',
+      'priced-badly',
+      'no cost table'
+    );
+  });
+
   it('enforces a stricter per-type role on top of editor', async () => {
     registerJobType('admin-only', { worker: async () => 1, role: 'super_admin' });
     const guard = {
