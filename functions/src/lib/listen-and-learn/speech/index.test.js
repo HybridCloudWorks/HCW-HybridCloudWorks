@@ -384,6 +384,29 @@ describe('estimateSpeechCostUsd', () => {
     expect(sent).toEqual(speakableTurns(mixed).map((t) => t.text));
   });
 
+  it('counts turns trimmed, as the providers send them, so padding never inflates the figure', () => {
+    // Every provider trims a turn before posting it; a count taken before the
+    // trim overstated the estimate shown to the operator (Copilot on #447).
+    const trimmed = [
+      { speaker: 'Maya', text: 'Hello there' },
+      { speaker: 'Elena', text: 'Hi back' },
+    ];
+    const padded = [
+      { speaker: 'Maya', text: '   Hello there \n' },
+      { speaker: 'Elena', text: '\t Hi back   ' },
+    ];
+    expect(speakableTurns(padded)).toEqual(trimmed);
+    for (const env of [ELEVEN, GEMINI]) {
+      expect(estimateSpeechCostUsd({ dialogue: padded, env })).toEqual(
+        estimateSpeechCostUsd({ dialogue: trimmed, env })
+      );
+    }
+    expect(estimateSpeechCostUsd({ dialogue: padded, env: ELEVEN })).toMatchObject({
+      characters: 18,
+      bytes: 18,
+    });
+  });
+
   it('prices ElevenLabs by characters at the cost-table rate, before any request', () => {
     // 'Hello' + 'Hi' = 7 characters at USD 0.10 per 1,000.
     expect(estimateSpeechCostUsd({ dialogue: DIALOGUE, env: { ...ELEVEN, ...GEMINI } })).toEqual({

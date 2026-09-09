@@ -39,7 +39,7 @@ describe('runJob', () => {
     expect(onAccepted).toHaveBeenCalledWith(accepted);
   });
 
-  it('a throwing onAccepted does not reject the run, which is already accepted and polling', async () => {
+  it('an onAccepted callback that throws does not reject runJob — the job is accepted and polling', async () => {
     // The job is running server-side by the time the 202 is rendered; a
     // render error must not report that work as failed (Copilot on #447).
     const enqueue = vi.fn(async () => ({ ok: true, jobId: 'j1', status: 'queued' }));

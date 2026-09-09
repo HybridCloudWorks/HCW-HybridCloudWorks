@@ -155,17 +155,23 @@ function candidateProviders(env) {
 const isOutOfCredit = (err) => err?.name === 'SpeechError' && err?.code === 'quota_exceeded';
 
 /**
- * The turns that will actually be spoken: those with non-blank text.
+ * The turns that will actually be spoken, as they will be spoken: blank turns
+ * dropped and each remaining text trimmed.
  *
  * One helper for both `synthesizeDialogue` and `estimateSpeechCostUsd`, so
- * the estimate can never count a turn synthesis would drop. Before this was
- * shared, a whitespace-only dialogue estimated $0 while synthesis refused it.
+ * the estimate can never count a turn synthesis would drop, nor whitespace
+ * synthesis would strip — every provider trims a turn before sending it, and
+ * a byte or character count taken before that trim overstated the figure
+ * shown to the operator. Before the filter was shared, a whitespace-only
+ * dialogue estimated $0 while synthesis refused it.
  *
  * @param {{speaker: string, text: string}[]|null|undefined} dialogue
  * @returns {{speaker: string, text: string}[]}
  */
 export function speakableTurns(dialogue) {
-  return (dialogue || []).filter((t) => String(t?.text || '').trim());
+  return (dialogue || [])
+    .map((t) => ({ ...t, text: String(t?.text || '').trim() }))
+    .filter((t) => t.text);
 }
 
 /**
