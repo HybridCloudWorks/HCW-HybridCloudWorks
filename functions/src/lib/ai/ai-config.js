@@ -101,7 +101,7 @@ export const AI_FEATURES = Object.freeze({
     label: 'Listen & Learn scripts',
     description: 'Scripts a two-host study episode for one skill area of a certification guide.',
     route:
-      'Generate a set on the Listen & Learn page, and regenerating one area. Off means the run fails before the model is called; existing episodes stay.',
+      'The Generate button on the Listen & Learn page, and Regenerate on one area. Off means the run fails before the model is called; existing episodes stay.',
   }),
   sourceGrounding: Object.freeze({
     label: 'Source grounding',
