@@ -25,6 +25,55 @@ describe('runJob', () => {
     expect(onUpdate).toHaveBeenCalledTimes(4);
   });
 
+  it('hands the 202 body to onAccepted once, before the first poll', async () => {
+    // Listen & Learn states its expected speech cost there; a page must see
+    // it at acceptance, not after the run.
+    const accepted = { ok: true, jobId: 'j1', status: 'queued', speech: { estimatedCostUsd: 7.2 } };
+    const enqueue = vi.fn(async () => accepted);
+    const get = vi.fn(async () => ({ ok: true, job: { id: 'j1', status: 'succeeded' } }));
+    const onAccepted = vi.fn(() => expect(get).not.toHaveBeenCalled());
+
+    await runJob('noop', {}, { fetchers: { enqueue, get }, sleep: noSleep, onAccepted });
+
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(onAccepted).toHaveBeenCalledWith(accepted);
+  });
+
+  it('an onAccepted callback that throws does not reject runJob — the job is accepted and polling', async () => {
+    // The job is running server-side by the time the 202 is rendered; a
+    // render error must not report that work as failed (Copilot on #447).
+    const enqueue = vi.fn(async () => ({ ok: true, jobId: 'j1', status: 'queued' }));
+    const statuses = ['running', 'succeeded'];
+    const get = vi.fn(async () => ({
+      ok: true,
+      job: { id: 'j1', status: statuses.shift(), result: { n: 1 } },
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onAccepted = vi.fn(() => {
+      throw new Error('render blew up');
+    });
+
+    const job = await runJob(
+      'noop',
+      {},
+      { fetchers: { enqueue, get }, sleep: noSleep, onAccepted }
+    );
+
+    expect(job).toEqual({ id: 'j1', status: 'succeeded', result: { n: 1 } });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith('runJob: onAccepted threw', 'noop', 'render blew up');
+    warn.mockRestore();
+  });
+
+  it('does not call onAccepted for a rejected job', async () => {
+    const onAccepted = vi.fn();
+    const enqueue = vi.fn(async () => ({ ok: false, error: 'nope' }));
+    await expect(
+      runJob('nope', {}, { fetchers: { enqueue, get: vi.fn() }, sleep: noSleep, onAccepted })
+    ).rejects.toThrow('nope');
+    expect(onAccepted).not.toHaveBeenCalled();
+  });
+
   it('throws the server error when the job is not accepted', async () => {
     const enqueue = vi.fn(async () => ({ ok: false, error: 'Unknown job type' }));
     await expect(

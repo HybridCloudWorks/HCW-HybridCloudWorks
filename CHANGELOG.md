@@ -428,6 +428,48 @@ This project has not cut a tagged release; entries are grouped under
   `data_type: "transaction"` entry, because both files sampled had an empty
   `source_list`; the normaliser finds the array by shape.
 
+- **ElevenLabs reads Listen & Learn, and the run says what it will cost
+  before it starts (#436, ADR 0029 §2a).** The owner approved a paid
+  ElevenLabs plan on 2026-09-08, which met the revisit trigger ADR 0029 §2
+  wrote for itself; §2a records the amendment and this is the code for it.
+  `speech/elevenlabs.js` is a third entry in the provider switch, first in
+  preference order when `ELEVENLABS_API_KEY` resolves, under the same contract
+  as its siblings: MP3 out (`mp3_44100_64`, the 64 kbps the Gemini path
+  already encodes to), so the blob path, the stored `contentType` and the
+  player are untouched. Every turn is an `inputs[]` entry with its own
+  `voice_id` — Sarah for Maya, Aria for Elena, both premade, overridable per
+  host — so a turn whose speaker has no voice is a hard error before a byte
+  is uploaded, not after. Dialogue is chunked at the endpoint's documented
+  2,000-character ceiling and the parts concatenated, as the Azure path
+  already does.
+
+  **The test that said `elevenlabs` was not a provider is gone, on purpose.**
+  It was the record of the deferral; `speech/index.test.js` now records the
+  order instead, and the assertion it replaced is described in that file's
+  header rather than deleted quietly.
+
+  **Out of credit is a state a paid provider has and a free one does not.**
+  The API answers it with 401 `quota_exceeded`; that is surfaced once, with
+  its status and a `code`, is never retried, and — unless a pin says
+  otherwise — moves the switch on to Gemini, which stays as the fallback for
+  exactly this. Any other failure still fails the area, because a fault hidden
+  behind a different voice is worse than a gap.
+
+  **Cost is recorded and stated.** A character is the output unit: usage rows
+  carry the billed count from the API's `character-cost` header (our own
+  count, flagged estimated, when the header is absent), and
+  `COST_TABLE.elevenlabs` prices it at USD 100 per million — USD 0.10 per
+  1,000 — so `getCostEstimate` and the usage page work unchanged. The job's
+  202 now carries `speech: { provider, estimatedCostUsd, … }`, a ceiling
+  computed against the script byte limit per episode, and the admin page
+  prints it the moment the run is accepted: "Queued — speech by ElevenLabs,
+  up to $7.20 (8 episodes × $0.90)". `ELEVENLABS-API-KEY` is declared in
+  `infra/functionapp.tf` and the secret catalogue; seeding it is the owner's
+  step, and until then the switch moves on to Gemini as before.
+
+  Incidentally fixed in the same page: `useAuthReady()` returns `authReady`,
+  and the page destructured `ready`, so the sets list never loaded on mount.
+
 - **`scripts/check-workflow-health.mjs` — the guard that would have caught
   the three weeks.** Split out of #426, which retired the workflow that
   prompted it on 2026-09-08. `validate-deployed.yml` explained in its own header why it

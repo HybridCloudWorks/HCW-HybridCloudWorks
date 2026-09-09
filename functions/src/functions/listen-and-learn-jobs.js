@@ -29,12 +29,79 @@ import { uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getActiveAiProvider, getCostEstimate } from '../lib/ai/router.js';
 import { registerJobType } from '../lib/jobs.js';
 import { generateEpisodes, isSupportedPlatform, SUPPORTED_PLATFORMS } from '../lib/listen-and-learn/generate.js';
+import { MAX_SCRIPT_BYTES } from '../lib/listen-and-learn/script.js';
+import {
+  estimateSpeechCostUsd,
+  resolveSpeechProvider,
+} from '../lib/listen-and-learn/speech/index.js';
 
 /**
  * Bound so a single run cannot spend an unbounded amount: the largest real
  * guide is 6 areas, and a request asking for more is a bug or abuse.
  */
 export const MAX_AREAS_PER_RUN = 8;
+
+/**
+ * What the speech for this run is expected to cost, stated in the 202 before
+ * the run starts (ADR 0029 §2a).
+ *
+ * A ceiling, not a forecast: no script exists yet, so each episode is priced
+ * at `MAX_SCRIPT_BYTES` — the most UTF-8 BYTES a script may hold, which
+ * `estimateSpeechCostUsd` treats as bytes. That is an over-estimate for both
+ * providers: ElevenLabs bills characters, and a script's character count is
+ * never more than its byte count (lower, for anything non-ASCII); Gemini's
+ * duration is derived from bytes at a deliberately slow speaking rate. The
+ * episode count is the areas requested or, when the guide has not been parsed
+ * to know, the most a run may generate. The run cannot spend more than this
+ * figure on speech; it usually spends less. `provider` is null when no speech
+ * provider will run, and `reason` says why, because the two causes call for
+ * different actions: `not_configured` (no key at all — the transcript-only
+ * state, not an error) or `pin_unavailable` (`LISTEN_AND_LEARN_TTS_PROVIDER`
+ * names a provider that is not configured or not known — the run will still
+ * go ahead, and its audio step will fail with a sentence naming the pin).
+ *
+ * @param {object} payload the raw enqueue payload
+ * @param {object} [env]
+ * @returns {{provider: string|null, model: string|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
+ */
+export function speechEstimateForRun(payload, env = process.env) {
+  const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
+  const episodes = areas > 0 ? Math.min(areas, MAX_AREAS_PER_RUN) : MAX_AREAS_PER_RUN;
+  const perEpisode = estimateSpeechCostUsd({ ceilingBytes: MAX_SCRIPT_BYTES, env });
+  if (!perEpisode) {
+    return {
+      provider: null,
+      model: null,
+      episodes,
+      perEpisodeUsd: null,
+      estimatedCostUsd: null,
+      reason: noProviderReason(env),
+    };
+  }
+  const perEpisodeUsd = perEpisode.estimatedCostUsd;
+  return {
+    provider: perEpisode.provider,
+    model: perEpisode.model,
+    episodes,
+    perEpisodeUsd,
+    estimatedCostUsd:
+      typeof perEpisodeUsd === 'number' ? parseFloat((perEpisodeUsd * episodes).toFixed(6)) : null,
+  };
+}
+
+/**
+ * Why no speech provider will run: the switch returns null for "nothing is
+ * configured" and throws for "the pin is unusable", and only the first of
+ * those is the normal transcript-only state.
+ */
+function noProviderReason(env) {
+  try {
+    return resolveSpeechProvider(env) ? null : 'not_configured';
+  } catch (err) {
+    if (err?.name === 'SpeechNotConfiguredError') return 'pin_unavailable';
+    throw err;
+  }
+}
 
 /**
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rules
@@ -144,5 +211,8 @@ registerJobType('generate-listen-and-learn', {
   // Five areas at roughly two minutes each — one model call plus one or two
   // synthesis requests plus an upload — with headroom for a slow guide fetch.
   timeoutMs: 25 * 60 * 1000,
+  // The expected speech spend, in the 202, so the admin page can show it at
+  // the moment the run is requested rather than after the usage rows land.
+  acceptedDetails: (payload) => ({ speech: speechEstimateForRun(payload) }),
   worker: runListenAndLearnGeneration,
 });

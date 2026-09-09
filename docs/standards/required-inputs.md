@@ -213,8 +213,7 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The twenty-three names below (as of `main` at #442; #447 adds
-one more when it merges) are what the Terraform root module
+correct posture. The twenty-four names below are what the Terraform root module
 in `infra/` references — the app-settings map that holds them is in
 `infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
 every `.tf` file in that directory as one module rather than any one file, so a
@@ -234,7 +233,8 @@ problem. The two cost very different amounts to diagnose.
 | `CLIENT-IP-SALT` | Request hashing | |
 | `AWS-ACCESS-KEY-ID` | AWS pricing | |
 | `AWS-SECRET-ACCESS-KEY` | AWS pricing | |
-| `GEMINI-API-KEY` | AI router; **Listen & Learn TTS** | Provider chosen by key presence, Gemini first. Episode audio is billed against this key |
+| `GEMINI-API-KEY` | AI router; **Listen & Learn TTS fallback** | Provider chosen by key presence, ElevenLabs first. Reads episodes when `ELEVENLABS-API-KEY` is absent or the ElevenLabs account is out of credit, and audio is then billed against this key |
+| `ELEVENLABS-API-KEY` | **Listen & Learn TTS** | First in preference order since the paid plan was approved on 2026-09-08 (ADR 0029 §2a). About USD 0.10 per 1,000 characters, roughly USD 4 per certification; the expected spend is shown when a run is requested. Versionless reference: a re-minted key needs an app restart to take effect |
 | `ANTHROPIC-API-KEY` | AI router | First in the router's provider order |
 | `OPENAI-API-KEY` | AI router | Second |
 | `PERPLEXITY-API-KEY` | AI router | |

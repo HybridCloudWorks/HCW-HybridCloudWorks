@@ -188,4 +188,17 @@ describe('generation runs as a job', () => {
 
     expect(runJob.mock.calls[0][2].onUpdate).toBe(onUpdate);
   });
+
+  it('forwards the acceptance callback, which is where the speech estimate arrives', async () => {
+    runJob.mockResolvedValue({});
+    const onAccepted = vi.fn();
+    await generateEpisodes({
+      platform: 'azure',
+      examCode: 'AZ-104',
+      studyGuideUrl: 'https://x',
+      onAccepted,
+    });
+
+    expect(runJob.mock.calls[0][2].onAccepted).toBe(onAccepted);
+  });
 });

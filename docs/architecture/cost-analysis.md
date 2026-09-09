@@ -115,7 +115,7 @@ telemetry line of roughly USD 20, and everything else a rounding error.
 | Key Vault | Standard SKU, no HSM; runtime reads come from cached secret clients | `azurerm_key_vault.hcw` |
 | Log Analytics / App Insights | **0.25 GB/day cap** plus 30-day retention, both live. Pruning the Cosmos diagnostic to `ControlPlaneRequests` — two data-plane categories were most of the cap — is declared and not yet applied. Ingestion sampling deliberately **not** enabled ([ADR 0022](../decisions/0022-alerting-fabric.md)) | `azurerm_log_analytics_workspace.hcw`, `infra/observability.tf` |
 | Hub networking | Everything in `hub.tf` is hourly-free by design. Azure Firewall (~$288–912), Bastion (~$138), VPN Gateway (~$138) and DDoS Protection (~$2,944) are absent and the file says why — any one of them is between one and twenty times this whole budget | `infra/hub.tf` |
-| AI generation | Not an Azure cost. Providers are on when their key is present; Listen & Learn audio bills against `GEMINI-API-KEY` at roughly $0.17 an episode and $0.87 a certification, logged per run in the AI Engine usage tab (`TODO.md`) | `functions/src/lib/ai/` |
+| AI generation | Not an Azure cost. Providers are on when their key is present; Listen & Learn audio bills against `ELEVENLABS-API-KEY` at about $0.10 per 1,000 characters — up to $0.90 an episode and roughly $4 a certification (ADR 0029 §2a) — or, when that key is absent or out of credit, against `GEMINI-API-KEY` at roughly $0.17 an episode. Logged per run in the AI Engine usage tab, and the expected spend is stated when a run is requested | `functions/src/lib/ai/` |
 
 ## What the alert fabric costs
 

@@ -65,6 +65,26 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+/**
+ * A hook's result as a plain, JSON-round-tripped object, or `{}`.
+ *
+ * Throws on anything JSON.stringify refuses (BigInt, a cycle), so the caller's
+ * try/catch sees it BEFORE the response is built rather than json() seeing it
+ * after the job is queued. A Promise throws too: the hook is synchronous by
+ * contract, and a thenable would otherwise stringify to `{}` and hide the
+ * author's mistake without a word. Anything else that is not a plain object
+ * — an array, a string, null — is `{}`: spreading those into a body is never
+ * intended.
+ */
+function serialisableObject(value) {
+  if (typeof value?.then === 'function') {
+    throw new Error('acceptedDetails returned a Promise; the hook must be synchronous');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const clean = JSON.parse(JSON.stringify(value));
+  return clean && typeof clean === 'object' && !Array.isArray(clean) ? clean : {};
+}
+
 // ---------------------------------------------------------------------------
 // Type registry
 // ---------------------------------------------------------------------------
@@ -95,6 +115,18 @@ const registry = new Map();
  *   Best effort: a throw is logged and never changes the job's outcome. Added
  *   for failure-only Telegram notifications (T-607) — successes already ride
  *   the forge_ready rising edge, so hooks should stay quiet on success.
+ * @param {(payload: any) => object|null|undefined} [spec.acceptedDetails]
+ *   Extra fields merged into the 202 body, computed BEFORE the job runs.
+ *   Exists so a caller can be told what a run is expected to cost at the
+ *   moment it asks for one (ADR 0029 §2a: Listen & Learn states its speech
+ *   spend before starting rather than in the usage table afterwards). The
+ *   argument is the RAW `body.payload`: at that point it has passed the role
+ *   check, is JSON-serialisable and is under `maxPayloadBytes`, and nothing
+ *   else — no per-type validation has run (the worker does that). Hook
+ *   authors treat every field as untrusted: read shapes defensively, never
+ *   echo values back, and never let a field choose a path. Best effort and
+ *   synchronous: a throw is logged and the job is still enqueued, and the
+ *   base fields (`ok`, `jobId`, …) always win over anything returned.
  */
 export function registerJobType(type, spec) {
   if (typeof type !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(type)) {
@@ -305,11 +337,28 @@ export function createJobHandlers({
         requestedBy: auth.user,
         createdAt: now().toISOString(),
       });
+      // Computed before the write so a hook that throws is logged against a
+      // job that does not exist yet, and never against one already queued.
+      // Serialised HERE as well, not in json() below: json() runs after the
+      // document is written and the message sent, so a BigInt or a cycle in
+      // the hook's result would answer 500 for a job that IS queued and invite
+      // a duplicate on retry. Bookkeeping must not be able to report the work
+      // it is bookkeeping as failed — the same rule as recordAiUsage's header.
+      let details = {};
+      if (typeof spec.acceptedDetails === 'function') {
+        try {
+          details = serialisableObject(spec.acceptedDetails(payload));
+        } catch (error) {
+          context.warn?.('enqueueJob: acceptedDetails failed for', type, error?.message);
+          details = {};
+        }
+      }
       try {
         await store.upsertDoc(JOBS_CONTAINER, doc);
         enqueue({ jobId, type });
         context.log?.('enqueueJob', jobId, type, `${payloadBytes}B`);
         return json(202, {
+          ...details,
           ok: true,
           jobId,
           type,

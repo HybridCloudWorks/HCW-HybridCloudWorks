@@ -56,6 +56,40 @@ const formatSize = (bytes) => (bytes > 0 ? `${(bytes / (1024 * 1024)).toFixed(1)
 /** Sub-cent runs are normal here, so two decimals would read as free. */
 const formatCost = (usd) => (usd >= 0.01 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`);
 
+const PROVIDER_LABEL = { elevenlabs: 'ElevenLabs', gemini: 'Gemini', azure: 'Azure AI Speech' };
+
+/**
+ * The progress line for a run that has just been accepted.
+ *
+ * The server's 202 says what the run is expected to spend on speech BEFORE it
+ * starts (ADR 0029 §2a). It is a ceiling — every episode priced at
+ * `MAX_SCRIPT_BYTES`, the most UTF-8 bytes a script may hold, which is never
+ * fewer than its billed characters — so it reads "up to". No provider means the
+ * run will publish transcripts with no audio; the server says which of the two
+ * causes that is, because they call for different fixes — seeding a key, or
+ * correcting `LISTEN_AND_LEARN_TTS_PROVIDER` — and a 202 from an older server
+ * carries no reason, so the wording without one covers both.
+ *
+ * @param {{provider?: string|null, reason?: string|null, estimatedCostUsd?: number|null, episodes?: number, perEpisodeUsd?: number|null}|null|undefined} speech
+ */
+export function queuedMessage(speech) {
+  if (!speech) return 'Queued…';
+  if (!speech.provider) {
+    if (speech.reason === 'pin_unavailable')
+      return 'Queued — the pinned speech provider (LISTEN_AND_LEARN_TTS_PROVIDER) is not configured, so the audio step will fail and episodes will have transcripts only';
+    if (speech.reason === 'not_configured')
+      return 'Queued — no speech provider is configured, so episodes will have transcripts only';
+    return 'Queued — no usable speech provider (none configured, or the pinned one is not), so episodes will have transcripts only';
+  }
+  const name = PROVIDER_LABEL[speech.provider] || speech.provider;
+  if (typeof speech.estimatedCostUsd !== 'number') return `Queued — speech by ${name}`;
+  const perEpisode =
+    typeof speech.perEpisodeUsd === 'number' && speech.episodes
+      ? ` (${speech.episodes} episodes × ${formatCost(speech.perEpisodeUsd)})`
+      : '';
+  return `Queued — speech by ${name}, up to ${formatCost(speech.estimatedCostUsd)}${perEpisode}`;
+}
+
 function StatusBadge({ status }) {
   const spec = STATUS_BADGE[status] || STATUS_BADGE.draft;
   const Icon = spec.icon;
@@ -192,7 +226,9 @@ function EpisodeCard({ episode, busy, onReview }) {
 }
 
 export default function ListenAndLearnPage() {
-  const { ready } = useAuthReady();
+  // The hook returns `authReady`; destructuring `ready` left this undefined
+  // and the initial load below never ran.
+  const { authReady: ready } = useAuthReady();
 
   const [sets, setSets] = useState([]);
   const [selected, setSelected] = useState(null); // { platform, examCode }
@@ -286,6 +322,9 @@ export default function ListenAndLearnPage() {
     try {
       const job = await generateEpisodes({
         ...form,
+        // The expected speech spend arrives with the 202 and is shown then —
+        // before the run starts is when it is worth knowing.
+        onAccepted: (accepted) => setProgress(queuedMessage(accepted?.speech)),
         onUpdate: (j) => setProgress(`Job ${j.status}…`),
       });
       const report = job?.result;
@@ -400,9 +439,10 @@ export default function ListenAndLearnPage() {
             <p className="text-[11px] text-muted-foreground">
               A run takes several minutes and saves each episode as it completes, so a timeout still
               leaves finished episodes behind. Re-running an exam code replaces its episodes and
-              clears their approval. Each run bills the configured model — roughly a dollar per
-              certification on the default flash voice — and the spend is logged to the AI Engine
-              usage tab.
+              clears their approval. Each run bills the configured speech provider — ElevenLabs at
+              about $0.10 per 1,000 characters, roughly $4 a certification — and the expected spend
+              is shown here as soon as the run is accepted; the actual spend is logged to the AI
+              Engine usage tab.
             </p>
           </form>
         </CardContent>
