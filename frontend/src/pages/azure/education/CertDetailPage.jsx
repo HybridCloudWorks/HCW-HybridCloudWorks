@@ -3,8 +3,15 @@ import { useParams, Link } from 'react-router';
 import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import ListenAndLearn from '@/components/education/ListenAndLearn';
+import { DATA_AS_OF, certifications } from '@/data/azure/certifications';
+import { deriveStatus, todayIso } from '@/lib/certStatus';
 
-// ── Shared data (mirrors EducationPage) ─────────────────────────────────────
+// ── Presentation ────────────────────────────────────────────────────────────
+//
+// The certification data itself is the shared catalogue in
+// data/azure/certifications.js — the same array the landing page links from.
+// Until 2026-09-09 this file carried its own 15-entry copy, so 86 of the
+// landing page's links opened "Certification Not Found" (#461 item 2).
 
 const LEVEL_META = {
   Fundamentals: {
@@ -46,681 +53,65 @@ function getNextCertDotClass(level) {
   }
 }
 
-const ALL_CERTS = [
-  {
-    slug: 'az-900',
-    title: 'Microsoft Azure Fundamentals',
-    code: 'AZ-900',
-    level: 'Fundamentals',
-    description: 'Foundational knowledge of cloud concepts and Azure core services.',
-    longDescription:
-      'Demonstrate foundational knowledge of cloud concepts and Microsoft Azure. This entry-level certification is ideal for anyone beginning their cloud journey, covering cloud models, Azure services, pricing, SLAs, and governance.',
-    topics: ['Cloud Concepts', 'Azure Services', 'Pricing & SLAs', 'Governance & Compliance'],
-    hours: 10,
-    prepTime: '~4 weeks',
-    successRate: '82%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-fundamentals/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-900',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-900',
-    modules: [
-      {
-        title: 'Describe cloud concepts',
-        url: 'https://learn.microsoft.com/en-us/training/modules/describe-cloud-compute/',
-      },
-      {
-        title: 'Describe Azure architecture and services',
-        url: 'https://learn.microsoft.com/en-us/training/modules/describe-core-azure-services/',
-      },
-      {
-        title: 'Describe Azure management and governance',
-        url: 'https://learn.microsoft.com/en-us/training/modules/describe-cost-management-azure/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'No prerequisites — recommended for beginners.',
-    nextCerts: ['az-104', 'ai-900', 'dp-900'],
-  },
-  {
-    slug: 'ai-900',
-    title: 'Microsoft Azure AI Fundamentals',
-    code: 'AI-900',
-    level: 'Fundamentals',
-    description: 'Core concepts of AI and machine learning on Azure.',
-    longDescription:
-      'Validate foundational knowledge of artificial intelligence (AI) and machine learning (ML) concepts and related Azure services. Ideal for those beginning to explore AI workloads.',
-    topics: ['AI Workloads', 'ML Principles', 'Computer Vision', 'NLP', 'Generative AI'],
-    hours: 12,
-    prepTime: '~4 weeks',
-    successRate: '80%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-fundamentals/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-900',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=ai-900',
-    modules: [
-      {
-        title: 'Get started with AI on Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/get-started-ai-fundamentals/',
-      },
-      {
-        title: 'Explore visual tools for ML',
-        url: 'https://learn.microsoft.com/en-us/training/modules/create-classification-model-azure-machine-learning-designer/',
-      },
-      {
-        title: 'Explore computer vision in Microsoft Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/analyze-images-computer-vision/',
-      },
-      {
-        title: 'Explore natural language processing',
-        url: 'https://learn.microsoft.com/en-us/training/modules/analyze-text-with-text-analytics-service/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'Familiarity with computers. AZ-900 recommended but not required.',
-    nextCerts: ['ai-102'],
-  },
-  {
-    slug: 'dp-900',
-    title: 'Microsoft Azure Data Fundamentals',
-    code: 'DP-900',
-    level: 'Fundamentals',
-    description: 'Core data concepts and Azure data services fundamentals.',
-    longDescription:
-      'Demonstrate foundational knowledge of core data concepts and how they are implemented using Microsoft Azure data services. Covers relational, non-relational, and analytics workloads.',
-    topics: ['Relational Data', 'Non-Relational Data', 'Analytics Workloads', 'Azure Databases'],
-    hours: 10,
-    prepTime: '~4 weeks',
-    successRate: '81%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-data-fundamentals/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-900',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=dp-900',
-    modules: [
-      {
-        title: 'Explore core data concepts',
-        url: 'https://learn.microsoft.com/en-us/training/modules/explore-core-data-concepts/',
-      },
-      {
-        title: 'Explore relational data in Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/explore-relational-data-offerings/',
-      },
-      {
-        title: 'Explore non-relational data in Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/explore-non-relational-data-stores-azure/',
-      },
-      {
-        title: 'Explore analytics in Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/explore-data-analytics-scale/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'Basic familiarity with data concepts. AZ-900 recommended.',
-    nextCerts: ['dp-203'],
-  },
-  {
-    slug: 'sc-900',
-    title: 'Microsoft Security, Compliance, and Identity Fundamentals',
-    code: 'SC-900',
-    level: 'Fundamentals',
-    description: 'Foundational knowledge of security, compliance, and identity across Microsoft.',
-    longDescription:
-      'Validate your knowledge of security, compliance, and identity concepts and related Microsoft products. Ideal for business stakeholders and IT professionals beginning their security journey.',
-    topics: [
-      'Security Concepts',
-      'Identity & Access',
-      'Microsoft Compliance',
-      'Microsoft Defender',
-    ],
-    hours: 10,
-    prepTime: '~4 weeks',
-    successRate: '79%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/security-compliance-and-identity-fundamentals/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/sc-900',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=sc-900',
-    modules: [
-      {
-        title: 'Describe security and compliance concepts',
-        url: 'https://learn.microsoft.com/en-us/training/modules/describe-security-concepts-methodologies/',
-      },
-      {
-        title: 'Describe Microsoft Entra capabilities',
-        url: 'https://learn.microsoft.com/en-us/training/modules/explore-basic-services-identity-types/',
-      },
-      {
-        title: 'Describe Microsoft security solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/describe-security-capabilities-of-azure/',
-      },
-      {
-        title: 'Describe Microsoft compliance solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/describe-compliance-management-capabilities-microsoft/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'General understanding of Microsoft cloud services.',
-    nextCerts: ['az-500', 'sc-200'],
-  },
-  {
-    slug: 'az-104',
-    title: 'Microsoft Azure Administrator',
-    code: 'AZ-104',
-    level: 'Associate',
-    description: 'Manage Azure subscriptions, resources, and cloud infrastructure.',
-    longDescription:
-      'Master the essential skills needed to manage cloud services on Microsoft Azure. This certification covers compute resources, networking, storage, security, and monitoring — the core competencies of an Azure Administrator.',
-    topics: ['Identity & Governance', 'Compute', 'Networking', 'Storage', 'Monitoring & Backup'],
-    hours: 45,
-    prepTime: '~3 months',
-    successRate: '78%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-administrator/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-104',
-    modules: [
-      {
-        title: 'Manage Azure identities and governance',
-        url: 'https://learn.microsoft.com/en-us/training/modules/azure-active-directory/',
-      },
-      {
-        title: 'Implement and manage storage',
-        url: 'https://learn.microsoft.com/en-us/training/modules/azure-storage-fundamentals/',
-      },
-      {
-        title: 'Deploy and manage Azure compute resources',
-        url: 'https://learn.microsoft.com/en-us/training/modules/azure-compute-fundamentals/',
-      },
-      {
-        title: 'Implement and manage virtual networking',
-        url: 'https://learn.microsoft.com/en-us/training/modules/azure-networking-fundamentals/',
-      },
-      {
-        title: 'Monitor and maintain Azure resources',
-        url: 'https://learn.microsoft.com/en-us/training/modules/intro-to-azure-monitor/',
-      },
-    ],
-    appliedSkills: [
-      {
-        code: 'APL-1002',
-        title: 'Deploy and configure Azure Monitor',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/deploy-and-configure-azure-monitor/',
-      },
-      {
-        code: 'APL-1003',
-        title: 'Secure storage for Azure Files and Azure Blob Storage',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/secure-storage-azure-files-azure-blob-storage/',
-      },
-    ],
-    prerequisites: 'AZ-900 recommended. 6+ months Azure experience.',
-    nextCerts: ['az-305', 'az-500', 'az-700'],
-  },
-  {
-    slug: 'az-204',
-    title: 'Developing Solutions for Microsoft Azure',
-    code: 'AZ-204',
-    level: 'Associate',
-    description: 'Design, build, test, and maintain cloud solutions on Azure.',
-    longDescription:
-      'Validate your ability to design and build cloud-native solutions on Azure. Covers compute, storage, security, API management, event-based, and message-based solutions.',
-    topics: [
-      'Compute Solutions',
-      'Azure Storage',
-      'Security',
-      'API Management',
-      'Event-Based Solutions',
-    ],
-    hours: 40,
-    prepTime: '~3 months',
-    successRate: '74%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-developer/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-204',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-204',
-    modules: [
-      {
-        title: 'Implement Azure App Service web apps',
-        url: 'https://learn.microsoft.com/en-us/training/modules/host-a-web-app-with-azure-app-service/',
-      },
-      {
-        title: 'Implement containerized solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/intro-to-containers/',
-      },
-      {
-        title: 'Implement Azure security',
-        url: 'https://learn.microsoft.com/en-us/training/modules/intro-to-azure-key-vault/',
-      },
-      {
-        title: 'Connect to and consume Azure services',
-        url: 'https://learn.microsoft.com/en-us/training/modules/azure-event-grid/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: '1+ year professional development experience. AZ-900 recommended.',
-    nextCerts: ['az-305', 'az-400'],
-  },
-  {
-    slug: 'az-500',
-    title: 'Microsoft Azure Security Engineer',
-    code: 'AZ-500',
-    level: 'Associate',
-    description: 'Implement and manage security across Azure workloads.',
-    longDescription:
-      'Validate your ability to implement security controls, maintain security posture, and identify and remediate vulnerabilities across Azure infrastructure.',
-    topics: [
-      'Identity & Access',
-      'Platform Protection',
-      'Data & Application Security',
-      'Security Operations',
-    ],
-    hours: 50,
-    prepTime: '~4 months',
-    successRate: '75%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-security-engineer/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-500',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-500',
-    modules: [
-      {
-        title: 'Manage identity and access',
-        url: 'https://learn.microsoft.com/en-us/training/modules/secure-azure-active-directory/',
-      },
-      {
-        title: 'Secure networking',
-        url: 'https://learn.microsoft.com/en-us/training/modules/secure-and-isolate-with-nsg-and-service-endpoints/',
-      },
-      {
-        title: 'Secure compute, storage, and databases',
-        url: 'https://learn.microsoft.com/en-us/training/modules/azure-well-architected-security/',
-      },
-      {
-        title: 'Manage security operations',
-        url: 'https://learn.microsoft.com/en-us/training/modules/intro-to-azure-defender/',
-      },
-    ],
-    appliedSkills: [
-      {
-        code: 'APL-1005',
-        title: 'Configure SIEM security operations using Microsoft Sentinel',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/configure-siem-security-operations-using-microsoft-sentinel/',
-      },
-    ],
-    prerequisites:
-      'AZ-104 or equivalent experience. Understanding of networking and virtualization.',
-    nextCerts: ['az-305'],
-  },
-  {
-    slug: 'az-700',
-    title: 'Designing and Implementing Microsoft Azure Networking Solutions',
-    code: 'AZ-700',
-    level: 'Associate',
-    description: 'Design and implement core Azure networking infrastructure.',
-    longDescription:
-      'Validate your skills in designing and implementing Azure networking solutions including virtual networks, load balancing, routing, hybrid connectivity, and network security.',
-    topics: ['Hybrid Connectivity', 'Routing', 'Load Balancing', 'Azure DNS', 'Private Access'],
-    hours: 40,
-    prepTime: '~3 months',
-    successRate: '73%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-network-engineer/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-700',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-700',
-    modules: [
-      {
-        title: 'Design and implement Azure VNets',
-        url: 'https://learn.microsoft.com/en-us/training/modules/introduction-to-azure-virtual-networks/',
-      },
-      {
-        title: 'Design and implement hybrid networking',
-        url: 'https://learn.microsoft.com/en-us/training/modules/design-implement-hybrid-networking/',
-      },
-      {
-        title: 'Design and implement Azure ExpressRoute',
-        url: 'https://learn.microsoft.com/en-us/training/modules/design-implement-azure-expressroute/',
-      },
-      {
-        title: 'Load balancing in Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/load-balancing-https-traffic-azure/',
-      },
-    ],
-    appliedSkills: [
-      {
-        code: 'APL-1001',
-        title: 'Configure secure access to your workloads using Azure networking',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/configure-secure-workloads-use-azure-virtual-networking/',
-      },
-    ],
-    prerequisites: 'AZ-104 or equivalent networking knowledge.',
-    nextCerts: ['az-305'],
-  },
-  {
-    slug: 'az-800',
-    title: 'Administering Windows Server Hybrid Core Infrastructure',
-    code: 'AZ-800',
-    level: 'Associate',
-    description: 'Administer Windows Server in on-premises, hybrid, and IaaS workloads.',
-    longDescription:
-      'Validate your ability to configure and manage Windows Server on-premises, hybrid, and IaaS platform workloads including Active Directory Domain Services, identity, storage, and compute.',
-    topics: ['Active Directory', 'Windows Server', 'Hybrid Identity', 'Storage', 'Virtualization'],
-    hours: 40,
-    prepTime: '~3 months',
-    successRate: '71%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/windows-server-hybrid-administrator/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-800',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-800',
-    modules: [
-      {
-        title: 'Deploy and manage AD DS in on-premises and cloud environments',
-        url: 'https://learn.microsoft.com/en-us/training/modules/deploy-manage-active-directory-domain-services/',
-      },
-      {
-        title: 'Manage Windows Servers and workloads in a hybrid environment',
-        url: 'https://learn.microsoft.com/en-us/training/modules/deploy-azure-arc-enabled-servers/',
-      },
-      {
-        title: 'Manage virtual machines and containers',
-        url: 'https://learn.microsoft.com/en-us/training/modules/hyper-v-replica/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'Windows Server and Active Directory experience (on-premises and cloud).',
-    nextCerts: ['az-305'],
-  },
-  {
-    slug: 'az-140',
-    title: 'Configuring and Operating Microsoft Azure Virtual Desktop',
-    code: 'AZ-140',
-    level: 'Associate',
-    description: 'Plan, deliver, and manage virtual desktop experiences on Azure.',
-    longDescription:
-      'Validate your skills in planning, delivering, managing, and monitoring virtual desktop experiences and remote apps on Azure Virtual Desktop.',
-    topics: ['AVD Architecture', 'Networking', 'Storage', 'Access Management', 'Monitoring'],
-    hours: 35,
-    prepTime: '~3 months',
-    successRate: '72%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-virtual-desktop-specialty/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-140',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-140',
-    modules: [
-      {
-        title: 'Plan an Azure Virtual Desktop implementation',
-        url: 'https://learn.microsoft.com/en-us/training/modules/plan-azure-virtual-desktop-implementation/',
-      },
-      {
-        title: 'Implement an Azure Virtual Desktop infrastructure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/implement-manage-networking-azure-virtual-desktop/',
-      },
-      {
-        title: 'Manage access and security',
-        url: 'https://learn.microsoft.com/en-us/training/modules/manage-access-azure-virtual-desktop/',
-      },
-      {
-        title: 'Manage user environments and apps',
-        url: 'https://learn.microsoft.com/en-us/training/modules/configure-user-experience-settings/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'AZ-104 or equivalent. Experience with Azure networking and virtualization.',
-    nextCerts: ['az-305'],
-  },
-  {
-    slug: 'dp-203',
-    title: 'Microsoft Azure Data Engineer',
-    code: 'DP-203',
-    level: 'Associate',
-    description: 'Design and implement data storage and data processing solutions on Azure.',
-    longDescription:
-      'Validate your expertise in integrating, transforming, and consolidating data from structured, unstructured, and streaming data systems into Azure analytical solutions.',
-    topics: [
-      'Data Storage',
-      'Data Processing',
-      'Data Security',
-      'Azure Synapse Analytics',
-      'Azure Databricks',
-    ],
-    hours: 50,
-    prepTime: '~4 months',
-    successRate: '70%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-data-engineer/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-203',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=dp-203',
-    modules: [
-      {
-        title: 'Introduction to data engineering on Azure',
-        url: 'https://learn.microsoft.com/en-us/training/modules/introduction-to-data-engineering-azure/',
-      },
-      {
-        title: 'Build data analytics solutions using Azure Synapse serverless SQL pools',
-        url: 'https://learn.microsoft.com/en-us/training/paths/build-data-analytics-solutions-using-azure-synapse-serverless-sql-pools/',
-      },
-      {
-        title: 'Perform data engineering with Azure Databricks',
-        url: 'https://learn.microsoft.com/en-us/training/paths/perform-data-engineering-with-azure-databricks/',
-      },
-      {
-        title: 'Implement a Data Streaming Solution with Azure Stream Analytics',
-        url: 'https://learn.microsoft.com/en-us/training/paths/implement-data-streaming-with-asa/',
-      },
-    ],
-    appliedSkills: [
-      {
-        code: 'APL-1008',
-        title: 'Migrate SQL Server workloads to Azure SQL Database',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/migrate-sql-workloads-azure-sql-database/',
-      },
-    ],
-    prerequisites: 'DP-900 recommended. Knowledge of SQL and data processing concepts.',
-    nextCerts: [],
-  },
-  {
-    slug: 'ai-102',
-    title: 'Designing and Implementing a Microsoft Azure AI Solution',
-    code: 'AI-102',
-    level: 'Associate',
-    description:
-      'Build AI solutions using Azure Cognitive Services, Azure AI Search, and Azure OpenAI.',
-    longDescription:
-      'Validate your ability to build, manage, and deploy AI solutions using Azure AI Services, Azure OpenAI Service, and Azure AI Search — including NLP, computer vision, and generative AI.',
-    topics: ['Azure AI Services', 'NLP', 'Computer Vision', 'Azure OpenAI', 'AI Search'],
-    hours: 45,
-    prepTime: '~3 months',
-    successRate: '72%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-engineer/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-102',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=ai-102',
-    modules: [
-      {
-        title: 'Get started with Azure AI Services',
-        url: 'https://learn.microsoft.com/en-us/training/modules/introduction-to-azure-ai/',
-      },
-      {
-        title: 'Develop NLP solutions with Azure AI Language',
-        url: 'https://learn.microsoft.com/en-us/training/modules/analyze-text-with-text-analytics-service/',
-      },
-      {
-        title: 'Develop Generative AI Solutions with Azure OpenAI Service',
-        url: 'https://learn.microsoft.com/en-us/training/modules/explore-azure-openai/',
-      },
-      {
-        title: 'Implement knowledge mining with Azure AI Search',
-        url: 'https://learn.microsoft.com/en-us/training/modules/introduction-to-azure-search/',
-      },
-    ],
-    appliedSkills: [
-      {
-        code: 'APL-1006',
-        title: 'Build a natural language processing solution with Azure AI Language',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/build-natural-language-solution-azure-ai/',
-      },
-      {
-        code: 'APL-1007',
-        title: 'Develop generative AI solutions with Azure OpenAI Service',
-        url: 'https://learn.microsoft.com/en-us/credentials/applied-skills/develop-generative-ai-solutions-with-azure-openai-service/',
-      },
-    ],
-    prerequisites: 'AI-900 recommended. Programming experience (C# or Python).',
-    nextCerts: [],
-  },
-  {
-    slug: 'az-305',
-    title: 'Microsoft Azure Solutions Architect Expert',
-    code: 'AZ-305',
-    level: 'Expert',
-    description: 'Design comprehensive Azure solutions and enterprise-scale architecture.',
-    longDescription:
-      'Validate advanced subject matter expertise in designing cloud and hybrid solutions that run on Azure, covering identity, governance, compute, storage, and networking at enterprise scale.',
-    topics: [
-      'Identity & Governance',
-      'Compute Architecture',
-      'Storage Design',
-      'Networking Design',
-      'Migration',
-    ],
-    hours: 60,
-    prepTime: '~6 months',
-    successRate: '71%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-solutions-architect/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-305',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-305',
-    modules: [
-      {
-        title: 'Design identity, governance, and monitoring solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/design-identity-governance-monitor-solutions/',
-      },
-      {
-        title: 'Design data storage solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/design-data-storage-solution-for-non-relational-data/',
-      },
-      {
-        title: 'Design business continuity solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/design-solution-for-backup-disaster-recovery/',
-      },
-      {
-        title: 'Design infrastructure solutions',
-        url: 'https://learn.microsoft.com/en-us/training/modules/design-compute-solution/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'AZ-104 required. AZ-204 recommended. Advanced Azure experience.',
-    nextCerts: [],
-  },
-  {
-    slug: 'az-400',
-    title: 'Azure DevOps Engineer Expert',
-    code: 'AZ-400',
-    level: 'Expert',
-    description: 'Implement CI/CD pipelines and DevOps practices on Azure.',
-    longDescription:
-      'Validate advanced expertise in combining people, processes, and technology to continuously deliver valuable products and services. Covers CI/CD, infrastructure as code, monitoring, and security.',
-    topics: [
-      'CI/CD Pipelines',
-      'Infrastructure as Code',
-      'Security Integration',
-      'Monitoring',
-      'Automation',
-    ],
-    hours: 65,
-    prepTime: '~6 months',
-    successRate: '69%',
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/devops-engineer/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-400',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-400',
-    modules: [
-      {
-        title: 'AZ-400: Get started on a DevOps transformation journey',
-        url: 'https://learn.microsoft.com/en-us/training/paths/az-400-get-started-devops-transformation-journey/',
-      },
-      {
-        title: 'AZ-400: Implement CI with Azure Pipelines and GitHub Actions',
-        url: 'https://learn.microsoft.com/en-us/training/paths/az-400-implement-ci-azure-pipelines-github-actions/',
-      },
-      {
-        title: 'AZ-400: Design and implement a release strategy',
-        url: 'https://learn.microsoft.com/en-us/training/paths/az-400-design-implement-release-strategy/',
-      },
-      {
-        title: 'AZ-400: Implement security and validate code bases for compliance',
-        url: 'https://learn.microsoft.com/en-us/training/paths/az-400-implement-security-validate-code-bases-compliance/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'AZ-104 or AZ-204 required. DevOps experience highly recommended.',
-    nextCerts: [],
-  },
-  {
-    slug: 'az-120',
-    title: 'Planning and Administering Microsoft Azure for SAP Workloads',
-    code: 'AZ-120',
-    level: 'Specialty',
-    description: 'Architect and administer SAP solutions on Microsoft Azure.',
-    longDescription:
-      'Validate your expertise in planning, migration, and administration of SAP solutions on Azure, covering infrastructure, SAP HANA, high availability, and disaster recovery.',
-    topics: [
-      'SAP on Azure',
-      'Migration Planning',
-      'Compute & Storage',
-      'HANA',
-      'High Availability',
-    ],
-    hours: 50,
-    prepTime: '~4 months',
-    successRate: '68%',
-    learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-for-sap-workloads-specialty/',
-    studyGuideUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-120',
-    practiceUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=az-120',
-    modules: [
-      {
-        title: 'AZ-120: Planning for SAP Workloads on Microsoft Azure',
-        url: 'https://learn.microsoft.com/en-us/training/paths/plan-sap-workloads/',
-      },
-      {
-        title: 'AZ-120: Migrating SAP Workloads to Azure',
-        url: 'https://learn.microsoft.com/en-us/training/paths/migrate-sap-workloads-azure/',
-      },
-      {
-        title: 'AZ-120: Administering SAP Workloads on Azure',
-        url: 'https://learn.microsoft.com/en-us/training/paths/administer-sap-workloads-azure/',
-      },
-    ],
-    appliedSkills: [],
-    prerequisites: 'AZ-104 and SAP HANA or SAP NetWeaver experience required.',
-    nextCerts: [],
-  },
-];
+function formatDate(iso) {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+/**
+ * The one line a reader must not miss: retired, retiring, or beta — derived
+ * from the dates so it cannot outlive them. Nothing for an active exam.
+ */
+function StatusNotice({ status, cert, replacement }) {
+  if (status === 'active') return null;
+  const styles = {
+    retired: 'bg-slate-500/15 border-slate-500/40 text-slate-200',
+    expiring: 'bg-rose-500/15 border-rose-500/40 text-rose-200',
+    beta: 'bg-amber-500/15 border-amber-500/40 text-amber-200',
+  };
+  const icons = { retired: 'block', expiring: 'schedule', beta: 'science' };
+  let text;
+  if (status === 'retired') {
+    text = cert.expiryDate
+      ? `Retired by Microsoft on ${formatDate(cert.expiryDate)}. It can no longer be scheduled.`
+      : 'Withdrawn by Microsoft. It can no longer be scheduled.';
+  } else if (status === 'expiring') {
+    text = `Retires on ${formatDate(cert.expiryDate)}. Schedule it before then or plan for the replacement.`;
+  } else {
+    text = cert.betaEndDate
+      ? `Beta exam — the beta period ends ${formatDate(cert.betaEndDate)}.`
+      : 'Beta exam — scores are released after the beta period closes.';
+  }
+  return (
+    <div
+      role="status"
+      data-testid="cert-status-notice"
+      data-status={status}
+      className={`mb-6 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-sm ${styles[status]}`}
+    >
+      <span className="material-symbols-outlined text-[18px]">{icons[status]}</span>
+      <span className="font-semibold capitalize">{status}.</span>
+      <span>{text}</span>
+      {replacement && (
+        <Link
+          to={getProviderPath('azure', `education/${replacement.slug}`)}
+          className="font-semibold underline underline-offset-2 hover:text-white"
+        >
+          Replaced by {replacement.code}: {replacement.title.replace(/Microsoft\s+/i, '')}
+        </Link>
+      )}
+    </div>
+  );
+}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CertDetailPage() {
   const { certSlug } = useParams();
-  const cert = ALL_CERTS.find((c) => c.slug === certSlug);
+  const cert = certifications.find((c) => c.slug === certSlug);
 
   if (!cert) {
     return (
@@ -747,14 +138,19 @@ export default function CertDetailPage() {
   }
 
   const meta = LEVEL_META[cert.level];
-  const nextCerts = ALL_CERTS.filter((c) => cert.nextCerts?.includes(c.slug));
+  const status = deriveStatus(cert, todayIso());
+  const replacement = cert.replacedBy
+    ? certifications.find((c) => c.slug === cert.replacedBy) || null
+    : null;
+  const nextCerts = certifications.filter((c) => cert.nextCerts?.includes(c.slug));
 
   return (
     <>
       <Helmet>
-        <title>
-          {cert.code}: {cert.title} | Azure Education | HCW
-        </title>
+        {/* One string child: react-helmet-async drops a title made of several
+            JSX children, which is why every pre-rendered detail page had an
+            empty <title> the first time these routes were built. */}
+        <title>{`${cert.code}: ${cert.title} | Azure Education | HCW`}</title>
         <meta name="description" content={cert.description} />
         <meta property="og:title" content={`${cert.code}: ${cert.title}`} />
         <meta property="og:description" content={cert.longDescription} />
@@ -786,6 +182,7 @@ export default function CertDetailPage() {
               <span className="text-sm font-mono text-foreground/60">{cert.code}</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">{cert.title}</h1>
+            <StatusNotice status={status} cert={cert} replacement={replacement} />
             <p className="text-foreground text-lg max-w-3xl mb-6">{cert.longDescription}</p>
             <div className="flex flex-wrap gap-6 text-sm">
               <div>
@@ -836,36 +233,39 @@ export default function CertDetailPage() {
               </div>
             </section>
 
-            {/* Microsoft Learn Modules */}
-            <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <span className="text-primary material-symbols-outlined text-[20px]">
-                  menu_book
-                </span>
-                Microsoft Learn Modules
-              </h2>
-              <div className="space-y-3">
-                {cert.modules.map((mod, i) => (
-                  <a
-                    key={i}
-                    href={mod.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 group bg-card/40 hover:bg-card/60 border border-card/30 hover:border-primary/30 rounded-xl px-4 py-3 transition-all"
-                  >
-                    <span className="shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center text-xs font-bold text-primary">
-                      {i + 1}
-                    </span>
-                    <span className="text-sm text-foreground group-hover:text-primary transition-colors flex-1">
-                      {mod.title}
-                    </span>
-                    <span className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-primary transition-colors shrink-0">
-                      open_in_new
-                    </span>
-                  </a>
-                ))}
-              </div>
-            </section>
+            {/* Microsoft Learn Modules — only when the catalogue lists any; an
+                empty section under a heading reads as broken. */}
+            {cert.modules?.length > 0 && (
+              <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-primary material-symbols-outlined text-[20px]">
+                    menu_book
+                  </span>
+                  Microsoft Learn Modules
+                </h2>
+                <div className="space-y-3">
+                  {cert.modules.map((mod, i) => (
+                    <a
+                      key={i}
+                      href={mod.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 group bg-card/40 hover:bg-card/60 border border-card/30 hover:border-primary/30 rounded-xl px-4 py-3 transition-all"
+                    >
+                      <span className="shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center text-xs font-bold text-primary">
+                        {i + 1}
+                      </span>
+                      <span className="text-sm text-foreground group-hover:text-primary transition-colors flex-1">
+                        {mod.title}
+                      </span>
+                      <span className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-primary transition-colors shrink-0">
+                        open_in_new
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* Applied Skills */}
             {cert.appliedSkills?.length > 0 && (
@@ -1021,7 +421,13 @@ export default function CertDetailPage() {
                 )}
                 <div className="flex justify-between">
                   <span className="text-foreground/60">MS Learn Modules</span>
-                  <span className="font-bold text-white">{cert.modules.length}</span>
+                  <span className="font-bold text-white">{cert.modules?.length ?? 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-foreground/60">Catalogue checked</span>
+                  <time dateTime={DATA_AS_OF} className="font-bold text-white">
+                    {formatDate(DATA_AS_OF)}
+                  </time>
                 </div>
               </div>
             </div>

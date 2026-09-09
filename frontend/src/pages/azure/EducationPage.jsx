@@ -3,16 +3,20 @@ import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import { getProviderPath } from '@/lib/routeFactory';
 import {
+  DATA_AS_OF,
   LEVEL_META,
   certifications,
   appliedSkills,
   timelineEvents,
 } from '@/data/azure/certifications';
+import { deriveStatus, todayIso } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const FILTER_LEVELS = ['All', 'Fundamentals', 'Associate', 'Expert', 'Specialty'];
-const STATUS_FILTER = ['All', 'Active', 'Beta', 'Expiring'];
+const STATUS_FILTER = ['All', 'Active', 'Beta', 'Expiring', 'Retired'];
+const STATUS_ORDER = { active: 0, beta: 1, expiring: 2, retired: 3 };
+const CODE_BY_SLUG = new Map(certifications.map((c) => [c.slug, c.code]));
 const VISIBLE_COUNT = 4;
 const APPLIED_SKILLS_COLLAPSED_ROWS = 3;
 
@@ -42,6 +46,9 @@ function getStatusFilterClass(statusFilter, status) {
   }
   if (status === 'Expiring') {
     return 'bg-rose-500/25 border-rose-400 text-rose-300';
+  }
+  if (status === 'Retired') {
+    return 'bg-slate-500/25 border-slate-400 text-slate-300';
   }
   return 'bg-primary/30 border-primary text-primary';
 }
@@ -338,7 +345,26 @@ function daysUntil(iso) {
   return Math.ceil((new Date(iso) - new Date()) / 86400000);
 }
 
-function StatusBadge({ status, expiryDate, betaEndDate, className = '' }) {
+/**
+ * `status` is the DERIVED status (see lib/certStatus.js), never the stored
+ * field: until 2026-09-09 this badge printed "BETA · ends Jun 30, 2026" and
+ * "Expiring Soon" for exams already gone, because the stored field had not
+ * been touched since April (#461).
+ */
+function StatusBadge({ status, expiryDate, betaEndDate, replacedBy, className = '' }) {
+  const replacementCode = replacedBy ? CODE_BY_SLUG.get(replacedBy) : null;
+  if (status === 'retired') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/20 border border-slate-500/40 text-slate-300 text-[10px] font-bold rounded-full ${className}`}
+      >
+        <span className="material-symbols-outlined text-[12px]">block</span>
+        Retired
+        {expiryDate && <span className="opacity-70">· {formatDate(expiryDate)}</span>}
+        {replacementCode && <span className="opacity-70">· now {replacementCode}</span>}
+      </span>
+    );
+  }
   if (status === 'beta') {
     return (
       <span
@@ -359,6 +385,7 @@ function StatusBadge({ status, expiryDate, betaEndDate, className = '' }) {
         <span className="material-symbols-outlined text-[12px]">schedule</span>
         Expiring Soon
         {days !== null && days > 0 && <span className="opacity-70">· {days}d</span>}
+        {replacementCode && <span className="opacity-70">· then {replacementCode}</span>}
       </span>
     );
   }
@@ -492,16 +519,16 @@ function HorizontalTimeline({ events }) {
         Certification &amp; Applied Skills Lifecycle
       </h3>
       <p className="text-sm text-foreground mb-4 max-w-2xl">
-        Beta launches, GA dates, and retirement deadlines — scraped weekly from the{' '}
+        Beta launches, GA dates, and retirement deadlines, checked against{' '}
         <a
-          href="https://techcommunity.microsoft.com/category/skills-hub/blog/skills-hub-blog"
+          href="https://learn.microsoft.com/en-us/credentials/support/credential-retirement"
           target="_blank"
           rel="noopener noreferrer"
           className="text-primary hover:underline"
         >
-          Microsoft Skills Hub Blog
-        </a>
-        .
+          Microsoft Learn
+        </a>{' '}
+        on {formatDate(DATA_AS_OF)}.
       </p>
 
       {/* Legend */}
@@ -774,15 +801,26 @@ export default function AzureEducationPage() {
   const [appliedSkillsExpanded, setAppliedSkillsExpanded] = useState(false);
   const [appliedSkillColumns, setAppliedSkillColumns] = useState(getAppliedSkillColumnCount);
 
-  const featuredCert = certifications.find((c) => c.featured);
+  // Status is derived from the dates on every render, so a retirement or beta
+  // end that passes between data syncs is reflected without a deploy. Retired
+  // exams stay listed — with the retirement date and the replacement — but
+  // sort last so the current catalogue comes first.
+  const today = todayIso();
+  const certs = certifications
+    .map((c) => ({ ...c, status: deriveStatus(c, today) }))
+    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+  const skills = appliedSkills.map((s) => ({ ...s, status: deriveStatus(s, today) }));
 
-  const filteredCerts = certifications.filter((c) => {
+  const featuredCert = certs.find((c) => c.featured);
+
+  const filteredCerts = certs.filter((c) => {
     const levelOk = levelFilter === 'All' || c.level === levelFilter;
     const statusOk =
       statusFilter === 'All' ||
       (statusFilter === 'Active' && c.status === 'active') ||
       (statusFilter === 'Beta' && c.status === 'beta') ||
-      (statusFilter === 'Expiring' && c.status === 'expiring');
+      (statusFilter === 'Expiring' && c.status === 'expiring') ||
+      (statusFilter === 'Retired' && c.status === 'retired');
     return levelOk && statusOk;
   });
 
@@ -795,10 +833,8 @@ export default function AzureEducationPage() {
   const selectedPath = learningPaths.find((p) => p.id === selectedPathId);
 
   const filteredSkills =
-    appliedSkillArea === 'All'
-      ? appliedSkills
-      : appliedSkills.filter((s) => s.area === appliedSkillArea);
-  const appliedSkillRetirementEvents = appliedSkills
+    appliedSkillArea === 'All' ? skills : skills.filter((s) => s.area === appliedSkillArea);
+  const appliedSkillRetirementEvents = skills
     .filter((skill) => skill.expiryDate)
     .map((skill) => ({
       id: `applied-skill-${skill.slug}-retire`,
@@ -842,7 +878,7 @@ export default function AzureEducationPage() {
         <title>Azure Education & Certifications | HCW</title>
         <meta
           name="description"
-          content="Microsoft Azure certification prep, applied skills, beta exams, retirement timeline, and learning paths — updated weekly."
+          content={`Microsoft Azure certification prep, applied skills, beta exams, retirement timeline, and learning paths — catalogue checked against Microsoft Learn on ${DATA_AS_OF}.`}
         />
         <meta property="og:title" content="Azure Education & Certifications" />
         <meta
@@ -862,7 +898,12 @@ export default function AzureEducationPage() {
           </h1>
           <p className="text-base sm:text-lg text-foreground max-w-3xl relative z-10">
             Master Azure with structured learning paths, official certifications, and applied
-            skills. Beta exams and retirement dates tracked weekly from Microsoft.
+            skills. Beta, retirement and replacement dates come from Microsoft Learn; this catalogue
+            was last checked on{' '}
+            <time dateTime={DATA_AS_OF} data-testid="data-as-of">
+              {formatDate(DATA_AS_OF)}
+            </time>
+            .
           </p>
         </section>
 
@@ -886,12 +927,12 @@ export default function AzureEducationPage() {
                     Microsoft Certifications Poster
                   </h2>
                   <span className="px-2 py-0.5 bg-primary/20 border border-primary/30 text-primary text-[10px] font-bold rounded-full uppercase tracking-wider shrink-0">
-                    Updated Monthly
+                    Official
                   </span>
                 </div>
                 <p className="text-sm text-foreground mb-3">
                   The official Microsoft Certifications roadmap — all role-based and specialty
-                  certifications in one poster. Refreshed by Microsoft each month.
+                  certifications in one poster, published by Microsoft.
                 </p>
                 <div className="flex items-center gap-1.5 text-primary text-sm font-semibold">
                   <span className="material-symbols-outlined text-[16px]">open_in_new</span>
@@ -982,7 +1023,8 @@ export default function AzureEducationPage() {
                 return (
                   <article
                     key={cert.id}
-                    className={`group bg-card/40 backdrop-blur-md border border-card/50 border-l-4 ${meta.accent} rounded-2xl p-6 hover:shadow-[0_0_20px_rgba(var(--primary-rgb,0,120,212),0.15)] hover:border-primary/40 transition-all duration-300 flex flex-col ${cert.status === 'expiring' ? 'opacity-80' : ''}`}
+                    className={`group bg-card/40 backdrop-blur-md border border-card/50 border-l-4 ${meta.accent} rounded-2xl p-6 hover:shadow-[0_0_20px_rgba(var(--primary-rgb,0,120,212),0.15)] hover:border-primary/40 transition-all duration-300 flex flex-col ${cert.status === 'expiring' ? 'opacity-80' : ''} ${cert.status === 'retired' ? 'opacity-60' : ''}`}
+                    data-status={cert.status}
                   >
                     <div className="flex items-start justify-between mb-2 gap-1 flex-wrap">
                       <span
@@ -999,6 +1041,7 @@ export default function AzureEducationPage() {
                       status={cert.status}
                       betaEndDate={cert.betaEndDate}
                       expiryDate={cert.expiryDate}
+                      replacedBy={cert.replacedBy}
                       className="mb-2 self-start"
                     />
 
@@ -1168,7 +1211,7 @@ export default function AzureEducationPage() {
                 All Certifications
               </h3>
               <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-                {certifications.map((cert) => (
+                {certs.map((cert) => (
                   <Link
                     key={cert.id}
                     to={`/azure/education/${cert.slug}`}
@@ -1193,6 +1236,11 @@ export default function AzureEducationPage() {
                     {cert.status === 'expiring' && (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded shrink-0">
                         EXPIRING
+                      </span>
+                    )}
+                    {cert.status === 'retired' && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-slate-500/20 text-slate-300 rounded shrink-0">
+                        RETIRED
                       </span>
                     )}
                   </Link>
@@ -1456,7 +1504,12 @@ export default function AzureEducationPage() {
                   </span>
                   <span className="text-foreground/40 text-[10px] font-mono">{skill.code}</span>
                 </div>
-                {skill.expiryDate && (
+                {skill.expiryDate && skill.status === 'retired' && (
+                  <span className="self-start mb-3 px-2 py-0.5 bg-slate-500/15 border border-slate-500/30 text-slate-300 text-[10px] font-bold rounded">
+                    Retired {formatDate(skill.expiryDate)}
+                  </span>
+                )}
+                {skill.expiryDate && skill.status !== 'retired' && (
                   <span className="self-start mb-3 px-2 py-0.5 bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] font-bold rounded">
                     Retires {formatDate(skill.expiryDate)}
                   </span>
