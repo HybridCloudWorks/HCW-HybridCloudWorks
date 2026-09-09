@@ -35,14 +35,14 @@ const CALLS = ['generateJsonResponse', 'generateTextResponse', 'generateGrounded
  *
  * The orphan check below exists so a toggle never reads as a working switch
  * for something that cannot happen. An entry listed here is that, knowingly
- * and briefly: the feature landed with the router change that makes it
- * possible (#433 slice 1) and the call site is the next PR. The exception is
- * checked in both directions — the feature must exist AND must still have no
- * call site — so it cannot outlive the slice that removes the need for it.
+ * and briefly: a feature that landed with the router change that makes it
+ * possible, whose call site is the next PR. The exception is checked in both
+ * directions — the feature must exist AND must still have no call site — so
+ * it cannot outlive the slice that removes the need for it. Empty since
+ * `sourceGrounding` gained its call site (#433 slice 2,
+ * listen-and-learn/script.js); the mechanism stays for the next split issue.
  */
-const PENDING_CALL_SITES = Object.freeze({
-  sourceGrounding: '#433 slice 2 adds the source-grounded episode kind that calls it',
-});
+const PENDING_CALL_SITES = Object.freeze({});
 
 function sourceFiles(dir) {
   const out = [];

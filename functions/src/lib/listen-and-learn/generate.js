@@ -74,8 +74,11 @@ function resolveDeps(deps = {}) {
  * Returns `{ error }` only for the not-configured case; everything else
  * throws, which fails the area. See the module header for why the two are
  * treated differently.
+ *
+ * Exported for the source-grounded run (source-episode.js, #433), which
+ * renders one episode's audio under exactly this policy.
  */
-async function renderAudio({
+export async function renderAudio({
   script,
   platform,
   examCode,

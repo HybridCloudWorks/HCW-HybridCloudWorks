@@ -11,7 +11,19 @@
  *
  * The run still saves area by area, so a timeout leaves the finished episodes
  * behind as drafts rather than losing the work and the spend.
+ *
+ * The same job runs a source-grounded episode (#433): a payload carrying
+ * `sources` is one episode built from the owner's pages and videos, parsed by
+ * `parseSourceEpisodePayload` and run by `generateSourceEpisode`, and needs no
+ * study guide URL. The admin page queues it through
+ * `POST cms/listen-and-learn/source-episode` (listen-and-learn/handlers.js), which
+ * validates the list before the job exists; the worker validates it again.
  */
+import { generateGroundedJsonResponse } from '../lib/ai/router.js';
+import {
+  generateSourceEpisode,
+  parseSourceEpisodePayload,
+} from '../lib/listen-and-learn/source-episode.js';
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getActiveAiProvider, getCostEstimate } from '../lib/ai/router.js';
@@ -29,6 +41,14 @@ export const MAX_AREAS_PER_RUN = 8;
  * are testable on their own and the job worker stays a thin adapter.
  */
 export function parseGeneratePayload(payload) {
+  // A source list makes this a source-grounded episode, whatever else the
+  // payload carries: the presence of the field is the switch, not its
+  // length, so an empty list is refused by the source rules ("needs at least
+  // one source") rather than silently becoming a guide run.
+  if (payload && typeof payload === 'object' && payload.sources !== undefined) {
+    return parseSourceEpisodePayload(payload);
+  }
+
   const platform = String(payload?.platform || '').toLowerCase();
   const examCode = String(payload?.examCode || '').trim();
   const studyGuideUrl = String(payload?.studyGuideUrl || '').trim();
@@ -68,6 +88,27 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
   const parsed = parseGeneratePayload(payload);
   if (parsed.error) throw new Error(parsed.error);
 
+  if (parsed.value.kind === 'source') {
+    const source = parsed.value;
+    const report = await generateSourceEpisode({
+      platform: source.platform,
+      examCode: source.examCode,
+      title: source.title,
+      sources: source.sources,
+      cert: source.cert,
+      store: { readDoc, upsertDoc, patchDoc },
+      storage: { uploadBlob },
+      ai: { generateGroundedJsonResponse, getCostEstimate },
+      actorId: job?.requestedBy?.oid || null,
+    });
+    // Exam code and counts only: the episode id is derived from the owner's
+    // title, which is content, and the log line is not the place for it.
+    context?.log?.(
+      `generate-listen-and-learn: ${report.examCode} — source-grounded episode drafted from ${report.sourceCount} sources${report.audioError ? ', without audio' : ''}, $${report.costUsd} spent`
+    );
+    return report;
+  }
+
   const { platform, examCode, studyGuideUrl, areas, cert } = parsed.value;
 
   const report = await generateEpisodes({
@@ -95,8 +136,11 @@ registerJobType('generate-listen-and-learn', {
   role: 'editor',
   description:
     'Parse a certification study guide, script one episode per skill area, synthesise the audio and save every episode as a draft for review.',
-  // Enough for the URL, the exam code and up to eight area slugs.
-  maxPayloadBytes: 2048,
+  // Enough for the URL, the exam code and up to eight area slugs — or, for a
+  // source-grounded episode, twenty page URLs and ten video URLs with a title
+  // each (#433): the router's caps, which the route refuses over rather than
+  // this limit truncating.
+  maxPayloadBytes: 16384,
   // Five areas at roughly two minutes each — one model call plus one or two
   // synthesis requests plus an upload — with headroom for a slow guide fetch.
   timeoutMs: 25 * 60 * 1000,

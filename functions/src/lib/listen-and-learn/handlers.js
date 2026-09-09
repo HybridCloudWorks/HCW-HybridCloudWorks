@@ -11,14 +11,51 @@
  * Ported from Site-Main `functions/listen-and-learn/index.js` (088f458).
  * `requireAdmin(req, res, 'editor')` becomes this repository's role guard, and
  * the two admin list reads are new — upstream's page read Firestore directly.
+ *
+ * One enqueue lives here after all (#433): `generateSourceEpisode` queues the
+ * same `generate-listen-and-learn` job the guide run uses, with a source list
+ * in the payload. It goes through this route rather than the generic
+ * `POST /api/enqueueJob` so that an over-cap list, or a YouTube URL given as
+ * a page, is refused with the sentence at once — a 400 the form shows — and
+ * not as a failed job the page would have to poll for. The worker validates
+ * again, as the guard for any other caller. Same shape as the podcast
+ * transcript enqueue (podcast/handlers.js), for the same reason.
  */
-import { EPISODE_CONTAINER, SET_CONTAINER, STATUS, setId, setEpisodeStatus } from './publish.js';
+import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
+// The one body-shape test the other admin writers use: an object, not null,
+// not an array. A JSON array passes `typeof === 'object'` and then fails on
+// a field message that names the wrong problem.
+import { isPlainObject } from '../cms/content-update-validation.js';
+import {
+  EPISODE_CONTAINER,
+  SET_CONTAINER,
+  STATUS,
+  episodeKindOf,
+  setId,
+  setEpisodeStatus,
+} from './publish.js';
+import { LISTEN_AND_LEARN_JOB_TYPE, parseSourceEpisodePayload } from './source-episode.js';
 
 const json = (status, body) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
+
+/**
+ * An episode as the review view returns it: `kind` resolved by the one rule
+ * (a document with none is a guide episode) and `sources` always an array, so
+ * the page never has to know that documents written before #433 carry
+ * neither field. The review view is the one place a reviewer sees what the
+ * model was given, which is why the sources ride along with the transcript.
+ */
+export function toReviewEpisode(doc) {
+  return {
+    ...doc,
+    kind: episodeKindOf(doc),
+    sources: Array.isArray(doc?.sources) ? doc.sources : [],
+  };
+}
 
 /**
  * Ceilings, not page sizes. A certification has at most eight areas and the
@@ -34,10 +71,17 @@ const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function }} deps.store
+ * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function, upsertDoc?: Function }} deps.store
+ *   `upsertDoc` is needed only by `generateSourceEpisode`, which writes the job document
  * @param {() => Date} [deps.now]
+ * @param {() => string} [deps.uuid]
  */
-export function createListenAndLearnHandlers({ guard, store, now = () => new Date() }) {
+export function createListenAndLearnHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = () => crypto.randomUUID(),
+}) {
   return {
     /** GET /api/cms/listen-and-learn — every set, newest generation first. */
     async listSets(request, context) {
@@ -86,10 +130,83 @@ export function createListenAndLearnHandlers({ guard, store, now = () => new Dat
           return json(404, { error: `No Listen & Learn set for ${platform}/${examCode}` });
         }
 
-        return json(200, { success: true, set: set || null, episodes: [...episodes].sort(byOrder) });
+        return json(200, {
+          success: true,
+          set: set || null,
+          episodes: [...episodes].sort(byOrder).map(toReviewEpisode),
+        });
       } catch (error) {
         context.error('getListenAndLearnSet failed:', error);
         return json(500, { error: 'Failed to get the Listen & Learn set' });
+      }
+    },
+
+    /**
+     * POST /api/cms/listen-and-learn/source-episode
+     * `{ platform, examCode, title, sources: [{ kind, url, title? }], certTitle?, certSlug? }`
+     *
+     * Queues one source-grounded episode (#433) and answers 202 with the job
+     * id, like `enqueueJob`; the episode appears in the set as a draft when
+     * the job finishes. The list is validated here with the worker's own
+     * validator — see the header for why — and the payload written to the
+     * job is the normalised one, so the worker cannot read a field the
+     * route did not check.
+     *
+     * @param {{ enqueue: (message: {jobId: string, type: string}) => void }} io - the queue output
+     */
+    async generateSourceEpisode(request, context, { enqueue } = {}) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      try {
+        const body = await request.json().catch(() => null);
+        if (!isPlainObject(body)) {
+          return json(400, { error: 'Body must be a JSON object' });
+        }
+
+        const parsed = parseSourceEpisodePayload(body);
+        if (parsed.error) return json(400, { error: parsed.error });
+        const { platform, examCode, title, areaSlug, sources, cert } = parsed.value;
+
+        if (typeof enqueue !== 'function') {
+          context.error?.('generateSourceEpisode: no queue output wired');
+          return json(500, { error: 'Job queue is not configured' });
+        }
+
+        const jobId = uuid();
+        const doc = newJobDoc({
+          id: jobId,
+          type: LISTEN_AND_LEARN_JOB_TYPE,
+          payload: {
+            platform,
+            examCode,
+            title,
+            sources,
+            ...(cert.title ? { certTitle: cert.title } : {}),
+            ...(cert.slug ? { certSlug: cert.slug } : {}),
+          },
+          requestedBy: auth.user,
+          createdAt: now().toISOString(),
+        });
+        await store.upsertDoc(JOBS_CONTAINER, doc);
+        enqueue({ jobId, type: LISTEN_AND_LEARN_JOB_TYPE });
+
+        // The job id is the correlation key; the episode id would be the
+        // owner's title, which is content and stays out of the log.
+        context.log?.(
+          `generateSourceEpisode: queued ${jobId} for ${examCode} (${sources.length} sources)`
+        );
+        return json(202, {
+          ok: true,
+          jobId,
+          type: LISTEN_AND_LEARN_JOB_TYPE,
+          status: 'queued',
+          poll: `getJob?jobId=${jobId}`,
+          areaSlug,
+          sourceCount: sources.length,
+        });
+      } catch (error) {
+        context.error('generateSourceEpisode failed:', error);
+        return json(500, { error: 'Failed to queue the source-grounded episode' });
       }
     },
 
@@ -102,7 +219,7 @@ export function createListenAndLearnHandlers({ guard, store, now = () => new Dat
       if (auth.error) return auth.error;
       try {
         const body = await request.json().catch(() => null);
-        if (!body || typeof body !== 'object') {
+        if (!isPlainObject(body)) {
           return json(400, { error: 'Body must be a JSON object' });
         }
 
