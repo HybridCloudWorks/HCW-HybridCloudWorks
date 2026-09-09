@@ -155,7 +155,17 @@ async function generateOneArea({
   // reads the source: `listenAndLearn` was declared inside script.js behind
   // the injected `generate`, where the scan could not see it, and so was
   // listed in no catalogue and gated by no portal toggle.
-  const generate = (params) => ai.generateJsonResponse({ ...params, feature: 'listenAndLearn' });
+  //
+  // Wrapped only when there is something to wrap. A router with no
+  // `generateJsonResponse` hands the script writer `undefined`, so its own
+  // "generate is required" guard names the problem, rather than a TypeError
+  // from inside this closure on the first call. A plain call, not `.call(ai)`:
+  // the router's methods are closures with no `this`, and the scan matches
+  // `generateJsonResponse(` — `.call(` would hide this site from it.
+  const generate =
+    typeof ai?.generateJsonResponse === 'function'
+      ? (params) => ai.generateJsonResponse({ ...params, feature: 'listenAndLearn' })
+      : undefined;
 
   const scriptUsage = [];
   const script = await writeScript({

@@ -13,6 +13,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { generateEpisodes, isSupportedPlatform, SUPPORTED_PLATFORMS } from './generate.js';
 import { SpeechNotConfiguredError, SpeechError } from './speech/index.js';
+import { generateEpisodeScript } from './script.js';
 import {
   AUDIO_CONTAINER,
   EPISODE_CONTAINER,
@@ -177,6 +178,24 @@ describe('a full run', () => {
     expect(run.ai.generateJsonResponse).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: 'p', purpose: 'analysis', feature: 'listenAndLearn' })
     );
+  });
+
+  it('a router with no generateJsonResponse fails the area with the script writer’s own guard', async () => {
+    // The wrapper is built only around a real function. Otherwise the script
+    // writer receives undefined and says "generate is required" — the error
+    // that names the problem — instead of a TypeError from inside the wrapper
+    // on the first call. The real script writer, so the guard is the real one.
+    const store = makeStore();
+    const run = baseRun({ ai: { getActiveAiProvider: vi.fn(() => 'anthropic') } });
+    const deps = happyDeps({ writeScript: generateEpisodeScript });
+
+    const report = await generateEpisodes({ ...run, store, storage: makeStorage(), deps });
+
+    expect(report.failed).toBe(2);
+    expect(store.docs[EPISODE_CONTAINER]['area-1']).toMatchObject({
+      status: STATUS.failed,
+      error: expect.stringContaining('generate is required'),
+    });
   });
 
   it('records which voice read the episode', async () => {
