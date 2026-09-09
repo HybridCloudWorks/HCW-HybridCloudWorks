@@ -34,10 +34,10 @@ import { generateArticleScript } from '../listen-and-learn/article-script.js';
 import { synthesizeDialogue } from '../listen-and-learn/speech/index.js';
 import {
   STATUS,
-  markTranscriptFailed,
-  saveTranscript,
-  transcriptId,
-  uploadTranscriptAudio,
+  describeArticleSource,
+  markTranscriptFailedFor,
+  saveTranscriptFor,
+  uploadSourceAudio,
 } from './store.js';
 import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 
@@ -83,14 +83,21 @@ export function refusalFor(article, articleId) {
   return null;
 }
 
-/** Real implementations unless a caller (or a test) supplies its own. */
-function resolveDeps(deps = {}) {
+/**
+ * Real implementations unless a caller (or a test) supplies its own.
+ *
+ * Shared with the recording pipeline (recording-generate.js), which passes
+ * its own `writeScript` default; everything after the script — the voice,
+ * the upload, the save, the usage rows — is the same for every kind of
+ * source, and lives once in `finishTranscript` below.
+ */
+export function resolvePipelineDeps(deps = {}, { writeScript = generateArticleScript } = {}) {
   return {
-    writeScript: deps.writeScript || generateArticleScript,
+    writeScript: deps.writeScript || writeScript,
     synthesize: deps.synthesize || synthesizeDialogue,
-    uploadAudio: deps.uploadAudio || uploadTranscriptAudio,
-    persistTranscript: deps.persistTranscript || saveTranscript,
-    persistFailure: deps.persistFailure || markTranscriptFailed,
+    uploadAudio: deps.uploadAudio || uploadSourceAudio,
+    persistTranscript: deps.persistTranscript || saveTranscriptFor,
+    persistFailure: deps.persistFailure || markTranscriptFailedFor,
     recordUsage: deps.recordUsage || null,
   };
 }
@@ -99,7 +106,7 @@ function resolveDeps(deps = {}) {
  * Synthesise and upload, or explain why there is no audio. Never throws —
  * see the module header.
  */
-async function renderAudio({ script, article, storage, env, synthesize, uploadAudio }) {
+async function renderAudio({ script, source, storage, env, synthesize, uploadAudio }) {
   let rendered;
   try {
     rendered = await synthesize({ dialogue: script.dialogue, env });
@@ -111,7 +118,7 @@ async function renderAudio({ script, article, storage, env, synthesize, uploadAu
   try {
     uploaded = await uploadAudio({
       storage,
-      article,
+      source,
       audio: rendered.audio,
       contentType: rendered.contentType,
     });
@@ -134,6 +141,93 @@ async function renderAudio({ script, article, storage, env, synthesize, uploadAu
     promptTokens: rendered.promptTokens ?? 0,
     completionTokens: rendered.completionTokens ?? 0,
     estimatedTokens: rendered.estimatedTokens === true,
+  };
+}
+
+/**
+ * Record that the script stage failed, then rethrow the original error.
+ *
+ * Best effort: the failure record must not mask the failure. If the container
+ * is missing this write fails too, and the original error is still the one
+ * worth reporting.
+ */
+export async function recordScriptFailure({ store, source, error, now, persistFailure }) {
+  await persistFailure(store, { source, error: error?.message || String(error), now }).catch(
+    () => {}
+  );
+  throw error;
+}
+
+/**
+ * Everything after the script, for every kind of source: voice it, upload
+ * it, save the draft, record the spend. Shared by the article pipeline here
+ * and the recording pipeline in recording-generate.js, so the two cannot
+ * drift on the policies the module header states — every audio failure
+ * degrades, and usage is recorded only after the transcript is saved.
+ *
+ * @param {object} params
+ * @param {object} params.source a descriptor from store.js (`describe*Source`)
+ * @param {object} params.script the generator's result
+ * @param {object[]} params.scriptUsage the router's usage rows for the script call
+ * @param {{ upsertDoc: Function }} params.store
+ * @param {{ uploadBlob: Function }} params.storage
+ * @param {{ getCostEstimate: Function }} params.ai
+ * @param {object} params.env
+ * @param {string} params.now
+ * @param {ReturnType<typeof resolvePipelineDeps>} params.deps resolved deps
+ * @returns {Promise<object>} the common report; callers add their own ids
+ */
+export async function finishTranscript({
+  source,
+  script,
+  scriptUsage,
+  store,
+  storage,
+  ai,
+  env,
+  now,
+  deps,
+}) {
+  const { synthesize, uploadAudio, persistTranscript, recordUsage } = deps;
+
+  const audio = await renderAudio({ script, source, storage, env, synthesize, uploadAudio });
+
+  const saved = await persistTranscript(store, { source, script, audio, now });
+
+  // Recorded after the transcript is saved, never before: a usage row for
+  // work that was then lost would overstate spend, and the write is
+  // best-effort (ai/usage.js) so it cannot fail a run that succeeded.
+  const record =
+    recordUsage ||
+    ((records) => recordAiUsageBatch({ store, ai: { getCostEstimate: ai.getCostEstimate } }, records));
+  const usage = await record([
+    ...scriptUsage.map((u) => ({ ...u, source: USAGE_SOURCES.podcastScript })),
+    ...(audio.speechProvider
+      ? [
+          {
+            provider: audio.speechProvider,
+            model: audio.speechModel,
+            promptTokens: audio.promptTokens,
+            completionTokens: audio.completionTokens,
+            estimatedTokens: audio.estimatedTokens,
+            source: USAGE_SOURCES.podcastAudio,
+          },
+        ]
+      : []),
+  ]);
+
+  return {
+    id: saved.id,
+    sourceKind: saved.sourceKind,
+    sourceSlug: saved.sourceSlug,
+    title: saved.title,
+    status: STATUS.draft,
+    audioBytes: audio.bytes || 0,
+    audioError: audio.error || null,
+    transcriptBytes: script.byteLength,
+    trimmedTurns: script.trimmedTurns,
+    truncated: script.truncated === true,
+    costUsd: totalCostUsd(usage),
   };
 }
 
@@ -163,15 +257,15 @@ export async function generateTranscriptFromArticle({
   if (parsedId.error) throw new TranscriptError(parsedId.error);
   const id = parsedId.value;
 
-  const { writeScript, synthesize, uploadAudio, persistTranscript, persistFailure, recordUsage } =
-    resolveDeps(deps);
+  const resolved = resolvePipelineDeps(deps);
+  const { writeScript, persistFailure } = resolved;
 
   const article = await store.readDoc(ARTICLE_CONTAINER, id, id);
   const refusal = refusalFor(article, id);
   if (refusal) throw new TranscriptError(refusal);
   // Resolves the slug-or-id key, and throws by name if neither is usable —
   // before the model call, so an unkeyable article costs nothing.
-  const docId = transcriptId(article);
+  const source = describeArticleSource(article);
 
   // The product declares the feature, not the generator: `generateArticleScript`
   // is a rewrite of an article into dialogue and #433 will use it for other
@@ -189,52 +283,20 @@ export async function generateTranscriptFromArticle({
       usageOut: scriptUsage,
     });
   } catch (err) {
-    // Best effort: the failure record must not mask the failure. If the
-    // container is missing this write fails too, and the original error is
-    // still the one worth reporting.
-    await persistFailure(store, { article, error: err?.message || String(err), now }).catch(
-      () => {}
-    );
-    throw err;
+    await recordScriptFailure({ store, source, error: err, now, persistFailure });
   }
 
-  const audio = await renderAudio({ script, article, storage, env, synthesize, uploadAudio });
+  const report = await finishTranscript({
+    source,
+    script,
+    scriptUsage,
+    store,
+    storage,
+    ai,
+    env,
+    now,
+    deps: resolved,
+  });
 
-  const saved = await persistTranscript(store, { article, script, audio, now });
-
-  // Recorded after the transcript is saved, never before: a usage row for
-  // work that was then lost would overstate spend, and the write is
-  // best-effort (ai/usage.js) so it cannot fail a run that succeeded.
-  const record =
-    recordUsage ||
-    ((records) => recordAiUsageBatch({ store, ai: { getCostEstimate: ai.getCostEstimate } }, records));
-  const usage = await record([
-    ...scriptUsage.map((u) => ({ ...u, source: USAGE_SOURCES.podcastScript })),
-    ...(audio.speechProvider
-      ? [
-          {
-            provider: audio.speechProvider,
-            model: audio.speechModel,
-            promptTokens: audio.promptTokens,
-            completionTokens: audio.completionTokens,
-            estimatedTokens: audio.estimatedTokens,
-            source: USAGE_SOURCES.podcastAudio,
-          },
-        ]
-      : []),
-  ]);
-
-  return {
-    id: docId,
-    articleId: id,
-    sourceSlug: saved.sourceSlug,
-    title: saved.title,
-    status: STATUS.draft,
-    audioBytes: audio.bytes || 0,
-    audioError: audio.error || null,
-    transcriptBytes: script.byteLength,
-    trimmedTurns: script.trimmedTurns,
-    truncated: script.truncated === true,
-    costUsd: totalCostUsd(usage),
-  };
+  return { ...report, articleId: id };
 }

@@ -255,10 +255,10 @@ function DashboardQuickActions({ queueCount, editorCount }) {
         'border-pink-200 bg-pink-50/60 text-pink-700 dark:border-pink-900 dark:bg-pink-950/30 dark:text-pink-300',
     },
     {
-      to: '/admin/recordings',
+      to: '/admin/recording-hub',
       icon: Radio,
-      label: 'Recordings Hub',
-      description: 'Plaud → content',
+      label: 'Recording Hub',
+      description: 'Podcast transcripts · Plaud',
       color:
         'border-indigo-200 bg-indigo-50/60 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300',
     },
@@ -436,10 +436,10 @@ function DashboardSidebar() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Turn Plaud recordings into articles, social posts, or podcast notes with one click.
+            Turn Plaud recordings into articles, social posts, or podcast episodes with one click.
           </p>
           <Link
-            to="/admin/recordings"
+            to="/admin/recording-hub"
             className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-colors"
           >
             <Radio className="h-3 w-3" />

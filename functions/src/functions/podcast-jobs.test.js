@@ -29,8 +29,14 @@ vi.mock('../lib/ai/router.js', async (importOriginal) => ({
 }));
 vi.mock('../lib/cms/publish.js', () => ({ publicUrlOf: vi.fn(() => '') }));
 
-const { parsePublishPayload, parseTranscriptPayload, runTranscriptGeneration, runTranscriptPublish } =
-  await import('./podcast-jobs.js');
+const {
+  parsePublishPayload,
+  parseTranscriptPayload,
+  runTranscriptGeneration,
+  runTranscriptPublish,
+  runRecordingGeneration,
+  runUploadTranscription,
+} = await import('./podcast-jobs.js');
 
 describe('parseTranscriptPayload', () => {
   it('accepts an article id and trims it', () => {
@@ -170,5 +176,29 @@ describe('registration', () => {
       { context: {}, now }
     );
     expect(patchDoc).not.toHaveBeenCalled();
+  });
+  it('registers the two recording-side jobs (#442) at editor, like the routes that enqueue them', () => {
+    for (const name of ['generate-podcast-transcript-from-recording', 'transcribe-recording-upload']) {
+      const [, spec] = registerJobType.mock.calls.find(([type]) => type === name);
+      expect(spec.role, name).toBe('editor');
+      expect(typeof spec.worker, name).toBe('function');
+      expect(spec.maxPayloadBytes, name).toBeLessThanOrEqual(1024);
+    }
+  });
+});
+
+describe('recording-side workers', () => {
+  it('fail a bad payload with the validation sentence before touching anything', async () => {
+    const ctx = { context: { log: vi.fn() } };
+    await expect(runRecordingGeneration({}, ctx)).rejects.toThrow(
+      'recordingId or storedRecordingId is required'
+    );
+    await expect(runRecordingGeneration({ recordingId: 'a', storedRecordingId: 'b' }, ctx)).rejects.toThrow(
+      /not both/
+    );
+    await expect(runUploadTranscription({ title: 't' }, ctx)).rejects.toThrow('uploadPath is required');
+    await expect(runUploadTranscription({ uploadPath: 'article/x.mp3', title: 't' }, ctx)).rejects.toThrow(
+      'uploadPath is not an upload path'
+    );
   });
 });

@@ -1,13 +1,20 @@
 /**
- * Recordings — Plaud MCP Integration
+ * Recording Hub → Plaud tab (#442): the Plaud MCP Library and Connect
+ * behaviour that lived on /admin/recordings, plus the direction that page
+ * did not have — upload audio for Plaud Embedded to transcribe — and the
+ * "Script this" action that turns any recording into a podcast draft
+ * (#434 wiring).
  *
- * Plaud now has a real MCP server at https://mcp.plaud.ai/mcp (Streamable HTTP, OAuth).
- * This page connects live to your Plaud library via the AI Engine's mcpProxy
- * Azure Function — no manual exports needed.
+ * Plaud has a real MCP server at https://mcp.plaud.ai/mcp (Streamable HTTP,
+ * OAuth). The Library connects live to your Plaud library via the AI
+ * Engine's mcpProxy Azure Function — no manual exports needed.
  *
- * Three tabs:
- *   1. Library       — live recordings from Plaud MCP: list_files → get_transcript
- *   2. Upload        — manual transcript paste/upload as fallback
+ * Three sub-tabs:
+ *   1. Library       — live recordings from Plaud MCP: list_files → get_transcript,
+ *                      with "Script this" per recording; stored recordings
+ *                      (manual pastes and transcribed uploads) listed below it
+ *   2. Upload        — audio for Plaud Embedded to transcribe (new), and the
+ *                      manual transcript paste kept as a fallback sub-section
  *   3. Connect       — OAuth token setup for Plaud MCP
  *
  * Auth flow:
@@ -32,25 +39,28 @@
  * `login` tool clears it in one call ("log me into Plaud" in any connected AI
  * client). Nothing in Plaud's docs connects that error to that remedy.
  *
- * These are the Plaud MCP tokens. Plaud Embedded's client id and secret
+ * These are the Plaud MCP tokens. Plaud Embedded's client id and API key
  * (docs.plaud.ai/plaud-embedded) are a different product — device SDK and
- * transcription API — and nothing on this site uses them.
+ * transcription API — and are what the Upload sub-tab's audio transcription
+ * uses, server-side, from Key Vault (PLAUD-EMBEDDED-CLIENT-ID /
+ * PLAUD-EMBEDDED-API-KEY). Both credentials are needed, one per direction:
+ * the MCP reads what Plaud recorded; Embedded transcribes what you upload.
  *
  * Cosmos DB containers:
- *   recordings  — local copies routed into ContentForge pipeline
- *   mcp_servers/plaud — stores oauthToken + oauthRefreshToken (admin-write only)
+ *   recordings          — stored transcripts: manual pastes, Plaud MCP copies
+ *                         routed into ContentForge, and Plaud Embedded results
+ *   mcp_servers/plaud   — stores oauthToken + oauthRefreshToken (admin-write only)
+ *   podcast_transcripts — where "Script this" lands (Podcast tab)
  */
-
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import ServicePageHeader from '@/components/admin/ServicePageHeader';
 import {
   Radio,
   Upload,
@@ -69,17 +79,24 @@ import {
   ChevronDown,
   ChevronRight,
   CalendarDays,
+  FileAudio,
 } from 'lucide-react';
 import { postJSON, getJSON, sendJSON } from '@/lib/api';
 import { aiEngine, setMcpOAuthToken } from '@/lib/aiEngine';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const TABS = [
+const SUB_TABS = [
   { id: 'library', label: 'Library', icon: Radio },
   { id: 'upload', label: 'Upload', icon: Upload },
   { id: 'connect', label: 'Connect', icon: Link },
 ];
+
+export const SCRIPT_QUEUED_TOAST = 'Queued. It appears on the Podcast tab when generated.';
+
+/** Accepted by the upload route; mirrors ACCEPTED_AUDIO_EXTENSIONS server-side. */
+export const AUDIO_ACCEPT = '.mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav';
+export const MAX_AUDIO_UPLOAD_BYTES = 40 * 1024 * 1024;
 
 function fmtDuration(ms) {
   if (!ms) return '';
@@ -102,15 +119,52 @@ function fmtDate(isoStr) {
   });
 }
 
+/** A File as the base64 the upload route reads, without the data-URL prefix. */
+export function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('Could not read the file'));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function TranscriptToggleIcon({ loading, expanded }) {
   if (loading) return <Loader2 className="h-3 w-3 animate-spin" />;
   if (expanded) return <ChevronDown className="h-3 w-3" />;
   return <ChevronRight className="h-3 w-3" />;
 }
 
+/**
+ * "Script this" — enqueue the podcast transcript job for one recording. The
+ * API refuses at the door (409 with the Connect-tab sentence, 404 for a
+ * stored recording that is gone) and that sentence is shown verbatim,
+ * because it names the fix.
+ */
+function useScriptThis() {
+  const [scripting, setScripting] = useState('');
+  const { toast } = useToast();
+  const scriptThis = async (payload, key) => {
+    setScripting(key);
+    try {
+      await postJSON('cms/podcast/transcripts/generate-from-recording', payload);
+      toast({ title: 'Podcast script queued', description: SCRIPT_QUEUED_TOAST });
+    } catch (err) {
+      toast({ title: 'Not queued', description: err.message, variant: 'destructive' });
+    } finally {
+      setScripting('');
+    }
+  };
+  return { scripting, scriptThis };
+}
+
 // ─── Recording Card ───────────────────────────────────────────────────────────
 
-function PlaudRecordingCard({ recording, onCreateContent }) {
+function PlaudRecordingCard({ recording, onCreateContent, onScriptThis, scripting }) {
   const [expanded, setExpanded] = useState(false);
   const [transcript, setTranscript] = useState(null);
   const [note, setNote] = useState(null);
@@ -187,6 +241,8 @@ function PlaudRecordingCard({ recording, onCreateContent }) {
     }
   };
 
+  const busy = scripting === `plaud:${recording.id}`;
+
   return (
     <Card className="transition-all hover:shadow-sm">
       <CardContent className="p-4">
@@ -213,7 +269,7 @@ function PlaudRecordingCard({ recording, onCreateContent }) {
               )}
             </div>
           </div>
-          <div className="flex gap-1.5 shrink-0">
+          <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
             <Button
               size="sm"
               variant="outline"
@@ -223,6 +279,21 @@ function PlaudRecordingCard({ recording, onCreateContent }) {
             >
               <TranscriptToggleIcon loading={loadingTx} expanded={expanded} />
               Transcript
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2 border-violet-300 text-violet-700 dark:text-violet-300"
+              onClick={() => onScriptThis({ recordingId: recording.id }, `plaud:${recording.id}`)}
+              disabled={busy}
+              aria-label={`Script this: ${recording.name || recording.id}`}
+            >
+              {busy ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Mic className="h-3 w-3 mr-1" />
+              )}
+              Script this
             </Button>
             <Button
               size="sm"
@@ -369,9 +440,93 @@ function RouteModal({ recording, onClose, onRouted }) {
   );
 }
 
-// ─── Library Tab (Live Plaud MCP) ─────────────────────────────────────────────
+// ─── Stored recordings (the `recordings` container) ──────────────────────────
 
-function LibraryTab({ isConnected }) {
+function sourceLabel(source) {
+  if (source === 'plaud-embedded') return 'Plaud Embedded';
+  if (source === 'plaud_mcp') return 'Plaud copy';
+  if (source === 'manual_upload') return 'Pasted';
+  return source || 'stored';
+}
+
+export function StoredRecordings({ onScriptThis, scripting, reloadKey }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    // No setLoading(true) here: the initial state is loading, and a reload
+    // keeps the stale list on screen rather than flashing empty.
+    (async () => {
+      try {
+        const res = await getJSON('cms/recordings?limit=50');
+        if (!cancelled) setItems(Array.isArray(res?.items) ? res.items : []);
+      } catch {
+        if (!cancelled) setItems([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  return (
+    <div className="space-y-2">
+      <h3 className="font-semibold text-sm">Stored recordings</h3>
+      <p className="text-xs text-slate-500">
+        Transcripts kept in this site&apos;s own store: pasted ones, copies made by Create Content,
+        and uploads Plaud Embedded transcribed. Each can be scripted the same way.
+      </p>
+      {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+      {!loading && items.length === 0 && (
+        <p className="text-xs text-slate-400">Nothing stored yet.</p>
+      )}
+      <div className="space-y-2">
+        {items.map((rec) => {
+          const busy = scripting === `stored:${rec.id}`;
+          return (
+            <Card key={rec.id}>
+              <CardContent className="p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{rec.title || rec.id}</p>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <Badge variant="secondary">{sourceLabel(rec.source)}</Badge>
+                    {rec.status && <span>{rec.status}</span>}
+                    {(rec.durationMs || rec.duration) > 0 && (
+                      <span>{fmtDuration(rec.durationMs || rec.duration)}</span>
+                    )}
+                    <span>{fmtDate(rec.createdAt)}</span>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs px-2 border-violet-300 text-violet-700 dark:text-violet-300 shrink-0"
+                  onClick={() => onScriptThis({ storedRecordingId: rec.id }, `stored:${rec.id}`)}
+                  disabled={busy}
+                  aria-label={`Script this: ${rec.title || rec.id}`}
+                >
+                  {busy ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : (
+                    <Mic className="h-3 w-3 mr-1" />
+                  )}
+                  Script this
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Library sub-tab (Live Plaud MCP) ────────────────────────────────────────
+
+function LibraryTab({ isConnected, reloadKey }) {
   const [recordings, setRecordings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -381,6 +536,7 @@ function LibraryTab({ isConnected }) {
   const [routingRec, setRoutingRec] = useState(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { scripting, scriptThis } = useScriptThis();
 
   const fetchRecordings = useCallback(async () => {
     setLoading(true);
@@ -435,130 +591,242 @@ function LibraryTab({ isConnected }) {
     return () => clearTimeout(timer);
   }, [isConnected, fetchRecordings]);
 
-  if (!isConnected) {
-    return (
-      <div className="text-center py-16 space-y-3">
-        <Link className="h-10 w-10 text-slate-300 mx-auto" />
-        <p className="text-sm text-slate-500">Connect your Plaud account first.</p>
-        <p className="text-xs text-slate-400">
-          Go to the <strong>Connect</strong> tab and paste your OAuth token.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 items-end">
-        <div className="flex-1 min-w-40">
-          <Label className="text-xs">Search recordings</Label>
-          <div className="relative mt-1">
-            <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
-            <Input
-              className="pl-8 h-8 text-xs"
-              placeholder="Keyword…"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
+    <div className="space-y-6">
+      {!isConnected ? (
+        <div className="text-center py-10 space-y-3">
+          <Link className="h-10 w-10 text-slate-300 mx-auto" />
+          <p className="text-sm text-slate-500">Connect your Plaud account first.</p>
+          <p className="text-xs text-slate-400">
+            Go to the <strong>Connect</strong> tab and paste your OAuth token.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Filters */}
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="flex-1 min-w-40">
+              <Label className="text-xs">Search recordings</Label>
+              <div className="relative mt-1">
+                <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
+                <Input
+                  className="pl-8 h-8 text-xs"
+                  placeholder="Keyword…"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">From</Label>
+              <Input
+                type="date"
+                className="h-8 text-xs mt-1 w-36"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">To</Label>
+              <Input
+                type="date"
+                className="h-8 text-xs mt-1 w-36"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={fetchRecordings}
+              disabled={loading}
+              aria-label="Refresh recordings"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+
+          {/* Results */}
+          {loading && (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+            </div>
+          )}
+
+          {!loading && recordings.length === 0 && (
+            <div className="text-center py-12 text-sm text-slate-400">
+              No recordings found. Try adjusting your filters or check your Plaud app.
+            </div>
+          )}
+
+          {!loading && recordings.length > 0 && (
+            <div className="space-y-2">
+              {recordings.map((r) => (
+                <PlaudRecordingCard
+                  key={r.id}
+                  recording={r}
+                  onCreateContent={(rec) => setRoutingRec(rec)}
+                  onScriptThis={scriptThis}
+                  scripting={scripting}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Pagination — only when no filters */}
+          {!search && !dateFrom && !dateTo && recordings.length === 20 && (
+            <div className="flex justify-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+              <span className="text-xs self-center text-slate-500">Page {page}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
+          )}
+
+          {routingRec && (
+            <RouteModal
+              recording={routingRec}
+              onClose={() => setRoutingRec(null)}
+              onRouted={(contentId) => {
+                setRoutingRec(null);
+                navigate(`/admin/editor?id=${contentId}`);
               }}
             />
-          </div>
-        </div>
-        <div>
-          <Label className="text-xs">From</Label>
-          <Input
-            type="date"
-            className="h-8 text-xs mt-1 w-36"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label className="text-xs">To</Label>
-          <Input
-            type="date"
-            className="h-8 text-xs mt-1 w-36"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-          />
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8"
-          onClick={fetchRecordings}
-          disabled={loading}
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
           )}
-        </Button>
-      </div>
-
-      {/* Results */}
-      {loading && (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
         </div>
       )}
 
-      {!loading && recordings.length === 0 && (
-        <div className="text-center py-12 text-sm text-slate-400">
-          No recordings found. Try adjusting your filters or check your Plaud app.
-        </div>
-      )}
-
-      {!loading && recordings.length > 0 && (
-        <div className="space-y-2">
-          {recordings.map((r) => (
-            <PlaudRecordingCard
-              key={r.id}
-              recording={r}
-              onCreateContent={(rec) => setRoutingRec(rec)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Pagination — only when no filters */}
-      {!search && !dateFrom && !dateTo && recordings.length === 20 && (
-        <div className="flex justify-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Previous
-          </Button>
-          <span className="text-xs self-center text-slate-500">Page {page}</span>
-          <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)}>
-            Next
-          </Button>
-        </div>
-      )}
-
-      {routingRec && (
-        <RouteModal
-          recording={routingRec}
-          onClose={() => setRoutingRec(null)}
-          onRouted={(contentId) => {
-            setRoutingRec(null);
-            navigate(`/admin/editor?id=${contentId}`);
-          }}
-        />
-      )}
+      <StoredRecordings onScriptThis={scriptThis} scripting={scripting} reloadKey={reloadKey} />
     </div>
   );
 }
 
-// ─── Upload Tab (manual fallback) ────────────────────────────────────────────
+// ─── Upload sub-tab: audio for transcription, and the manual paste ───────────
 
-function UploadTab() {
+export function AudioUploadForm({ onQueued }) {
+  const [title, setTitle] = useState('');
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [queued, setQueued] = useState(null);
+  const fileRef = useRef(null);
+  const { toast } = useToast();
+
+  const handleFileChange = (e) => {
+    const picked = e.target.files?.[0] || null;
+    setFile(picked);
+    if (picked) setTitle((t) => t || picked.name.replace(/\.(mp3|m4a|wav)$/i, ''));
+  };
+
+  const handleUpload = async () => {
+    if (!file || !title.trim()) {
+      toast({ title: 'Title and an audio file are required', variant: 'destructive' });
+      return;
+    }
+    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+      toast({
+        title: 'File too large',
+        description: 'The upload limit is 40 MB — about an hour at 64 kbps.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setUploading(true);
+    try {
+      const dataBase64 = await readFileAsBase64(file);
+      const res = await postJSON('cms/podcast/recordings/upload', {
+        title: title.trim(),
+        fileName: file.name,
+        contentType: file.type || 'audio/mpeg',
+        dataBase64,
+      });
+      setQueued({ jobId: res.jobId, title: title.trim(), fileName: file.name });
+      setTitle('');
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+      toast({
+        title: 'Transcription queued',
+        description: 'Plaud is transcribing it; the result appears under Stored recordings.',
+      });
+      onQueued?.(res);
+    } catch (err) {
+      toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 max-w-2xl">
+      <div>
+        <h3 className="font-semibold text-sm flex items-center gap-1.5">
+          <FileAudio className="h-4 w-4" /> Upload audio for transcription
+        </h3>
+        <p className="text-xs text-slate-500 mt-1">
+          Plaud Embedded transcribes the file with speaker labels and the transcript is stored here;
+          the audio is kept only so Plaud can fetch it. MP3, M4A or WAV, up to 40 MB.
+        </p>
+      </div>
+      <div>
+        <Label htmlFor="audio-upload-title" className="text-xs">
+          Title
+        </Label>
+        <Input
+          id="audio-upload-title"
+          className="mt-1 h-9"
+          placeholder="Architecture review — Sept 8"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+      </div>
+      <div>
+        <Label htmlFor="audio-upload-file" className="text-xs">
+          Audio file
+        </Label>
+        <input
+          id="audio-upload-file"
+          ref={fileRef}
+          type="file"
+          accept={AUDIO_ACCEPT}
+          className="mt-1 block w-full text-xs"
+          onChange={handleFileChange}
+        />
+      </div>
+      <div className="flex items-center gap-3">
+        <Button onClick={handleUpload} disabled={uploading || !file || !title.trim()}>
+          {uploading ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Upload className="h-4 w-4 mr-2" />
+          )}
+          Upload & transcribe
+        </Button>
+        {queued && (
+          <span className="text-xs text-emerald-700 dark:text-emerald-300" role="status">
+            Queued: {queued.title} ({queued.fileName}) — job {queued.jobId}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ManualPaste({ onSaved }) {
   const [title, setTitle] = useState('');
   const [transcript, setTranscript] = useState('');
   const [saving, setSaving] = useState(false);
@@ -591,7 +859,8 @@ function UploadTab() {
       setSaved(true);
       setTitle('');
       setTranscript('');
-      toast({ title: 'Recording saved ✓', description: 'Find it in the Library tab.' });
+      toast({ title: 'Recording saved ✓', description: 'Find it under Stored recordings.' });
+      onSaved?.();
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       toast({ title: 'Error saving', description: err.message, variant: 'destructive' });
@@ -602,10 +871,13 @@ function UploadTab() {
 
   return (
     <div className="space-y-4 max-w-2xl">
-      <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-300 flex gap-2">
-        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-        This tab is a manual fallback. If you&apos;ve connected Plaud via the Connect tab, use the
-        Library tab for live access to all your recordings instead.
+      <div>
+        <h3 className="font-semibold text-sm">Paste a transcript</h3>
+        <div className="mt-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-300 flex gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />A manual fallback. If you&apos;ve
+          connected Plaud via the Connect tab, use the Library tab for live access to all your
+          recordings instead.
+        </div>
       </div>
 
       <div>
@@ -655,7 +927,17 @@ function UploadTab() {
   );
 }
 
-// ─── Connect Tab (OAuth setup) ────────────────────────────────────────────────
+function UploadTab({ onStored }) {
+  return (
+    <div className="space-y-8">
+      <AudioUploadForm onQueued={onStored} />
+      <hr className="border-slate-200 dark:border-slate-700" />
+      <ManualPaste onSaved={onStored} />
+    </div>
+  );
+}
+
+// ─── Connect sub-tab (OAuth setup) ───────────────────────────────────────────
 
 function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
   const [token, setToken] = useState('');
@@ -885,7 +1167,8 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
           <strong>Auth:</strong> OAuth — the access token lasts about a day, the refresh token about
           a week, and each refresh returns a new pair with a fresh week. With both stored, the
           12-hour <code>refreshPlaudToken</code> timer keeps the connection alive indefinitely.
-          Plaud Embedded&apos;s client id and secret are a different product and are not used here.
+          Plaud Embedded&apos;s client id and API key are a different product: they transcribe the
+          audio you upload on the Upload tab and are seeded in Key Vault, not pasted here.
         </p>
         <a
           href="https://docs.plaud.ai/plaud-mcp-cli/mcp"
@@ -927,60 +1210,28 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── The tab ──────────────────────────────────────────────────────────────────
 
-export default function RecordingsPage() {
-  useAuthReady();
-  const [activeTab, setActiveTab] = useState('library');
-  const [isConnected, setIsConnected] = useState(false);
-  const [hasRefreshToken, setHasRefreshToken] = useState(false);
-  const [checkingConn, setCheckingConn] = useState(true);
-
-  // Check Plaud connection status on mount
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        // If the Plaud MCP server doc reports connected and a stored token
-        // (the API returns hasOauthToken; the value itself is write-only).
-        const res = await getJSON('cms/config/mcp-servers');
-        const plaud = (res.items || []).find((d) => d.id === 'plaud');
-        setIsConnected(plaud?.status === 'connected' && plaud?.hasOauthToken === true);
-        setHasRefreshToken(plaud?.hasOauthRefreshToken === true);
-      } catch {
-        setIsConnected(false);
-        setHasRefreshToken(false);
-      } finally {
-        setCheckingConn(false);
-      }
-    };
-    checkConnection();
-  }, []);
+export default function PlaudTab({ isConnected, hasRefreshToken, checkingConn, onConnected }) {
+  const [subTab, setSubTab] = useState('library');
+  const [reloadKey, setReloadKey] = useState(0);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <ServicePageHeader
-        icon={Radio}
-        title="Recordings Hub"
-        service="Plaud"
-        connected={checkingConn ? 'checking' : isConnected}
-        description="Browse your Plaud audio recordings, pull AI summaries and timestamped transcripts, and route them into the Content Pipeline."
-        accent="violet"
-      />
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
-        {TABS.map(({ id, label, icon: Icon }) => (
+    <div className="space-y-4">
+      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700" role="tablist">
+        {SUB_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === id
-                ? 'border-violet-500 text-violet-600 dark:text-violet-400'
+            role="tab"
+            aria-selected={subTab === id}
+            onClick={() => setSubTab(id)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+              subTab === id
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-3.5 w-3.5" />
             {label}
             {id === 'connect' && !isConnected && !checkingConn && (
               <span className="w-2 h-2 rounded-full bg-amber-400 ml-0.5" />
@@ -989,17 +1240,15 @@ export default function RecordingsPage() {
         ))}
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'library' && <LibraryTab isConnected={isConnected} />}
-      {activeTab === 'upload' && <UploadTab />}
-      {activeTab === 'connect' && (
+      {subTab === 'library' && <LibraryTab isConnected={isConnected} reloadKey={reloadKey} />}
+      {subTab === 'upload' && <UploadTab onStored={() => setReloadKey((k) => k + 1)} />}
+      {subTab === 'connect' && (
         <ConnectTab
           isConnected={isConnected}
           hasRefreshToken={hasRefreshToken}
-          onConnected={({ refreshSupplied } = {}) => {
-            setIsConnected(true);
-            if (refreshSupplied) setHasRefreshToken(true);
-            setActiveTab('library');
+          onConnected={(info) => {
+            onConnected(info);
+            setSubTab('library');
           }}
         />
       )}

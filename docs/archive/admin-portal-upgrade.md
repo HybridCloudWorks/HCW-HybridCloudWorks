@@ -66,6 +66,12 @@ Three tabs:
 
 ### Recordings (`/admin/recordings`) — Plaud
 
+> **Superseded 2026-09-08 (#442).** `/admin/recordings` now redirects to the Recording Hub at
+> `/admin/recording-hub`, whose Plaud tab carries the three sub-tabs below unchanged, plus a
+> "Script this" action per recording and audio upload for Plaud Embedded transcription. Its
+> Podcast tab presents the transcripts #435 and #434 produce. The section is kept as written
+> because it records what the upgrade shipped.
+
 Three tabs:
 
 1. **Recording Library** — searchable grid of all recordings with expand-to-read and "Create

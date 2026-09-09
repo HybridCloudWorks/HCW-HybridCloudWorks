@@ -35,6 +35,7 @@ import './platform-health-http.js';
 import './platform-settings-http.js';
 import './podcast-http.js';
 import './podcast-jobs.js';
+import './podcast-recordings-http.js';
 import './public-media.js';
 import './public-preview.js';
 import './public-content-manifest.js';

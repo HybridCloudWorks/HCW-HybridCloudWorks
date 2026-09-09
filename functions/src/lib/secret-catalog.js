@@ -138,6 +138,27 @@ export const SECRET_CATALOG = Object.freeze([
     help: 'Written, tested fallback for the day the preview Gemini TTS models retire.',
     probe: null,
   },
+  {
+    setting: 'PLAUD_EMBEDDED_CLIENT_ID',
+    secret: 'PLAUD-EMBEDDED-CLIENT-ID',
+    section: 'ai',
+    label: 'Plaud Embedded — client id',
+    help:
+      'Transcribes audio uploaded on the Recording Hub → Plaud tab through the Plaud Embedded ' +
+      'Transcription API (#442). A different credential from the Plaud MCP OAuth tokens the ' +
+      'Connect tab stores; an identifier that travels with its key.',
+    probe: null,
+  },
+  {
+    setting: 'PLAUD_EMBEDDED_API_KEY',
+    secret: 'PLAUD-EMBEDDED-API-KEY',
+    section: 'ai',
+    label: 'Plaud Embedded — API key',
+    help:
+      'Sent as X-Client-Api-Key beside the client id. Absent, the upload form answers with a ' +
+      'sentence naming both settings before any audio is stored.',
+    probe: null,
+  },
 
   // ── Social & audience ────────────────────────────────────────────────────
   {

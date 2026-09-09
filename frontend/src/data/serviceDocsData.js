@@ -307,7 +307,7 @@ export const SERVICE_DOCS = {
           'Turns a Plaud transcript into a ContentForge draft through the shared drafter and the createContentItem write path, then marks the recording routed (issue #180).',
         files: [
           'functions/src/lib/content/draft-from-recording.js',
-          'frontend/src/pages/admin/RecordingsPage.jsx',
+          'frontend/src/components/admin/recording-hub/PlaudTab.jsx',
         ],
         status: HCW_STATUS.ACTIVE,
       },
@@ -983,22 +983,22 @@ export const SERVICE_DOCS = {
     ],
     hcwUses: [
       {
-        feature: 'Recordings Page — Library tab',
+        feature: 'Recording Hub — Plaud tab, Library',
         usage:
           'Live list of all recordings via list_files; load transcripts on demand via get_transcript',
-        files: ['src/pages/admin/RecordingsPage.jsx'],
+        files: ['src/components/admin/recording-hub/PlaudTab.jsx'],
         status: HCW_STATUS.ACTIVE,
       },
       {
-        feature: 'Recordings Page — Connect tab',
+        feature: 'Recording Hub — Plaud tab, Connect',
         usage: 'OAuth token setup and connection test',
-        files: ['src/pages/admin/RecordingsPage.jsx'],
+        files: ['src/components/admin/recording-hub/PlaudTab.jsx'],
         status: HCW_STATUS.ACTIVE,
       },
       {
         feature: 'ContentForge Pipeline',
         usage: 'Route a recording transcript into a content draft via createContentFromRecording',
-        files: ['src/pages/admin/RecordingsPage.jsx', 'functions/index.js'],
+        files: ['src/components/admin/recording-hub/PlaudTab.jsx', 'functions/index.js'],
         status: HCW_STATUS.ACTIVE,
       },
       {
@@ -1049,7 +1049,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Paste the token in HCW',
-            body: 'Go to /admin/recordings → Connect tab → paste the token → Save & Test. The token is stored server-side in Cosmos DB and used by the Azure mcpProxy Function. It never returns to the browser after saving.',
+            body: 'Go to /admin/recording-hub → Plaud tab → Connect → paste the token → Save & Test. The token is stored server-side in Cosmos DB and used by the Azure mcpProxy Function. It never returns to the browser after saving.',
             codes: [],
           },
         ],
@@ -1074,8 +1074,8 @@ export const SERVICE_DOCS = {
             ],
           },
           {
-            heading: 'Recordings page — Library tab',
-            body: 'Once connected, navigate to /admin/recordings → Library tab. Your recordings appear immediately. Search by keyword or date range, expand any card to read the transcript, or click "Create Content" to route a transcript through the ContentForge pipeline.',
+            heading: 'Recording Hub — Plaud tab, Library',
+            body: 'Once connected, navigate to /admin/recording-hub → Plaud tab → Library. Your recordings appear immediately. Search by keyword or date range, expand any card to read the transcript, click "Script this" to queue a podcast episode draft (it lands on the Podcast tab), or click "Create Content" to route a transcript through the ContentForge pipeline. The Upload sub-tab sends an audio file to the Plaud Embedded Transcription API — a separate key pair, seeded in Key Vault — and stores the transcript under Stored recordings.',
             codes: [],
           },
           {
