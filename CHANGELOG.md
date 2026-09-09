@@ -19,6 +19,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The weekly Learn catalogue workflow ends quietly when nothing changed
+  instead of failing at "Artifact not found" (#461 item 3).** The refresh job
+  uploads the catalogue only when it changed, but the commit job downloaded it
+  unconditionally, so the first hand-triggered run after #467 (34408439025,
+  2026-09-09) failed on a catalogue that was already current. The refresh job
+  now exports `changed` and the commit job runs only when it is `true`, so an
+  unchanged week shows the job as skipped; the tripwire test asserts the gate.
+
 - **Listen & Learn is mounted on the AWS certification pages, its "coming
   soon" copy no longer names GitHub, every provider in the registry is
   checked for a dated Learn catalogue, and a flag-disabled timer is visible

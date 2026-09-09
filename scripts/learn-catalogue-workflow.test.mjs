@@ -86,4 +86,17 @@ describe('the Learn catalogue workflow', () => {
   it('installs the frontend tree without lifecycle scripts', () => {
     expect(lines.some((l) => l.includes('npm ci --ignore-scripts'))).toBe(true);
   });
+
+  it('runs the commit job only when the refresh job reported a change', () => {
+    // The upload is conditional on the change, so an ungated commit job fails
+    // at "Artifact not found" every week the catalogue is unchanged (run
+    // 34408439025, 2026-09-09). The gate is the job-level `if`, not the
+    // download step, so the job shows as skipped rather than failed.
+    const updateJob = source.slice(source.indexOf('  update:'), source.indexOf('  commit:'));
+    const commitJob = source.slice(source.indexOf('  commit:'));
+    expect(updateJob).toContain('changed: ${{ steps.changed.outputs.changed }}');
+    expect(commitJob).toContain("if: needs.update.outputs.changed == 'true'");
+    const uploadAt = source.indexOf('Upload the refreshed catalogue');
+    expect(source.slice(uploadAt, uploadAt + 200)).toContain("if: steps.changed.outputs.changed == 'true'");
+  });
 });
