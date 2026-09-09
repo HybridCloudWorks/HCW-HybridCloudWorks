@@ -19,6 +19,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Azure Learn statuses are derived from their dates, the ten retired exams
+  say so, and every landing card opens a real detail page (#461 items 1 and
+  2).** The Azure catalogue (`frontend/src/data/azure/certifications.js`) had
+  not been checked since 2026-04-16, so the live page showed AI-900, AI-102,
+  AZ-204, AZ-500, PL-200, PL-500, PL-600, MB-280, MB-335 and MB-700 as
+  "Expiring Soon" ten weeks after Microsoft retired them, twelve GA exams as
+  "BETA · ends Jun 30, 2026", MB-240 as active, and no retirement for
+  AZ-800/AZ-801. Re-verified against the Microsoft Learn credentials browse
+  API and the credential-retirement page on 2026-09-09: those ten plus MB-240
+  are `retired` with their dates and replacements (AI-900 → AI-901, AI-102 →
+  AI-103); AB-210, AB-250, AB-410, AB-620, AI-103, AI-200, AI-300, AI-901,
+  DP-750, DP-800, GH-600 and SC-500 are `active`; SC-730 is retired
+  (Microsoft withdrew it after the beta, no date published); AZ-800 and AZ-801
+  are `expiring` 2026-09-30 → AZ-802, and MS-102 `expiring` 2026-11-30;
+  AZ-802 (active), AB-650 (beta) and AI-500 (beta) are added; five applied
+  skills are retired with Microsoft's dates. The pages now compute status from
+  the dates at render time (`frontend/src/lib/certStatus.js`, `deriveStatus`),
+  render a Retired badge, filter and replacement code, and print `DATA_AS_OF`
+  where they used to claim "scraped weekly", "tracked weekly", "updated
+  weekly" and "Refreshed by Microsoft each month". A vitest fails the day any
+  stored `expiring`/`beta` outlives its date. The Azure detail page drops its
+  own 15-entry copy (five of them retired, DP-203 gone) and reads the shared
+  catalogue, so all 68 landing links resolve instead of 15; the 68
+  `/azure/education/<slug>` routes are pre-rendered — with a single-string
+  Helmet title, since the multi-child form wrote `<title></title>` — and the
+  Listen & Learn block appears only when published audio exists (verified for
+  azure/AB-100).
 - **ElevenLabs no longer reads Listen & Learn, and the Listen & Learn pin no
   longer governs the podcast: speech providers are chosen per product (#436,
   #432).** Owner rule 2026-09-09: ElevenLabs is only the podcast voice —

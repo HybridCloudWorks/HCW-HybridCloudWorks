@@ -17,6 +17,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { App, AppProviders } from '@/App';
 import { VALID_PROVIDERS } from '@/context/ProviderContext';
 import { PrerenderDataContext } from '@/hooks/prerenderData';
+import { certifications as azureCertifications } from '@/data/azure/certifications';
 
 /**
  * Sections that exist under every provider, as declared by App.jsx's
@@ -92,6 +93,17 @@ const STANDALONE_ROUTES = [
   '/templates/rosetta-stone',
 ];
 
+/**
+ * Azure certification detail pages, one per entry of the shared catalogue
+ * (`/azure/education/:certSlug`). These come from a repository file rather
+ * than the manifest, so they pre-render on every build with no seed: the page
+ * renders its certification from the import, and the Listen & Learn block —
+ * the only fetched part — renders nothing without data, which is also what
+ * the browser shows until the episodes arrive. Before 2026-09-09 these URLs
+ * served the 3 kB SPA shell (#461 item 2).
+ */
+const AZURE_CERT_ROUTES = azureCertifications.map((cert) => `/azure/education/${cert.slug}`);
+
 export function routes(manifest = null) {
   return [
     '/',
@@ -102,6 +114,7 @@ export function routes(manifest = null) {
       ...PROVIDER_SECTIONS.map((section) => `/${provider}/${section}`),
     ]),
     ...STANDALONE_ROUTES,
+    ...AZURE_CERT_ROUTES,
     ...(manifest?.routes || []),
   ];
 }
