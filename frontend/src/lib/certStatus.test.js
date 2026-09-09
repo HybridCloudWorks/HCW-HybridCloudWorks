@@ -4,6 +4,7 @@ import { hydrateRoot } from 'react-dom/client';
 import { act, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CERT_DATE_FIELDS,
   CERT_STATUSES,
   daysUntil,
   deriveStatus,
@@ -355,6 +356,31 @@ describe('findStaleStatuses', () => {
       "Z: unknown status 'sunset'",
       "W: gaDate '2027-02-30' is not YYYY-MM-DD",
     ]);
+  });
+
+  it('validates every field in CERT_DATE_FIELDS, registrationOpens included', () => {
+    // The list is the contract: a malformed value in any listed field is
+    // reported, and the list names every dated field the catalogues use.
+    expect(CERT_DATE_FIELDS).toContain('registrationOpens');
+    for (const field of CERT_DATE_FIELDS) {
+      const row = { code: 'R', status: 'active', [field]: 'Oct 27 2026' };
+      expect(findStaleStatuses([row], TODAY)).toEqual([
+        `R: ${field} 'Oct 27 2026' is not YYYY-MM-DD`,
+      ]);
+    }
+    expect(
+      findStaleStatuses(
+        [
+          {
+            code: 'SAP-C03',
+            status: 'upcoming',
+            availableDate: '2026-11-17',
+            registrationOpens: '2026-10-27',
+          },
+        ],
+        TODAY
+      )
+    ).toEqual([]);
   });
 
   it('returns nothing for a consistent list', () => {

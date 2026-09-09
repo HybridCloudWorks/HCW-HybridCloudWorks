@@ -232,14 +232,21 @@ export function describeCertStatus(cert, today = todayIso()) {
   }
 }
 
-const DATE_FIELDS = [
+/**
+ * Every field on a catalogue row that holds a `YYYY-MM-DD`. This is the one
+ * list: `findStaleStatuses` validates each of them, and the catalogue tests
+ * import it so a field added to the data cannot be missed by the check —
+ * `registrationOpens` (the AWS upcoming rows) was, once (#465 review).
+ */
+export const CERT_DATE_FIELDS = Object.freeze([
   'expiryDate',
   'betaEndDate',
   'betaStartDate',
   'gaDate',
   'availableDate',
+  'registrationOpens',
   'retiredDate',
-];
+]);
 
 /**
  * The stored statuses that contradict their own dates on `today` — the check
@@ -269,7 +276,7 @@ export function findStaleStatuses(entries, today = todayIso()) {
 /** Fields that are present but not a calendar day, and a dateless `expiring`. */
 function shapeProblems(entry, label) {
   const problems = [];
-  for (const field of DATE_FIELDS) {
+  for (const field of CERT_DATE_FIELDS) {
     const value = entry[field];
     if (value !== undefined && value !== null && !isIsoDate(value)) {
       problems.push(`${label}: ${field} '${value}' is not YYYY-MM-DD`);

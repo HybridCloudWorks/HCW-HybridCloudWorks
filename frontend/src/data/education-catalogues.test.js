@@ -24,7 +24,7 @@
  * (#464); both run through the one `findStaleStatuses` in `@/lib/certStatus`.
  */
 import { describe, it, expect } from 'vitest';
-import { findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
+import { CERT_DATE_FIELDS, findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
 import * as aws from '@/data/aws/certifications';
 import * as gcp from '@/data/gcp/certifications';
 import * as github from '@/data/github/certifications';
@@ -49,6 +49,25 @@ describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provide
       stale,
       `${provider}: re-verify these rows against ${DATA_SOURCE?.url} and update the catalogue`
     ).toEqual([]);
+  });
+
+  it('keeps every dated field as YYYY-MM-DD, and uses no dated field the shared list does not know', () => {
+    // Both directions of the contract with `findStaleStatuses`: every value
+    // in a listed field is a calendar day, and no row carries a *Date field
+    // outside CERT_DATE_FIELDS — a new field would otherwise skip the check.
+    for (const cert of certifications) {
+      for (const field of CERT_DATE_FIELDS) {
+        if (cert[field] !== undefined && cert[field] !== null) {
+          expect(isIsoDate(cert[field]), `${provider} ${cert.code} ${field}`).toBe(true);
+        }
+      }
+      const unlisted = Object.keys(cert).filter(
+        (key) => /(Date|Opens)$/.test(key) && !CERT_DATE_FIELDS.includes(key)
+      );
+      expect(unlisted, `${provider} ${cert.code} has dated fields not in CERT_DATE_FIELDS`).toEqual(
+        []
+      );
+    }
   });
 
   it('has unique codes and slugs, and a learn URL on every row', () => {
