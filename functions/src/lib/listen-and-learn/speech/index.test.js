@@ -368,6 +368,44 @@ describe('estimateSpeechCostUsd', () => {
     expect(estimate.estimatedCostUsd).toBeLessThan(0.3);
   });
 
+  it('measures Gemini in bytes, so a non-ASCII script is never priced below its ASCII twin', () => {
+    // The speaking rate borrowed from azure.js is UTF-8 bytes per second;
+    // dividing a character count by it under-estimated every non-ASCII
+    // script (Copilot review on #447). Same code-point length, more bytes.
+    const ascii = [{ speaker: 'Maya', text: 'a'.repeat(1300) }];
+    const accented = [{ speaker: 'Maya', text: 'é'.repeat(1300) }]; // 2 bytes each
+    const cjk = [{ speaker: 'Maya', text: '語'.repeat(1300) }]; // 3 bytes each
+
+    const asciiCost = estimateSpeechCostUsd({ dialogue: ascii, env: GEMINI }).estimatedCostUsd;
+    const accentedCost = estimateSpeechCostUsd({ dialogue: accented, env: GEMINI }).estimatedCostUsd;
+    const cjkCost = estimateSpeechCostUsd({ dialogue: cjk, env: GEMINI }).estimatedCostUsd;
+
+    expect(asciiCost).toBeGreaterThan(0);
+    expect(accentedCost).toBeCloseTo(asciiCost * 2, 6);
+    expect(cjkCost).toBeCloseTo(asciiCost * 3, 6);
+    // The billed unit for ElevenLabs is still characters, unchanged by width.
+    expect(estimateSpeechCostUsd({ dialogue: cjk, env: ELEVEN }).characters).toBe(1300);
+    expect(estimateSpeechCostUsd({ dialogue: cjk, env: ELEVEN }).estimatedCostUsd).toBe(
+      estimateSpeechCostUsd({ dialogue: ascii, env: ELEVEN }).estimatedCostUsd
+    );
+  });
+
+  it('treats a bare ceiling as bytes, so it never sits below any script that fits under it', () => {
+    // The enqueue path passes MAX_SCRIPT_BYTES with no dialogue. A 9,000-byte
+    // script of three-byte characters is the widest that fits.
+    const widest = [{ speaker: 'Maya', text: '語'.repeat(3000) }];
+    for (const env of [GEMINI, ELEVEN]) {
+      const ceiling = estimateSpeechCostUsd({ characters: 9000, env }).estimatedCostUsd;
+      const actual = estimateSpeechCostUsd({ dialogue: widest, env }).estimatedCostUsd;
+      expect(ceiling).toBeGreaterThanOrEqual(actual);
+    }
+    // And a plain ASCII script under the ceiling is priced strictly below it.
+    const plain = [{ speaker: 'Maya', text: 'a'.repeat(8000) }];
+    expect(estimateSpeechCostUsd({ characters: 9000, env: GEMINI }).estimatedCostUsd).toBeGreaterThan(
+      estimateSpeechCostUsd({ dialogue: plain, env: GEMINI }).estimatedCostUsd
+    );
+  });
+
   it('is honest that Azure Speech is not priced', () => {
     expect(estimateSpeechCostUsd({ characters: 9000, env: AZURE })).toEqual({
       provider: 'azure',

@@ -232,11 +232,18 @@ function modelFor(providerName, env) {
  *
  * Pass `dialogue` when there is one, or `characters` when there is not yet —
  * the enqueue handler estimates against the script's byte ceiling before any
- * script exists.
+ * script exists. Two units are in play and they are kept apart: ElevenLabs
+ * bills CHARACTERS (code points), while the speaking-rate constant borrowed
+ * from azure.js is UTF-8 BYTES per second. A dialogue is therefore measured
+ * both ways, and a bare `characters` ceiling is treated as BYTES — a byte
+ * count is never fewer than a character count, so the ceiling over-estimates
+ * for both providers, which is the direction a figure shown before spending
+ * must err in. Dividing characters by a bytes-per-second rate would have
+ * under-estimated any non-ASCII script.
  *
  * @param {object} params
  * @param {{speaker: string, text: string}[]} [params.dialogue]
- * @param {number} [params.characters]
+ * @param {number} [params.characters] a ceiling in UTF-8 bytes (see above)
  * @param {object} [params.env]
  * @returns {{provider: string, model: string|null, characters: number, estimatedCostUsd: number|null}|null}
  *   null when no provider is configured (or the pin is unusable).
@@ -253,22 +260,29 @@ export function estimateSpeechCostUsd({ dialogue = null, characters = null, env 
 
   // `Number(null)` is 0, so the null check comes first or a dialogue is
   // never counted.
-  const count =
-    characters !== null && characters !== undefined && Number.isFinite(Number(characters))
-      ? Math.max(0, Math.round(Number(characters)))
-      : dialogueCharacters(dialogue || []);
+  const hasCeiling =
+    characters !== null && characters !== undefined && Number.isFinite(Number(characters));
+  const ceiling = hasCeiling ? Math.max(0, Math.round(Number(characters))) : null;
+  const turns = dialogue || [];
+  const count = hasCeiling ? ceiling : dialogueCharacters(turns);
+  const bytes = hasCeiling ? ceiling : dialogueBytes(turns);
   const model = modelFor(provider.name, env);
 
   let estimatedCostUsd = null;
   if (provider.name === 'elevenlabs') {
     estimatedCostUsd = getCostEstimate('elevenlabs', model, 0, count);
   } else if (provider.name === 'gemini') {
-    const seconds = count / SPEECH_LIMITS.BYTES_PER_SECOND;
+    const seconds = bytes / SPEECH_LIMITS.BYTES_PER_SECOND;
     const audioTokens = Math.round(seconds * GEMINI_AUDIO_TOKENS_PER_SECOND);
     estimatedCostUsd = getCostEstimate('gemini', model, 0, audioTokens);
   }
 
   return { provider: provider.name, model, characters: count, estimatedCostUsd };
+}
+
+/** UTF-8 bytes of every turn's text — the unit azure.js's speaking rate is in. */
+function dialogueBytes(turns) {
+  return turns.reduce((total, turn) => total + Buffer.byteLength(String(turn?.text ?? ''), 'utf8'), 0);
 }
 
 /** Exposed so the admin surface can say which voices an episode was read in. */
