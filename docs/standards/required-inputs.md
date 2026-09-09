@@ -213,8 +213,7 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The twenty-three names below (as of `main` at #442; #447 adds
-one more when it merges) are what the Terraform root module
+correct posture. The twenty-four names below are what the Terraform root module
 in `infra/` references — the app-settings map that holds them is in
 `infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
 every `.tf` file in that directory as one module rather than any one file, so a
