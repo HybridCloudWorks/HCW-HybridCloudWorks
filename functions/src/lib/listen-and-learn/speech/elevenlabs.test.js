@@ -346,6 +346,36 @@ describe('usage and cost', () => {
     expect(result.estimatedTokens).toBe(true);
   });
 
+  it('counts what was actually posted in the fallback, not the untrimmed dialogue', async () => {
+    // The chunker trims each turn before sending; a billing row that counted
+    // the dialogue as handed in would over-count by the whitespace (Copilot
+    // on #447). 'Hello there' (11) + 'Hi back' (7) = 18, not 18 + padding.
+    const padded = [turn('Maya', '   Hello there \n'), turn('Elena', '\tHi back   ')];
+
+    const noHeader = vi.fn(async () => okResponse());
+    const viaCount = await synthesizeWithElevenLabs({
+      dialogue: padded,
+      env: KEYED_ENV,
+      fetchImpl: noHeader,
+      sleep: noSleep,
+    });
+    const posted = noHeader.mock.calls.flatMap(([, init]) => JSON.parse(init.body).inputs);
+    expect(posted.map((i) => i.text)).toEqual(['Hello there', 'Hi back']);
+    expect(viaCount.completionTokens).toBe(18);
+    expect(viaCount.estimatedTokens).toBe(true);
+
+    // The header still wins whenever it is present.
+    const withHeader = vi.fn(async () => okResponse([1], { characterCost: 21 }));
+    const viaHeader = await synthesizeWithElevenLabs({
+      dialogue: padded,
+      env: KEYED_ENV,
+      fetchImpl: withHeader,
+      sleep: noSleep,
+    });
+    expect(viaHeader.completionTokens).toBe(21);
+    expect(viaHeader.estimatedTokens).toBe(false);
+  });
+
   it('is priced by the cost table at USD 0.10 per 1,000 characters', () => {
     // The row the usage writer prices with; a 9,000-character episode is 90 cents.
     expect(COST_TABLE.elevenlabs[ELEVENLABS_DEFAULT_MODEL]).toEqual([0, 100.0]);

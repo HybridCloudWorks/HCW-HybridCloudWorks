@@ -384,7 +384,11 @@ export async function synthesizeWithElevenLabs({
   }
 
   const audio = Buffer.concat(parts);
-  const sent = dialogueCharacters(turns);
+  // Counted over the inputs actually posted — after the chunker trimmed and
+  // split them — not over the dialogue as handed in. This is a billing row:
+  // when the API's own count is absent, ours must be what was sent, and a
+  // turn's surrounding whitespace was not.
+  const sent = chunks.flat().reduce((total, input) => total + characterCount(input.text), 0);
 
   return {
     audio,
