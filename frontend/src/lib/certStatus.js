@@ -24,9 +24,25 @@
  */
 import { useSyncExternalStore } from 'react';
 
-export const CERT_STATUSES = Object.freeze(['active', 'beta', 'expiring', 'retired']);
+// `upcoming` is a version a vendor has announced but nobody can sit yet (AWS
+// SAP-C03 before 2026-11-17); it becomes `active` on its `availableDate`.
+export const CERT_STATUSES = Object.freeze(['active', 'beta', 'upcoming', 'expiring', 'retired']);
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * True for a `YYYY-MM-DD` string that names a real calendar day — the check
+ * the catalogue tests run on `DATA_AS_OF` and on every dated field, so a
+ * typo like `2026-02-30` is a red build rather than a date that never comes.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isIsoDate(value) {
+  if (typeof value !== 'string' || !ISO_DATE.test(value)) return false;
+  const ms = utcDay(value);
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value;
+}
 
 /**
  * Today as `YYYY-MM-DD` in the viewer's local calendar. For code that runs
@@ -124,13 +140,14 @@ export function formatIsoDate(iso) {
  *   1. `expiryDate` before today → `retired`, whatever the stored status says.
  *   2. Stored `beta` whose `betaEndDate` is before today, or whose `gaDate` is
  *      today or earlier → `active`.
- *   3. Stored `active` with an `expiryDate` still ahead → `expiring`, because
+ *   3. Stored `upcoming` whose `availableDate` is today or earlier → `active`.
+ *   4. Stored `active` with an `expiryDate` still ahead → `expiring`, because
  *      a published retirement date is what "expiring" means.
- *   4. Otherwise the stored status (`active` when absent).
+ *   5. Otherwise the stored status (`active` when absent).
  *
- * @param {{status?: string, expiryDate?: string, betaEndDate?: string, gaDate?: string}} cert
+ * @param {{status?: string, expiryDate?: string, betaEndDate?: string, gaDate?: string, availableDate?: string}} cert
  * @param {string} [today] `YYYY-MM-DD`; defaults to the local date
- * @returns {'active'|'beta'|'expiring'|'retired'}
+ * @returns {'active'|'beta'|'upcoming'|'expiring'|'retired'}
  */
 export function deriveStatus(cert, today = todayIso()) {
   const stored = CERT_STATUSES.includes(cert?.status) ? cert.status : 'active';
@@ -146,6 +163,14 @@ export function deriveStatus(cert, today = todayIso()) {
     return 'beta';
   }
 
+  if (stored === 'upcoming') {
+    const available =
+      typeof cert.availableDate === 'string' &&
+      ISO_DATE.test(cert.availableDate) &&
+      cert.availableDate <= today;
+    return available ? 'active' : 'upcoming';
+  }
+
   if (
     stored === 'active' &&
     typeof cert.expiryDate === 'string' &&
@@ -158,9 +183,71 @@ export function deriveStatus(cert, today = todayIso()) {
 }
 
 /**
+ * What a status badge should say for a row on `today`.
+ *
+ * `label` is the short word on the badge and `detail` the date phrase beside
+ * it; both are `null` for an active exam so a caller can render nothing.
+ * Dates are printed with `formatIsoDate`, never a local `new Date(iso)`.
+ *
+ * @param {object} cert
+ * @param {string} [today] `YYYY-MM-DD`; defaults to the local date
+ * @returns {{status: string, label: string|null, detail: string|null}}
+ */
+export function describeCertStatus(cert, today = todayIso()) {
+  const status = deriveStatus(cert, today);
+  const replacedBy = cert?.replacement?.code ? ` · replaced by ${cert.replacement.code}` : '';
+
+  switch (status) {
+    case 'expiring':
+      return {
+        status,
+        label: 'Retiring',
+        detail: `last day to test ${formatIsoDate(cert.expiryDate)}${replacedBy}`,
+      };
+    case 'retired': {
+      const on = cert.retiredDate ?? cert.expiryDate;
+      const detail = `${isIsoDate(on) ? formatIsoDate(on) : ''}${replacedBy}`.replace(/^ · /, '');
+      return { status, label: 'Retired', detail: detail || null };
+    }
+    case 'beta': {
+      if (isIsoDate(cert.betaStartDate) && cert.betaStartDate > today) {
+        return { status, label: 'Beta', detail: `from ${formatIsoDate(cert.betaStartDate)}` };
+      }
+      return {
+        status,
+        label: 'Beta',
+        detail: isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null,
+      };
+    }
+    case 'upcoming':
+      return {
+        status,
+        label: 'Coming',
+        detail: isIsoDate(cert.availableDate)
+          ? `available ${formatIsoDate(cert.availableDate)}`
+          : null,
+      };
+    default:
+      return { status, label: null, detail: null };
+  }
+}
+
+const DATE_FIELDS = [
+  'expiryDate',
+  'betaEndDate',
+  'betaStartDate',
+  'gaDate',
+  'availableDate',
+  'retiredDate',
+];
+
+/**
  * The stored statuses that contradict their own dates on `today` — the check
  * the data test runs so the next drift is a red build rather than a stale
  * page. Returns one line per offender, empty when the file is consistent.
+ * Also names a status outside `CERT_STATUSES`, a dated field that is not
+ * `YYYY-MM-DD`, and an `expiring` row with no `expiryDate`, since each of
+ * those is a claim `deriveStatus` cannot check.
  *
  * @param {Array<{code?: string, id?: string}>} entries
  * @param {string} today
@@ -170,23 +257,62 @@ export function findStaleStatuses(entries, today = todayIso()) {
   const problems = [];
   for (const entry of entries || []) {
     const label = entry.code || entry.id || entry.slug || '(unnamed)';
-    if (entry.status === 'expiring' && isPastDate(entry.expiryDate, today)) {
-      problems.push(`${label}: status 'expiring' but expiryDate ${entry.expiryDate} has passed`);
+    if (entry.status !== undefined && !CERT_STATUSES.includes(entry.status)) {
+      problems.push(`${label}: unknown status '${entry.status}'`);
+      continue;
     }
-    if (entry.status === 'active' && isPastDate(entry.expiryDate, today)) {
-      problems.push(`${label}: status 'active' but expiryDate ${entry.expiryDate} has passed`);
+    problems.push(...shapeProblems(entry, label), ...dateProblems(entry, label, today));
+  }
+  return problems;
+}
+
+/** Fields that are present but not a calendar day, and a dateless `expiring`. */
+function shapeProblems(entry, label) {
+  const problems = [];
+  for (const field of DATE_FIELDS) {
+    const value = entry[field];
+    if (value !== undefined && value !== null && !isIsoDate(value)) {
+      problems.push(`${label}: ${field} '${value}' is not YYYY-MM-DD`);
     }
-    if (entry.status === 'beta') {
+  }
+  if (
+    entry.status === 'expiring' &&
+    (entry.expiryDate === undefined || entry.expiryDate === null)
+  ) {
+    problems.push(`${label}: status 'expiring' but no expiryDate`);
+  }
+  return problems;
+}
+
+/** A stored status that `today` has already moved past. */
+function dateProblems(entry, label, today) {
+  const problems = [];
+  const reached = (iso) => isIsoDate(iso) && iso <= today;
+  switch (entry.status) {
+    case 'expiring':
+    case 'active':
+      if (isPastDate(entry.expiryDate, today)) {
+        problems.push(
+          `${label}: status '${entry.status}' but expiryDate ${entry.expiryDate} has passed`
+        );
+      }
+      break;
+    case 'beta':
       if (isPastDate(entry.betaEndDate, today)) {
         problems.push(`${label}: status 'beta' but betaEndDate ${entry.betaEndDate} has passed`);
-      } else if (
-        typeof entry.gaDate === 'string' &&
-        ISO_DATE.test(entry.gaDate) &&
-        entry.gaDate <= today
-      ) {
+      } else if (reached(entry.gaDate)) {
         problems.push(`${label}: status 'beta' but gaDate ${entry.gaDate} has been reached`);
       }
-    }
+      break;
+    case 'upcoming':
+      if (reached(entry.availableDate)) {
+        problems.push(
+          `${label}: status 'upcoming' but availableDate ${entry.availableDate} has been reached`
+        );
+      }
+      break;
+    default:
+      break;
   }
   return problems;
 }

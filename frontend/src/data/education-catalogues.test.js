@@ -20,11 +20,11 @@
  * Deliberately uses the real clock. A frozen date would make the assertion
  * vacuous — the point is that the repository notices when the world moves.
  *
- * Azure's catalogue is checked by its own agent's test and is not imported
- * here; the coordinator unifies the two helpers afterwards.
+ * Azure's catalogue has the same check in `azure/certifications.test.js`
+ * (#464); both run through the one `findStaleStatuses` in `@/lib/certStatus`.
  */
 import { describe, it, expect } from 'vitest';
-import { findStaleRows, isIsoDate, todayIso } from '@/lib/certStatus';
+import { findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
 import * as aws from '@/data/aws/certifications';
 import * as gcp from '@/data/gcp/certifications';
 import * as github from '@/data/github/certifications';
@@ -44,7 +44,7 @@ describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provide
   });
 
   it('has no row whose stored status its dates have already overtaken', () => {
-    const stale = findStaleRows(certifications);
+    const stale = findStaleStatuses(certifications, todayIso());
     expect(
       stale,
       `${provider}: re-verify these rows against ${DATA_SOURCE?.url} and update the catalogue`

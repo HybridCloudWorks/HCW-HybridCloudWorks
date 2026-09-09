@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
 import CertStatusBadge from '@/components/education/CertStatusBadge';
 import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/aws/certifications';
+import { useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -173,6 +174,7 @@ export default function AWSEducationPage() {
 
   const [carouselPage, setCarouselPage] = useState(0);
   const [selectedPathId, setSelectedPathId] = useState(0);
+  const today = useToday(DATA_AS_OF);
 
   const featuredCert = certifications.find((c) => c.featured);
 
@@ -316,7 +318,7 @@ export default function AWSEducationPage() {
                       >
                         {featuredCert.level}
                       </span>
-                      <CertStatusBadge cert={featuredCert} />
+                      <CertStatusBadge cert={featuredCert} today={today} />
                     </div>
                     <h2 className="text-2xl font-bold text-white mb-1">{featuredCert.title}</h2>
                     <div className="text-sm font-mono text-foreground/50 mb-2">
@@ -462,7 +464,7 @@ export default function AWSEducationPage() {
                       </span>
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
-                    <CertStatusBadge cert={cert} className="self-start mb-2" />
+                    <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-amber-300 transition-colors flex-1">
                       {cert.title}

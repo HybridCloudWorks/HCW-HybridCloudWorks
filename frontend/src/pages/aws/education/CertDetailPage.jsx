@@ -3,7 +3,12 @@ import { useParams, Link } from 'react-router';
 import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import CertStatusBadge from '@/components/education/CertStatusBadge';
-import { certifications as ALL_CERTS, findCertificationBySlug } from '@/data/aws/certifications';
+import {
+  DATA_AS_OF,
+  certifications as ALL_CERTS,
+  findCertificationBySlug,
+} from '@/data/aws/certifications';
+import { useToday } from '@/lib/certStatus';
 
 // ── Shared data ──────────────────────────────────────────────────────────────
 
@@ -44,6 +49,7 @@ const LEVEL_META = {
 
 export default function AWSCertDetailPage() {
   const { certSlug } = useParams();
+  const today = useToday(DATA_AS_OF);
   const cert = findCertificationBySlug(certSlug);
 
   if (!cert) {
@@ -108,7 +114,7 @@ export default function AWSCertDetailPage() {
                 {cert.level}
               </span>
               <span className="text-sm font-mono text-foreground/60">{cert.code}</span>
-              <CertStatusBadge cert={cert} />
+              <CertStatusBadge cert={cert} today={today} />
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">{cert.title}</h1>
             <p className="text-foreground text-lg max-w-3xl mb-6">{cert.longDescription}</p>

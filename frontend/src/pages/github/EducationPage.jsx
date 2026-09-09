@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
 import CertStatusBadge from '@/components/education/CertStatusBadge';
 import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/github/certifications';
-import { deriveCertStatus } from '@/lib/certStatus';
+import { deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -159,12 +159,14 @@ export default function GitHubEducationPage() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [carouselPage, setCarouselPage] = useState(0);
   const [selectedPathId, setSelectedPathId] = useState(0);
+  const today = useToday(DATA_AS_OF);
 
   const featuredCert = certifications.find((c) => c.featured);
 
   const filteredCerts = certifications.filter((c) => {
     const levelOk = levelFilter === 'All' || c.level === levelFilter;
-    const statusOk = statusFilter === 'All' || deriveCertStatus(c) === statusFilter.toLowerCase();
+    const statusOk =
+      statusFilter === 'All' || deriveStatus(c, today) === statusFilter.toLowerCase();
     return levelOk && statusOk;
   });
 
@@ -357,7 +359,7 @@ export default function GitHubEducationPage() {
                       </span>
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
-                    <CertStatusBadge cert={cert} className="self-start mb-2" />
+                    <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-slate-300 transition-colors flex-1">
                       {cert.title}

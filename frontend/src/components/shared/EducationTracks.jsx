@@ -12,6 +12,7 @@
 import React, { useMemo, useState } from 'react';
 import CertStatusBadge from '@/components/education/CertStatusBadge';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import { useToday } from '@/lib/certStatus';
 
 function LevelBadge({ level, levelMeta }) {
   const meta = levelMeta?.[level];
@@ -36,6 +37,9 @@ export default function EducationTracks({
   dataSource,
 }) {
   const [level, setLevel] = useState('All');
+  // "Today" for the status badges: the catalogue's own date while
+  // pre-rendering and hydrating, the viewer's date after (see certStatus.js).
+  const today = useToday(dataAsOf);
   const visible = useMemo(
     () => (level === 'All' ? certifications : certifications.filter((c) => c.level === level)),
     [certifications, level]
@@ -87,7 +91,7 @@ export default function EducationTracks({
                 </span>
                 <LevelBadge level={cert.level} levelMeta={levelMeta} />
               </div>
-              <CertStatusBadge cert={cert} className="self-start" />
+              <CertStatusBadge cert={cert} today={today} className="self-start" />
               <h3 className="text-sm font-bold text-foreground leading-snug">{cert.title}</h3>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                 {cert.description}

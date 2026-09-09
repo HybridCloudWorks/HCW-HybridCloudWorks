@@ -9,7 +9,7 @@
  * component only renders the line and does not detect or remove them.
  */
 import React from 'react';
-import { formatCertDate } from '@/lib/certStatus';
+import { formatIsoDate } from '@/lib/certStatus';
 
 export default function CatalogueFreshness({ asOf, source, className = '' }) {
   if (!asOf) return null;
@@ -28,7 +28,7 @@ export default function CatalogueFreshness({ asOf, source, className = '' }) {
       ) : (
         (source?.label ?? 'the vendor')
       )}{' '}
-      on <time dateTime={asOf}>{formatCertDate(asOf)}</time>.
+      on <time dateTime={asOf}>{formatIsoDate(asOf)}</time>.
     </p>
   );
 }
