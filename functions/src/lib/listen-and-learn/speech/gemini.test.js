@@ -23,6 +23,13 @@ import {
   speakersIn,
   synthesizeWithGemini,
 } from './gemini.js';
+import { encodePcmToMp3 } from './mp3.js';
+
+// The real encoder, made spy-able so one test can make it throw.
+vi.mock('./mp3.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, encodePcmToMp3: vi.fn(actual.encodePcmToMp3) };
+});
 
 const KEYED_ENV = { GEMINI_API_KEY: 'g-key' };
 
@@ -309,6 +316,26 @@ describe('the response', () => {
     expect(() => parseWav(bytes)).toThrow(/24-bit; only 16-bit PCM/);
   });
 
+  it('refuses a WAV whose fmt chunk is shorter than a format', () => {
+    // The chunk declares its size; honouring it stops a short one being read
+    // into the chunk after it and passed off as a sample rate.
+    const bytes = wav(new Int16Array(10));
+    bytes.writeUInt32LE(12, 16); // fmt chunk size
+    expect(() => parseWav(bytes)).toThrow(/malformed WAV: fmt chunk too short/);
+  });
+
+  it('fails fast on data that is not base64, which decodes to nothing', () => {
+    // Buffer.from skips non-base64 characters instead of throwing, so a
+    // truthy `data` can still yield zero bytes.
+    const payload = interaction([audioBlock({ data: '!!!!' })]);
+    expect(() => extractAudio(payload)).toThrow(/empty or not valid base64/);
+  });
+
+  it('fails fast on an odd byte count, which is not whole 16-bit samples', () => {
+    const payload = interaction([audioBlock({ data: Buffer.from([1, 2, 3]).toString('base64') })]);
+    expect(() => extractAudio(payload)).toThrow(/3 bytes is not a whole number of 16-bit samples/);
+  });
+
   it('joins several audio blocks in the order they arrived', () => {
     const first = audioBlock({ data: pcmBase64(100, 1) });
     const second = audioBlock({ data: pcmBase64(100, 2) });
@@ -500,6 +527,23 @@ describe('failures', () => {
       synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: async () => {} })
     ).rejects.toThrow(/Gemini TTS HTTP 503/);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports an encoder failure as a speech error, not a plain Error', async () => {
+    // The episode card and the provider selector key on SpeechError; a bare
+    // Error from the encoder would read as a bug in the pipeline, not a
+    // provider failure.
+    encodePcmToMp3.mockImplementationOnce(() => {
+      throw new Error('encoder exploded');
+    });
+    const fetchImpl = vi.fn(async () => audioResponse());
+    const err = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl }).catch(
+      (e) => e
+    );
+
+    expect(err.name).toBe('SpeechError');
+    expect(err.provider).toBe('gemini');
+    expect(err.message).toMatch(/Could not encode the Gemini audio to MP3: encoder exploded/);
   });
 
   it('tags its errors so the selector and the caller can tell them apart', async () => {

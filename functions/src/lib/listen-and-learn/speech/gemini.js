@@ -273,7 +273,12 @@ export function parseWav(bytes) {
     const id = bytes.toString('latin1', offset, offset + 4);
     const size = bytes.readUInt32LE(offset + 4);
     const body = offset + 8;
-    if (id === 'fmt ' && body + 16 <= bytes.length) {
+    if (id === 'fmt ') {
+      // The chunk declares its own size; a short one must not be read into
+      // the chunk after it and passed off as a sample rate.
+      if (size < 16 || body + 16 > bytes.length) {
+        throw new GeminiSpeechError('malformed WAV: fmt chunk too short');
+      }
       format = {
         codec: bytes.readUInt16LE(body),
         channels: bytes.readUInt16LE(body + 2),
@@ -297,15 +302,43 @@ export function parseWav(bytes) {
   throw new GeminiSpeechError('WAV audio has no data chunk');
 }
 
+/**
+ * 16-bit PCM is whole samples or it is not audio. An odd length is a truncated
+ * download or a format that is not what was assumed; encoding it anyway
+ * produces noise at the end rather than an error, so it is refused here, as a
+ * speech error, before the encoder sees it.
+ */
+function assertPcm16(pcm, where) {
+  if (!Buffer.isBuffer(pcm) || pcm.length === 0) {
+    throw new GeminiSpeechError(`${where}: no PCM samples`);
+  }
+  if (pcm.length % 2 !== 0) {
+    throw new GeminiSpeechError(
+      `${where}: ${pcm.length} bytes is not a whole number of 16-bit samples`
+    );
+  }
+}
+
 /** One audio block → headerless PCM plus what the block or its header said about it. */
 function decodeBlock(block) {
   const bytes = Buffer.from(String(block.data), 'base64');
+  if (bytes.length === 0) {
+    // Buffer.from skips characters that are not base64 instead of throwing,
+    // so a block whose `data` is present but not base64 decodes to nothing.
+    throw new GeminiSpeechError(
+      'Gemini returned an audio block whose data is empty or not valid base64'
+    );
+  }
   const [mime, ...params] = String(block.mime_type || '')
     .toLowerCase()
     .split(';')
     .map((part) => part.trim());
 
-  if (isRiffWave(bytes) || WAV_MIMES.has(mime)) return parseWav(bytes);
+  if (isRiffWave(bytes) || WAV_MIMES.has(mime)) {
+    const parsed = parseWav(bytes);
+    assertPcm16(parsed.pcm, 'Gemini WAV audio');
+    return parsed;
+  }
 
   if (mime && !RAW_PCM_MIMES.has(mime)) {
     throw new GeminiSpeechError(
@@ -321,6 +354,7 @@ function decodeBlock(block) {
     (rateParam ? Number(rateParam.slice('rate='.length)) : 0) ||
     PCM_SAMPLE_RATE;
   const channels = Number(block.channels) || 1;
+  assertPcm16(bytes, 'Gemini audio block');
   return { pcm: bytes, sampleRate, channels };
 }
 
@@ -472,8 +506,19 @@ export async function synthesizeWithGemini({
 
   const pcm = downmixToMono(found.pcm, found.channels);
   const { sampleRate } = found;
-  const audio = encodePcmToMp3(pcm, { sampleRate });
-  const seconds = pcmDurationSeconds(pcm, sampleRate);
+  assertPcm16(pcm, 'Gemini audio');
+
+  // The encoder throws a plain Error. The episode card and the provider
+  // selector key on SpeechError, so it is rewrapped as one; its messages are
+  // byte counts, never content.
+  let audio;
+  let seconds;
+  try {
+    audio = encodePcmToMp3(pcm, { sampleRate });
+    seconds = pcmDurationSeconds(pcm, sampleRate);
+  } catch (err) {
+    throw new GeminiSpeechError(`Could not encode the Gemini audio to MP3: ${err.message}`);
+  }
 
   return {
     audio,
