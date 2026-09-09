@@ -141,14 +141,30 @@ describe('speechEstimateForRun', () => {
     expect(speechEstimateForRun(valid({ areas }), ELEVEN).episodes).toBe(MAX_AREAS_PER_RUN);
   });
 
-  it('says there is no provider rather than pricing nothing at zero', () => {
+  it('says there is no provider rather than pricing nothing at zero, and why', () => {
     expect(speechEstimateForRun(valid(), {})).toEqual({
       provider: null,
       model: null,
       episodes: MAX_AREAS_PER_RUN,
       perEpisodeUsd: null,
       estimatedCostUsd: null,
+      reason: 'not_configured',
     });
+  });
+
+  it('tells an unusable pin apart from nothing configured', () => {
+    // Both price as null; only one of them is the normal transcript-only
+    // state. The other is a setting to correct before the audio step fails.
+    const pinned = { GEMINI_API_KEY: 'g', LISTEN_AND_LEARN_TTS_PROVIDER: 'elevenlabs' };
+    expect(speechEstimateForRun(valid(), pinned)).toMatchObject({
+      provider: null,
+      reason: 'pin_unavailable',
+    });
+    const unknown = { GEMINI_API_KEY: 'g', LISTEN_AND_LEARN_TTS_PROVIDER: 'polly' };
+    expect(speechEstimateForRun(valid(), unknown).reason).toBe('pin_unavailable');
+    // A usable pin carries no reason at all.
+    const usable = { GEMINI_API_KEY: 'g', LISTEN_AND_LEARN_TTS_PROVIDER: 'gemini' };
+    expect(speechEstimateForRun(valid(), usable)).not.toHaveProperty('reason');
   });
 
   it('follows the switch: Gemini when the ElevenLabs key is absent', () => {

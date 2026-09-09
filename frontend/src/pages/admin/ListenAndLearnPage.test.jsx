@@ -42,8 +42,34 @@ describe('queuedMessage', () => {
   });
 
   it('says in words when there will be no audio, rather than showing a zero', () => {
+    expect(
+      queuedMessage({
+        provider: null,
+        reason: 'not_configured',
+        estimatedCostUsd: null,
+        episodes: 8,
+      })
+    ).toMatch(/no speech provider is configured.*transcripts only/);
+  });
+
+  it('distinguishes an unusable pin from nothing configured — they need different fixes', () => {
+    // The server returns provider: null for both; `reason` says which
+    // (Copilot on #447). A pin names the setting to correct.
+    expect(
+      queuedMessage({
+        provider: null,
+        reason: 'pin_unavailable',
+        estimatedCostUsd: null,
+        episodes: 8,
+      })
+    ).toMatch(
+      /pinned speech provider \(LISTEN_AND_LEARN_TTS_PROVIDER\) is not configured.*transcripts only/
+    );
+  });
+
+  it('covers both causes when an older server sends no reason', () => {
     expect(queuedMessage({ provider: null, estimatedCostUsd: null, episodes: 8 })).toMatch(
-      /no speech provider is configured.*transcripts only/
+      /no usable speech provider \(none configured, or the pinned one is not\).*transcripts only/
     );
   });
 

@@ -65,15 +65,22 @@ const PROVIDER_LABEL = { elevenlabs: 'ElevenLabs', gemini: 'Gemini', azure: 'Azu
  * starts (ADR 0029 §2a). It is a ceiling — every episode priced at
  * `MAX_SCRIPT_BYTES`, the most UTF-8 bytes a script may hold, which is never
  * fewer than its billed characters — so it reads "up to". No provider means the
- * run will publish transcripts with no audio, which is a normal state here
- * and is said in those words rather than shown as a zero.
+ * run will publish transcripts with no audio; the server says which of the two
+ * causes that is, because they call for different fixes — seeding a key, or
+ * correcting `LISTEN_AND_LEARN_TTS_PROVIDER` — and a 202 from an older server
+ * carries no reason, so the wording without one covers both.
  *
- * @param {{provider?: string|null, estimatedCostUsd?: number|null, episodes?: number, perEpisodeUsd?: number|null}|null|undefined} speech
+ * @param {{provider?: string|null, reason?: string|null, estimatedCostUsd?: number|null, episodes?: number, perEpisodeUsd?: number|null}|null|undefined} speech
  */
 export function queuedMessage(speech) {
   if (!speech) return 'Queued…';
-  if (!speech.provider)
-    return 'Queued — no speech provider is configured, so episodes will have transcripts only';
+  if (!speech.provider) {
+    if (speech.reason === 'pin_unavailable')
+      return 'Queued — the pinned speech provider (LISTEN_AND_LEARN_TTS_PROVIDER) is not configured, so the audio step will fail and episodes will have transcripts only';
+    if (speech.reason === 'not_configured')
+      return 'Queued — no speech provider is configured, so episodes will have transcripts only';
+    return 'Queued — no usable speech provider (none configured, or the pinned one is not), so episodes will have transcripts only';
+  }
   const name = PROVIDER_LABEL[speech.provider] || speech.provider;
   if (typeof speech.estimatedCostUsd !== 'number') return `Queued — speech by ${name}`;
   const perEpisode =

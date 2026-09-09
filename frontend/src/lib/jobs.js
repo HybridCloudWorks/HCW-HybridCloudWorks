@@ -100,6 +100,14 @@ export async function runJob(type, payload = {}, options = {}) {
   if (!accepted?.ok || !accepted.jobId) {
     throw new Error(accepted?.error || 'Job was not accepted');
   }
-  onAccepted?.(accepted);
+  // Best-effort bookkeeping: the job is accepted and running server-side by
+  // now, so a consumer that throws while rendering the 202 must not turn that
+  // into a rejected run — the page would report a failure for work that is
+  // happening. Same rule as the server's acceptedDetails hook.
+  try {
+    onAccepted?.(accepted);
+  } catch (error) {
+    console.warn('runJob: onAccepted threw', type, error?.message ?? error);
+  }
   return pollUntilTerminal(get, accepted.jobId, { onUpdate, signal, maxWaitMs, sleep, now });
 }

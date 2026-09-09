@@ -30,7 +30,10 @@ import { generateJsonResponse, getActiveAiProvider, getCostEstimate } from '../l
 import { registerJobType } from '../lib/jobs.js';
 import { generateEpisodes, isSupportedPlatform, SUPPORTED_PLATFORMS } from '../lib/listen-and-learn/generate.js';
 import { MAX_SCRIPT_BYTES } from '../lib/listen-and-learn/script.js';
-import { estimateSpeechCostUsd } from '../lib/listen-and-learn/speech/index.js';
+import {
+  estimateSpeechCostUsd,
+  resolveSpeechProvider,
+} from '../lib/listen-and-learn/speech/index.js';
 
 /**
  * Bound so a single run cannot spend an unbounded amount: the largest real
@@ -51,18 +54,29 @@ export const MAX_AREAS_PER_RUN = 8;
  * episode count is the areas requested or, when the guide has not been parsed
  * to know, the most a run may generate. The run cannot spend more than this
  * figure on speech; it usually spends less. `provider` is null when no speech
- * key is configured, which is the transcript-only state rather than an error.
+ * provider will run, and `reason` says why, because the two causes call for
+ * different actions: `not_configured` (no key at all — the transcript-only
+ * state, not an error) or `pin_unavailable` (`LISTEN_AND_LEARN_TTS_PROVIDER`
+ * names a provider that is not configured or not known — the run will still
+ * go ahead, and its audio step will fail with a sentence naming the pin).
  *
  * @param {object} payload the raw enqueue payload
  * @param {object} [env]
- * @returns {{provider: string|null, model: string|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null}}
+ * @returns {{provider: string|null, model: string|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
  */
 export function speechEstimateForRun(payload, env = process.env) {
   const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
   const episodes = areas > 0 ? Math.min(areas, MAX_AREAS_PER_RUN) : MAX_AREAS_PER_RUN;
   const perEpisode = estimateSpeechCostUsd({ ceilingBytes: MAX_SCRIPT_BYTES, env });
   if (!perEpisode) {
-    return { provider: null, model: null, episodes, perEpisodeUsd: null, estimatedCostUsd: null };
+    return {
+      provider: null,
+      model: null,
+      episodes,
+      perEpisodeUsd: null,
+      estimatedCostUsd: null,
+      reason: noProviderReason(env),
+    };
   }
   const perEpisodeUsd = perEpisode.estimatedCostUsd;
   return {
@@ -73,6 +87,20 @@ export function speechEstimateForRun(payload, env = process.env) {
     estimatedCostUsd:
       typeof perEpisodeUsd === 'number' ? parseFloat((perEpisodeUsd * episodes).toFixed(6)) : null,
   };
+}
+
+/**
+ * Why no speech provider will run: the switch returns null for "nothing is
+ * configured" and throws for "the pin is unusable", and only the first of
+ * those is the normal transcript-only state.
+ */
+function noProviderReason(env) {
+  try {
+    return resolveSpeechProvider(env) ? null : 'not_configured';
+  } catch (err) {
+    if (err?.name === 'SpeechNotConfiguredError') return 'pin_unavailable';
+    throw err;
+  }
 }
 
 /**
