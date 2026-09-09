@@ -135,6 +135,42 @@ describe('requests', () => {
     expect(JSON.stringify(init.headers)).not.toContain('rk_test');
   });
 
+  it('a 403 on the presigned PUT is an expired URL, never a rejected API key', async () => {
+    // The PUT carries no key, so a storage host's 403 cannot be about ours.
+    const { client } = build({ responses: [reply(403, undefined, { text: 'Request has expired' })] });
+    const error = await client
+      .uploadAudio('https://store.example/put?sig=1', Buffer.from('mp3'), 'audio/mpeg')
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(RssComError);
+    expect(error.status).toBe(403);
+    expect(error.code).toBe('UPLOAD_REJECTED');
+    expect(error.code).not.toBe('KEY_REJECTED');
+    expect(error.retryable).toBe(true);
+    expect(error.detail).toBe('Request has expired');
+    expect(error.message).toMatch(/presigned upload URL refused the PUT \(HTTP 403\)/);
+    expect(error.message).toMatch(/re-run to mint a new one/);
+    expect(error.message).not.toMatch(/API key/);
+  });
+
+  it('other PUT failures are UPLOAD_FAILED, retryable only for 5xx/429/408', async () => {
+    const cases = [
+      [500, true],
+      [429, true],
+      [400, false],
+      [404, false],
+    ];
+    for (const [status, retryable] of cases) {
+      const { client } = build({ responses: [reply(status, undefined, { text: 'nope' })] });
+      const error = await client
+        .uploadAudio('https://store.example/put', Buffer.from('mp3'), 'audio/mpeg')
+        .catch((e) => e);
+      expect(error.code).toBe('UPLOAD_FAILED');
+      expect(error.status).toBe(status);
+      expect(error.retryable).toBe(retryable);
+      expect(error.message).not.toMatch(/API key/);
+    }
+  });
+
   it('uploadAudio refuses zero bytes before touching the network', async () => {
     const { client, fetchImpl } = build();
     await expect(

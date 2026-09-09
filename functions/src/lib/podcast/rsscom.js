@@ -95,7 +95,9 @@ export const PODCAST_ID_SETTING = 'RSSCOM_PODCAST_ID';
  * `status` is the upstream HTTP status, or `null` when no response was had
  * (timeout, DNS, not configured). `detail` is what the API said, already
  * flattened to a string. `code` is ours: `NOT_CONFIGURED`, `KEY_REJECTED`,
- * `PLAN_REQUIRED`, `VALIDATION`, `NOT_FOUND`, `UPSTREAM`, `TIMEOUT`, `NETWORK`.
+ * `PLAN_REQUIRED`, `VALIDATION`, `NOT_FOUND`, `UPSTREAM`, `TIMEOUT`, `NETWORK`,
+ * and for the keyless PUT to the presigned URL `UPLOAD_REJECTED` (401/403 from
+ * the storage host — an expired URL, never the API key) and `UPLOAD_FAILED`.
  * `retryable` is true when repeating the same call later could succeed
  * without a change on our side.
  */
@@ -184,6 +186,30 @@ function messageFor(operation, status, detail) {
     }.`;
   }
   return `RSS.com answered ${status} while ${operation}${detail ? `: ${detail}` : ''}.`;
+}
+
+/**
+ * A refused PUT to the presigned URL. That request carries no API key — the
+ * URL is the credential, and it is a storage host answering, not api.rss.com —
+ * so its 401/403 must not read as "the API key was rejected". The usual cause
+ * is an expired or already-used URL, and the remedy is a fresh presigned
+ * upload, which a re-run mints: retryable. A 5xx from the storage host is
+ * retryable for the ordinary reason; a 4xx of another kind is not.
+ */
+function uploadError(status, detail) {
+  const suffix = detail ? `: ${detail}` : '';
+  if (status === 401 || status === 403) {
+    return new RssComError(
+      `The presigned upload URL refused the PUT (HTTP ${status})${suffix} — ` +
+        'the URL may have expired or been used already; re-run to mint a new one.',
+      { status, code: 'UPLOAD_REJECTED', detail, retryable: true }
+    );
+  }
+  const retryable = status === 408 || status === 429 || status >= 500;
+  return new RssComError(
+    `The presigned upload URL answered ${status} to the PUT${suffix}.`,
+    { status, code: 'UPLOAD_FAILED', detail, retryable }
+  );
 }
 
 /** Map a transport failure (no response) to the typed error. */
@@ -329,13 +355,7 @@ export function createRssComClient({ env = process.env, fetch: fetchImpl = globa
       if (!response.ok) {
         const text = typeof response.text === 'function' ? await response.text() : '';
         const detail = String(text || '').slice(0, 300);
-        const { code, retryable } = classify(response.status);
-        throw new RssComError(messageFor('uploading the audio', response.status, detail), {
-          status: response.status,
-          code,
-          detail,
-          retryable,
-        });
+        throw uploadError(response.status, detail);
       }
       return { status: response.status, bytes: bytes.length };
     },

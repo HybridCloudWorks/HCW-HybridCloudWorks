@@ -190,7 +190,7 @@ Enumerated live 2026-08-25.
 ## 4.5 Function App settings — Terraform-managed
 
 No operator action. Every setting on `func-site-prod-cus-01` is declared in
-`infra/main.tf`; changing one by hand is reverted by the next apply and is how
+`infra/functionapp.tf`; changing one by hand is reverted by the next apply and is how
 configuration drift starts. Three properties are worth knowing rather than
 listing every key:
 
@@ -213,9 +213,12 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The twenty-one names below are what `infra/main.tf` references,
-so each has a named consumer and a fixed spelling; presence is what is
-unconfirmed. [Accepted risks](../repo/todo.md#accepted-risks) records the vault as holding 18
+correct posture. The twenty-one names below are what the Terraform root module
+in `infra/` references — the app-settings map that holds them is in
+`infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
+every `.tf` file in that directory as one module rather than any one file, so a
+reference is found wherever it is declared. Each name therefore has a named
+consumer and a fixed spelling; presence is what is unconfirmed. [Accepted risks](../repo/todo.md#accepted-risks) records the vault as holding 18
 live secrets as of 2026-08-24.
 
 Seeding one is an owner action through the approved vault procedure, and the
