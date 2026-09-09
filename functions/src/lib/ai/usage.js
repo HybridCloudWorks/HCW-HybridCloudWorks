@@ -24,6 +24,11 @@ export const USAGE_SOURCES = Object.freeze({
   admin: 'admin',
   listenAndLearnScript: 'listen-and-learn:script',
   listenAndLearnAudio: 'listen-and-learn:audio',
+  // The podcast's own pipeline (#432): a transcript scripted from a published
+  // article (#435) and the audio read from it. Its own rows, not Listen &
+  // Learn's, so the cost of each product is attributable on its own.
+  podcastScript: 'podcast:script',
+  podcastAudio: 'podcast:audio',
 });
 
 /**

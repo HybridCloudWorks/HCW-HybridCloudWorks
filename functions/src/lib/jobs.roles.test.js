@@ -25,6 +25,7 @@ import '../functions/cosmos-export.js';
 import '../functions/forge-jobs.js';
 import '../functions/inspect-jobs.js';
 import '../functions/listen-and-learn-jobs.js';
+import '../functions/podcast-jobs.js';
 import '../functions/publish-jobs.js';
 import '../functions/rss-jobs.js';
 

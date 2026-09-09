@@ -720,6 +720,17 @@
       "note": null
     },
     {
+      "name": "podcast_transcripts",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "default_ttl": null,
+      "note": null
+    },
+    {
       "name": "podcasts",
       "partition_key_path": "/id",
       "included_paths": [

@@ -441,6 +441,15 @@ describe('generateArticleScript', () => {
     const usageOut = [];
     await generateArticleScript({ article, generate, usageOut });
     expect(generate.mock.calls[0][0].usageOut).toBe(usageOut);
-    expect(generate.mock.calls[0][0].feature).toBe('listenAndLearn');
+  });
+
+  it('leaves the portal feature to the product that calls it', async () => {
+    // The podcast pipeline declares `podcastScript` at its own
+    // generateJsonResponse call site, where ai-call-sites.test.js can see it.
+    // A feature named here, behind the injected `generate`, would be invisible
+    // to that scan and listed in no catalogue.
+    const generate = vi.fn().mockResolvedValue(script());
+    await generateArticleScript({ article, generate });
+    expect(generate.mock.calls[0][0]).not.toHaveProperty('feature');
   });
 });

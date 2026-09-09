@@ -102,6 +102,12 @@ export const AI_FEATURES = Object.freeze({
     description: 'Reads owner-supplied web pages and YouTube videos to ground a generation.',
     route: 'Listen & Learn source-grounded episodes (#433).',
   }),
+  podcastScript: Object.freeze({
+    label: 'Podcast transcripts',
+    description: 'Scripts a two-host podcast episode from a published article.',
+    route:
+      'The Podcast transcript action on the Publish page. Off means the job fails before the model is called; existing transcripts stay.',
+  }),
 });
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));

@@ -40,6 +40,7 @@ export const PUBLIC_MEDIA_CONTAINERS = new Set([
   'covers',
   'certifications',
   'listenandlearn',
+  'podcast',
 ]);
 
 /**
@@ -48,6 +49,15 @@ export const PUBLIC_MEDIA_CONTAINERS = new Set([
  * `listenandlearn` holds Listen & Learn episode audio, written by the
  * `generate-listen-and-learn` job through `uploadBlob` with a path it derives
  * itself (`{provider}/{examCode}/{areaSlug}.mp3`). Nothing else writes there.
+ *
+ * `podcast` holds podcast transcript audio (#435), written the same way by
+ * the `generate-podcast-transcript` job at `article/{slug}.mp3`. Its own
+ * container rather than a prefix in `listenandlearn`, for the reason its
+ * Cosmos container is its own (lib/podcast/store.js): Listen & Learn is the
+ * Learn section's product and the podcast is another. Anonymous delivery
+ * follows the Learn precedent — the path is derivable before the transcript
+ * is approved, exactly as an episode's is, and the review gate is on the
+ * document that is listed, not on the bytes.
  *
  * This set exists so the separation is checkable rather than incidental. It is
  * deliberately DISJOINT from UPLOAD_CONTAINERS, and blob-paths.test.js asserts
@@ -60,7 +70,7 @@ export const PUBLIC_MEDIA_CONTAINERS = new Set([
  * was a description of the world, not a control, and satisfying it here would
  * have meant opening the episode container to the upload route.
  */
-export const GENERATED_MEDIA_CONTAINERS = new Set(['listenandlearn']);
+export const GENERATED_MEDIA_CONTAINERS = new Set(['listenandlearn', 'podcast']);
 
 /**
  * The blob path is caller-chosen, to preserve the existing naming scheme

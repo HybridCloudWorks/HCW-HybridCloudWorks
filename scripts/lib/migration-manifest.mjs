@@ -266,6 +266,17 @@ export const COLLECTIONS = [
       },
     ],
   },
+  {
+    // Azure-only, no Firestore source: written by the generate-podcast-transcript
+    // job (functions/src/lib/podcast/store.js). Its own container, NOT a
+    // reserved setId inside listen_and_learn_episodes — owner ruling on #435,
+    // 2026-09-08: Listen & Learn is the Learn section's product and the
+    // podcast is another. Ids are `article_<slug>` (and later
+    // `plaud_<recordingId>`), globally unique by construction, so /id.
+    name: 'podcast_transcripts',
+    disposition: 'migrate',
+    note: "Content transcripts: two-host scripts generated from published articles (#435) and Plaud recordings (#434), and their audio; the podcast's own product, distinct from listen_and_learn_episodes (Learn section). Azure-only, no Firestore source.",
+  },
 
   // --- Architecture / frameworks -------------------------------------------
   { name: 'designs', disposition: 'migrate' },
