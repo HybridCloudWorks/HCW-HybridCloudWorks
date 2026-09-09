@@ -29,20 +29,16 @@ issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/
 
 | Item | Issue |
 | --- | --- |
-| Podbean feed returns 410; `fetchPodcastFeeds` fails every 2 hours; Podbean still on the pages | [#348](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/348) |
-| Replace Podbean: RSS.com hosting, ElevenLabs speech, StreamYard, one audio surface | [#349](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/349) |
-| Optional: `REPLICATE-API-KEY` for AI hero images | [#350](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/350) |
-| Optional: default hero covers, `admin_config/default_heroes` | [#351](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/351) |
-| Optional: `admin_config/social_autopost` | [#352](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/352) |
-| Optional: `YOUTUBE-API-KEY` for Listen & Learn watch-next | [#353](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/353) |
-| Optional: `GCP-BILLING-API-KEY` for the pricing tool | [#354](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/354) |
-| Live check: Entra role claim, API audience, `getCurrentAdminStatus` | [#355](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/355) |
-| Live check: the deployed no-op Labs job path | [#356](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/356) |
-| Live check: public API and custom domain after a DNS or edge change | [#357](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/357) |
-| Live check: third-party webhooks after an approved mutation test | [#358](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/358) |
-| Cosmos recoverability: exporter and a timed restore against RTO 8 h / RPO 24 h | [#231](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/231) |
-| `createContentFromRecording`, the last unimplemented RPC | [#180](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/180) |
-| Cloudflare Pro and managed WAF rulesets | [#127](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/127) |
+| Audio pipeline parent: sources, transcript, voice, RSS.com publish; owner steps after the 2026-09-09 merges | [#432](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/432) |
+| Listen & Learn grounded on owner-supplied pages and videos: owner-run live generation closes it | [#433](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/433) |
+| Plaud recording to episode script: owner-run "Script this" on a connected Plaud closes it | [#434](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/434) |
+| Published article to podcast transcript: article-side player still to come | [#435](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/435) |
+| ElevenLabs speech provider: seed the key, one-certification trial closes it | [#436](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/436) |
+| One Recording Hub: season and per-episode metadata editing still to come | [#442](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/442) |
+| Replace Podbean: RSS.com show live once the first pipeline episode publishes; Listen & Learn on the show still a decision | [#349](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/349) |
+| Live check: third-party webhooks after an approved mutation test (Publer blocked on a rotated key) | [#358](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/358) |
+| Functions deploy and Terraform apply race on the app-settings map; six settings lost 2026-09-09 | [#454](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/454) |
+| Live check: timed Cosmos restore drill against RTO 8 h / RPO 24 h, after the first Sunday full | [#455](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/455) |
 
 `GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
 
