@@ -229,17 +229,26 @@ async function requestAudio(body, { key, fetchImpl, sleep }) {
  * The SDK-style `output_audio` accessor is checked first so that a REST
  * revision adding it keeps working; otherwise the `model_output` steps are
  * walked. Anything that is not audio — text, a tool call — is skipped here
- * and named by `describeShape` when nothing is left.
+ * and named by `describeShape` when nothing is left. An audio item with no
+ * `data` is not skipped: that is a malformed block, and dropping it would
+ * report the generic "no audio" for a reply that did try to carry some.
  */
 function audioBlocks(payload) {
   if (payload?.output_audio?.data) return [payload.output_audio];
   const blocks = [];
-  for (const step of Array.isArray(payload?.steps) ? payload.steps : []) {
-    if (step?.type !== 'model_output' || !Array.isArray(step.content)) continue;
-    for (const item of step.content) {
-      if (item?.type === 'audio' && item.data) blocks.push(item);
-    }
-  }
+  const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+  steps.forEach((step, stepIndex) => {
+    if (step?.type !== 'model_output' || !Array.isArray(step.content)) return;
+    step.content.forEach((item, itemIndex) => {
+      if (item?.type !== 'audio') return;
+      if (!item.data) {
+        throw new GeminiSpeechError(
+          `Gemini returned an audio block with no data (step ${stepIndex + 1}, item ${itemIndex + 1}; mime ${String(item.mime_type || 'unspecified').slice(0, 40)})`
+        );
+      }
+      blocks.push(item);
+    });
+  });
   return blocks;
 }
 

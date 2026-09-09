@@ -445,6 +445,29 @@ describe('a 200 that is not a success', () => {
     ).rejects.toThrow(/returned no audio/);
   });
 
+  it('names a malformed audio block instead of calling the reply empty', async () => {
+    // An audio item with no `data` is a provider defect, not an absence of
+    // audio; "returned no audio" would send the operator looking at the
+    // prompt when the reply is what is broken.
+    const fetchImpl = vi.fn(async () =>
+      ok(interaction([{ type: 'text', text: 'lead-in' }, { type: 'audio', mime_type: 'audio/L16' }]))
+    );
+    const err = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl }).catch(
+      (e) => e
+    );
+
+    expect(err.message).toBe(
+      'Gemini returned an audio block with no data (step 1, item 2; mime audio/L16)'
+    );
+    expect(err.message).not.toMatch(/returned no audio/);
+    expect(err.provider).toBe('gemini');
+
+    // An empty string is the same defect; a block that names no mime says so.
+    expect(() => extractAudio(interaction([{ type: 'audio', data: '' }]))).toThrow(
+      /no data \(step 1, item 1; mime unspecified\)/
+    );
+  });
+
   it('names the shape it saw when the model answered in text, without quoting it', async () => {
     // What the operator reads on the episode card. Types only: the text the
     // model produced is content and stays out of the error.
