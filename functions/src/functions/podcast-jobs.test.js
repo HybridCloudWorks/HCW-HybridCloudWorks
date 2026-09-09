@@ -63,7 +63,12 @@ describe('parsePublishPayload', () => {
     });
     expect(parsePublishPayload(undefined).error).toBe('transcriptId is required');
     expect(parsePublishPayload({ transcriptId: 7 }).error).toBe('transcriptId is required');
-    expect(parsePublishPayload({ transcriptId: 'x'.repeat(256) }).error).toBe(
+    // Bounded by UTF-8 bytes (Cosmos's 1,023), so a wide-character id of
+    // fewer characters is refused too.
+    expect(parsePublishPayload({ transcriptId: 'x'.repeat(1024) }).error).toBe(
+      'transcriptId is too long'
+    );
+    expect(parsePublishPayload({ transcriptId: '語'.repeat(400) }).error).toBe(
       'transcriptId is too long'
     );
   });

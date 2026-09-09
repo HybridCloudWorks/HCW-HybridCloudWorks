@@ -96,40 +96,47 @@ export function parsePublishPayload(payload) {
  * The article's public URL for `custom_link`, or null. A read failure here
  * is logged and costs the link, not the publish: an episode without a page
  * link is still an episode, and the retry route recovers the link later.
+ * The log line carries the job id and the error's code — never a document
+ * id or the raw message; the job document records the rest.
  */
-async function resolveArticleUrl(doc, context) {
+async function resolveArticleUrl(doc, { context, jobId }) {
   if (!doc?.sourceId) return null;
   try {
     const article = await readDoc(ARTICLE_CONTAINER, doc.sourceId, doc.sourceId);
     return publicUrlOf(article || {}) || null;
   } catch (error) {
     context?.warn?.(
-      `${PUBLISH_JOB_TYPE}: ${doc.id} publishes without custom_link (${error?.message || error})`
+      `${PUBLISH_JOB_TYPE}: job ${jobId ?? 'unknown'} publishes without custom_link ` +
+        `(article read failed: ${error?.code ?? error?.statusCode ?? 'unknown'})`
     );
     return null;
   }
 }
 
 /** One publish run against production dependencies. */
-export async function runTranscriptPublish(payload, { context } = {}) {
+export async function runTranscriptPublish(payload, { context, job } = {}) {
   const parsed = parsePublishPayload(payload);
   if (parsed.error) throw new Error(parsed.error);
   const id = parsed.value.transcriptId;
+  const jobId = job?.id ?? null;
 
   const record = await runHostPublish({
     store: { readDoc, patchDoc },
     id,
     client: createRssComClient(),
     readAudio: audioReaderFor(readBlobForDelivery),
-    resolvePublicUrl: (doc) => resolveArticleUrl(doc, context),
+    resolvePublicUrl: (doc) => resolveArticleUrl(doc, { context, jobId }),
   });
 
+  // Content-free: the outcome and the error code, keyed by the job id. The
+  // transcript id and the host's episode id are on the document and in the
+  // job result, not in the log.
   const outcome = record.skipped
     ? `skipped (${record.skipped})`
     : record.error
       ? `failed (${record.error.code})`
-      : `on the host as episode ${record.episodeId}`;
-  context?.log?.(`${PUBLISH_JOB_TYPE}: ${id} ${outcome}`);
+      : 'on the host';
+  context?.log?.(`${PUBLISH_JOB_TYPE}: job ${jobId ?? 'unknown'} ${outcome}`);
 
   return {
     id,

@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   HOST_SKIP,
+  MAX_TRANSCRIPT_ID_BYTES,
   PUBLISH_JOB_TYPE,
   audioReaderFor,
   hostSkipFor,
@@ -83,7 +84,22 @@ describe('parseTranscriptId', () => {
     expect(parseTranscriptId(undefined).error).toBe('transcriptId is required');
     expect(parseTranscriptId('  ').error).toBe('transcriptId is required');
     expect(parseTranscriptId(42).error).toBe('transcriptId is required');
-    expect(parseTranscriptId('x'.repeat(256)).error).toBe('transcriptId is too long');
+    expect(parseTranscriptId('x'.repeat(MAX_TRANSCRIPT_ID_BYTES)).value).toHaveLength(
+      MAX_TRANSCRIPT_ID_BYTES
+    );
+    expect(parseTranscriptId('x'.repeat(MAX_TRANSCRIPT_ID_BYTES + 1)).error).toBe(
+      'transcriptId is too long'
+    );
+  });
+
+  it('bounds by UTF-8 bytes, as Cosmos does, not by characters', () => {
+    // 400 characters, 1,200 bytes: under the limit as a string length, over
+    // it as Cosmos measures it. A character count would let this through
+    // and the write would fail later, with a worse message.
+    const wide = '語'.repeat(400);
+    expect(wide.length).toBeLessThan(MAX_TRANSCRIPT_ID_BYTES);
+    expect(Buffer.byteLength(wide, 'utf8')).toBeGreaterThan(MAX_TRANSCRIPT_ID_BYTES);
+    expect(parseTranscriptId(wide).error).toBe('transcriptId is too long');
   });
 });
 

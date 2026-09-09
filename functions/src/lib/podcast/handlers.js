@@ -105,8 +105,9 @@ export function createPodcastHandlers({
       uuid,
       now,
     });
+    // Outcome and the job id (a correlation id), never the transcript id.
     context.log?.(
-      `podcast host step: ${doc.id} ${outcome.outcome}${outcome.jobId ? ` (${outcome.jobId})` : ''}`
+      `podcast host step: ${outcome.outcome}${outcome.jobId ? ` (job ${outcome.jobId})` : ''}`
     );
     return {
       ...outcome,
@@ -252,7 +253,7 @@ export function createPodcastHandlers({
           actorId: auth.user?.oid || null,
           now: now().toISOString(),
         });
-        context.log?.(`reviewPodcastTranscript: ${id} → ${status} by ${auth.user?.oid || 'unknown'}`);
+        context.log?.(`reviewPodcastTranscript: → ${status} by ${auth.user?.oid || 'unknown'}`);
 
         if (status !== STATUS.published) {
           return json(200, { success: true, id, status, item: updated || null, host: null });

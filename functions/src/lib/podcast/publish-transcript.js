@@ -80,8 +80,14 @@ export const HOST_SKIP = Object.freeze({
   notPublished: 'not_published',
 });
 
-/** Cosmos ids are bounded at 255 bytes; a transcript id longer than this is not one. */
-export const MAX_TRANSCRIPT_ID_CHARS = 255;
+/**
+ * Cosmos bounds an item's `id` at 1,023 **bytes** — "Maximum length of ID
+ * value: 1,023 bytes", Per-item limits, https://learn.microsoft.com/azure/cosmos-db/concepts-limits#per-item-limits
+ * — so the check is on the UTF-8 encoding, not on `String.length`: a
+ * 400-character id of three-byte characters is 1,200 bytes and would be
+ * refused by Cosmos while passing a character count.
+ */
+export const MAX_TRANSCRIPT_ID_BYTES = 1023;
 
 /**
  * The one validator for a `transcriptId`, shared by the routes that enqueue
@@ -91,7 +97,9 @@ export const MAX_TRANSCRIPT_ID_CHARS = 255;
 export function parseTranscriptId(raw) {
   const id = typeof raw === 'string' ? raw.trim() : '';
   if (!id) return { error: 'transcriptId is required' };
-  if (id.length > MAX_TRANSCRIPT_ID_CHARS) return { error: 'transcriptId is too long' };
+  if (Buffer.byteLength(id, 'utf8') > MAX_TRANSCRIPT_ID_BYTES) {
+    return { error: 'transcriptId is too long' };
+  }
   return { value: id };
 }
 
