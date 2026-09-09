@@ -154,6 +154,20 @@ export function oneLineTitle(value) {
     .trim();
 }
 
+/**
+ * The one notion of "same speaker" in this module.
+ *
+ * Plaud's labels are consistent, but a paste is not: "Speaker 1", "speaker 1"
+ * and "Speaker 1 " are one voice. Two places need to agree on that — the
+ * paragraph break `renderTranscriptForPrompt` puts where the speaker changes
+ * (a spurious break tells the model a second person spoke) and the
+ * de-duplication in `findAttributionLeaks` (a spurious duplicate inflates the
+ * count a reviewer reads). One key function, so they cannot drift apart.
+ */
+function speakerKey(label) {
+  return oneLineTitle(label).toLowerCase();
+}
+
 /** One Plaud utterance → one normalised segment, or null if it says nothing. */
 function fromPlaudSegment(item) {
   if (!item || typeof item !== 'object') return null;
@@ -351,7 +365,10 @@ export function renderTranscriptForPrompt(
 
   const pieces = usable.map((s, i) => {
     if (i === 0) return s.text;
-    const separator = s.speaker === usable[i - 1].speaker ? '\n' : '\n\n';
+    // Compared on the normalised key, not by string equality: "Speaker 1"
+    // followed by "speaker 1" is a continuation, and a paragraph break there
+    // would tell the model a second person spoke.
+    const separator = speakerKey(s.speaker) === speakerKey(usable[i - 1].speaker) ? '\n' : '\n\n';
     return `${separator}${s.text}`;
   });
   const sourceBytes = pieces.reduce((n, p) => n + Buffer.byteLength(p, 'utf8'), 0);
@@ -468,7 +485,7 @@ export function findAttributionLeaks(turns, segments) {
   const labels = new Map();
   for (const s of Array.isArray(segments) ? segments : []) {
     const label = String(s?.speaker ?? '').trim();
-    const key = label.toLowerCase();
+    const key = speakerKey(label);
     if (label.length >= 3 && !labels.has(key)) labels.set(key, label);
   }
   const spoken = (Array.isArray(turns) ? turns : []).map((t) => String(t?.text ?? '')).join('\n');
@@ -526,10 +543,16 @@ export async function generateRecordingScript({
   }
 
   const title = oneLineTitle(recording?.title);
+  // No `feature` here, deliberately — the same convention as the article
+  // sibling. The portal toggle belongs to the product that owns the router
+  // call, and this generator will be wired into the podcast path (#448's
+  // `podcastScript`), not Listen & Learn's. A name set here, behind the
+  // injected `generate`, is also invisible to ai-call-sites.test.js, which
+  // scans real call sites so a toggle can never read as a working switch for
+  // something it does not gate.
   const parsed = await generate({
     prompt: buildRecordingPrompt({ recording: { ...recording, title }, rendered, speakers }),
     purpose: 'analysis',
-    feature: 'listenAndLearn',
     usageOut,
     systemPrompt:
       'You are a cloud engineer who turns recorded sessions into faithful audio discussions without impersonating anyone in them. You return JSON only.',

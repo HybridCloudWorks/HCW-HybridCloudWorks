@@ -275,6 +275,19 @@ describe('renderTranscriptForPrompt', () => {
     expect(text).not.toContain('Speaker');
   });
 
+  it('treats case and whitespace variants of one label as the same speaker', () => {
+    // Copilot on #446: strict equality put a paragraph break between
+    // "Speaker 1" and "speaker 1", which tells the model a second person
+    // spoke. A real change still breaks.
+    const { text } = renderTranscriptForPrompt([
+      { text: line(0), speaker: 'Speaker 1' },
+      { text: line(1), speaker: 'speaker 1' },
+      { text: line(2), speaker: ' Speaker  1 ' },
+      { text: line(3), speaker: 'Speaker 2' },
+    ]);
+    expect(text).toBe(`${line(0)}\n${line(1)}\n${line(2)}\n\n${line(3)}`);
+  });
+
   it('leaves an ordinary transcript whole and says so', () => {
     const rendered = renderTranscriptForPrompt(segmentsFor(['Speaker 1', 'Speaker 2']));
     expect(rendered.truncated).toBe(false);
@@ -666,7 +679,16 @@ describe('generateRecordingScript', () => {
     const usageOut = [];
     await generateRecordingScript({ recording, segments, generate, usageOut });
     expect(generate.mock.calls[0][0].usageOut).toBe(usageOut);
-    expect(generate.mock.calls[0][0].feature).toBe('listenAndLearn');
     expect(generate.mock.calls[0][0].purpose).toBe('analysis');
+  });
+
+  it('leaves the portal feature to the product that calls it', async () => {
+    // Same convention as the article sibling. A feature named here, behind
+    // the injected `generate`, would be invisible to ai-call-sites.test.js
+    // and would pin this generator to a surface it is not wired into — the
+    // wiring is the podcast path (#448's podcastScript), not listenAndLearn.
+    const generate = vi.fn().mockResolvedValue(script());
+    await generateRecordingScript({ recording, segments, generate });
+    expect(generate.mock.calls[0][0]).not.toHaveProperty('feature');
   });
 });
