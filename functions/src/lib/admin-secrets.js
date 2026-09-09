@@ -179,6 +179,11 @@ export function presentSecret(entry, ctx) {
     lastOkAt: strOrNull(record.lastOkAt),
     lastFailAt: strOrNull(record.lastFailAt),
     lastFailStatus: Number.isFinite(record.lastFailStatus) ? record.lastFailStatus : null,
+    // What the provider SAID, beside the number it answered with. Values are
+    // still never included — this is the upstream's own error sentence, which
+    // is what tells an operator whether to rotate the key or fix the request
+    // (#463 item 4).
+    lastFailDetail: strOrNull(record.lastFailDetail),
   };
 }
 
@@ -202,13 +207,25 @@ async function writeState(store, secrets) {
  * router, which already distinguishes "the key was rejected" (401/403) from
  * "the request was bad" — see `isProviderUnusable`.
  */
-export async function recordSecretVerdict(store, secretName, { ok, status = null, now = () => new Date().toISOString() }) {
+export async function recordSecretVerdict(
+  store,
+  secretName,
+  { ok, status = null, detail = '', now = () => new Date().toISOString() }
+) {
   if (!store || !findBySecretName(secretName)) return;
   const secrets = await readState(store);
   const previous = secrets[secretName] ?? {};
   secrets[secretName] = ok
     ? { ...previous, lastOkAt: now() }
-    : { ...previous, lastFailAt: now(), lastFailStatus: Number.isFinite(status) ? status : null };
+    : {
+        ...previous,
+        lastFailAt: now(),
+        lastFailStatus: Number.isFinite(status) ? status : null,
+        // Overwritten on every failure, including with `''` when the provider
+        // gave no reason — a stale sentence from a previous rejection beside a
+        // fresh status is worse than no sentence at all.
+        lastFailDetail: typeof detail === 'string' ? detail.slice(0, 300) : '',
+      };
   await writeState(store, secrets);
 }
 

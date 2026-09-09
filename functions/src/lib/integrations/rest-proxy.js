@@ -37,6 +37,7 @@
  * made the call still gets the status and the body it always did.
  */
 import { createKeyVerdictReporter, isCredentialRejected } from '../key-verdict.js';
+import { readUpstreamError } from './upstream-error.js';
 
 const json = (status, body) => ({
   status,
@@ -221,11 +222,6 @@ export function createRestProxy({
 
       try {
         const response = await fetchImpl(`${integration.baseUrl}${path}`, options);
-        if (response.ok) {
-          await reportVerdict(integration.keyEnv, { ok: true });
-        } else if (isCredentialRejected(response.status)) {
-          await reportVerdict(integration.keyEnv, { ok: false, status: response.status });
-        }
         const text = await response.text();
         let data = null;
         try {
@@ -234,6 +230,21 @@ export function createRestProxy({
           // Not every upstream error is JSON. Returning the raw text is more
           // use to an operator than discarding it.
           data = { raw: text.slice(0, 2000) };
+        }
+        // The body is read BEFORE the verdict, which is the only reason the
+        // verdict can carry a reason. It used to be judged on the status
+        // alone, so the API-keys page could say a key was rejected but never
+        // why — and "Missing or invalid Authorization header" (our request is
+        // malformed) and a revoked key are the same red light with different
+        // fixes (#463 item 4).
+        if (response.ok) {
+          await reportVerdict(integration.keyEnv, { ok: true });
+        } else if (isCredentialRejected(response.status)) {
+          await reportVerdict(integration.keyEnv, {
+            ok: false,
+            status: response.status,
+            detail: readUpstreamError(data),
+          });
         }
         return json(200, { ok: response.ok, status: response.status, data });
       } catch (error) {

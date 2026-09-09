@@ -356,16 +356,34 @@ export function createFeedHandlers({
  * The `!after` branch of syncSocialPostToPubler: un-publish on Publer when a
  * social post is deleted. Called by DELETE /api/cms/social-posts/{id}.
  * Best-effort; never throws.
+ *
+ * One call for every id, through `publer.deletePosts` (#463 item 2). It used
+ * to be one `DELETE /posts/{id}` per id, which is a form Publer does not
+ * document — and the id-per-request loop counted a 200 as a removal, so a
+ * post Publer declined to delete was reported here as removed and stayed
+ * scheduled to publish under the owner's name. `deleted_ids` is the only
+ * thing that says a post is gone, and `missingIds` is the rest.
  */
 export async function unpublishFromPubler(publer, doc, log = {}) {
   const ids = Array.isArray(doc?.publerPostIds) ? doc.publerPostIds : [];
   if (!ids.length || !publer?.configured) return { attempted: 0, removed: 0 };
-  const results = await Promise.allSettled(
-    ids.map((id) => publer.request(`/posts/${id}`, 'DELETE'))
-  );
-  const removed = results.filter((r) => r.status === 'fulfilled').length;
-  results
-    .filter((r) => r.status === 'rejected')
-    .forEach((r) => log.warn?.(`[unpublishFromPubler] ${r.reason?.message || r.reason}`));
-  return { attempted: ids.length, removed };
+  try {
+    const { deletedIds, missingIds } = await publer.deletePosts(ids);
+    if (missingIds.length) {
+      // Warned, not thrown: the caller is a delete that has already happened
+      // on our side, and the operator's next move is the Publer queue itself.
+      //
+      // Counts only. A Publer post id is an identifier and traces stay
+      // content-free — the same rule `cleanupSoftDeletedContent` states at
+      // `timers/content-cleanup.js` for refused document ids.
+      log.warn?.(
+        `[unpublishFromPubler] Publer did not delete ${missingIds.length} of ${ids.length} ` +
+          'post(s) — check the Publer queue'
+      );
+    }
+    return { attempted: ids.length, removed: deletedIds.length };
+  } catch (error) {
+    log.warn?.(`[unpublishFromPubler] ${error?.message || error}`);
+    return { attempted: ids.length, removed: 0 };
+  }
 }

@@ -65,12 +65,51 @@ describe('unwrapPublerAccounts', () => {
     });
   });
 
+  it("prefers the proxy's own explanation over the upstream body when it has one", () => {
+    // `error` is the PROXY speaking (it never called Publer, or its fetch
+    // threw); `data.errors[0]` is Publer. Both can be present, and the
+    // proxy's is the one that describes what actually happened to the call.
+    expect(
+      unwrapPublerAccounts({
+        ok: false,
+        code: 'INTEGRATION_NOT_CONFIGURED',
+        error: 'Publer is not configured: PUBLER_WORKSPACE_ID is not set',
+        data: { errors: ['ignored'] },
+      }).reason
+    ).toBe('Publer is not configured: PUBLER_WORKSPACE_ID is not set');
+  });
+
   it('reports an upstream refusal as a failure, not as an empty workspace', () => {
     // Publer answered 401. The proxy still returns HTTP 200, so this arrives as
     // a resolved promise and a `.catch()` never sees it. Before #402 this read
     // as { accounts: [], notConfigured: false } — indistinguishable from an
     // empty workspace, which is the bug of #397 one layer down.
+    // `reason` now carries what PUBLER said, read out of the body the proxy
+    // passes through untouched (#463 item 4). It used to be dropped, so an
+    // operator saw `Publer answered 401` and nothing that told them whether
+    // to rotate the key or fix the request.
     expect(unwrapPublerAccounts({ ok: false, status: 401, data: { error: 'nope' } })).toEqual({
+      accounts: [],
+      notConfigured: false,
+      failed: true,
+      status: 401,
+      reason: 'nope',
+    });
+    expect(
+      unwrapPublerAccounts({
+        ok: false,
+        status: 401,
+        data: { errors: ['Missing or invalid Authorization header'] },
+      })
+    ).toEqual({
+      accounts: [],
+      notConfigured: false,
+      failed: true,
+      status: 401,
+      reason: 'Missing or invalid Authorization header',
+    });
+    // No body, no sentence — and no invention of one.
+    expect(unwrapPublerAccounts({ ok: false, status: 401, data: {} })).toEqual({
       accounts: [],
       notConfigured: false,
       failed: true,

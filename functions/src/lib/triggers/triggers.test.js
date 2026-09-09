@@ -814,11 +814,40 @@ describe('feed handlers', () => {
       syncError: 'Publer PUT failed',
     });
     expect(() => buildPublerUpdateBody({})).toThrow(/caption or URL/);
-    d.publer.request.mockResolvedValue({});
+
+    // One documented bulk delete for every id, and `deleted_ids` is the only
+    // proof a post is gone (#463 item 2).
+    d.publer.deletePosts = vi.fn(async (ids) => ({
+      deletedIds: ids.map(String),
+      missingIds: [],
+    }));
     expect(await unpublishFromPubler(d.publer, { publerPostIds: ['p1', 'p2'] })).toEqual({
       attempted: 2,
       removed: 2,
     });
+    expect(d.publer.deletePosts).toHaveBeenCalledWith(['p1', 'p2']);
+
+    // A post Publer declined to delete is NOT removed. Counting it as removed
+    // leaves a post scheduled to publish with nothing on the calendar saying so.
+    const warn = vi.fn();
+    d.publer.deletePosts = vi.fn(async () => ({ deletedIds: ['p1'], missingIds: ['p2'] }));
+    expect(
+      await unpublishFromPubler(d.publer, { publerPostIds: ['p1', 'p2'] }, { warn })
+    ).toEqual({ attempted: 2, removed: 1 });
+    expect(warn.mock.calls[0][0]).toMatch(/did not delete 1 of 2/);
+    // Counts, never the ids: traces stay content-free (Copilot review of
+    // 200a532f; `timers/content-cleanup.js` states the same rule).
+    expect(warn.mock.calls[0][0]).not.toMatch(/p2/);
+
+    // Best-effort: a thrown delete is warned, never propagated.
+    d.publer.deletePosts = vi.fn(async () => {
+      throw new Error('Publer is having a day');
+    });
+    expect(await unpublishFromPubler(d.publer, { publerPostIds: ['p1'] }, { warn })).toEqual({
+      attempted: 1,
+      removed: 0,
+    });
+
     expect(await unpublishFromPubler({ configured: false }, { publerPostIds: ['p1'] })).toEqual({
       attempted: 0,
       removed: 0,

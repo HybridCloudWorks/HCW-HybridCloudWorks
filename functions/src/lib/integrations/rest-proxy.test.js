@@ -299,9 +299,39 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
       const response = await call(handler);
       expect(response.status).toBe(200);
       expect(JSON.parse(response.body)).toEqual({ ok: false, status, data: { error: 'nope' } });
-      expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: false, status });
+      // The upstream's own sentence rides with the verdict (#463 item 4): the
+      // API-keys page could say a key was rejected but never why, and
+      // "Missing or invalid Authorization header" and a revoked key are the
+      // same red light with completely different fixes.
+      expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', {
+        ok: false,
+        status,
+        detail: 'nope',
+      });
     }
   );
+
+  it.each([401, 403])(
+    'reports a %i with an empty detail when the upstream gave no reason',
+    async (status) => {
+      const { handler, onKeyVerdict } = buildReporting({ status, body: {} });
+      await call(handler);
+      expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: false, status, detail: '' });
+    }
+  );
+
+  it('reads the reason out of an errors array, which is the shape Publer uses', async () => {
+    const { handler, onKeyVerdict } = buildReporting({
+      status: 401,
+      body: { errors: ['Missing or invalid Authorization header'] },
+    });
+    await call(handler);
+    expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', {
+      ok: false,
+      status: 401,
+      detail: 'Missing or invalid Authorization header',
+    });
+  });
 
   it('reports a success, so a rotated key turns the light green from this path too', async () => {
     const { handler, onKeyVerdict } = buildReporting({ status: 200 });

@@ -24,18 +24,57 @@
  * router uses — the red light `secrets-health.js` says only the upstream
  * service can switch on. A 500 or a timeout still throws: those ARE transient,
  * and a failed invocation is the right record of them.
+ *
+ * WHAT THE API ACTUALLY LOOKS LIKE (#463, read against Publer's own docs on
+ * 2026-09-09 — every one of these was wrong here, and none could be caught by
+ * a test because the 401 had kept the code paths dark since the port):
+ *
+ *   - `GET /posts` takes `state[]` as an array, so the three reconciled states
+ *     travel in ONE request rather than three loops. `per_page` is a field of
+ *     the response, not a parameter of the request; sending it did nothing.
+ *   - The rate limit is **100 requests per two minutes per user account,
+ *     across every API key it holds** — shared with the owner's browser and
+ *     the admin pages, which is why paging stops early on
+ *     `X-RateLimit-Remaining` rather than spending the whole window here.
+ *   - Deleting is `DELETE /posts?post_ids[]=…`, answering `{ deleted_ids }`.
+ *     `DELETE /posts/{id}` was invented. Omitting `post_ids` deletes every
+ *     non-published post in the workspace, so the empty list is refused before
+ *     the request rather than sent.
+ *   - Errors arrive as `{ "errors": [...] }`, and that sentence is the whole
+ *     difference between a malformed header and a revoked key. It is now on
+ *     the thrown message and on the key verdict.
  */
 import { readKey } from '../ai/router.js';
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
 import { createKeyVerdictReporter, isCredentialRejected } from '../key-verdict.js';
+import { describeUpstreamFailure, readUpstreamError } from '../integrations/upstream-error.js';
 
 // Outbound deadline (T-712): Node's fetch has none, and these calls are
 // reached from change-feed handlers where a hung socket holds the lease.
 const PUBLER_TIMEOUT_MS = 20_000;
 
 export const PUBLER_API_BASE_URL = 'https://app.publer.com/api/v1';
+
+// The three states the calendar reconciles against, sent as one `state[]`
+// array rather than looped over. `GET /posts` documents `state[]` for exactly
+// this, and the three separate passes it replaces cost three times the
+// requests against a limit of 100 per two minutes, shared across every key on
+// the account (#463 item 5).
 const SYNC_STATES = ['scheduled', 'published', 'failed'];
-const MAX_PAGES_PER_STATE = 10;
+const MAX_PAGES = 10;
+
+// Publer's page size is its own; `per_page` is a field of the RESPONSE and not
+// a parameter of the request, so the `per_page=100` this used to send was
+// ignored on the way out and misread the account's real paging on the way
+// back. Pages are followed with `total_pages`, which is documented.
+//
+// Stop paging with this much of the window left. `X-RateLimit-Remaining`
+// counts down from 100 per two minutes PER USER ACCOUNT across all of its API
+// keys — so the budget is shared with the owner's browser, the Social Hub and
+// anything else holding a key. A five-minute reconcile that drains it would
+// take the admin pages down with it, and a partial reconcile is corrected on
+// the next run five minutes later.
+const RATE_LIMIT_FLOOR = 10;
 
 function asIsoString(value) {
   if (!value) return null;
@@ -125,7 +164,13 @@ export function buildSocialPostSyncPatch(
  *   writer, in the shape `createAiRouter` takes it. `null` — every unit test —
  *   reports nothing.
  * @param {{ warn?: Function }} [deps.log]
- * @returns {{ configured: boolean, request: Function, listPostsForSync: Function }}
+ * @returns {{
+ *   configured: boolean,
+ *   request: (path: string, method?: string, body?: unknown) => Promise<unknown>,
+ *   listPostsForSync: () => Promise<object[]>,
+ *   deletePosts: (ids: Array<string|number>) => Promise<{ deletedIds: string[], missingIds: string[] }>,
+ * }} `deletePosts` is the only documented way to delete — see its own note on
+ *    why an empty list is refused rather than sent.
  */
 export function createPublerClient({
   env = process.env,
@@ -141,7 +186,15 @@ export function createPublerClient({
   // a key valid for a different workspace answers 401 exactly like a stale one.
   const reportVerdict = createKeyVerdictReporter({ onKeyVerdict, log, source: 'publer' });
 
-  async function request(path, method = 'GET', body) {
+  /**
+   * One call, with the rate-limit budget the response reported.
+   *
+   * `request` below is the same thing with the metadata dropped; it is what
+   * the change-feed handlers have always called and its signature does not
+   * move. Only the paging loop needs the header, and only the paging loop
+   * takes this.
+   */
+  async function requestWithMeta(path, method = 'GET', body) {
     const options = {
       method,
       headers: {
@@ -157,40 +210,138 @@ export function createPublerClient({
       ...options,
       timeoutMs: PUBLER_TIMEOUT_MS,
     });
-    const data = await response.json().catch(() => ({}));
+    // Text first, then parse. `response.json().catch(() => ({}))` discarded
+    // every body that was not JSON — and an HTML error page from a gateway in
+    // front of Publer is exactly the failure where the body says more than the
+    // status. `rest-proxy.js` has always read it this way and parks the
+    // remains under `raw`, which `readUpstreamError` knows how to read; this
+    // client did not, so that branch was unreachable from here.
+    const text = await response.text().catch(() => '');
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text.slice(0, 2000) };
+    }
+    // Absent on a mocked response and on any answer Publer serves without it;
+    // `null` means "unknown", which the caller must not read as "exhausted".
+    const remainingHeader = response.headers?.get?.('X-RateLimit-Remaining');
+    const rateLimitRemaining =
+      remainingHeader !== null && remainingHeader !== undefined && remainingHeader !== ''
+        ? Number(remainingHeader)
+        : null;
+
     if (!response.ok) {
+      // Publer's own sentence, not just the number. `{"errors":[...]}` is
+      // what separates "Missing or invalid Authorization header" — our
+      // request is malformed — from a key that is revoked or on an account
+      // without API entitlement. #358 spent two days on that distinction with
+      // only `HTTP 401` to go on, because this line threw the status alone.
+      const detail = readUpstreamError(data);
       // Only a 401/403 is a verdict on the key. A 404 is a wrong path, a 429
       // a busy account, a 5xx Publer's problem — none of them says the
       // credential is bad, and the light stays as it was.
       if (isCredentialRejected(response.status)) {
-        await reportVerdict('PUBLER_API_KEY', { ok: false, status: response.status });
+        await reportVerdict('PUBLER_API_KEY', { ok: false, status: response.status, detail });
       }
-      const error = new Error(`Publer ${method} ${path} failed with HTTP ${response.status}`);
+      const error = new Error(
+        `Publer ${method} ${path} failed with ${describeUpstreamFailure(response.status, data)}`
+      );
       error.status = response.status;
+      error.detail = detail;
       throw error;
     }
     await reportVerdict('PUBLER_API_KEY', { ok: true });
+    return { data, rateLimitRemaining: Number.isFinite(rateLimitRemaining) ? rateLimitRemaining : null };
+  }
+
+  async function request(path, method = 'GET', body) {
+    const { data } = await requestWithMeta(path, method, body);
     return data;
   }
 
+  /**
+   * Every post in the three reconciled states, in one paged pass.
+   *
+   * Was three passes of up to ten pages each — thirty requests against a
+   * hundred-per-two-minutes budget shared with the admin pages — because
+   * `state` was sent singular in a loop. `state[]` takes all three at once
+   * (#463 item 5).
+   */
   async function listPostsForSync() {
+    const states = SYNC_STATES.map((state) => `state[]=${encodeURIComponent(state)}`).join('&');
     const results = [];
-    for (const state of SYNC_STATES) {
-      let page = 0;
-      // Assigned from the first response before the while condition reads it;
-      // the do-while guarantees one pass, so there is no initial value to seed.
-      let totalPages;
-      do {
-        const response = await request(`/posts?state=${state}&per_page=100&page=${page}`);
-        results.push(...extractPublerList(response));
-        totalPages = Number(response?.total_pages || 1);
-        page += 1;
-      } while (page < Math.min(totalPages, MAX_PAGES_PER_STATE));
-    }
+    let page = 0;
+    // Assigned from the first response before the while condition reads it;
+    // the do-while guarantees one pass, so there is no initial value to seed.
+    let totalPages;
+    do {
+      const response = await requestWithMeta(`/posts?${states}&page=${page}`);
+      results.push(...extractPublerList(response.data));
+      totalPages = Number(response.data?.total_pages || 1);
+      page += 1;
+      // A null reading is unknown, not exhausted: an upstream that stops
+      // sending the header must not stop the reconcile at page one.
+      const remaining = response.rateLimitRemaining;
+      if (remaining !== null && remaining <= RATE_LIMIT_FLOOR) {
+        log.warn?.(
+          `[syncSocialCalendar] stopping after page ${page} of ${totalPages}: ` +
+            `${remaining} Publer requests left in the window`
+        );
+        break;
+      }
+    } while (page < Math.min(totalPages, MAX_PAGES));
     return results.map(normalizePublerPost).filter((post) => post.id);
   }
 
-  return { configured: Boolean(apiKey && workspaceId), request, listPostsForSync };
+  /**
+   * Delete posts by id, in the one form Publer documents.
+   *
+   * `DELETE /posts/{id}` was invented; the API takes `DELETE /posts` with a
+   * `post_ids[]` query array and answers `{ deleted_ids }`. The undocumented
+   * per-id path is not merely wrong, it is wrong in a dangerous direction —
+   * **omitting `post_ids` deletes every non-published post in the workspace**,
+   * so a call built by dropping an id from the path is a workspace wipe. This
+   * function refuses an empty list for that reason, and refuses it before the
+   * request rather than after (#463 item 2).
+   *
+   * An id absent from `deleted_ids` was NOT deleted. Publer reports that in a
+   * 200, so a caller that only checks for a thrown error records a post as
+   * removed while it is still scheduled to publish.
+   *
+   * @param {Array<string|number>} ids
+   * @returns {Promise<{ deletedIds: string[], missingIds: string[] }>}
+   */
+  async function deletePosts(ids) {
+    // Nullish is dropped BEFORE stringifying: `String(null)` is the truthy
+    // string 'null', so filtering after the map would send `post_ids[]=null`
+    // — a request Publer would answer, for a post that does not exist, from a
+    // caller that meant to send nothing.
+    const wanted = [
+      ...new Set(
+        (Array.isArray(ids) ? ids : [])
+          .filter((id) => id !== null && id !== undefined)
+          .map((id) => String(id).trim())
+          .filter(Boolean)
+      ),
+    ];
+    if (!wanted.length) {
+      // Not a silent return: the caller believed it had something to delete,
+      // and the alternative reading of an empty list is the bulk wipe above.
+      throw new Error('Publer deletePosts called with no post ids — refusing to delete');
+    }
+    const query = wanted.map((id) => `post_ids[]=${encodeURIComponent(id)}`).join('&');
+    const data = await request(`/posts?${query}`, 'DELETE');
+    const deletedIds = (Array.isArray(data?.deleted_ids) ? data.deleted_ids : []).map(String);
+    return { deletedIds, missingIds: wanted.filter((id) => !deletedIds.includes(id)) };
+  }
+
+  return {
+    configured: Boolean(apiKey && workspaceId),
+    request,
+    listPostsForSync,
+    deletePosts,
+  };
 }
 
 export function createPublerReconcile({ store, client, now = () => new Date(), log = {} }) {

@@ -54,12 +54,16 @@ export function isCredentialRejected(status) {
  * Wrap a verdict writer in the two rules above.
  *
  * @param {object} [deps]
- * @param {((settingName: string, verdict: { ok: boolean, status?: number }) => Promise<void>) | null} [deps.onKeyVerdict]
+ * @param {((settingName: string, verdict: { ok: boolean, status?: number, detail?: string }) => Promise<void>) | null} [deps.onKeyVerdict]
  *   The writer. `null` — how every unit test constructs a client — makes the
  *   reporter a no-op.
  * @param {{ warn?: Function }} [deps.log]
  * @param {string} [deps.source] Names the caller in the warning when a write fails.
- * @returns {(settingName: string, verdict: { ok: boolean, status?: number }) => Promise<void>}
+ * @returns {(settingName: string, verdict: { ok: boolean, status?: number, detail?: string }) => Promise<void>}
+ *   `detail` is the upstream's own error sentence, carried through to the
+ *   API-keys page unchanged (#463 item 4). It is a provider's message about a
+ *   rejection, never a secret value; reporters pass whatever the provider
+ *   said and `recordSecretVerdict` caps its length.
  */
 export function createKeyVerdictReporter({ onKeyVerdict = null, log = console, source = 'key-verdict' } = {}) {
   const successReported = new Set();
