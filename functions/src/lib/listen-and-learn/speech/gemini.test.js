@@ -316,6 +316,37 @@ describe('the response', () => {
     expect(() => parseWav(bytes)).toThrow(/24-bit; only 16-bit PCM/);
   });
 
+  it('rejects a WAV header that would divide by zero or exceed what it can fold', () => {
+    // The header is untrusted input: 0 Hz or 0 channels would reach the
+    // duration arithmetic and the encoder, and three channels is more than
+    // downmixToMono folds.
+    const withHeader = (offset, value, width) => {
+      const bytes = wav(new Int16Array(10));
+      if (width === 4) bytes.writeUInt32LE(value, offset);
+      else bytes.writeUInt16LE(value, offset);
+      return bytes;
+    };
+    expect(() => parseWav(withHeader(22, 0, 2))).toThrow(/0 channels is not mono or stereo/);
+    expect(() => parseWav(withHeader(22, 3, 2))).toThrow(/3 channels is not mono or stereo/);
+    expect(() => parseWav(withHeader(24, 0, 4))).toThrow(/0 Hz is outside the 8000–96000 Hz band/);
+    expect(() => parseWav(withHeader(24, 192000, 4))).toThrow(/192000 Hz is outside/);
+    expect(() => parseWav(withHeader(34, 8, 2))).toThrow(/8-bit; only 16-bit PCM/);
+    expect(() => parseWav(withHeader(20, 3, 2))).toThrow(/format 3 at 16-bit; only 16-bit PCM/);
+  });
+
+  it('applies the same checks to a raw block that states its own format', () => {
+    // A present field is validated as written; only an absent one defaults.
+    const raw = (over) => interaction([audioBlock(over)]);
+    expect(() => extractAudio(raw({ channels: 0 }))).toThrow(/0 channels is not mono or stereo/);
+    expect(() => extractAudio(raw({ channels: 3 }))).toThrow(/3 channels is not mono or stereo/);
+    expect(() => extractAudio(raw({ sample_rate: 0 }))).toThrow(/0 Hz is outside the 8000–96000 Hz band/);
+    expect(() => extractAudio(raw({ sample_rate: 'fast' }))).toThrow(/NaN Hz is outside/);
+    expect(extractAudio(raw({ sample_rate: 8000, channels: 2 }))).toMatchObject({
+      sampleRate: 8000,
+      channels: 2,
+    });
+  });
+
   it('refuses a WAV whose fmt chunk is shorter than a format', () => {
     // The chunk declares its size; honouring it stops a short one being read
     // into the chunk after it and passed off as a sample rate.

@@ -285,13 +285,17 @@ export function parseWav(bytes) {
         sampleRate: bytes.readUInt32LE(body + 4),
         bitsPerSample: bytes.readUInt16LE(body + 14),
       };
-    } else if (id === 'data') {
-      if (!format) throw new GeminiSpeechError('WAV audio has a data chunk before its fmt chunk');
+      // Rejected here, before any sample is read: a header is untrusted
+      // input, and 0 Hz or 0 channels would otherwise reach the duration
+      // arithmetic and the encoder as a divide-by-zero.
       if (format.codec !== 1 || format.bitsPerSample !== 16) {
         throw new GeminiSpeechError(
           `WAV audio is format ${format.codec} at ${format.bitsPerSample}-bit; only 16-bit PCM can be encoded`
         );
       }
+      assertFormat(format, 'WAV audio');
+    } else if (id === 'data') {
+      if (!format) throw new GeminiSpeechError('WAV audio has a data chunk before its fmt chunk');
       // A streaming writer may leave the size 0 or 0xFFFFFFFF; the bytes that
       // are actually present are the truth either way.
       const end = size === 0 || body + size > bytes.length ? bytes.length : body + size;
@@ -300,6 +304,36 @@ export function parseWav(bytes) {
     offset = body + size + (size % 2); // chunks are word-aligned
   }
   throw new GeminiSpeechError('WAV audio has no data chunk');
+}
+
+/**
+ * The band of sample rates this module will encode. 8 kHz is telephone
+ * speech and 96 kHz is studio; a value outside it is a corrupt header or a
+ * field the API has started using differently, not a rate to trust.
+ */
+const MIN_SAMPLE_RATE = 8000;
+const MAX_SAMPLE_RATE = 96000;
+
+/**
+ * A format read from a WAV header or an audio block is untrusted input.
+ * Mono or stereo only, because that is what downmixToMono knows how to fold,
+ * and a rate inside the band above — 0 Hz, NaN or 0 channels would reach
+ * pcmDurationSeconds and the encoder as a divide-by-zero.
+ */
+function assertFormat({ sampleRate, channels }, where) {
+  if (!Number.isInteger(channels) || channels < 1 || channels > 2) {
+    throw new GeminiSpeechError(`${where}: ${channels} channels is not mono or stereo`);
+  }
+  if (!Number.isInteger(sampleRate) || sampleRate < MIN_SAMPLE_RATE || sampleRate > MAX_SAMPLE_RATE) {
+    throw new GeminiSpeechError(
+      `${where}: ${sampleRate} Hz is outside the ${MIN_SAMPLE_RATE}–${MAX_SAMPLE_RATE} Hz band this module encodes`
+    );
+  }
+}
+
+/** A field that is present, as a number; null when the block omits it. */
+function fieldNumber(value) {
+  return value === undefined || value === null || value === '' ? null : Number(value);
 }
 
 /**
@@ -348,12 +382,15 @@ function decodeBlock(block) {
 
   // RFC 2586 lets audio/L16 carry its rate as a parameter; the block's own
   // sample_rate field is the documented place and wins when both are present.
+  // A field that is present is validated as written — a `0` is a malformed
+  // block, not a request for the default — and only an absent one defaults.
   const rateParam = params.find((p) => p.startsWith('rate='));
   const sampleRate =
-    Number(block.sample_rate) ||
-    (rateParam ? Number(rateParam.slice('rate='.length)) : 0) ||
+    fieldNumber(block.sample_rate) ??
+    (rateParam ? Number(rateParam.slice('rate='.length)) : null) ??
     PCM_SAMPLE_RATE;
-  const channels = Number(block.channels) || 1;
+  const channels = fieldNumber(block.channels) ?? 1;
+  assertFormat({ sampleRate, channels }, 'Gemini audio block');
   assertPcm16(bytes, 'Gemini audio block');
   return { pcm: bytes, sampleRate, channels };
 }
