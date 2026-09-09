@@ -140,7 +140,7 @@ This project has not cut a tagged release; entries are grouped under
   the new entry point and carries a checked, self-expiring exception for the
   toggle until slice 2 gives it a call site.
 - **A script generator for recording transcripts, sibling to the article
-  one (#434, generator only).** `generateRecordingScript` in
+  one (#434, generator only; #446).** `generateRecordingScript` in
   `functions/src/lib/listen-and-learn/recording-script.js` takes a Plaud
   transcript and returns the same script shape `generateEpisodeScript` and
   `generateArticleScript` return, through the same validation, byte fitting
