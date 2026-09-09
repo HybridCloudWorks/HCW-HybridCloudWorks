@@ -139,6 +139,51 @@ This project has not cut a tagged release; entries are grouped under
   feature toggle joins the AI Engine catalogue; `ai-call-sites.test.js` scans
   the new entry point and carries a checked, self-expiring exception for the
   toggle until slice 2 gives it a call site.
+- **A script generator for recording transcripts, sibling to the article
+  one (#434, generator only).** `generateRecordingScript` in
+  `functions/src/lib/listen-and-learn/recording-script.js` takes a Plaud
+  transcript and returns the same script shape `generateEpisodeScript` and
+  `generateArticleScript` return, through the same validation, byte fitting
+  and prompt-injection fence — imported from `script.js` and
+  `article-script.js`, with tests that swap the sibling's fence for a marker
+  and prove the marker reaches the prompt, so a copy cannot drift. Nothing
+  calls it yet: the admin surface, the stored episode and the `USAGE_SOURCES`
+  entry are the next slice, and the returned `source` object carries what
+  that slice needs — `kind: 'plaud'`, the recording id, title, time, duration,
+  segment counts and whether the input was cut.
+
+  **It is a retelling, not a transcript.** The issue's rule is that the two
+  hosts must not attribute lines to the real people in the recording, and a
+  diarised Plaud transcript invites exactly that: every segment carries
+  `Speaker 1`, `Speaker 2` or a name the owner typed in, and the obvious
+  script maps those onto Maya and Elena. So the labels never reach the model.
+  `renderTranscriptForPrompt` writes each segment as one line and a paragraph
+  break where the speaker changes — the shape of the conversation, with
+  nothing that could name or number a person. A persistent neutral marker
+  (`[A]`, `[B]`) was rejected because it is an alias, and a model that can
+  say "the second participant argued" is one sentence away from "Speaker 2
+  said". The prompt forbids naming or quoting anyone who spoke, the
+  disclaimer says out loud that the voices are not the participants, and the
+  result reports any transcript label the finished dialogue repeated
+  verbatim, for the review surface rather than as a refusal.
+
+  **Empty or trivially short transcripts are refused before any spend**, for
+  the reason `resolveArticleBody` throws: a prompt with nothing in it produces
+  a plausible episode about the title. Measured live on 2026-09-08, a
+  28-second device check has an empty `source_list`, which is the file this
+  catches. The input ceiling is 120 kB — about two hours of speech — and the
+  cut lands at a segment boundary, because a half sentence at the end of the
+  fence reads to the model as a transcription error to smooth over rather
+  than an edge to respect. The prompt is told, and so is the result.
+
+  **`normalizePlaudTranscript`** accepts the measured `get_transcript` shape
+  (`segments[]` of `start_time`/`end_time`/`content`/`speaker` in ms), the
+  `get_file` shape with its `source_list`, a bare utterance array, a pasted
+  plain-text transcript, and the `{ transcript }` document `POST
+  cms/recordings` already stores. One thing is inferred rather than measured
+  and the header says so: the key that holds the utterances inside a
+  `data_type: "transaction"` entry, because both files sampled had an empty
+  `source_list`; the normaliser finds the array by shape.
 
 - **Any published article can become a podcast transcript (#435, slice 2 of
   #432).** The generator #439 left unwired is now wired: a per-item **Podcast
