@@ -175,11 +175,16 @@ This project has not cut a tagged release; entries are grouped under
   the article-side player lands, and nothing in the portal lists them until
   the Recording Hub (#442) ships — the confirmation says so.
 
-- **An RSS.com publish client and an idempotent host-publish step (#437,
-  slice 1; ADR 0029 §1b).** The owner approved RSS.com Max on 2026-09-08 so
-  that approving an episode uploads it to the show rather than leaving the
-  owner to upload it by hand. The issue's first task was to confirm whether
-  the API had left beta; it has not. Checked 2026-09-09: RSS.com's help
+- **Groundwork for publishing episodes to RSS.com: the API client, the
+  idempotent host-publish step, and the two Key Vault references (#437,
+  slice 1; ADR 0029 §1b).** Nothing calls the new step yet. The owner
+  approved RSS.com Max on 2026-09-08 so that, eventually, approving an
+  episode uploads it to the show rather than leaving the owner to upload it
+  by hand; the approval hook that makes that happen, and the admin retry,
+  are the next slice. What this slice settles is how the host is spoken to
+  and what a publish writes on the document, so that the hook is a wiring
+  change rather than a design one. The issue's first task was to confirm
+  whether the API had left beta; it has not. Checked 2026-09-09: RSS.com's help
   article says the API "was introduced in December 2025 and is currently in
   beta" and that "small changes to the documentation or endpoints may occur".
   So the client is written to the issue's beta-tolerant design rather than
