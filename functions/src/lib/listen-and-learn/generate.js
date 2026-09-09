@@ -160,8 +160,9 @@ async function generateOneArea({
   // `generateJsonResponse` hands the script writer `undefined`, so its own
   // "generate is required" guard names the problem, rather than a TypeError
   // from inside this closure on the first call. A plain call, not `.call(ai)`:
-  // the router's methods are closures with no `this`, and the scan matches
-  // `generateJsonResponse(` — `.call(` would hide this site from it.
+  // the router's methods are closures with no `this`, and the scan matches the
+  // method name followed directly by its open paren — `.call` in between would
+  // hide this site from it.
   const generate =
     typeof ai?.generateJsonResponse === 'function'
       ? (params) => ai.generateJsonResponse({ ...params, feature: 'listenAndLearn' })
