@@ -189,7 +189,7 @@ describe('requests', () => {
     expect(error.detail).toBe('getaddrinfo ENOTFOUND uploads.storage.example');
     expect(error.message).toContain('The upload host uploads.storage.example could not be reached for the PUT');
     expect(error.message).toMatch(/re-run to mint a fresh presigned upload/);
-    expect(error.message).not.toMatch(/RSS\.com/);
+    expect(error.message).not.toContain('RSS.com');
     expect(error.message).not.toMatch(/could not be reached while/);
   });
 
@@ -212,7 +212,7 @@ describe('requests', () => {
       expect(error.retryable).toBe(true);
       expect(error.message).toContain('The upload host uploads.storage.example did not answer the PUT');
       expect(error.message).toContain(`timeout after ${RSSCOM_UPLOAD_TIMEOUT_MS} ms`);
-      expect(error.message).not.toMatch(/RSS\.com/);
+      expect(error.message).not.toContain('RSS.com');
     } finally {
       vi.useRealTimers();
     }
