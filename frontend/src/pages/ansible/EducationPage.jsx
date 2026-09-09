@@ -2,6 +2,8 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import EducationTracks from '@/components/shared/EducationTracks';
 import {
+  DATA_AS_OF,
+  DATA_SOURCE,
   certifications,
   filterLevels,
   learningPaths,
@@ -36,6 +38,8 @@ export default function AnsibleEducationPage() {
           resources={resources}
           levelMeta={levelMeta}
           filterLevels={filterLevels}
+          dataAsOf={DATA_AS_OF}
+          dataSource={DATA_SOURCE}
         />
       </main>
     </>

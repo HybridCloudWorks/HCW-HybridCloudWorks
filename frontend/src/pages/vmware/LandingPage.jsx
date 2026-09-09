@@ -50,11 +50,11 @@ const CERTS = [
     skills: ['vSphere', 'vSAN', 'NSX'],
   },
   {
-    code: 'VCAP-DCV',
-    title: 'VCAP — Data Center Virtualization',
+    code: 'VCAP-VCF',
+    title: 'VCAP — VMware Cloud Foundation',
     difficulty: 'Advanced',
     duration: '~6 months',
-    skills: ['Design', 'Deploy', 'Operate'],
+    skills: ['Administrator', 'Architect', 'Support'],
   },
 ];
 

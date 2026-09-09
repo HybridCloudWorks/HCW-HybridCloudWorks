@@ -19,6 +19,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The GitHub, AWS, Terraform, Google Cloud and VMware Learn catalogues
+  match the vendors again, say when they were last checked, and derive
+  "retiring"/"beta" from dates instead of a typed field (#461, items 5–9).**
+  The 2026-09-09 audit found every provider page hard-coded and behind:
+  GitHub had GH-100 on Foundations, GH-300 on Advanced Security and GH-500 on
+  Administration with no GH-900 or Copilot exam; AWS listed SOA-C02 under the
+  CloudOps name a year after SOA-C03 replaced it and knew nothing of the
+  MLA-C01 (2026-09-28), SAP-C02 (2026-11-16), DVA-C02 (2026-11-30) and
+  ANS-C01 (2026-12-31) retirements or the AI Business Strategist beta;
+  Terraform advertised the 003 exam retired in January and a Consul exam
+  HashiCorp retired on 2026-07-15 while omitting both Advanced credentials;
+  GCP was missing five of Google's fourteen and still called the Workspace
+  credential Professional; VMware carried the superseded VCAP-DCV Deploy
+  and no VCP-VVF. Each catalogue now lives in `frontend/src/data/<provider>/`
+  with a `DATA_AS_OF` and `DATA_SOURCE` the page renders as "Catalogue
+  checked against … on Sep 9, 2026" — the one freshness claim that is true.
+  AWS's two duplicate lists (landing page and `CertDetailPage.jsx`) are one
+  file, and `/aws/education/soa-c02` still resolves through `previousSlugs`.
+  The pages share the Azure entry's `frontend/src/lib/certStatus.js`, which
+  gains an `upcoming` status (a version announced but not yet deliverable,
+  such as SAP-C03 from 2026-11-17), `isIsoDate`, `describeCertStatus` (the
+  badge wording, "Retiring · last day to test Nov 16, 2026 · replaced by
+  SAP-C03"), and three more stale checks; every page reads "today" through
+  `useToday(DATA_AS_OF)` so the prerendered HTML and the hydrating render
+  agree, and `education-catalogues.test.js` fails the moment any dated row
+  is past (first due: MLA-C01 on 2026-09-29), which is the reminder to
+  re-verify against the vendor. VCTA-DCV is kept because Broadcom's 2024
+  FAQ names it and no 2026 Broadcom page contradicts it.
 - **Azure Learn statuses are derived from their dates, the ten retired exams
   say so, and every landing card opens a real detail page (#461 items 1 and
   2).** The Azure catalogue (`frontend/src/data/azure/certifications.js`) had

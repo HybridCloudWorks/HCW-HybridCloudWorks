@@ -2,6 +2,8 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import EducationTracks from '@/components/shared/EducationTracks';
 import {
+  DATA_AS_OF,
+  DATA_SOURCE,
   certifications,
   filterLevels,
   learningPaths,
@@ -25,8 +27,8 @@ export default function VMwareEducationPage() {
             VMware Education & Certifications
           </h1>
           <p className="text-slate-600 dark:text-slate-400 max-w-2xl">
-            Certification tracks and learning paths for VMware Cloud Foundation, vSphere, vSAN and
-            NSX — from the foundational VCP to the advanced VCAP designs.
+            Certification tracks and learning paths for VMware Cloud Foundation, vSphere Foundation,
+            vSAN and NSX — from the VCTA through the VCP tracks to the role-based VCAP-VCF exams.
           </p>
         </header>
         <EducationTracks
@@ -35,6 +37,8 @@ export default function VMwareEducationPage() {
           resources={resources}
           levelMeta={levelMeta}
           filterLevels={filterLevels}
+          dataAsOf={DATA_AS_OF}
+          dataSource={DATA_SOURCE}
         />
       </main>
     </>

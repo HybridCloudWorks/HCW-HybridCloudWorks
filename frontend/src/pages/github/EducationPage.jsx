@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
+import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import CertStatusBadge from '@/components/education/CertStatusBadge';
+import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/github/certifications';
+import { deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,73 +44,10 @@ function getLevelFilterClass(levelFilter, level) {
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
-const certifications = [
-  {
-    id: 'gh-100',
-    slug: 'gh-100',
-    code: 'GH-100',
-    title: 'GitHub Foundations',
-    level: 'Foundations',
-    status: 'active',
-    description:
-      'Demonstrate foundational knowledge of Git, GitHub repositories, collaboration workflows, issues, and project management.',
-    topics: ['Git', 'Repos', 'Collaboration', 'PRs', 'Issues', 'Projects'],
-    hours: 20,
-    prepTime: '~4 weeks',
-    featured: false,
-    learnUrl: 'https://examregistration.github.com/overview',
-  },
-  {
-    id: 'gh-200',
-    slug: 'gh-200',
-    code: 'GH-200',
-    title: 'GitHub Actions',
-    level: 'Associate',
-    status: 'active',
-    description:
-      'Automate workflows, manage runners, secure secrets, build matrices, and handle artifacts with GitHub Actions.',
-    topics: ['Workflows', 'Runners', 'Secrets', 'Matrices', 'Artifacts'],
-    hours: 30,
-    prepTime: '~6 weeks',
-    featured: true,
-    learnUrl: 'https://examregistration.github.com/overview',
-  },
-  {
-    id: 'gh-300',
-    slug: 'gh-300',
-    code: 'GH-300',
-    title: 'GitHub Advanced Security',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Implement supply chain security using CodeQL, Dependabot, secret scanning, and SBOM generation.',
-    topics: ['CodeQL', 'Dependabot', 'Secret Scanning', 'SBOM'],
-    hours: 40,
-    prepTime: '~8 weeks',
-    featured: false,
-    learnUrl: 'https://examregistration.github.com/overview',
-  },
-  {
-    id: 'gh-500',
-    slug: 'gh-500',
-    code: 'GH-500',
-    title: 'GitHub Administration',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Manage enterprise GitHub environments including LDAP integration, audit logs, policies, and SSO configuration.',
-    topics: ['Enterprise', 'LDAP', 'Audit Logs', 'Policies', 'SSO'],
-    hours: 35,
-    prepTime: '~8 weeks',
-    featured: false,
-    learnUrl: 'https://examregistration.github.com/overview',
-  },
-];
-
 const learningPaths = [
   {
     id: 0,
-    certCode: 'GH-100',
+    certCode: 'GH-900',
     title: 'GitHub Foundations Path',
     level: 'Beginner',
     hours: 20,
@@ -138,7 +79,7 @@ const learningPaths = [
   },
   {
     id: 2,
-    certCode: 'GH-300',
+    certCode: 'GH-500',
     title: 'Advanced Security Path',
     level: 'Advanced',
     hours: 40,
@@ -218,12 +159,14 @@ export default function GitHubEducationPage() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [carouselPage, setCarouselPage] = useState(0);
   const [selectedPathId, setSelectedPathId] = useState(0);
+  const today = useToday(DATA_AS_OF);
 
   const featuredCert = certifications.find((c) => c.featured);
 
   const filteredCerts = certifications.filter((c) => {
     const levelOk = levelFilter === 'All' || c.level === levelFilter;
-    const statusOk = statusFilter === 'All' || c.status === statusFilter.toLowerCase();
+    const statusOk =
+      statusFilter === 'All' || deriveStatus(c, today) === statusFilter.toLowerCase();
     return levelOk && statusOk;
   });
 
@@ -250,7 +193,7 @@ export default function GitHubEducationPage() {
         <title>GitHub Skills &amp; Certifications | HCW</title>
         <meta
           name="description"
-          content="GitHub certification prep, learning paths, and resources — covering Foundations, Actions, Advanced Security, and Administration."
+          content="GitHub certification prep, learning paths, and resources — covering Foundations, Actions, Copilot, Advanced Security, and Administration."
         />
         <meta property="og:title" content="GitHub Skills & Certifications" />
         <meta
@@ -270,7 +213,7 @@ export default function GitHubEducationPage() {
           </h1>
           <p className="text-base sm:text-lg text-foreground max-w-3xl relative z-10">
             Validate your GitHub expertise with official certifications covering foundations, CI/CD
-            automation, advanced security, and enterprise administration.
+            automation, GitHub Copilot, advanced security, and enterprise administration.
           </p>
           <div className="flex flex-wrap gap-2 mt-4 relative z-10">
             {['Foundations', 'Associate', 'Professional'].map((level) => (
@@ -354,10 +297,13 @@ export default function GitHubEducationPage() {
         {/* ── Browse Certifications Carousel ───────────────────────────── */}
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-slate-300 text-[24px] material-symbols-outlined">school</span>
-              Browse Certifications
-            </h3>
+            <div>
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <span className="text-slate-300 text-[24px] material-symbols-outlined">school</span>
+                Browse Certifications
+              </h3>
+              <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
+            </div>
           </div>
 
           {/* Filters */}
@@ -413,6 +359,7 @@ export default function GitHubEducationPage() {
                       </span>
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
+                    <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-slate-300 transition-colors flex-1">
                       {cert.title}
