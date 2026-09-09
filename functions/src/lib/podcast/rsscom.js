@@ -260,6 +260,32 @@ function uploadTransportError(url, error) {
   );
 }
 
+/**
+ * A bare `type/subtype` media type, no parameters, per RFC 2045 token
+ * characters. `audio/mpeg`, `audio/mp4`, `image/jpeg` pass; `audio/mpeg;
+ * charset=x`, an empty string and whitespace do not.
+ */
+const MIME_SHAPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i;
+
+/**
+ * The one rule for a mime type, shared by the two calls that must agree on
+ * it: `createPresignedUpload` sends it as `expected_mime`, which the host
+ * checks the PUT against, and `uploadAudio` sends it as the PUT's
+ * `Content-Type`. Trimmed, non-empty, `type/subtype`, or refused before any
+ * network call — never defaulted, because a default applied in one place and
+ * not the other is exactly the mismatch the host would reject.
+ */
+function mimeOrRefuse(mime, where) {
+  const value = typeof mime === 'string' ? mime.trim() : '';
+  if (!value || !MIME_SHAPE.test(value)) {
+    throw new RssComError(
+      `${where} needs a mime type shaped like audio/mpeg; got ${JSON.stringify(mime ?? null)}.`,
+      { status: null, code: 'VALIDATION', retryable: false }
+    );
+  }
+  return value;
+}
+
 /** Map a transport failure (no response) on an api.rss.com call to the typed error. */
 function transportError(operation, error) {
   if (error?.code === 'FETCH_TIMEOUT') {
@@ -367,17 +393,20 @@ export function createRssComClient({ env = process.env, fetch: fetchImpl = globa
      * PUTs bytes to `url` and references `id` as `audio_upload_id`.
      */
     async createPresignedUpload({ assetType = 'audio', mime, filename }) {
-      if (!mime || !filename) {
-        throw new RssComError('A presigned upload needs both a mime type and a filename.', {
+      const expectedMime = mimeOrRefuse(mime, 'A presigned upload');
+      const name = typeof filename === 'string' ? filename.trim() : '';
+      if (!name) {
+        throw new RssComError('A presigned upload needs a filename.', {
           status: null,
           code: 'VALIDATION',
+          retryable: false,
         });
       }
       return call(
         'creating a presigned upload',
         'POST',
         `/podcasts/${podcastId}/assets/presigned-uploads`,
-        { body: { asset_type: assetType, expected_mime: mime, filename } }
+        { body: { asset_type: assetType, expected_mime: expectedMime, filename: name } }
       );
     },
 
@@ -403,11 +432,15 @@ export function createRssComClient({ env = process.env, fetch: fetchImpl = globa
           code: 'VALIDATION',
         });
       }
+      // Validated before fetch sees it: an empty or malformed header value
+      // makes fetch throw, and that throw would otherwise be misreported as
+      // the upload host being unreachable.
+      const contentType = mimeOrRefuse(mime, 'The audio PUT');
       let response;
       try {
         response = await fetchWithTimeout(fetchImpl, url, {
           method: 'PUT',
-          headers: { 'Content-Type': mime, 'Content-Length': String(bytes.length) },
+          headers: { 'Content-Type': contentType, 'Content-Length': String(bytes.length) },
           body: bytes,
           timeoutMs: RSSCOM_UPLOAD_TIMEOUT_MS,
         });

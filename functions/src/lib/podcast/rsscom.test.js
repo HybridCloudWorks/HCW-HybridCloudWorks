@@ -218,6 +218,48 @@ describe('requests', () => {
     }
   });
 
+  it('uploadAudio refuses a missing, empty or whitespace mime before fetch is called', async () => {
+    // fetch throws on an empty header value, and that throw would read as the
+    // upload host being unreachable. Refuse first, as a plain sentence.
+    for (const bad of [undefined, null, '', '   ', 'audio', 'audio/mpeg; charset=x', 42]) {
+      const { client, fetchImpl } = build();
+      const error = await client
+        .uploadAudio('https://store.example/put', Buffer.from('mp3'), bad)
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(RssComError);
+      expect(error.code).toBe('VALIDATION');
+      expect(error.retryable).toBe(false);
+      expect(error.status).toBeNull();
+      expect(error.message).toMatch(/^The audio PUT needs a mime type shaped like audio\/mpeg; got /);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
+  it('uploadAudio sends a valid mime verbatim, trimmed of surrounding whitespace', async () => {
+    const { client, lastCall } = build({ responses: [reply(200)] });
+    await client.uploadAudio('https://store.example/put', Buffer.from('mp3'), '  audio/mp4 ');
+    expect(lastCall()[1].headers['Content-Type']).toBe('audio/mp4');
+  });
+
+  it('createPresignedUpload applies the same mime rule, so expected_mime and the PUT agree', async () => {
+    for (const bad of ['', '  ', 'audio', 'audio/mpeg; charset=x']) {
+      const { client, fetchImpl } = build();
+      const error = await client
+        .createPresignedUpload({ mime: bad, filename: 'a.mp3' })
+        .catch((e) => e);
+      expect(error.code).toBe('VALIDATION');
+      expect(error.message).toMatch(/^A presigned upload needs a mime type shaped like audio\/mpeg/);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+    const { client, lastCall } = build({ responses: [reply(201, { id: 'up', url: 'https://s/p' })] });
+    await client.createPresignedUpload({ mime: ' audio/mp4 ', filename: ' a.mp3 ' });
+    expect(JSON.parse(lastCall()[1].body)).toEqual({
+      asset_type: 'audio',
+      expected_mime: 'audio/mp4',
+      filename: 'a.mp3',
+    });
+  });
+
   it('uploadAudio refuses zero bytes before touching the network', async () => {
     const { client, fetchImpl } = build();
     await expect(
