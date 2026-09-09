@@ -7,16 +7,35 @@
  * and the worker runs here under the non-HTTP timeout, exactly as
  * `generate-listen-and-learn` does. The document in `podcast_transcripts` is
  * the record; the job result is a small report of it.
+ *
+ * The second job, `publish-podcast-transcript` (#437, ADR 0029 §1b), is the
+ * host step approval queues: read the MP3 from the `podcast` container, put
+ * it on RSS.com, store the outcome under `host.rsscom`. It is `publisher`
+ * because the route that queues it is, and because it is the act that puts
+ * an AI-read episode on the feed under the owner's name. It never writes
+ * `status` or `approvedAt`, and it never writes `podcasts` — the feed is the
+ * ingest boundary. `custom_link` is the article's public URL when the
+ * article document carries one.
  */
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
-import { uploadBlob } from '../lib/blob-storage.js';
+import { readBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getCostEstimate } from '../lib/ai/router.js';
+import { publicUrlOf } from '../lib/cms/publish.js';
 import { registerJobType } from '../lib/jobs.js';
 import {
+  ARTICLE_CONTAINER,
   TRANSCRIPT_JOB_TYPE,
   generateTranscriptFromArticle,
   parseArticleId,
 } from '../lib/podcast/generate.js';
+import {
+  PUBLISH_JOB_TYPE,
+  audioReaderFor,
+  parseTranscriptId,
+  recordHostJobFailure,
+  runHostPublish,
+} from '../lib/podcast/publish-transcript.js';
+import { createRssComClient } from '../lib/podcast/rsscom.js';
 
 /**
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rule
@@ -64,4 +83,96 @@ registerJobType(TRANSCRIPT_JOB_TYPE, {
   // headroom for a slow provider.
   timeoutMs: 10 * 60 * 1000,
   worker: runTranscriptGeneration,
+});
+
+/** Validate a publish payload: `{ transcriptId }`. Same rule as the routes. */
+export function parsePublishPayload(payload) {
+  const parsed = parseTranscriptId(payload?.transcriptId);
+  if (parsed.error) return { error: parsed.error };
+  return { value: { transcriptId: parsed.value } };
+}
+
+/**
+ * The article's public URL for `custom_link`, or null. A read failure here
+ * is logged and costs the link, not the publish: an episode without a page
+ * link is still an episode, and the retry route recovers the link later.
+ * The log line carries the job id and the error's code — never a document
+ * id or the raw message; the job document records the rest.
+ */
+async function resolveArticleUrl(doc, { context, jobId }) {
+  if (!doc?.sourceId) return null;
+  try {
+    const article = await readDoc(ARTICLE_CONTAINER, doc.sourceId, doc.sourceId);
+    return publicUrlOf(article || {}) || null;
+  } catch (error) {
+    context?.warn?.(
+      `${PUBLISH_JOB_TYPE}: job ${jobId ?? 'unknown'} publishes without custom_link ` +
+        `(article read failed: ${error?.code ?? error?.statusCode ?? 'unknown'})`
+    );
+    return null;
+  }
+}
+
+/** One publish run against production dependencies. */
+export async function runTranscriptPublish(payload, { context, job } = {}) {
+  const parsed = parsePublishPayload(payload);
+  if (parsed.error) throw new Error(parsed.error);
+  const id = parsed.value.transcriptId;
+  const jobId = job?.id ?? null;
+
+  const record = await runHostPublish({
+    store: { readDoc, patchDoc },
+    id,
+    client: createRssComClient(),
+    readAudio: audioReaderFor(readBlobForDelivery),
+    resolvePublicUrl: (doc) => resolveArticleUrl(doc, { context, jobId }),
+  });
+
+  // Content-free: the outcome and the error code, keyed by the job id. The
+  // transcript id and the host's episode id are on the document and in the
+  // job result, not in the log.
+  const outcome = record.skipped
+    ? `skipped (${record.skipped})`
+    : record.error
+      ? `failed (${record.error.code})`
+      : 'on the host';
+  context?.log?.(`${PUBLISH_JOB_TYPE}: job ${jobId ?? 'unknown'} ${outcome}`);
+
+  return {
+    id,
+    episodeId: record.episodeId ?? null,
+    guid: record.guid ?? null,
+    hostStatus: record.hostStatus ?? null,
+    skipped: record.skipped ?? null,
+    error: record.error ?? null,
+  };
+}
+
+registerJobType(PUBLISH_JOB_TYPE, {
+  // The role of POST cms/podcast/transcripts/review and …/{id}/publish, the
+  // two routes that queue it: this is what puts an episode on the feed.
+  role: 'publisher',
+  description:
+    'Upload an approved podcast transcript’s audio to RSS.com and create or update its episode; the outcome is recorded on the transcript under host.rsscom.',
+  // One transcript id.
+  maxPayloadBytes: 512,
+  // The client's own deadlines (30 s presign, 300 s PUT, 30 s create) sum to
+  // six minutes; this sits above them so a slow host is recorded as the
+  // client's specific error rather than as a job timeout.
+  timeoutMs: 8 * 60 * 1000,
+  worker: runTranscriptPublish,
+  // A job that died around the step (a thrown store error, the timeout) would
+  // leave host.rsscom.pending true forever; clear it and say why.
+  onComplete: async ({ job, status, error }, { now }) => {
+    if (status === 'succeeded') return;
+    const parsed = parsePublishPayload(job?.payload);
+    if (parsed.error) return;
+    await recordHostJobFailure({
+      store: { readDoc, patchDoc },
+      id: parsed.value.transcriptId,
+      status,
+      error,
+      now,
+    });
+  },
 });
