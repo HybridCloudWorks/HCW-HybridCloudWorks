@@ -101,8 +101,10 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
       ai: { generateGroundedJsonResponse, getCostEstimate },
       actorId: job?.requestedBy?.oid || null,
     });
+    // Exam code and counts only: the episode id is derived from the owner's
+    // title, which is content, and the log line is not the place for it.
     context?.log?.(
-      `generate-listen-and-learn: ${report.examCode}/${report.areaSlug} — source-grounded episode drafted from ${report.sourceCount} sources${report.audioError ? ', without audio' : ''}, $${report.costUsd} spent`
+      `generate-listen-and-learn: ${report.examCode} — source-grounded episode drafted from ${report.sourceCount} sources${report.audioError ? ', without audio' : ''}, $${report.costUsd} spent`
     );
     return report;
   }

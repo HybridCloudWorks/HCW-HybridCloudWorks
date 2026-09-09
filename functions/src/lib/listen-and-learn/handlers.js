@@ -186,8 +186,10 @@ export function createListenAndLearnHandlers({
         await store.upsertDoc(JOBS_CONTAINER, doc);
         enqueue({ jobId, type: LISTEN_AND_LEARN_JOB_TYPE });
 
+        // The job id is the correlation key; the episode id would be the
+        // owner's title, which is content and stays out of the log.
         context.log?.(
-          `generateSourceEpisode: queued ${jobId} for ${examCode}/${areaSlug} (${sources.length} sources)`
+          `generateSourceEpisode: queued ${jobId} for ${examCode} (${sources.length} sources)`
         );
         return json(202, {
           ok: true,
