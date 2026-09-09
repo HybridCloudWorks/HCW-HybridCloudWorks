@@ -34,6 +34,14 @@ import {
   estimateSpeechCostUsd,
   resolveSpeechProvider,
 } from '../lib/listen-and-learn/speech/index.js';
+import {
+  parseTtsModel,
+  readStoredListenAndLearnModel,
+  resolveListenAndLearnModel,
+} from '../lib/listen-and-learn/speech-settings.js';
+
+/** Every synthesis and estimate here is for this product, never the podcast's. */
+const PRODUCT = 'listenAndLearn';
 
 /**
  * Bound so a single run cannot spend an unbounded amount: the largest real
@@ -47,31 +55,50 @@ export const MAX_AREAS_PER_RUN = 8;
  *
  * A ceiling, not a forecast: no script exists yet, so each episode is priced
  * at `MAX_SCRIPT_BYTES` — the most UTF-8 BYTES a script may hold, which
- * `estimateSpeechCostUsd` treats as bytes. That is an over-estimate for both
- * providers: ElevenLabs bills characters, and a script's character count is
- * never more than its byte count (lower, for anything non-ASCII); Gemini's
- * duration is derived from bytes at a deliberately slow speaking rate. The
+ * `estimateSpeechCostUsd` treats as bytes; Gemini's duration is derived from
+ * bytes at a deliberately slow speaking rate, so this over-estimates. The
  * episode count is the areas requested or, when the guide has not been parsed
  * to know, the most a run may generate. The run cannot spend more than this
- * figure on speech; it usually spends less. `provider` is null when no speech
- * provider will run, and `reason` says why, because the two causes call for
- * different actions: `not_configured` (no key at all — the transcript-only
- * state, not an error) or `pin_unavailable` (`LISTEN_AND_LEARN_TTS_PROVIDER`
- * names a provider that is not configured or not known — the run will still
- * go ahead, and its audio step will fail with a sentence naming the pin).
+ * figure on speech; it usually spends less.
+ *
+ * The Listen & Learn product only — Gemini or Azure AI Speech, never
+ * ElevenLabs, whatever keys are present (speech/index.js). `provider` is null
+ * when no speech provider will run, and `reason` says why, because the two
+ * causes call for different actions: `not_configured` (no key at all — the
+ * transcript-only state, not an error) or `pin_unavailable`
+ * (`LISTEN_AND_LEARN_TTS_PROVIDER` names a provider that is not configured,
+ * not known, or not this product's — the run will still go ahead, and its
+ * audio step will fail with a sentence naming the pin).
+ *
+ * `model` is the Gemini model the run will read with when the payload names
+ * a valid `ttsModel` (`modelSource: 'run'`). This hook is synchronous and
+ * sees only the payload, so when the payload names none it prices the
+ * setting/module default (`modelSource: 'default'`) — the worker then reads
+ * the stored default, which may differ. The generation form always sends
+ * `ttsModel`, so the 202 an operator sees names the model that will run; a
+ * caller going around the form gets the honest label instead.
  *
  * @param {object} payload the raw enqueue payload
  * @param {object} [env]
- * @returns {{provider: string|null, model: string|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
+ * @returns {{provider: string|null, model: string|null, modelSource: 'run'|'default'|null, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
  */
 export function speechEstimateForRun(payload, env = process.env) {
   const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
   const episodes = areas > 0 ? Math.min(areas, MAX_AREAS_PER_RUN) : MAX_AREAS_PER_RUN;
-  const perEpisode = estimateSpeechCostUsd({ ceilingBytes: MAX_SCRIPT_BYTES, env });
+  // An allowlist lookup: a value that is not one of the two ids is treated as
+  // absent here (the worker refuses it by sentence), never echoed back.
+  const requested = parseTtsModel(payload?.ttsModel).value ?? null;
+  const perEpisode = estimateSpeechCostUsd({
+    product: PRODUCT,
+    ceilingBytes: MAX_SCRIPT_BYTES,
+    model: requested,
+    env,
+  });
   if (!perEpisode) {
     return {
       provider: null,
       model: null,
+      modelSource: null,
       episodes,
       perEpisodeUsd: null,
       estimatedCostUsd: null,
@@ -82,6 +109,7 @@ export function speechEstimateForRun(payload, env = process.env) {
   return {
     provider: perEpisode.provider,
     model: perEpisode.model,
+    modelSource: perEpisode.model ? (requested ? 'run' : 'default') : null,
     episodes,
     perEpisodeUsd,
     estimatedCostUsd:
@@ -96,7 +124,7 @@ export function speechEstimateForRun(payload, env = process.env) {
  */
 function noProviderReason(env) {
   try {
-    return resolveSpeechProvider(env) ? null : 'not_configured';
+    return resolveSpeechProvider(env, { product: PRODUCT }) ? null : 'not_configured';
   } catch (err) {
     if (err?.name === 'SpeechNotConfiguredError') return 'pin_unavailable';
     throw err;
@@ -106,14 +134,22 @@ function noProviderReason(env) {
 /**
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rules
  * are testable on their own and the job worker stays a thin adapter.
+ *
+ * `ttsModel` is checked first and for both kinds of run: an id that is not
+ * one of the two offered is refused by sentence before anything is spent,
+ * and an absent one is null — "the stored default" — in the value.
  */
 export function parseGeneratePayload(payload) {
+  const model = parseTtsModel(payload?.ttsModel);
+  if (model.error) return { error: model.error };
+
   // A source list makes this a source-grounded episode, whatever else the
   // payload carries: the presence of the field is the switch, not its
   // length, so an empty list is refused by the source rules ("needs at least
   // one source") rather than silently becoming a guide run.
   if (payload && typeof payload === 'object' && payload.sources !== undefined) {
-    return parseSourceEpisodePayload(payload);
+    const parsed = parseSourceEpisodePayload(payload);
+    return parsed.error ? parsed : { value: { ...parsed.value, ttsModel: model.value } };
   }
 
   const platform = String(payload?.platform || '').toLowerCase();
@@ -142,6 +178,7 @@ export function parseGeneratePayload(payload) {
       examCode,
       studyGuideUrl,
       areas,
+      ttsModel: model.value,
       cert: {
         title: String(payload?.certTitle || '').trim() || null,
         slug: String(payload?.certSlug || '').trim() || null,
@@ -150,10 +187,26 @@ export function parseGeneratePayload(payload) {
   };
 }
 
+/**
+ * The Gemini model this run reads with: the run's choice, else the stored
+ * default, else null for `LISTEN_AND_LEARN_TTS_MODEL` and the module default
+ * (speech-settings.js). Read once per run, before anything is spent.
+ *
+ * @param {string|null} requested the validated `ttsModel` from the payload
+ * @param {{ readDoc: Function }} store
+ */
+export async function resolveRunModel(requested, store) {
+  if (requested) return requested;
+  return resolveListenAndLearnModel({ stored: await readStoredListenAndLearnModel(store.readDoc) });
+}
+
 /** One generation run against production dependencies. */
 export async function runListenAndLearnGeneration(payload, { context, job } = {}) {
   const parsed = parseGeneratePayload(payload);
   if (parsed.error) throw new Error(parsed.error);
+
+  const store = { readDoc, upsertDoc, patchDoc };
+  const ttsModel = await resolveRunModel(parsed.value.ttsModel, store);
 
   if (parsed.value.kind === 'source') {
     const source = parsed.value;
@@ -163,9 +216,10 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
       title: source.title,
       sources: source.sources,
       cert: source.cert,
-      store: { readDoc, upsertDoc, patchDoc },
+      store,
       storage: { uploadBlob },
       ai: { generateGroundedJsonResponse, getCostEstimate },
+      ttsModel,
       actorId: job?.requestedBy?.oid || null,
     });
     // Exam code and counts only: the episode id is derived from the owner's
@@ -183,16 +237,19 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
     examCode,
     studyGuideUrl,
     cert,
-    store: { readDoc, upsertDoc, patchDoc },
+    store,
     storage: { uploadBlob },
     ai: { generateJsonResponse, getActiveAiProvider, getCostEstimate },
+    ttsModel,
     youtubeApiKey: process.env.YOUTUBE_API_KEY || '',
     actorId: job?.requestedBy?.oid || null,
     onlyAreas: areas,
   });
 
+  // The model id is a setting, not content; naming it is what answers "why
+  // does this run sound different" from the log alone.
   context?.log?.(
-    `generate-listen-and-learn: ${report.examCode} — ${report.generated} drafted, ${report.failed} failed, ${report.withoutAudio} without audio, $${report.costUsd} spent`
+    `generate-listen-and-learn: ${report.examCode} — ${report.generated} drafted, ${report.failed} failed, ${report.withoutAudio} without audio, $${report.costUsd} spent (speech model ${ttsModel || 'default'})`
   );
 
   return report;

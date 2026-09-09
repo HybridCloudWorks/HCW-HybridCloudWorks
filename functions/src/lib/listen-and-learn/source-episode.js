@@ -183,6 +183,7 @@ function resolveDeps(deps = {}) {
  * @param {object} params.storage Blob: uploadBlob
  * @param {{ generateGroundedJsonResponse: Function, getCostEstimate: Function }} params.ai the router
  * @param {object} [params.env]
+ * @param {string|null} [params.ttsModel] the Gemini model the job resolved, or null (speech-settings.js)
  * @param {string|null} [params.actorId]
  * @param {string} [params.now]
  * @param {object} [params.deps] test seams; see resolveDeps
@@ -197,6 +198,7 @@ export async function generateSourceEpisode({
   storage,
   ai,
   env = process.env,
+  ttsModel = null,
   actorId = null,
   now = new Date().toISOString(),
   deps = {},
@@ -261,6 +263,7 @@ export async function generateSourceEpisode({
       areaSlug,
       storage,
       env,
+      model: ttsModel,
       synthesize,
       uploadAudio,
     });

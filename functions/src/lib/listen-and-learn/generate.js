@@ -77,6 +77,11 @@ function resolveDeps(deps = {}) {
  *
  * Exported for the source-grounded run (source-episode.js, #433), which
  * renders one episode's audio under exactly this policy.
+ *
+ * Always the `listenAndLearn` product: Gemini TTS, with Azure AI Speech as
+ * the fallback, never ElevenLabs (speech/index.js). `model` is the Gemini
+ * model the job resolved — the run's choice or the stored default — or null
+ * for the setting and module default.
  */
 export async function renderAudio({
   script,
@@ -85,12 +90,18 @@ export async function renderAudio({
   areaSlug,
   storage,
   env,
+  model = null,
   synthesize,
   uploadAudio,
 }) {
   let rendered;
   try {
-    rendered = await synthesize({ dialogue: script.dialogue, env });
+    rendered = await synthesize({
+      product: 'listenAndLearn',
+      dialogue: script.dialogue,
+      model,
+      env,
+    });
   } catch (err) {
     if (err instanceof SpeechNotConfiguredError || err?.name === 'SpeechNotConfiguredError') {
       return { error: err.message };
@@ -142,6 +153,7 @@ async function generateOneArea({
   store,
   storage,
   env,
+  ttsModel,
   now,
   ai,
   writeScript,
@@ -183,6 +195,7 @@ async function generateOneArea({
     areaSlug: area.slug,
     storage,
     env,
+    model: ttsModel,
     synthesize,
     uploadAudio,
   });
@@ -236,6 +249,10 @@ async function generateOneArea({
  * Returns a per-area report rather than throwing on the first failure —
  * partial success is the normal outcome when a quota runs out mid-run, and
  * the admin page needs to show which areas are missing and why.
+ *
+ * `ttsModel` is the Gemini model the job resolved for this run (the run's
+ * choice or the stored default; see speech-settings.js), or null to let the
+ * setting and the module default decide.
  */
 export async function generateEpisodes({
   platform,
@@ -246,6 +263,7 @@ export async function generateEpisodes({
   storage,
   ai,
   env = process.env,
+  ttsModel = null,
   youtubeApiKey,
   actorId = null,
   onlyAreas = null,
@@ -325,6 +343,7 @@ export async function generateEpisodes({
           store,
           storage,
           env,
+          ttsModel,
           now,
           ai,
           writeScript,

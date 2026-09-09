@@ -19,6 +19,36 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **ElevenLabs no longer reads Listen & Learn, and the Listen & Learn pin no
+  longer governs the podcast: speech providers are chosen per product (#436,
+  #432).** Owner rule 2026-09-09: ElevenLabs is only the podcast voice —
+  article and Plaud transcripts to RSS.com — and Listen & Learn audio is
+  Gemini TTS, generated on demand and stored as MP3, with Azure AI Speech as
+  the GA fallback. #447 had put ElevenLabs first in one global order read by
+  every caller, so the paid podcast voice read every study episode the moment
+  its key landed, and `LISTEN_AND_LEARN_TTS_PROVIDER` — also read by every
+  caller — would have pinned the podcast too, which is why the owner's
+  instruction to set it to `gemini` could not be applied as the code stood.
+  `speech/index.js` now holds `SPEECH_PRODUCTS = { listenAndLearn: ['gemini',
+  'azure'], podcast: ['elevenlabs'] }`; `resolveSpeechProvider`,
+  `synthesizeDialogue` and `estimateSpeechCostUsd` require `product` and
+  refuse to guess without one; each product reads only its own pin
+  (`LISTEN_AND_LEARN_TTS_PROVIDER`, `PODCAST_TTS_PROVIDER`), a pin may name
+  only its product's providers, and `LISTEN_AND_LEARN_TTS_PROVIDER =
+  elevenlabs` fails every run with a sentence quoting the rule. Nothing falls
+  through between products: the podcast without `ELEVENLABS_API_KEY` saves a
+  transcript-only draft whose `audioError` names that setting (pinned in
+  `lib/podcast/generate.test.js` through the real switch), never a Gemini
+  reading, and #447's out-of-credit fallthrough is removed because its only
+  path was the cross-product one. `infra/functionapp.tf` sets
+  `LISTEN_AND_LEARN_TTS_PROVIDER = "gemini"` on the Function App, deliberately
+  Terraform-managed so the rule is stated in the estate and a portal edit is
+  drift (one app setting added; `app-settings-secrets.test.js` and
+  `secret-catalog.test.js` still pass). The 202, the queued line and the
+  `speechEstimateForRun` estimate describe the Listen & Learn product only —
+  Gemini or Azure, never ElevenLabs. ADR 0029 §2b records the rule and keeps
+  §2a as history, saying it was written as if ElevenLabs replaced Gemini for
+  Listen & Learn, which was wrong.
 - **Listen & Learn audio generates again: the Gemini TTS provider read the
   SDK's `output_audio` accessor, which the REST reply does not have (#458).**
   Every generation since the provider landed ended with
@@ -184,6 +214,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The owner's button: Listen & Learn reads with Gemini "Best" or "Economy",
+  set as a default and overridable per run (#436, #432).** Owner instruction
+  2026-09-09: "have a button to go from gemini 2.5 to 3.1 and back — for
+  newer technologies, better is best, for older, cheaper is best." Two Gemini
+  TTS models are offered, both priced in `COST_TABLE`: **Best — newest voice,
+  about twice the cost** (`gemini-3.1-flash-tts-preview`) and **Economy —
+  cheaper** (`gemini-2.5-flash-preview-tts`). The stored default is a new
+  `admin_config/listen_and_learn_speech` document, `{ geminiModel }`, edited
+  from a **Listen & Learn voice** card on `/admin/platform` as a two-option
+  control with each model's per-episode ceiling beside it; the route accepts
+  only the two ids and answers 400 by sentence for anything else, following
+  the podcast-feeds card's validation and write pattern. The generation form
+  gains a **Voice model** picker with the same two options, defaulting to the
+  stored value and carried in the job payload as `ttsModel`, which the job
+  refuses by sentence for any other id. Precedence in the job: the run's
+  choice → the stored default → `LISTEN_AND_LEARN_TTS_MODEL` → the module
+  default (`lib/listen-and-learn/speech-settings.js`; a settings read failure
+  fails the run rather than reading in a voice nobody chose). The 202 and the
+  queued toast name the chosen model and its cost, and the episode's
+  `speechModel` and its usage row record which one read it. The rule of thumb
+  on both controls — newer certifications: Best; older ones: Economy — is
+  guidance for the person choosing, not automation; choosing by certification
+  age is a follow-up.
 - **One Recording Hub at `/admin/recording-hub` — podcast transcripts and
   Plaud in two tabs (#442; wires #434, presents #435).** `/admin/recordings`
   redirects there and `RecordingsPage.jsx` is gone. The **Podcast tab** lists

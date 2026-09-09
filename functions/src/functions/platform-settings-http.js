@@ -4,8 +4,8 @@
  * lib/platform-settings.js.
  *
  * The {setting} segment is allowlisted in the lib (default-heroes,
- * social-autopost, podcast-feeds) — anything else 404s before touching
- * Cosmos, the same pattern as cms/config/{collection}.
+ * social-autopost, podcast-feeds, listen-and-learn-speech) — anything else
+ * 404s before touching Cosmos, the same pattern as cms/config/{collection}.
  */
 import { httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';

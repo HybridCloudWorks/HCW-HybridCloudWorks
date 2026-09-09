@@ -14,11 +14,17 @@ import {
   createPlatformSettingsHandlers,
   isAcceptableHeroUrl,
   normalizeDefaultHeroes,
+  normalizeListenAndLearnSpeech,
   normalizePodcastFeeds,
   normalizeSocialAutopost,
   presentSetting,
   resolveSetting,
 } from './platform-settings.js';
+import {
+  LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
+  listenAndLearnModelOptions,
+  readStoredListenAndLearnModel,
+} from './listen-and-learn/speech-settings.js';
 import { pickDefaultHero, DEFAULT_HEROES_CONFIG_ID } from './triggers/ai-cover.js';
 import { AUTOPOST_CONFIG_ID } from './triggers/social-caption-trigger.js';
 import {
@@ -307,9 +313,125 @@ describe('podcast feeds', () => {
   });
 });
 
+describe('listen & learn speech', () => {
+  const BEST = 'gemini-3.1-flash-tts-preview';
+  const ECONOMY = 'gemini-2.5-flash-preview-tts';
+
+  it('stores exactly one of the two offered Gemini models, matched exactly', () => {
+    expect(normalizeListenAndLearnSpeech({ geminiModel: BEST })).toEqual({ geminiModel: BEST });
+    expect(normalizeListenAndLearnSpeech({ geminiModel: ECONOMY })).toEqual({ geminiModel: ECONOMY });
+    const rule = new RegExp(`geminiModel must be one of ${BEST}, ${ECONOMY}`);
+    // The id is sent to a paid API as the model name: no near-misses, no
+    // third model, no trimming to a match.
+    for (const geminiModel of ['gemini-2.5-pro-preview-tts', 'eleven_v3', ` ${BEST}`, 'best', '']) {
+      expectRejects(() => normalizeListenAndLearnSpeech({ geminiModel }), rule);
+    }
+    expectRejects(() => normalizeListenAndLearnSpeech({}), /geminiModel must be a string/);
+    expectRejects(() => normalizeListenAndLearnSpeech({ geminiModel: 7 }), /must be a string/);
+    expectRejects(
+      () => normalizeListenAndLearnSpeech({ geminiModel: BEST, provider: 'gemini' }),
+      /Unknown field\(s\) in body: provider/
+    );
+  });
+
+  it('produces exactly what the job reads back as the stored default', async () => {
+    const { geminiModel } = normalizeListenAndLearnSpeech({ geminiModel: ECONOMY });
+    const readDoc = vi.fn(async () => ({
+      id: LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
+      configScope: ADMIN_CONFIG_PARTITION,
+      geminiModel,
+    }));
+    expect(await readStoredListenAndLearnModel(readDoc)).toBe(ECONOMY);
+  });
+
+  it('shows the module default selected when nothing is stored — that is what will run', () => {
+    expect(presentSetting('listen-and-learn-speech', null)).toEqual({
+      value: { geminiModel: BEST },
+      exists: false,
+      stored: null,
+      updatedAt: null,
+    });
+  });
+
+  it('GET carries the two choices with their per-episode ceiling beside the value', async () => {
+    const store = makeStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.getSetting(
+      makeRequest({ params: { setting: 'listen-and-learn-speech' } }),
+      context
+    );
+    expect(store.readDoc).toHaveBeenCalledWith(
+      'admin_config',
+      LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
+      ADMIN_CONFIG_PARTITION
+    );
+    const body = parse(res);
+    expect(body.value).toEqual({ geminiModel: BEST });
+    expect(body.options).toEqual(listenAndLearnModelOptions());
+    expect(body.options.map((o) => [o.id, o.tier])).toEqual([
+      [BEST, 'best'],
+      [ECONOMY, 'economy'],
+    ]);
+    expect(body.options[0].label).toBe('Best — newest voice, about twice the cost');
+    expect(body.options[1].label).toBe('Economy — cheaper');
+    expect(body.options[0].perEpisodeUsd).toBeGreaterThan(0);
+    expect(body.options[1].perEpisodeUsd).toBeCloseTo(body.options[0].perEpisodeUsd / 2, 6);
+    // The other settings offer nothing to choose from, and say nothing.
+    const feeds = await h.getSetting(makeRequest({ params: { setting: 'podcast-feeds' } }), context);
+    expect(parse(feeds)).not.toHaveProperty('options');
+  });
+
+  it('PUT stores the choice, answers with the options, and audits the model id', async () => {
+    const store = makeStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({ params: { setting: 'listen-and-learn-speech' }, body: { geminiModel: ECONOMY } }),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(parse(res)).toMatchObject({
+      value: { geminiModel: ECONOMY },
+      stored: 'valid',
+      options: listenAndLearnModelOptions(),
+    });
+    const [configCall, auditCall] = store.upsertDoc.mock.calls;
+    expect(configCall[1]).toEqual({
+      id: LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
+      configScope: ADMIN_CONFIG_PARTITION,
+      geminiModel: ECONOMY,
+      updatedAt: '2026-09-07T12:00:00.000Z',
+      updatedBy: 'u1',
+    });
+    expect(auditCall[1].details).toEqual({
+      setting: 'listen-and-learn-speech',
+      geminiModel: ECONOMY,
+    });
+  });
+
+  it('PUT answers 400 for any other model id and writes nothing', async () => {
+    const store = makeStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({
+        params: { setting: 'listen-and-learn-speech' },
+        body: { geminiModel: 'gemini-2.5-pro-preview-tts' },
+      }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(parse(res).error).toBe(`geminiModel must be one of ${BEST}, ${ECONOMY}`);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+});
+
 describe('presentSetting', () => {
-  it('names the three settings and nothing else', () => {
-    expect(PLATFORM_SETTING_NAMES).toEqual(['default-heroes', 'social-autopost', 'podcast-feeds']);
+  it('names the four settings and nothing else', () => {
+    expect(PLATFORM_SETTING_NAMES).toEqual([
+      'default-heroes',
+      'social-autopost',
+      'podcast-feeds',
+      'listen-and-learn-speech',
+    ]);
   });
 
   it('shows an empty shape for a missing document and a repaired view for an invalid one', () => {

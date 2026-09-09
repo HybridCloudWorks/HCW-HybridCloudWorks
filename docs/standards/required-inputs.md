@@ -233,8 +233,8 @@ problem. The two cost very different amounts to diagnose.
 | `CLIENT-IP-SALT` | Request hashing | |
 | `AWS-ACCESS-KEY-ID` | AWS pricing | |
 | `AWS-SECRET-ACCESS-KEY` | AWS pricing | |
-| `GEMINI-API-KEY` | AI router; **Listen & Learn TTS fallback** | Provider chosen by key presence, ElevenLabs first. Reads episodes when `ELEVENLABS-API-KEY` is absent or the ElevenLabs account is out of credit, and audio is then billed against this key |
-| `ELEVENLABS-API-KEY` | **Listen & Learn TTS** | First in preference order since the paid plan was approved on 2026-09-08 (ADR 0029 §2a). About USD 0.10 per 1,000 characters, roughly USD 4 per certification; the expected spend is shown when a run is requested. Versionless reference: a re-minted key needs an app restart to take effect |
+| `GEMINI-API-KEY` | AI router; **Listen & Learn TTS** | Gemini TTS reads every Listen & Learn episode (owner rule 2026-09-09, ADR 0029 §2b); `LISTEN_AND_LEARN_TTS_PROVIDER = gemini` is Terraform-managed on the Function App and may name only `gemini` or `azure`. The model is the owner's Best/Economy choice on the Platform settings page, overridable per run; audio is billed against this key |
+| `ELEVENLABS-API-KEY` | **Podcast TTS** | The podcast voice only — article and Plaud transcripts to RSS.com (ADR 0029 §2a, scoped by §2b); never Listen & Learn, and with no key the podcast saves a transcript-only draft rather than falling back to Gemini. About USD 0.10 per 1,000 characters. Versionless reference: a re-minted key needs an app restart to take effect |
 | `ANTHROPIC-API-KEY` | AI router | First in the router's provider order |
 | `OPENAI-API-KEY` | AI router | Second |
 | `PERPLEXITY-API-KEY` | AI router | |

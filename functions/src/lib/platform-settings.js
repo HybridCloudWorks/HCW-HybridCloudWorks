@@ -1,12 +1,13 @@
 /**
  * platform-settings.js — the Admin → Platform settings page's read and write
- * of three `admin_config` documents that until now could only be seeded by an
- * operator holding a Cosmos data-plane role (#351, #352, and the feed list
- * from #348/#349):
+ * of four `admin_config` documents, three of which until now could only be
+ * seeded by an operator holding a Cosmos data-plane role (#351, #352, and the
+ * feed list from #348/#349):
  *
- *   default-heroes  → admin_config/default_heroes   read by triggers/ai-cover.js
- *   social-autopost → admin_config/social_autopost  read by triggers/social-caption-trigger.js
- *   podcast-feeds   → admin_config/podcast_feeds    read by timers/podcasts.js
+ *   default-heroes          → admin_config/default_heroes          read by triggers/ai-cover.js
+ *   social-autopost         → admin_config/social_autopost         read by triggers/social-caption-trigger.js
+ *   podcast-feeds           → admin_config/podcast_feeds           read by timers/podcasts.js
+ *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
  *
  * Every write is normalized to EXACTLY the shape its consumer reads — the
  * whole point of a screen over a hand-seeded document is that the shape can
@@ -29,6 +30,13 @@ import {
   dedupeFeedsByProvider,
   isValidFeedEntry,
 } from './timers/podcasts.js';
+import {
+  LISTEN_AND_LEARN_GEMINI_MODEL_IDS,
+  LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
+  isListenAndLearnGeminiModel,
+  listenAndLearnModelOptions,
+} from './listen-and-learn/speech-settings.js';
+import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
 
 const json = (status, body) => ({
   status,
@@ -297,12 +305,35 @@ export function normalizePodcastFeeds(body) {
   return mainFeedUrl === '' ? { feeds: deduped } : { mainFeedUrl, feeds: deduped };
 }
 
+// ── Listen & Learn speech ──────────────────────────────────────────────────
+
+/**
+ * `{ geminiModel }` → the document listen-and-learn-jobs.js reads for the
+ * stored default (speech-settings.js). Exactly one of the two offered ids,
+ * matched exactly: this value is sent to a paid API as the model name, so a
+ * near-miss is refused rather than corrected.
+ */
+export function normalizeListenAndLearnSpeech(body) {
+  if (!isPlainObject(body)) fail('Body must be a JSON object');
+  assertOnlyKeys(body, ['geminiModel'], 'body');
+  const raw = body.geminiModel;
+  if (typeof raw !== 'string') fail('geminiModel must be a string');
+  if (!isListenAndLearnGeminiModel(raw)) {
+    fail(`geminiModel must be one of ${LISTEN_AND_LEARN_GEMINI_MODEL_IDS.join(', ')}`);
+  }
+  return { geminiModel: raw };
+}
+
 // ── the catalogue ──────────────────────────────────────────────────────────
 
 /**
  * Route segment → document. The segment is the only caller-chosen part of the
  * path and it resolves here or 404s before Cosmos is touched, the same
  * pattern admin-integrations.js uses for cms/config/{collection}.
+ *
+ * `options`, where a spec has it, is what the page may choose from; it rides
+ * on the GET and PUT responses beside the value, priced by the server so the
+ * card and the queued toast use the same figure.
  */
 export const PLATFORM_SETTINGS = Object.freeze({
   'default-heroes': Object.freeze({
@@ -323,6 +354,14 @@ export const PLATFORM_SETTINGS = Object.freeze({
     docId: PODCAST_FEEDS_CONFIG_ID,
     normalize: normalizePodcastFeeds,
     empty: () => ({ feeds: [] }),
+  }),
+  'listen-and-learn-speech': Object.freeze({
+    docId: LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
+    normalize: normalizeListenAndLearnSpeech,
+    // Nothing stored means the module default reads — the card shows that
+    // choice selected rather than nothing, because that is what will run.
+    empty: () => ({ geminiModel: GEMINI_DEFAULT_MODEL }),
+    options: listenAndLearnModelOptions,
   }),
 });
 
@@ -437,10 +476,18 @@ export function createPlatformSettingsHandlers({
         // Whether a main feed is set, never which one: the audit row records
         // counts, and a URL is content.
         return { feeds: value.feeds.length, mainFeed: Boolean(value.mainFeedUrl) };
+      case 'listen-and-learn-speech':
+        // A model id is a setting, not content, and which one was chosen is
+        // the whole point of the row.
+        return { geminiModel: value.geminiModel };
       default:
         return {};
     }
   };
+
+  /** What a spec offers to choose from, or nothing. */
+  const optionsFor = (spec) =>
+    typeof spec.options === 'function' ? { options: spec.options() } : {};
 
   return {
     /** GET /api/cms/platform-settings/{setting} */
@@ -452,7 +499,12 @@ export function createPlatformSettingsHandlers({
       if (!spec) return json(404, { error: 'Unknown platform setting' });
       try {
         const doc = await store.readDoc('admin_config', spec.docId, ADMIN_CONFIG_PARTITION);
-        return json(200, { success: true, setting: name, ...presentSetting(name, doc) });
+        return json(200, {
+          success: true,
+          setting: name,
+          ...presentSetting(name, doc),
+          ...optionsFor(spec),
+        });
       } catch (error) {
         context.error(`getPlatformSetting(${name}) failed:`, error);
         return json(500, { error: 'Failed to read platform setting' });
@@ -509,6 +561,7 @@ export function createPlatformSettingsHandlers({
           exists: true,
           stored: 'valid',
           updatedAt,
+          ...optionsFor(spec),
         });
       } catch (error) {
         context.error(`putPlatformSetting(${name}) failed:`, error);

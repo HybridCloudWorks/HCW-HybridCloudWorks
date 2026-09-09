@@ -12,7 +12,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { generateEpisodes, isSupportedPlatform, SUPPORTED_PLATFORMS } from './generate.js';
-import { SpeechNotConfiguredError, SpeechError } from './speech/index.js';
+import {
+  SpeechNotConfiguredError,
+  SpeechError,
+  speechNotConfiguredMessage,
+} from './speech/index.js';
 import { generateEpisodeScript } from './script.js';
 import {
   AUDIO_CONTAINER,
@@ -211,6 +215,32 @@ describe('a full run', () => {
     });
   });
 
+  it('asks for the Listen & Learn product with the run’s model, never the podcast’s voice', async () => {
+    // The product name is what keeps ElevenLabs out of study episodes
+    // (speech/index.js); the model is the owner's Best/Economy choice as the
+    // job resolved it, or null for the setting and module default.
+    const deps = happyDeps();
+    await generateEpisodes({
+      ...baseRun(),
+      store: makeStore(),
+      storage: makeStorage(),
+      deps,
+      ttsModel: 'gemini-2.5-flash-preview-tts',
+    });
+    expect(deps.synthesize).toHaveBeenCalledTimes(2);
+    for (const [call] of deps.synthesize.mock.calls) {
+      expect(call).toMatchObject({
+        product: 'listenAndLearn',
+        model: 'gemini-2.5-flash-preview-tts',
+        dialogue: [{ speaker: 'Maya', text: 'Hello' }],
+      });
+    }
+
+    const bare = happyDeps();
+    await generateEpisodes({ ...baseRun(), store: makeStore(), storage: makeStorage(), deps: bare });
+    expect(bare.synthesize.mock.calls[0][0]).toMatchObject({ product: 'listenAndLearn', model: null });
+  });
+
   it('leaves the provenance null when there was no audio', async () => {
     const store = makeStore();
     const deps = happyDeps({
@@ -272,9 +302,11 @@ describe('a missing speech key degrades, a broken one fails', () => {
   it('still saves the transcript when no key is configured, and says why', async () => {
     const store = makeStore();
     const storage = makeStorage();
+    // The sentence the real switch degrades with for this product — naming
+    // Gemini and Azure, never ElevenLabs (speech/index.js).
     const deps = happyDeps({
       synthesize: vi.fn(async () => {
-        throw new SpeechNotConfiguredError();
+        throw new SpeechNotConfiguredError(speechNotConfiguredMessage('listenAndLearn'));
       }),
     });
 
@@ -289,6 +321,7 @@ describe('a missing speech key degrades, a broken one fails', () => {
     expect(episode.transcript).toEqual([{ speaker: 'Maya', text: 'Hello' }]);
     expect(episode.audioUrl).toBeNull();
     expect(episode.audioError).toMatch(/GEMINI_API_KEY/);
+    expect(episode.audioError).not.toMatch(/ELEVENLABS/);
     // Nothing was uploaded, so no empty blob is left behind.
     expect(storage.uploadBlob).not.toHaveBeenCalled();
   });

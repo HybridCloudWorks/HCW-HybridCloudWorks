@@ -1,6 +1,6 @@
 # ADR 0029: Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges
 
-**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a)
+**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b)
 **Decision date:** 2026-09-07
 **Owners:** Workload owner
 
@@ -193,7 +193,7 @@ must not route around it.
 
 Tracked by #437.
 
-### 2. Speech: providers selected by key presence, in a stated preference order (order amended in §2a)
+### 2. Speech: providers selected by key presence, in a stated preference order (order amended in §2a, made per product in §2b)
 
 **Decided 2026-09-07; superseded by §2a below.** `speech/index.js` keeps its
 order: Gemini TTS when the `GEMINI_API_KEY` app setting is present — a Key Vault
@@ -205,7 +205,11 @@ had declined paid services. The provider switch rejects `elevenlabs` by name in
 its tests, so the shape a third provider takes was recorded and the trial was a
 bounded piece of work for when a plan was approved.
 
-#### 2a. ElevenLabs is selected — amended 2026-09-08
+#### 2a. ElevenLabs is selected — amended 2026-09-08 (scope corrected in §2b)
+
+*Kept as written on 2026-09-08, as history. It was written as if ElevenLabs
+replaced Gemini for Listen & Learn — "it is the provider that runs" for every
+episode — which was wrong; §2b below records what the owner actually decided.*
 
 The owner approved a paid ElevenLabs plan on 2026-09-08. The trigger this record
 wrote for itself — "Revisit ElevenLabs when a paid plan is approved" — is met
@@ -229,6 +233,57 @@ the run starts, because roughly USD 4 per certification is a number an operator
 should see beforehand rather than find in the usage table afterwards.
 
 Tracked by #436.
+
+#### 2b. ElevenLabs is the podcast voice only; Listen & Learn is Gemini TTS — amended 2026-09-09
+
+Owner rule, stated 2026-09-09 and fixed: **ElevenLabs is only the podcast
+voice** — content transcripts from articles and Plaud recordings, published as
+episodes on RSS.com — and is never used for Listen & Learn. **Listen & Learn
+audio is Gemini TTS**, generated on demand and stored as MP3, with Azure AI
+Speech kept as the GA fallback. §2a read the paid plan as a replacement for
+Gemini across the board; it was a decision about the podcast.
+
+**What the code had.** One global preference order in `speech/index.js`, with
+ElevenLabs first, read by every caller — so the paid podcast voice read every
+study episode the moment its key landed, and `LISTEN_AND_LEARN_TTS_PROVIDER`,
+also read for every caller, would have pinned the podcast too. That is why the
+owner's instruction to set that pin to `gemini` could not be applied as the
+code stood: it would have made the podcast read with Gemini.
+
+**What changes.** Provider selection is per product, and every entry point
+takes the product's name and refuses to guess without one:
+
+| product          | providers, in order | pin setting                     |
+| ---------------- | ------------------- | ------------------------------- |
+| `listenAndLearn` | gemini, azure       | `LISTEN_AND_LEARN_TTS_PROVIDER` |
+| `podcast`        | elevenlabs          | `PODCAST_TTS_PROVIDER`          |
+
+A pin may name only its own product's providers; `LISTEN_AND_LEARN_TTS_PROVIDER`
+naming `elevenlabs` fails every run with a sentence quoting this rule. Nothing
+falls through between products: the podcast without an ElevenLabs key is a saved
+transcript-only draft whose `audioError` names `ELEVENLABS_API_KEY`, never a
+Gemini reading, and the out-of-credit fallthrough §2a introduced is removed
+because its only path was the cross-product one. `LISTEN_AND_LEARN_TTS_PROVIDER
+= gemini` is Terraform-managed on the Function App (`infra/functionapp.tf`), so
+the rule is stated in the estate and a portal edit is drift.
+
+**The model is the owner's button.** Two Gemini TTS models are offered — *Best*
+(`gemini-3.1-flash-tts-preview`, the newest voice, about twice the cost) and
+*Economy* (`gemini-2.5-flash-preview-tts`) — as a stored default in
+`admin_config/listen_and_learn_speech`, edited on the Platform settings page
+with each model's per-episode ceiling beside it, and as a per-run override on
+the generation form carried in the job as `ttsModel`. Precedence: the run's
+choice → the stored default → `LISTEN_AND_LEARN_TTS_MODEL` → the module
+default. The 202 and the queued line name the model and its cost, and the
+episode and its usage row record which one read it. The owner's rule of thumb
+— newer certifications: Best; older ones: Economy — is guidance on the control,
+not automation.
+
+**The estimate in §2a stands, re-scoped.** What a run is expected to spend is
+still stated before it starts; for Listen & Learn it is now Gemini's figure
+for the chosen model, and it can never name ElevenLabs.
+
+Tracked by #436 and #432.
 
 ### 3. The podcast page is the single audio surface
 
@@ -359,9 +414,13 @@ ever run, is a YouTube embed on a page, not an integration.
   host's analytics. Self-hosting stays the fallback if the host's API does not
   hold up; it is no longer the only route to publishing without an upload.
 - **Revisit ElevenLabs** when a paid plan is approved. **Met 2026-09-08**
-  (§2a, #436). The trial the issue describes — one certification through both
-  providers, compared on cost and listenability — is the evidence that issue
-  records.
+  (§2a, #436), **and scoped 2026-09-09** (§2b): the plan is for the podcast
+  voice only, and the trial of one certification through both providers is
+  withdrawn — Listen & Learn is Gemini by rule, so there is nothing to compare.
+- **Revisit the Best/Economy rule of thumb** if choosing by hand proves a
+  chore: automating it by certification age is the follow-up §2b names, and
+  it needs a definition of "newer" the certification documents do not carry
+  today.
 - **Revisit RSS.com Max** only if the automated publish step is wanted and
   the API has left beta. **The first condition was met 2026-09-08** (§1b, #437);
   the second is a fact about the API today, verified on that issue before the
