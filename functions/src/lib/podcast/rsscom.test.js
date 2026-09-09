@@ -13,6 +13,7 @@ import {
   RSSCOM_UPLOAD_TIMEOUT_MS,
   RssComError,
   createRssComClient,
+  hasApiKey,
   isConfigured,
 } from './rsscom.js';
 
@@ -302,6 +303,41 @@ describe('errors', () => {
     expect(error.status).toBeNull();
     expect(error.retryable).toBe(true);
     expect(error.message).toContain('ENOTFOUND');
+  });
+
+  it('listPodcasts works with the key alone, so the podcast id can be discovered; episode calls still refuse', async () => {
+    // The seeding instruction tells the owner to read the id from GET
+    // /v4/podcasts. A gate that demanded the id for that call would be circular.
+    const { client, fetchImpl, lastCall } = build({
+      env: { RSSCOM_API_KEY: 'rk_only' },
+      responses: [reply(200, [{ id: 4242, title: 'Hybrid Cloud Insights' }])],
+    });
+    expect(client.configured.ok).toBe(false);
+    expect(hasApiKey({ RSSCOM_API_KEY: 'rk_only' })).toEqual({ ok: true });
+
+    const shows = await client.listPodcasts();
+    expect(shows).toEqual([{ id: 4242, title: 'Hybrid Cloud Insights' }]);
+    const [url, init] = lastCall();
+    expect(url).toBe(`${RSSCOM_API_BASE_URL}/podcasts`);
+    expect(init.headers['X-Api-Key']).toBe('rk_only');
+
+    const error = await client.createEpisode({ title: 't', description: 'd' }).catch((e) => e);
+    expect(error).toBeInstanceOf(RssComError);
+    expect(error.code).toBe('NOT_CONFIGURED');
+    expect(error.message).toMatch(/^RSS\.com publishing is not configured: /);
+    expect(error.message).toContain('RSSCOM_PODCAST_ID (Key Vault secret RSSCOM-PODCAST-ID) is not set');
+    expect(error.message).not.toContain('RSSCOM_API_KEY (');
+    // Only the discovery call reached the network.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('listPodcasts without a key refuses with a sentence naming only the key', async () => {
+    const { client, fetchImpl } = build({ env: { RSSCOM_PODCAST_ID: '4242' } });
+    const error = await client.listPodcasts().catch((e) => e);
+    expect(error.code).toBe('NOT_CONFIGURED');
+    expect(error.message).toContain('RSSCOM_API_KEY (Key Vault secret RSSCOM-API-KEY) is not set');
+    expect(error.message).not.toContain('RSSCOM_PODCAST_ID');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('an unconfigured client rejects every call with the plain sentence and sends nothing', async () => {

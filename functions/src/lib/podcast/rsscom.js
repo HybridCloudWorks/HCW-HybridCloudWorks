@@ -68,7 +68,10 @@
  * (`RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID` in `infra/functionapp.tf`). They are
  * read through `readKey`, so an unresolved `@Microsoft.KeyVault(…)` string is
  * "not configured" rather than a key, and `isConfigured` says which one is
- * missing in a sentence an operator can act on.
+ * missing in a sentence an operator can act on. Two gates, not one:
+ * `listPodcasts` needs the key alone (`hasApiKey`), because it is the call
+ * that finds the id the second setting is seeded with; every `{podcast_id}`
+ * route and the upload flow need both (`isConfigured`).
  */
 import { readKey } from '../ai/router.js';
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
@@ -116,7 +119,27 @@ export class RssComError extends Error {
 }
 
 /**
- * Whether publishing can run at all, and if not, why, in one sentence.
+ * Whether the account-level calls can run — `GET /v4/podcasts` needs only the
+ * key. Split from `isConfigured` because that call is how the podcast id is
+ * discovered in the first place; gating it on the id it exists to find would
+ * make the seeding instruction circular.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+export function hasApiKey(env = process.env) {
+  if (readKey(env, API_KEY_SETTING)) return { ok: true };
+  return {
+    ok: false,
+    reason:
+      `RSS.com publishing is not configured: ${API_KEY_SETTING} (Key Vault secret ` +
+      'RSSCOM-API-KEY) is not set, so episodes stay on the manual upload path.',
+  };
+}
+
+/**
+ * Whether publishing can run at all, and if not, why, in one sentence. This
+ * is the gate for every `{podcast_id}` route and for the upload flow.
  *
  * @param {Record<string, string|undefined>} [env]
  * @returns {{ ok: true, podcastId: string } | { ok: false, reason: string }}
@@ -238,17 +261,27 @@ function transportError(operation, error) {
  */
 export function createRssComClient({ env = process.env, fetch: fetchImpl = globalThis.fetch } = {}) {
   const configured = isConfigured(env);
-  const apiKey = configured.ok ? readKey(env, API_KEY_SETTING) : '';
+  const keyed = hasApiKey(env);
+  const apiKey = keyed.ok ? readKey(env, API_KEY_SETTING) : '';
   const podcastId = configured.ok ? configured.podcastId : null;
 
+  /** The `{podcast_id}` routes and the upload flow: both settings, or the full sentence. */
   function requireConfigured() {
     if (!configured.ok) {
       throw new RssComError(configured.reason, { status: null, code: 'NOT_CONFIGURED' });
     }
   }
 
-  async function call(operation, method, path, { body, query } = {}) {
-    requireConfigured();
+  /** The account-level routes: the key alone, so the show's id can be discovered. */
+  function requireApiKey() {
+    if (!keyed.ok) {
+      throw new RssComError(keyed.reason, { status: null, code: 'NOT_CONFIGURED' });
+    }
+  }
+
+  async function call(operation, method, path, { body, query, scope = 'podcast' } = {}) {
+    if (scope === 'key') requireApiKey();
+    else requireConfigured();
     const url = new URL(`${RSSCOM_API_BASE_URL}${path}`);
     for (const [key, value] of Object.entries(query || {})) {
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
@@ -295,9 +328,13 @@ export function createRssComClient({ env = process.env, fetch: fetchImpl = globa
     configured,
     podcastId,
 
-    /** `GET /v4/podcasts` — every show the key can see. */
+    /**
+     * `GET /v4/podcasts` — every show the key can see. Gated on the key
+     * alone: this is the call that discovers the numeric id `RSSCOM_PODCAST_ID`
+     * is seeded with, so it must work before that setting exists.
+     */
     listPodcasts() {
-      return call('listing podcasts', 'GET', '/podcasts');
+      return call('listing podcasts', 'GET', '/podcasts', { scope: 'key' });
     },
 
     /**
