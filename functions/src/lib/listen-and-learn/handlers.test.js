@@ -421,6 +421,27 @@ describe('generateSourceEpisode — the enqueue route (#433)', () => {
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
+  it('refuses a JSON array or null body with the object sentence, and queues nothing', async () => {
+    // An array is `typeof 'object'`; without the shape check it would fall
+    // through to the validator and be refused for a missing platform, which
+    // names the wrong problem.
+    const store = enqueueStore();
+    const enqueue = vi.fn();
+    for (const payload of [[], [body()], null]) {
+      const res = await queue(store, { enqueue, payload });
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toBe('Body must be a JSON object');
+    }
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+
+    // The review route applies the same test.
+    const review = await handlers(store).reviewEpisode(makeRequest({ body: [] }), context);
+    expect(review.status).toBe(400);
+    expect(JSON.parse(review.body).error).toBe('Body must be a JSON object');
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
   it('500s when no queue output is wired, before writing a job nothing would run', async () => {
     const store = enqueueStore();
     const res = await createListenAndLearnHandlers({

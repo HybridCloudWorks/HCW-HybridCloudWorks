@@ -22,6 +22,10 @@
  * transcript enqueue (podcast/handlers.js), for the same reason.
  */
 import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
+// The one body-shape test the other admin writers use: an object, not null,
+// not an array. A JSON array passes `typeof === 'object'` and then fails on
+// a field message that names the wrong problem.
+import { isPlainObject } from '../cms/content-update-validation.js';
 import {
   EPISODE_CONTAINER,
   SET_CONTAINER,
@@ -155,7 +159,7 @@ export function createListenAndLearnHandlers({
       if (auth.error) return auth.error;
       try {
         const body = await request.json().catch(() => null);
-        if (!body || typeof body !== 'object') {
+        if (!isPlainObject(body)) {
           return json(400, { error: 'Body must be a JSON object' });
         }
 
@@ -215,7 +219,7 @@ export function createListenAndLearnHandlers({
       if (auth.error) return auth.error;
       try {
         const body = await request.json().catch(() => null);
-        if (!body || typeof body !== 'object') {
+        if (!isPlainObject(body)) {
           return json(400, { error: 'Body must be a JSON object' });
         }
 
