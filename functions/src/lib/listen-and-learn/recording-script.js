@@ -212,10 +212,18 @@ function findUtterances(entry) {
  * it (`Maria`, `O'Brien`, `McDonald`). An all-caps token followed by a colon
  * — `AWS: the region…`, `TODO: fix this` — is a topical prefix and stays in
  * the text. Copilot on #446 caught the earlier pattern stripping those.
+ *
+ * The letter classes are Unicode property escapes, not `[A-Z]`/`[a-z]`/`\w`.
+ * An ASCII matcher does not see `Zoë:` or `Łukasz:` as a name, so it leaves
+ * the label in the segment text — and that carries a participant's name
+ * into the prompt, which is the one thing this module promises not to do.
+ * "Uppercase initial with at least one lowercase letter" is the same rule
+ * in any script that has case; `ÉCOLE:` stays in the text like `AWS:`.
  */
-const NAME_TOKEN = String.raw`(?:[A-Z]\.|[A-Z][\w'-]*[a-z][\w'-]*)`;
+const NAME_TOKEN = String.raw`(?:\p{Lu}\.|\p{Lu}[\p{L}\p{N}'-]*\p{Ll}[\p{L}\p{N}'-]*)`;
 const PLAIN_LINE = new RegExp(
-  String.raw`^\s*(?:\[?(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\]?\s*[-–—]?\s*)?(?:((?:[Ss]peaker\s*\d+)|(?:${NAME_TOKEN}(?:\s+${NAME_TOKEN}){0,2})):\s+)?(.*\S)\s*$`
+  String.raw`^\s*(?:\[?(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\]?\s*[-–—]?\s*)?(?:((?:[Ss]peaker\s*\d+)|(?:${NAME_TOKEN}(?:\s+${NAME_TOKEN}){0,2})):\s+)?(.*\S)\s*$`,
+  'u'
 );
 
 function fromPlainText(text) {

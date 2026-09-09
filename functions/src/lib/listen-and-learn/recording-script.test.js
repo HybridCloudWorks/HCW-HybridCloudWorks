@@ -210,6 +210,28 @@ describe('normalizePlaudTranscript', () => {
     ]);
   });
 
+  it('lifts non-ASCII names as labels too, still leaving an all-caps prefix in the text', () => {
+    // Copilot on #446: an ASCII-only matcher left "Zoë:" in the segment
+    // text, which carries a participant's name into the prompt. Same rule,
+    // any script with case: uppercase initial plus a lowercase letter.
+    const { segments } = normalizePlaudTranscript(
+      [
+        'Zoë: The locking point first.',
+        'Łukasz Nowak: Then the naming.',
+        'José M. García: And the split.',
+        'AWS: the region drives latency.',
+        'ÉCOLE: the module title.',
+      ].join('\n')
+    );
+    expect(segments.map((s) => [s.speaker, s.text])).toEqual([
+      ['Zoë', 'The locking point first.'],
+      ['Łukasz Nowak', 'Then the naming.'],
+      ['José M. García', 'And the split.'],
+      [null, 'AWS: the region drives latency.'],
+      [null, 'ÉCOLE: the module title.'],
+    ]);
+  });
+
   it('reads the { transcript } shape the recordings container already stores', () => {
     const { recording: rec, segments } = normalizePlaudTranscript({
       id: 'local-1',
