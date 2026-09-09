@@ -302,7 +302,14 @@ export async function runHostPublish({
   now = () => new Date(),
 }) {
   const doc = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
-  if (!doc) throw new Error(`Podcast transcript ${id} was not found`);
+  if (!doc) {
+    // runJob logs and stores `error.message`, so the message names the
+    // condition and not the document; the id rides a property nothing logs.
+    throw Object.assign(new Error('podcast transcript not found'), {
+      code: 'TRANSCRIPT_NOT_FOUND',
+      transcriptId: id,
+    });
+  }
   const at = now().toISOString();
 
   const skip =

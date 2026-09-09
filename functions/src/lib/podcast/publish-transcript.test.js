@@ -450,8 +450,14 @@ describe('runHostPublish', () => {
     expect(client.createPresignedUpload).not.toHaveBeenCalled();
   });
 
-  it('throws when the transcript does not exist — there is nothing to record on', async () => {
-    await expect(run(makeStore(), makeClient())).rejects.toThrow(/was not found/);
+  it('throws when the transcript does not exist — there is nothing to record on — without naming it', async () => {
+    // runJob logs and stores the message; the id travels on a property.
+    const error = await run(makeStore(), makeClient()).catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('podcast transcript not found');
+    expect(error.message).not.toContain('article_picking-a-state-backend');
+    expect(error.code).toBe('TRANSCRIPT_NOT_FOUND');
+    expect(error.transcriptId).toBe('article_picking-a-state-backend');
   });
 });
 
