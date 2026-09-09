@@ -19,6 +19,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Listen & Learn audio generates again: the Gemini TTS provider read the
+  SDK's `output_audio` accessor, which the REST reply does not have (#458).**
+  Every generation since the provider landed ended with
+  `audioError: "Gemini returned no audio for this dialogue"` on a 200. The
+  request matched the documented multi-speaker contract; the parser did not
+  match the response. `POST /v1beta/interactions` returns an Interaction
+  object whose audio sits in `steps[].content[]` as
+  `{ type: 'audio', data, mime_type, sample_rate, channels }`, with a
+  top-level `status` and optional `errors[]`. `output_audio.data` is a
+  convenience accessor the Python and JavaScript SDKs put on *their*
+  Interaction object, and the guide's examples use it; the REST JSON never
+  carried it, so audio in `steps` was treated as no audio. `speech/gemini.js`
+  now exports `extractAudio`, which walks the `model_output` steps (keeping
+  `output_audio` as a fallback), joins several audio blocks in order, reads a
+  WAV header for its rate and channel count and strips it, and averages
+  stereo to mono for the MP3 encoder. A reply with no audio now says why on
+  the episode card — the `status`, each `errors[].code` and message, and the
+  shape seen by type only (`model_output[text]`, never the text); `failed`
+  and `incomplete` statuses are refused explicitly, the latter because the
+  audio would stop mid-sentence. The default model moved from
+  `gemini-2.5-flash-preview-tts` to `gemini-3.1-flash-tts-preview` (owner
+  request; `COST_TABLE` already priced it at USD 20 per million audio
+  tokens, twice the 2.5 flash rate), with `LISTEN_AND_LEARN_TTS_MODEL` still
+  the override. Verified against the Interactions API reference and the
+  speech-generation guide on 2026-09-09; the module header records what was
+  checked.
 - **Listen & Learn scripts have a portal toggle, the docs build no longer
   dirties the tree, and the router says who writes a key verdict.** Three
   small things left behind by #449, #435 and the docs hooks. `script.js`
