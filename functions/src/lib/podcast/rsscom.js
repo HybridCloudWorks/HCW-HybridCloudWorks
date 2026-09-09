@@ -100,7 +100,9 @@ export const PODCAST_ID_SETTING = 'RSSCOM_PODCAST_ID';
  * flattened to a string. `code` is ours: `NOT_CONFIGURED`, `KEY_REJECTED`,
  * `PLAN_REQUIRED`, `VALIDATION`, `NOT_FOUND`, `UPSTREAM`, `TIMEOUT`, `NETWORK`,
  * and for the keyless PUT to the presigned URL `UPLOAD_REJECTED` (401/403 from
- * the storage host — an expired URL, never the API key) and `UPLOAD_FAILED`.
+ * the storage host — an expired URL, never the API key), `UPLOAD_FAILED` (any
+ * other status from it) and `UPLOAD_UNREACHABLE` (no response from it — the
+ * message names the upload host, not RSS.com).
  * `retryable` is true when repeating the same call later could succeed
  * without a change on our side.
  */
@@ -235,7 +237,30 @@ function uploadError(status, detail) {
   );
 }
 
-/** Map a transport failure (no response) to the typed error. */
+/**
+ * A transport failure (no response) on the presigned PUT. The PUT goes to
+ * the storage host the presigned URL names, not to api.rss.com, so a DNS
+ * failure or a timeout there must not read as "RSS.com could not be
+ * reached" — an operator would check the wrong host. The message names the
+ * upload host; the code is `UPLOAD_UNREACHABLE`; retryable, because a re-run
+ * mints a fresh URL and the storage host may simply have been slow.
+ */
+function uploadTransportError(url, error) {
+  let host = 'the upload host';
+  try {
+    host = new URL(url).hostname || host;
+  } catch {
+    // An unparseable URL has already been refused before the PUT; keep the fallback.
+  }
+  const detail = error?.message || String(error);
+  const what = error?.code === 'FETCH_TIMEOUT' ? 'did not answer the PUT' : 'could not be reached for the PUT';
+  return new RssComError(
+    `The upload host ${host} ${what} (${detail}) — re-run to mint a fresh presigned upload.`,
+    { status: null, code: 'UPLOAD_UNREACHABLE', detail, retryable: true }
+  );
+}
+
+/** Map a transport failure (no response) on an api.rss.com call to the typed error. */
 function transportError(operation, error) {
   if (error?.code === 'FETCH_TIMEOUT') {
     return new RssComError(`RSS.com did not answer while ${operation} (${error.message}).`, {
@@ -387,7 +412,7 @@ export function createRssComClient({ env = process.env, fetch: fetchImpl = globa
           timeoutMs: RSSCOM_UPLOAD_TIMEOUT_MS,
         });
       } catch (error) {
-        throw transportError('uploading the audio', error);
+        throw uploadTransportError(url, error);
       }
       if (!response.ok) {
         const text = typeof response.text === 'function' ? await response.text() : '';

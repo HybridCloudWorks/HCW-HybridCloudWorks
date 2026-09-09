@@ -172,6 +172,52 @@ describe('requests', () => {
     }
   });
 
+  it('a fetch rejection on the presigned PUT names the upload host, never RSS.com', async () => {
+    // The PUT goes to the storage host in the presigned URL. A DNS failure
+    // there is that host's, and the message must send an operator to it.
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('getaddrinfo ENOTFOUND uploads.storage.example');
+    });
+    const client = createRssComClient({ env: ENV, fetch: fetchImpl });
+    const error = await client
+      .uploadAudio('https://uploads.storage.example/put?sig=1', Buffer.from('mp3'), 'audio/mpeg')
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(RssComError);
+    expect(error.code).toBe('UPLOAD_UNREACHABLE');
+    expect(error.status).toBeNull();
+    expect(error.retryable).toBe(true);
+    expect(error.detail).toBe('getaddrinfo ENOTFOUND uploads.storage.example');
+    expect(error.message).toContain('The upload host uploads.storage.example could not be reached for the PUT');
+    expect(error.message).toMatch(/re-run to mint a fresh presigned upload/);
+    expect(error.message).not.toMatch(/RSS\.com/);
+    expect(error.message).not.toMatch(/could not be reached while/);
+  });
+
+  it('a timeout on the presigned PUT is the upload host not answering, not RSS.com', async () => {
+    const fetchImpl = (_url, { signal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () =>
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+        );
+      });
+    vi.useFakeTimers();
+    try {
+      const client = createRssComClient({ env: ENV, fetch: fetchImpl });
+      const pending = client
+        .uploadAudio('https://uploads.storage.example/put', Buffer.from('mp3'), 'audio/mpeg')
+        .catch((e) => e);
+      await vi.advanceTimersByTimeAsync(RSSCOM_UPLOAD_TIMEOUT_MS + 1);
+      const error = await pending;
+      expect(error.code).toBe('UPLOAD_UNREACHABLE');
+      expect(error.retryable).toBe(true);
+      expect(error.message).toContain('The upload host uploads.storage.example did not answer the PUT');
+      expect(error.message).toContain(`timeout after ${RSSCOM_UPLOAD_TIMEOUT_MS} ms`);
+      expect(error.message).not.toMatch(/RSS\.com/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('uploadAudio refuses zero bytes before touching the network', async () => {
     const { client, fetchImpl } = build();
     await expect(
