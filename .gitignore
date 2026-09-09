@@ -40,3 +40,9 @@ scripts/.reports/
 
 # MkDocs build output (docs-pages.yml uploads it as the Pages artifact).
 site/
+
+# Python bytecode. scripts/docs/hooks.py is an mkdocs hook, so every
+# `mkdocs build` rewrites scripts/docs/__pycache__/; two of those files were
+# tracked and every docs session had to check them out before committing.
+__pycache__/
+*.pyc

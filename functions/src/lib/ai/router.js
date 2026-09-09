@@ -656,17 +656,19 @@ export function createAiRouter({
   /**
    * Tell the API-keys page whether a provider accepted its credential.
    *
-   * This is one of the two sources of the red light — the Publer client is the
-   * other — for a key that resolved but is not working. `secrets-health.js`
-   * cannot see that state by design — "only the upstream service can say it is
-   * wrong" — and this is the upstream service saying so.
+   * `lib/key-verdict.js` is the single writer of the red light for a key that
+   * resolved but is not working; this is one of the reporters that feed it,
+   * beside the Publer timer client (`timers/publer-sync.js`) and the Publer
+   * REST proxy (`integrations/rest-proxy.js`). `secrets-health.js` cannot see
+   * that state by design — "only the upstream service can say it is wrong" —
+   * and each reporter is an upstream service saying so.
    *
-   * The reporter holds the two rules that keep it off the hot path (failures
-   * always, successes once per worker per provider) and the invariant that a
+   * The two rules that keep it off the hot path (failures always, successes
+   * once per reporter per setting until a failure) and the invariant that a
    * status page which cannot record a verdict never fails the AI call it was
-   * observing. Reported under the SETTING name: the recorder maps a setting to
-   * its vault secret through the catalogue, and a provider name would map to
-   * nothing.
+   * observing live in key-verdict.js, not here. Reported under the SETTING
+   * name: the recorder maps a setting to its vault secret through the
+   * catalogue, and a provider name would map to nothing.
    */
   const reportVerdict = createKeyVerdictReporter({ onKeyVerdict, log, source: 'ai-router' });
   const reportKeyVerdict = (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict);

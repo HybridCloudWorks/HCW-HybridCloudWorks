@@ -150,11 +150,18 @@ async function generateOneArea({
   persistEpisode,
   recordUsage,
 }) {
+  // The product declares the feature, not the generator — the same shape as
+  // lib/podcast/generate.js. A literal call site, because ai-call-sites.test.js
+  // reads the source: `listenAndLearn` was declared inside script.js behind
+  // the injected `generate`, where the scan could not see it, and so was
+  // listed in no catalogue and gated by no portal toggle.
+  const generate = (params) => ai.generateJsonResponse({ ...params, feature: 'listenAndLearn' });
+
   const scriptUsage = [];
   const script = await writeScript({
     cert,
     area,
-    generate: ai.generateJsonResponse,
+    generate,
     usageOut: scriptUsage,
   });
 

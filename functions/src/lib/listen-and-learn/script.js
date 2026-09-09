@@ -346,7 +346,8 @@ export function validateScript(parsed, { speakers }) {
  * @param {{ examCode: string, title: string }} params.cert
  * @param {object} params.area a parsed study-guide area
  * @param {{ a: string, b: string }} [params.speakers]
- * @param {Function} params.generate the router's `generateJsonResponse`
+ * @param {Function} params.generate the router's `generateJsonResponse`, with
+ *   the caller's `feature` already bound (see generate.js)
  * @param {object[]} [params.usageOut] the router appends this call's cost here
  * @param {object} [params.grounding] present ONLY for a source-grounded
  *   episode (#433); with it, `generate` is unused and `area` is the episode
@@ -368,10 +369,14 @@ export async function generateEpisodeScript({
   if (grounding) return generateSourceGroundedScript({ cert, area, speakers, usageOut, grounding });
   if (typeof generate !== 'function') throw new ScriptError('generate is required');
 
+  // No `feature` here, deliberately — the same rule as article-script.js. The
+  // portal toggle belongs to the product that calls this: generate.js declares
+  // `listenAndLearn` at its own `generateJsonResponse` call site, where
+  // ai-call-sites.test.js can see it. The name used to sit here, behind the
+  // injected `generate`, and was in no catalogue and gated by nothing.
   const parsed = await generate({
     prompt: buildPrompt({ cert, area, speakers }),
     purpose: 'analysis',
-    feature: 'listenAndLearn',
     // The router appends what the call actually cost, including which provider
     // served it after any failover. The run records it so the portal's spend
     // page shows the script half of an episode, not only the audio half.

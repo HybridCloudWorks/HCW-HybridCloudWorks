@@ -219,7 +219,7 @@ describe('generateEpisodeScript with grounding', () => {
 });
 
 describe('generateEpisodeScript without grounding', () => {
-  it('is the guide branch: the injected generate, the guide feature, no fence', async () => {
+  it('is the guide branch: the injected generate, no feature of its own, no fence', async () => {
     const generate = vi.fn(async () => ({
       title: 'T',
       dialogue: [{ speaker: 'Maya', text: DISCLAIMER }],
@@ -230,7 +230,10 @@ describe('generateEpisodeScript without grounding', () => {
 
     expect(generate).toHaveBeenCalledTimes(1);
     const call = generate.mock.calls[0][0];
-    expect(call.feature).toBe('listenAndLearn');
+    // The feature is the caller's to declare (generate.js binds `listenAndLearn`
+    // at a literal call site). A name set here would be invisible to
+    // ai-call-sites.test.js and listed in no catalogue — which is how it was.
+    expect(call.feature).toBeUndefined();
     expect(call.prompt).not.toContain(ARTICLE_OPEN);
     expect(call.prompt).toContain(DISCLAIMER);
     expect(script.title).toBe('T');

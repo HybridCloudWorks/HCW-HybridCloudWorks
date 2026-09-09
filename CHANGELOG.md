@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Listen & Learn scripts have a portal toggle, the docs build no longer
+  dirties the tree, and the router says who writes a key verdict.** Three
+  small things left behind by #449, #435 and the docs hooks. `script.js`
+  declared `feature: 'listenAndLearn'` behind the injected `generate`, where
+  `ai-call-sites.test.js` cannot see it, and no `listenAndLearn` entry
+  existed in `AI_FEATURES` — so the AI Engine page had no switch for it and
+  the router treated the call as ungated. The feature is now declared at a
+  literal call site in `listen-and-learn/generate.js`, the same shape as
+  `podcast/generate.js`, and the catalogue lists it as **Listen & Learn
+  scripts**; the source scan and the catalogue tests cover both directions.
+  `scripts/docs/__pycache__/*.pyc` was tracked and rewritten by every
+  `mkdocs build --strict`, so every docs session had to check it out before
+  committing; the two files are untracked and `__pycache__/` and `*.pyc` are
+  ignored. The router's key-verdict docstring named "the Publer client" as
+  the other source of a rejected-key verdict; it now names `lib/key-verdict.js`
+  as the single writer and lists the three reporters that feed it (the
+  router, the Publer timer client, the Publer REST proxy).
 - **A rejected Publer key no longer fails `syncSocialCalendarScheduled` every
   five minutes, and the API-keys page now says the key is rejected (#358).**
   Measured in Log Analytics on 2026-09-09: Publer answering 401 to a stale

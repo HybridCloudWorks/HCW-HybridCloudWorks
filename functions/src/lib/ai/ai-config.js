@@ -97,6 +97,12 @@ export const AI_FEATURES = Object.freeze({
     description: 'Writes a social-media caption for a published article.',
     route: 'The Social Hub Generate button and the on-publish auto-queue to Publer.',
   }),
+  listenAndLearn: Object.freeze({
+    label: 'Listen & Learn scripts',
+    description: 'Scripts a two-host study episode for one skill area of a certification guide.',
+    route:
+      'Generate a set on the Listen & Learn page, and regenerating one area. Off means the run fails before the model is called; existing episodes stay.',
+  }),
   sourceGrounding: Object.freeze({
     label: 'Source grounding',
     description: 'Reads owner-supplied web pages and YouTube videos to ground a generation.',

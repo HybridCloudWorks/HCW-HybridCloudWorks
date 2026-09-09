@@ -164,6 +164,21 @@ describe('a full run', () => {
     expect(episodes.every((e) => e.approvedAt === null && e.approvedBy === null)).toBe(true);
   });
 
+  it('hands the script writer a generate bound to the listenAndLearn toggle', async () => {
+    // The portal switch is real only if the router sees the feature name on
+    // the call. It is bound here, at the product, so the source scan in
+    // ai-call-sites.test.js can see it; script.js itself declares nothing.
+    const run = baseRun();
+    const deps = happyDeps();
+    await generateEpisodes({ ...run, store: makeStore(), storage: makeStorage(), deps });
+
+    const { generate } = deps.writeScript.mock.calls[0][0];
+    await generate({ prompt: 'p', purpose: 'analysis' });
+    expect(run.ai.generateJsonResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: 'p', purpose: 'analysis', feature: 'listenAndLearn' })
+    );
+  });
+
   it('records which voice read the episode', async () => {
     // Provenance, for the same reason the approver is recorded. It is also
     // what answers "why does this one sound different" after a model change.
