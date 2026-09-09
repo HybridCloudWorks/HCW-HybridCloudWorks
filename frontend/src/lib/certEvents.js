@@ -13,27 +13,47 @@
  *
  * Every function is pure and every date is a `YYYY-MM-DD` string compared as
  * text, matching lib/certStatus.js, so the pre-render, the hydrating render
- * and the tests agree. The static entries are the fallback: when the list is
- * empty or the request fails the page shows exactly what it showed before.
+ * and the tests agree. Every day that decides anything passes `isIsoDate`
+ * first — the scraper's dates are text lifted from a blog post, and an
+ * impossible day must not place a row. The static entries are the fallback:
+ * when the list is empty or the request fails the page shows exactly what it
+ * showed before.
  */
+import { isIsoDate } from './certStatus';
 
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const KNOWN_TYPES = new Set(['beta_launch', 'ga_launch', 'retirement', 'update']);
 
 /**
  * `YYYY-MM-DD` for an ISO timestamp (`2026-05-01T09:00:00.000Z`), a bare ISO
  * day, or a written date (`June 30, 2026`, the form the scraper captures);
- * null for anything else. Written dates are placed on the UTC calendar so the
- * day is the one printed, not the one before it west of Greenwich.
+ * null for anything else, including a day that does not exist. Written dates
+ * are placed on the UTC calendar so the day is the one printed, not the one
+ * before it west of Greenwich.
  */
 export function isoDayOf(value) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
-  if (ISO_DAY.test(text)) return text;
-  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) return text.slice(0, 10);
+  const candidate = /^\d{4}-\d{2}-\d{2}(T|$)/.test(text) ? text.slice(0, 10) : fromWritten(text);
+  return isIsoDate(candidate) ? candidate : null;
+}
+
+function fromWritten(text) {
+  // Only a written month-day-year form is accepted here: Date.parse would
+  // read "30" as 1930 and "2026-02-30" as March 2, and neither is a date the
+  // post named.
+  if (!/^[A-Za-z]+ \d{1,2}, \d{4}$/.test(text)) return null;
   const ms = Date.parse(`${text} UTC`);
   if (Number.isNaN(ms)) return null;
-  return new Date(ms).toISOString().slice(0, 10);
+  const day = new Date(ms).toISOString().slice(0, 10);
+  // Round-trip: "February 30, 2026" parses to March 2, which is not the day
+  // the post named, so the printed form must reproduce the input's day.
+  const [month, dayOfMonth] = text.replace(',', '').split(' ');
+  const printed = new Date(ms).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  return printed.toLowerCase() === `${month} ${Number(dayOfMonth)}`.toLowerCase() ? day : null;
 }
 
 /**

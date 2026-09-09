@@ -887,10 +887,17 @@ export async function buildCatalogue({
   const nextSkillTitles = new Set(nextSkills.map((skill) => normalizeTitle(skill.title)));
   for (const skill of existingSkills) {
     if (nextSlugs.has(skill.slug) || nextSkillTitles.has(normalizeTitle(skill.title))) continue;
+    // The code written is the one reported: when a skill from the sources
+    // has taken this code, the kept entry gets a fresh one and the summary
+    // says so, or a reviewer would look for a code the file no longer has.
     const code = usedCodes.has(skill.code) ? makeCode(skill.slug, usedCodes) : skill.code;
     usedCodes.add(code);
     nextSkills.push({ ...skill, code });
-    kept.push(`${skill.code} — ${skill.title} (${skill.status})`);
+    kept.push(
+      code === skill.code
+        ? `${code} — ${skill.title} (${skill.status})`
+        : `${code} — ${skill.title} (${skill.status}) — kept as ${code} (was ${skill.code}, now taken by a sourced skill)`
+    );
   }
 
   nextSkills.sort((a, b) => a.title.localeCompare(b.title));

@@ -39,6 +39,17 @@ describe('isoDayOf', () => {
     expect(isoDayOf(undefined)).toBeNull();
     expect(isoDayOf(12345)).toBeNull();
   });
+
+  it('rejects a day that does not exist instead of rolling it into the next month', () => {
+    // isIsoDate is the gate (#465): 2026-02-30 must not become March 2.
+    expect(isoDayOf('2026-02-30')).toBeNull();
+    expect(isoDayOf('2026-02-30T09:00:00.000Z')).toBeNull();
+    expect(isoDayOf('February 30, 2026')).toBeNull();
+    expect(isoDayOf('June 31, 2026')).toBeNull();
+    expect(isoDayOf('2026-13-01')).toBeNull();
+    expect(isoDayOf('30')).toBeNull();
+    expect(isoDayOf('February 28, 2026')).toBe('2026-02-28');
+  });
 });
 
 describe('timelineDateFor', () => {
@@ -59,7 +70,14 @@ describe('timelineDateFor', () => {
 
   it('is null without a publication date', () => {
     expect(timelineDateFor(doc({ pubDate: 'garbage' }))).toBeNull();
+    expect(timelineDateFor(doc({ pubDate: '2026-02-30T09:00:00.000Z' }))).toBeNull();
     expect(timelineDateFor(null)).toBeNull();
+  });
+
+  it('skips an impossible mentioned day and takes the next real one', () => {
+    expect(timelineDateFor(doc({ mentionedDates: ['June 31, 2026', 'July 31, 2026'] }))).toBe(
+      '2026-07-31'
+    );
   });
 });
 

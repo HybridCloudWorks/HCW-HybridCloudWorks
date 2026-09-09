@@ -328,6 +328,54 @@ describe('buildCatalogue — the rules applied to the whole file', () => {
     expect(out.unverified).toEqual(['MB-300 — Full certification title']);
   });
 
+  it('reports the code actually written when a kept skill has to give up its code', async () => {
+    // A new skill from the browse API has no entry in the file, so it gets a
+    // generated code — APL-BAA for this slug — which is exactly the code the
+    // retired skill below already holds. The retired skill is kept under a
+    // fresh code, and the summary must name that code, not the old one.
+    const retiredWithClashingCode = {
+      id: 'apl-old',
+      slug: 'old-thing',
+      code: 'APL-BAA',
+      officialCode: 'applied-skill.old-thing',
+      title: 'Old thing nobody lists any more',
+      area: 'AI',
+      level: 'Intermediate',
+      status: 'retired',
+      expiryDate: '2026-01-31',
+      description: 'd',
+      learnUrl: 'https://learn.microsoft.com/en-us/credentials/applied-skills/old-thing/',
+    };
+    const out = await buildCatalogue({
+      existingSkills: [retiredWithClashingCode],
+      existingCertifications,
+      sources: {
+        ...sources,
+        browseResults: [
+          {
+            uid: 'applied-skill.build-an-agent',
+            title: 'Microsoft Applied Skills: Build an agent',
+            url: '/credentials/applied-skills/build-an-agent/',
+            display_levels: ['Intermediate'],
+          },
+        ],
+      },
+      fetchImpl: async () => failed(404),
+    });
+    const sourced = out.nextSkills.find((s) => s.slug === 'build-an-agent');
+    const kept = out.nextSkills.find((s) => s.slug === 'old-thing');
+    expect(sourced.code).toBe('APL-BAA');
+    expect(kept.code).not.toBe('APL-BAA');
+    expect(kept).toMatchObject({ status: 'retired', expiryDate: '2026-01-31' });
+    // The certification fixture still reports AI-102 as kept; the skill line
+    // is the one under test.
+    const skillLines = out.kept.filter((line) => line.includes('Old thing'));
+    expect(skillLines).toEqual([
+      `${kept.code} — Old thing nobody lists any more (retired) — kept as ${kept.code} (was APL-BAA, now taken by a sourced skill)`,
+    ]);
+    expect(out.kept.some((line) => line.startsWith('APL-BAA'))).toBe(false);
+  });
+
   it('treats a detail page that does not answer as no opinion, not as a reprieve', async () => {
     const out = await buildCatalogue({
       existingSkills,
