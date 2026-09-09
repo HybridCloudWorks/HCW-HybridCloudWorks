@@ -2847,9 +2847,11 @@ export const appliedSkills = [
   },
 ];
 
-// Timeline events — hand-maintained and verified against Microsoft Learn on DATA_AS_OF.
-// The Friday Skills Hub RSS scraper (functions/src/lib/timers/skills-hub.js) writes certEvents,
-// which nothing reads yet (#461 item 4); this array is not fed by it.
+// Timeline events — hand-maintained. The three entries added on 2026-09-09 (mb-240-retire,
+// az-800-az-801-retire, ms-102-retire) cite the Microsoft Learn pages they were verified
+// against; every earlier entry keeps its original Skills Hub blog sourceUrl and was not
+// re-verified. The Friday Skills Hub RSS scraper (functions/src/lib/timers/skills-hub.js)
+// writes certEvents, which nothing reads yet (#461 item 4); this array is not fed by it.
 export const timelineEvents = [
   {
     id: 'ai-103-beta',

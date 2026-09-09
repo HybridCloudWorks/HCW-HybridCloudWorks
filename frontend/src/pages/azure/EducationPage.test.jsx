@@ -35,6 +35,35 @@ function renderPage() {
   );
 }
 
+const visibleCards = () => Array.from(document.querySelectorAll('article[data-status]'));
+
+/**
+ * The carousel shows four cards a page, so a card's position depends on how
+ * many certifications share its status. Page forward until the card for
+ * `code` is on screen; the "next" button (a material icon, no label) is
+ * disabled on the last page, which ends the walk.
+ */
+function pageToCard(code) {
+  for (;;) {
+    const card = visibleCards().find((el) => el.textContent.includes(code));
+    if (card) return card;
+    const next = screen.getByText('chevron_right').closest('button');
+    if (!next || next.disabled) return undefined;
+    fireEvent.click(next);
+  }
+}
+
+/** Every card the current filter yields, across all carousel pages. */
+function allFilteredCards() {
+  const seen = new Map();
+  for (;;) {
+    for (const card of visibleCards()) seen.set(card.textContent, card);
+    const next = screen.queryByText('chevron_right')?.closest('button');
+    if (!next || next.disabled) return Array.from(seen.values());
+    fireEvent.click(next);
+  }
+}
+
 describe('AzureEducationPage', () => {
   it('renders the retired exams as retired, never as expiring or beta', () => {
     renderPage();
@@ -44,35 +73,46 @@ describe('AzureEducationPage', () => {
     const retired = certifications.filter((c) => deriveStatus(c, today) === 'retired');
     expect(retired.length).toBeGreaterThan(0);
 
-    // The carousel shows four cards a page; the first page is enough to prove
-    // the badge, and the side list carries every certification at once.
-    const cards = document.querySelectorAll('article[data-status]');
-    expect(cards.length).toBeGreaterThan(0);
+    // Every page of the filtered carousel, not just the first.
+    const cards = allFilteredCards();
+    expect(cards.length).toBe(retired.length);
     for (const card of cards) {
       expect(card.dataset.status).toBe('retired');
       expect(card.textContent).toMatch(/Retired/);
       expect(card.textContent).not.toMatch(/Expiring Soon|BETA/);
     }
+    // The side list carries every certification at once, one RETIRED chip each.
     expect(screen.getAllByText('RETIRED').length).toBe(retired.length);
   });
 
   it('shows the replacement on a retired card (AI-102 → AI-103)', () => {
+    // The data says what the card must say; the page is paged until it shows.
+    expect(
+      deriveStatus(
+        certifications.find((c) => c.code === 'AI-102'),
+        todayIso()
+      )
+    ).toBe('retired');
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Retired' }));
-    const ai102 = Array.from(document.querySelectorAll('article[data-status]')).find((card) =>
-      card.textContent.includes('AI-102')
-    );
+    const ai102 = pageToCard('AI-102');
     expect(ai102).toBeDefined();
+    expect(ai102.dataset.status).toBe('retired');
     expect(ai102.textContent).toMatch(/now AI-103/);
   });
 
   it('shows the replacement on an expiring card (AZ-800 → AZ-802)', () => {
+    expect(
+      deriveStatus(
+        certifications.find((c) => c.code === 'AZ-800'),
+        todayIso()
+      )
+    ).toBe('expiring');
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Expiring' }));
-    const az800 = Array.from(document.querySelectorAll('article[data-status]')).find((card) =>
-      card.textContent.includes('AZ-800')
-    );
+    const az800 = pageToCard('AZ-800');
     expect(az800).toBeDefined();
+    expect(az800.dataset.status).toBe('expiring');
     expect(az800.textContent).toMatch(/Expiring Soon/);
     expect(az800.textContent).toMatch(/then AZ-802/);
   });
