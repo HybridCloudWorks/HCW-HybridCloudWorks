@@ -7,8 +7,9 @@
  * a working episode from the site with no record of why.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createListenAndLearnHandlers } from './handlers.js';
+import { createListenAndLearnHandlers, toReviewEpisode } from './handlers.js';
 import { EPISODE_CONTAINER, SET_CONTAINER, STATUS } from './publish.js';
+import { JOBS_CONTAINER } from '../jobs.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -267,5 +268,177 @@ describe('reviewEpisode', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).not.toContain('cosmos down'); // no internals to the browser
+  });
+});
+
+describe('getSet — the two kinds (#433)', () => {
+  const sources = [{ kind: 'page', url: 'https://example.com/a', title: 'A' }];
+
+  it('returns kind and sources on every episode, defaulting a pre-#433 document to guide', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'azure_az-104' })),
+      queryDocs: vi.fn(async () => [
+        { id: 'area-1', order: 0, status: STATUS.published },
+        { id: 'source_t', order: 1000, status: STATUS.draft, kind: 'source', sources },
+      ]),
+    });
+
+    const body = JSON.parse(
+      (
+        await handlers(store).getSet(
+          makeRequest({ params: { platform: 'azure', examCode: 'AZ-104' } }),
+          context
+        )
+      ).body
+    );
+
+    expect(body.episodes).toEqual([
+      { id: 'area-1', order: 0, status: STATUS.published, kind: 'guide', sources: [] },
+      { id: 'source_t', order: 1000, status: STATUS.draft, kind: 'source', sources },
+    ]);
+  });
+
+  it('toReviewEpisode applies the one rule and never returns a non-array source list', () => {
+    expect(toReviewEpisode({ id: 'x' })).toEqual({ id: 'x', kind: 'guide', sources: [] });
+    expect(toReviewEpisode({ id: 'x', kind: 'source', sources: 'https://a' })).toMatchObject({
+      kind: 'source',
+      sources: [],
+    });
+    // Reviewing an AI episode without what it was given is reviewing half of
+    // it, so the list rides with the transcript rather than being projected off.
+    expect(toReviewEpisode({ kind: 'source', sources, transcript: [] }).sources).toBe(sources);
+  });
+});
+
+describe('generateSourceEpisode — the enqueue route (#433)', () => {
+  const body = (over = {}) => ({
+    platform: 'azure',
+    examCode: 'AZ-104',
+    title: 'Entra ID basics',
+    certTitle: 'Azure Administrator',
+    sources: [
+      { kind: 'page', url: 'https://example.com/entra', title: 'Entra overview' },
+      { kind: 'video', url: 'https://youtu.be/abc123' },
+    ],
+    ...over,
+  });
+
+  const enqueueStore = (over = {}) =>
+    makeStore({ upsertDoc: vi.fn(async (_c, doc) => doc), ...over });
+
+  const queue = (store, { guard = allowGuard, enqueue = vi.fn(), payload = body() } = {}) =>
+    createListenAndLearnHandlers({
+      guard,
+      store,
+      now: () => new Date('2026-09-09T12:00:00.000Z'),
+      uuid: () => 'job-1',
+    }).generateSourceEpisode(makeRequest({ body: payload }), context, { enqueue });
+
+  it('is editor-gated, with zero writes on denial', async () => {
+    const store = enqueueStore();
+    const enqueue = vi.fn();
+    const res = await queue(store, { guard: denyGuard, enqueue });
+    expect(res.status).toBe(403);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('writes the job document with the normalised payload and answers 202 like enqueueJob', async () => {
+    const store = enqueueStore();
+    const enqueue = vi.fn();
+    const res = await queue(store, { enqueue, payload: body({ platform: 'AZURE' }) });
+
+    expect(res.status).toBe(202);
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      jobId: 'job-1',
+      type: 'generate-listen-and-learn',
+      status: 'queued',
+      poll: 'getJob?jobId=job-1',
+      areaSlug: 'source_entra-id-basics',
+      sourceCount: 2,
+    });
+
+    const [container, doc] = store.upsertDoc.mock.calls[0];
+    expect(container).toBe(JOBS_CONTAINER);
+    expect(doc).toMatchObject({
+      id: 'job-1',
+      type: 'generate-listen-and-learn',
+      status: 'queued',
+      requestedBy: { oid: 'oid-1' },
+    });
+    // What the worker reads is what the route checked: lowercased platform,
+    // the router-resolved list, and nothing the request carried that the
+    // validator did not return.
+    expect(doc.payload).toEqual({
+      platform: 'azure',
+      examCode: 'AZ-104',
+      title: 'Entra ID basics',
+      sources: [
+        { kind: 'page', url: 'https://example.com/entra', title: 'Entra overview' },
+        { kind: 'video', url: 'https://youtu.be/abc123' },
+      ],
+      certTitle: 'Azure Administrator',
+    });
+    expect(enqueue).toHaveBeenCalledWith({ jobId: 'job-1', type: 'generate-listen-and-learn' });
+  });
+
+  it('refuses a YouTube URL given as a page with the sentence, at the route, and queues nothing', async () => {
+    const store = enqueueStore();
+    const enqueue = vi.fn();
+    const res = await queue(store, {
+      enqueue,
+      payload: body({ sources: [{ kind: 'page', url: 'https://www.youtube.com/watch?v=abc' }] }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/is a YouTube URL given as kind 'page'/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('refuses an over-cap list rather than truncating it', async () => {
+    const store = enqueueStore();
+    const sources = Array.from({ length: 21 }, (_, i) => ({
+      kind: 'page',
+      url: `https://example.com/p${i}`,
+    }));
+    const res = await queue(store, { payload: body({ sources }) });
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/at most 20 pages/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('400s a missing title, an empty list and a non-object body', async () => {
+    const store = enqueueStore();
+    expect((await queue(store, { payload: body({ title: '' }) })).status).toBe(400);
+    expect((await queue(store, { payload: body({ sources: [] }) })).status).toBe(400);
+    const res = await createListenAndLearnHandlers({
+      guard: allowGuard,
+      store,
+    }).generateSourceEpisode(makeRequest(), context, { enqueue: vi.fn() });
+    expect(res.status).toBe(400);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('500s when no queue output is wired, before writing a job nothing would run', async () => {
+    const store = enqueueStore();
+    const res = await createListenAndLearnHandlers({
+      guard: allowGuard,
+      store,
+    }).generateSourceEpisode(makeRequest({ body: body() }), context);
+    expect(res.status).toBe(500);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('500s a store failure without leaking internals', async () => {
+    const store = enqueueStore({
+      upsertDoc: vi.fn(async () => {
+        throw new Error('cosmos down');
+      }),
+    });
+    const res = await queue(store);
+    expect(res.status).toBe(500);
+    expect(res.body).not.toContain('cosmos down');
   });
 });

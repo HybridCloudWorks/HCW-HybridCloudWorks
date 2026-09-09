@@ -1588,6 +1588,26 @@ describe('listListenAndLearnEpisodes — the provider-wide list (#349)', () => {
     expect(containers).toContain(EPISODE_CONTAINER);
     expect(containers).toContain(SET_CONTAINER);
   });
+
+  it('lists the kind of a source-grounded episode and withholds its sources (#433)', async () => {
+    // `kind` is the decided addition: a listener-facing page may label a
+    // source-grounded episode. `sources` waits for the citation page. And a
+    // document with no `kind` — every episode before #433 — is listed as
+    // it always was, which the exact-row test above pins.
+    const sources = [{ kind: 'page', url: 'https://example.com/a', title: 'A' }];
+    const deps = store({
+      episodes: [published({ id: 'source_t', kind: 'source', sources })],
+      sets: [{ id: 'azure_az-104', certTitle: 'T', certSlug: 't' }],
+    });
+    const body = JSON.parse((await list(deps)).body);
+    expect(body.items[0].kind).toBe('source');
+    expect(body.items[0]).not.toHaveProperty('sources');
+    expect(JSON.stringify(body)).not.toContain('https://example.com/a');
+
+    const query = deps.queryDocs.mock.calls[0][1];
+    expect(query).toContain('c["kind"]');
+    expect(query).not.toContain('sources');
+  });
 });
 
 describe('podcast media that is gone (#372)', () => {

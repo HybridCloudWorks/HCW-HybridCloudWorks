@@ -446,6 +446,18 @@ const LISTEN_AND_LEARN_MAX_EPISODES = 50;
  * than denylisted so a field added to the writer later is withheld here
  * until someone decides it belongs on an anonymous list.
  *
+ * Two such decisions, recorded (#433, 2026-09-09). `kind` IS listed: a
+ * listener-facing page may label a source-grounded episode as one, and a
+ * row that cannot say what it was built from cannot be labelled honestly.
+ * It is passed through as stored — absent on every episode written before
+ * #433, which are all guide episodes (listen-and-learn/publish.js
+ * `episodeKindOf` is the rule) — so rows for those episodes are exactly what
+ * they were. `sources` is NOT listed: the URLs a source episode was built
+ * from belong on a citation page beside the transcript, and no listener-facing
+ * page renders one yet; until it exists they stay off the anonymous list.
+ * The per-certification read above returns the whole document, sources
+ * included, for the same reason it returns the transcript.
+ *
  * Twenty sets of up to eight areas is far more than exists; the cap is a
  * runaway guard on a cross-partition query, not a page size.
  */
@@ -456,6 +468,7 @@ const LISTEN_AND_LEARN_LIST_FIELDS = [
   'examCode',
   'areaSlug',
   'areaName',
+  'kind',
   'order',
   'weightLabel',
   'title',

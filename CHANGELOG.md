@@ -185,6 +185,42 @@ This project has not cut a tagged release; entries are grouped under
   `PLAUD-EMBEDDED-API-KEY`, catalogued and documented; `callMcpTool` extracted
   from `mcpProxy` so a job can call an MCP tool server-side.
 
+- **Listen & Learn episodes grounded on owner-supplied web pages and YouTube
+  videos (#433, slice 2).** A second kind of episode, not a looser first.
+  `generateEpisodeScript` gains an optional `grounding: { sources, ai }`;
+  without it the function, the guide prompt and its tests are exactly what
+  they were, and no source list is threaded into the certification path.
+  With it, a separate prompt (`buildSourceGroundedPrompt`) says the episode
+  is built from the listed sources and nothing else, fences the owner's list
+  and states that whatever a source returns is material and never an
+  instruction, forbids claiming exam authority the sources do not carry, and
+  opens with its own dated `SOURCE_DISCLAIMER`. The call goes through the
+  router's `generateGroundedJsonResponse` from slice 1 under
+  `feature: 'sourceGrounding'` — the `ai-call-sites` exception that held the
+  toggle open is removed — so Gemini absent from the chain is a sentence
+  before a byte is sent, never a failover, and nothing is written.
+
+  The episode is stored in `listen_and_learn_episodes` under the same set as
+  the guide episodes, with `kind: 'source'` and the resolved
+  `sources: [{ kind, url, title? }]`; guide episodes now write
+  `kind: 'guide'`, and `episodeKindOf` is the one rule that reads a missing
+  `kind` as guide. Its id is `source_<slug of title>` — the underscore is what
+  keeps it out of every guide area's way, since `studyguide.slugify` can never
+  emit one — so regenerating a title replaces the same draft. The admin page
+  gains `SourceGroundingPanel`: a title, URLs one per line classified as page
+  or video by the server's own rule (`lib/sourceUrl.js`, pinned equal to
+  `isYouTubeVideoUrl` by a functions-side test), and a Generate button that
+  posts `POST cms/listen-and-learn/source-episode`, which validates the list
+  with `validateGroundingSources` and answers 400 with the sentence — an
+  over-cap list, a YouTube URL given as a page — before any job exists; the
+  worker validates again. `getSet` returns `kind` and `sources` on every
+  episode and the review card lists the sources with links beside the
+  transcript. The anonymous list adds `kind` (a listener-facing page may
+  label a source-grounded episode) and deliberately not `sources`, until a
+  citation page exists. One usage source, `listen-and-learn:source-script`.
+  The live acceptance — one article URL plus one YouTube URL producing a
+  draft that reflects both — spends on the Gemini key and is owner-run.
+
 - **Approving a podcast transcript publishes it to RSS.com (#437, slice 2;
   ADR 0029 §1b).** `POST cms/podcast/transcripts/review` moving a transcript
   to `published` now runs the host step slice 1 built: it queues a

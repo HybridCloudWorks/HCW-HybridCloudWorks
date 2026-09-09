@@ -37,6 +37,7 @@ function timeAgo(ts) {
 export const SOURCE_LABELS = {
   admin: 'Admin playground',
   'listen-and-learn:script': 'Listen & Learn — script',
+  'listen-and-learn:source-script': 'Listen & Learn — source-grounded script',
   'listen-and-learn:audio': 'Listen & Learn — audio',
   'podcast:script': 'Podcast transcript — script',
   'podcast:audio': 'Podcast transcript — audio',

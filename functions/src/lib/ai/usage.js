@@ -23,6 +23,11 @@ export const USAGE_CONTAINER = 'ai_usage';
 export const USAGE_SOURCES = Object.freeze({
   admin: 'admin',
   listenAndLearnScript: 'listen-and-learn:script',
+  // A source-grounded episode's script (#433): Gemini reading the owner's
+  // pages and videos, billed as input. Its own row so the cost of grounding
+  // on sources is attributable apart from the guide-grounded scripts; the
+  // audio half is the same row as every other episode's.
+  listenAndLearnSourceScript: 'listen-and-learn:source-script',
   listenAndLearnAudio: 'listen-and-learn:audio',
   // The podcast's own pipeline (#432): a transcript scripted from a published
   // article (#435) and the audio read from it. Its own rows, not Listen &

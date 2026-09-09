@@ -36,6 +36,7 @@ import {
   reviewEpisode,
 } from '@/lib/listenAndLearn';
 import { resolveMediaUrl } from '@/lib/functionsBase';
+import SourceGroundingPanel, { EpisodeSources } from './SourceGroundingPanel';
 
 const STATUS_BADGE = {
   published: { variant: 'default', label: 'Published', icon: CheckCircle2 },
@@ -131,6 +132,8 @@ function EpisodeCard({ episode, busy, onReview }) {
       </div>
 
       {episode.summary && <p className="text-xs text-muted-foreground">{episode.summary}</p>}
+
+      <EpisodeSources episode={episode} />
 
       {episode.status === 'failed' && episode.error && (
         <p className="text-xs text-destructive">{episode.error}</p>
@@ -404,6 +407,16 @@ export default function ListenAndLearnPage() {
           </form>
         </CardContent>
       </Card>
+
+      <SourceGroundingPanel
+        platform={form.platform}
+        examCode={form.examCode}
+        certTitle={form.certTitle}
+        onDone={async () => {
+          await loadSets();
+          if (form.examCode) await openSet(form.platform, form.examCode);
+        }}
+      />
 
       <Card>
         <CardHeader>
