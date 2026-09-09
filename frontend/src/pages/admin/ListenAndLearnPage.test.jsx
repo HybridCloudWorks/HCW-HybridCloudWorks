@@ -162,6 +162,7 @@ describe('VoiceModelField', () => {
       .getAllByRole('option')
       .map((o) => o.textContent);
     expect(labels).toEqual([
+      'Stored default (set on Platform settings)',
       'Best — newest voice, about twice the cost · up to $0.44 an episode',
       'Economy — cheaper · up to $0.22 an episode',
     ]);
@@ -170,12 +171,23 @@ describe('VoiceModelField', () => {
     expect(screen.getByText(/newer certifications: Best; older ones: Economy/)).toBeInTheDocument();
   });
 
+  it('lets a per-run override be undone: "Stored default" stays on the list after a model is picked', () => {
+    // Copilot on #462: the option used to render only while the value was
+    // blank, so a pick was sticky until a reload.
+    const onChange = vi.fn();
+    render(<VoiceModelField value={ECONOMY} options={OPTIONS} onChange={onChange} />);
+    const select = screen.getByLabelText('Voice model');
+    expect(select.value).toBe(ECONOMY);
+    fireEvent.change(select, { target: { value: '' } });
+    expect(onChange).toHaveBeenCalledWith('');
+  });
+
   it('still offers both ids by short name, behind "Stored default", when the settings did not load', () => {
     render(<VoiceModelField value="" options={[]} onChange={vi.fn()} />);
     const labels = within(screen.getByLabelText('Voice model'))
       .getAllByRole('option')
       .map((o) => o.textContent);
-    expect(labels).toEqual(['Stored default', 'Best', 'Economy']);
+    expect(labels).toEqual(['Stored default (set on Platform settings)', 'Best', 'Economy']);
   });
 });
 
@@ -257,6 +269,24 @@ describe('ListenAndLearnPage', () => {
     );
   });
 
+  it('sends no ttsModel when the operator picks Best and then returns to Stored default', async () => {
+    // Copilot on #462: the override must be undoable within the page, and
+    // undoing it means the payload carries no model at all.
+    generateEpisodes.mockImplementation(async () => new Promise(() => {}));
+    render(<ListenAndLearnPage />);
+    const form = await submitGuideForm();
+    const select = form.getByLabelText('Voice model');
+    fireEvent.change(select, { target: { value: BEST } });
+    expect(select.value).toBe(BEST);
+    fireEvent.change(select, { target: { value: '' } });
+    expect(select.value).toBe('');
+    fireEvent.click(form.getByRole('button', { name: /generate/i }));
+    await waitFor(() => expect(generateEpisodes).toHaveBeenCalled());
+    const [[call]] = generateEpisodes.mock.calls;
+    expect(call.ttsModel).toBeUndefined();
+    expect(call).toMatchObject({ platform: 'azure', examCode: 'AZ-104' });
+  });
+
   it('leaves the choice on the stored default when the settings fail to load', async () => {
     fetchSpeechSettings.mockRejectedValue(new Error('500'));
     generateEpisodes.mockImplementation(async () => new Promise(() => {}));
@@ -271,6 +301,6 @@ describe('ListenAndLearnPage', () => {
     });
     fireEvent.click(form.getByRole('button', { name: /generate/i }));
     await waitFor(() => expect(generateEpisodes).toHaveBeenCalled());
-    expect(generateEpisodes.mock.calls[0][0].ttsModel).toBe('');
+    expect(generateEpisodes.mock.calls[0][0].ttsModel).toBeUndefined();
   });
 });

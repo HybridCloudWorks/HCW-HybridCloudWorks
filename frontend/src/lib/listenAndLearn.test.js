@@ -158,6 +158,21 @@ describe('generation runs as a job', () => {
     expect(payload).not.toHaveProperty('areas');
   });
 
+  it('carries the per-run voice model only when one was chosen — "Stored default" sends none', async () => {
+    // The worker reads the stored default when the payload names no model
+    // (speech-settings.js); a blank string would be refused there, and an
+    // omitted field is what "Stored default" means (Copilot on #462).
+    runJob.mockResolvedValue({});
+    const base = { platform: 'azure', examCode: 'AZ-104', studyGuideUrl: 'https://x' };
+    await generateEpisodes({ ...base, ttsModel: '' });
+    await generateEpisodes({ ...base, ttsModel: undefined });
+    await generateEpisodes({ ...base, ttsModel: 'gemini-2.5-flash-preview-tts' });
+
+    expect(runJob.mock.calls[0][1]).not.toHaveProperty('ttsModel');
+    expect(runJob.mock.calls[1][1]).not.toHaveProperty('ttsModel');
+    expect(runJob.mock.calls[2][1]).toMatchObject({ ttsModel: 'gemini-2.5-flash-preview-tts' });
+  });
+
   it('passes the optional fields through when they are set', async () => {
     runJob.mockResolvedValue({});
     await generateEpisodes({

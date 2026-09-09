@@ -123,7 +123,9 @@ export function queuedMessage(speech) {
  * the stored choice on the Platform settings page. The labels and the
  * per-episode ceiling come from the server, which prices them from the same
  * table the 202 uses; if that load failed, the two ids are still offered by
- * their short names and a blank choice means "the stored default".
+ * their short names. "Stored default" is always on the list — it means
+ * "send no model, let the stored default read" — so a per-run override can
+ * be undone without a reload (Copilot on #462).
  */
 export function VoiceModelField({ value, options, onChange, disabled }) {
   const choices = options?.length
@@ -139,7 +141,7 @@ export function VoiceModelField({ value, options, onChange, disabled }) {
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       >
-        {!value && <option value="">Stored default</option>}
+        <option value="">Stored default (set on Platform settings)</option>
         {choices.map((choice) => (
           <option key={choice.id} value={choice.id}>
             {choice.label}
@@ -409,6 +411,9 @@ export default function ListenAndLearnPage() {
     try {
       const job = await generateEpisodes({
         ...form,
+        // "Stored default" is no model at all: the field is dropped, not sent
+        // blank, so the payload carries no ttsModel and the stored default reads.
+        ttsModel: form.ttsModel || undefined,
         // The expected speech spend arrives with the 202 and is shown then —
         // before the run starts is when it is worth knowing.
         onAccepted: (accepted) => setProgress(queuedMessage(accepted?.speech)),
