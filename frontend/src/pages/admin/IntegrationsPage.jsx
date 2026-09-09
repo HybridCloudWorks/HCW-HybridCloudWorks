@@ -301,6 +301,12 @@ export function SecretRow({ item, onSubmit, busy }) {
             {item.state === 'failing' && item.lastFailStatus ? (
               <span className="text-muted-foreground"> · HTTP {item.lastFailStatus}</span>
             ) : null}
+            {item.state === 'failing' && item.lastFailDetail ? (
+              // The provider's own words. `HTTP 401` alone sent two days into
+              // reminting a key that a sentence would have exonerated or
+              // condemned outright (#463 item 4, #358).
+              <span className="text-muted-foreground"> — {item.lastFailDetail}</span>
+            ) : null}
             {!item.hasLivenessCheck && item.state === 'live' ? (
               // Otherwise green would imply "verified", which for these means
               // only "the reference resolved to something".

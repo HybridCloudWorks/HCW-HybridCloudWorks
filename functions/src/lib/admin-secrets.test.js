@@ -123,6 +123,7 @@ describe('the response carries exactly these fields', () => {
       'help',
       'label',
       'lastFailAt',
+      'lastFailDetail',
       'lastFailStatus',
       'lastOkAt',
       'lastWriteAt',

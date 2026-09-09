@@ -110,24 +110,24 @@ describe('Publer reconcile', () => {
     });
   });
 
-  it('pages Publer per state, updates matches, marks vanished posts deleted, creates unlinked ones', async () => {
+  it('asks for all three states at once, pages, and reconciles matches, vanished and unlinked posts', async () => {
+    // One `state[]` request per PAGE, not per state (#463 item 5). The three
+    // separate passes this replaces cost three times the requests against a
+    // budget of 100 per two minutes shared with every other holder of the key.
     const fetch = vi.fn(async (url) => {
-      const state = new URL(url).searchParams.get('state');
-      const page = Number(new URL(url).searchParams.get('page'));
+      const params = new URL(url).searchParams;
+      expect(params.getAll('state[]')).toEqual(['scheduled', 'published', 'failed']);
+      // `per_page` is a response field, not a request parameter.
+      expect(params.get('per_page')).toBeNull();
+      const page = Number(params.get('page'));
       const posts =
-        state === 'scheduled'
-          ? page === 0
-            ? [publer()]
-            : [publer({ id: 'p2', job_id: null })]
-          : state === 'published'
-            ? [publer({ id: 'p3', state: 'published', job_id: 'job3' })]
-            : [];
+        page === 0
+          ? [publer(), publer({ id: 'p3', state: 'published', job_id: 'job3' })]
+          : [publer({ id: 'p2', job_id: null })];
       return {
         ok: true,
-        json: async () => ({
-          posts,
-          total_pages: state === 'scheduled' ? 2 : 1,
-        }),
+        headers: { get: () => '87' },
+        json: async () => ({ posts, total_pages: 2 }),
       };
     });
     const client = createPublerClient({
@@ -153,11 +153,10 @@ describe('Publer reconcile', () => {
     );
     const r = await createPublerReconcile({ store, client, now }).run();
     expect(r).toEqual({ skipped: false, fetched: 3, updated: 3, created: 1 });
+    const STATES = 'state[]=scheduled&state[]=published&state[]=failed';
     expect(fetch.mock.calls.map((c) => c[0])).toEqual([
-      `${'https://app.publer.com/api/v1'}/posts?state=scheduled&per_page=100&page=0`,
-      `${'https://app.publer.com/api/v1'}/posts?state=scheduled&per_page=100&page=1`,
-      `${'https://app.publer.com/api/v1'}/posts?state=published&per_page=100&page=0`,
-      `${'https://app.publer.com/api/v1'}/posts?state=failed&per_page=100&page=0`,
+      `${'https://app.publer.com/api/v1'}/posts?${STATES}&page=0`,
+      `${'https://app.publer.com/api/v1'}/posts?${STATES}&page=1`,
     ]);
     expect(fetch.mock.calls[0][1].headers).toMatchObject({
       Authorization: 'Bearer-API k',
@@ -189,6 +188,109 @@ describe('Publer reconcile', () => {
   });
 });
 
+describe('Publer deletePosts — the documented bulk form (#463 item 2)', () => {
+  const client = (fetchImpl) =>
+    createPublerClient({
+      env: { PUBLER_API_KEY: 'k', PUBLER_WORKSPACE_ID: 'w' },
+      fetch: fetchImpl,
+    });
+  const answering = (body, ok = true, status = 200) =>
+    vi.fn(async () => ({ ok, status, headers: { get: () => null }, json: async () => body }));
+
+  it('sends DELETE /posts with a post_ids[] array, not DELETE /posts/{id}', async () => {
+    const fetch = answering({ deleted_ids: ['p1', 'p2'] });
+    const result = await client(fetch).deletePosts(['p1', 'p2']);
+    expect(fetch.mock.calls[0][0]).toBe(
+      'https://app.publer.com/api/v1/posts?post_ids[]=p1&post_ids[]=p2'
+    );
+    expect(fetch.mock.calls[0][1].method).toBe('DELETE');
+    expect(result).toEqual({ deletedIds: ['p1', 'p2'], missingIds: [] });
+  });
+
+  it('reports an id Publer did not delete, because a 200 is not proof', async () => {
+    // Publer answers 200 and simply leaves the id out of `deleted_ids`. A
+    // caller that only watches for a throw records a post as removed while it
+    // is still scheduled to publish under the owner's name.
+    const fetch = answering({ deleted_ids: ['p1'] });
+    expect(await client(fetch).deletePosts(['p1', 'p2'])).toEqual({
+      deletedIds: ['p1'],
+      missingIds: ['p2'],
+    });
+  });
+
+  it('treats a missing deleted_ids as nothing deleted', async () => {
+    const fetch = answering({});
+    expect(await client(fetch).deletePosts(['p1'])).toEqual({
+      deletedIds: [],
+      missingIds: ['p1'],
+    });
+  });
+
+  it('REFUSES an empty list without calling Publer at all', async () => {
+    // This is the dangerous one. `DELETE /posts` with no `post_ids` is
+    // documented as "delete every non-published post in the workspace", so an
+    // empty list must never reach the wire — and it must fail loudly, because
+    // the caller believed it had something to delete.
+    const fetch = answering({ deleted_ids: [] });
+    for (const ids of [[], null, undefined, [''], [null]]) {
+      await expect(client(fetch).deletePosts(ids)).rejects.toThrow(/refusing to delete/);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('encodes ids and drops duplicates', async () => {
+    const fetch = answering({ deleted_ids: ['a b'] });
+    await client(fetch).deletePosts(['a b', 'a b']);
+    expect(fetch.mock.calls[0][0]).toBe('https://app.publer.com/api/v1/posts?post_ids[]=a%20b');
+  });
+});
+
+describe('Publer paging stops before it exhausts the rate limit (#463 item 5)', () => {
+  const build = (remaining, totalPages = 5) => {
+    const log = { warn: vi.fn(), log: vi.fn() };
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => remaining },
+      json: async () => ({ posts: [], total_pages: totalPages }),
+    }));
+    return { fetch, log, client: createPublerClient({ env: { PUBLER_API_KEY: 'k', PUBLER_WORKSPACE_ID: 'w' }, fetch, log }) };
+  };
+
+  it('stops after one page when the window is nearly spent, and says so', async () => {
+    // 100 requests per two minutes, per USER ACCOUNT across every key it
+    // holds — so the budget is shared with the owner's browser and the admin
+    // pages. A reconcile that drains it takes those down with it, and a
+    // partial pass is corrected five minutes later.
+    const { fetch, log, client } = build('3');
+    await client.listPostsForSync();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toMatch(/3 Publer requests left in the window/);
+  });
+
+  it('pages normally when the window is healthy', async () => {
+    const { fetch, log, client } = build('90', 3);
+    await client.listPostsForSync();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('treats a missing header as unknown, not as exhausted', async () => {
+    // An upstream that stops sending the header must not stop the reconcile at
+    // page one — which is what reading `null` as `0` would do.
+    const { fetch, log, client } = build(null, 3);
+    await client.listPostsForSync();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('never pages past the hard cap however many pages Publer claims', async () => {
+    const { fetch, client } = build('99', 500);
+    await client.listPostsForSync();
+    expect(fetch).toHaveBeenCalledTimes(10);
+  });
+});
+
 describe('Publer rejected credential (#358)', () => {
   // Measured 2026-09-09: a stale key had failed this timer 429 times in 36
   // hours, 0 successes, and no alert read it. A rejected credential is a
@@ -199,7 +301,8 @@ describe('Publer rejected credential (#358)', () => {
     vi.fn(async () => ({
       ok: status < 400,
       status,
-      json: async () => ({ posts: [], total_pages: 1 }),
+      headers: { get: () => null },
+      json: async () => ({ posts: [], total_pages: 1, errors: ['Publer said why'] }),
     }));
   const quiet = () => ({ warn: vi.fn(), log: vi.fn() });
   const build = ({ status, onKeyVerdict = vi.fn(), log = quiet() }) => {
@@ -227,7 +330,19 @@ describe('Publer rejected credential (#358)', () => {
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn.mock.calls[0][0]).toMatch(/HTTP \d{3}/);
     expect(log.warn.mock.calls[0][0]).toMatch(/PUBLER_API_KEY \/ PUBLER_WORKSPACE_ID/);
-    expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', { ok: false, status });
+    // With Publer's own sentence, not just the number (#463 item 4).
+    expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', {
+      ok: false,
+      status,
+      detail: 'Publer said why',
+    });
+  });
+
+  it('carries the upstream sentence into the thrown message too', async () => {
+    // `HTTP 401` alone is what #358 had to work from for two days. The body
+    // separates a malformed header — our bug — from a revoked key.
+    const { reconcile } = build({ status: 500 });
+    await expect(reconcile.run()).rejects.toThrow('HTTP 500 — Publer said why');
   });
 
   it('still throws on a 500 — that IS transient, and a failed invocation is its record', async () => {
@@ -244,12 +359,13 @@ describe('Publer rejected credential (#358)', () => {
   });
 
   it('reports a working key once across two runs, under the SETTING name', async () => {
-    // Three states are listed per run, so a per-request report would be three
-    // writes a run and 864 a day; the reporter dedupes successes.
+    // One request per run now that the three states travel together, so the
+    // dedupe has less to absorb — but it is still what stops a report per
+    // request, and a five-minute timer would otherwise write 288 a day.
     const { reconcile, fetch, onKeyVerdict } = build({ status: 200 });
     await expect(reconcile.run()).resolves.toMatchObject({ skipped: false, fetched: 0 });
     await expect(reconcile.run()).resolves.toMatchObject({ skipped: false, fetched: 0 });
-    expect(fetch).toHaveBeenCalledTimes(6);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(onKeyVerdict).toHaveBeenCalledTimes(1);
     expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', { ok: true });
   });

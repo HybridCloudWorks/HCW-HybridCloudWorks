@@ -125,6 +125,29 @@ describe('the lights', () => {
     expect(screen.getByRole('img', { name: 'Rejected' })).toBeTruthy();
   });
 
+  it("shows the provider's own sentence beside the status, not just the number", () => {
+    // `HTTP 401` alone sent #358 into two days of reminting a key. "Missing or
+    // invalid Authorization header" says the request is malformed — our bug —
+    // and a revoked-key message says it is not; both are the same red light.
+    render(
+      <SecretRow
+        item={item({
+          state: 'failing',
+          lastFailStatus: 401,
+          lastFailDetail: 'Missing or invalid Authorization header',
+        })}
+        onSubmit={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/HTTP 401/)).toBeTruthy();
+    expect(screen.getByText(/Missing or invalid Authorization header/)).toBeTruthy();
+  });
+
+  it('shows nothing extra when the provider gave no reason', () => {
+    render(<SecretRow item={item({ state: 'failing', lastFailStatus: 500 })} onSubmit={vi.fn()} />);
+    expect(screen.getByText(/HTTP 500/).textContent).not.toMatch(/—/);
+  });
+
   it('says so when a green light is not backed by a liveness check', () => {
     render(
       <SecretRow item={item({ state: 'live', hasLivenessCheck: false })} onSubmit={vi.fn()} />

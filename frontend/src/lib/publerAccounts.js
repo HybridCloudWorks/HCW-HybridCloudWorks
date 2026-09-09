@@ -12,6 +12,33 @@
 export const PUBLER_NOT_CONFIGURED = 'INTEGRATION_NOT_CONFIGURED';
 
 /**
+ * The first sentence out of Publer's `{ "errors": [...] }` error body.
+ *
+ * The proxy passes upstream bodies through untouched, so this is available on
+ * every failed envelope and was being thrown away — leaving the Social Hub and
+ * the Connections card showing `Publer answered 401` and nothing else while
+ * Publer was naming the cause in the body (#463 item 4).
+ *
+ * Mirrors `functions/src/lib/integrations/upstream-error.js`, which does the
+ * same job for the timer and the proxy. The two are small, deliberately
+ * separate — the browser bundle should not import a function module — and
+ * tested against the same shapes.
+ *
+ * @param {unknown} data the parsed upstream body from the proxy envelope
+ * @returns {string} the message, or `''` when the body carried none
+ */
+export function readPublerErrors(data) {
+  if (!data || typeof data !== 'object') return '';
+  const candidates = [data.errors, data.error, data.message].flat();
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim().slice(0, 300);
+    const nested = candidate?.detail || candidate?.message || candidate?.title;
+    if (typeof nested === 'string' && nested.trim()) return nested.trim().slice(0, 300);
+  }
+  return '';
+}
+
+/**
  * Read the publerProxy envelope (functions/src/lib/integrations/rest-proxy.js).
  *
  * THE PROXY ANSWERS 200 FOR EVERY OUTCOME, so the HTTP status of the call the
@@ -59,7 +86,13 @@ export const PUBLER_NOT_CONFIGURED = 'INTEGRATION_NOT_CONFIGURED';
  */
 export function unwrapPublerAccounts(response) {
   const status = Number.isFinite(response?.status) ? response.status : null;
-  const reason = typeof response?.error === 'string' ? response.error : '';
+  // Two different sentences, and the third envelope can carry both. `error` is
+  // the PROXY's explanation (it never called Publer, or its own fetch threw);
+  // `data.errors[0]` is PUBLER's, which is the one that says whether the key
+  // was refused or the header was malformed. Preferring the proxy's when it
+  // has one keeps "not configured" reading as it always did (#463 item 4).
+  const reason =
+    (typeof response?.error === 'string' && response.error) || readPublerErrors(response?.data);
 
   if (response && response.ok === false) {
     const notConfigured = response.code === PUBLER_NOT_CONFIGURED;
