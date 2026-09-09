@@ -37,7 +37,20 @@ This project has not cut a tagged release; entries are grouped under
   every provider in `PROVIDER_ALIASES` must have a
   `src/data/<provider>/certifications.js` or `education.js` exporting a real
   `DATA_AS_OF` and no row `findStaleStatuses` flags, and it names the
-  provider that has none. And `functions/src/functions/schedulers.js` logs
+  provider that has none. That was `finops`, whose page carried its own
+  four rows with no date: they are now `src/data/finops/education.js`,
+  verified 2026-09-09 against learn.finops.org (where
+  finops.org/certification/ redirects) — Practitioner, Professional and
+  Engineer are listed and active, the Engineer row takes the Foundation's
+  name "FinOps Certified Engineer" and its ten-hour sizing, every link
+  points at the page that exists today, and "FinOps for Platform Engineers"
+  was never a certification: the nearest thing, the "FinOps for Engineers"
+  course, reads "Not currently available", so the row is `retired` with that
+  evidence and points at the Engineer credential. The FinOps page renders
+  the "Catalogue checked against …" line and a status badge from the dates,
+  like the other hubs. The AWS detail page's Helmet `<title>` is one
+  template string, the form the Azure page uses, because the multi-child
+  form pre-renders as an empty title. And `functions/src/functions/schedulers.js` logs
   the first "disabled — skipping" of each timer per process at Warning —
   `host.json` holds the `Function` category at Warning, so the Information
   line it used to write never reached Log Analytics and a timer whose flag

@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
+import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import CertStatusBadge from '@/components/education/CertStatusBadge';
+import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/finops/education';
+import { deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,68 +44,9 @@ function getLevelFilterClass(levelFilter, level) {
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
-const certifications = [
-  {
-    id: 'focp',
-    slug: 'focp',
-    code: 'FOCP',
-    title: 'FinOps Certified Practitioner',
-    level: 'Practitioner',
-    status: 'active',
-    description:
-      'Demonstrate foundational knowledge of FinOps principles, cloud cost management, the FOCUS specification, allocation, and optimization patterns.',
-    topics: ['Cloud Cost Management', 'FOCUS', 'Allocation', 'Optimization'],
-    hours: 20,
-    prepTime: '~4 weeks',
-    featured: true,
-    learnUrl: 'https://www.finops.org/certification/finops-certified-practitioner/',
-  },
-  {
-    id: 'fopa',
-    slug: 'fopa',
-    code: 'FOPA',
-    title: 'FinOps for Platform Engineers',
-    level: 'Practitioner',
-    status: 'active',
-    description:
-      'Apply FinOps practices as an engineer — tagging strategies, budgets, alerts, showback, and chargeback models.',
-    topics: ['Tagging', 'Budgets', 'Alerts', 'Showback', 'Chargeback'],
-    hours: 15,
-    prepTime: '~3 weeks',
-    featured: false,
-    learnUrl: 'https://www.finops.org/certification/',
-  },
-  {
-    id: 'focb',
-    slug: 'focb',
-    code: 'FOCB',
-    title: 'FinOps Certified Professional',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Lead FinOps strategy and governance across multi-cloud environments with benchmarking and executive-level reporting.',
-    topics: ['Strategy', 'Governance', 'Multi-Cloud', 'Benchmarking'],
-    hours: 40,
-    prepTime: '~3 months',
-    featured: false,
-    learnUrl: 'https://www.finops.org/certification/',
-  },
-  {
-    id: 'foce',
-    slug: 'foce',
-    code: 'FOCE',
-    title: 'FinOps Engineer',
-    level: 'Professional',
-    status: 'active',
-    description:
-      'Implement FinOps tooling, FOCUS schema pipelines, and automation to operationalize cloud financial management.',
-    topics: ['FOCUS Schema', 'Data Pipelines', 'FinOps Tooling', 'Automation'],
-    hours: 35,
-    prepTime: '~2 months',
-    featured: false,
-    learnUrl: 'https://www.finops.org/certification/',
-  },
-];
+// The certification catalogue is src/data/finops/education.js (#461 item 11),
+// verified against learn.finops.org and dated; only the page-local learning
+// paths and resources stay here.
 
 const learningPaths = [
   {
@@ -118,12 +63,12 @@ const learningPaths = [
       { title: 'Allocation & Showback' },
       { title: 'Cost Optimization Patterns' },
     ],
-    certUrl: 'https://www.finops.org/certification/finops-certified-practitioner/',
+    certUrl: 'https://learn.finops.org/path/finops-certified-practitioner-self-paced',
   },
   {
     id: 1,
-    certCode: 'FOPA',
-    title: 'FinOps for Engineers Path',
+    certCode: 'FOCE',
+    title: 'FinOps Certified Engineer Path',
     level: 'Intermediate',
     hours: 15,
     description:
@@ -134,7 +79,7 @@ const learningPaths = [
       { title: 'Rightsize & Spot' },
       { title: 'Automation with FinOps APIs' },
     ],
-    certUrl: 'https://www.finops.org/certification/',
+    certUrl: 'https://learn.finops.org/page/finops-certified-engineer',
   },
   {
     id: 2,
@@ -150,7 +95,7 @@ const learningPaths = [
       { title: 'Benchmarking' },
       { title: 'Executive Reporting' },
     ],
-    certUrl: 'https://www.finops.org/certification/',
+    certUrl: 'https://learn.finops.org/path/finops-certified-professional',
   },
 ];
 
@@ -207,7 +152,7 @@ const resources = [
       'Official exam guide with domains, objectives, and recommended study materials for the FinOps Certified Practitioner (FOCP) exam.',
     type: 'Exam Guide',
     icon: 'checklist',
-    url: 'https://www.finops.org/certification/finops-certified-practitioner/',
+    url: 'https://learn.finops.org/finops-certified-practitioner-certification-exam',
   },
 ];
 
@@ -218,12 +163,14 @@ export default function FinOpsEducationPage() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [carouselPage, setCarouselPage] = useState(0);
   const [selectedPathId, setSelectedPathId] = useState(0);
+  const today = useToday(DATA_AS_OF);
 
   const featuredCert = certifications.find((c) => c.featured);
 
   const filteredCerts = certifications.filter((c) => {
     const levelOk = levelFilter === 'All' || c.level === levelFilter;
-    const statusOk = statusFilter === 'All' || c.status === statusFilter.toLowerCase();
+    const statusOk =
+      statusFilter === 'All' || deriveStatus(c, today) === statusFilter.toLowerCase();
     return levelOk && statusOk;
   });
 
@@ -250,7 +197,7 @@ export default function FinOpsEducationPage() {
         <title>FinOps Education &amp; Certifications | HCW</title>
         <meta
           name="description"
-          content="FinOps Foundation certification prep, learning paths, and resources — covering FOCP, FinOps for Platform Engineers, and FinOps Professional."
+          content="FinOps Foundation certification prep, learning paths, and resources — covering the FinOps Certified Practitioner, Engineer, and Professional credentials."
         />
         <meta property="og:title" content="FinOps Education & Certifications" />
         <meta
@@ -355,10 +302,15 @@ export default function FinOpsEducationPage() {
         {/* ── Browse Certifications Carousel ───────────────────────────── */}
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-emerald-400 text-[24px] material-symbols-outlined">school</span>
-              Browse Certifications
-            </h3>
+            <div>
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <span className="text-emerald-400 text-[24px] material-symbols-outlined">
+                  school
+                </span>
+                Browse Certifications
+              </h3>
+              <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
+            </div>
           </div>
 
           {/* Filters */}
@@ -415,6 +367,7 @@ export default function FinOpsEducationPage() {
                       <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
                     </div>
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
+                    <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
                     <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-emerald-300 transition-colors flex-1">
                       {cert.title}
                     </h3>

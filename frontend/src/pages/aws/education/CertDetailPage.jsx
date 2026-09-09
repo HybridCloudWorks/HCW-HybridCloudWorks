@@ -83,9 +83,7 @@ export default function AWSCertDetailPage() {
   return (
     <>
       <Helmet>
-        <title>
-          {cert.code}: {cert.title} | AWS Education | HCW
-        </title>
+        <title>{`${cert.code}: ${cert.title} | AWS Education | HCW`}</title>
         <meta name="description" content={cert.description} />
         <meta property="og:title" content={`${cert.code}: ${cert.title}`} />
         <meta property="og:description" content={cert.longDescription} />
