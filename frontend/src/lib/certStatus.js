@@ -10,15 +10,29 @@
  * from the dates — and a date passing can no longer show a status that has
  * already ended.
  *
- * Pure and dependency-free so the page, the detail page, the pre-renderer and
- * the tests all agree on one rule.
+ * Every function here is pure so the page, the detail page, the pre-renderer
+ * and the tests agree on one rule. The one hook, `useToday`, exists for
+ * hydration: /azure/education and the 68 detail routes are pre-rendered at
+ * build time and hydrated with `hydrateRoot`. If a render read the real clock,
+ * the HTML built on Monday and the first client render on Friday would
+ * disagree the day a status flips (an expiring row turned retired) — React
+ * logs a hydration mismatch and re-renders the tree from scratch. So during
+ * the pre-render and the hydrating render "today" is the catalogue's own
+ * `DATA_AS_OF`, which the build and the browser share, and the render right
+ * after hydration moves it to the viewer's real date. Server and first client
+ * render agree; the page still corrects itself.
  */
+import { useSyncExternalStore } from 'react';
 
 export const CERT_STATUSES = Object.freeze(['active', 'beta', 'expiring', 'retired']);
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Today as `YYYY-MM-DD` in the viewer's local calendar. */
+/**
+ * Today as `YYYY-MM-DD` in the viewer's local calendar. For code that runs
+ * outside a render (tests, scripts, effects); inside a component use
+ * `useToday` so the pre-rendered HTML and the first client render agree.
+ */
 export function todayIso(now = new Date()) {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -26,10 +40,33 @@ export function todayIso(now = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+// The clock is an external system as far as React is concerned, so it is read
+// through useSyncExternalStore rather than a state-plus-effect pair: React
+// uses the server snapshot for the pre-render and for the hydrating render,
+// then re-renders with the client snapshot when the two differ — without a
+// hydration mismatch, and without the setState-in-effect cascade the lint
+// rule forbids. Nothing pushes updates (the date changes at midnight, which a
+// page open that long can miss), so subscribe is a no-op.
+const subscribeToNothing = () => () => {};
+
 /**
- * Whether an ISO date is strictly before `today`. ISO `YYYY-MM-DD` strings
- * compare correctly as text, which keeps this free of time zones: a
- * retirement dated 2026-06-30 is "past" from 2026-07-01, everywhere.
+ * "Today" for a render: `fallbackIso` (the catalogue's `DATA_AS_OF`) while
+ * pre-rendering and while hydrating that HTML, the viewer's local date on every
+ * render after that — and immediately on a client-side navigation, which has
+ * no HTML to agree with. See the module header for why.
+ *
+ * @param {string} fallbackIso `YYYY-MM-DD`
+ * @returns {string} `YYYY-MM-DD`
+ */
+export function useToday(fallbackIso) {
+  return useSyncExternalStore(subscribeToNothing, todayIso, () => fallbackIso);
+}
+
+/**
+ * Whether an ISO date is strictly before `today`. Both are `YYYY-MM-DD`
+ * strings and are compared as text, so no Date parsing or zone conversion is
+ * involved here; the caller defines "today" (`todayIso` gives the viewer's
+ * local calendar date, `useToday` the catalogue date until mount).
  *
  * A missing or malformed date is never "past" — a bad value must not retire a
  * certification by accident.

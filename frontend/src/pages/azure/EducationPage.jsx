@@ -9,7 +9,7 @@ import {
   appliedSkills,
   timelineEvents,
 } from '@/data/azure/certifications';
-import { deriveStatus, todayIso } from '@/lib/certStatus';
+import { deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -341,8 +341,9 @@ function formatDate(iso) {
   });
 }
 
-function daysUntil(iso) {
-  return Math.ceil((new Date(iso) - new Date()) / 86400000);
+/** Whole days from `today` (`YYYY-MM-DD`, see useToday) to `iso`; negative when past. */
+function daysUntil(iso, today) {
+  return Math.ceil((new Date(`${iso}T00:00:00`) - new Date(`${today}T00:00:00`)) / 86400000);
 }
 
 /**
@@ -351,7 +352,7 @@ function daysUntil(iso) {
  * "Expiring Soon" for exams already gone, because the stored field had not
  * been touched since April (#461).
  */
-function StatusBadge({ status, expiryDate, betaEndDate, replacedBy, className = '' }) {
+function StatusBadge({ status, expiryDate, betaEndDate, replacedBy, today, className = '' }) {
   const replacementCode = replacedBy ? CODE_BY_SLUG.get(replacedBy) : null;
   if (status === 'retired') {
     return (
@@ -377,7 +378,7 @@ function StatusBadge({ status, expiryDate, betaEndDate, replacedBy, className = 
     );
   }
   if (status === 'expiring') {
-    const days = expiryDate ? daysUntil(expiryDate) : null;
+    const days = expiryDate ? daysUntil(expiryDate, today) : null;
     return (
       <span
         className={`inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[10px] font-bold rounded-full ${className}`}
@@ -444,6 +445,10 @@ function HorizontalTimeline({ events }) {
   const [canScrollLeft, setCanScrollLeft] = React.useState(false);
   const [canScrollRight, setCanScrollRight] = React.useState(false);
   const scrollContainerRef = React.useRef(null);
+  // The catalogue date while pre-rendering and hydrating, the real date after;
+  // called before any early return so the hook order is stable. See lib/certStatus.js.
+  const todayStr = useToday(DATA_AS_OF);
+  const today = new Date(`${todayStr}T00:00:00`);
 
   const { months, minDate, maxDate } = buildMonthColumns(events);
 
@@ -509,8 +514,6 @@ function HorizontalTimeline({ events }) {
 
   const numLanes = Math.max(...eventLanes, 0) + 1;
   const svgHeight = HEADER_HEIGHT + numLanes * TRACK_HEIGHT + 16;
-
-  const today = new Date();
 
   return (
     <section className="mb-16">
@@ -779,7 +782,9 @@ function HorizontalTimeline({ events }) {
                 <div className="text-[10px] text-foreground/50 flex items-center justify-between">
                   <span>{formatDate(ev.date)}</span>
                   {!isPast && (
-                    <span className="text-primary font-semibold">in {daysUntil(ev.date)}d</span>
+                    <span className="text-primary font-semibold">
+                      in {daysUntil(ev.date, todayStr)}d
+                    </span>
                   )}
                 </div>
               </div>
@@ -805,7 +810,7 @@ export default function AzureEducationPage() {
   // end that passes between data syncs is reflected without a deploy. Retired
   // exams stay listed — with the retirement date and the replacement — but
   // sort last so the current catalogue comes first.
-  const today = todayIso();
+  const today = useToday(DATA_AS_OF);
   const certs = certifications
     .map((c) => ({ ...c, status: deriveStatus(c, today) }))
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
@@ -1042,6 +1047,7 @@ export default function AzureEducationPage() {
                       betaEndDate={cert.betaEndDate}
                       expiryDate={cert.expiryDate}
                       replacedBy={cert.replacedBy}
+                      today={today}
                       className="mb-2 self-start"
                     />
 
@@ -1091,6 +1097,7 @@ export default function AzureEducationPage() {
               <button
                 onClick={() => setCarouselPage((p) => Math.max(0, p - 1))}
                 disabled={carouselPage === 0}
+                aria-label="Previous page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
                 <span className="material-symbols-outlined text-[18px]">chevron_left</span>
@@ -1105,6 +1112,7 @@ export default function AzureEducationPage() {
               <button
                 onClick={() => setCarouselPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={carouselPage === totalPages - 1}
+                aria-label="Next page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
                 <span className="material-symbols-outlined text-[18px]">chevron_right</span>

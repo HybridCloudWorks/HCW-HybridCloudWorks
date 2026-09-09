@@ -38,16 +38,23 @@ function renderPage() {
 const visibleCards = () => Array.from(document.querySelectorAll('article[data-status]'));
 
 /**
+ * The carousel's own "next" control, by its label — the timeline has a
+ * chevron_right icon of its own ("Scroll right"), so the icon text is not a
+ * unique handle. Null when the filter fits on one page (no paginator).
+ */
+const nextPageButton = () => screen.queryByRole('button', { name: 'Next page' });
+
+/**
  * The carousel shows four cards a page, so a card's position depends on how
  * many certifications share its status. Page forward until the card for
- * `code` is on screen; the "next" button (a material icon, no label) is
- * disabled on the last page, which ends the walk.
+ * `code` is on screen; the button is disabled on the last page, which ends
+ * the walk.
  */
 function pageToCard(code) {
   for (;;) {
     const card = visibleCards().find((el) => el.textContent.includes(code));
     if (card) return card;
-    const next = screen.getByText('chevron_right').closest('button');
+    const next = nextPageButton();
     if (!next || next.disabled) return undefined;
     fireEvent.click(next);
   }
@@ -58,7 +65,7 @@ function allFilteredCards() {
   const seen = new Map();
   for (;;) {
     for (const card of visibleCards()) seen.set(card.textContent, card);
-    const next = screen.queryByText('chevron_right')?.closest('button');
+    const next = nextPageButton();
     if (!next || next.disabled) return Array.from(seen.values());
     fireEvent.click(next);
   }

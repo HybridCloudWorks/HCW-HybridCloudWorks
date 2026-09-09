@@ -4,7 +4,7 @@ import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import ListenAndLearn from '@/components/education/ListenAndLearn';
 import { DATA_AS_OF, certifications } from '@/data/azure/certifications';
-import { deriveStatus, todayIso } from '@/lib/certStatus';
+import { deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Presentation ────────────────────────────────────────────────────────────
 //
@@ -112,6 +112,9 @@ function StatusNotice({ status, cert, replacement }) {
 export default function CertDetailPage() {
   const { certSlug } = useParams();
   const cert = certifications.find((c) => c.slug === certSlug);
+  // DATA_AS_OF on the pre-rendered and hydrating render, the real date after
+  // mount — before the early return, since hooks must run in the same order.
+  const today = useToday(DATA_AS_OF);
 
   if (!cert) {
     return (
@@ -138,7 +141,7 @@ export default function CertDetailPage() {
   }
 
   const meta = LEVEL_META[cert.level];
-  const status = deriveStatus(cert, todayIso());
+  const status = deriveStatus(cert, today);
   const replacement = cert.replacedBy
     ? certifications.find((c) => c.slug === cert.replacedBy) || null
     : null;

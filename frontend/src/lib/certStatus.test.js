@@ -1,7 +1,56 @@
-import { describe, expect, it } from 'vitest';
-import { deriveStatus, findStaleStatuses, isPastDate, todayIso } from './certStatus';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
+import { act, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { deriveStatus, findStaleStatuses, isPastDate, todayIso, useToday } from './certStatus';
 
 const TODAY = '2026-09-09';
+
+describe('useToday', () => {
+  const FALLBACK = '2000-01-01';
+
+  it('pre-renders with the fallback, hydrates against it, then switches to the local date', async () => {
+    // What scripts/prerender.mjs does at build time, then what main.jsx does
+    // in the browser: the HTML and the hydrating render must agree (both see
+    // the fallback), and only then may "today" move to the viewer's date.
+    const seen = [];
+    function Probe() {
+      const today = useToday(FALLBACK);
+      seen.push(today);
+      return createElement('p', null, today);
+    }
+    const html = renderToString(createElement(Probe));
+    expect(html).toContain(FALLBACK);
+    expect(seen).toEqual([FALLBACK]);
+
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    document.body.appendChild(container);
+    const onRecoverableError = vi.fn();
+    let root;
+    await act(async () => {
+      root = hydrateRoot(container, createElement(Probe), { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(seen[1]).toBe(FALLBACK);
+    expect(seen[seen.length - 1]).toBe(todayIso());
+    expect(container.textContent).toBe(todayIso());
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('uses the local date straight away on a client-only render', () => {
+    // A client-side navigation has no HTML to agree with, so nothing waits.
+    const seen = [];
+    function Probe() {
+      seen.push(useToday(FALLBACK));
+      return null;
+    }
+    render(createElement(Probe));
+    expect(seen[0]).toBe(todayIso());
+  });
+});
 
 describe('isPastDate', () => {
   it('compares ISO dates as text, strictly before today', () => {
