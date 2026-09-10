@@ -14,7 +14,7 @@
  *
  *   GH-600 GitHub Certified: Agentic AI Developer — 120 minutes, $165 USD,
  *     English, proctored, with two Microsoft Learn paths as the prepared
- *     route (about six hours between them).
+ *     route.
  *     https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-developer/
  *
  * Worth knowing for the next pass: `docs.github.com`'s "About GitHub
