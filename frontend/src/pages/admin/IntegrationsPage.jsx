@@ -59,6 +59,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
+import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 import {
   getIntegrationSettings,
   saveIntegrationSettings,
@@ -75,10 +76,21 @@ const Youtube = ({ className }) => (
 // ── Service test runners ──────────────────────────────────────────────────────
 // Each returns a human-readable success string or throws.
 
+// EVERY ONE OF THESE MUST READ `ok`. The three REST proxies answer HTTP 200
+// for every outcome, so `authedFetch` does not throw and a refused credential
+// arrives as a resolved envelope. `testPubler` used to read
+// `Array.isArray(accounts)` on that envelope — an object, never an array — so
+// it computed zero and said "Connected — 0 social account(s)" for a 403.
+// The button reported Connected while the timer beside it had been failing for
+// hours. `unwrapProxy` throws instead, with the upstream's own sentence.
+
 async function testPubler() {
-  const accounts = await postJSON('publerProxy', { path: '/accounts', method: 'GET' });
-  const count = Array.isArray(accounts) ? accounts.length : 0;
-  return `Connected — ${count} social account(s).`;
+  const body = unwrapProxy(
+    await postJSON('publerProxy', { path: '/accounts', method: 'GET' }),
+    'Publer'
+  );
+  const count = countList(body, 'accounts');
+  return count === null ? 'Connected to Publer.' : `Connected — ${count} social account(s).`;
 }
 
 async function testPlaud() {
@@ -100,14 +112,24 @@ async function testSessionize(speakerId) {
 }
 
 async function testLinkie() {
-  await postJSON('linkieProxy', { path: '/profiles', method: 'GET' });
-  return 'Connected to the Linkie API.';
+  const body = unwrapProxy(
+    await postJSON('linkieProxy', { path: '/profiles', method: 'GET' }),
+    'Linkie'
+  );
+  const count = countList(body, 'profiles');
+  return count === null ? 'Connected to Linkie.' : `Connected — ${count} profile(s).`;
 }
 
 async function testKlaviyo() {
-  const res = await postJSON('klaviyoProxy', { path: '/api/lists/', method: 'GET' });
-  const count = Array.isArray(res?.data) ? res.data.length : 0;
-  return `Connected — ${count} list(s) visible.`;
+  // Doubly wrong before: `res.data` is the ENVELOPE's data, which is Klaviyo's
+  // whole body `{ data: [...] }` rather than the array, so the count was zero
+  // even on a genuine success.
+  const body = unwrapProxy(
+    await postJSON('klaviyoProxy', { path: '/api/lists/', method: 'GET' }),
+    'Klaviyo'
+  );
+  const count = countList(body);
+  return count === null ? 'Connected to Klaviyo.' : `Connected — ${count} list(s) visible.`;
 }
 
 // ── The service registry ──────────────────────────────────────────────────────
