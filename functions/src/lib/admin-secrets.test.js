@@ -257,7 +257,7 @@ describe('the four lights', () => {
 
 describe('what it refuses to store', () => {
   it('accepts an ordinary credential', () => {
-    expect(rejectSecretValue('sk-ant-api03-abcdefghijklmnop')).toBeNull();
+    expect(rejectSecretValue('not-a-real-key-EXAMPLE-VALUE')).toBeNull();
   });
 
   it('refuses a pasted Key Vault reference', () => {
@@ -270,8 +270,8 @@ describe('what it refuses to store', () => {
     // Trimming for the operator would be friendlier and wrong: if their
     // clipboard has a newline, the NEXT thing they paste somewhere else will
     // too, and here we can say so.
-    expect(rejectSecretValue('  sk-ant-api03-abcdefghij  ')).toMatch(/whitespace/);
-    expect(rejectSecretValue('sk-ant-api03-abcdefghij\n')).toMatch(/whitespace/);
+    expect(rejectSecretValue('  not-a-real-key-EXAMPLE  ')).toMatch(/whitespace/);
+    expect(rejectSecretValue('not-a-real-key-EXAMPLE\n')).toMatch(/whitespace/);
   });
 
   it('refuses anything too short to be a credential', () => {
@@ -292,7 +292,7 @@ describe('what it refuses to store', () => {
   // the module gives: a test file about invisible characters that contains
   // invisible characters cannot be reviewed, because the interesting byte is
   // the one nobody can see. Every fixture below is built from an escape.
-  const KEY = 'sk-ant-api03-abcdefghij';
+  const KEY = 'not-a-real-key-EXAMPLE';
 
   it('refuses a zero-width character that trim cannot reach', () => {
     // The heart of the issue. `trim` removes \u00a0 and \ufeff and only at the ends;
@@ -363,13 +363,19 @@ describe('what it refuses to store', () => {
   });
 
   it('leaves credentials that are actually fine alone', () => {
-    // The regression guard. Real shapes from this estate's own catalogue:
-    // hyphens, underscores, dots, colons and mixed case all survive.
+    // The regression guard: the punctuation real credentials use - hyphens,
+    // underscores, dots, colons and mixed case - all survive.
+    //
+    // NOT written in any real provider's key shape, deliberately. The first
+    // draft used `sk-ant-api03-`, `AIzaSy` and `xoxb-` prefixes, which a
+    // secret scanner cannot tell from live values; #485 made the same
+    // correction for the same reason, and the false positive costs a real
+    // rotation. The three pre-existing fixtures above were changed with them.
     for (const ok of [
-      'sk-ant-api03-abcdefghijklmnop',
-      'AIzaSyD_ab-cd.ef1234567890',
-      '1234567890:AAHabcdefghijklmnop',
-      'xoxb-123456789012-abcdefghij',
+      'not-a-real-key-with-hyphens',
+      'not_a_real_key.with.dots_0189',
+      'not-a-real-key:with-a-colon',
+      'NotARealKeyWithMixedCase99',
     ]) {
       expect(rejectSecretValue(ok), ok).toBeNull();
     }
