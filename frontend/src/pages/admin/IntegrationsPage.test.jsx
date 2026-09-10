@@ -110,6 +110,70 @@ describe('the pasted value stays out of the DOM', () => {
   });
 });
 
+describe('saving a value', () => {
+  it('has a Save button, because Enter is not a control on a phone', async () => {
+    // This form had no submit control at all: the only way to store a pasted
+    // value was to press Enter in the field. On a mobile keyboard the return
+    // key is not reliably a form submit, so a value could be pasted with no
+    // way to save it - reported from a phone while correcting
+    // PUBLER-WORKSPACE-ID, which is not generatable and so had no button of
+    // any kind beside it.
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    render(<SecretRow item={item({ state: 'live', generatable: false })} onSubmit={onSubmit} />);
+
+    const save = screen.getByRole('button', { name: /save/i });
+    expect(save).toBeTruthy();
+
+    // Disabled with nothing to send, so it cannot fire an empty write.
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/New value for/), {
+      target: { value: '68ca33f83b3adc54100358cc' },
+    });
+    expect(save.disabled).toBe(false);
+
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(expect.any(String), {
+        value: '68ca33f83b3adc54100358cc',
+      })
+    );
+  });
+
+  it('stays disabled for whitespace, which is not a credential', () => {
+    render(<SecretRow item={item({ state: 'live', generatable: false })} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/New value for/), { target: { value: '   ' } });
+    expect(screen.getByRole('button', { name: /save/i }).disabled).toBe(true);
+  });
+
+  it('refuses an empty or whitespace submit from Enter too, not just from the button', async () => {
+    // Disabling the button closes one of two doors. Enter still reaches the
+    // form's onSubmit, so the guard has to live there as well or the keyboard
+    // path fires a write the button refuses to (Copilot review of 215eeb5b).
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    render(<SecretRow item={item({ state: 'live', generatable: false })} onSubmit={onSubmit} />);
+    const input = screen.getByLabelText(/New value for/);
+
+    fireEvent.submit(input.closest('form'));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.submit(input.closest('form'));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('still submits on Enter, so the keyboard path is not lost', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    render(<SecretRow item={item({ state: 'never', generatable: false })} onSubmit={onSubmit} />);
+    const input = screen.getByLabelText(/New value for/);
+    fireEvent.change(input, { target: { value: 'a-real-looking-value' } });
+    fireEvent.submit(input.closest('form'));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(expect.any(String), { value: 'a-real-looking-value' })
+    );
+  });
+});
+
 describe('the lights', () => {
   it('names every state the API can return', () => {
     // A state with no presentation falls back to gray, which would quietly
@@ -162,22 +226,28 @@ describe('the lights', () => {
 });
 
 describe('generate', () => {
+  // These used to count buttons, which worked only while the generate button
+  // was the ONLY button in the row. Every row now carries a Save button, so
+  // they identify the generate control by its title instead - the assertion
+  // they were always making.
+  const generateButton = () => screen.queryByTitle(/Generate a random value/);
+
   it('is offered only for values this estate invents', () => {
-    const { rerender, container } = render(
+    const { rerender } = render(
       <SecretRow item={item({ generatable: false })} onSubmit={vi.fn()} />
     );
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(generateButton()).toBeNull();
+    // ...while Save is there either way, since any row can be pasted into.
+    expect(screen.getByRole('button', { name: /save/i })).toBeTruthy();
 
     rerender(<SecretRow item={item({ generatable: true })} onSubmit={vi.fn()} />);
-    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(generateButton()).toBeTruthy();
   });
 
   it('sends generate without a value', async () => {
     const onSubmit = vi.fn().mockResolvedValue(true);
-    const { container } = render(
-      <SecretRow item={item({ generatable: true })} onSubmit={onSubmit} />
-    );
-    fireEvent.click(container.querySelector('button'));
+    render(<SecretRow item={item({ generatable: true })} onSubmit={onSubmit} />);
+    fireEvent.click(generateButton());
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith('GEMINI-API-KEY', { generate: true })
     );
@@ -231,7 +301,13 @@ describe('the page', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Google Gemini')).toBeTruthy());
 
-    fireEvent.submit(screen.getByLabelText('New value for Google Gemini').closest('form'));
+    // Types a value first. This used to submit an empty form, which reached
+    // the API only because nothing guarded against it; an empty write is now
+    // refused from the keyboard as well as from the disabled button, so the
+    // test has to do what an operator does. The assertion is unchanged.
+    const input = screen.getByLabelText('New value for Google Gemini');
+    fireEvent.change(input, { target: { value: 'a-real-looking-value' } });
+    fireEvent.submit(input.closest('form'));
 
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(

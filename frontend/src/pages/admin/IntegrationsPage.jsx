@@ -320,6 +320,14 @@ export function SecretRow({ item, onSubmit, busy }) {
         className="flex shrink-0 items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          // The SAME guard the Save button carries. Disabling the button only
+          // closes one of two doors: Enter still reaches this handler, so
+          // without this an empty or whitespace-only write goes out from the
+          // keyboard while the button sits disabled beside it. The server
+          // refuses it either way, but a control that is inert and a control
+          // that fires a doomed request are not the same thing to whoever is
+          // pressing them.
+          if (!value.trim()) return;
           submit({ value });
         }}
       >
@@ -330,11 +338,38 @@ export function SecretRow({ item, onSubmit, busy }) {
           autoComplete="off"
           spellCheck={false}
           disabled={busy}
-          placeholder={item.state === 'never' ? 'Paste key, press Enter' : 'Paste to rotate'}
+          placeholder={item.state === 'never' ? 'Paste key' : 'Paste to rotate'}
           onChange={(event) => setValue(event.target.value)}
           className="w-full font-mono text-xs sm:w-64"
           aria-label={`New value for ${item.label}`}
         />
+        {/*
+          A REAL SUBMIT BUTTON, because Enter is not a control on a phone.
+          This form had none: the only way to store a pasted value was to press
+          Enter in the field, and the placeholder only said so on a row that
+          had never been set — a rotation just read "Paste to rotate". On a
+          mobile keyboard the return key is not reliably a form submit, so
+          pasting a value and finding no way to save it is the whole
+          interaction. Reported from a phone while trying to correct
+          PUBLER-WORKSPACE-ID, which is not `generatable` and so had no button
+          of any kind beside it.
+
+          Disabled until there is something to send, so it cannot fire an empty
+          write, and it carries the same spinner the rest of the page uses.
+        */}
+        <Button
+          type="submit"
+          size="sm"
+          disabled={busy || !value.trim()}
+          title={`Save this value to ${item.secret}`}
+        >
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          <span className="ml-1.5">Save</span>
+        </Button>
         {item.generatable ? (
           <Button
             type="button"
