@@ -682,6 +682,25 @@ describe('the service cards', () => {
     }
   });
 
+  it('sends a credential with no test straight to the page that manages it', () => {
+    // No beaker means the globe is the only thing this page can do about a red
+    // light, so it has to land where the credential is minted - not on the
+    // vendor's front door. A bare host would be a shrug.
+    const untestable = SERVICES.filter(
+      (service) => !service.test && (service.secrets ?? []).length > 0
+    );
+    // If this is ever empty the assertion below is vacuous, which is its own
+    // kind of broken.
+    expect(untestable.length).toBeGreaterThan(0);
+    for (const service of untestable) {
+      const { pathname } = new URL(service.url);
+      expect(
+        pathname.replace(/\/+$/, '').length,
+        `${service.name} points at a bare host (${service.url}) with no test beside it`
+      ).toBeGreaterThan(0);
+    }
+  });
+
   it('puts every service in a group that exists', () => {
     const ids = new Set(SERVICE_GROUPS.map((group) => group.id));
     for (const service of SERVICES) {
