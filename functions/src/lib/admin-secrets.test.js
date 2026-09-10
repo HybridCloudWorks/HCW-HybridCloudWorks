@@ -257,7 +257,7 @@ describe('the four lights', () => {
 
 describe('what it refuses to store', () => {
   it('accepts an ordinary credential', () => {
-    expect(rejectSecretValue('sk-ant-api03-abcdefghijklmnop')).toBeNull();
+    expect(rejectSecretValue('not-a-real-key-EXAMPLE-VALUE')).toBeNull();
   });
 
   it('refuses a pasted Key Vault reference', () => {
@@ -270,8 +270,8 @@ describe('what it refuses to store', () => {
     // Trimming for the operator would be friendlier and wrong: if their
     // clipboard has a newline, the NEXT thing they paste somewhere else will
     // too, and here we can say so.
-    expect(rejectSecretValue('  sk-ant-api03-abcdefghij  ')).toMatch(/whitespace/);
-    expect(rejectSecretValue('sk-ant-api03-abcdefghij\n')).toMatch(/whitespace/);
+    expect(rejectSecretValue('  not-a-real-key-EXAMPLE  ')).toMatch(/whitespace/);
+    expect(rejectSecretValue('not-a-real-key-EXAMPLE\n')).toMatch(/whitespace/);
   });
 
   it('refuses anything too short to be a credential', () => {
@@ -288,6 +288,141 @@ describe('what it refuses to store', () => {
     }
   });
 
+  // #484. THESE TESTS NAME THEIR CODE POINTS AS NUMBERS TOO, for the reason
+  // the module gives: a test file about invisible characters that contains
+  // invisible characters cannot be reviewed, because the interesting byte is
+  // the one nobody can see. Every fixture below is built from an escape.
+  const KEY = 'not-a-real-key-EXAMPLE';
+
+  it('refuses a zero-width character that trim cannot reach', () => {
+    // The heart of the issue. `trim` removes \u00a0 and \ufeff and only at the ends;
+    // it does not touch \u200b even there, and never reaches the middle. Such a
+    // value stores clean, resolves clean, and is refused upstream forever.
+    for (const cp of [0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0x00ad]) {
+      const bad = KEY.slice(0, 6) + String.fromCodePoint(cp) + KEY.slice(6);
+      expect(rejectSecretValue(bad), 'U+' + cp.toString(16)).toMatch(/invisible character/);
+    }
+  });
+
+  it('refuses a text-direction mark', () => {
+    for (const cp of [0x200e, 0x200f, 0x202e, 0x2066, 0x2069]) {
+      const bad = String.fromCodePoint(cp) + KEY;
+      expect(rejectSecretValue(bad), 'U+' + cp.toString(16)).toMatch(/invisible character/);
+    }
+  });
+
+  it('refuses a control character in the middle, which trim leaves alone', () => {
+    // A newline at the END is the trim rule's business and reads better
+    // there; this is the one in the middle, which nothing else catches.
+    const bad = KEY.slice(0, 6) + String.fromCodePoint(0x0a) + KEY.slice(6);
+    expect(rejectSecretValue(bad)).toMatch(/control character/);
+  });
+
+  it('refuses a value still wearing its quotes', () => {
+    const pairs = [[0x22, 0x22], [0x27, 0x27], [0x60, 0x60], [0x201c, 0x201d], [0x2018, 0x2019]];
+    for (const [open, close] of pairs) {
+      const bad = String.fromCodePoint(open) + KEY + String.fromCodePoint(close);
+      expect(rejectSecretValue(bad), 'U+' + open.toString(16)).toMatch(/wrapped in quotes/);
+    }
+  });
+
+  it('allows a quote INSIDE a value, which is not the same thing', () => {
+    // Only a matched wrapping pair is refused. A credential is allowed to
+    // contain a quote, and refusing that would reject real keys.
+    expect(rejectSecretValue(KEY.slice(0, 6) + String.fromCodePoint(0x22) + KEY.slice(6))).toBeNull();
+  });
+
+  it('refuses a curly quote a keyboard substituted', () => {
+    const bad = KEY.slice(0, 6) + String.fromCodePoint(0x2019) + KEY.slice(6);
+    expect(rejectSecretValue(bad)).toMatch(/curly quote/);
+  });
+
+  it('quotes the label it found rather than complaining about a space', () => {
+    // A pasted header line trips three rules at once. The useful sentence is
+    // the one about the label, so this check runs before the whitespace one.
+    //
+    // Asserted on the QUOTED PREFIX, not on the surrounding sentence: the
+    // behaviour under test is "it tells you which label it found", and an
+    // assertion on the prose would fail the next time the prose is corrected
+    // for accuracy - which is exactly what happened to this check.
+    for (const label of ['Bearer', 'Basic', 'Token', 'api_key', 'API-KEY']) {
+      const sep = label.toLowerCase().includes('key') || label === 'Token' ? ': ' : ' ';
+      expect(rejectSecretValue(label + sep + KEY), label).toMatch(new RegExp('"' + label + '"'));
+    }
+    expect(rejectSecretValue('Authorization: Bearer ' + KEY)).toMatch(/"Authorization:"/);
+  });
+
+  it('does not call a config-file label an Authorization header', () => {
+    // Half of these prefixes are not auth schemes at all - `api_key:` is a
+    // YAML key or a .env line far more often than a header - so the sentence
+    // says the label precedes the credential, which is true of all of them.
+    // Naming the wrong source on the one check whose purpose is naming the
+    // right one is the same defect the whitespace message had.
+    expect(rejectSecretValue('api_key: ' + KEY)).not.toMatch(/Authorization header/);
+    expect(rejectSecretValue('api_key: ' + KEY)).toMatch(/labels the credential/);
+  });
+
+  it('names Bearer-API rather than Bearer, so the message is not subtly wrong', () => {
+    // The alternation is ordered longest-first. With `bearer` earlier, a
+    // Publer value would match the short one and the sentence would quote a
+    // scheme the operator never pasted.
+    expect(rejectSecretValue('Bearer-API ' + KEY)).toMatch(/"Bearer-API"/);
+  });
+
+  it('leaves a credential that merely begins with those letters alone', () => {
+    // The trailing separator is what makes the check safe: without it, a real
+    // key starting with "token" would be refused for looking like a label.
+    expect(rejectSecretValue('tokenXY-not-a-real-key')).toBeNull();
+    expect(rejectSecretValue('bearerish-not-a-real-key')).toBeNull();
+  });
+
+  it('refuses interior whitespace once no better sentence applies', () => {
+    expect(rejectSecretValue(KEY.slice(0, 6) + ' ' + KEY.slice(6))).toMatch(/whitespace inside/);
+  });
+
+  it('catches the Unicode spaces too, which is why the message says whitespace', () => {
+    // `\s` is wider than the space bar, and the wide part is precisely what
+    // survives to that check: every ASCII whitespace character is a control
+    // character and is refused earlier with a better sentence. U+2028 is a
+    // line separator, so calling it "a space" would name the wrong thing on
+    // the one check whose purpose is naming the right one.
+    for (const cp of [0x0020, 0x00a0, 0x2003, 0x2028, 0x3000]) {
+      const bad = KEY.slice(0, 6) + String.fromCodePoint(cp) + KEY.slice(6);
+      expect(rejectSecretValue(bad), 'U+' + cp.toString(16)).toMatch(/whitespace inside/);
+    }
+  });
+
+  it('refuses an ASCII tab as a control character, not as whitespace', () => {
+    // The ordering that makes the sentence above true: a tab is U+0009 and
+    // never reaches the whitespace check.
+    const bad = KEY.slice(0, 6) + String.fromCodePoint(0x09) + KEY.slice(6);
+    expect(rejectSecretValue(bad)).toMatch(/control character/);
+  });
+
+  it('still calls a placeholder a placeholder', () => {
+    // The new checks run last for exactly this reason: '<paste here>' has a
+    // space in it, and reporting that would bury the real problem.
+    expect(rejectSecretValue('<paste here>')).toMatch(/placeholder/);
+  });
+
+  it('leaves credentials that are actually fine alone', () => {
+    // The regression guard: the punctuation real credentials use - hyphens,
+    // underscores, dots, colons and mixed case - all survive.
+    //
+    // NOT written in any real provider's key shape, deliberately. The first
+    // draft used `sk-ant-api03-`, `AIzaSy` and `xoxb-` prefixes, which a
+    // secret scanner cannot tell from live values; #485 made the same
+    // correction for the same reason, and the false positive costs a real
+    // rotation. The three pre-existing fixtures above were changed with them.
+    for (const ok of [
+      'not-a-real-key-with-hyphens',
+      'not_a_real_key.with.dots_0189',
+      'not-a-real-key:with-a-colon',
+      'NotARealKeyWithMixedCase99',
+    ]) {
+      expect(rejectSecretValue(ok), ok).toBeNull();
+    }
+  });
   it('refuses an empty or non-string value', () => {
     for (const bad of ['', null, undefined, 42, {}]) {
       expect(rejectSecretValue(bad)).toMatch(/no value/);
