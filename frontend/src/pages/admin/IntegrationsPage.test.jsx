@@ -17,6 +17,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 import IntegrationsPage, {
   SERVICES,
+  SERVICE_GROUPS,
   STATE_PRESENTATION,
   SecretRow,
   buildIntegrationView,
@@ -43,12 +44,15 @@ vi.mock('@/lib/adminSettings', () => ({
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 
+// The API's real shape. `section` is a GROUP id now - the same vocabulary the
+// page renders headings from - and `help` is written the way the catalogue
+// writes it: what kind of value, what it does here, no repository jargon.
 const item = (overrides = {}) => ({
   secret: 'GEMINI-API-KEY',
   setting: 'GEMINI_API_KEY',
-  section: 'ai',
+  section: 'gen-ai',
   label: 'Google Gemini',
-  help: 'First in the router’s preference order.',
+  help: 'API key. The first model the site asks to write.',
   state: 'never',
   generatable: false,
   hasLivenessCheck: true,
@@ -62,7 +66,7 @@ const item = (overrides = {}) => ({
 
 const payload = (secrets) => ({
   success: true,
-  sections: [{ id: 'ai', title: 'AI & generation', blurb: 'AI keys.' }],
+  sections: [{ id: 'gen-ai', title: 'Gen AI', blurb: 'Models that write and draw.' }],
   secrets,
 });
 
@@ -287,25 +291,30 @@ describe('generate', () => {
 });
 
 describe('the page', () => {
-  it('loads status once auth is ready and groups by section', async () => {
+  it('loads status once auth is ready and shows the credential under its group', async () => {
+    // The heading comes from SERVICE_GROUPS, not from the API's sections - one
+    // taxonomy drives both, so a key appears under the same words as the
+    // service it belongs to.
     render(<IntegrationsPage />);
-    await waitFor(() => expect(screen.getByText('AI & generation')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Gen AI')).toBeTruthy());
     expect(getJSON).toHaveBeenCalledWith('cms/secrets');
     expect(screen.getByText('Google Gemini')).toBeTruthy();
   });
 
-  it('hides a section that has no secrets rather than showing an empty heading', async () => {
+  it('hides a group that has nothing in it rather than showing an empty heading', async () => {
     getJSON.mockResolvedValue({
       success: true,
       sections: [
-        { id: 'ai', title: 'AI & generation', blurb: 'AI keys.' },
+        { id: 'gen-ai', title: 'Gen AI', blurb: 'Models that write and draw.' },
         { id: 'ghost', title: 'Empty Section', blurb: 'Nothing here.' },
       ],
       secrets: [item()],
     });
     render(<IntegrationsPage />);
-    await waitFor(() => expect(screen.getByText('AI & generation')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Gen AI')).toBeTruthy());
     expect(screen.queryByText('Empty Section')).toBeNull();
+    // 'Cloud' has neither a service card nor a credential in this payload.
+    expect(screen.queryByText('Cloud')).toBeNull();
   });
 
   it('PUTs to the same route it read from', async () => {
@@ -367,24 +376,109 @@ describe('the page', () => {
 // ── The merge: a service and its credential are one subject ──────────────────
 
 describe('joining services to credentials', () => {
+  // Section ids ARE group ids now - one taxonomy for services and credentials
+  // alike, so a key is never under a different heading from the service it
+  // unlocks.
   const sections = [
-    { id: 'social', title: 'Social & audience', blurb: 'Publishing credentials.' },
-    { id: 'ai', title: 'AI & generation', blurb: 'AI keys.' },
+    { id: 'communication', title: 'Communication', blurb: 'Publishing credentials.' },
+    { id: 'gen-ai', title: 'Gen AI', blurb: 'AI keys.' },
   ];
   const klaviyoKey = item({
     secret: 'KLAVIYO-PRIVATE-KEY',
-    section: 'social',
+    section: 'communication',
     label: 'Klaviyo — private key',
   });
   const klaviyoList = item({
     secret: 'KLAVIYO-LIST-ID',
-    section: 'social',
+    section: 'communication',
     label: 'Klaviyo — list id',
   });
+  // Claimed by the Telegram card, so it is no longer a loose credential.
   const telegram = item({
     secret: 'TELEGRAM-BOT-TOKEN',
-    section: 'social',
+    section: 'communication',
     label: 'Telegram — bot token',
+  });
+  const firecrawl = item({
+    secret: 'FIRECRAWL-API-KEY',
+    section: 'ai-services',
+    label: 'Firecrawl',
+  });
+
+  // ── grouping ────────────────────────────────────────────────────────────
+  // The fallback below exists so a card cannot silently disappear, and an
+  // untested guarantee is not one (Copilot review of 658b9407).
+
+  const GROUPS = [
+    { id: 'alpha', title: 'Alpha', blurb: 'a' },
+    { id: 'omega', title: 'Omega', blurb: 'o' },
+  ];
+  const svc = (id, group) => ({ id, group, name: id, url: 'https://x.test', secrets: [] });
+
+  it('sorts cards under their group, in registry order', () => {
+    const { serviceGroups } = buildIntegrationView({
+      services: [svc('one', 'alpha'), svc('two', 'omega'), svc('three', 'alpha')],
+      groups: GROUPS,
+    });
+    expect(serviceGroups.map((group) => group.id)).toEqual(['alpha', 'omega']);
+    expect(serviceGroups[0].cards.map((card) => card.id)).toEqual(['one', 'three']);
+    expect(serviceGroups[1].cards.map((card) => card.id)).toEqual(['two']);
+  });
+
+  it('drops a group with no cards rather than rendering a bare heading', () => {
+    const { serviceGroups } = buildIntegrationView({
+      services: [svc('one', 'alpha')],
+      groups: GROUPS,
+    });
+    expect(serviceGroups.map((group) => group.id)).toEqual(['alpha']);
+  });
+
+  it('NEVER drops a card whose group does not exist - it falls into the last group', () => {
+    // The failure this guards: a typo in `group`, or a group removed from
+    // SERVICE_GROUPS, quietly removing a service from the page. A card in the
+    // wrong place is visible and fixable; a card that is gone is neither.
+    const { serviceGroups } = buildIntegrationView({
+      services: [svc('one', 'alpha'), svc('stray', 'nonesuch'), svc('none', undefined)],
+      groups: GROUPS,
+    });
+    const placed = serviceGroups.flatMap((group) => group.cards.map((card) => card.id));
+    expect(placed).toContain('stray');
+    expect(placed).toContain('none');
+    expect(serviceGroups.find((group) => group.id === 'omega').cards.map((c) => c.id)).toEqual([
+      'stray',
+      'none',
+    ]);
+  });
+
+  it('places every service exactly once, whatever its group says', () => {
+    // The property that matters more than any individual placement rule.
+    const services = [
+      svc('a', 'alpha'),
+      svc('b', 'omega'),
+      svc('c', 'nonesuch'),
+      svc('d', 'alpha'),
+    ];
+    const { serviceGroups, serviceCards } = buildIntegrationView({ services, groups: GROUPS });
+    const placed = serviceGroups.flatMap((group) => group.cards.map((card) => card.id)).sort();
+    expect(placed).toEqual(['a', 'b', 'c', 'd']);
+    expect(serviceCards).toHaveLength(4);
+  });
+
+  it('survives an empty group list without losing the cards from the page', () => {
+    // No groups means nothing can be rendered under a heading, so the caller
+    // still has `serviceCards`; what must not happen is a crash.
+    const { serviceGroups, serviceCards } = buildIntegrationView({
+      services: [svc('one', 'alpha')],
+      groups: [],
+    });
+    expect(serviceGroups).toEqual([]);
+    expect(serviceCards.map((card) => card.id)).toEqual(['one']);
+  });
+
+  it('groups the real registry with nothing left over', () => {
+    const { serviceGroups } = buildIntegrationView({});
+    const placed = serviceGroups.flatMap((group) => group.cards.map((card) => card.id));
+    expect(placed.sort()).toEqual(SERVICES.map((service) => service.id).sort());
   });
 
   it('gives a credential to the service that owns it', () => {
@@ -399,24 +493,54 @@ describe('joining services to credentials', () => {
     ]);
   });
 
-  it('does not list a claimed credential a second time in the sections below', () => {
+  it('never shows a claimed credential twice - on its card and loose in the group', () => {
     // The whole point of the merge. Rotating Klaviyo from the card and from a
     // duplicate row further down would be two paths to one write, and the
     // second would look like a different credential.
-    const { otherSections } = buildIntegrationView({
+    const { serviceGroups } = buildIntegrationView({
       sections,
-      secrets: [klaviyoKey, klaviyoList, telegram],
+      secrets: [klaviyoKey, klaviyoList, telegram, firecrawl],
     });
-    const social = otherSections.find((section) => section.id === 'social');
-    expect(social.items.map((row) => row.secret)).toEqual(['TELEGRAM-BOT-TOKEN']);
+    const communication = serviceGroups.find((group) => group.id === 'communication');
+    const onCards = communication.cards.flatMap((card) => card.items.map((row) => row.secret));
+    expect(onCards).toContain('KLAVIYO-PRIVATE-KEY');
+    expect(onCards).toContain('TELEGRAM-BOT-TOKEN');
+    // Everything in this group belongs to a card, so nothing is left loose.
+    expect(communication.loose).toEqual([]);
   });
 
-  it('drops a section whose every credential went to a service card', () => {
-    const { otherSections } = buildIntegrationView({
+  it('shows a credential with no service card as a loose row in its own group', () => {
+    // Firecrawl has no card. It must still appear, under AI services, rather
+    // than falling off the page because nothing claimed it.
+    const { serviceGroups } = buildIntegrationView({ sections, secrets: [firecrawl] });
+    const aiServices = serviceGroups.find((group) => group.id === 'ai-services');
+    expect(aiServices.loose.map((row) => row.secret)).toEqual(['FIRECRAWL-API-KEY']);
+    expect(aiServices.cards).toEqual([]);
+  });
+
+  it('gives a credential whose group this page does not know a heading of its own', () => {
+    // The safety net. A key nobody can see is a key nobody can rotate, so an
+    // unknown section gets its own heading rather than silence.
+    const stray = item({ secret: 'STRAY-KEY', section: 'nowhere', label: 'Stray' });
+    const { orphanSections, serviceGroups } = buildIntegrationView({
+      sections,
+      secrets: [stray],
+    });
+    expect(orphanSections.map((section) => section.id)).toEqual(['nowhere']);
+    expect(orphanSections[0].items.map((row) => row.secret)).toEqual(['STRAY-KEY']);
+    const placed = serviceGroups.flatMap((group) => group.loose.map((row) => row.secret));
+    expect(placed).not.toContain('STRAY-KEY');
+  });
+
+  it('leaves nothing loose when every credential went to a service card', () => {
+    const { serviceGroups, orphanSections } = buildIntegrationView({
       sections,
       secrets: [klaviyoKey, klaviyoList],
     });
-    expect(otherSections.map((section) => section.id)).toEqual([]);
+    expect(orphanSections).toEqual([]);
+    for (const group of serviceGroups) {
+      expect(group.loose, `${group.id} has loose credentials`).toEqual([]);
+    }
   });
 
   it('renders nothing for a credential a service names but the API did not return', () => {
@@ -432,9 +556,13 @@ describe('the service cards', () => {
   const withKlaviyo = () =>
     getJSON.mockResolvedValue({
       success: true,
-      sections: [{ id: 'social', title: 'Social & audience', blurb: 'Publishing credentials.' }],
+      sections: [{ id: 'communication', title: 'Communication', blurb: 'Publishing credentials.' }],
       secrets: [
-        item({ secret: 'KLAVIYO-PRIVATE-KEY', section: 'social', label: 'Klaviyo — private key' }),
+        item({
+          secret: 'KLAVIYO-PRIVATE-KEY',
+          section: 'communication',
+          label: 'Klaviyo — private key',
+        }),
       ],
     });
 
@@ -443,9 +571,11 @@ describe('the service cards', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
 
-    // The status question and the rotation answer, in one place.
+    // The status question and the rotation answer, in one place. The test
+    // control is an icon button now - a beaker - so it is found by its label
+    // rather than by the words that used to wrap the header row.
     const card = screen.getByText('Klaviyo').closest('.p-4');
-    expect(card.textContent).toContain('Test Connection');
+    expect(within(card).getByRole('button', { name: /^Test Klaviyo$/ })).toBeTruthy();
     expect(card.textContent).toContain('KLAVIYO-PRIVATE-KEY');
     expect(within(card).getByLabelText('New value for Klaviyo — private key')).toBeTruthy();
   });
@@ -466,7 +596,7 @@ describe('the service cards', () => {
     await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
 
     const card = screen.getByText('Klaviyo').closest('.p-4');
-    fireEvent.click(within(card).getByText('Test Connection'));
+    fireEvent.click(within(card).getByRole('button', { name: /^Test Klaviyo$/ }));
 
     await waitFor(() => expect(screen.getByText(/2 list\(s\) visible/)).toBeTruthy());
     expect(postJSON).toHaveBeenCalledWith('klaviyoProxy', { path: '/api/lists/', method: 'GET' });
@@ -480,7 +610,9 @@ describe('the service cards', () => {
     await waitFor(() => expect(screen.getByText('YouTube')).toBeTruthy());
 
     const card = screen.getByText('YouTube').closest('.p-4');
-    expect(card.textContent).toContain('Data API v3');
+    // The description is shorter now and names the consumer rather than the
+    // API version; what must not come back is the claim that it is unused.
+    expect(card.textContent).toContain('watch next');
     expect(screen.queryByText('Placeholder')).toBeNull();
     expect(card.textContent).not.toContain('not wired up');
   });
@@ -498,12 +630,20 @@ describe('the service cards', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Plaud')).toBeTruthy());
     const card = screen.getByText('Plaud').closest('.p-4');
-    expect(card.textContent).toContain('No Key Vault secret');
+    // The note must explain the OTHER sign-in - the one with no row here -
+    // without naming a database document, an issue number or a file path. A
+    // reader of this page has never seen the repository.
+    expect(card.textContent).toContain('12 hours');
+    expect(card.textContent).toContain('Recording Hub');
+    expect(card.textContent).not.toMatch(/mcp_servers|#\d{3}|\.js\b/);
   });
 
-  it('names every service the old Connections page did', () => {
-    // The merge must not quietly drop one.
-    expect(SERVICES.map((service) => service.name)).toEqual([
+  it('still names every service the old Connections page did', () => {
+    // The original seven. The order changed when the cards were sorted into
+    // groups and three education profiles were added, so this asserts
+    // PRESENCE rather than sequence - dropping one is the failure it guards.
+    const names = SERVICES.map((service) => service.name);
+    for (const name of [
       'Publer',
       'Plaud',
       'Sessionize',
@@ -511,6 +651,41 @@ describe('the service cards', () => {
       'Linkie',
       'Klaviyo',
       'YouTube',
+    ]) {
+      expect(names, `${name} disappeared from the registry`).toContain(name);
+    }
+  });
+
+  it('lists exactly the services it means to, in group order', () => {
+    expect(SERVICES.map((service) => service.name)).toEqual([
+      'Publer',
+      'Klaviyo',
+      'Linkie',
+      'Telegram',
+      'RSS.com',
+      'YouTube',
+      'Plaud',
+      'Sessionize',
+      'Credly',
+      'Microsoft Learn',
+      'AWS Skill Builder',
+      'Google Developer',
     ]);
+  });
+
+  it('gives every service a URL, since that is the one thing they all have', () => {
+    // A card with no globe is a dead end: no key to rotate, no test to run and
+    // nowhere to go. Education profiles have only the globe, which is the
+    // whole reason they are on the page.
+    for (const service of SERVICES) {
+      expect(service.url, `${service.name} has no url`).toMatch(/^https:\/\//);
+    }
+  });
+
+  it('puts every service in a group that exists', () => {
+    const ids = new Set(SERVICE_GROUPS.map((group) => group.id));
+    for (const service of SERVICES) {
+      expect(ids, `${service.name} is in group '${service.group}'`).toContain(service.group);
+    }
   });
 });
