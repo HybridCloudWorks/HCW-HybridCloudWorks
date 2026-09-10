@@ -452,7 +452,16 @@ describe('the service cards', () => {
 
   it('runs the service test through its own proxy and reports the result', async () => {
     withKlaviyo();
-    postJSON.mockResolvedValue({ data: [{ id: 'list-1' }, { id: 'list-2' }] });
+    // THE REAL ENVELOPE. This mocked `{ data: [...] }` - the envelope's shape
+    // minus its `ok`, which the proxy always sets - so it was asserting
+    // against a response the server has never sent, and passed only because
+    // nothing checked `ok`. klaviyoProxy answers `{ ok, status, data }` where
+    // `data` is Klaviyo's own `{ data: [...] }` body.
+    postJSON.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { data: [{ id: 'list-1' }, { id: 'list-2' }] },
+    });
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
 
