@@ -41,8 +41,8 @@ export const SECRET_SECTIONS = Object.freeze([
     id: 'gen-ai',
     title: 'Gen AI',
     blurb:
-      'The models the site asks to write. It tries them in order, so removing one changes which ' +
-      'model writes your content without anything else looking different.',
+      'Language models. When something needs writing the site tries them in order, so removing ' +
+      'one changes which model writes your content. Each row says what it is used for.',
   },
   {
     id: 'ai-services',

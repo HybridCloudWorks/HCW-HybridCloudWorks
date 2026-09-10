@@ -176,7 +176,8 @@ export const SERVICE_GROUPS = Object.freeze([
   {
     id: 'gen-ai',
     title: 'Gen AI',
-    blurb: 'The models the site asks to write.',
+    blurb:
+      'Language models. The site tries them in order when something needs writing. Each row says what it is used for.',
   },
   {
     id: 'ai-services',
