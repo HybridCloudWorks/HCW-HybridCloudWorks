@@ -337,19 +337,43 @@ describe('what it refuses to store', () => {
     expect(rejectSecretValue(bad)).toMatch(/curly quote/);
   });
 
-  it('names the auth scheme rather than complaining about a space', () => {
+  it('quotes the label it found rather than complaining about a space', () => {
     // A pasted header line trips three rules at once. The useful sentence is
-    // the one about the header, so the scheme check runs before the space
-    // check and the message quotes what it actually found.
-    expect(rejectSecretValue('Bearer ' + KEY)).toMatch(/Authorization header/);
-    expect(rejectSecretValue('Authorization: Bearer ' + KEY)).toMatch(/Authorization header/);
+    // the one about the label, so this check runs before the whitespace one.
+    //
+    // Asserted on the QUOTED PREFIX, not on the surrounding sentence: the
+    // behaviour under test is "it tells you which label it found", and an
+    // assertion on the prose would fail the next time the prose is corrected
+    // for accuracy - which is exactly what happened to this check.
+    for (const label of ['Bearer', 'Basic', 'Token', 'api_key', 'API-KEY']) {
+      const sep = label.toLowerCase().includes('key') || label === 'Token' ? ': ' : ' ';
+      expect(rejectSecretValue(label + sep + KEY), label).toMatch(new RegExp('"' + label + '"'));
+    }
+    expect(rejectSecretValue('Authorization: Bearer ' + KEY)).toMatch(/"Authorization:"/);
+  });
+
+  it('does not call a config-file label an Authorization header', () => {
+    // Half of these prefixes are not auth schemes at all - `api_key:` is a
+    // YAML key or a .env line far more often than a header - so the sentence
+    // says the label precedes the credential, which is true of all of them.
+    // Naming the wrong source on the one check whose purpose is naming the
+    // right one is the same defect the whitespace message had.
+    expect(rejectSecretValue('api_key: ' + KEY)).not.toMatch(/Authorization header/);
+    expect(rejectSecretValue('api_key: ' + KEY)).toMatch(/labels the credential/);
   });
 
   it('names Bearer-API rather than Bearer, so the message is not subtly wrong', () => {
     // The alternation is ordered longest-first. With `bearer` earlier, a
     // Publer value would match the short one and the sentence would quote a
     // scheme the operator never pasted.
-    expect(rejectSecretValue('Bearer-API ' + KEY)).toMatch(/Bearer-API/);
+    expect(rejectSecretValue('Bearer-API ' + KEY)).toMatch(/"Bearer-API"/);
+  });
+
+  it('leaves a credential that merely begins with those letters alone', () => {
+    // The trailing separator is what makes the check safe: without it, a real
+    // key starting with "token" would be refused for looking like a label.
+    expect(rejectSecretValue('tokenXY-not-a-real-key')).toBeNull();
+    expect(rejectSecretValue('bearerish-not-a-real-key')).toBeNull();
   });
 
   it('refuses interior whitespace once no better sentence applies', () => {

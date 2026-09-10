@@ -135,14 +135,25 @@ const WRAPPED_IN_QUOTES = [
 ];
 
 /**
- * An `Authorization` header value pasted in place of the credential.
+ * A label that precedes a credential, pasted along with it.
+ *
+ * NOT called an auth-scheme pattern, and the message it produces does not say
+ * "Authorization header", because only half of these come from one. `Bearer`,
+ * `Basic` and `Bearer-API` are HTTP auth schemes; `token:` and `api_key:` are
+ * far more often a key in a YAML file, a `.env` line or a form label. Claiming
+ * a header for those would name the wrong source on a check whose entire
+ * purpose is naming the right one — the same correction the whitespace message
+ * needed. What is true of all of them is that they LABEL the credential
+ * instead of being part of it, so that is what the sentence says.
  *
  * `Bearer-API` is listed before `Bearer` because these alternate left to
  * right: with `Bearer` first, a Publer value would match on the short one and
- * the message would name the wrong scheme. The trailing separator is required,
- * so a credential that merely begins with these letters is untouched.
+ * the message would quote a scheme the operator never pasted. The trailing
+ * separator is required, so a credential that merely begins with these letters
+ * is untouched.
  */
-const AUTH_SCHEME_PATTERN = /^(authorization\s*:|bearer-api|bearer|basic|token|api[-_]?key)[\s:]/i;
+const CREDENTIAL_LABEL_PATTERN =
+  /^(authorization\s*:|bearer-api|bearer|basic|token|api[-_]?key)[\s:]/i;
 
 /** Roles allowed to see or change credentials. Nothing below the top. */
 export const SECRETS_ROLE = 'super_admin';
@@ -208,9 +219,9 @@ export function rejectSecretValue(raw) {
   if (SMART_QUOTE_PATTERN.test(raw)) {
     return 'the value contains a curly quote, which a phone keyboard or a rich-text editor substitutes for a straight one — retype it in a plain-text field';
   }
-  const scheme = raw.match(AUTH_SCHEME_PATTERN);
-  if (scheme) {
-    return `the value starts with "${scheme[1]}", which is part of the Authorization header rather than the credential — paste only the part after it`;
+  const label = raw.match(CREDENTIAL_LABEL_PATTERN);
+  if (label) {
+    return `the value starts with "${label[1]}", which labels the credential rather than being part of it — paste only what comes after it`;
   }
   if (/\s/.test(raw)) {
     // Reached only for whitespace in the MIDDLE: the leading and trailing case

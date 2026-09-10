@@ -337,6 +337,16 @@ This project has not cut a tagged release; entries are grouped under
   whitespace. **Each names what was found**, because "invalid" here would
   reproduce one layer earlier the same uselessness the feature exists to end.
 
+  Naming what was found turned out to be harder than writing the checks, and
+  review corrected the sentence twice. The interior-whitespace message said
+  "a space" while the check is `/\s/` - and the wide part is exactly what
+  survives to it, since every ASCII whitespace character is a control
+  character refused earlier, so what actually reaches it is U+00A0, U+2028,
+  U+3000 and their neighbours. The label message said "part of the
+  Authorization header", which is true of `Bearer` and false of `api_key:`,
+  a YAML key far more often than a header. Both now say the accurate thing,
+  and the tests assert the quoted prefix rather than the prose around it.
+
   Ordered most specific first, which is not cosmetic. A pasted
   `Authorization: Bearer <key>` trips three rules at once, and the useful
   sentence is the one about the header rather than the one about a space. The
