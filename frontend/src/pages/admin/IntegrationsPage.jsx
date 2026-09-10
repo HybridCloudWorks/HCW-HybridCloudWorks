@@ -291,27 +291,45 @@ export function SecretRow({ item, onSubmit, busy }) {
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{item.help}</p>
           <p className="mt-1 text-xs">
-            <span className="font-medium">{presentation.label}</span>
-            {item.lastWriteAt ? (
-              <span className="text-muted-foreground">
-                {' '}
-                · updated {relativeTime(item.lastWriteAt)}
+            {/*
+              A WRITE IS SLOW AND THE PAGE MUST SAY SO. A spinner inside one
+              small button is easy to miss on a phone, and nothing else on the
+              row moved, so an operator had no way to tell a save in progress
+              from a dead page. While `busy`, the state label is replaced by
+              "Saving…" and the rest of the line is suppressed: the old status
+              is about to stop being true, and showing it beside a spinner
+              invites reading it as the new one.
+            */}
+            {busy ? (
+              <span className="inline-flex items-center gap-1.5 font-medium text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Saving…
               </span>
-            ) : null}
-            {item.state === 'failing' && item.lastFailStatus ? (
-              <span className="text-muted-foreground"> · HTTP {item.lastFailStatus}</span>
-            ) : null}
-            {item.state === 'failing' && item.lastFailDetail ? (
-              // The provider's own words. `HTTP 401` alone sent two days into
-              // reminting a key that a sentence would have exonerated or
-              // condemned outright (#463 item 4, #358).
-              <span className="text-muted-foreground"> — {item.lastFailDetail}</span>
-            ) : null}
-            {!item.hasLivenessCheck && item.state === 'live' ? (
-              // Otherwise green would imply "verified", which for these means
-              // only "the reference resolved to something".
-              <span className="text-muted-foreground"> · no liveness check for this one</span>
-            ) : null}
+            ) : (
+              <>
+                <span className="font-medium">{presentation.label}</span>
+                {item.lastWriteAt ? (
+                  <span className="text-muted-foreground">
+                    {' '}
+                    · updated {relativeTime(item.lastWriteAt)}
+                  </span>
+                ) : null}
+                {item.state === 'failing' && item.lastFailStatus ? (
+                  <span className="text-muted-foreground"> · HTTP {item.lastFailStatus}</span>
+                ) : null}
+                {item.state === 'failing' && item.lastFailDetail ? (
+                  // The provider's own words. `HTTP 401` alone sent two days
+                  // into reminting a key that a sentence would have exonerated
+                  // or condemned outright (#463 item 4, #358).
+                  <span className="text-muted-foreground"> — {item.lastFailDetail}</span>
+                ) : null}
+                {!item.hasLivenessCheck && item.state === 'live' ? (
+                  // Otherwise green would imply "verified", which for these
+                  // means only "the reference resolved to something".
+                  <span className="text-muted-foreground"> · no liveness check for this one</span>
+                ) : null}
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -357,18 +375,23 @@ export function SecretRow({ item, onSubmit, busy }) {
           Disabled until there is something to send, so it cannot fire an empty
           write, and it carries the same spinner the rest of the page uses.
         */}
+        {/*
+          ICON ONLY, and the icon itself becomes the spinner. The first version
+          kept the word "Save" beside it, so the only thing that changed during
+          a write was a 14px glyph — against a save that takes several seconds
+          (a Key Vault write, then an ARM call to refresh the app's references,
+          then a reload of this page) that reads as the page having frozen.
+
+          `aria-label` carries the name now that no visible text does.
+        */}
         <Button
           type="submit"
           size="sm"
           disabled={busy || !value.trim()}
-          title={`Save this value to ${item.secret}`}
+          aria-label={busy ? `Saving ${item.label}` : `Save ${item.label}`}
+          title={busy ? 'Saving…' : `Save this value to ${item.secret}`}
         >
-          {busy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
-          )}
-          <span className="ml-1.5">Save</span>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
         </Button>
         {item.generatable ? (
           <Button
