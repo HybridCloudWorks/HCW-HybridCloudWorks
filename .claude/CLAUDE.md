@@ -109,22 +109,48 @@ so it is recorded here, where every session reads it.
 
   The verdict and the inline findings live in two different places and a
   session needs both — the review body carries the verdict, and the line
-  comments carry what to actually fix. **The two below are bash (Git Bash),
+  comments carry what to actually fix. **The four below are bash (Git Bash),
   not PowerShell** — the same rule as the top of this file, which applies to
   a session's own commands as much as to the owner's:
 
   ```bash
   PR=$(gh pr view --json number -q .number)
-  gh pr view "$PR" --json reviews -q '.reviews[] | "\(.author.login) [\(.state)]\n\(.body)"'
-  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --jq '.[] | "\(.path):line \(.line // "outdated")\n\(.body)\n"'
+  gh pr view "$PR" --json headRefOid -q .headRefOid
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/reviews --paginate --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | "\(.commit_id[0:8]) \(.state) \((.body // "") | split("\n")[0])"'
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --paginate --jq '.[] | "\(.path):line \(.line // "outdated")\n\(.body)\n"'
   ```
 
+  Three details in those lines are each a mistake someone has already made:
+
+  - **The reviews line prints the commit a review judged**, and the line
+    above prints the head, because only a review of the head is the merge
+    signal below. A review looks the same whether it read the current code
+    or three pushes ago, and the sha is the only thing that says which.
+  - **`--paginate`, because `gh api` stops at thirty.** A PR with more
+    review comments than that silently returns a prefix, and a section whose
+    whole point is finding every outstanding item cannot end at an arbitrary
+    cut. The same default truncated a board listing to its first thirty rows
+    on 2026-09-10 and made four open issues look absent.
+  - **The bot login differs between the two APIs.** REST spells it
+    `copilot-pull-request-reviewer[bot]`; `gh pr view --json reviews` spells
+    the same actor `copilot-pull-request-reviewer`, with no suffix. A filter
+    written for one and run against the other matches nothing and reads
+    exactly like "no reviews yet".
+
   Then work the loop: fix every recommendation, push, reply on each thread
-  naming the commit, resolve it, and ask for another review by commenting
-  `@copilot review` on the PR. Repeat until the review of the current head
-  recommends approval, which is the merge signal below. A finding judged
-  wrong is answered on its thread with the reason rather than silently
-  skipped — disagreeing is allowed, ignoring is not.
+  naming the commit, resolve it, and ask for another review of the new head.
+  Repeat until the review of the current head recommends approval, which is
+  the merge signal below. A finding judged wrong is answered on its thread
+  with the reason rather than silently skipped — disagreeing is allowed,
+  ignoring is not.
+
+  **Asking for the re-review: `@copilot review` summons the coding agent as
+  well as the reviewer.** On 2026-09-10 that comment on PR #486 brought back
+  a review *and* two commits pushed to the branch by `copilot-swe-agent`.
+  They were good changes and were kept, but they were not asked for. Read
+  anything that arrives that way before merging it, exactly as for any other
+  author, and never merge a head a session has not looked at. A plain push
+  also triggers a fresh review on its own, so the comment is rarely needed.
 - **A Copilot review that recommends approval is the owner's "merge".** Owner
   decision 2026-09-05: Copilot code review has authority to approve PRs in
   this repository, so when its review of the **current head** recommends
