@@ -114,8 +114,9 @@ so it is recorded here, where every session reads it.
   a session's own commands as much as to the owner's:
 
   ```bash
-  gh pr view --json reviews -q '.reviews[] | "\(.author.login) [\(.state)]\n\(.body)"'
-  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/$(gh pr view --json number -q .number)/comments --jq '.[] | "\(.path):line \(.line // "outdated")\n\(.body)\n"'
+  PR=$(gh pr view --json number -q .number)
+  gh pr view "$PR" --json reviews -q '.reviews[] | "\(.author.login) [\(.state)]\n\(.body)"'
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --jq '.[] | "\(.path):line \(.line // "outdated")\n\(.body)\n"'
   ```
 
   Then work the loop: fix every recommendation, push, reply on each thread
