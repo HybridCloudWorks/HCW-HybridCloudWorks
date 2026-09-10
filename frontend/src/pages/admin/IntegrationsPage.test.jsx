@@ -17,6 +17,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 import IntegrationsPage, {
   SERVICES,
+  SERVICE_GROUPS,
   STATE_PRESENTATION,
   SecretRow,
   buildIntegrationView,
@@ -443,9 +444,11 @@ describe('the service cards', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
 
-    // The status question and the rotation answer, in one place.
+    // The status question and the rotation answer, in one place. The test
+    // control is an icon button now - a beaker - so it is found by its label
+    // rather than by the words that used to wrap the header row.
     const card = screen.getByText('Klaviyo').closest('.p-4');
-    expect(card.textContent).toContain('Test Connection');
+    expect(within(card).getByRole('button', { name: /^Test Klaviyo$/ })).toBeTruthy();
     expect(card.textContent).toContain('KLAVIYO-PRIVATE-KEY');
     expect(within(card).getByLabelText('New value for Klaviyo — private key')).toBeTruthy();
   });
@@ -466,7 +469,7 @@ describe('the service cards', () => {
     await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
 
     const card = screen.getByText('Klaviyo').closest('.p-4');
-    fireEvent.click(within(card).getByText('Test Connection'));
+    fireEvent.click(within(card).getByRole('button', { name: /^Test Klaviyo$/ }));
 
     await waitFor(() => expect(screen.getByText(/2 list\(s\) visible/)).toBeTruthy());
     expect(postJSON).toHaveBeenCalledWith('klaviyoProxy', { path: '/api/lists/', method: 'GET' });
@@ -480,7 +483,9 @@ describe('the service cards', () => {
     await waitFor(() => expect(screen.getByText('YouTube')).toBeTruthy());
 
     const card = screen.getByText('YouTube').closest('.p-4');
-    expect(card.textContent).toContain('Data API v3');
+    // The description is shorter now and names the consumer rather than the
+    // API version; what must not come back is the claim that it is unused.
+    expect(card.textContent).toContain('watch next');
     expect(screen.queryByText('Placeholder')).toBeNull();
     expect(card.textContent).not.toContain('not wired up');
   });
@@ -498,12 +503,18 @@ describe('the service cards', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Plaud')).toBeTruthy());
     const card = screen.getByText('Plaud').closest('.p-4');
-    expect(card.textContent).toContain('No Key Vault secret');
+    // The note is shorter now; what it must still do is say WHERE the
+    // credential lives, since the absence of a row is otherwise unexplained.
+    expect(card.textContent).toContain('mcp_servers/plaud');
+    expect(card.textContent).toContain('12 hours');
   });
 
-  it('names every service the old Connections page did', () => {
-    // The merge must not quietly drop one.
-    expect(SERVICES.map((service) => service.name)).toEqual([
+  it('still names every service the old Connections page did', () => {
+    // The original seven. The order changed when the cards were sorted into
+    // groups and three education profiles were added, so this asserts
+    // PRESENCE rather than sequence - dropping one is the failure it guards.
+    const names = SERVICES.map((service) => service.name);
+    for (const name of [
       'Publer',
       'Plaud',
       'Sessionize',
@@ -511,6 +522,39 @@ describe('the service cards', () => {
       'Linkie',
       'Klaviyo',
       'YouTube',
+    ]) {
+      expect(names, `${name} disappeared from the registry`).toContain(name);
+    }
+  });
+
+  it('lists exactly the services it means to, in group order', () => {
+    expect(SERVICES.map((service) => service.name)).toEqual([
+      'Publer',
+      'Klaviyo',
+      'Linkie',
+      'YouTube',
+      'Sessionize',
+      'Plaud',
+      'Credly',
+      'Microsoft Learn',
+      'AWS Skill Builder',
+      'Google Developer',
     ]);
+  });
+
+  it('gives every service a URL, since that is the one thing they all have', () => {
+    // A card with no globe is a dead end: no key to rotate, no test to run and
+    // nowhere to go. Education profiles have only the globe, which is the
+    // whole reason they are on the page.
+    for (const service of SERVICES) {
+      expect(service.url, `${service.name} has no url`).toMatch(/^https:\/\//);
+    }
+  });
+
+  it('puts every service in a group that exists', () => {
+    const ids = new Set(SERVICE_GROUPS.map((group) => group.id));
+    for (const service of SERVICES) {
+      expect(ids, `${service.name} is in group '${service.group}'`).toContain(service.group);
+    }
   });
 });

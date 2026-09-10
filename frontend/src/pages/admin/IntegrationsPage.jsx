@@ -44,7 +44,11 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   AlertCircle,
   Award,
+  BookOpen,
   CheckCircle,
+  Cloud,
+  FlaskConical,
+  Globe,
   KeyRound,
   Link2,
   Loader2,
@@ -145,35 +149,113 @@ async function testKlaviyo() {
  * against `infra/main.tf`. An empty list is a real answer, not an omission:
  * Plaud and Sessionize genuinely have no vault secret, and each says why.
  */
+/**
+ * The groups the service cards are sorted into.
+ *
+ * The same idea as `SECRET_SECTIONS` in the catalogue, and deliberately not the
+ * same list: a service is grouped by what it DOES for this site, a secret by
+ * what it unlocks. Publer and Klaviyo share "social" in both; Credly has no
+ * secret at all and still belongs beside the other credential wallets.
+ */
+export const SERVICE_GROUPS = Object.freeze([
+  {
+    id: 'social',
+    title: 'Social & audience',
+    blurb: 'Publishing, links and lists. Each path no-ops when its credential is absent.',
+  },
+  {
+    id: 'speaking',
+    title: 'Speaking & recordings',
+    blurb: 'Where talks and voice recordings come from.',
+  },
+  {
+    id: 'education',
+    title: 'Education & credentials',
+    blurb:
+      'Public profiles the Learn pages and the certifications page read from. ' +
+      'No keys and nothing to test \u2014 the globe is the point.',
+  },
+]);
+
+/**
+ * Every third-party service, and the Key Vault secrets that belong to it.
+ *
+ * `secrets` names entries in `functions/src/lib/secret-catalog.js`. A name that
+ * is not in the catalogue simply renders nothing \u2014 the catalogue is the source
+ * of truth for what exists, and `secret-catalog.test.js` already holds it
+ * against `infra/main.tf`. An empty list is a real answer, not an omission:
+ * Plaud and Sessionize genuinely have no vault secret, and each says why.
+ *
+ * THREE FIELDS DRIVE THE CARD, and each is allowed to be absent for a reason:
+ *
+ *   `url`   Where this service lives, as specifically as possible \u2014 the page
+ *           that holds the credential when there is one (Publer\u2019s API
+ *           settings, Klaviyo\u2019s API keys) and the owner\u2019s own profile when
+ *           there is not (Credly badges, a Learn transcript). Every service
+ *           has one. It is the globe.
+ *   `test`  A GET that proves the credential works, or `null` where no such
+ *           call exists from a browser. It is the beaker. `null` is honest:
+ *           the education profiles are public HTML and a browser cannot fetch
+ *           them cross-origin, and YOUTUBE_API_KEY is only ever used
+ *           server-side, so there is nothing here that would mean anything.
+ *   `group` Which heading it sits under.
+ */
 export const SERVICES = Object.freeze([
   {
     id: 'publer',
+    group: 'social',
     icon: Share2,
     name: 'Publer',
-    description: 'Social media scheduling (LinkedIn, X, Facebook, Instagram, YouTube).',
+    description: 'Schedules posts to LinkedIn, X, Facebook, Instagram and YouTube.',
+    url: 'https://app.publer.com/#/settings/access',
     manageHref: '/admin/social?tab=settings',
     test: testPubler,
     secrets: ['PUBLER-API-KEY', 'PUBLER-WORKSPACE-ID'],
   },
   {
-    id: 'plaud',
-    icon: Radio,
-    name: 'Plaud',
-    description: 'Voice recordings sync for the Recording Hub’s Plaud tab.',
-    manageHref: '/admin/recording-hub',
-    test: testPlaud,
-    secrets: [],
-    // Not an omission: the OAuth pair lives on the mcp_servers/plaud document
-    // and refreshPlaudToken rotates it every 12 hours. There is no vault
-    // secret to paste, and a row here would imply there was one.
-    credentialNote:
-      'No Key Vault secret for the MCP. The OAuth token pair lives on the mcp_servers/plaud document and refreshes every 12 hours — reconnect from the Recording Hub → Plaud tab → Connect. Plaud Embedded (audio upload transcription) is a separate pair, PLAUD-EMBEDDED-CLIENT-ID / PLAUD-EMBEDDED-API-KEY, seeded on the API Keys page.',
+    id: 'klaviyo',
+    group: 'social',
+    icon: Mail,
+    name: 'Klaviyo',
+    description: 'Holds the newsletter list and sends the campaigns.',
+    url: 'https://www.klaviyo.com/settings/account/api-keys',
+    manageHref: '/admin/mailing-list',
+    test: testKlaviyo,
+    secrets: ['KLAVIYO-PRIVATE-KEY', 'KLAVIYO-LIST-ID'],
+  },
+  {
+    id: 'linkie',
+    group: 'social',
+    icon: Link2,
+    name: 'Linkie',
+    description: 'The link-in-bio page and the links on it.',
+    url: 'https://app.linkie.bio',
+    manageHref: '/admin/linkie',
+    test: testLinkie,
+    secrets: ['LINKIE-API-KEY'],
+  },
+  {
+    id: 'youtube',
+    group: 'social',
+    icon: Youtube,
+    name: 'YouTube',
+    // Wired up: lib/listen-and-learn/videos.js calls Data API v3 to pick the
+    // "watch next" videos beside every episode. Posting goes through Publer,
+    // which is a different API from the one this key opens.
+    description: 'Finds the \u201cwatch next\u201d videos beside Listen & Learn episodes.',
+    url: 'https://console.cloud.google.com/apis/credentials',
+    manageHref: '/admin/listen-and-learn',
+    // The key is read server-side only, so a browser has nothing to call.
+    test: null,
+    secrets: ['YOUTUBE-API-KEY'],
   },
   {
     id: 'sessionize',
+    group: 'speaking',
     icon: Mic,
     name: 'Sessionize',
-    description: 'Speaking events feed for the Speaking Events page.',
+    description: 'The speaking events feed behind the Speaking Events page.',
+    url: 'https://sessionize.com/app/speaker',
     manageHref: '/admin/speaking-events',
     test: (speakerId) => testSessionize(speakerId),
     secrets: [],
@@ -182,47 +264,60 @@ export const SERVICES = Object.freeze([
     setting: 'sessionizeSpeakerId',
   },
   {
+    id: 'plaud',
+    group: 'speaking',
+    icon: Radio,
+    name: 'Plaud',
+    description: 'Syncs voice recordings into the Recording Hub.',
+    url: 'https://app.plaud.ai',
+    manageHref: '/admin/recording-hub',
+    test: testPlaud,
+    secrets: [],
+    // Not an omission: the OAuth pair lives on the mcp_servers/plaud document
+    // and refreshPlaudToken rotates it every 12 hours.
+    credentialNote:
+      'The MCP\u2019s OAuth pair lives on the mcp_servers/plaud document and refreshes every 12 hours \u2014 reconnect from Recording Hub \u2192 Plaud \u2192 Connect. Plaud Embedded is a separate pair, listed under Other credentials.',
+  },
+  {
     id: 'credly',
+    group: 'education',
     icon: Award,
     name: 'Credly',
-    description: 'Certification badges, synced by downloading the badge images.',
+    description: 'Badge wallet behind the certifications page.',
+    url: 'https://www.credly.com/users/saul-patino/badges',
     manageHref: '/admin/certifications',
     test: null,
     secrets: [],
-    credentialNote: 'A public badge feed — no credential and no test endpoint.',
   },
   {
-    id: 'linkie',
-    icon: Link2,
-    name: 'Linkie',
-    description: 'Link-in-bio management via the linkieProxy function.',
-    manageHref: '/admin/linkie',
-    test: testLinkie,
-    secrets: ['LINKIE-API-KEY'],
-  },
-  {
-    id: 'klaviyo',
-    icon: Mail,
-    name: 'Klaviyo',
-    description: 'Newsletter lists, subscribers, and campaigns via klaviyoProxy.',
-    manageHref: '/admin/mailing-list',
-    test: testKlaviyo,
-    secrets: ['KLAVIYO-PRIVATE-KEY', 'KLAVIYO-LIST-ID'],
-  },
-  {
-    id: 'youtube',
-    icon: Youtube,
-    name: 'YouTube',
-    // This card used to read "not wired up yet" behind a Placeholder badge.
-    // It is wired up: lib/listen-and-learn/videos.js calls the Data API v3
-    // with YOUTUBE_API_KEY to pick the "watch next" videos beside every
-    // episode. Posting is what goes through Publer, and that is a different
-    // API from the one this key opens.
-    description:
-      'Data API v3 search for the “watch next” links beside Listen & Learn episodes. Posting to YouTube goes through Publer.',
-    manageHref: '/admin/listen-and-learn',
+    id: 'microsoft-learn',
+    group: 'education',
+    icon: BookOpen,
+    name: 'Microsoft Learn',
+    description: 'Certification transcript behind the Azure Learn pages.',
+    url: 'https://learn.microsoft.com/en-us/users/saulpatinojr/transcript/d4993ir4gpz8g40',
     test: null,
-    secrets: ['YOUTUBE-API-KEY'],
+    secrets: [],
+  },
+  {
+    id: 'aws-skill-builder',
+    group: 'education',
+    icon: Cloud,
+    name: 'AWS Skill Builder',
+    description: 'Certification badges behind the AWS Learn pages.',
+    url: 'https://skillsprofile.skillbuilder.aws/user/saulpatino/certification-badges',
+    test: null,
+    secrets: [],
+  },
+  {
+    id: 'google-developer',
+    group: 'education',
+    icon: Globe,
+    name: 'Google Developer',
+    description: 'Developer profile behind the Google Cloud Learn pages.',
+    url: 'https://developers.google.com/profile/u/105048864698113573023',
+    test: null,
+    secrets: [],
   },
 ]);
 
@@ -444,10 +539,17 @@ export function SecretRow({ item, onSubmit, busy }) {
  * rendered as an empty row — the catalogue can grow a name this page has not
  * been taught yet, and the honest rendering of that is nothing.
  *
- * @param {{ services?: ReadonlyArray<object>, sections?: ReadonlyArray<object>, secrets?: ReadonlyArray<object> }} input
- * @returns {{ serviceCards: Array<object>, otherSections: Array<object> }}
+ * @param {{ services?: ReadonlyArray<object>, groups?: ReadonlyArray<object>, sections?: ReadonlyArray<object>, secrets?: ReadonlyArray<object> }} input
+ * @returns {{ serviceCards: Array<object>, serviceGroups: Array<object>, otherSections: Array<object> }}
+ *   `serviceCards` is every card in registry order; `serviceGroups` is the
+ *   same cards under their headings, which is what the page renders.
  */
-export function buildIntegrationView({ services = SERVICES, sections = [], secrets = [] } = {}) {
+export function buildIntegrationView({
+  services = SERVICES,
+  groups = SERVICE_GROUPS,
+  sections = [],
+  secrets = [],
+} = {}) {
   const bySecretName = new Map((secrets ?? []).map((item) => [item.secret, item]));
   const claimed = new Set();
 
@@ -473,11 +575,44 @@ export function buildIntegrationView({ services = SERVICES, sections = [], secre
     // otherwise render as a heading with nothing under it.
     .filter((section) => section.items.length > 0);
 
-  return { serviceCards, otherSections };
+  // Cards, sorted into their headings. A group with no cards is dropped
+  // rather than rendered as an empty heading, and a service whose `group` is
+  // not in SERVICE_GROUPS falls into the last one rather than vanishing -
+  // silently dropping a card is the failure mode worth avoiding here.
+  const known = new Set(groups.map((group) => group.id));
+  const fallback = groups.length ? groups[groups.length - 1].id : null;
+  const serviceGroups = groups
+    .map((group) => ({
+      ...group,
+      cards: serviceCards.filter((card) =>
+        known.has(card.group) ? card.group === group.id : group.id === fallback
+      ),
+    }))
+    .filter((group) => group.cards.length > 0);
+
+  return { serviceCards, serviceGroups, otherSections };
 }
 
 // ── Service card ──────────────────────────────────────────────────────────────
 
+/**
+ * One service: what it is, where it lives, whether it answers, and the values
+ * it runs on.
+ *
+ * THE LAYOUT IS THE POINT OF THIS COMPONENT. It used to put a full-width "Test
+ * Connection" button and an "Open" link in a right-hand column, which pushed
+ * the description into a narrow ragged strip beside them and left the name,
+ * the sentence and the controls on three different baselines. On a phone that
+ * reads as three unrelated things.
+ *
+ * Now: identity on the left, actions as two icon buttons pinned to the top
+ * right, and the values in their own bordered subgroup below. A card has one
+ * heading row, one sentence, and one block of values.
+ *
+ * Both action icons are universal rather than captioned. A globe is a link out
+ * and a beaker is a test; neither needs a word, and words were what made the
+ * row wrap.
+ */
 function ServiceCard({ service, speakerId, onSubmitSecret, busySecret }) {
   const Icon = service.icon;
   const [testing, setTesting] = useState(false);
@@ -500,8 +635,9 @@ function ServiceCard({ service, speakerId, onSubmitSecret, busySecret }) {
     <Card className="p-4">
       <div className="flex items-start gap-3">
         <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold">{service.name}</p>
             {result && (
               <Badge
@@ -517,45 +653,71 @@ function ServiceCard({ service, speakerId, onSubmitSecret, busySecret }) {
             )}
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{service.description}</p>
-          {result && (
-            <p
-              className={`mt-2 flex items-start gap-1.5 text-xs ${
-                result.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
-              }`}
-            >
-              {result.ok ? (
-                <CheckCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="min-w-0 break-words">{result.message}</span>
-            </p>
-          )}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          {service.test ? (
-            <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
-              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Test Connection'}
-            </Button>
-          ) : (
-            <span className="text-[10px] text-muted-foreground">No test available</span>
-          )}
-          {service.manageHref && (
-            <a
-              href={service.manageHref}
-              className="text-xs text-primary hover:underline"
-              {...(service.manageHref.startsWith('http')
-                ? { target: '_blank', rel: 'noopener noreferrer' }
-                : {})}
+
+        {/*
+          Actions, top right, always in the same place. `shrink-0` so a long
+          description never squeezes them, and a fixed order so the beaker is
+          in the same spot on every card that has one.
+        */}
+        <div className="flex shrink-0 items-center gap-1">
+          {service.url && (
+            <Button
+              asChild
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              title={`Open ${service.name} \u2014 ${service.url}`}
             >
-              Open
-            </a>
+              <a href={service.url} target="_blank" rel="noopener noreferrer">
+                <Globe className="h-4 w-4" />
+                <span className="sr-only">{`Open ${service.name}`}</span>
+              </a>
+            </Button>
+          )}
+          {service.test && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              onClick={handleTest}
+              disabled={testing}
+              title={testing ? 'Testing\u2026' : `Test the ${service.name} connection`}
+              aria-label={testing ? `Testing ${service.name}` : `Test ${service.name}`}
+            >
+              {testing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FlaskConical className="h-4 w-4" />
+              )}
+            </Button>
           )}
         </div>
       </div>
 
+      {/*
+        The test's answer gets the full width under the header rather than the
+        narrow right-hand column it used to share with the button. Upstream
+        error sentences are long, and this is the one place on the page that
+        prints them verbatim.
+      */}
+      {result && (
+        <p
+          className={`mt-3 flex items-start gap-1.5 text-xs ${
+            result.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
+          }`}
+        >
+          {result.ok ? (
+            <CheckCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="min-w-0 break-words">{result.message}</span>
+        </p>
+      )}
+
       {service.items.length > 0 && (
-        <div className="mt-3 border-t border-border/60 pt-1">
+        <div className="mt-3 rounded-md border border-border/60 bg-muted/20 px-3">
           {service.items.map((item) => (
             <SecretRow
               key={item.secret}
@@ -568,21 +730,21 @@ function ServiceCard({ service, speakerId, onSubmitSecret, busySecret }) {
       )}
 
       {service.credentialNote && (
-        <p className="mt-3 border-t border-border/60 pt-3 text-xs text-muted-foreground">
-          {service.credentialNote}
-        </p>
+        <p className="mt-3 text-xs text-muted-foreground">{service.credentialNote}</p>
+      )}
+
+      {service.manageHref && (
+        <a
+          href={service.manageHref}
+          className="mt-3 inline-block text-xs text-primary hover:underline"
+        >
+          Manage on this site \u2192
+        </a>
       )}
     </Card>
   );
 }
 
-/**
- * Sessionize's speaker id, on Sessionize's card.
- *
- * It used to sit in an "Integration Settings" card at the bottom of a
- * different page, three scroll-lengths from the Test Connection button that
- * uses it. It is the only thing that decides which speaker the test reads.
- */
 function SessionizeSetting({ speakerId, setSpeakerId, loading, saving, onSave }) {
   return (
     <div className="mt-3 max-w-md border-t border-border/60 pt-3">
@@ -721,7 +883,7 @@ export default function IntegrationsPage() {
     }
   };
 
-  const { serviceCards, otherSections } = buildIntegrationView({
+  const { serviceGroups, otherSections } = buildIntegrationView({
     services: SERVICES,
     sections: data?.sections ?? [],
     secrets: data?.secrets ?? [],
@@ -777,37 +939,37 @@ export default function IntegrationsPage() {
         </div>
       ) : null}
 
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-lg font-semibold">Services</h2>
-          <p className="text-sm text-muted-foreground">
-            Test the connection, then rotate the credential it uses without leaving the card.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-3">
-          {serviceCards.map((service) => (
-            <div key={service.id}>
-              <ServiceCard
-                service={service}
-                speakerId={speakerId}
-                onSubmitSecret={submitSecret}
-                busySecret={busySecret}
-              />
-              {service.setting === 'sessionizeSpeakerId' ? (
-                <div className="-mt-px rounded-b-lg border border-t-0 px-4 pb-4">
-                  <SessionizeSetting
-                    speakerId={speakerId}
-                    setSpeakerId={setSpeakerId}
-                    loading={loadingSettings}
-                    saving={savingSettings}
-                    onSave={handleSaveSettings}
-                  />
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      </section>
+      {serviceGroups.map((group) => (
+        <section key={group.id} className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">{group.title}</h2>
+            <p className="text-sm text-muted-foreground">{group.blurb}</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            {group.cards.map((service) => (
+              <div key={service.id}>
+                <ServiceCard
+                  service={service}
+                  speakerId={speakerId}
+                  onSubmitSecret={submitSecret}
+                  busySecret={busySecret}
+                />
+                {service.setting === 'sessionizeSpeakerId' ? (
+                  <div className="-mt-px rounded-b-lg border border-t-0 px-4 pb-4">
+                    <SessionizeSetting
+                      speakerId={speakerId}
+                      setSpeakerId={setSpeakerId}
+                      loading={loadingSettings}
+                      saving={savingSettings}
+                      onSave={handleSaveSettings}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
 
       {otherSections.length > 0 && (
         <section className="space-y-3">
