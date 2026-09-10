@@ -252,7 +252,15 @@ export function createRestProxy({
         // malformed) and a revoked key are the same red light with different
         // fixes (#463 item 4).
         if (response.ok) {
-          await reportVerdict(integration.keyEnv, { ok: true });
+          // The key AND everything that travelled with it. A rejection can now
+          // blame a setting other than the key (Publer's 401 blames the
+          // workspace id), so clearing only `keyEnv` would leave whichever
+          // other light that rejection lit stuck red through every subsequent
+          // success. The timer's client clears the pair for the same reason;
+          // these two must agree or the page flickers between them.
+          for (const setting of [integration.keyEnv, ...integration.extraEnv]) {
+            await reportVerdict(setting, { ok: true });
+          }
         } else if (isCredentialRejected(response.status)) {
           await reportVerdict(integration.verdictSettingForStatus(response.status), {
             ok: false,

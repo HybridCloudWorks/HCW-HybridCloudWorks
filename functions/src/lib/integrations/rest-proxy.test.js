@@ -279,10 +279,18 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
   const upstream = (status, body = { hi: true }) =>
     vi.fn(async () => ({ ok: status < 400, status, text: async () => JSON.stringify(body) }));
   const quiet = () => ({ log: vi.fn(), error: vi.fn(), warn: vi.fn() });
-  const buildReporting = ({ integration = REPORTING, status, body, onKeyVerdict = vi.fn() }) => {
+  const buildReporting = ({
+    integration = REPORTING,
+    status,
+    body,
+    onKeyVerdict = vi.fn(),
+    // Overridable so an integration with `extraEnv` can be configured; the
+    // default keeps every existing case unchanged.
+    env = { TEST_API_KEY: 'secret' },
+  }) => {
     const handler = createRestProxy({
       guard: allowGuard,
-      env: { TEST_API_KEY: 'secret' },
+      env,
       fetch: upstream(status, body),
       readKey,
       onKeyVerdict,
@@ -374,6 +382,30 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
       await call(handler);
       expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: false, status, detail: '' });
     }
+  });
+
+  it('clears every setting that travelled with the key, not just the key', async () => {
+    // Copilot review of 4be3eb90. Rejections can now blame a setting other
+    // than the key — Publer's 401 blames the workspace id — so clearing only
+    // `keyEnv` on success would leave that light stuck red through every
+    // subsequent successful call. The timer's client clears the pair for the
+    // same reason, and the two must agree or the page flickers between them.
+    const PAIR = createIntegration({
+      name: 'Pair',
+      baseUrl: 'https://api.example.test/v1',
+      keyEnv: 'TEST_API_KEY',
+      extraEnv: ['TEST_WORKSPACE_ID'],
+      headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+      reportsKeyVerdict: true,
+    });
+    const { handler, onKeyVerdict } = buildReporting({
+      integration: PAIR,
+      status: 200,
+      env: { TEST_API_KEY: 'secret', TEST_WORKSPACE_ID: 'w1' },
+    });
+    await call(handler);
+    expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: true });
+    expect(onKeyVerdict).toHaveBeenCalledWith('TEST_WORKSPACE_ID', { ok: true });
   });
 
   it('reports a success, so a rotated key turns the light green from this path too', async () => {
