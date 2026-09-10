@@ -320,6 +320,14 @@ export function SecretRow({ item, onSubmit, busy }) {
         className="flex shrink-0 items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          // The SAME guard the Save button carries. Disabling the button only
+          // closes one of two doors: Enter still reaches this handler, so
+          // without this an empty or whitespace-only write goes out from the
+          // keyboard while the button sits disabled beside it. The server
+          // refuses it either way, but a control that is inert and a control
+          // that fires a doomed request are not the same thing to whoever is
+          // pressing them.
+          if (!value.trim()) return;
           submit({ value });
         }}
       >

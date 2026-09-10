@@ -146,6 +146,22 @@ describe('saving a value', () => {
     expect(screen.getByRole('button', { name: /save/i }).disabled).toBe(true);
   });
 
+  it('refuses an empty or whitespace submit from Enter too, not just from the button', async () => {
+    // Disabling the button closes one of two doors. Enter still reaches the
+    // form's onSubmit, so the guard has to live there as well or the keyboard
+    // path fires a write the button refuses to (Copilot review of 215eeb5b).
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    render(<SecretRow item={item({ state: 'live', generatable: false })} onSubmit={onSubmit} />);
+    const input = screen.getByLabelText(/New value for/);
+
+    fireEvent.submit(input.closest('form'));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.submit(input.closest('form'));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('still submits on Enter, so the keyboard path is not lost', async () => {
     const onSubmit = vi.fn().mockResolvedValue(true);
     render(<SecretRow item={item({ state: 'never', generatable: false })} onSubmit={onSubmit} />);
@@ -285,7 +301,13 @@ describe('the page', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Google Gemini')).toBeTruthy());
 
-    fireEvent.submit(screen.getByLabelText('New value for Google Gemini').closest('form'));
+    // Types a value first. This used to submit an empty form, which reached
+    // the API only because nothing guarded against it; an empty write is now
+    // refused from the keyboard as well as from the disabled button, so the
+    // test has to do what an operator does. The assertion is unchanged.
+    const input = screen.getByLabelText('New value for Google Gemini');
+    fireEvent.change(input, { target: { value: 'a-real-looking-value' } });
+    fireEvent.submit(input.closest('form'));
 
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(
