@@ -212,6 +212,14 @@ export const SERVICE_GROUPS = Object.freeze([
  *           profiles are public HTML that a browser cannot fetch from another
  *           origin, and the YouTube, RSS.com and Telegram keys are only ever
  *           read on the server, so there is nothing here that could call them.
+ *
+ *           NO BEAKER MEANS THE GLOBE HAS TO WORK HARDER. When a service holds
+ *           credentials and offers no test, the only thing this page can do
+ *           about a red light is send you where the credential is managed — so
+ *           `url` must be that page, not the vendor’s front door. `t.me/BotFather`,
+ *           `dashboard.rss.com/api-access/`, the Google credentials console.
+ *           A test below holds it: such a service must point at a specific
+ *           page rather than a bare host.
  *   `group` Which heading it sits under.
  *
  * DESCRIPTIONS ARE FOR SOMEONE WHO HAS NEVER SEEN THIS REPOSITORY. One line,
@@ -271,7 +279,10 @@ export const SERVICES = Object.freeze([
     icon: Rss,
     name: 'RSS.com',
     description: 'Hosts the podcast and receives approved episodes.',
-    url: 'https://dashboard.rss.com',
+    // Where the key is minted, not the dashboard front door: this card has no
+    // beaker, so the globe has to land somewhere that answers the question a
+    // red light asks.
+    url: 'https://dashboard.rss.com/api-access/',
     test: null,
     secrets: ['RSSCOM-API-KEY', 'RSSCOM-PODCAST-ID'],
   },
