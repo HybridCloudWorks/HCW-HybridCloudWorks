@@ -418,11 +418,20 @@ export function createPublerReconcile({ store, client, now = () => new Date(), l
       // Names the setting the status actually blames. The old message named
       // both and left the operator to guess, which in practice meant reminting
       // the key when the workspace id was wrong (#358).
+      //
+      // The gloss is derived from the SAME function as the setting name, not
+      // from a second comparison of `error.status`. A strict `=== 401` here
+      // disagreed with `publerSettingForStatus`, which coerces with `Number`,
+      // so a string status would have named PUBLER_WORKSPACE_ID and then
+      // explained it as "a 403 is the key" in the same sentence (Copilot
+      // review of a0c1ca3e). A warning that contradicts itself is worse than
+      // the bare status it replaced.
+      const blamed = publerSettingForStatus(error.status);
+      const gloss =
+        blamed === 'PUBLER_WORKSPACE_ID' ? 'a 401 is the workspace id' : 'a 403 is the key';
       log.warn?.(
         `[syncSocialCalendar] Publer rejected the credential (HTTP ${error.status}); ` +
-          `check ${publerSettingForStatus(error.status)} ` +
-          `(${error.status === 401 ? 'a 401 is the workspace id' : 'a 403 is the key'}) ` +
-          '— skipping until it is fixed'
+          `check ${blamed} (${gloss}) — skipping until it is fixed`
       );
       return {
         skipped: true,

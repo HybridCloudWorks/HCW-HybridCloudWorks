@@ -200,6 +200,33 @@ describe('publerSettingForStatus — which value a rejection actually blames', (
     expect(publerSettingForStatus('401')).toBe('PUBLER_WORKSPACE_ID');
   });
 
+  it('keeps the warning internally consistent when the status is a string', () => {
+    // The gloss and the setting name are derived from one call, so they cannot
+    // disagree. A strict `=== 401` in the message had them disagreeing for a
+    // string status: PUBLER_WORKSPACE_ID named, "a 403 is the key" explaining
+    // it (Copilot review of a0c1ca3e).
+    const log = { warn: vi.fn(), log: vi.fn() };
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: '401',
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ errors: ['nope'] }),
+    }));
+    const client = createPublerClient({
+      env: { PUBLER_API_KEY: 'k', PUBLER_WORKSPACE_ID: 'w' },
+      fetch: fetchImpl,
+      log,
+    });
+    return createPublerReconcile({ store: memStore(), client, now, log })
+      .run()
+      .then(() => {
+        const message = log.warn.mock.calls[0][0];
+        expect(message).toContain('PUBLER_WORKSPACE_ID');
+        expect(message).toContain('a 401 is the workspace id');
+        expect(message).not.toContain('a 403 is the key');
+      });
+  });
+
   it('falls back to the key for anything else', () => {
     // Unreachable today — `isCredentialRejected` admits only 401 and 403 — so
     // this pins the fallback as conservative rather than as behaviour.
