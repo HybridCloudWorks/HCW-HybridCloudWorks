@@ -80,6 +80,70 @@ export const MIN_SECRET_LENGTH = 12;
 const PLACEHOLDER_PATTERN =
   /^(changeme|change-me|placeholder|todo|tbd|test|example|your[-_]?key([-_]?here)?|xxx+|<.*>)$/i;
 
+/*
+ * THE PATTERNS BELOW NAME THEIR CODE POINTS AS NUMBERS, NEVER AS CHARACTERS.
+ *
+ * A file about invisible characters that contains invisible characters reads
+ * as binary to git and to grep, and the one thing nobody can review is the
+ * byte they cannot see. `integrations/rest-proxy.js` records the same trap
+ * against its own control-character check, and made the same choice (#484).
+ */
+
+/**
+ * Characters with no width, which a paste can carry and no eye can find.
+ *
+ * `String.prototype.trim()` is not a defence against any of these. It removes
+ * U+00A0 and U+FEFF, and only at the ends; U+200B and the bidi marks it does
+ * not touch even there, and nothing it does reaches the middle of a string.
+ * So a key with a zero-width space in it stores clean, resolves clean, and is
+ * refused upstream forever as "the key is wrong".
+ *
+ * U+FEFF appears here as well as in `trim`'s set because interior is exactly
+ * where trim cannot help.
+ */
+const INVISIBLE_PATTERN =
+  /[\u00ad\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+
+/**
+ * C0 and C1 control characters, and the DEL in between.
+ *
+ * A raw newline inside a value is the common one, and it survives `trim` when
+ * it is not at an end. Anything in this range that reaches an outbound header
+ * throws in `fetch` rather than being rejected by the provider, which is a
+ * crash where a diagnosis should be — the measurement on 2026-09-09 caught
+ * exactly that shape.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+
+/** The four a phone keyboard or a rich-text editor substitutes for ' and ". */
+const SMART_QUOTE_PATTERN = /[\u2018\u2019\u201c\u201d]/;
+
+/**
+ * A value that arrived still wearing its quotes.
+ *
+ * Straight, curly and backtick, and only as a MATCHED pair — a credential is
+ * allowed to contain a quote, just not to be wrapped in one. The curly pairs
+ * are directional, so the opener and closer differ.
+ */
+const WRAPPED_IN_QUOTES = [
+  ['"', '"'],
+  ["'", "'"],
+  ['`', '`'],
+  ['\u201c', '\u201d'],
+  ['\u2018', '\u2019'],
+];
+
+/**
+ * An `Authorization` header value pasted in place of the credential.
+ *
+ * `Bearer-API` is listed before `Bearer` because these alternate left to
+ * right: with `Bearer` first, a Publer value would match on the short one and
+ * the message would name the wrong scheme. The trailing separator is required,
+ * so a credential that merely begins with these letters is untouched.
+ */
+const AUTH_SCHEME_PATTERN = /^(authorization\s*:|bearer-api|bearer|basic|token|api[-_]?key)[\s:]/i;
+
 /** Roles allowed to see or change credentials. Nothing below the top. */
 export const SECRETS_ROLE = 'super_admin';
 
@@ -119,6 +183,39 @@ export function rejectSecretValue(raw) {
   }
   if (PLACEHOLDER_PATTERN.test(raw)) {
     return 'that looks like a placeholder — a placeholder turns the light green while the feature stays broken';
+  }
+
+  // Everything below is #484, and it runs AFTER every check above so that a
+  // placeholder still reads as a placeholder. Each names WHAT WAS FOUND: the
+  // whole failure this guards against is a value that stores clean and is
+  // refused upstream forever as "the key is wrong", so "invalid" here would
+  // reproduce the same uselessness one layer earlier.
+  //
+  // Ordered most specific first. A pasted `Authorization: Bearer abc` trips
+  // three of these, and the useful sentence is the one about the header, not
+  // the one about a space.
+  if (INVISIBLE_PATTERN.test(raw)) {
+    return 'the value contains an invisible character (a zero-width space or a text-direction mark) — retype it, or paste it through a plain-text editor first';
+  }
+  if (CONTROL_PATTERN.test(raw)) {
+    return 'the value contains a control character, such as a line break inside it — copy the credential on its own, without the line it sits on';
+  }
+  for (const [open, close] of WRAPPED_IN_QUOTES) {
+    if (raw.length > 1 && raw.startsWith(open) && raw.endsWith(close)) {
+      return 'the value is wrapped in quotes — paste the credential itself, without the quotes around it';
+    }
+  }
+  if (SMART_QUOTE_PATTERN.test(raw)) {
+    return 'the value contains a curly quote, which a phone keyboard or a rich-text editor substitutes for a straight one — retype it in a plain-text field';
+  }
+  const scheme = raw.match(AUTH_SCHEME_PATTERN);
+  if (scheme) {
+    return `the value starts with "${scheme[1]}", which is part of the Authorization header rather than the credential — paste only the part after it`;
+  }
+  if (/\s/.test(raw)) {
+    // Reached only for whitespace in the MIDDLE: the leading and trailing case
+    // is caught by the trim comparison above, which gives a better sentence.
+    return 'the value has a space inside it — a credential in this estate has none, so part of the surrounding text was copied with it';
   }
   return null;
 }

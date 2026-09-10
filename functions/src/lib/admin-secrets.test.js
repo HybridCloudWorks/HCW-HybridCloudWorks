@@ -288,6 +288,92 @@ describe('what it refuses to store', () => {
     }
   });
 
+  // #484. THESE TESTS NAME THEIR CODE POINTS AS NUMBERS TOO, for the reason
+  // the module gives: a test file about invisible characters that contains
+  // invisible characters cannot be reviewed, because the interesting byte is
+  // the one nobody can see. Every fixture below is built from an escape.
+  const KEY = 'sk-ant-api03-abcdefghij';
+
+  it('refuses a zero-width character that trim cannot reach', () => {
+    // The heart of the issue. `trim` removes \u00a0 and \ufeff and only at the ends;
+    // it does not touch \u200b even there, and never reaches the middle. Such a
+    // value stores clean, resolves clean, and is refused upstream forever.
+    for (const cp of [0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0x00ad]) {
+      const bad = KEY.slice(0, 6) + String.fromCodePoint(cp) + KEY.slice(6);
+      expect(rejectSecretValue(bad), 'U+' + cp.toString(16)).toMatch(/invisible character/);
+    }
+  });
+
+  it('refuses a text-direction mark', () => {
+    for (const cp of [0x200e, 0x200f, 0x202e, 0x2066, 0x2069]) {
+      const bad = String.fromCodePoint(cp) + KEY;
+      expect(rejectSecretValue(bad), 'U+' + cp.toString(16)).toMatch(/invisible character/);
+    }
+  });
+
+  it('refuses a control character in the middle, which trim leaves alone', () => {
+    // A newline at the END is the trim rule's business and reads better
+    // there; this is the one in the middle, which nothing else catches.
+    const bad = KEY.slice(0, 6) + String.fromCodePoint(0x0a) + KEY.slice(6);
+    expect(rejectSecretValue(bad)).toMatch(/control character/);
+  });
+
+  it('refuses a value still wearing its quotes', () => {
+    const pairs = [[0x22, 0x22], [0x27, 0x27], [0x60, 0x60], [0x201c, 0x201d], [0x2018, 0x2019]];
+    for (const [open, close] of pairs) {
+      const bad = String.fromCodePoint(open) + KEY + String.fromCodePoint(close);
+      expect(rejectSecretValue(bad), 'U+' + open.toString(16)).toMatch(/wrapped in quotes/);
+    }
+  });
+
+  it('allows a quote INSIDE a value, which is not the same thing', () => {
+    // Only a matched wrapping pair is refused. A credential is allowed to
+    // contain a quote, and refusing that would reject real keys.
+    expect(rejectSecretValue(KEY.slice(0, 6) + String.fromCodePoint(0x22) + KEY.slice(6))).toBeNull();
+  });
+
+  it('refuses a curly quote a keyboard substituted', () => {
+    const bad = KEY.slice(0, 6) + String.fromCodePoint(0x2019) + KEY.slice(6);
+    expect(rejectSecretValue(bad)).toMatch(/curly quote/);
+  });
+
+  it('names the auth scheme rather than complaining about a space', () => {
+    // A pasted header line trips three rules at once. The useful sentence is
+    // the one about the header, so the scheme check runs before the space
+    // check and the message quotes what it actually found.
+    expect(rejectSecretValue('Bearer ' + KEY)).toMatch(/Authorization header/);
+    expect(rejectSecretValue('Authorization: Bearer ' + KEY)).toMatch(/Authorization header/);
+  });
+
+  it('names Bearer-API rather than Bearer, so the message is not subtly wrong', () => {
+    // The alternation is ordered longest-first. With `bearer` earlier, a
+    // Publer value would match the short one and the sentence would quote a
+    // scheme the operator never pasted.
+    expect(rejectSecretValue('Bearer-API ' + KEY)).toMatch(/Bearer-API/);
+  });
+
+  it('refuses interior whitespace once no better sentence applies', () => {
+    expect(rejectSecretValue(KEY.slice(0, 6) + ' ' + KEY.slice(6))).toMatch(/space inside/);
+  });
+
+  it('still calls a placeholder a placeholder', () => {
+    // The new checks run last for exactly this reason: '<paste here>' has a
+    // space in it, and reporting that would bury the real problem.
+    expect(rejectSecretValue('<paste here>')).toMatch(/placeholder/);
+  });
+
+  it('leaves credentials that are actually fine alone', () => {
+    // The regression guard. Real shapes from this estate's own catalogue:
+    // hyphens, underscores, dots, colons and mixed case all survive.
+    for (const ok of [
+      'sk-ant-api03-abcdefghijklmnop',
+      'AIzaSyD_ab-cd.ef1234567890',
+      '1234567890:AAHabcdefghijklmnop',
+      'xoxb-123456789012-abcdefghij',
+    ]) {
+      expect(rejectSecretValue(ok), ok).toBeNull();
+    }
+  });
   it('refuses an empty or non-string value', () => {
     for (const bad of ['', null, undefined, 42, {}]) {
       expect(rejectSecretValue(bad)).toMatch(/no value/);

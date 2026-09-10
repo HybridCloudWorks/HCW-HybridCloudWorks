@@ -319,6 +319,49 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The API-keys page refuses a credential paste that carries an invisible
+  character, a curly quote, or an Authorization header (#484).**
+  `rejectSecretValue` already refused leading or trailing whitespace, which is
+  the visible half of a bad paste. `String.prototype.trim()` is no defence
+  against the other half: it removes U+00A0 and U+FEFF and only at the ends,
+  it does not touch U+200B or the text-direction marks even there, and nothing
+  it does reaches the middle of a string. A value carrying one of those stores
+  clean, resolves clean, and is refused upstream forever as "the key is
+  wrong" - the exact sentence that cost #358 several days on a credential
+  where nothing could see the stored string.
+
+  Six checks now run after the existing ones, deliberately last so a
+  placeholder still reads as a placeholder rather than as a value with a space
+  in it: invisible and zero-width characters, control characters, a matched
+  wrapping pair of quotes, curly quotes, an auth-scheme prefix, and interior
+  whitespace. **Each names what was found**, because "invalid" here would
+  reproduce one layer earlier the same uselessness the feature exists to end.
+
+  Ordered most specific first, which is not cosmetic. A pasted
+  `Authorization: Bearer <key>` trips three rules at once, and the useful
+  sentence is the one about the header rather than the one about a space. The
+  scheme alternation is longest-first for the same reason: with `bearer`
+  ahead of `bearer-api`, a Publer value would match the short one and the
+  message would quote a scheme the operator never pasted.
+
+  A quote INSIDE a value is still allowed - only a matched wrapping pair is
+  refused - and a regression test carries four real credential shapes from
+  this estate's own catalogue so hyphens, underscores, dots, colons and mixed
+  case keep working.
+
+  **The module and its tests name every suspect code point as a number, never
+  as the character.** A file about invisible characters that contains
+  invisible characters reads as binary to git and to grep, and the one byte
+  nobody can review is the one nobody can see; `integrations/rest-proxy.js`
+  recorded the same trap against its own control-character check. Both files
+  are asserted clean of the characters they describe.
+
+  **Not built, and that is the decision rather than an omission:** the "shape"
+  readout (length, alphabet, flags) from the deleted `fix/358-secret-shape-diagnostic`
+  branch. It answered "is the stored string the one I copied", which #358
+  answered another way, and it would put a description of a secret on a page
+  whose stated promise is that it never reads one back.
+
 - **Telegram, RSS.com and YouTube can be tested from the Integrations page,
   without their credentials ever reaching a browser (#483).** The three held
   keys that are only ever read on the server, so their cards had a globe and
