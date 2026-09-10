@@ -44,12 +44,15 @@ vi.mock('@/lib/adminSettings', () => ({
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 
+// The API's real shape. `section` is a GROUP id now - the same vocabulary the
+// page renders headings from - and `help` is written the way the catalogue
+// writes it: what kind of value, what it does here, no repository jargon.
 const item = (overrides = {}) => ({
   secret: 'GEMINI-API-KEY',
   setting: 'GEMINI_API_KEY',
-  section: 'ai',
+  section: 'gen-ai',
   label: 'Google Gemini',
-  help: 'First in the router’s preference order.',
+  help: 'API key. The first model the site asks to write.',
   state: 'never',
   generatable: false,
   hasLivenessCheck: true,
@@ -63,7 +66,7 @@ const item = (overrides = {}) => ({
 
 const payload = (secrets) => ({
   success: true,
-  sections: [{ id: 'ai', title: 'AI & generation', blurb: 'AI keys.' }],
+  sections: [{ id: 'gen-ai', title: 'Gen AI', blurb: 'Models that write and draw.' }],
   secrets,
 });
 
@@ -288,25 +291,30 @@ describe('generate', () => {
 });
 
 describe('the page', () => {
-  it('loads status once auth is ready and groups by section', async () => {
+  it('loads status once auth is ready and shows the credential under its group', async () => {
+    // The heading comes from SERVICE_GROUPS, not from the API's sections - one
+    // taxonomy drives both, so a key appears under the same words as the
+    // service it belongs to.
     render(<IntegrationsPage />);
-    await waitFor(() => expect(screen.getByText('AI & generation')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Gen AI')).toBeTruthy());
     expect(getJSON).toHaveBeenCalledWith('cms/secrets');
     expect(screen.getByText('Google Gemini')).toBeTruthy();
   });
 
-  it('hides a section that has no secrets rather than showing an empty heading', async () => {
+  it('hides a group that has nothing in it rather than showing an empty heading', async () => {
     getJSON.mockResolvedValue({
       success: true,
       sections: [
-        { id: 'ai', title: 'AI & generation', blurb: 'AI keys.' },
+        { id: 'gen-ai', title: 'Gen AI', blurb: 'Models that write and draw.' },
         { id: 'ghost', title: 'Empty Section', blurb: 'Nothing here.' },
       ],
       secrets: [item()],
     });
     render(<IntegrationsPage />);
-    await waitFor(() => expect(screen.getByText('AI & generation')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Gen AI')).toBeTruthy());
     expect(screen.queryByText('Empty Section')).toBeNull();
+    // 'Cloud' has neither a service card nor a credential in this payload.
+    expect(screen.queryByText('Cloud')).toBeNull();
   });
 
   it('PUTs to the same route it read from', async () => {
@@ -548,9 +556,13 @@ describe('the service cards', () => {
   const withKlaviyo = () =>
     getJSON.mockResolvedValue({
       success: true,
-      sections: [{ id: 'social', title: 'Social & audience', blurb: 'Publishing credentials.' }],
+      sections: [{ id: 'communication', title: 'Communication', blurb: 'Publishing credentials.' }],
       secrets: [
-        item({ secret: 'KLAVIYO-PRIVATE-KEY', section: 'social', label: 'Klaviyo — private key' }),
+        item({
+          secret: 'KLAVIYO-PRIVATE-KEY',
+          section: 'communication',
+          label: 'Klaviyo — private key',
+        }),
       ],
     });
 

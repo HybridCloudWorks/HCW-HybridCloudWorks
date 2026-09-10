@@ -140,25 +140,8 @@ async function testKlaviyo() {
   return count === null ? 'Connected to Klaviyo.' : `Connected — ${count} list(s) visible.`;
 }
 
-// ── The service registry ──────────────────────────────────────────────────────
+// ── Groups and services ───────────────────────────────────────────────────────
 
-/**
- * Every third-party service, and the Key Vault secrets that belong to it.
- *
- * `secrets` names entries in `functions/src/lib/secret-catalog.js`. A name that
- * is not in the catalogue simply renders nothing — the catalogue is the source
- * of truth for what exists, and `secret-catalog.test.js` already holds it
- * against `infra/main.tf`. An empty list is a real answer, not an omission:
- * Plaud and Sessionize genuinely have no vault secret, and each says why.
- */
-/**
- * The groups the service cards are sorted into.
- *
- * The same idea as `SECRET_SECTIONS` in the catalogue, and deliberately not the
- * same list: a service is grouped by what it DOES for this site, a secret by
- * what it unlocks. Publer and Klaviyo share "social" in both; Credly has no
- * secret at all and still belongs beside the other credential wallets.
- */
 /**
  * The groups everything on this page is sorted into — services AND the
  * credentials underneath them.
