@@ -5,8 +5,16 @@
  * whose reference resolved to the WRONG secret. That value is a real string,
  * not a reference, and "only the upstream service can say it is wrong". This
  * module is the upstream service saying so. A 401 or 403 from a provider is
- * recorded against the setting's Key Vault secret and the page turns the
- * light red; a success records the opposite and turns it green again.
+ * recorded against a setting's Key Vault secret and the page turns the light
+ * red; a success records the opposite and turns it green again.
+ *
+ * WHICH setting is the caller's decision, not this module's, and it is not
+ * always the key. Publer answers 401 when the WORKSPACE ID is wrong and 403
+ * when the key is — measured, and the reverse of its documentation — so its
+ * client and proxy split the verdict by status through
+ * `publerSettingForStatus`. Recording both against the key is what made #358
+ * cost two days: the page turned the key red and the owner reminted it,
+ * repeatedly, while the wrong value sat in the other box.
  *
  * Two callers report today — the AI router (`ai/router.js`) and the Publer
  * client and proxy (`timers/publer-sync.js`, `integrations/rest-proxy.js`).

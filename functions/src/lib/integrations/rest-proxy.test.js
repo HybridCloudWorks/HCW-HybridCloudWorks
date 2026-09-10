@@ -279,10 +279,18 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
   const upstream = (status, body = { hi: true }) =>
     vi.fn(async () => ({ ok: status < 400, status, text: async () => JSON.stringify(body) }));
   const quiet = () => ({ log: vi.fn(), error: vi.fn(), warn: vi.fn() });
-  const buildReporting = ({ integration = REPORTING, status, body, onKeyVerdict = vi.fn() }) => {
+  const buildReporting = ({
+    integration = REPORTING,
+    status,
+    body,
+    onKeyVerdict = vi.fn(),
+    // Overridable so an integration with `extraEnv` can be configured; the
+    // default keeps every existing case unchanged.
+    env = { TEST_API_KEY: 'secret' },
+  }) => {
     const handler = createRestProxy({
       guard: allowGuard,
-      env: { TEST_API_KEY: 'secret' },
+      env,
       fetch: upstream(status, body),
       readKey,
       onKeyVerdict,
@@ -331,6 +339,73 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
       status: 401,
       detail: 'Missing or invalid Authorization header',
     });
+  });
+
+  it('attributes a rejection to whichever setting the integration blames for that status', async () => {
+    // Publer's case, and the reason the hook exists: a 401 there means the
+    // WORKSPACE ID is wrong and a 403 means the KEY is — measured against the
+    // live API, and the reverse of Publer's documentation. Every other
+    // integration keeps the default, which blames the key for both (#358).
+    const SPLIT = createIntegration({
+      name: 'Split',
+      baseUrl: 'https://api.example.test/v1',
+      keyEnv: 'TEST_API_KEY',
+      headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+      reportsKeyVerdict: true,
+      verdictSettingForStatus: (status) =>
+        Number(status) === 401 ? 'TEST_WORKSPACE_ID' : 'TEST_API_KEY',
+    });
+
+    const four01 = buildReporting({ integration: SPLIT, status: 401, body: {} });
+    await call(four01.handler);
+    expect(four01.onKeyVerdict).toHaveBeenCalledWith('TEST_WORKSPACE_ID', {
+      ok: false,
+      status: 401,
+      detail: '',
+    });
+
+    const four03 = buildReporting({ integration: SPLIT, status: 403, body: {} });
+    await call(four03.handler);
+    expect(four03.onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', {
+      ok: false,
+      status: 403,
+      detail: '',
+    });
+  });
+
+  it('blames the key for both statuses when an integration says nothing', async () => {
+    // The default has to stay the old behaviour: Klaviyo and Linkie have not
+    // had their 401/403 semantics measured, and guessing at a split for them
+    // would be the same mistake in a new place.
+    for (const status of [401, 403]) {
+      const { handler, onKeyVerdict } = buildReporting({ status, body: {} });
+      await call(handler);
+      expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: false, status, detail: '' });
+    }
+  });
+
+  it('clears every setting that travelled with the key, not just the key', async () => {
+    // Copilot review of 4be3eb90. Rejections can now blame a setting other
+    // than the key — Publer's 401 blames the workspace id — so clearing only
+    // `keyEnv` on success would leave that light stuck red through every
+    // subsequent successful call. The timer's client clears the pair for the
+    // same reason, and the two must agree or the page flickers between them.
+    const PAIR = createIntegration({
+      name: 'Pair',
+      baseUrl: 'https://api.example.test/v1',
+      keyEnv: 'TEST_API_KEY',
+      extraEnv: ['TEST_WORKSPACE_ID'],
+      headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+      reportsKeyVerdict: true,
+    });
+    const { handler, onKeyVerdict } = buildReporting({
+      integration: PAIR,
+      status: 200,
+      env: { TEST_API_KEY: 'secret', TEST_WORKSPACE_ID: 'w1' },
+    });
+    await call(handler);
+    expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: true });
+    expect(onKeyVerdict).toHaveBeenCalledWith('TEST_WORKSPACE_ID', { ok: true });
   });
 
   it('reports a success, so a rotated key turns the light green from this path too', async () => {

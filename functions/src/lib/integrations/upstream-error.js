@@ -4,12 +4,16 @@
  *
  * Written for #463 item 4. A rejected Publer credential had been reported as
  * `HTTP 401` and nothing else for two days, through a timer, a proxy and an
- * admin page — while Publer was answering
- * `{"errors":["Missing or invalid Authorization header"]}`, which is the
- * sentence that separates "the header we built is wrong" from "the key is
- * revoked". One of those is our bug and the other is the owner's account, and
- * the status code alone cannot tell an operator which of the two they are
- * looking at. Two days of reminting a key were spent on that distinction.
+ * admin page — while Publer was answering a sentence that named the cause
+ * outright.
+ *
+ * That sentence turned out to be `You don't have access on this workspace`:
+ * the WORKSPACE ID was wrong, not the key, which is the reverse of what
+ * Publer's documentation says a 401 means. Two days went into reminting a key
+ * that was never the problem, and the body would have said so on day one.
+ * `timers/publer-sync.js` carries the measurements. The lesson this module
+ * exists to enforce is narrower than any of it: pass the upstream's own words
+ * through, because the status code is not the diagnosis.
  *
  * Deliberately generic rather than Publer-specific: `rest-proxy.js` carries
  * Klaviyo and Linkie through the same code path, and an error reader that

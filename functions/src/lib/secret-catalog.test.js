@@ -93,17 +93,29 @@ describe('secret catalogue ↔ Terraform', () => {
     // through lib/key-verdict.js: the AI router for its providers, and the
     // Publer client and proxy for PUBLER_API_KEY (#358). Those are the only
     // legal probes; adding one here without a reporter is the lie this guards.
-    const probed = SECRET_CATALOG.filter((e) => e.probe).map((e) => e.probe).sort();
+    //
+    // Compares the SET of reporter names, not the raw list: one reporter may
+    // legitimately cover more than one secret, which `publer` now does across
+    // PUBLER_API_KEY and PUBLER_WORKSPACE_ID. What must stay closed is the set
+    // of names, since a name with no reporter behind it is the promise this
+    // test exists to refuse.
+    const probed = [...new Set(SECRET_CATALOG.filter((e) => e.probe).map((e) => e.probe))].sort();
     expect(probed).toEqual([...PROVIDERS, 'publer'].sort());
   });
 
-  it('carries the Publer probe on the key, not the workspace id', () => {
-    // The verdict is recorded against PUBLER_API_KEY; the id is an identifier
-    // that travels with it, and a probe there would promise a light that
-    // nothing switches.
+  it('carries the Publer probe on BOTH the key and the workspace id', () => {
+    // This assertion used to say the opposite, and the comment under it gave
+    // the reason: the id "is an identifier that travels with its key", so a
+    // probe there "would promise a light that nothing switches". Measured
+    // against the live API on 2026-09-09, that is wrong in the expensive
+    // direction. Publer answers 401 when the WORKSPACE ID is wrong and 403
+    // when the KEY is — the reverse of its documentation — so the workspace id
+    // is a value an upstream service rejects on its own, and something does
+    // switch that light. Reporting both against the key is what sent #358
+    // into two days of reminting a key that was fine.
     const byProbe = Object.fromEntries(SECRET_CATALOG.map((e) => [e.setting, e.probe]));
     expect(byProbe.PUBLER_API_KEY).toBe('publer');
-    expect(byProbe.PUBLER_WORKSPACE_ID).toBeNull();
+    expect(byProbe.PUBLER_WORKSPACE_ID).toBe('publer');
   });
 
   it('declares probe explicitly on every entry, so "no liveness check" is a decision', () => {

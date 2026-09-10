@@ -102,8 +102,22 @@ export function createIntegration({
   // Klaviyo's and Linkie's have not been read, and a scope-limited key that
   // answers 403 on one endpoint and 200 on the next would flap the light.
   reportsKeyVerdict = false,
+  // Which setting a rejection blames, from the upstream status. Defaults to
+  // the key, which is what every integration but Publer means. Publer needs
+  // the choice because a 401 there blames the WORKSPACE ID and a 403 the key
+  // — measured, and the opposite of what its documentation says (#358).
+  verdictSettingForStatus = null,
 }) {
-  return { name, baseUrl, keyEnv, headers, extraEnv, allowedPaths, reportsKeyVerdict };
+  return {
+    name,
+    baseUrl,
+    keyEnv,
+    headers,
+    extraEnv,
+    allowedPaths,
+    reportsKeyVerdict,
+    verdictSettingForStatus: verdictSettingForStatus || (() => keyEnv),
+  };
 }
 
 /**
@@ -238,9 +252,17 @@ export function createRestProxy({
         // malformed) and a revoked key are the same red light with different
         // fixes (#463 item 4).
         if (response.ok) {
-          await reportVerdict(integration.keyEnv, { ok: true });
+          // The key AND everything that travelled with it. A rejection can now
+          // blame a setting other than the key (Publer's 401 blames the
+          // workspace id), so clearing only `keyEnv` would leave whichever
+          // other light that rejection lit stuck red through every subsequent
+          // success. The timer's client clears the pair for the same reason;
+          // these two must agree or the page flickers between them.
+          for (const setting of [integration.keyEnv, ...integration.extraEnv]) {
+            await reportVerdict(setting, { ok: true });
+          }
         } else if (isCredentialRejected(response.status)) {
-          await reportVerdict(integration.keyEnv, {
+          await reportVerdict(integration.verdictSettingForStatus(response.status), {
             ok: false,
             status: response.status,
             detail: readUpstreamError(data),

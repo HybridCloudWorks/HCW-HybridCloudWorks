@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   createPublerClient,
+  publerSettingForStatus,
   createPublerReconcile,
   buildSocialPostSyncPatch,
   publerStateToSocialStatus,
@@ -188,6 +189,53 @@ describe('Publer reconcile', () => {
   });
 });
 
+describe('publerSettingForStatus — which value a rejection actually blames', () => {
+  it('blames the workspace id for 401 and the key for 403, as MEASURED not as documented', () => {
+    // Publer's docs say 401 is a missing/invalid/revoked key and 403 is a bad
+    // workspace or scope. Against the live API on 2026-09-09 it is the other
+    // way round, and believing the docs cost #358 two days of reminting a key
+    // that was never the problem.
+    expect(publerSettingForStatus(401)).toBe('PUBLER_WORKSPACE_ID');
+    expect(publerSettingForStatus(403)).toBe('PUBLER_API_KEY');
+    expect(publerSettingForStatus('401')).toBe('PUBLER_WORKSPACE_ID');
+  });
+
+  it('keeps the warning internally consistent when the status is a string', () => {
+    // The gloss and the setting name are derived from one call, so they cannot
+    // disagree. A strict `=== 401` in the message had them disagreeing for a
+    // string status: PUBLER_WORKSPACE_ID named, "a 403 is the key" explaining
+    // it (Copilot review of a0c1ca3e).
+    const log = { warn: vi.fn(), log: vi.fn() };
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: '401',
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ errors: ['nope'] }),
+    }));
+    const client = createPublerClient({
+      env: { PUBLER_API_KEY: 'k', PUBLER_WORKSPACE_ID: 'w' },
+      fetch: fetchImpl,
+      log,
+    });
+    return createPublerReconcile({ store: memStore(), client, now, log })
+      .run()
+      .then(() => {
+        const message = log.warn.mock.calls[0][0];
+        expect(message).toContain('PUBLER_WORKSPACE_ID');
+        expect(message).toContain('a 401 is the workspace id');
+        expect(message).not.toContain('a 403 is the key');
+      });
+  });
+
+  it('falls back to the key for anything else', () => {
+    // Unreachable today — `isCredentialRejected` admits only 401 and 403 — so
+    // this pins the fallback as conservative rather than as behaviour.
+    for (const status of [500, 429, undefined, null]) {
+      expect(publerSettingForStatus(status)).toBe('PUBLER_API_KEY');
+    }
+  });
+});
+
 describe('Publer deletePosts — the documented bulk form (#463 item 2)', () => {
   const client = (fetchImpl) =>
     createPublerClient({
@@ -319,7 +367,19 @@ describe('Publer rejected credential (#358)', () => {
     return { fetch, client, store, reconcile, onKeyVerdict, log };
   };
 
-  it.each([401, 403])('skips the run on a %i with one warning naming the pair, instead of throwing', async (status) => {
+  // THE ATTRIBUTION, and it is the whole point of #358.
+  //
+  // Measured against the live API on 2026-09-09 with a working key and a
+  // deliberately wrong value in each position:
+  //   correct key + WRONG workspace -> 401 "You don't have access on this workspace"
+  //   WRONG key   + correct workspace -> 403 "Invalid API key or not active for this account."
+  // which is the REVERSE of Publer's documentation. Reporting both against
+  // PUBLER_API_KEY turned the key red when the workspace id was wrong, and two
+  // days went into reminting a key that was fine.
+  it.each([
+    [401, 'PUBLER_WORKSPACE_ID', 'PUBLER_API_KEY'],
+    [403, 'PUBLER_API_KEY', 'PUBLER_WORKSPACE_ID'],
+  ])('blames %i on %s and never on %s', async (status, blamed, spared) => {
     const { reconcile, fetch, store, onKeyVerdict, log } = build({ status });
     await expect(reconcile.run()).resolves.toEqual({
       skipped: true,
@@ -335,13 +395,17 @@ describe('Publer rejected credential (#358)', () => {
     expect(store.queryDocs).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn.mock.calls[0][0]).toMatch(/HTTP \d{3}/);
-    expect(log.warn.mock.calls[0][0]).toMatch(/PUBLER_API_KEY \/ PUBLER_WORKSPACE_ID/);
+    // The warning names the ONE setting to look at, not both. Naming both is
+    // what left the operator guessing.
+    expect(log.warn.mock.calls[0][0]).toContain(blamed);
+    expect(log.warn.mock.calls[0][0]).not.toContain(spared);
     // With Publer's own sentence, not just the number (#463 item 4).
-    expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', {
+    expect(onKeyVerdict).toHaveBeenCalledWith(blamed, {
       ok: false,
       status,
       detail: 'Publer said why',
     });
+    expect(onKeyVerdict).not.toHaveBeenCalledWith(spared, expect.objectContaining({ ok: false }));
   });
 
   it('keeps a non-JSON error body instead of discarding it', async () => {
@@ -388,8 +452,13 @@ describe('Publer rejected credential (#358)', () => {
     await expect(reconcile.run()).resolves.toMatchObject({ skipped: false, fetched: 0 });
     await expect(reconcile.run()).resolves.toMatchObject({ skipped: false, fetched: 0 });
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(onKeyVerdict).toHaveBeenCalledTimes(1);
+    // BOTH lights, once each. A successful call proved the key and the
+    // workspace id together, so clearing only one would strand whichever the
+    // previous rejection had blamed — and after this change a rejection can
+    // have blamed either.
+    expect(onKeyVerdict).toHaveBeenCalledTimes(2);
     expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_API_KEY', { ok: true });
+    expect(onKeyVerdict).toHaveBeenCalledWith('PUBLER_WORKSPACE_ID', { ok: true });
   });
 
   it('never fails the run because the verdict writer threw', async () => {
