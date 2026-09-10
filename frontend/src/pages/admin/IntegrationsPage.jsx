@@ -57,7 +57,9 @@ import {
   Plug,
   Radio,
   RefreshCw,
+  Rss,
   Save,
+  Send,
   Share2,
   ShieldCheck,
   Wand2,
@@ -157,135 +159,184 @@ async function testKlaviyo() {
  * what it unlocks. Publer and Klaviyo share "social" in both; Credly has no
  * secret at all and still belongs beside the other credential wallets.
  */
+/**
+ * The groups everything on this page is sorted into — services AND the
+ * credentials underneath them.
+ *
+ * ONE TAXONOMY, not two. The page used to show a flat list of service cards
+ * and then a separate "Other credentials" bucket organised on different lines,
+ * so Publer’s card and Publer’s keys could sit under different words. These
+ * ids match `SECRET_SECTIONS` in `functions/src/lib/secret-catalog.js`, which
+ * is what lets a group show its services and its loose keys together.
+ *
+ * `education` is the one id with no secrets behind it — those services are
+ * public profiles with nothing to store — and the catalogue deliberately does
+ * not declare it, because a section there with no secrets renders as an empty
+ * heading and its own test refuses that.
+ */
 export const SERVICE_GROUPS = Object.freeze([
   {
-    id: 'social',
-    title: 'Social & audience',
-    blurb: 'Publishing, links and lists. Each path no-ops when its credential is absent.',
+    id: 'communication',
+    title: 'Communication',
+    blurb: 'Anything that speaks to an audience \u2014 posts, newsletters, links and alerts.',
   },
   {
-    id: 'speaking',
-    title: 'Speaking & recordings',
-    blurb: 'Where talks and voice recordings come from.',
+    id: 'content',
+    title: 'Content',
+    blurb: 'Where episodes, videos and recordings are published and read from.',
   },
   {
     id: 'education',
-    title: 'Education & credentials',
-    blurb:
-      'Public profiles the Learn pages and the certifications page read from. ' +
-      'No keys and nothing to test \u2014 the globe is the point.',
+    title: 'Education',
+    blurb: 'The public profiles behind the certifications and Learn pages. Nothing to store here.',
+  },
+  {
+    id: 'gen-ai',
+    title: 'Gen AI',
+    blurb: 'Models that write and draw.',
+  },
+  {
+    id: 'ai-services',
+    title: 'AI services',
+    blurb: 'Narration, and reading a web page well enough to summarise it.',
+  },
+  {
+    id: 'cloud',
+    title: 'Cloud',
+    blurb: 'Public price lists for the cost comparison tools. None of these bills this site.',
+  },
+  {
+    id: 'platform',
+    title: 'Site platform',
+    blurb: 'Values the site runs on. Each one says what changing it breaks.',
   },
 ]);
 
 /**
- * Every third-party service, and the Key Vault secrets that belong to it.
+ * Every service, and the credentials that belong to it.
  *
- * `secrets` names entries in `functions/src/lib/secret-catalog.js`. A name that
- * is not in the catalogue simply renders nothing \u2014 the catalogue is the source
- * of truth for what exists, and `secret-catalog.test.js` already holds it
- * against `infra/main.tf`. An empty list is a real answer, not an omission:
- * Plaud and Sessionize genuinely have no vault secret, and each says why.
+ * `secrets` names entries in the catalogue. A name that is not there renders
+ * nothing — the catalogue is the source of truth for what exists.
  *
- * THREE FIELDS DRIVE THE CARD, and each is allowed to be absent for a reason:
+ * THREE FIELDS DRIVE THE CARD, and each may be absent for a reason:
  *
- *   `url`   Where this service lives, as specifically as possible \u2014 the page
- *           that holds the credential when there is one (Publer\u2019s API
- *           settings, Klaviyo\u2019s API keys) and the owner\u2019s own profile when
- *           there is not (Credly badges, a Learn transcript). Every service
- *           has one. It is the globe.
- *   `test`  A GET that proves the credential works, or `null` where no such
- *           call exists from a browser. It is the beaker. `null` is honest:
- *           the education profiles are public HTML and a browser cannot fetch
- *           them cross-origin, and YOUTUBE_API_KEY is only ever used
- *           server-side, so there is nothing here that would mean anything.
+ *   `url`   Where this service lives, as specifically as possible: the page
+ *           that holds the credential when there is one, and the owner’s own
+ *           profile when there is not. EVERY service has one, and a test says
+ *           so — a card with no key, no test and no link is a dead end.
+ *   `test`  A GET that proves the credential works, or `null` where a browser
+ *           cannot make one. `null` is honest rather than lazy: the education
+ *           profiles are public HTML that a browser cannot fetch from another
+ *           origin, and the YouTube, RSS.com and Telegram keys are only ever
+ *           read on the server, so there is nothing here that could call them.
  *   `group` Which heading it sits under.
+ *
+ * DESCRIPTIONS ARE FOR SOMEONE WHO HAS NEVER SEEN THIS REPOSITORY. One line,
+ * saying what the service is and what it does for the site. No issue numbers,
+ * no function names, no file paths.
  */
 export const SERVICES = Object.freeze([
+  // ── Communication ────────────────────────────────────────────────────────
   {
     id: 'publer',
-    group: 'social',
+    group: 'communication',
     icon: Share2,
     name: 'Publer',
-    description: 'Schedules posts to LinkedIn, X, Facebook, Instagram and YouTube.',
+    description: 'Schedules and publishes posts to LinkedIn, X, Facebook, Instagram and YouTube.',
     url: 'https://app.publer.com/#/settings/access',
-    manageHref: '/admin/social?tab=settings',
     test: testPubler,
     secrets: ['PUBLER-API-KEY', 'PUBLER-WORKSPACE-ID'],
   },
   {
     id: 'klaviyo',
-    group: 'social',
+    group: 'communication',
     icon: Mail,
     name: 'Klaviyo',
     description: 'Holds the newsletter list and sends the campaigns.',
     url: 'https://www.klaviyo.com/settings/account/api-keys',
-    manageHref: '/admin/mailing-list',
     test: testKlaviyo,
     secrets: ['KLAVIYO-PRIVATE-KEY', 'KLAVIYO-LIST-ID'],
   },
   {
     id: 'linkie',
-    group: 'social',
+    group: 'communication',
     icon: Link2,
     name: 'Linkie',
     description: 'The link-in-bio page and the links on it.',
     url: 'https://app.linkie.bio',
-    manageHref: '/admin/linkie',
     test: testLinkie,
     secrets: ['LINKIE-API-KEY'],
   },
   {
+    id: 'telegram',
+    group: 'communication',
+    icon: Send,
+    name: 'Telegram',
+    description: 'Sends the approve-or-reject message when new content is ready.',
+    // Where the token is minted and re-minted.
+    url: 'https://t.me/BotFather',
+    // The token would have to reach the browser to call getMe, which is the
+    // one thing this page will not do.
+    test: null,
+    secrets: ['TELEGRAM-BOT-TOKEN', 'TELEGRAM-CHAT-ID'],
+  },
+
+  // ── Content ──────────────────────────────────────────────────────────────
+  {
+    id: 'rsscom',
+    group: 'content',
+    icon: Rss,
+    name: 'RSS.com',
+    description: 'Hosts the podcast and receives approved episodes.',
+    url: 'https://dashboard.rss.com',
+    test: null,
+    secrets: ['RSSCOM-API-KEY', 'RSSCOM-PODCAST-ID'],
+  },
+  {
     id: 'youtube',
-    group: 'social',
+    group: 'content',
     icon: Youtube,
     name: 'YouTube',
-    // Wired up: lib/listen-and-learn/videos.js calls Data API v3 to pick the
-    // "watch next" videos beside every episode. Posting goes through Publer,
-    // which is a different API from the one this key opens.
-    description: 'Finds the \u201cwatch next\u201d videos beside Listen & Learn episodes.',
+    description:
+      'Finds the \u201cwatch next\u201d videos shown beside each Listen & Learn episode.',
     url: 'https://console.cloud.google.com/apis/credentials',
-    manageHref: '/admin/listen-and-learn',
-    // The key is read server-side only, so a browser has nothing to call.
     test: null,
     secrets: ['YOUTUBE-API-KEY'],
   },
   {
+    id: 'plaud',
+    group: 'content',
+    icon: Radio,
+    name: 'Plaud',
+    description: 'Voice recorder. Its recordings become podcast episodes.',
+    url: 'https://app.plaud.ai',
+    test: testPlaud,
+    secrets: ['PLAUD-EMBEDDED-CLIENT-ID', 'PLAUD-EMBEDDED-API-KEY'],
+    credentialNote:
+      'Reading recordings from the recorder uses a separate sign-in that renews itself every 12 hours \u2014 reconnect from Recording Hub \u2192 Plaud \u2192 Connect. The two values above are only for turning uploaded audio into text.',
+  },
+  {
     id: 'sessionize',
-    group: 'speaking',
+    group: 'content',
     icon: Mic,
     name: 'Sessionize',
-    description: 'The speaking events feed behind the Speaking Events page.',
+    description: 'The list of speaking events behind the Speaking Events page.',
     url: 'https://sessionize.com/app/speaker',
-    manageHref: '/admin/speaking-events',
     test: (speakerId) => testSessionize(speakerId),
     secrets: [],
     // The one service configured rather than credentialed. Its setting is
     // rendered on this card because the setting IS its connection.
     setting: 'sessionizeSpeakerId',
   },
-  {
-    id: 'plaud',
-    group: 'speaking',
-    icon: Radio,
-    name: 'Plaud',
-    description: 'Syncs voice recordings into the Recording Hub.',
-    url: 'https://app.plaud.ai',
-    manageHref: '/admin/recording-hub',
-    test: testPlaud,
-    secrets: [],
-    // Not an omission: the OAuth pair lives on the mcp_servers/plaud document
-    // and refreshPlaudToken rotates it every 12 hours.
-    credentialNote:
-      'The MCP\u2019s OAuth pair lives on the mcp_servers/plaud document and refreshes every 12 hours \u2014 reconnect from Recording Hub \u2192 Plaud \u2192 Connect. Plaud Embedded is a separate pair, listed under Other credentials.',
-  },
+
+  // ── Education ────────────────────────────────────────────────────────────
   {
     id: 'credly',
     group: 'education',
     icon: Award,
     name: 'Credly',
-    description: 'Badge wallet behind the certifications page.',
+    description: 'The badge wallet behind the certifications page.',
     url: 'https://www.credly.com/users/saul-patino/badges',
-    manageHref: '/admin/certifications',
     test: null,
     secrets: [],
   },
@@ -294,7 +345,7 @@ export const SERVICES = Object.freeze([
     group: 'education',
     icon: BookOpen,
     name: 'Microsoft Learn',
-    description: 'Certification transcript behind the Azure Learn pages.',
+    description: 'The certification transcript behind the Azure Learn pages.',
     url: 'https://learn.microsoft.com/en-us/users/saulpatinojr/transcript/d4993ir4gpz8g40',
     test: null,
     secrets: [],
@@ -304,7 +355,7 @@ export const SERVICES = Object.freeze([
     group: 'education',
     icon: Cloud,
     name: 'AWS Skill Builder',
-    description: 'Certification badges behind the AWS Learn pages.',
+    description: 'The certification badges behind the AWS Learn pages.',
     url: 'https://skillsprofile.skillbuilder.aws/user/saulpatino/certification-badges',
     test: null,
     secrets: [],
@@ -314,7 +365,7 @@ export const SERVICES = Object.freeze([
     group: 'education',
     icon: Globe,
     name: 'Google Developer',
-    description: 'Developer profile behind the Google Cloud Learn pages.',
+    description: 'The developer profile behind the Google Cloud Learn pages.',
     url: 'https://developers.google.com/profile/u/105048864698113573023',
     test: null,
     secrets: [],
@@ -540,7 +591,7 @@ export function SecretRow({ item, onSubmit, busy }) {
  * been taught yet, and the honest rendering of that is nothing.
  *
  * @param {{ services?: ReadonlyArray<object>, groups?: ReadonlyArray<object>, sections?: ReadonlyArray<object>, secrets?: ReadonlyArray<object> }} input
- * @returns {{ serviceCards: Array<object>, serviceGroups: Array<object>, otherSections: Array<object> }}
+ * @returns {{ serviceCards: Array<object>, serviceGroups: Array<object>, orphanSections: Array<object> }}
  *   `serviceCards` is every card in registry order; `serviceGroups` is the
  *   same cards under their headings, which is what the page renders.
  */
@@ -564,16 +615,25 @@ export function buildIntegrationView({
     return { ...service, items };
   });
 
-  const otherSections = (sections ?? [])
-    .map((section) => ({
-      ...section,
-      items: (secrets ?? []).filter(
-        (item) => item.section === section.id && !claimed.has(item.secret)
-      ),
-    }))
-    // A section whose every secret was claimed by a service above would
-    // otherwise render as a heading with nothing under it.
-    .filter((section) => section.items.length > 0);
+  // The safety net, and normally empty. Every credential is shown under its
+  // group below; this catches one whose section matches NO group at all,
+  // which would otherwise disappear from the page entirely. A key nobody can
+  // see is a key nobody can rotate, so it gets a heading of its own rather
+  // than silence. `sections` supplies the titles when it can.
+  const groupIds = new Set((groups ?? []).map((group) => group.id));
+  const byId = new Map((sections ?? []).map((section) => [section.id, section]));
+  const orphanSections = [
+    ...new Set(
+      (secrets ?? [])
+        .filter((item) => !claimed.has(item.secret) && !groupIds.has(item.section))
+        .map((item) => item.section)
+    ),
+  ].map((id) => ({
+    id,
+    title: byId.get(id)?.title ?? id,
+    blurb: byId.get(id)?.blurb ?? 'These have no group on this page yet.',
+    items: (secrets ?? []).filter((item) => item.section === id && !claimed.has(item.secret)),
+  }));
 
   // Cards, sorted into their headings. A group with no cards is dropped
   // rather than rendered as an empty heading, and a service whose `group` is
@@ -581,16 +641,27 @@ export function buildIntegrationView({
   // silently dropping a card is the failure mode worth avoiding here.
   const known = new Set(groups.map((group) => group.id));
   const fallback = groups.length ? groups[groups.length - 1].id : null;
+  //
+  // Each group carries BOTH its service cards and the credentials in that
+  // group that no card claimed. The page used to render every card in one
+  // flat list and then sweep the remaining keys into a separate "Other
+  // credentials" bucket organised on different lines, so Publer's card and
+  // Publer's keys could appear under two different words. One taxonomy, one
+  // pass, and a credential is always under the same heading as the service it
+  // belongs to.
   const serviceGroups = groups
     .map((group) => ({
       ...group,
       cards: serviceCards.filter((card) =>
         known.has(card.group) ? card.group === group.id : group.id === fallback
       ),
+      loose: (secrets ?? []).filter(
+        (item) => item.section === group.id && !claimed.has(item.secret)
+      ),
     }))
-    .filter((group) => group.cards.length > 0);
+    .filter((group) => group.cards.length > 0 || group.loose.length > 0);
 
-  return { serviceCards, serviceGroups, otherSections };
+  return { serviceCards, serviceGroups, orphanSections };
 }
 
 // ── Service card ──────────────────────────────────────────────────────────────
@@ -731,15 +802,6 @@ function ServiceCard({ service, speakerId, onSubmitSecret, busySecret }) {
 
       {service.credentialNote && (
         <p className="mt-3 text-xs text-muted-foreground">{service.credentialNote}</p>
-      )}
-
-      {service.manageHref && (
-        <a
-          href={service.manageHref}
-          className="mt-3 inline-block text-xs text-primary hover:underline"
-        >
-          Manage on this site \u2192
-        </a>
       )}
     </Card>
   );
@@ -883,7 +945,7 @@ export default function IntegrationsPage() {
     }
   };
 
-  const { serviceGroups, otherSections } = buildIntegrationView({
+  const { serviceGroups, orphanSections } = buildIntegrationView({
     services: SERVICES,
     sections: data?.sections ?? [],
     secrets: data?.secrets ?? [],
@@ -967,20 +1029,39 @@ export default function IntegrationsPage() {
                 ) : null}
               </div>
             ))}
+
+            {/*
+              Credentials in this group that no service card claimed. Same
+              heading, same card shape, so a key is never somewhere else on the
+              page from the thing it unlocks.
+            */}
+            {group.loose.length > 0 && (
+              <Card className="p-4">
+                <div className="rounded-md border border-border/60 bg-muted/20 px-3">
+                  {group.loose.map((item) => (
+                    <SecretRow
+                      key={item.secret}
+                      item={item}
+                      onSubmit={submitSecret}
+                      busy={busySecret === item.secret}
+                    />
+                  ))}
+                </div>
+              </Card>
+            )}
           </div>
         </section>
       ))}
 
-      {otherSections.length > 0 && (
+      {orphanSections.length > 0 && (
         <section className="space-y-3">
           <div>
             <h2 className="text-lg font-semibold">Other credentials</h2>
             <p className="text-sm text-muted-foreground">
-              Keys with no service card of their own — nothing here has a connection test that would
-              mean anything from a browser.
+              Keys whose group this page does not know about yet.
             </p>
           </div>
-          {otherSections.map((section) => (
+          {orphanSections.map((section) => (
             <Card key={section.id}>
               <CardHeader>
                 <CardTitle className="text-lg">{section.title}</CardTitle>

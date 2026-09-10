@@ -368,24 +368,33 @@ describe('the page', () => {
 // ── The merge: a service and its credential are one subject ──────────────────
 
 describe('joining services to credentials', () => {
+  // Section ids ARE group ids now - one taxonomy for services and credentials
+  // alike, so a key is never under a different heading from the service it
+  // unlocks.
   const sections = [
-    { id: 'social', title: 'Social & audience', blurb: 'Publishing credentials.' },
-    { id: 'ai', title: 'AI & generation', blurb: 'AI keys.' },
+    { id: 'communication', title: 'Communication', blurb: 'Publishing credentials.' },
+    { id: 'gen-ai', title: 'Gen AI', blurb: 'AI keys.' },
   ];
   const klaviyoKey = item({
     secret: 'KLAVIYO-PRIVATE-KEY',
-    section: 'social',
+    section: 'communication',
     label: 'Klaviyo — private key',
   });
   const klaviyoList = item({
     secret: 'KLAVIYO-LIST-ID',
-    section: 'social',
+    section: 'communication',
     label: 'Klaviyo — list id',
   });
+  // Claimed by the Telegram card, so it is no longer a loose credential.
   const telegram = item({
     secret: 'TELEGRAM-BOT-TOKEN',
-    section: 'social',
+    section: 'communication',
     label: 'Telegram — bot token',
+  });
+  const firecrawl = item({
+    secret: 'FIRECRAWL-API-KEY',
+    section: 'ai-services',
+    label: 'Firecrawl',
   });
 
   // ── grouping ────────────────────────────────────────────────────────────
@@ -476,24 +485,54 @@ describe('joining services to credentials', () => {
     ]);
   });
 
-  it('does not list a claimed credential a second time in the sections below', () => {
+  it('never shows a claimed credential twice - on its card and loose in the group', () => {
     // The whole point of the merge. Rotating Klaviyo from the card and from a
     // duplicate row further down would be two paths to one write, and the
     // second would look like a different credential.
-    const { otherSections } = buildIntegrationView({
+    const { serviceGroups } = buildIntegrationView({
       sections,
-      secrets: [klaviyoKey, klaviyoList, telegram],
+      secrets: [klaviyoKey, klaviyoList, telegram, firecrawl],
     });
-    const social = otherSections.find((section) => section.id === 'social');
-    expect(social.items.map((row) => row.secret)).toEqual(['TELEGRAM-BOT-TOKEN']);
+    const communication = serviceGroups.find((group) => group.id === 'communication');
+    const onCards = communication.cards.flatMap((card) => card.items.map((row) => row.secret));
+    expect(onCards).toContain('KLAVIYO-PRIVATE-KEY');
+    expect(onCards).toContain('TELEGRAM-BOT-TOKEN');
+    // Everything in this group belongs to a card, so nothing is left loose.
+    expect(communication.loose).toEqual([]);
   });
 
-  it('drops a section whose every credential went to a service card', () => {
-    const { otherSections } = buildIntegrationView({
+  it('shows a credential with no service card as a loose row in its own group', () => {
+    // Firecrawl has no card. It must still appear, under AI services, rather
+    // than falling off the page because nothing claimed it.
+    const { serviceGroups } = buildIntegrationView({ sections, secrets: [firecrawl] });
+    const aiServices = serviceGroups.find((group) => group.id === 'ai-services');
+    expect(aiServices.loose.map((row) => row.secret)).toEqual(['FIRECRAWL-API-KEY']);
+    expect(aiServices.cards).toEqual([]);
+  });
+
+  it('gives a credential whose group this page does not know a heading of its own', () => {
+    // The safety net. A key nobody can see is a key nobody can rotate, so an
+    // unknown section gets its own heading rather than silence.
+    const stray = item({ secret: 'STRAY-KEY', section: 'nowhere', label: 'Stray' });
+    const { orphanSections, serviceGroups } = buildIntegrationView({
+      sections,
+      secrets: [stray],
+    });
+    expect(orphanSections.map((section) => section.id)).toEqual(['nowhere']);
+    expect(orphanSections[0].items.map((row) => row.secret)).toEqual(['STRAY-KEY']);
+    const placed = serviceGroups.flatMap((group) => group.loose.map((row) => row.secret));
+    expect(placed).not.toContain('STRAY-KEY');
+  });
+
+  it('leaves nothing loose when every credential went to a service card', () => {
+    const { serviceGroups, orphanSections } = buildIntegrationView({
       sections,
       secrets: [klaviyoKey, klaviyoList],
     });
-    expect(otherSections.map((section) => section.id)).toEqual([]);
+    expect(orphanSections).toEqual([]);
+    for (const group of serviceGroups) {
+      expect(group.loose, `${group.id} has loose credentials`).toEqual([]);
+    }
   });
 
   it('renders nothing for a credential a service names but the API did not return', () => {
@@ -579,10 +618,12 @@ describe('the service cards', () => {
     render(<IntegrationsPage />);
     await waitFor(() => expect(screen.getByText('Plaud')).toBeTruthy());
     const card = screen.getByText('Plaud').closest('.p-4');
-    // The note is shorter now; what it must still do is say WHERE the
-    // credential lives, since the absence of a row is otherwise unexplained.
-    expect(card.textContent).toContain('mcp_servers/plaud');
+    // The note must explain the OTHER sign-in - the one with no row here -
+    // without naming a database document, an issue number or a file path. A
+    // reader of this page has never seen the repository.
     expect(card.textContent).toContain('12 hours');
+    expect(card.textContent).toContain('Recording Hub');
+    expect(card.textContent).not.toMatch(/mcp_servers|#\d{3}|\.js\b/);
   });
 
   it('still names every service the old Connections page did', () => {
@@ -608,9 +649,11 @@ describe('the service cards', () => {
       'Publer',
       'Klaviyo',
       'Linkie',
+      'Telegram',
+      'RSS.com',
       'YouTube',
-      'Sessionize',
       'Plaud',
+      'Sessionize',
       'Credly',
       'Microsoft Learn',
       'AWS Skill Builder',

@@ -38,36 +38,40 @@
  */
 export const SECRET_SECTIONS = Object.freeze([
   {
-    id: 'ai',
-    title: 'AI & generation',
+    id: 'gen-ai',
+    title: 'Gen AI',
     blurb:
-      'The AI router picks a provider by key presence, in preference order. ' +
-      'Removing a key here silently changes which model writes your content.',
+      'Models that write and draw. The site tries them in order, so removing one changes which ' +
+      'model writes your content without anything else looking different.',
   },
   {
-    id: 'social',
-    title: 'Social & audience',
-    blurb: 'Publishing, broadcast and list credentials. Each path no-ops when its key is absent.',
+    id: 'ai-services',
+    title: 'AI services',
+    blurb: 'Narration, and reading a web page well enough to summarise it.',
   },
   {
-    id: 'intel',
-    title: 'Intelligence & research',
-    blurb: 'Read-only lookups used by the inspector, link enrichment and episode research.',
+    id: 'communication',
+    title: 'Communication',
+    blurb: 'Anything that speaks to an audience \u2014 posts, newsletters, links and alerts.',
+  },
+  {
+    id: 'content',
+    title: 'Content',
+    blurb: 'Where episodes, videos and recordings are published and read from.',
   },
   {
     id: 'cloud',
-    title: 'Cloud pricing (public catalogues)',
+    title: 'Cloud',
     blurb:
-      'Read the three clouds’ PUBLIC price lists for the comparison tools. ' +
-      'None of these bills this estate — that runs on Azure and is not charged through anything here.',
+      'Read the three clouds\u2019 PUBLIC price lists for the comparison tools. None of these bills ' +
+      'this site \u2014 that runs on Azure and is not charged through anything here.',
   },
   {
     id: 'platform',
     title: 'Site platform',
     blurb:
-      'Shared secrets the site itself derives from. Rotating one of these changes live behaviour ' +
-      'immediately: CLIENT-IP-SALT resets every rate-limit counter, and PREVIEW-SIGNING-SECRET ' +
-      'invalidates every staging link already sent.',
+      'Values the site itself runs on. Changing one of these takes effect immediately and is ' +
+      'felt by visitors, so each says what it breaks.',
   },
 ]);
 
@@ -98,201 +102,226 @@ export const SECRET_SECTIONS = Object.freeze([
  * will tell you about, deserves its own light.
  */
 export const SECRET_CATALOG = Object.freeze([
-  // ── AI & generation ──────────────────────────────────────────────────────
+  // EVERY `help` BELOW IS WRITTEN FOR SOMEONE WHO HAS NEVER SEEN THIS
+  // REPOSITORY. It reaches the API-keys page and nowhere else, so it says what
+  // kind of value it is and what it does for the site — never an issue
+  // number, an ADR section, a function name or a file path. The engineering
+  // detail that used to live in these strings is in the comments beside them,
+  // where it is still findable and no longer shown to someone trying to work
+  // out which box to paste a key into.
+
+  // ── Gen AI ───────────────────────────────────────────────────────
   {
     setting: 'GEMINI_API_KEY',
     secret: 'GEMINI-API-KEY',
-    section: 'ai',
+    section: 'gen-ai',
     label: 'Google Gemini',
-    help: 'First in the router’s preference order, and the Listen & Learn voice: Gemini TTS reads every study episode (ADR 0029 §2b).',
+    // First in the router's preference order, and the Listen & Learn voice:
+    // Gemini TTS reads every study episode (ADR 0029 §2b).
+    help: 'API key. The first model the site asks to write, and the voice that reads every Listen & Learn episode.',
     probe: 'gemini',
   },
   {
     setting: 'ANTHROPIC_API_KEY',
     secret: 'ANTHROPIC-API-KEY',
-    section: 'ai',
+    section: 'gen-ai',
     label: 'Anthropic',
-    help: 'Second in the router’s preference order.',
+    // Second in the router's preference order.
+    help: 'API key. The second model tried, when Gemini is unavailable.',
     probe: 'anthropic',
   },
   {
     setting: 'OPENAI_API_KEY',
     secret: 'OPENAI-API-KEY',
-    section: 'ai',
+    section: 'gen-ai',
     label: 'OpenAI',
-    help: 'Third in the router’s preference order.',
+    // Third in the router's preference order.
+    help: 'API key. The third model tried, when neither Gemini nor Anthropic answers.',
     probe: 'openai',
   },
   {
     setting: 'PERPLEXITY_API_KEY',
     secret: 'PERPLEXITY-API-KEY',
-    section: 'ai',
+    section: 'gen-ai',
     label: 'Perplexity',
-    help: 'Referenced but not reachable through the AI router today — it implements Gemini, OpenAI and Anthropic only.',
+    // Referenced but not reachable through the AI router today — it
+    // implements Gemini, OpenAI and Anthropic only.
+    help: 'API key. Nothing on the site uses it today.',
     probe: null,
   },
   {
     setting: 'REPLICATE_API_KEY',
     secret: 'REPLICATE-API-KEY',
-    section: 'ai',
+    section: 'gen-ai',
     label: 'Replicate',
-    help: 'AI cover images. Absent, posts fall back to the default hero for their provider.',
+    help: 'API key. Generates the cover image for a post. Without it, posts use a stock image instead.',
     probe: null,
   },
+
+  // ── AI services ───────────────────────────────────────────────────
   {
     setting: 'ELEVENLABS_API_KEY',
     secret: 'ELEVENLABS-API-KEY',
-    section: 'ai',
+    section: 'ai-services',
     label: 'ElevenLabs',
-    help: 'The podcast voice only — article and Plaud transcripts to RSS.com — at about USD 0.10 per 1,000 characters (ADR 0029 §2a, scoped by §2b); never Listen & Learn. A re-minted key needs an app restart to take effect.',
+    // The podcast voice ONLY — article and Plaud transcripts to RSS.com
+    // (ADR 0029 §2a, scoped by §2b); never Listen & Learn, which is Gemini
+    // TTS. A re-minted key needs an app restart to take effect.
+    help: 'API key. Reads podcast episodes aloud. Around $0.10 per 1,000 characters, so it is used for the podcast only.',
     probe: null,
   },
   {
     setting: 'AZURE_SPEECH_KEY',
     secret: 'AZURE-SPEECH-KEY',
-    section: 'ai',
+    section: 'ai-services',
     label: 'Azure AI Speech',
-    help: 'Written, tested fallback for the day the preview Gemini TTS models retire.',
+    // Written and tested against the day the preview Gemini TTS models
+    // retire. Deliberately unprovisioned; monitor-unresolved-secrets.yml
+    // excludes it by name for that reason.
+    help: 'API key. A spare narrator, ready in case the main one stops being available. Not set up on purpose.',
     probe: null,
   },
   {
-    setting: 'PLAUD_EMBEDDED_CLIENT_ID',
-    secret: 'PLAUD-EMBEDDED-CLIENT-ID',
-    section: 'ai',
-    label: 'Plaud Embedded — client id',
-    help:
-      'Transcribes audio uploaded on the Recording Hub → Plaud tab through the Plaud Embedded ' +
-      'Transcription API (#442). A different credential from the Plaud MCP OAuth tokens the ' +
-      'Connect tab stores; an identifier that travels with its key.',
-    probe: null,
-  },
-  {
-    setting: 'PLAUD_EMBEDDED_API_KEY',
-    secret: 'PLAUD-EMBEDDED-API-KEY',
-    section: 'ai',
-    label: 'Plaud Embedded — API key',
-    help:
-      'Sent as X-Client-Api-Key beside the client id. Absent, the upload form answers with a ' +
-      'sentence naming both settings before any audio is stored.',
+    setting: 'FIRECRAWL_API_KEY',
+    secret: 'FIRECRAWL-API-KEY',
+    section: 'ai-services',
+    label: 'Firecrawl',
+    help: 'API key. Reads a web page and pulls out its text, so a link can be summarised.',
     probe: null,
   },
 
-  // ── Social & audience ────────────────────────────────────────────────────
+  // ── Communication ───────────────────────────────────────────────
   {
     setting: 'PUBLER_API_KEY',
     secret: 'PUBLER-API-KEY',
-    section: 'social',
-    label: 'Publer — API key',
-    help: 'Social auto-post. Absent, scheduled posts no-op rather than failing; rejected, the calendar sync skips and this light goes red.',
+    section: 'communication',
+    label: 'Publer \u2014 API key',
+    // Publer answers 403 when the KEY is wrong and 401 when the workspace id
+    // is — the reverse of its own documentation, measured 2026-09-09 (#358).
+    help: 'API key. Lets the site schedule social posts through Publer. If Publer refuses with a 403, this is the value to check.',
     probe: 'publer',
   },
   {
     setting: 'PUBLER_WORKSPACE_ID',
     secret: 'PUBLER-WORKSPACE-ID',
-    section: 'social',
-    label: 'Publer — workspace id',
+    section: 'communication',
+    label: 'Publer \u2014 workspace id',
     help:
-      'An identifier rather than a credential, but Publer rejects a wrong one on its own: a 401 ' +
-      'from Publer means THIS value, not the key. Find it in the API playground at ' +
-      'publer.com/docs, not on the Settings page — the id shown there is the account id.',
+      'Identifier, not a secret. Which Publer workspace to post into. A 401 from Publer means ' +
+      'this value is wrong, not the key \u2014 copy it from Publer\u2019s API playground, because ' +
+      'the id on their settings page is a different number.',
     probe: 'publer',
   },
   {
     setting: 'KLAVIYO_PRIVATE_KEY',
     secret: 'KLAVIYO-PRIVATE-KEY',
-    section: 'social',
-    label: 'Klaviyo — private key',
-    help: 'Mailing list. Absent, subscribe calls no-op.',
+    section: 'communication',
+    label: 'Klaviyo \u2014 private key',
+    help: 'API key. Adds subscribers to the mailing list and reads it back. Without it, the signup form quietly does nothing.',
     probe: null,
   },
   {
     setting: 'KLAVIYO_LIST_ID',
     secret: 'KLAVIYO-LIST-ID',
-    section: 'social',
-    label: 'Klaviyo — list id',
-    help: 'An identifier rather than a credential, but it travels with its key.',
-    probe: null,
-  },
-  {
-    setting: 'RSSCOM_API_KEY',
-    secret: 'RSSCOM-API-KEY',
-    section: 'social',
-    label: 'RSS.com — API key',
-    help:
-      'Publishes approved podcast episodes to the show over the RSS.com API (Max plan). ' +
-      'Absent, approval leaves the episode on the manual dashboard-upload path.',
-    probe: null,
-  },
-  {
-    setting: 'RSSCOM_PODCAST_ID',
-    secret: 'RSSCOM-PODCAST-ID',
-    section: 'social',
-    label: 'RSS.com — podcast id',
-    help:
-      'The numeric id GET /v4/podcasts returns for the show. An identifier rather than a ' +
-      'credential, but it travels with its key.',
-    probe: null,
-  },
-  {
-    setting: 'TELEGRAM_BOT_TOKEN',
-    secret: 'TELEGRAM-BOT-TOKEN',
-    section: 'social',
-    label: 'Telegram — bot token',
-    help:
-      'Approve/reject notifications. Rotating this INVALIDATES the registered webhook — ' +
-      're-run scripts/cutover/04-telegram-webhook.ps1 afterwards.',
-    probe: null,
-  },
-  {
-    setting: 'TELEGRAM_CHAT_ID',
-    secret: 'TELEGRAM-CHAT-ID',
-    section: 'social',
-    label: 'Telegram — chat id',
-    help: 'Where notifications land. An identifier, not a credential.',
-    probe: null,
-  },
-
-  // ── Intelligence & research ──────────────────────────────────────────────
-  {
-    setting: 'FIRECRAWL_API_KEY',
-    secret: 'FIRECRAWL-API-KEY',
-    section: 'intel',
-    label: 'Firecrawl',
-    help: 'Page fetch and extraction for the inspector.',
+    section: 'communication',
+    label: 'Klaviyo \u2014 list id',
+    help: 'Identifier, not a secret. Which mailing list new subscribers are added to.',
     probe: null,
   },
   {
     setting: 'LINKIE_API_KEY',
     secret: 'LINKIE-API-KEY',
-    section: 'intel',
+    section: 'communication',
     label: 'Linkie',
-    help: 'Link enrichment.',
+    help: 'API key. Manages the link-in-bio page and the links on it.',
+    probe: null,
+  },
+  {
+    setting: 'TELEGRAM_BOT_TOKEN',
+    secret: 'TELEGRAM-BOT-TOKEN',
+    section: 'communication',
+    label: 'Telegram \u2014 bot token',
+    // Rotating this INVALIDATES the registered webhook — re-run
+    // scripts/cutover/04-telegram-webhook.ps1 afterwards.
+    help:
+      'Bot token. Sends the approve-or-reject messages for new content. Changing it stops those ' +
+      'messages until the bot is reconnected.',
+    probe: null,
+  },
+  {
+    setting: 'TELEGRAM_CHAT_ID',
+    secret: 'TELEGRAM-CHAT-ID',
+    section: 'communication',
+    label: 'Telegram \u2014 chat id',
+    help: 'Identifier, not a secret. Which Telegram conversation those messages are sent to.',
+    probe: null,
+  },
+
+  // ── Content ──────────────────────────────────────────────────────
+  {
+    setting: 'RSSCOM_API_KEY',
+    secret: 'RSSCOM-API-KEY',
+    section: 'content',
+    label: 'RSS.com \u2014 API key',
+    help:
+      'API key. Publishes an approved episode to the podcast. Without it, episodes have to be ' +
+      'uploaded to RSS.com by hand.',
+    probe: null,
+  },
+  {
+    setting: 'RSSCOM_PODCAST_ID',
+    secret: 'RSSCOM-PODCAST-ID',
+    section: 'content',
+    label: 'RSS.com \u2014 podcast id',
+    help: 'Identifier, not a secret. Which show episodes are published to.',
     probe: null,
   },
   {
     setting: 'YOUTUBE_API_KEY',
     secret: 'YOUTUBE-API-KEY',
-    section: 'intel',
+    section: 'content',
     label: 'YouTube Data API',
-    help: 'Curated “watch next” links. One certification costs ~505 of the default 10,000 daily quota units.',
+    // One certification costs ~505 of the default 10,000 daily quota units.
+    help: 'API key. Finds the \u201cwatch next\u201d videos shown beside each Listen & Learn episode.',
+    probe: null,
+  },
+  {
+    setting: 'PLAUD_EMBEDDED_CLIENT_ID',
+    secret: 'PLAUD-EMBEDDED-CLIENT-ID',
+    section: 'content',
+    label: 'Plaud Embedded \u2014 client id',
+    // A different credential from the Plaud MCP OAuth tokens the Connect tab
+    // stores; sent as X-Client-Api-Key beside the key below (#442).
+    help: 'Identifier, not a secret. Names this site to Plaud when audio is sent for transcription.',
+    probe: null,
+  },
+  {
+    setting: 'PLAUD_EMBEDDED_API_KEY',
+    secret: 'PLAUD-EMBEDDED-API-KEY',
+    section: 'content',
+    label: 'Plaud Embedded \u2014 API key',
+    help:
+      'API key. Turns an uploaded recording into text. Without it, the upload is refused before ' +
+      'any audio is stored.',
     probe: null,
   },
 
-  // ── Cloud pricing ────────────────────────────────────────────────────────
+  // ── Cloud ────────────────────────────────────────────────────────
   {
     setting: 'AWS_ACCESS_KEY_ID',
     secret: 'AWS-ACCESS-KEY-ID',
     section: 'cloud',
-    label: 'AWS — access key id',
-    help: 'Price List Query API. Scope the IAM policy to pricing:GetProducts only.',
+    label: 'AWS \u2014 access key id',
+    // Scope the IAM policy to pricing:GetProducts only.
+    help: 'Access key id. Reads Amazon\u2019s public price list for the cost comparison tools.',
     probe: null,
   },
   {
     setting: 'AWS_SECRET_ACCESS_KEY',
     secret: 'AWS-SECRET-ACCESS-KEY',
     section: 'cloud',
-    label: 'AWS — secret access key',
-    help: 'Pairs with the access key id above. Both must be rotated together.',
+    label: 'AWS \u2014 secret access key',
+    help: 'The secret half of the AWS key above. The two are always changed together.',
     probe: null,
   },
   {
@@ -300,21 +329,23 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'GCP-BILLING-API-KEY',
     section: 'cloud',
     label: 'Google Cloud Billing Catalog',
+    // A restricted API key, which is what Google documents for this API.
     help:
-      'A restricted API key, which is what Google documents for this API. ' +
-      'Absent, the GCP column is missing and AWS and Azure still render.',
+      'API key. Reads Google\u2019s public price list. Without it the Google column disappears from ' +
+      'the comparison and the other two still work.',
     probe: null,
   },
 
-  // ── Site platform ────────────────────────────────────────────────────────
+  // ── Site platform ────────────────────────────────────────────────
   {
     setting: 'CF_ORIGIN_SECRET',
     secret: 'CF-ORIGIN-SECRET',
     section: 'platform',
     label: 'Cloudflare origin secret',
     help:
-      'Proves a request arrived through Cloudflare. Rotating it requires the SAME value to be set ' +
-      'on the Cloudflare side — until both match, anonymous submissions are refused in production.',
+      'Shared password. Proves a visitor reached the site through Cloudflare. It has to be ' +
+      'changed in Cloudflare at the same time \u2014 until both match, public form submissions are ' +
+      'refused.',
     probe: null,
   },
   {
@@ -322,7 +353,9 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'CLIENT-IP-SALT',
     section: 'platform',
     label: 'Client IP salt',
-    help: 'Salts rate-limit keys. Rotating it resets every live counter — which is sometimes the point.',
+    help:
+      'Random value. Scrambles visitor addresses before they are counted, so nobody is tracked. ' +
+      'Changing it resets every rate limit \u2014 which is sometimes the point.',
     probe: null,
   },
   {
@@ -330,7 +363,9 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'PREVIEW-SIGNING-SECRET',
     section: 'platform',
     label: 'Preview signing secret',
-    help: 'Signs staging links. Rotating it invalidates every preview URL already sent.',
+    help:
+      'Random value. Signs the private links used to preview unpublished pages. Changing it makes ' +
+      'every preview link already shared stop working.',
     probe: null,
   },
 ]);
