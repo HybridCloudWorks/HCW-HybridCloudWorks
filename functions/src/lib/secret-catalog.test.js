@@ -91,8 +91,15 @@ describe('secret catalogue ↔ Terraform', () => {
     // verdict for that secret, the light can never go red and the page has
     // quietly promised a check it does not run. Two things report, both
     // through lib/key-verdict.js: the AI router for its providers, and the
-    // Publer client and proxy for PUBLER_API_KEY (#358). Those are the only
+    // Publer client and proxy for PUBLER_API_KEY (#358), and the Telegram
+    // connection probe for TELEGRAM_BOT_TOKEN (#483). Those are the only
     // legal probes; adding one here without a reporter is the lie this guards.
+    //
+    // `telegram` earned its place by being unambiguous: getMe takes the token
+    // and nothing else, so a 401 has exactly one thing to blame. RSS.com and
+    // YouTube gained the same beaker in #483 and deliberately NOT a probe —
+    // YouTube answers 403 for an exceeded quota as well as a bad key, and a
+    // light that reddens on a quota day is #358 repeated.
     //
     // Compares the SET of reporter names, not the raw list: one reporter may
     // legitimately cover more than one secret, which `publer` now does across
@@ -100,7 +107,7 @@ describe('secret catalogue ↔ Terraform', () => {
     // of names, since a name with no reporter behind it is the promise this
     // test exists to refuse.
     const probed = [...new Set(SECRET_CATALOG.filter((e) => e.probe).map((e) => e.probe))].sort();
-    expect(probed).toEqual([...PROVIDERS, 'publer'].sort());
+    expect(probed).toEqual([...PROVIDERS, 'publer', 'telegram'].sort());
   });
 
   it('carries the Publer probe on BOTH the key and the workspace id', () => {

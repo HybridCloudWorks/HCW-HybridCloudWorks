@@ -28,7 +28,9 @@ function firstString(value) {
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object') return '';
   // Klaviyo's `errors[]` holds objects; JSON:API calls the sentence `detail`.
-  for (const key of ['detail', 'message', 'title', 'error']) {
+  // `description` is Telegram's field and is last, so appending it cannot
+  // change what any existing caller reads (#483).
+  for (const key of ['detail', 'message', 'title', 'error', 'description']) {
     if (typeof value[key] === 'string' && value[key].trim()) return value[key];
   }
   return '';
@@ -48,7 +50,7 @@ export function readUpstreamMessage(data) {
   if (!data || typeof data !== 'object') return '';
   const candidates = Array.isArray(data)
     ? data
-    : [data.errors, data.error, data.message, data.detail, data.raw];
+    : [data.errors, data.error, data.message, data.detail, data.description, data.raw];
   for (const candidate of candidates.flat?.() ?? candidates) {
     const found = firstString(candidate);
     if (found.trim()) return found.trim().slice(0, MAX_DETAIL_LENGTH);

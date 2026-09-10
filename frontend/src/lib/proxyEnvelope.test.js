@@ -119,3 +119,17 @@ describe('readUpstreamMessage', () => {
     }
   });
 });
+
+describe('Telegram’s description field (#483)', () => {
+  it('reads the sentence Telegram sends, so the browser mirror does not drift', () => {
+    expect(readUpstreamMessage({ ok: false, error_code: 401, description: 'Unauthorized' })).toBe(
+      'Unauthorized'
+    );
+  });
+
+  it('still prefers the fields the other providers use', () => {
+    expect(readUpstreamMessage({ message: 'the real one', description: 'the vaguer one' })).toBe(
+      'the real one'
+    );
+  });
+});

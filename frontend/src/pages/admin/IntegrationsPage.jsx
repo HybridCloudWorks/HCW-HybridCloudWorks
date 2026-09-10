@@ -140,6 +140,36 @@ async function testKlaviyo() {
   return count === null ? 'Connected to Klaviyo.' : `Connected — ${count} list(s) visible.`;
 }
 
+// The three whose credentials never reach a browser (#483). Each posts a NAME
+// to `connectionProbe`, which builds the whole outbound call server-side; none
+// of them names a URL, a path or a method, because the caller supplying one is
+// the confused deputy `rest-proxy.js` spends its header on. The envelope is the
+// proxies' own, so `unwrapProxy` reads a refusal here exactly as it does there.
+
+async function testTelegram() {
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'telegram' }), 'Telegram');
+  // getMe answers `{ ok, result: { username, ... } }`. The username is the
+  // useful half: it says WHICH bot the token belongs to, which is the question
+  // an operator holding two tokens actually has.
+  const username = body?.result?.username;
+  return username ? `Connected — @${username}.` : 'Connected to Telegram.';
+}
+
+async function testRssCom() {
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'rsscom' }), 'RSS.com');
+  const count = countList(body, 'podcasts');
+  return count === null ? 'Connected to RSS.com.' : `Connected — ${count} show(s) visible.`;
+}
+
+async function testYouTube() {
+  unwrapProxy(await postJSON('connectionProbe', { probe: 'youtube' }), 'YouTube');
+  // No count: the probe asks for one result and discards it, so any number
+  // here would describe the probe rather than the account. The quota cost is
+  // said out loud because pressing this button spends it — about 100 of the
+  // 10,000 units a day that Listen & Learn draws on for real episodes.
+  return 'Connected — the Data API answered. This check costs ~100 of 10,000 daily quota units.';
+}
+
 // ── Groups and services ───────────────────────────────────────────────────────
 
 /**
@@ -268,9 +298,10 @@ export const SERVICES = Object.freeze([
     description: 'Sends the approve-or-reject message when new content is ready.',
     // Where the token is minted and re-minted.
     url: 'https://t.me/BotFather',
-    // The token would have to reach the browser to call getMe, which is the
-    // one thing this page will not do.
-    test: null,
+    // getMe runs on the SERVER (#483), which is how the token is tested
+    // without ever reaching a browser. It judges the token alone — getMe does
+    // not read the chat id, so a green light here says nothing about it.
+    test: testTelegram,
     secrets: ['TELEGRAM-BOT-TOKEN', 'TELEGRAM-CHAT-ID'],
   },
 
@@ -281,11 +312,13 @@ export const SERVICES = Object.freeze([
     icon: Rss,
     name: 'RSS.com',
     description: 'Hosts the podcast and receives approved episodes.',
-    // Where the key is minted, not the dashboard front door: this card has no
-    // beaker, so the globe has to land somewhere that answers the question a
-    // red light asks.
+    // Where the key is minted, not the dashboard front door. The card gained a
+    // beaker in #483 and the globe still points here, because the page a red
+    // light sends you to is worth keeping either way.
     url: 'https://dashboard.rss.com/api-access/',
-    test: null,
+    // Server-side (#483): GET /v4/podcasts, the same call that discovers the
+    // show id, so the test works before RSSCOM-PODCAST-ID is seeded.
+    test: testRssCom,
     secrets: ['RSSCOM-API-KEY', 'RSSCOM-PODCAST-ID'],
   },
   {
@@ -296,7 +329,10 @@ export const SERVICES = Object.freeze([
     description:
       'Finds the \u201cwatch next\u201d videos shown beside each Listen & Learn episode.',
     url: 'https://console.cloud.google.com/apis/credentials',
-    test: null,
+    // Server-side (#483). COSTS ~100 OF 10,000 DAILY QUOTA UNITS per press,
+    // because the Data API prices search.list per call — so this is a button
+    // and must never become an automatic check.
+    test: testYouTube,
     secrets: ['YOUTUBE-API-KEY'],
   },
   {
