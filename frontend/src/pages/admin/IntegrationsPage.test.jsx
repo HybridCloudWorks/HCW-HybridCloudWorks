@@ -140,6 +140,38 @@ describe('saving a value', () => {
     );
   });
 
+  it('shows only an icon, never the word Save, but stays named for screen readers', () => {
+    render(<SecretRow item={item({ state: 'live', generatable: false })} onSubmit={vi.fn()} />);
+    const save = screen.getByRole('button', { name: /^Save / });
+    // No visible text: the label lives on aria-label so the control is still
+    // named without the word competing with the icon.
+    expect(save.textContent.trim()).toBe('');
+    expect(save.getAttribute('aria-label')).toMatch(/^Save /);
+  });
+
+  it('says "Saving…" on the row while a write is in flight', () => {
+    // A Key Vault write plus an ARM reference refresh plus a page reload runs
+    // for seconds. A spinner inside one small button is easy to miss on a
+    // phone, so the row says so in words too - without it the page reads as
+    // frozen.
+    render(
+      <SecretRow item={item({ state: 'live', generatable: false })} onSubmit={vi.fn()} busy />
+    );
+    expect(screen.getByText(/Saving/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Saving / })).toBeTruthy();
+  });
+
+  it('hides the old status while saving, so it cannot be read as the new one', () => {
+    const props = { state: 'failing', lastFailStatus: 401, lastFailDetail: 'nope' };
+    const { rerender } = render(<SecretRow item={item(props)} onSubmit={vi.fn()} />);
+    expect(screen.getByText(/HTTP 401/)).toBeTruthy();
+
+    rerender(<SecretRow item={item(props)} onSubmit={vi.fn()} busy />);
+    expect(screen.queryByText(/HTTP 401/)).toBeNull();
+    expect(screen.queryByText(/Rejected/)).toBeNull();
+    expect(screen.getByText(/Saving/)).toBeTruthy();
+  });
+
   it('stays disabled for whitespace, which is not a credential', () => {
     render(<SecretRow item={item({ state: 'live', generatable: false })} onSubmit={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(/New value for/), { target: { value: '   ' } });
