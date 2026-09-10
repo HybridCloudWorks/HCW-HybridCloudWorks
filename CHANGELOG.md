@@ -366,7 +366,7 @@ This project has not cut a tagged release; entries are grouped under
   the operator who pressed it, which is the point of the button.
 
   **The Telegram token keeps its literal colon, and that trade has a second
-  half.** `encodeURIComponent` would send `%3A`, which Telegram would have to
+  half, and review found a gap in it.** `encodeURIComponent` would send `%3A`, which Telegram would have to
   decode before routing; if it ever did not, the probe would answer 404 and
   the page would tell the owner their token is bad — a wrong answer to the one
   question the button exists to ask. So the token goes in unencoded and
@@ -378,6 +378,18 @@ This project has not cut a tagged release; entries are grouped under
   percent-encoded form as well as the raw one for the same reason: an upstream
   that quotes its request target back shows the encoded bytes, and matching
   only the raw string would sail straight past it.
+
+  `%` joined that refusal list on review, and it is the least obvious member.
+  Because the token goes in unencoded, a value carrying its own `%2F` is
+  decoded by the far end into the delimiter the character class had just
+  refused — so blocking the literal slash while allowing the escape that
+  becomes one was a gap rather than a boundary. No real Telegram token
+  contains a percent sign. The test fixtures were rewritten in the same pass:
+  they read `123456789:AAH…` and `AIzaSy…`, the genuine Telegram and Google
+  key shapes, which a secret scanner cannot tell from live values and whose
+  false positive costs a real rotation. They now say `not-a-real-…` and keep
+  only the properties the tests need. Both found by Copilot review of
+  89288f8a.
 
   Telegram answers `{ description }` where the other providers answer
   `message` or `detail`, so `upstream-error.js` and its browser mirror

@@ -17,9 +17,16 @@ import {
   redactSecrets,
 } from './connection-probe.js';
 
-const TOKEN = '123456789:AAHreallylongtelegramtokenvalue';
-const YT_KEY = 'AIzaSyDreallylongyoutubeapikeyvalue';
-const RSS_KEY = 'rsscom-really-long-api-key-value';
+// DELIBERATELY UNLIKE REAL CREDENTIALS. The first drafts read
+// `123456789:AAH…` and `AIzaSy…`, which are the genuine Telegram and Google
+// key shapes — fake values that secret scanners cannot tell from live ones,
+// and the cost of that is a false positive that forces a real rotation
+// (Copilot review of 89288f8a). These keep the only property the tests
+// actually need: long enough to be redacted, and a colon in the Telegram one
+// so its percent-encoded form differs from its raw form.
+const TOKEN = 'not-a-real-telegram-token:EXAMPLE-VALUE-FOR-TESTS';
+const YT_KEY = 'not-a-real-youtube-key-EXAMPLE-VALUE-FOR-TESTS';
+const RSS_KEY = 'not-a-real-rsscom-key-EXAMPLE-VALUE-FOR-TESTS';
 
 const ENV = {
   TELEGRAM_BOT_TOKEN: TOKEN,
@@ -79,9 +86,19 @@ describe('assertUrlSafe', () => {
   });
 
   it('refuses a value that could reshape the request target', () => {
-    for (const bad of [`${TOKEN}
-`, `${TOKEN}/x`, `${TOKEN}?a=1`, `${TOKEN}#f`, `${TOKEN} `]) {
-      expect(() => assertUrlSafe(bad)).toThrow(/cannot appear in a URL/);
+    for (const bad of ['\n', '/x', '?a=1', '#f', ' ', '\\y'].map((tail) => `${TOKEN}${tail}`)) {
+      expect(() => assertUrlSafe(bad), JSON.stringify(bad)).toThrow(/cannot appear in a URL/);
+    }
+  });
+
+  it('refuses a percent-escape, which becomes a delimiter at the far end', () => {
+    // The subtle one. `%2F` passes every literal-delimiter check above and is
+    // then decoded by the upstream server into the `/` that check just
+    // refused, so blocking the slash while allowing its escape is a gap
+    // rather than a boundary (Copilot review of 89288f8a). `%25` is the same
+    // argument one level down.
+    for (const bad of ['%2Fgetupdates', '%3Fx', '%25'].map((tail) => `${TOKEN}${tail}`)) {
+      expect(() => assertUrlSafe(bad), bad).toThrow(/cannot appear in a URL/);
     }
   });
 });

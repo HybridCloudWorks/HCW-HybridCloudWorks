@@ -128,6 +128,13 @@ export class UnusableCredentialError extends Error {
  * other half of that trade: anything that could END the path segment or start
  * a query, a fragment or a new authority is refused outright.
  *
+ * `%` IS IN THE LIST, and it is the least obvious member. Because the value
+ * goes in unencoded, a token carrying its own percent-escape — `%2F` — is
+ * decoded by the upstream server into the very delimiter this character class
+ * just refused. Blocking the literal `/` while allowing the escape that
+ * becomes one is a gap, not a boundary. No real Telegram token contains a
+ * percent sign, so nothing valid is lost. (Copilot review of 89288f8a.)
+ *
  * The value comes from Key Vault, not from the caller, so this is not a
  * defence against an attacker choosing it — it is a defence against a
  * mis-pasted secret quietly changing which URL gets called and turning the
@@ -137,7 +144,7 @@ export class UnusableCredentialError extends Error {
  * @throws {UnusableCredentialError}
  */
 export function assertUrlSafe(value) {
-  if (/[\s/?#\\]/.test(value)) {
+  if (/[\s/?#\\%]/.test(value)) {
     throw new UnusableCredentialError('the value contains characters that cannot appear in a URL');
   }
   return value;
