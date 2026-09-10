@@ -41,13 +41,13 @@ export const SECRET_SECTIONS = Object.freeze([
     id: 'gen-ai',
     title: 'Gen AI',
     blurb:
-      'Models that write and draw. The site tries them in order, so removing one changes which ' +
-      'model writes your content without anything else looking different.',
+      'Language models. When something needs writing the site tries them in order, so removing ' +
+      'one changes which model writes your content. Each row says what it is used for.',
   },
   {
     id: 'ai-services',
     title: 'AI services',
-    blurb: 'Narration, and reading a web page well enough to summarise it.',
+    blurb: 'Called for one job each — narration, cover images, and reading a web page well enough to summarise it.',
   },
   {
     id: 'communication',
@@ -149,14 +149,6 @@ export const SECRET_CATALOG = Object.freeze([
     help: 'API key. Nothing on the site uses it today.',
     probe: null,
   },
-  {
-    setting: 'REPLICATE_API_KEY',
-    secret: 'REPLICATE-API-KEY',
-    section: 'gen-ai',
-    label: 'Replicate',
-    help: 'API key. Generates the cover image for a post. Without it, posts use a stock image instead.',
-    probe: null,
-  },
 
   // ── AI services ───────────────────────────────────────────────────
   {
@@ -187,6 +179,17 @@ export const SECRET_CATALOG = Object.freeze([
     section: 'ai-services',
     label: 'Firecrawl',
     help: 'API key. Reads a web page and pulls out its text, so a link can be summarised.',
+    probe: null,
+  },
+  {
+    setting: 'REPLICATE_API_KEY',
+    secret: 'REPLICATE-API-KEY',
+    section: 'ai-services',
+    label: 'Replicate',
+    // A service that runs a model for you, not one of the three the site
+    // chooses between when it needs writing. It sits with the other things
+    // called for a single job.
+    help: 'API key. Generates the cover image for a post. Without it, posts use a stock image instead.',
     probe: null,
   },
 
