@@ -117,7 +117,7 @@ so it is recorded here, where every session reads it.
   PR=$(gh pr view --json number -q .number)
   gh pr view "$PR" --json headRefOid -q .headRefOid
   gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/reviews --paginate --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | "\(.commit_id[0:8]) \(.state) \((.body // "") | split("\n")[0])"'
-  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --paginate --jq '.[] | "\(.path):line \(.line // "outdated")\n\(.body)\n"'
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --paginate --jq '.[] | "\(.path):line \(.line // .original_line // "unknown")\n\(.body)\n"'
   ```
 
   Three details in those lines are each a mistake someone has already made:
@@ -131,6 +131,10 @@ so it is recorded here, where every session reads it.
     whole point is finding every outstanding item cannot end at an arbitrary
     cut. The same default truncated a board listing to its first thirty rows
     on 2026-09-10 and made four open issues look absent.
+  - **A comment on an outdated line still knows where it was.** `.line` goes
+    null once the code beneath a comment has moved, but `.original_line`
+    survives, so falling back to it keeps a finding locatable instead of
+    printing a shrug. Only a comment with neither is genuinely unplaced.
   - **The bot login differs between the two APIs.** REST spells it
     `copilot-pull-request-reviewer[bot]`; `gh pr view --json reviews` spells
     the same actor `copilot-pull-request-reviewer`, with no suffix. A filter
