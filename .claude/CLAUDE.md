@@ -164,9 +164,11 @@ so it is recorded here, where every session reads it.
   - **When the agent fixes the finding, that is the finding closed.** Take it
     as the only thing that was wrong, reply on the thread acknowledging the
     fix and naming its commit, resolve, and treat the change as the precursor
-    to a green head. Once the acknowledgement is committed and the review of
-    that head recommends approval, merge. Do not re-derive the fix, re-review
-    it line by line, or hold the PR open to prove it was read.
+    to a green head. The acknowledgement is that reply and the resolve —
+    there is no commit to make for it, since the agent's own push is already
+    the change. Once it is posted and the review of that head recommends
+    approval, merge. Do not re-derive the fix, re-review it line by line, or
+    hold the PR open to prove it was read.
   - **When the fix does not actually close the finding, say so and correct
     it.** Push the correction, explain on the thread what was still open, and
     ask for another review. That is the same loop as any other round.
