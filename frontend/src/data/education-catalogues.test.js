@@ -138,6 +138,7 @@ describe('the facts the 2026-09-09 audit asked for (#461 items 5–9)', () => {
     expect(gh['GH-200']?.title).toBe('GitHub Actions');
     expect(gh['GH-300']?.title).toBe('GitHub Copilot');
     expect(gh['GH-500']?.title).toBe('GitHub Advanced Security');
+    expect(gh['GH-600']?.title).toBe('GitHub Agentic AI Developer');
   });
 
   it('AWS: CloudOps is SOA-C03, the three version bumps and ANS-C01 carry their dates', () => {

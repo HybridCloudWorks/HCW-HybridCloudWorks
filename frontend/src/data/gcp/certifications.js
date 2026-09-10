@@ -2,10 +2,31 @@
  * Google Cloud certification catalogue for /gcp/education (#461).
  *
  * Verified 2026-09-09 against https://cloud.google.com/learn/certification
- * and each credential's own page under that path. Google lists fourteen
- * certifications; the page had nine and still called the Workspace
- * credential "Professional", which Google retired in favour of the Associate
- * Google Workspace Administrator (the Professional URL now returns 404).
+ * and each credential's own page under that path; the page had nine and still
+ * called the Workspace credential "Professional", which Google retired in
+ * favour of the Associate Google Workspace Administrator (the Professional
+ * URL now returns 404).
+ *
+ * RE-VERIFIED 2026-09-09 (#469 item 1) against the same index, which now
+ * lists FIFTEEN — two Foundational, three Associate and ten Professional.
+ * Thirteen were carried. The two that were not:
+ *
+ *   Professional Security Operations Engineer — added `active`. Two hours,
+ *     $200, English and Japanese, 50-60 questions.
+ *     https://cloud.google.com/learn/certification/security-operations-engineer
+ *   Professional Agentic Architect — added `beta`. Google's index labels it
+ *     "Agentic Architect (Beta)" and the certification page says the beta
+ *     "is open until September 30", which is `betaEndDate` below. Three
+ *     hours, $120 at the beta's 40% discount off a $200 retail price,
+ *     English, ~80 questions, and a ONE-year validity rather than the two
+ *     years a Professional certification normally carries.
+ *     https://cloud.google.com/learn/certification/agentic-architect
+ *
+ * That `betaEndDate` is deliberate and it is an alarm: `findStaleStatuses`
+ * fails the suite on 2026-10-01 for a `beta` row whose beta window has shut,
+ * which is exactly when someone must go and read whether Google took it to
+ * GA, extended the window, or withdrew it. No GA date is published yet, so
+ * none is invented here.
  *
  * Google does not publish exam codes; the `code` values here are the
  * community short forms this page has always used.
@@ -215,5 +236,36 @@ export const certifications = [
     prepTime: '~5 months',
     featured: false,
     learnUrl: 'https://cloud.google.com/learn/certification/machine-learning-engineer',
+  },
+  {
+    id: 'psoe',
+    slug: 'psoe',
+    code: 'PSOE',
+    title: 'Professional Security Operations Engineer',
+    level: 'Professional',
+    status: 'active',
+    description:
+      'Run a security operations practice on Google Cloud — detection engineering, threat hunting, triage and response across Google Security Operations. Two hours, $200, 50-60 questions, English and Japanese.',
+    topics: ['Google SecOps', 'Detection Engineering', 'Threat Hunting', 'Incident Response'],
+    hours: 45,
+    prepTime: '~4 months',
+    featured: false,
+    learnUrl: 'https://cloud.google.com/learn/certification/security-operations-engineer',
+  },
+  {
+    id: 'paa',
+    slug: 'paa',
+    code: 'PAA',
+    title: 'Professional Agentic Architect',
+    level: 'Professional',
+    status: 'beta',
+    betaEndDate: '2026-09-30',
+    description:
+      'Design, build, deploy and operate agentic systems on Google Cloud. In beta until September 30: three hours, ~80 questions, $120 at the beta discount against a $200 retail price, English only. Google gives the beta credential a one-year validity rather than the usual two, and publishes no GA date yet.',
+    topics: ['Agentic Systems', 'Vertex AI Agents', 'Orchestration', 'Evaluation', 'Operations'],
+    hours: 50,
+    prepTime: '~4 months',
+    featured: false,
+    learnUrl: 'https://cloud.google.com/learn/certification/agentic-architect',
   },
 ];
