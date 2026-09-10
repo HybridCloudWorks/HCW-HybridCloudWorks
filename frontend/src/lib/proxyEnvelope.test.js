@@ -64,7 +64,21 @@ describe('unwrapProxy', () => {
   it('refuses a shape that is not the envelope, rather than assuming success', () => {
     // Reading `undefined` as "zero of them" is precisely how the old runners
     // reported success for a refusal.
-    for (const value of [null, undefined, 'text', 42, {}, []]) {
+    for (const value of [
+      null,
+      undefined,
+      'text',
+      42,
+      {},
+      [],
+      // The likeliest accident, and the one a "has a data property" check
+      // would have waved through: an already-unwrapped JSON:API body, which
+      // would then be unwrapped a second time.
+      { data: [] },
+      { data: { profiles: [] } },
+      // `ok` present but not the boolean the proxy sets.
+      { ok: 'true', data: [] },
+    ]) {
       expect(() => unwrapProxy(value, 'Klaviyo')).toThrow(/unrecognised response/);
     }
   });

@@ -78,7 +78,14 @@ export function unwrapProxy(res, service) {
   // A shape that is not the envelope at all. Treated as a failure rather than
   // assumed good: silently reading `undefined` as "zero of them" is exactly
   // how the runners this replaces reported success for a refusal.
-  if (!res || typeof res !== 'object' || !('data' in res)) {
+  //
+  // The test is `ok === true`, NOT "has a data property". The proxy sets `ok`
+  // on every response, so its absence means this did not come from the proxy
+  // - and the most likely thing that reaches here without it is an already
+  // unwrapped JSON:API body, `{ data: [...] }`, which the looser check would
+  // have accepted and unwrapped a second time. That is the same species of
+  // accident this module exists to prevent, so it fails loudly.
+  if (!res || typeof res !== 'object' || res.ok !== true) {
     throw new Error(`${service} returned an unrecognised response`);
   }
   return res.data;

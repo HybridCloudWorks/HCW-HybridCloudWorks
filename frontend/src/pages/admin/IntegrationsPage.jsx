@@ -60,6 +60,7 @@ import {
 } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
+import { extractProfiles } from '@/lib/linkie';
 import {
   getIntegrationSettings,
   saveIntegrationSettings,
@@ -112,12 +113,13 @@ async function testSessionize(speakerId) {
 }
 
 async function testLinkie() {
-  const body = unwrapProxy(
-    await postJSON('linkieProxy', { path: '/profiles', method: 'GET' }),
-    'Linkie'
-  );
-  const count = countList(body, 'profiles');
-  return count === null ? 'Connected to Linkie.' : `Connected — ${count} profile(s).`;
+  const res = await postJSON('linkieProxy', { path: '/profiles', method: 'GET' });
+  // `unwrapProxy` for the verdict, `extractProfiles` for the count. Linkie
+  // answers `{ data: { profiles: [...] } }` and `lib/linkie.js` already knows
+  // that - counting it again here would be the second copy that drifts.
+  unwrapProxy(res, 'Linkie');
+  const profiles = extractProfiles(res);
+  return `Connected — ${profiles.length} profile(s).`;
 }
 
 async function testKlaviyo() {
