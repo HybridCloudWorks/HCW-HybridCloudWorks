@@ -388,6 +388,82 @@ describe('joining services to credentials', () => {
     label: 'Telegram — bot token',
   });
 
+  // ── grouping ────────────────────────────────────────────────────────────
+  // The fallback below exists so a card cannot silently disappear, and an
+  // untested guarantee is not one (Copilot review of 658b9407).
+
+  const GROUPS = [
+    { id: 'alpha', title: 'Alpha', blurb: 'a' },
+    { id: 'omega', title: 'Omega', blurb: 'o' },
+  ];
+  const svc = (id, group) => ({ id, group, name: id, url: 'https://x.test', secrets: [] });
+
+  it('sorts cards under their group, in registry order', () => {
+    const { serviceGroups } = buildIntegrationView({
+      services: [svc('one', 'alpha'), svc('two', 'omega'), svc('three', 'alpha')],
+      groups: GROUPS,
+    });
+    expect(serviceGroups.map((group) => group.id)).toEqual(['alpha', 'omega']);
+    expect(serviceGroups[0].cards.map((card) => card.id)).toEqual(['one', 'three']);
+    expect(serviceGroups[1].cards.map((card) => card.id)).toEqual(['two']);
+  });
+
+  it('drops a group with no cards rather than rendering a bare heading', () => {
+    const { serviceGroups } = buildIntegrationView({
+      services: [svc('one', 'alpha')],
+      groups: GROUPS,
+    });
+    expect(serviceGroups.map((group) => group.id)).toEqual(['alpha']);
+  });
+
+  it('NEVER drops a card whose group does not exist - it falls into the last group', () => {
+    // The failure this guards: a typo in `group`, or a group removed from
+    // SERVICE_GROUPS, quietly removing a service from the page. A card in the
+    // wrong place is visible and fixable; a card that is gone is neither.
+    const { serviceGroups } = buildIntegrationView({
+      services: [svc('one', 'alpha'), svc('stray', 'nonesuch'), svc('none', undefined)],
+      groups: GROUPS,
+    });
+    const placed = serviceGroups.flatMap((group) => group.cards.map((card) => card.id));
+    expect(placed).toContain('stray');
+    expect(placed).toContain('none');
+    expect(serviceGroups.find((group) => group.id === 'omega').cards.map((c) => c.id)).toEqual([
+      'stray',
+      'none',
+    ]);
+  });
+
+  it('places every service exactly once, whatever its group says', () => {
+    // The property that matters more than any individual placement rule.
+    const services = [
+      svc('a', 'alpha'),
+      svc('b', 'omega'),
+      svc('c', 'nonesuch'),
+      svc('d', 'alpha'),
+    ];
+    const { serviceGroups, serviceCards } = buildIntegrationView({ services, groups: GROUPS });
+    const placed = serviceGroups.flatMap((group) => group.cards.map((card) => card.id)).sort();
+    expect(placed).toEqual(['a', 'b', 'c', 'd']);
+    expect(serviceCards).toHaveLength(4);
+  });
+
+  it('survives an empty group list without losing the cards from the page', () => {
+    // No groups means nothing can be rendered under a heading, so the caller
+    // still has `serviceCards`; what must not happen is a crash.
+    const { serviceGroups, serviceCards } = buildIntegrationView({
+      services: [svc('one', 'alpha')],
+      groups: [],
+    });
+    expect(serviceGroups).toEqual([]);
+    expect(serviceCards.map((card) => card.id)).toEqual(['one']);
+  });
+
+  it('groups the real registry with nothing left over', () => {
+    const { serviceGroups } = buildIntegrationView({});
+    const placed = serviceGroups.flatMap((group) => group.cards.map((card) => card.id));
+    expect(placed.sort()).toEqual(SERVICES.map((service) => service.id).sort());
+  });
+
   it('gives a credential to the service that owns it', () => {
     const { serviceCards } = buildIntegrationView({
       sections,
