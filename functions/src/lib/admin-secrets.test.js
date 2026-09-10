@@ -353,7 +353,26 @@ describe('what it refuses to store', () => {
   });
 
   it('refuses interior whitespace once no better sentence applies', () => {
-    expect(rejectSecretValue(KEY.slice(0, 6) + ' ' + KEY.slice(6))).toMatch(/space inside/);
+    expect(rejectSecretValue(KEY.slice(0, 6) + ' ' + KEY.slice(6))).toMatch(/whitespace inside/);
+  });
+
+  it('catches the Unicode spaces too, which is why the message says whitespace', () => {
+    // `\s` is wider than the space bar, and the wide part is precisely what
+    // survives to that check: every ASCII whitespace character is a control
+    // character and is refused earlier with a better sentence. U+2028 is a
+    // line separator, so calling it "a space" would name the wrong thing on
+    // the one check whose purpose is naming the right one.
+    for (const cp of [0x0020, 0x00a0, 0x2003, 0x2028, 0x3000]) {
+      const bad = KEY.slice(0, 6) + String.fromCodePoint(cp) + KEY.slice(6);
+      expect(rejectSecretValue(bad), 'U+' + cp.toString(16)).toMatch(/whitespace inside/);
+    }
+  });
+
+  it('refuses an ASCII tab as a control character, not as whitespace', () => {
+    // The ordering that makes the sentence above true: a tab is U+0009 and
+    // never reaches the whitespace check.
+    const bad = KEY.slice(0, 6) + String.fromCodePoint(0x09) + KEY.slice(6);
+    expect(rejectSecretValue(bad)).toMatch(/control character/);
   });
 
   it('still calls a placeholder a placeholder', () => {

@@ -215,7 +215,14 @@ export function rejectSecretValue(raw) {
   if (/\s/.test(raw)) {
     // Reached only for whitespace in the MIDDLE: the leading and trailing case
     // is caught by the trim comparison above, which gives a better sentence.
-    return 'the value has a space inside it — a credential in this estate has none, so part of the surrounding text was copied with it';
+    //
+    // "whitespace", not "a space", because `\s` is wider than the space bar
+    // and what survives to this line is the wide part. Every ASCII whitespace
+    // character is a control character and was refused above; what reaches
+    // here is U+0020 and the Unicode spaces beyond it — U+00A0, U+2000-U+200A,
+    // U+2028, U+3000. Calling U+2028 "a space" would name the wrong thing, on
+    // a check whose entire purpose is naming the right one.
+    return 'the value has whitespace inside it — a credential in this estate has none, so part of the surrounding text was copied with it';
   }
   return null;
 }
