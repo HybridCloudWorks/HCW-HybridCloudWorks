@@ -109,8 +109,10 @@ so it is recorded here, where every session reads it.
 
   The verdict and the inline findings live in two different places and a
   session needs both — the review body carries the verdict, and the line
-  comments carry what to actually fix. These are session commands with the
-  PR number substituted, not lines for the owner to paste:
+  comments carry what to actually fix. **The two below are bash (Git Bash),
+  not PowerShell** — the same rule as the top of this file, which applies to
+  a session's own commands as much as to the owner's. They are session
+  commands with the PR number substituted, not lines for the owner to paste:
 
   ```bash
   gh pr view NUMBER --json reviews -q '.reviews[] | "\(.author.login) [\(.state)]\n\(.body)"'
