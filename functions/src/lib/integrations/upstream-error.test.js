@@ -89,3 +89,22 @@ describe('describeUpstreamFailure', () => {
     expect(describeUpstreamFailure(429, null)).toBe('HTTP 429');
   });
 });
+
+describe('Telegram’s description field (#483)', () => {
+  it('reads the sentence Telegram actually sends', () => {
+    // `{ ok: false, error_code: 401, description: 'Unauthorized' }`. Without
+    // this the connection probe would print a bare HTTP 401, which is the
+    // exact thing #463 item 4 existed to stop.
+    expect(readUpstreamError({ ok: false, error_code: 401, description: 'Unauthorized' })).toBe(
+      'Unauthorized'
+    );
+  });
+
+  it('still prefers the fields the other providers use', () => {
+    // Appended last on purpose: adding it must not change what Publer,
+    // Klaviyo or Linkie resolve to.
+    expect(readUpstreamError({ message: 'the real one', description: 'the vaguer one' })).toBe(
+      'the real one'
+    );
+  });
+});

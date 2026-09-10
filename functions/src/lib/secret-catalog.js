@@ -249,7 +249,11 @@ export const SECRET_CATALOG = Object.freeze([
     help:
       'Bot token. Sends the approve-or-reject messages for new content. Changing it stops those ' +
       'messages until the bot is reconnected.',
-    probe: null,
+    // The Integrations page's Telegram beaker calls getMe, which authenticates
+    // on this token alone and answers 401 when it is wrong (#483). The chat id
+    // below stays unprobed on purpose: getMe never reads it, so a success here
+    // says nothing about it.
+    probe: 'telegram',
   },
   {
     setting: 'TELEGRAM_CHAT_ID',

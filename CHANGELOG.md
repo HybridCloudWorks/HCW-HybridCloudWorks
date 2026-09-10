@@ -319,6 +319,85 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Telegram, RSS.com and YouTube can be tested from the Integrations page,
+  without their credentials ever reaching a browser (#483).** The three held
+  keys that are only ever read on the server, so their cards had a globe and
+  no beaker: #481 pointed each globe at the page where its credential is
+  minted, which is the best a card with no test can do, but "test everything
+  possible with a simple GET" was not actually satisfied. `connectionProbe`
+  is that test. `lib/integrations/connection-probe.js` runs one hard-coded
+  read-only call per service — Telegram's `getMe`, RSS.com's `GET
+  /v4/podcasts`, and a one-result YouTube `search.list` — behind the same
+  `editor` guard the REST proxies use.
+
+  **The caller sends a NAME, not a path.** `rest-proxy.js` takes
+  `{ path, method, body }` and spends its header explaining why that is a
+  confused deputy, with `assertSafePath` as the boundary that makes it safe.
+  That boundary holds, but it is a denylist. Nothing here needs the latitude:
+  the page asks one question per service and there is one call that answers
+  it, so `{ probe: 'telegram' }` is the whole request and the URL, method and
+  headers are built server-side from a frozen table. The property is stronger
+  than a validated path — the caller never supplies one. `Object.hasOwn`
+  rather than a bare lookup, so `constructor` and `__proto__` are refused
+  like any other unknown name.
+
+  **Two of the three authenticate in the URL, which made redaction a security
+  property rather than tidiness.** Telegram's token is the path and YouTube's
+  key is a query parameter, so the ordinary habit of quoting a failed URL back
+  into an error is a credential leak — the kind that ends up in a screenshot
+  or in Application Insights forever. The built URL is never returned and
+  never logged, and the upstream response is redacted *before* it is parsed,
+  which is one choke point rather than four. That ordering was not the first
+  draft: it redacted the error string and the log and passed the parsed body
+  through untouched, and its own test caught the token sitting inside a
+  provider error that echoed the request line back. The test asserts the
+  absence on all three paths that can produce a string — a rejection, an
+  unparseable body, and a transport error whose message quotes its target.
+
+  **Only Telegram reports a key verdict, and the other two are a decision
+  rather than an omission.** `getMe` takes the bot token and nothing else and
+  answers 401 when it is wrong, so a rejection has exactly one setting to
+  blame — and `TELEGRAM_CHAT_ID` stays unprobed for the same reason, because
+  a success says nothing about it. RSS.com's 401/403 split has not been
+  measured here, and the YouTube Data API answers 403 for a disabled API, an
+  exceeded quota and a referrer-restricted key alike; a light that reddens on
+  a quota day would send the owner to remint a key that is fine, which is
+  exactly what #358 cost two days. The beaker still reports those failures to
+  the operator who pressed it, which is the point of the button.
+
+  **The Telegram token keeps its literal colon, and that trade has a second
+  half.** `encodeURIComponent` would send `%3A`, which Telegram would have to
+  decode before routing; if it ever did not, the probe would answer 404 and
+  the page would tell the owner their token is bad — a wrong answer to the one
+  question the button exists to ask. So the token goes in unencoded and
+  `assertUrlSafe` refuses any value carrying whitespace, a slash, a question
+  mark, a hash or a backslash, naming the SETTING rather than quoting the
+  value. It is not a defence against a caller, who never supplies this; it is
+  a defence against a mis-pasted secret quietly changing which URL is called,
+  of which a trailing newline is the common case. Redaction covers the
+  percent-encoded form as well as the raw one for the same reason: an upstream
+  that quotes its request target back shows the encoded bytes, and matching
+  only the raw string would sail straight past it.
+
+  Telegram answers `{ description }` where the other providers answer
+  `message` or `detail`, so `upstream-error.js` and its browser mirror
+  `proxyEnvelope.js` learned that field — appended last, so nothing Publer,
+  Klaviyo or Linkie resolve to can change. Without it the probe would print a
+  bare `HTTP 401`, which is the thing #463 item 4 exists to prevent.
+
+  **The YouTube probe costs about 100 of 10,000 daily quota units per press**,
+  because the Data API prices `search.list` per call and not per result. That
+  is why it is a button, why the success message says the cost out loud, and
+  why it must never become a timer or a page-load check.
+
+  One test changed rather than being added, and the direction matters. The
+  page asserted that a credentialed service with no test points at the page
+  where its credential is managed, guarded by `expect(untestable.length)
+  .toBeGreaterThan(0)` so the rule could not go vacuous. These three were the
+  last three, so that guard now fails for the right reason — which makes it
+  the wrong guard. It is replaced by an assertion that the set is *empty*,
+  which pins today's fact and hands the rule back the moment anything joins.
+
 - **The Azure Learn catalogue refreshes itself every Monday, and the Friday
   Skills Hub scrape finally has a reader (#461 items 3 and 4).**
   `frontend/scripts/update-applied-skills.mjs` had only ever been run by hand
