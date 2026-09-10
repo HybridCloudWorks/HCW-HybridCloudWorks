@@ -9,6 +9,20 @@
  * Advanced Security and GH-500 as Administration, and had no GH-900 or
  * Copilot at all.
  *
+ * RE-VERIFIED 2026-09-09 (#469 item 1). GitHub now publishes SIX, and the
+ * sixth was missing here:
+ *
+ *   GH-600 GitHub Certified: Agentic AI Developer — 120 minutes, $165 USD,
+ *     English, proctored, with two Microsoft Learn paths as the prepared
+ *     route (about six hours between them).
+ *     https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-developer/
+ *
+ * Worth knowing for the next pass: `docs.github.com`'s "About GitHub
+ * Certifications" page still lists only five and does not mention GH-600, so
+ * it is NOT a usable source for the set. `learn.github.com/credentials` and
+ * the Microsoft Learn browse URL in `DATA_SOURCE` both carry it. Read the
+ * source this file names, not the one that is easiest to find.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
@@ -95,5 +109,26 @@ export const certifications = [
     prepTime: '~8 weeks',
     featured: false,
     learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/github-administration/',
+  },
+  {
+    id: 'gh-600',
+    slug: 'gh-600',
+    code: 'GH-600',
+    title: 'GitHub Agentic AI Developer',
+    level: 'Associate',
+    status: 'active',
+    description:
+      'Build and operate agentic AI systems on GitHub — designing agent workflows, wiring tools and context, and evaluating and shipping them responsibly. 120 minutes, $165, English, proctored.',
+    topics: [
+      'Agentic Workflows',
+      'Tool Use',
+      'Context Engineering',
+      'Evaluation',
+      'Responsible AI',
+    ],
+    hours: 25,
+    prepTime: '~5 weeks',
+    featured: false,
+    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-developer/',
   },
 ];
