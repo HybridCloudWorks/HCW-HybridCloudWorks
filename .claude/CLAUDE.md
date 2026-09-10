@@ -120,7 +120,10 @@ so it is recorded here, where every session reads it.
   gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --paginate --jq '.[] | "\(.path):line \(.line // .original_line // "unknown")\n\(.body)\n"'
   ```
 
-  Three details in those lines are each a mistake someone has already made:
+  Every detail in those lines is a mistake someone has already made. Stated
+  without a count on purpose: this file learned from T-722 that a number
+  above a list drifts the moment the list grows, and this very sentence said
+  "three" over four bullets until review caught it.
 
   - **The reviews line prints the commit a review judged**, and the line
     above prints the head, because only a review of the head is the merge
