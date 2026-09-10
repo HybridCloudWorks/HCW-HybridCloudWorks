@@ -99,6 +99,65 @@ so it is recorded here, where every session reads it.
   own checks have been run locally, or it exists to hold a question rather
   than a change, say so in the first line of the description and open it as
   a draft. Otherwise not.
+- **Check for a waiting review before reporting a PR as finished, and again
+  whenever the session next touches it.** Owner instruction 2026-09-10, after
+  a session opened a PR, watched CI go green, reported it done, and stopped —
+  while a Copilot review carrying two security findings sat on it unread. CI
+  passing is not the end of a PR; the review is. Green checks and an unread
+  review look identical from the outside, which is why this is a step rather
+  than a habit.
+
+  The verdict and the inline findings live in two different places and a
+  session needs both — the review body carries the verdict, and the line
+  comments carry what to actually fix. **The four below are bash (Git Bash),
+  not PowerShell** — the same rule as the top of this file, which applies to
+  a session's own commands as much as to the owner's:
+
+  ```bash
+  PR=$(gh pr view --json number -q .number)
+  gh pr view "$PR" --json headRefOid -q .headRefOid
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/reviews --paginate --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | "\(.commit_id[0:8]) \(.state) \((.body // "") | split("\n")[0])"'
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/"$PR"/comments --paginate --jq '.[] | "\(.path):line \(.line // .original_line // "unknown")\n\(.body)\n"'
+  ```
+
+  Every detail in those lines is a mistake someone has already made. Stated
+  without a count on purpose: this file learned from T-722 that a number
+  above a list drifts the moment the list grows, and this very sentence said
+  "three" over four bullets until review caught it.
+
+  - **The reviews line prints the commit a review judged**, and the line
+    above prints the head, because only a review of the head is the merge
+    signal below. A review looks the same whether it read the current code
+    or three pushes ago, and the sha is the only thing that says which.
+  - **`--paginate`, because `gh api` stops at thirty.** A PR with more
+    review comments than that silently returns a prefix, and a section whose
+    whole point is finding every outstanding item cannot end at an arbitrary
+    cut. The same default truncated a board listing to its first thirty rows
+    on 2026-09-10 and made four open issues look absent.
+  - **A comment on an outdated line still knows where it was.** `.line` goes
+    null once the code beneath a comment has moved, but `.original_line`
+    survives, so falling back to it keeps a finding locatable instead of
+    printing a shrug. Only a comment with neither is genuinely unplaced.
+  - **The bot login differs between the two APIs.** REST spells it
+    `copilot-pull-request-reviewer[bot]`; `gh pr view --json reviews` spells
+    the same actor `copilot-pull-request-reviewer`, with no suffix. A filter
+    written for one and run against the other matches nothing and reads
+    exactly like "no reviews yet".
+
+  Then work the loop: fix every recommendation, push, reply on each thread
+  naming the commit, resolve it, and ask for another review of the new head.
+  Repeat until the review of the current head recommends approval, which is
+  the merge signal below. A finding judged wrong is answered on its thread
+  with the reason rather than silently skipped — disagreeing is allowed,
+  ignoring is not.
+
+  **Asking for the re-review: `@copilot review` summons the coding agent as
+  well as the reviewer.** On 2026-09-10 that comment on PR #486 brought back
+  a review *and* two commits pushed to the branch by `copilot-swe-agent`.
+  They were good changes and were kept, but they were not asked for. Read
+  anything that arrives that way before merging it, exactly as for any other
+  author, and never merge a head a session has not looked at. A plain push
+  also triggers a fresh review on its own, so the comment is rarely needed.
 - **A Copilot review that recommends approval is the owner's "merge".** Owner
   decision 2026-09-05: Copilot code review has authority to approve PRs in
   this repository, so when its review of the **current head** recommends
@@ -126,3 +185,28 @@ so it is recorded here, where every session reads it.
   resolution reads as dismissal to the next reviewer. Never resolve a thread
   to get past it: a thread whose ask has not been met stays open and the PR
   waits.
+
+## Several PRs at once, but conflicts are resolved one at a time
+
+Owner instruction 2026-09-10. Working more than one PR in a session is fine
+and often faster. What is not fine is carrying two of them into the same
+lines at once, because the second conflict is always worse than the first:
+it lands on a file that has already been hand-merged, so the resolution has
+to be re-derived rather than repeated.
+
+- **Work them in parallel until they touch.** Independent PRs — different
+  directories, different files — proceed together with no special handling.
+- **The moment two open PRs would edit the same lines, stop one.** Finish the
+  first through to merge, then fix the conflict on the next, then the next.
+  One at a time, in a decided order, rather than all of them at once against
+  a base that keeps moving.
+- **`CHANGELOG.md` is the file this happens on.** Nearly every PR appends to
+  the same `[Unreleased]` section, so two PRs open together will collide
+  there even when they share no code. Treat a second changelog entry as the
+  signal to serialise, not as a surprise when the merge button goes red.
+- **Rebases follow the same rule: complete one, then rebase the next onto
+  it.** Rebasing every open branch onto a new `main` at once means resolving
+  the same upstream change several times over, once per branch, with no way
+  to reuse the answer. Land one, rebase the next onto the result, land it,
+  and continue. A branch waiting its turn is cheaper than a branch rebased
+  twice.
