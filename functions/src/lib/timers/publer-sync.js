@@ -43,6 +43,32 @@
  *   - Errors arrive as `{ "errors": [...] }`, and that sentence is the whole
  *     difference between a malformed header and a revoked key. It is now on
  *     the thrown message and on the key verdict.
+ *
+ * PUBLER'S DOCUMENTED 401/403 SEMANTICS ARE BACKWARDS, and believing them cost
+ * #358 two days. The documentation says 401 is a missing, invalid, revoked or
+ * expired key and that a bad workspace id or a missing scope is 403. MEASURED
+ * against the live API on 2026-09-09, with a working key and a deliberately
+ * wrong value in each position:
+ *
+ *   correct key + correct workspace     -> 200
+ *   correct key + WRONG workspace id    -> 401 "You don't have access on this
+ *                                          workspace"
+ *   WRONG key + correct workspace       -> 403 "Invalid API key or not active
+ *                                          for this account."
+ *
+ * So **401 blames the workspace id and 403 blames the key**, the opposite way
+ * round. This client used to report both against `PUBLER_API_KEY`, so a wrong
+ * workspace id turned the KEY red on the API-keys page and the owner reminted
+ * a perfectly good key, repeatedly, for two days. `publerSettingForStatus`
+ * below is that fix, and it is written from the measurement rather than from
+ * the documentation for exactly the reason above.
+ *
+ * Two more things the same measurement settled, both of which had been
+ * proposed as causes and neither of which is one: a key with the `Bearer-API `
+ * scheme already baked into the value still answers **200** (Publer tolerates
+ * the doubled prefix), and a key carrying a zero-width character never reaches
+ * Publer at all -- `fetch` throws `Cannot convert argument to a ByteString`
+ * while building the header, which is a crash and not a 401.
  */
 import { readKey } from '../ai/router.js';
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
@@ -75,6 +101,21 @@ const MAX_PAGES = 10;
 // take the admin pages down with it, and a partial reconcile is corrected on
 // the next run five minutes later.
 const RATE_LIMIT_FLOOR = 10;
+
+/**
+ * Which setting a rejection actually blames, from the status.
+ *
+ * Measured, not documented -- see the header. 401 is the workspace id, 403 is
+ * the key. Anything else that reaches here is treated as the key, which is the
+ * conservative default: `isCredentialRejected` only admits 401 and 403 today,
+ * so the fallback is unreachable rather than wrong.
+ *
+ * @param {number|string} status
+ * @returns {'PUBLER_WORKSPACE_ID'|'PUBLER_API_KEY'}
+ */
+export function publerSettingForStatus(status) {
+  return Number(status) === 401 ? 'PUBLER_WORKSPACE_ID' : 'PUBLER_API_KEY';
+}
 
 function asIsoString(value) {
   if (!value) return null;
@@ -238,11 +279,19 @@ export function createPublerClient({
       // without API entitlement. #358 spent two days on that distinction with
       // only `HTTP 401` to go on, because this line threw the status alone.
       const detail = readUpstreamError(data);
-      // Only a 401/403 is a verdict on the key. A 404 is a wrong path, a 429
-      // a busy account, a 5xx Publer's problem — none of them says the
-      // credential is bad, and the light stays as it was.
+      // Only a 401/403 is a verdict on the pair. A 404 is a wrong path, a 429
+      // a busy account, a 5xx Publer's problem — none of them says a
+      // credential is bad, and the lights stay as they were.
+      //
+      // WHICH light, though, is the whole point: 401 blames the workspace id
+      // and 403 blames the key, measured rather than read off the docs, which
+      // have it the other way round. See the header.
       if (isCredentialRejected(response.status)) {
-        await reportVerdict('PUBLER_API_KEY', { ok: false, status: response.status, detail });
+        await reportVerdict(publerSettingForStatus(response.status), {
+          ok: false,
+          status: response.status,
+          detail,
+        });
       }
       const error = new Error(
         `Publer ${method} ${path} failed with ${describeUpstreamFailure(response.status, data)}`
@@ -251,7 +300,11 @@ export function createPublerClient({
       error.detail = detail;
       throw error;
     }
+    // A success clears BOTH lights: the call proved the key and the workspace
+    // id together, and leaving the other red would strand whichever one a
+    // previous rejection had blamed.
     await reportVerdict('PUBLER_API_KEY', { ok: true });
+    await reportVerdict('PUBLER_WORKSPACE_ID', { ok: true });
     return { data, rateLimitRemaining: Number.isFinite(rateLimitRemaining) ? rateLimitRemaining : null };
   }
 
@@ -362,9 +415,14 @@ export function createPublerReconcile({ store, client, now = () => new Date(), l
       publerPosts = await client.listPostsForSync();
     } catch (error) {
       if (!isCredentialRejected(error?.status)) throw error;
+      // Names the setting the status actually blames. The old message named
+      // both and left the operator to guess, which in practice meant reminting
+      // the key when the workspace id was wrong (#358).
       log.warn?.(
         `[syncSocialCalendar] Publer rejected the credential (HTTP ${error.status}); ` +
-          'PUBLER_API_KEY / PUBLER_WORKSPACE_ID need rotating together — skipping until they are'
+          `check ${publerSettingForStatus(error.status)} ` +
+          `(${error.status === 401 ? 'a 401 is the workspace id' : 'a 403 is the key'}) ` +
+          '— skipping until it is fixed'
       );
       return {
         skipped: true,

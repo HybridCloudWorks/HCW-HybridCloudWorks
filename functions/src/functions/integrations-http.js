@@ -8,7 +8,7 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { readKey } from '../lib/ai/router.js';
 import { createRestProxy, createIntegration } from '../lib/integrations/rest-proxy.js';
-import { PUBLER_API_BASE_URL } from '../lib/timers/publer-sync.js';
+import { PUBLER_API_BASE_URL, publerSettingForStatus } from '../lib/timers/publer-sync.js';
 import { recordKeyVerdict } from '../lib/key-verdict.js';
 
 // `recordKeyVerdict` is the process-wide writer the AI router and the Publer
@@ -30,6 +30,10 @@ const PUBLER = createIntegration({
     'Publer-Workspace-Id': read(env, 'PUBLER_WORKSPACE_ID'),
   }),
   reportsKeyVerdict: true,
+  // 401 is the workspace id, 403 is the key — measured against the live API,
+  // and the reverse of Publer's documentation. Shared with the timer's client
+  // so the two cannot disagree about which light to turn red (#358).
+  verdictSettingForStatus: publerSettingForStatus,
 });
 
 // The admin UI sends paths already prefixed with /api (e.g. '/api/lists/'), so

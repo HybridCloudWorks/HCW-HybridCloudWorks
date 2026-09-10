@@ -83,10 +83,19 @@ export const SECRET_SECTIONS = Object.freeze([
  * PROMISE that something reports this credential's health, and the page prints
  * "no liveness check for this one" beside a green light that has none. Two
  * things report today, both through `lib/key-verdict.js`, which is what
- * distinguishes a rejected key (401/403) from a bad request: `ai/router.js`
- * for its three providers, and the Publer client and proxy for `PUBLER_API_KEY`
- * (#358). Only those may carry a probe, and `secret-catalog.test.js` holds
- * that. Wiring a new reporter and setting a probe is one change, not two.
+ * distinguishes a rejected credential (401/403) from a bad request:
+ * `ai/router.js` for its three providers, and the Publer client and proxy for
+ * BOTH `PUBLER_API_KEY` and `PUBLER_WORKSPACE_ID` (#358). Only those may carry
+ * a probe, and `secret-catalog.test.js` holds that. Wiring a new reporter and
+ * setting a probe is one change, not two.
+ *
+ * The workspace id gained a probe on 2026-09-09, and the reason is worth
+ * keeping: Publer answers 401 when the WORKSPACE ID is wrong and 403 when the
+ * KEY is, which is the reverse of its own documentation and was measured
+ * against the live API. Reporting both against the key meant a wrong workspace
+ * id turned the key red, and two days went into reminting a key that was fine.
+ * An identifier that can be wrong on its own, and that an upstream service
+ * will tell you about, deserves its own light.
  */
 export const SECRET_CATALOG = Object.freeze([
   // ── AI & generation ──────────────────────────────────────────────────────
@@ -182,8 +191,11 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'PUBLER-WORKSPACE-ID',
     section: 'social',
     label: 'Publer — workspace id',
-    help: 'An identifier rather than a credential, but it travels with its key.',
-    probe: null,
+    help:
+      'An identifier rather than a credential, but Publer rejects a wrong one on its own: a 401 ' +
+      'from Publer means THIS value, not the key. Find it in the API playground at ' +
+      'publer.com/docs, not on the Settings page — the id shown there is the account id.',
+    probe: 'publer',
   },
   {
     setting: 'KLAVIYO_PRIVATE_KEY',

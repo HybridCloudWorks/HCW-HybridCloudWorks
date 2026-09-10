@@ -102,8 +102,22 @@ export function createIntegration({
   // Klaviyo's and Linkie's have not been read, and a scope-limited key that
   // answers 403 on one endpoint and 200 on the next would flap the light.
   reportsKeyVerdict = false,
+  // Which setting a rejection blames, from the upstream status. Defaults to
+  // the key, which is what every integration but Publer means. Publer needs
+  // the choice because a 401 there blames the WORKSPACE ID and a 403 the key
+  // — measured, and the opposite of what its documentation says (#358).
+  verdictSettingForStatus = null,
 }) {
-  return { name, baseUrl, keyEnv, headers, extraEnv, allowedPaths, reportsKeyVerdict };
+  return {
+    name,
+    baseUrl,
+    keyEnv,
+    headers,
+    extraEnv,
+    allowedPaths,
+    reportsKeyVerdict,
+    verdictSettingForStatus: verdictSettingForStatus || (() => keyEnv),
+  };
 }
 
 /**
@@ -240,7 +254,7 @@ export function createRestProxy({
         if (response.ok) {
           await reportVerdict(integration.keyEnv, { ok: true });
         } else if (isCredentialRejected(response.status)) {
-          await reportVerdict(integration.keyEnv, {
+          await reportVerdict(integration.verdictSettingForStatus(response.status), {
             ok: false,
             status: response.status,
             detail: readUpstreamError(data),

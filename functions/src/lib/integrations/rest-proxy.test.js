@@ -333,6 +333,49 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
     });
   });
 
+  it('attributes a rejection to whichever setting the integration blames for that status', async () => {
+    // Publer's case, and the reason the hook exists: a 401 there means the
+    // WORKSPACE ID is wrong and a 403 means the KEY is — measured against the
+    // live API, and the reverse of Publer's documentation. Every other
+    // integration keeps the default, which blames the key for both (#358).
+    const SPLIT = createIntegration({
+      name: 'Split',
+      baseUrl: 'https://api.example.test/v1',
+      keyEnv: 'TEST_API_KEY',
+      headers: ({ apiKey }) => ({ Authorization: `Bearer ${apiKey}` }),
+      reportsKeyVerdict: true,
+      verdictSettingForStatus: (status) =>
+        Number(status) === 401 ? 'TEST_WORKSPACE_ID' : 'TEST_API_KEY',
+    });
+
+    const four01 = buildReporting({ integration: SPLIT, status: 401, body: {} });
+    await call(four01.handler);
+    expect(four01.onKeyVerdict).toHaveBeenCalledWith('TEST_WORKSPACE_ID', {
+      ok: false,
+      status: 401,
+      detail: '',
+    });
+
+    const four03 = buildReporting({ integration: SPLIT, status: 403, body: {} });
+    await call(four03.handler);
+    expect(four03.onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', {
+      ok: false,
+      status: 403,
+      detail: '',
+    });
+  });
+
+  it('blames the key for both statuses when an integration says nothing', async () => {
+    // The default has to stay the old behaviour: Klaviyo and Linkie have not
+    // had their 401/403 semantics measured, and guessing at a split for them
+    // would be the same mistake in a new place.
+    for (const status of [401, 403]) {
+      const { handler, onKeyVerdict } = buildReporting({ status, body: {} });
+      await call(handler);
+      expect(onKeyVerdict).toHaveBeenCalledWith('TEST_API_KEY', { ok: false, status, detail: '' });
+    }
+  });
+
   it('reports a success, so a rotated key turns the light green from this path too', async () => {
     const { handler, onKeyVerdict } = buildReporting({ status: 200 });
     expect(JSON.parse((await call(handler)).body)).toEqual({
