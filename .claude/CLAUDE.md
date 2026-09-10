@@ -111,12 +111,11 @@ so it is recorded here, where every session reads it.
   session needs both — the review body carries the verdict, and the line
   comments carry what to actually fix. **The two below are bash (Git Bash),
   not PowerShell** — the same rule as the top of this file, which applies to
-  a session's own commands as much as to the owner's. They are session
-  commands with the PR number substituted, not lines for the owner to paste:
+  a session's own commands as much as to the owner's:
 
   ```bash
-  gh pr view NUMBER --json reviews -q '.reviews[] | "\(.author.login) [\(.state)]\n\(.body)"'
-  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/NUMBER/comments --jq '.[] | "\(.path):\(.line)\n\(.body)\n"'
+  gh pr view --json reviews -q '.reviews[] | "\(.author.login) [\(.state)]\n\(.body)"'
+  gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/$(gh pr view --json number -q .number)/comments --jq '.[] | "\(.path):line \(.line // "outdated")\n\(.body)\n"'
   ```
 
   Then work the loop: fix every recommendation, push, reply on each thread
