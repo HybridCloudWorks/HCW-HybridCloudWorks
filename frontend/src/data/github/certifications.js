@@ -4,7 +4,7 @@
  * Verified 2026-09-09 against each certification's Microsoft Learn page — the
  * exam code is the `examUid=exam.GH-xxx` in its "Schedule exam" link:
  *   GH-900 Foundations, GH-100 Administration, GH-200 Actions,
- *   GH-300 Copilot, GH-500 Advanced Security.
+ *   GH-300 Copilot, GH-500 Advanced Security, GH-600 Agentic AI Developer.
  * Before this file existed the page carried GH-100 as Foundations, GH-300 as
  * Advanced Security and GH-500 as Administration, and had no GH-900 or
  * Copilot at all.
@@ -13,8 +13,8 @@
  * sixth was missing here:
  *
  *   GH-600 GitHub Certified: Agentic AI Developer — 120 minutes, $165 USD,
- *     English, proctored, with two Microsoft Learn paths as the prepared
- *     route.
+ *     English, proctored, with two Microsoft Learn paths as the
+ *     recommended prep route.
  *     https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-developer/
  *
  * Worth knowing for the next pass: `docs.github.com`'s "About GitHub
