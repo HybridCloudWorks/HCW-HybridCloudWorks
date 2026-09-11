@@ -2,7 +2,7 @@
 // Verified by hand against the Learn credentials browse API
 // (https://learn.microsoft.com/api/contentbrowser/search/credentials) and the credential-retirement page
 // (https://learn.microsoft.com/en-us/credentials/support/credential-retirement) on the date below.
-// Last manual sync: 2026-09-09
+// Last manual sync: 2026-09-11
 //
 // THE GITHUB EXAMS ARE NOT CARRIED HERE (#496, owner decision 2026-09-11).
 // GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900 used to sit in this file as
@@ -29,7 +29,7 @@
  * derived from the dates at render time (src/lib/certStatus.js) so a date that
  * passes between syncs cannot keep showing "Expiring" or "Beta".
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-11';
 
 /**
  * The page a reader can check this catalogue's freshness claim against.
@@ -1377,6 +1377,157 @@ export const certifications = [
     appliedSkills: [],
     prerequisites: 'Basic data familiarity. AZ-900 recommended.',
     nextCerts: ['dp-700', 'dp-300', 'dp-420'],
+  },
+  {
+    id: 'gh-100',
+    slug: 'github-administration',
+    code: 'GH-100',
+    officialCode: 'GH-100',
+    title: 'Microsoft Certified: GitHub Administration',
+    level: 'Fundamentals',
+    status: 'active',
+    description: 'GitHub Administration validates role-based Microsoft cloud skills.',
+    longDescription:
+      'GitHub Administration validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+    topics: ['Application development', 'DevOps'],
+    hours: 10,
+    prepTime: '~4 weeks',
+    successRate: null,
+    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/github-administration/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-100',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=gh-100',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
+    nextCerts: [],
+  },
+  {
+    id: 'gh-200',
+    slug: 'github-actions',
+    code: 'GH-200',
+    officialCode: 'GH-200',
+    title: 'Microsoft Certified: GitHub Actions',
+    level: 'Fundamentals',
+    status: 'active',
+    description: 'GitHub Actions validates role-based Microsoft cloud skills.',
+    longDescription:
+      'GitHub Actions validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+    topics: ['Application development', 'DevOps'],
+    hours: 10,
+    prepTime: '~4 weeks',
+    successRate: null,
+    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/github-actions/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-200',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=gh-200',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
+    nextCerts: [],
+  },
+  {
+    id: 'gh-300',
+    slug: 'github-copilot',
+    code: 'GH-300',
+    officialCode: 'GH-300',
+    title: 'Microsoft Certified: GitHub Copilot',
+    level: 'Fundamentals',
+    status: 'active',
+    description: 'GitHub Copilot validates role-based Microsoft cloud skills.',
+    longDescription:
+      'GitHub Copilot validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+    topics: ['Artificial intelligence', 'Business applications', 'Automation', 'Machine learning'],
+    hours: 10,
+    prepTime: '~4 weeks',
+    successRate: null,
+    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/github-copilot/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-300',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=gh-300',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
+    nextCerts: [],
+  },
+  {
+    id: 'gh-500',
+    slug: 'github-advanced-security',
+    code: 'GH-500',
+    officialCode: 'GH-500',
+    title: 'Microsoft Certified: GitHub Advanced Security',
+    level: 'Fundamentals',
+    status: 'active',
+    description: 'GitHub Advanced Security validates role-based Microsoft cloud skills.',
+    longDescription:
+      'GitHub Advanced Security validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+    topics: ['Application development', 'DevOps'],
+    hours: 10,
+    prepTime: '~4 weeks',
+    successRate: null,
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/github-advanced-security/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-500',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=gh-500',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
+    nextCerts: [],
+  },
+  {
+    id: 'gh-600',
+    slug: 'agentic-ai-developer',
+    code: 'GH-600',
+    officialCode: 'GH-600',
+    title: 'Microsoft Certified: GitHub Agentic AI Developer',
+    level: 'Associate',
+    status: 'active',
+    description: 'GitHub Agentic AI Developer validates role-based Microsoft cloud skills.',
+    longDescription:
+      'GitHub Agentic AI Developer validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+    topics: ['Application development', 'Artificial intelligence'],
+    hours: 35,
+    prepTime: '~6 weeks',
+    successRate: null,
+    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-developer/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-600',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=gh-600',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
+    nextCerts: [],
+  },
+  {
+    id: 'gh-900',
+    slug: 'github-foundations',
+    code: 'GH-900',
+    officialCode: 'GH-900',
+    title: 'Microsoft Certified: GitHub Foundations',
+    level: 'Fundamentals',
+    status: 'active',
+    description: 'GitHub Foundations validates role-based Microsoft cloud skills.',
+    longDescription:
+      'GitHub Foundations validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+    topics: ['Application development', 'DevOps'],
+    hours: 10,
+    prepTime: '~4 weeks',
+    successRate: null,
+    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/github-foundations/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-900',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications#examid=gh-900',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'Review the official Microsoft Learn certification page for prerequisites.',
+    nextCerts: [],
   },
   {
     id: 'mb-230',

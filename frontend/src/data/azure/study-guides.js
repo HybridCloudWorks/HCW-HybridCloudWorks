@@ -3,15 +3,6 @@
 // certifications.js, using the same parser Listen & Learn uses
 // (functions/src/lib/listen-and-learn/studyguide.js). Do not edit by hand: re-run the script.
 // Last manual sync: 2026-09-11
-//
-// ONE HAND EDIT, #496: the six gh-* outlines were deleted. They were generated
-// when certifications.js still carried the GitHub exams, and #496 removed those
-// rows — `eligibleCerts` reads the catalogue, so the next script run would drop
-// these six anyway, and study-guides.test.js ("has no outline for an exam the
-// catalogue does not carry") goes red until they are gone. Deleted rather than
-// regenerated to keep the diff to the six entries: a full re-run re-fetches all
-// ~50 guides and moves DATA_AS_OF, which would bury the change it is meant to
-// show. Nothing was added or reworded by hand.
 
 /**
  * The day these outlines were last read from Microsoft Learn. Rendered by the
@@ -5546,6 +5537,1173 @@ export const STUDY_GUIDES = Object.freeze({
           },
         ],
         objectives: [],
+      },
+    ],
+  },
+  'gh-100': {
+    examCode: 'GH-100',
+    title: 'Study guide for Exam GH-100: GitHub Enterprise Administrator',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-100',
+    areas: [
+      {
+        name: 'Manage GitHub identities and access',
+        slug: 'manage-github-identities-and-access',
+        anchor: 'manage-github-identities-and-access-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Manage user identities and authentication',
+            objectives: [
+              'Describe differences between managed users and personal accounts',
+              'Configure and enforce SAML SSO and 2FA',
+              'Understand SCIM and team synchronization: implementation and key differences',
+              'Choose and configure identity providers',
+              'Explain GitHub’s authentication and authorization model',
+            ],
+          },
+          {
+            title: 'Manage access and permissions',
+            objectives: [
+              'Configure organization and repository roles',
+              'Define and manage enterprise teams',
+              'Audit access and permissions',
+              'Manage settings, policies, rulesets, and roles',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Administer GitHub Enterprise environment',
+        slug: 'administer-github-enterprise-environment',
+        anchor: 'administer-github-enterprise-environment-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Support GitHub Enterprise users and stakeholders',
+            objectives: [
+              'Identify issues resolvable by admins vs GitHub Support',
+              'Generate support bundles and diagnostics',
+              'Recommend standards for developer processes',
+              'Define standards for workflows, branching, reviews, and releases',
+            ],
+          },
+          {
+            title: 'Manage deployment and licensing',
+            objectives: [
+              'Describe GitHub Enterprise deployment scenarios (GHEC with EMU, GHEC with Data Residency + EMU, GHEC with personal accounts, GHES)',
+              'Explain licensing and billing models',
+              'Monitor license usage and consumption',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Implement secure software development and compliance',
+        slug: 'implement-secure-software-development-and-compliance',
+        anchor: 'implement-secure-software-development-and-compliance-2530',
+        weightLabel: '25–30%',
+        weightLow: 25,
+        weightHigh: 30,
+        sections: [
+          {
+            title: 'Configure security policies and rulesets',
+            objectives: [
+              'Define organization and enterprise policies',
+              'Strengthen enterprise security posture and data protection',
+              'Implement audit logging and reporting',
+            ],
+          },
+          {
+            title: 'Enable repository security features',
+            objectives: [
+              'Configure vulnerability alerts, secret scanning, and CodeQL',
+              'Manage Dependabot and security advisories',
+              'Define and implement a security response plan',
+            ],
+          },
+          {
+            title: 'Manage API access and integrations',
+            objectives: [
+              'Configure personal access tokens',
+              'Understand rate limits for PATs and GitHub Apps',
+              'Describe GitHub Apps and OAuth Apps',
+              'Approve or deny app usage based on policy',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Manage GitHub Actions',
+        slug: 'manage-github-actions',
+        anchor: 'manage-github-actions-2025',
+        weightLabel: '20–25%',
+        weightLow: 20,
+        weightHigh: 25,
+        sections: [
+          {
+            title: 'Configure workflows and reusable components',
+            objectives: [
+              'Configure and manage reuse of actions and workflows to the enterprise repository',
+              'Apply organizational policies for GitHub Actions',
+            ],
+          },
+          {
+            title: 'Manage runners',
+            objectives: [
+              'Manage runner groups and administer GitHub-hosted vs. self-hosted runner options',
+              'Apply IP allow lists and configure networking (including Azure private networking)',
+              'Monitor and troubleshoot runner performance',
+            ],
+          },
+          {
+            title: 'Manage encrypted secrets',
+            objectives: [
+              'Define scope and access for secrets',
+              'Configure secrets at organization and repository levels',
+              'Integrate third-party vaults',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Monitor and optimize GitHub usage',
+        slug: 'monitor-and-optimize-github-usage',
+        anchor: 'monitor-and-optimize-github-usage-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Monitor enterprise usage and activity',
+            objectives: [
+              'Analyze audit logs and API usage',
+              'Distinguish admin responsibilities vs. GitHub Support and generate diagnostics',
+              'Evaluate enterprise usage patterns to identify adoption, activity, and underutilized features',
+            ],
+          },
+          {
+            title: 'Optimize cost and performance',
+            objectives: [
+              'Interpret usage reports for metered products',
+              'Recommend strategies for license and resource optimization',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+    ],
+  },
+  'gh-200': {
+    examCode: 'GH-200',
+    title: 'Study guide for Exam GH-200: GitHub Actions',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-200',
+    areas: [
+      {
+        name: 'Author and manage workflows',
+        slug: 'author-and-manage-workflows',
+        anchor: 'author-and-manage-workflows-2025',
+        weightLabel: '20–25%',
+        weightLow: 20,
+        weightHigh: 25,
+        sections: [
+          {
+            title: 'Configure workflow triggers and events',
+            objectives: [
+              'Configure workflows to run for scheduled, manual, webhook, and repository events',
+              'Choose appropriate scope, permissions, and events for workflow automation',
+              'Define and validate workflow_dispatch inputs (types, required, defaults) and pass inputs to reusable workflows via workflow_call with inputs and secrets mapping',
+            ],
+          },
+          {
+            title: 'Design and implement workflow structure',
+            objectives: [
+              'Use jobs, steps, and conditional logic',
+              'Implement dependencies between jobs',
+              'Use workflow commands and environment variables',
+              'Use service containers (services:) for dependent services (databases, queues); configure ports, health checks, and container options',
+              'Use strategy and matrix to generate job variations (OS, language/runtime versions); apply include/exclude; control fail-fast and max-parallel; optimize matrix size for cost and performance; account for runner image changes (Ubuntu 20.04 deprecation, Windows Server 2025 migration for windows-latest)',
+              'Implement YAML anchors and aliases (&, * and merge <<) to reuse repeated mappings/steps within a single workflow file',
+              'Use predefined contexts (github, runner, env, vars, secrets, inputs, matrix, needs, strategy, job, steps, github.event, github.ref) to access workflow, repository, and runtime metadata; understand immutable actions behavior and version pinning requirements',
+              'Evaluate expressions with ${{ }} referencing contexts; distinguish static (workflow parse) vs runtime evaluation; prevent secret leakage in logs and expressions',
+              'Leverage editor tooling (GitHub Actions VS Code extension / YAML schema completion, metadata IntelliSense, validation) to author and maintain workflows efficiently',
+            ],
+          },
+          {
+            title: 'Manage workflow execution and outputs',
+            objectives: [
+              'Configure caching and artifact management; apply retention policies via REST APIs (logs, artifacts, workflow runs) at org/repo level',
+              'Pass data between jobs and steps (artifacts, outputs, environment files via GITHUB_ENV and GITHUB_OUTPUT, reusable workflow outputs)',
+              'Generate job summaries using GITHUB_STEP_SUMMARY for rich Markdown reports (test results, coverage, links)',
+              'Add workflow status badges and environment protections',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Consume and troubleshoot workflows',
+        slug: 'consume-and-troubleshoot-workflows',
+        anchor: 'consume-and-troubleshoot-workflows-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Interpret workflow behavior and results',
+            objectives: [
+              'Identify workflow triggers and effects from configuration and logs',
+              'Diagnose failed workflow runs using logs and run history',
+              'Expand and interpret YAML anchors, aliases, and merged mappings when analyzing workflow configuration',
+              'Interpret matrix expansions, correlate job names to matrix axes, analyze failures across variants, and selectively rerun individual matrix jobs',
+            ],
+          },
+          {
+            title: 'Access workflow artifacts and logs',
+            objectives: [
+              'Locate workflows, logs, and artifacts in the UI and via API',
+              'Download and manage workflow artifacts',
+            ],
+          },
+          {
+            title: 'Use and manage workflow templates',
+            objectives: [
+              'Consume organization-level and reusable workflows',
+              'Consume non-public organization workflow templates',
+              'Use starter workflows (public and private/non-public templates); customize and adapt; distinguish from reusable workflows and composite actions',
+              'Differentiate starter workflows (copy scaffold, independent after creation) vs reusable workflows (central versioned definition invoked via workflow_call) vs composite actions (encapsulated step logic)',
+              'Contrast disabling and deleting workflows',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Author and maintain actions',
+        slug: 'author-and-maintain-actions',
+        anchor: 'author-and-maintain-actions-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Create and troubleshoot custom actions',
+            objectives: [
+              'Identify and implement action types (JavaScript, Docker, composite); understand immutable actions rollout on hosted runners and implications for version pinning and registry sources',
+              'Troubleshoot action execution and errors',
+            ],
+          },
+          {
+            title: 'Define action structure and metadata',
+            objectives: [
+              'Specify required files, directory structure, and metadata',
+              'Implement workflow commands within actions',
+            ],
+          },
+          {
+            title: 'Distribute and maintain actions',
+            objectives: [
+              'Select distribution models (public, private, marketplace)',
+              'Publish actions to the GitHub Marketplace',
+              'Apply versioning and release strategies',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Manage GitHub Actions for the enterprise',
+        slug: 'manage-github-actions-for-the-enterprise',
+        anchor: 'manage-github-actions-for-the-enterprise-2025',
+        weightLabel: '20–25%',
+        weightLow: 20,
+        weightHigh: 25,
+        sections: [
+          {
+            title: 'Distribute and govern actions and workflows',
+            objectives: [
+              'Define and manage reusable components and templates',
+              'Control access to actions and workflows within the enterprise',
+              'Configure organizational use policies',
+            ],
+          },
+          {
+            title: 'Manage runners at scale',
+            objectives: [
+              'Configure and monitor GitHub-hosted and self-hosted runners',
+              'Apply IP allow lists and networking settings',
+              'Manage runner groups and troubleshoot runner issues',
+              'Identify preinstalled software/tool versions on GitHub-hosted runners (image release notes, toolcache) and install additional software at runtime (setup-* actions, package managers, caching, container images, custom self-hosted images)',
+            ],
+          },
+          {
+            title: 'Manage encrypted secrets and variables',
+            objectives: [
+              'Define and scope encrypted secrets and variables at the organization, repository, and environment levels',
+              'Access and use secrets and variables in workflows and actions; manage secrets and variables programmatically via REST APIs',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Secure and optimize automation',
+        slug: 'secure-and-optimize-automation',
+        anchor: 'secure-and-optimize-automation-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Implement security best practices',
+            objectives: [
+              'Use environment protections and approval gates',
+              'Identify and use trustworthy actions from the Marketplace',
+              'Mitigate script injection (sanitize/validate inputs, least-privilege permissions, avoid untrusted data in run:, proper shell quoting, prefer vetted actions over inline scripts)',
+              'Understand GITHUB_TOKEN lifecycle (ephemeral, scoped), configure granular permissions, contrast with PAT; restrict write scopes',
+              'Use OIDC token (id-token permission) for cloud provider federation to eliminate long-lived cloud secrets',
+              'Pin third-party actions to full commit SHAs; align with immutable actions enforcement on hosted runners; avoid floating @main/@v\\* without justification',
+              'Enforce action usage policies (organization/repository allow/deny lists, required reviewers for unverified actions)',
+              'Generate and verify artifact attestations / provenance (e.g., SLSA, build metadata) and integrate into deployment verification',
+            ],
+          },
+          {
+            title: 'Optimize workflow performance and cost',
+            objectives: [
+              'Configure caching and artifact retention for efficiency; apply retention policies programmatically via REST APIs',
+              'Recommend strategies for scaling and optimizing workflows',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+    ],
+  },
+  'gh-300': {
+    examCode: 'GH-300',
+    title: 'Study guide for Exam GH-300: GitHub Copilot',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-300',
+    areas: [
+      {
+        name: 'Use GitHub Copilot responsibly',
+        slug: 'use-github-copilot-responsibly',
+        anchor: 'use-github-copilot-responsibly-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Understand responsible AI principles',
+            objectives: [
+              'Describe risks and limitations of Generative AI tools',
+              'Describe ethical and responsible AI usage',
+              'Identify potential harms and mitigation strategies of AI usage',
+            ],
+          },
+          {
+            title: 'Validate and operate AI tools',
+            objectives: [
+              'Explain the need to validate AI output',
+              'Identify how to operate GitHub Copilot responsibly',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Use GitHub Copilot features',
+        slug: 'use-github-copilot-features',
+        anchor: 'use-github-copilot-features-2530',
+        weightLabel: '25–30%',
+        weightLow: 25,
+        weightHigh: 30,
+        sections: [
+          {
+            title: 'Use GitHub Copilot in the IDE',
+            objectives: [
+              'Enable Copilot in the IDE',
+              'Trigger Copilot through inline suggestions, chat, CLI, and agent mode',
+              'Configure content exclusions for specific files or repositories (app knowledge)',
+            ],
+          },
+          {
+            title: 'Use GitHub Copilot CLI',
+            objectives: [
+              'Define GitHub Copilot CLI and how it benefits developers',
+              'Identify the steps for installing GitHub Copilot CLI',
+              'Describe key GitHub Copilot CLI features and commands',
+              'Use GitHub Copilot CLI interactively and in sessions',
+              'Generate scripts and manage files with GitHub Copilot CLI',
+            ],
+          },
+          {
+            title: 'Use GitHub Copilot features and capabilities',
+            objectives: [
+              'Use Agent Mode, Copilot Edits, and MCP for enhanced development and workflows; manage Agent Sessions and delegate tasks to Sub‑Agents for optimized context usage',
+              'Use Copilot for code review and coding assistance',
+              'Utilize Spaces, Spark, Pull Request summaries, and customizable review standards via instructions files',
+              'Understand the limits, options, feedback, and commands of GitHub Copilot Chat; include prompt file reuse for consistent responses',
+            ],
+          },
+          {
+            title: 'Manage organization-wide settings and policies',
+            objectives: [
+              'Configure organization-wide policy management; enable Copilot Code Review policies and manage feature availability across IDEs and github.com',
+              'Utilize audit log events',
+              'Manage subscriptions using the REST API',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Understand GitHub Copilot data and architecture',
+        slug: 'understand-github-copilot-data-and-architecture',
+        anchor: 'understand-github-copilot-data-and-architecture-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Describe data handling and flow',
+            objectives: [
+              'Explain data usage, flow, and sharing',
+              'Describe input processing and prompt building',
+              'Explain proxy filtering and post-processing',
+            ],
+          },
+          {
+            title: 'Understand lifecycle and limitations',
+            objectives: [
+              'Visualize code suggestion lifecycle',
+              'Describe limitations of LLMs and Copilot',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Apply prompt engineering and context crafting',
+        slug: 'apply-prompt-engineering-and-context-crafting',
+        anchor: 'apply-prompt-engineering-and-context-crafting-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Craft effective prompts',
+            objectives: [
+              'Describe prompt structure and context',
+              'Understand how context is determined',
+              'Use zero-shot and few-shot prompting',
+              'Apply best practices for prompt crafting',
+            ],
+          },
+          {
+            title: 'Engineer prompts for performance',
+            objectives: [
+              'Explain prompt engineering principles',
+              'Describe prompt process flow and chat history usage',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Improve developer productivity with GitHub Copilot',
+        slug: 'improve-developer-productivity-with-github-copilot',
+        anchor: 'improve-developer-productivity-with-github-copilot-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Enhance productivity and code quality',
+            objectives: [
+              'Use Copilot for code generation, refactoring, and documentation',
+              'Accelerate learning and reduce context switching',
+              'Generate sample data and modernize legacy code',
+            ],
+          },
+          {
+            title: 'Support testing and security',
+            objectives: [
+              'Generate unit and integration tests',
+              'Identify edge cases and write assertions',
+              'Suggest security improvements and performance optimizations',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Configure privacy, content exclusions, and safeguards',
+        slug: 'configure-privacy-content-exclusions-and-safeguards',
+        anchor: 'configure-privacy-content-exclusions-and-safeguards-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Manage privacy settings and exclusions',
+            objectives: [
+              'Configure content exclusions and editor settings',
+              'Describe ownership and limitations of outputs',
+            ],
+          },
+          {
+            title: 'Apply safeguards and troubleshoot',
+            objectives: [
+              'Enable suggestions matching public code filtering',
+              'Resolve issues with suggestions and content exclusions',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+    ],
+  },
+  'gh-500': {
+    examCode: 'GH-500',
+    title: 'Study guide for Exam GH-500: GitHub Advanced Security',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-500',
+    areas: [
+      {
+        name: 'Describe GitHub Security suites, features, and ecosystem',
+        slug: 'describe-github-security-suites-features-and-ecosystem',
+        anchor: 'describe-github-security-suites-features-and-ecosystem-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Understand GitHub Security suites and architecture',
+            objectives: [
+              'Describe GitHub Security suite structure and navigation',
+              'Contrast Code Security, Secret Protection, and Supply Chain Security',
+              'Differentiate security feature availability for public repositories vs. enterprise environments',
+              'Explain features and benefits of the Security Overview',
+            ],
+          },
+          {
+            title: 'Apply secure SDLC and security strategies',
+            objectives: [
+              'Explain differences and interplay between Secret Protection and Code Security',
+              'Describe end-to-end secure SDLC using GitHub Security suites',
+              'Compare prevention-first approaches vs. gate-based security strategies',
+              'Explain security campaigns and their role in reducing risk',
+            ],
+          },
+          {
+            title: 'Detect, manage, and respond to security alerts',
+            objectives: [
+              'Identify vulnerability and secret detection mechanisms',
+              'Choose and act on security alerts (alert management, policies, workflows)',
+              'Explain implications and best practices for ignoring or dismissing alerts',
+              'Describe developer, security, and admin responsibilities for alerts and remediation',
+            ],
+          },
+          {
+            title: 'Manage access, governance, and supply chain security',
+            objectives: [
+              'Explain alert access management, roles, delegated bypass, and enforcement',
+              'Describe supply chain security concepts and alert information across the SDLC',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Configure and use Secret Protection (formerly secret scanning)',
+        slug: 'configure-and-use-secret-protection-formerly-secret-scanning',
+        anchor: 'configure-and-use-secret-protection-formerly-secret-scanning-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Enable and configure Secret Protection',
+            objectives: [
+              'Enable GitHub Secret Protection at the repository and organization levels',
+              'Configure Secret Protection settings and feature availability',
+              'Contrast Secret Protection behavior for public vs. private/enterprise repositories',
+            ],
+          },
+          {
+            title: 'Prevent secret exposure',
+            objectives: [
+              'Explain Push Protection and how it prevents secrets at the source',
+              'Describe validity checks and prioritized alerting for high-confidence secrets',
+              'Describe the Secret Protection alert lifecycle (creation, status, dismissal)',
+              'Respond to secret alerts and apply appropriate remediation actions',
+              'Explain implications and best practices for dismissing or ignoring alerts',
+            ],
+          },
+          {
+            title: 'Control access, policies, and customization',
+            objectives: [
+              'Explain role-based and delegated bypass policies in Secret Protection',
+              'Configure alert recipients and exclusions',
+              'Create and manage custom secret patterns',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Configure and use supply chain security (formerly Dependabot/Dependency Review)',
+        slug: 'configure-and-use-supply-chain-security-formerly-dependabot-dependency-review',
+        anchor: 'configure-and-use-supply-chain-security-formerly-dependabotdependency-review-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Understand and manage dependency and supply chain risks',
+            objectives: [
+              'Comprehensive dependency security (tools, vulnerability databases, SBOMs)',
+              'Generate and interpret the dependency graph',
+              'SBOM usage: export options, formats, and supply chain context',
+            ],
+          },
+          {
+            title: 'Detect, prioritize, and respond to supply chain alerts',
+            objectives: [
+              'Supply chain alerts and security updates (prioritization, EPSS scoring)',
+              'Remediating supply chain alerts through campaigns and pull requests',
+              'Auto-dismiss behavior and security campaign configuration',
+            ],
+          },
+          {
+            title: 'Secure dependencies during development',
+            objectives: [
+              'Dependency Review (pre-merge checks, license and compliance validation, configuration)',
+              'Advanced dependency update rules (grouping, auto-dismiss, update strategies)',
+            ],
+          },
+          {
+            title: 'Configure policies, permissions, and integrations',
+            objectives: [
+              'Permissions and role-based alert assignment',
+              'Workflow management for dependency and supply chain security',
+              'External notifications, webhooks, and security integrations',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Configure and use Code Security (formerly Code Scanning with CodeQL)',
+        slug: 'configure-and-use-code-security-formerly-code-scanning-with-codeql',
+        anchor: 'configure-and-use-code-security-formerly-code-scanning-with-codeql-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Understand code scanning approaches and tooling',
+            objectives: [
+              'Native and third-party code scanning options',
+              'Choosing between CodeQL and third-party analysis tools',
+              'SARIF file ingestion, management, and interoperability',
+            ],
+          },
+          {
+            title: 'Set up and configure Code Security',
+            objectives: [
+              'Enable code security using GitHub Actions or external CI systems',
+              'Configure code scanning workflows and workflow templates',
+              'Use matrix builds and define appropriate scan frequency',
+            ],
+          },
+          {
+            title: 'Analyze, triage, and remediate code scanning results',
+            objectives: [
+              'Review scan results, including dataflow analysis insights',
+              'Alert lifecycles, autofix capabilities, and remediation workflows',
+              'Dismissing alerts and managing severity and category classifications',
+            ],
+          },
+          {
+            title: 'Optimize and automate Code Security operations',
+            objectives: [
+              'Advanced configuration and customization',
+              'Troubleshooting scan failures and performance issues',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Security operations: best practices, prioritization, and remediation',
+        slug: 'security-operations-best-practices-prioritization-and-remediation',
+        anchor: 'security-operations-best-practices-prioritization-and-remediation-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Understand vulnerability context and remediation frameworks',
+            objectives: [
+              'CVE, CWE, and GitHub Security Advisory concepts',
+              'End-to-end remediation workflows across security alerts and advisories',
+            ],
+          },
+          {
+            title: 'Prioritize and manage security work at scale',
+            objectives: [
+              'Defining, prioritizing, and enforcing severity and remediation rulesets',
+              'Campaign-based remediation strategies and bulk alert management',
+              'Automated alert dismissal and documentation practices',
+            ],
+          },
+          {
+            title: 'Customize and optimize security detection',
+            objectives: [
+              'Customizing CodeQL query suites and language-specific analysis',
+              'Tailoring security detection to organizational risk profiles',
+            ],
+          },
+          {
+            title: 'Collaborate across roles and enforce governance',
+            objectives: [
+              'Security roles, delegated exceptions, and alert ownership',
+              'Collaboration on alerts and security campaigns across teams',
+              'Cross-suite rulesets, policies, and enforcement mechanisms',
+            ],
+          },
+          {
+            title: 'Shift left and strengthen preventive security',
+            objectives: [
+              'Early vulnerability prevention through push protection, dependency scanning, and pre-merge analysis',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'GitHub Security suites administration',
+        slug: 'github-security-suites-administration',
+        anchor: 'github-security-suites-administration-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Roll out and manage security features at scale',
+            objectives: [
+              'Enable GitHub Security Suites at enterprise, organization, and repository levels',
+              'Understand feature availability and differences across GitHub Enterprise Cloud and GitHub Enterprise Server',
+            ],
+          },
+          {
+            title: 'Configure security features and defaults',
+            objectives: [
+              'Enable Code Security (CodeQL), Secret Protection, and Supply Chain Security',
+              'Define default configurations and inheritance behavior',
+            ],
+          },
+          {
+            title: 'Define governance, access, and Code Security workflows',
+            objectives: [
+              'Define enterprise and organization security policies and rulesets',
+              'Configure enforcement boundaries, bypass permissions, and exceptions',
+              'Define administrator, security manager, and developer roles',
+              'Configure permissions for managing and dismissing security alerts',
+              'Enable and configure default or approved custom CodeQL workflows',
+              'Understand APIs and automation methods for large-scale security configuration and governance',
+            ],
+          },
+          {
+            title: 'Manage CodeQL and security automation',
+            objectives: [
+              'Enable and configure default or approved custom CodeQL workflows',
+              'Understand available APIs and automation methods for large-scale security configuration and governance',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+    ],
+  },
+  'gh-600': {
+    examCode: 'GH-600',
+    title: 'Study guide for Exam GH-600: Developing in Agentic AI Systems',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-600',
+    areas: [
+      {
+        name: 'Prepare agent architecture and SDLC processes',
+        slug: 'prepare-agent-architecture-and-sdlc-processes',
+        anchor: 'prepare-agent-architecture-and-sdlc-processes-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Integrate agents into the software development lifecycle (SDLC)',
+            objectives: [
+              'Identify steps for agents to perform',
+              'Identify and mitigate common anti-patterns in agents',
+              'Define inputs, outputs, and success criteria for agents',
+            ],
+          },
+          {
+            title: 'Define boundaries between planning, reasoning, and action',
+            objectives: [
+              'Configure agent planning to be distinct from agent execution',
+              'Configure an agent to output a structured plan',
+              'Validate agent plans',
+              'Prevent agent action until the agent checked and approved',
+            ],
+          },
+          {
+            title: 'Configure observability and control for autonomous agents',
+            objectives: [
+              'Plan and implement the degree of agent autonomy, including guardrails',
+              'Configure agent to produce inspectable artifacts within standard development tooling',
+              'Configure human intervention for autonomous agents without slowing delivery',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Implement tool use and environment interaction',
+        slug: 'implement-tool-use-and-environment-interaction',
+        anchor: 'implement-tool-use-and-environment-interaction-2025',
+        weightLabel: '20–25%',
+        weightLow: 20,
+        weightHigh: 25,
+        sections: [
+          {
+            title: 'Select and configure agent tools',
+            objectives: [
+              'Identify required tools',
+              'Configure agent tools',
+              'Configure agent tool permissions',
+            ],
+          },
+          {
+            title: 'Configure MCP servers',
+            objectives: [
+              'Add an MCP server as a tool to an agent',
+              'Configure a GitHub remote MCP server',
+              'Configure the MCP registries',
+              'Configure MCP allow lists',
+            ],
+          },
+          {
+            title: 'Integrate agents within development environments',
+            objectives: [
+              'Evaluate the execution context for an agent',
+              "Configure an agent's scope to a specific repository",
+              'Configure an agent to be invoked in a CI workflow',
+              'Configure an agent to use branch-based scope',
+              'Enable an agent to perform autonomous actions, including creating branches and pull requests',
+              'Configure an agent to handle environment-specific constraints',
+            ],
+          },
+          {
+            title: 'Operate agents with safe execution paths and robust error handling',
+            objectives: [
+              'Implement error handling',
+              'Implement retries',
+              'Implement rollbacks',
+              'Implement escalation paths',
+              'Implement traceability and accountability for agent actions',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Manage memory, state, and execution',
+        slug: 'manage-memory-state-and-execution',
+        anchor: 'manage-memory-state-and-execution-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Implement agent memory strategies',
+            objectives: [
+              'Choose between short-term, long-term, and external memory',
+              'Scope agent memory to task-relevant information',
+              'Define memory expiration, pruning, and reset rules',
+            ],
+          },
+          {
+            title: 'Persist agent state and manage context drift',
+            objectives: [
+              'Capture task progress and decisions as durable artifacts',
+              'Resume agent work without repeating steps or diverging from prior decisions',
+              'Detect and correct drift during extended agent execution',
+            ],
+          },
+          {
+            title: 'Ensure continuity of agent memory and state across tools and environments',
+            objectives: [
+              'Share agent state',
+              'Prevent conflicting context',
+              'Prevent stale context',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Perform evaluation, error analysis, and tuning',
+        slug: 'perform-evaluation-error-analysis-and-tuning',
+        anchor: 'perform-evaluation-error-analysis-and-tuning-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Define success criteria and evaluation signals for agent tasks',
+            objectives: [
+              'Specify expected outcomes and operational constraints for agent tasks',
+              'Identify qualitative and quantitative evaluation signals to evaluate agents',
+              'Align evaluation criteria with development intent',
+              'Generate evaluation signals by using automated scanning tools',
+            ],
+          },
+          {
+            title: 'Analyze agent failures and identify root causes',
+            objectives: [
+              'Identify failures by using logs, plans, traces, outputs, and workflow artifacts',
+              'Classify root causes, including reasoning errors, tool misuse, and context or environment issues',
+            ],
+          },
+          {
+            title: 'Tune agent behavior based on evaluation results',
+            objectives: [
+              'Revise instructions, workflows, or constraints',
+              'Refine memory usage',
+              'Refine tool usage and tool access',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Orchestrate multi-agent coordination',
+        slug: 'orchestrate-multi-agent-coordination',
+        anchor: 'orchestrate-multi-agent-coordination-1520',
+        weightLabel: '15–20%',
+        weightLow: 15,
+        weightHigh: 20,
+        sections: [
+          {
+            title: 'Operate and manage multi-agent workflows',
+            objectives: [
+              'Apply an orchestration pattern to coordinate multiple agents',
+              'Configure agent isolation for parallel execution',
+              'Detect and resolve agent conflicts, including overlapping code changes, duplicated effort, and contradictory outputs',
+            ],
+          },
+          {
+            title:
+              'Configure observability for multi-agent behavior by using logs, artifacts, and operational signals',
+            objectives: [
+              'Configure multi-agent workflows to produce artifacts suitable for review and audit',
+              'Document key decisions, handoffs, and outcomes across agents',
+              'Perform post-hoc analysis of multi-agent behavior',
+            ],
+          },
+          {
+            title: 'Detect and respond to multi-agent failures and degraded behavior',
+            objectives: [
+              'Identify failed, partial, or stalled agent executions',
+              'Respond to degraded behavior or coordination across agents',
+              'Implement multi-agent recovery patterns, including rollback and human-in-the-loop',
+            ],
+          },
+          {
+            title: 'Manage the lifecycle of agents within multi-agent workflows',
+            objectives: [
+              'Add agents to existing multi-agent workflows',
+              'Update, reconfigure, or replace agents without disrupting active workflows',
+              'Retire agents while preserving auditability and workflow continuity',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Implement guardrails and accountability',
+        slug: 'implement-guardrails-and-accountability',
+        anchor: 'implement-guardrails-and-accountability-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Define autonomy levels',
+            objectives: [
+              'Classify agent actions by operational, security, and compliance risk to right-size human interventions',
+              'Assign autonomy levels to maximize delivery speed while remaining compliant with organizational security and Responsible AI standards',
+            ],
+          },
+          {
+            title: 'Implement guardrails and human-in-the-loop workflows',
+            objectives: [
+              'Identify the subset of actions that require human judgment',
+              'Block actions that violate defined security, compliance, or Responsible AI policies',
+              'Scope permissions and execution contexts to enforce least-privilege access',
+              'Require explicit authorization or controlled paths for irreversible or compliance-sensitive changes',
+              'Preserve execution velocity by minimizing approvals that do not materially reduce risk',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+    ],
+  },
+  'gh-900': {
+    examCode: 'GH-900',
+    title: 'Study guide for Exam GH-900: GitHub Foundations',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/gh-900',
+    areas: [
+      {
+        name: 'Understand Git and GitHub basics',
+        slug: 'understand-git-and-github-basics',
+        anchor: 'understand-git-and-github-basics-2530',
+        weightLabel: '25–30%',
+        weightLow: 25,
+        weightHigh: 30,
+        sections: [
+          {
+            title: 'Version control fundamentals',
+            objectives: [
+              'Describe the purpose and benefits of version control',
+              'Explain the difference between Git and GitHub',
+              'Identify key Git concepts such as repositories, commits, and branches',
+            ],
+          },
+          {
+            title: 'Working with GitHub',
+            objectives: [
+              'Describe GitHub accounts, organizations, and enterprise options',
+              'Explain the GitHub Flow for collaboration',
+              'Identify uses of Markdown for clear communication in issues and pull requests',
+              'Recognize when to use GitHub Desktop and GitHub Mobile',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Work with GitHub repositories',
+        slug: 'work-with-github-repositories',
+        anchor: 'work-with-github-repositories-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [],
+        objectives: [
+          'Describe the structure and key files of a GitHub repository (README, LICENSE, CONTRIBUTING, CODEOWNERS, SECURITY)',
+          'Identify how to create, organize, and maintain repositories using templates and branches.',
+          'Explain how to add and manage files within a repository',
+          'Describe repository insights, stars, feature previews, repository metrics dashboards, and dependency insights for improved visibility',
+          'Recognize best practices for repository maintenance and collaboration',
+        ],
+      },
+      {
+        name: 'Collaborate using GitHub',
+        slug: 'collaborate-using-github',
+        anchor: 'collaborate-using-github-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Collaboration tools',
+            objectives: [
+              'Describe how to use issues, pull requests, and discussions for collaboration',
+              'Explain how to link pull requests to issues and manage templates, filters, and assignments',
+              'Identify the purpose of notifications and how to configure them for workflow management',
+              'Describe how to use Gists, Wikis, and GitHub Pages to document and share information',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Apply modern development practices',
+        slug: 'apply-modern-development-practices',
+        anchor: 'apply-modern-development-practices-1015',
+        weightLabel: '10–15%',
+        weightLow: 10,
+        weightHigh: 15,
+        sections: [
+          {
+            title: 'Automation and AI tools',
+            objectives: [
+              'Describe the purpose and capabilities of GitHub Actions',
+              'Identify how GitHub Copilot assists with AI-powered code suggestions, including Copilot agents, Agent Mode, and multi‑model support',
+              'Explain the differences between GitHub Copilot for Individuals, Business, and Enterprise',
+              'Describe GitHub Codespaces and how to set up, customize, and use dev containers',
+              'Explain when to use the github.dev editor and how it differs from Codespaces',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Manage projects with GitHub',
+        slug: 'manage-projects-with-github',
+        anchor: 'manage-projects-with-github-510',
+        weightLabel: '5–10%',
+        weightLow: 5,
+        weightHigh: 10,
+        sections: [
+          {
+            title: 'Project Tracking and organization',
+            objectives: [
+              'Describe GitHub Projects and layout options',
+              'Explain how to configure projects, labels, milestones, and workflows',
+              'Identify how to use saved replies and assignees to streamline communication',
+              'Describe how project insights can be used to track progress and productivity',
+              'Describe how to secure accounts with two-factor authentication (2FA) and passkeys',
+              'Identify access permissions and roles for repositories and organizations',
+              'Explain the purpose of Enterprise Managed Users (EMUs) and organization-wide Copilot policy management',
+              'Describe repository privacy options, visibility settings, and branch protection rules',
+              'Recognize how to manage organization settings, teams, and roles',
+            ],
+          },
+        ],
+        objectives: [],
+      },
+      {
+        name: 'Explore the GitHub community',
+        slug: 'explore-the-github-community',
+        anchor: 'explore-the-github-community-510',
+        weightLabel: '5–10%',
+        weightLow: 5,
+        weightHigh: 10,
+        sections: [],
+        objectives: [
+          'Describe the benefits of open source and GitHub Sponsors',
+          'Explain how GitHub supports and advances open-source projects.',
+          'Identify how to follow users and organizations to stay informed about activity.',
+          'Describe the GitHub Marketplace and its purpose.',
+          'Explain how InnerSource applies open-source principles within organizations.',
+          'Recognize when to use forks, templates, and discoverable repositories to promote collaboration.',
+        ],
       },
     ],
   },
