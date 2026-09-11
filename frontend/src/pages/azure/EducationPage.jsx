@@ -358,7 +358,9 @@ function StatusBadge({ status, expiryDate, betaEndDate, replacedBy, today, class
       <span
         className={`inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/20 border border-slate-500/40 text-slate-300 text-[10px] font-bold rounded-full ${className}`}
       >
-        <span className="material-symbols-outlined text-[12px]">block</span>
+        <span className="material-symbols-outlined text-[12px]" aria-hidden="true">
+          block
+        </span>
         Retired
         {expiryDate && <span className="opacity-70">· {formatDate(expiryDate)}</span>}
         {replacementCode && <span className="opacity-70">· now {replacementCode}</span>}
@@ -382,7 +384,9 @@ function StatusBadge({ status, expiryDate, betaEndDate, replacedBy, today, class
       <span
         className={`inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[10px] font-bold rounded-full ${className}`}
       >
-        <span className="material-symbols-outlined text-[12px]">schedule</span>
+        <span className="material-symbols-outlined text-[12px]" aria-hidden="true">
+          schedule
+        </span>
         Expiring Soon
         {days !== null && days > 0 && <span className="opacity-70">· {days}d</span>}
         {replacementCode && <span className="opacity-70">· then {replacementCode}</span>}
@@ -413,7 +417,11 @@ function TimelineCredentialTypeIcon({ credentialType, className = 'h-4 w-4' }) {
   if (meta.iconSrc) {
     return <img src={meta.iconSrc} alt="" aria-hidden="true" className={className} />;
   }
-  return <span className={`material-symbols-outlined text-[16px] ${meta.color}`}>{meta.icon}</span>;
+  return (
+    <span className={`material-symbols-outlined text-[16px] ${meta.color}`} aria-hidden="true">
+      {meta.icon}
+    </span>
+  );
 }
 
 // ── Horizontal Timeline ───────────────────────────────────────────────────────
@@ -523,7 +531,9 @@ function HorizontalTimeline({ events }) {
   return (
     <section className="mb-16">
       <h3 className="text-2xl font-bold text-slate-950 dark:text-white mb-2 flex items-center gap-2">
-        <span className="text-primary text-[24px] material-symbols-outlined">timeline</span>
+        <span className="text-primary text-[24px] material-symbols-outlined" aria-hidden="true">
+          timeline
+        </span>
         Certification &amp; Applied Skills Lifecycle
       </h3>
       <p className="text-sm text-foreground mb-4 max-w-2xl">
@@ -560,7 +570,10 @@ function HorizontalTimeline({ events }) {
           const meta = TIMELINE_TYPE_META[type];
           return (
             <div key={type} className="flex items-center gap-1.5">
-              <span className={`material-symbols-outlined text-[14px] ${meta.color}`}>
+              <span
+                className={`material-symbols-outlined text-[14px] ${meta.color}`}
+                aria-hidden="true"
+              >
                 {meta.icon}
               </span>
               <span className="text-xs text-foreground/70">{meta.label}</span>
@@ -585,7 +598,9 @@ function HorizontalTimeline({ events }) {
             className="absolute left-2 top-1/2 -translate-y-1/2 z-30 bg-primary/90 hover:bg-primary text-white rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110"
             aria-label="Scroll left"
           >
-            <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+              chevron_left
+            </span>
           </button>
         )}
 
@@ -596,7 +611,9 @@ function HorizontalTimeline({ events }) {
             className="absolute right-2 top-1/2 -translate-y-1/2 z-30 bg-primary/90 hover:bg-primary text-white rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110"
             aria-label="Scroll right"
           >
-            <span className="material-symbols-outlined text-[20px]">chevron_right</span>
+            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+              chevron_right
+            </span>
           </button>
         )}
 
@@ -786,7 +803,10 @@ function HorizontalTimeline({ events }) {
             return (
               <div className="absolute bottom-3 right-3 max-w-xs bg-background/95 backdrop-blur-md border border-card/60 rounded-xl px-4 py-3 shadow-2xl z-20 pointer-events-none">
                 <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className={`material-symbols-outlined text-[14px] ${meta.color}`}>
+                  <span
+                    className={`material-symbols-outlined text-[14px] ${meta.color}`}
+                    aria-hidden="true"
+                  >
                     {meta.icon}
                   </span>
                   <span className={`text-[10px] font-bold ${meta.color}`}>{meta.label}</span>
@@ -963,7 +983,10 @@ export default function AzureEducationPage() {
               className="group relative bg-linear-to-br from-blue-900/40 to-card/40 backdrop-blur-md border border-blue-500/30 rounded-2xl p-6 hover:shadow-[0_0_30px_rgba(0,120,212,0.2)] hover:border-primary/60 transition-all duration-300 flex items-start gap-5"
             >
               <div className="w-14 h-14 shrink-0 bg-primary/20 rounded-xl flex items-center justify-center">
-                <span className="text-primary text-[28px] material-symbols-outlined">
+                <span
+                  className="text-primary text-[28px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   workspace_premium
                 </span>
               </div>
@@ -981,7 +1004,9 @@ export default function AzureEducationPage() {
                   certifications in one poster, published by Microsoft.
                 </p>
                 <div className="flex items-center gap-1.5 text-primary text-sm font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                   aka.ms/CertificationsPoster
                 </div>
               </div>
@@ -994,7 +1019,10 @@ export default function AzureEducationPage() {
               className="group relative bg-linear-to-br from-cyan-900/40 to-card/40 backdrop-blur-md border border-cyan-500/30 rounded-2xl p-6 hover:shadow-[0_0_30px_rgba(0,188,212,0.2)] hover:border-cyan-400/60 transition-all duration-300 flex items-start gap-5"
             >
               <div className="w-14 h-14 shrink-0 bg-cyan-500/20 rounded-xl flex items-center justify-center">
-                <span className="text-cyan-400 text-[28px] material-symbols-outlined">
+                <span
+                  className="text-cyan-400 text-[28px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   construction
                 </span>
               </div>
@@ -1013,7 +1041,9 @@ export default function AzureEducationPage() {
                   proof.
                 </p>
                 <div className="flex items-center gap-1.5 text-cyan-400 text-sm font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                   View Applied Skills Poster
                 </div>
               </div>
@@ -1025,7 +1055,12 @@ export default function AzureEducationPage() {
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
-              <span className="text-primary text-[24px] material-symbols-outlined">school</span>
+              <span
+                className="text-primary text-[24px] material-symbols-outlined"
+                aria-hidden="true"
+              >
+                school
+              </span>
               Browse Certifications
             </h3>
           </div>
@@ -1122,8 +1157,11 @@ export default function AzureEducationPage() {
                         rel="noopener noreferrer"
                         className="h-9 w-9 bg-card/50 hover:bg-primary/20 text-foreground rounded flex items-center justify-center transition-colors"
                         title="Open on Microsoft Learn"
+                        aria-label={`Open ${cert.code} on Microsoft Learn`}
                       >
-                        <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                        <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                          open_in_new
+                        </span>
                       </a>
                     </div>
                   </article>
@@ -1141,14 +1179,23 @@ export default function AzureEducationPage() {
                 aria-label="Previous page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
-                <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                  chevron_left
+                </span>
               </button>
               {Array.from({ length: totalPages }).map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setCarouselPage(i)}
-                  className={`h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-primary w-5' : 'w-2.5 bg-card/60 hover:bg-card/80'}`}
-                />
+                  aria-label={`Page ${i + 1} of ${totalPages}`}
+                  aria-current={i === carouselPage ? 'true' : undefined}
+                  className="group flex h-6 min-w-6 items-center justify-center rounded-full"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`block h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-primary w-5' : 'w-2.5 bg-card/60 group-hover:bg-card/80'}`}
+                  />
+                </button>
               ))}
               <button
                 onClick={() => setCarouselPage((p) => Math.min(totalPages - 1, p + 1))}
@@ -1156,7 +1203,9 @@ export default function AzureEducationPage() {
                 aria-label="Next page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
-                <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                  chevron_right
+                </span>
               </button>
               <span className="text-xs text-foreground/50 ml-2">
                 {carouselPage * VISIBLE_COUNT + 1}–
@@ -1199,7 +1248,10 @@ export default function AzureEducationPage() {
                     <div className="grid grid-cols-2 gap-3 mb-8">
                       {featuredCert.topics.map((topic, i) => (
                         <div key={i} className="flex items-center gap-2">
-                          <span className="text-primary material-symbols-outlined text-[16px]">
+                          <span
+                            className="text-primary material-symbols-outlined text-[16px]"
+                            aria-hidden="true"
+                          >
                             check_circle
                           </span>
                           <span className="text-foreground text-sm">{topic}</span>
@@ -1254,7 +1306,10 @@ export default function AzureEducationPage() {
           <aside className="h-fit sticky top-28 space-y-6">
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
-                <span className="text-primary text-[20px] material-symbols-outlined">
+                <span
+                  className="text-primary text-[20px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   emoji_events
                 </span>
                 All Certifications
@@ -1308,7 +1363,10 @@ export default function AzureEducationPage() {
 
             <div className="bg-linear-to-br from-primary/20 to-blue-900/20 backdrop-blur-md border border-primary/30 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-2 flex items-center gap-2">
-                <span className="text-primary text-[20px] material-symbols-outlined">
+                <span
+                  className="text-primary text-[20px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   rocket_launch
                 </span>
                 Getting Started
@@ -1333,7 +1391,12 @@ export default function AzureEducationPage() {
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
-              <span className="text-primary text-[24px] material-symbols-outlined">bookmark</span>
+              <span
+                className="text-primary text-[24px] material-symbols-outlined"
+                aria-hidden="true"
+              >
+                bookmark
+              </span>
               Learning Paths
             </h3>
             <div className="relative">
@@ -1348,7 +1411,10 @@ export default function AzureEducationPage() {
                   </option>
                 ))}
               </select>
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-foreground pointer-events-none">
+              <span
+                className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-foreground pointer-events-none"
+                aria-hidden="true"
+              >
                 expand_more
               </span>
             </div>
@@ -1404,13 +1470,19 @@ export default function AzureEducationPage() {
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 group/mod hover:text-primary transition-colors"
                       >
-                        <span className="text-primary material-symbols-outlined text-[16px] shrink-0">
+                        <span
+                          className="text-primary material-symbols-outlined text-[16px] shrink-0"
+                          aria-hidden="true"
+                        >
                           check_circle
                         </span>
                         <span className="text-foreground group-hover/mod:text-primary text-sm transition-colors flex-1">
                           {mod.title}
                         </span>
-                        <span className="material-symbols-outlined text-[12px] text-foreground/40 group-hover/mod:text-primary transition-colors ml-auto shrink-0">
+                        <span
+                          className="material-symbols-outlined text-[12px] text-foreground/40 group-hover/mod:text-primary transition-colors ml-auto shrink-0"
+                          aria-hidden="true"
+                        >
                           open_in_new
                         </span>
                       </a>
@@ -1454,7 +1526,10 @@ export default function AzureEducationPage() {
                               rel="noopener noreferrer"
                               className="group/skill flex items-start gap-3 bg-card/50 rounded-xl p-3 hover:bg-card/70 hover:border-cyan-500/30 border border-transparent transition-all"
                             >
-                              <span className="text-cyan-400 material-symbols-outlined text-[18px] shrink-0 mt-0.5">
+                              <span
+                                className="text-cyan-400 material-symbols-outlined text-[18px] shrink-0 mt-0.5"
+                                aria-hidden="true"
+                              >
                                 construction
                               </span>
                               <div className="min-w-0">
@@ -1465,7 +1540,10 @@ export default function AzureEducationPage() {
                                   {skill.title}
                                 </div>
                               </div>
-                              <span className="material-symbols-outlined text-[12px] text-foreground/40 shrink-0 mt-1">
+                              <span
+                                className="material-symbols-outlined text-[12px] text-foreground/40 shrink-0 mt-1"
+                                aria-hidden="true"
+                              >
                                 open_in_new
                               </span>
                             </a>
@@ -1482,7 +1560,9 @@ export default function AzureEducationPage() {
                       rel="noopener noreferrer"
                       className="w-full h-11 px-4 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                     >
-                      <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                        open_in_new
+                      </span>
                       Microsoft Learn
                     </a>
                     {certifications.find((c) => c.code === selectedPath.certCode) && (
@@ -1490,7 +1570,9 @@ export default function AzureEducationPage() {
                         to={`/azure/education/${certifications.find((c) => c.code === selectedPath.certCode)?.slug}`}
                         className="w-full h-11 px-4 bg-background/50 hover:bg-card/70 border border-card/60 text-foreground font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
                       >
-                        <span className="material-symbols-outlined text-[16px]">article</span>
+                        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                          article
+                        </span>
                         View Cert Detail
                       </Link>
                     )}
@@ -1506,7 +1588,10 @@ export default function AzureEducationPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
             <div>
               <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
-                <span className="text-cyan-400 text-[24px] material-symbols-outlined">
+                <span
+                  className="text-cyan-400 text-[24px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   construction
                 </span>
                 Applied Skills Reference Library
@@ -1567,7 +1652,9 @@ export default function AzureEducationPage() {
                   {skill.title}
                 </p>
                 <div className="flex items-center gap-1 text-cyan-400 text-xs font-semibold mt-auto">
-                  <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                   Microsoft Learn
                 </div>
               </a>
@@ -1581,7 +1668,7 @@ export default function AzureEducationPage() {
                 onClick={() => setAppliedSkillsExpanded((expanded) => !expanded)}
                 className="h-10 px-4 bg-card/50 hover:bg-card/70 border border-card/60 hover:border-cyan-400/50 text-foreground hover:text-cyan-300 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
               >
-                <span className="material-symbols-outlined text-[16px]">
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                   {appliedSkillsExpanded ? 'unfold_less' : 'unfold_more'}
                 </span>
                 {appliedSkillsExpanded
@@ -1595,7 +1682,7 @@ export default function AzureEducationPage() {
         {/* ── Learning Resources ───────────────────────────────────────── */}
         <section>
           <h3 className="text-2xl font-bold text-slate-950 dark:text-white mb-6 flex items-center gap-2">
-            <span className="text-primary text-[24px] material-symbols-outlined">
+            <span className="text-primary text-[24px] material-symbols-outlined" aria-hidden="true">
               library_books
             </span>
             Learning Resources
@@ -1616,7 +1703,10 @@ export default function AzureEducationPage() {
                 <div
                   className={`mb-4 w-12 h-12 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${resource.highlight ? 'bg-primary/30' : 'bg-primary/20'}`}
                 >
-                  <span className="text-2xl material-symbols-outlined text-primary">
+                  <span
+                    className="text-2xl material-symbols-outlined text-primary"
+                    aria-hidden="true"
+                  >
                     {resource.icon}
                   </span>
                 </div>
@@ -1633,7 +1723,9 @@ export default function AzureEducationPage() {
                   <span className="text-sm font-bold text-primary">{resource.count}</span>
                   <span className="flex items-center gap-1.5 text-foreground text-sm font-semibold group-hover:text-primary transition-colors">
                     Explore
-                    <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                    <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                      open_in_new
+                    </span>
                   </span>
                 </div>
               </a>

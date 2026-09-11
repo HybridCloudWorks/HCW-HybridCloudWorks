@@ -245,13 +245,16 @@ export default function AWSEducationPage() {
               className="group relative bg-gradient-to-br from-amber-900/40 to-card/40 backdrop-blur-md border border-amber-500/30 rounded-2xl p-6 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] hover:border-amber-400/60 transition-all duration-300 flex items-start gap-5"
             >
               <div className="w-14 h-14 shrink-0 bg-amber-500/20 rounded-xl flex items-center justify-center">
-                <span className="text-amber-400 text-[28px] material-symbols-outlined">
+                <span
+                  className="text-amber-400 text-[28px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   workspace_premium
                 </span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h2 className="text-lg font-bold text-white group-hover:text-amber-300 transition-colors">
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white group-hover:text-amber-300 transition-colors">
                     AWS Certification Portal
                   </h2>
                   <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold rounded-full uppercase tracking-wider shrink-0">
@@ -263,7 +266,9 @@ export default function AWSEducationPage() {
                   transcript, and download digital badges from the official AWS portal.
                 </p>
                 <div className="flex items-center gap-1.5 text-amber-400 text-sm font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                   aws.amazon.com/certification
                 </div>
               </div>
@@ -276,13 +281,16 @@ export default function AWSEducationPage() {
               className="group relative bg-gradient-to-br from-orange-900/40 to-card/40 backdrop-blur-md border border-orange-500/30 rounded-2xl p-6 hover:shadow-[0_0_30px_rgba(249,115,22,0.2)] hover:border-orange-400/60 transition-all duration-300 flex items-start gap-5"
             >
               <div className="w-14 h-14 shrink-0 bg-orange-500/20 rounded-xl flex items-center justify-center">
-                <span className="text-orange-400 text-[28px] material-symbols-outlined">
+                <span
+                  className="text-orange-400 text-[28px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   model_training
                 </span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h2 className="text-lg font-bold text-white group-hover:text-orange-300 transition-colors">
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white group-hover:text-orange-300 transition-colors">
                     AWS Skill Builder
                   </h2>
                   <span className="px-2 py-0.5 bg-orange-500/20 border border-orange-500/30 text-orange-300 text-[10px] font-bold rounded-full uppercase tracking-wider shrink-0">
@@ -294,7 +302,9 @@ export default function AWSEducationPage() {
                   official AWS digital learning platform for all skill levels.
                 </p>
                 <div className="flex items-center gap-1.5 text-orange-400 text-sm font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                   skillbuilder.aws
                 </div>
               </div>
@@ -320,7 +330,9 @@ export default function AWSEducationPage() {
                       </span>
                       <CertStatusBadge cert={featuredCert} today={today} />
                     </div>
-                    <h2 className="text-2xl font-bold text-white mb-1">{featuredCert.title}</h2>
+                    <h2 className="text-2xl font-bold text-slate-950 dark:text-white mb-1">
+                      {featuredCert.title}
+                    </h2>
                     <div className="text-sm font-mono text-foreground/50 mb-2">
                       {featuredCert.code}
                     </div>
@@ -333,7 +345,10 @@ export default function AWSEducationPage() {
                     <div className="grid grid-cols-2 gap-2 mb-5">
                       {featuredCert.topics.map((topic, i) => (
                         <div key={i} className="flex items-center gap-2">
-                          <span className="text-amber-400 material-symbols-outlined text-[14px]">
+                          <span
+                            className="text-amber-400 material-symbols-outlined text-[14px]"
+                            aria-hidden="true"
+                          >
                             check_circle
                           </span>
                           <span className="text-foreground text-xs">{topic}</span>
@@ -358,7 +373,9 @@ export default function AWSEducationPage() {
                     </div>
                     <div className="border-t border-slate-700 pt-4 text-center">
                       <div className="text-sm text-foreground mb-1">Estimated Preparation</div>
-                      <div className="text-2xl font-bold text-white">{featuredCert.prepTime}</div>
+                      <div className="text-2xl font-bold text-slate-950 dark:text-white">
+                        {featuredCert.prepTime}
+                      </div>
                     </div>
                   </div>
                   <div className="pt-4 border-t border-slate-700">
@@ -379,8 +396,11 @@ export default function AWSEducationPage() {
           {/* Sidebar — All Certifications */}
           <aside className="flex flex-col gap-4">
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-5 flex-1">
-              <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
-                <span className="text-amber-400 text-[20px] material-symbols-outlined">
+              <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-3 flex items-center gap-2">
+                <span
+                  className="text-amber-400 text-[20px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   emoji_events
                 </span>
                 All Certifications
@@ -419,8 +439,13 @@ export default function AWSEducationPage() {
         <section className="mb-12">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-                <span className="text-amber-400 text-[24px] material-symbols-outlined">school</span>
+              <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
+                <span
+                  className="text-amber-400 text-[24px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
+                  school
+                </span>
                 Browse Certifications
               </h3>
               <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
@@ -466,7 +491,7 @@ export default function AWSEducationPage() {
                     </div>
                     <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
-                    <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-amber-300 transition-colors flex-1">
+                    <h3 className="text-sm font-bold text-slate-950 dark:text-white mb-2 line-clamp-3 group-hover:text-amber-300 transition-colors flex-1">
                       {cert.title}
                     </h3>
                     <p className="text-xs text-foreground mb-4 line-clamp-2">{cert.description}</p>
@@ -486,7 +511,9 @@ export default function AWSEducationPage() {
                         className="flex-1 h-9 bg-card/50 hover:bg-amber-500/20 hover:text-amber-300 text-foreground rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
                       >
                         View Details
-                        <span className="material-symbols-outlined text-[12px]">arrow_forward</span>
+                        <span className="material-symbols-outlined text-[12px]" aria-hidden="true">
+                          arrow_forward
+                        </span>
                       </Link>
                     </div>
                   </article>
@@ -501,23 +528,36 @@ export default function AWSEducationPage() {
               <button
                 onClick={() => setCarouselPage((p) => Math.max(0, p - 1))}
                 disabled={carouselPage === 0}
+                aria-label="Previous page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
-                <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                  chevron_left
+                </span>
               </button>
               {Array.from({ length: totalPages }).map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setCarouselPage(i)}
-                  className={`h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-amber-400 w-5' : 'w-2.5 bg-card/60 hover:bg-card/80'}`}
-                />
+                  aria-label={`Page ${i + 1} of ${totalPages}`}
+                  aria-current={i === carouselPage ? 'true' : undefined}
+                  className="group flex h-6 min-w-6 items-center justify-center rounded-full"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`block h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-amber-400 w-5' : 'w-2.5 bg-card/60 group-hover:bg-card/80'}`}
+                  />
+                </button>
               ))}
               <button
                 onClick={() => setCarouselPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={carouselPage === totalPages - 1}
+                aria-label="Next page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
-                <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                  chevron_right
+                </span>
               </button>
               <span className="text-xs text-foreground/50 ml-2">
                 {carouselPage * VISIBLE_COUNT + 1}–
@@ -532,8 +572,11 @@ export default function AWSEducationPage() {
         <section className="mb-12">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
             <div>
-              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-                <span className="text-amber-400 text-[24px] material-symbols-outlined">
+              <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
+                <span
+                  className="text-amber-400 text-[24px] material-symbols-outlined"
+                  aria-hidden="true"
+                >
                   verified
                 </span>
                 AWS Microcredentials
@@ -599,7 +642,10 @@ export default function AWSEducationPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-card/60 flex items-center justify-center shrink-0">
-                      <span className={`material-symbols-outlined text-[22px] ${mc.color}`}>
+                      <span
+                        className={`material-symbols-outlined text-[22px] ${mc.color}`}
+                        aria-hidden="true"
+                      >
                         {mc.icon}
                       </span>
                     </div>
@@ -607,7 +653,7 @@ export default function AWSEducationPage() {
                       <div className="text-[10px] font-black text-foreground/40 tracking-widest uppercase mb-0.5">
                         AWS Microcredential
                       </div>
-                      <h4 className="text-sm font-bold text-white leading-snug group-hover:text-amber-300 transition-colors">
+                      <h4 className="text-sm font-bold text-slate-950 dark:text-white leading-snug group-hover:text-amber-300 transition-colors">
                         {mc.title}
                       </h4>
                     </div>
@@ -621,10 +667,15 @@ export default function AWSEducationPage() {
                 <p className="text-xs text-foreground/70 leading-relaxed">{mc.description}</p>
                 <div className="pt-3 border-t border-card/40 flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-xs text-foreground/50">
-                    <span className="material-symbols-outlined text-[14px]">timer</span>
+                    <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                      timer
+                    </span>
                     90 min · Proctored hands-on lab
                   </div>
-                  <span className="material-symbols-outlined text-foreground/40 group-hover:text-amber-400 transition-colors text-[16px]">
+                  <span
+                    className="material-symbols-outlined text-foreground/40 group-hover:text-amber-400 transition-colors text-[16px]"
+                    aria-hidden="true"
+                  >
                     arrow_forward
                   </span>
                 </div>
@@ -636,8 +687,13 @@ export default function AWSEducationPage() {
         {/* ── Learning Paths — compact ──────────────────────────────────── */}
         <section className="mb-12">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-amber-400 text-[24px] material-symbols-outlined">bookmark</span>
+            <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
+              <span
+                className="text-amber-400 text-[24px] material-symbols-outlined"
+                aria-hidden="true"
+              >
+                bookmark
+              </span>
               Learning Paths
             </h3>
             <div className="relative">
@@ -652,7 +708,10 @@ export default function AWSEducationPage() {
                   </option>
                 ))}
               </select>
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-foreground pointer-events-none">
+              <span
+                className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-foreground pointer-events-none"
+                aria-hidden="true"
+              >
                 expand_more
               </span>
             </div>
@@ -673,7 +732,9 @@ export default function AWSEducationPage() {
                   {selectedPath.modules.length} modules
                 </span>
               </div>
-              <h2 className="text-xl font-bold text-white mb-2">{selectedPath.title}</h2>
+              <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-2">
+                {selectedPath.title}
+              </h2>
               <p className="text-foreground mb-5 text-sm">{selectedPath.description}</p>
               <div className="flex flex-wrap gap-2 mb-5">
                 {selectedPath.modules.map((mod, i) => (
@@ -694,7 +755,9 @@ export default function AWSEducationPage() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 h-10 px-5 bg-amber-700 hover:bg-amber-600 text-white font-bold rounded-lg transition-colors text-sm"
               >
-                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                  open_in_new
+                </span>
                 View {selectedPath.certCode} on AWS
               </a>
             </article>
@@ -703,8 +766,11 @@ export default function AWSEducationPage() {
 
         {/* ── Learning Resources ───────────────────────────────────────── */}
         <section className="mb-16">
-          <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-            <span className="text-amber-400 text-[24px] material-symbols-outlined">
+          <h3 className="text-2xl font-bold text-slate-950 dark:text-white mb-6 flex items-center gap-2">
+            <span
+              className="text-amber-400 text-[24px] material-symbols-outlined"
+              aria-hidden="true"
+            >
               library_books
             </span>
             Learning Resources
@@ -719,19 +785,25 @@ export default function AWSEducationPage() {
                 className="group bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6 flex flex-col hover:shadow-[0_0_25px_rgba(245,158,11,0.15)] hover:border-amber-400/50 transition-all duration-300"
               >
                 <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <span className="material-symbols-outlined text-amber-400 text-[24px]">
+                  <span
+                    className="material-symbols-outlined text-amber-400 text-[24px]"
+                    aria-hidden="true"
+                  >
                     {resource.icon}
                   </span>
                 </div>
                 <div className="text-xs font-bold text-amber-400/70 uppercase tracking-wider mb-1">
                   {resource.type}
                 </div>
-                <h4 className="font-bold text-white mb-2 group-hover:text-amber-300 transition-colors">
+                <h4 className="font-bold text-slate-950 dark:text-white mb-2 group-hover:text-amber-300 transition-colors">
                   {resource.title}
                 </h4>
                 <p className="text-xs text-foreground flex-1">{resource.description}</p>
                 <div className="mt-4 flex items-center gap-1 text-amber-400 text-xs font-semibold">
-                  Explore <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                  Explore{' '}
+                  <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                 </div>
               </a>
             ))}
