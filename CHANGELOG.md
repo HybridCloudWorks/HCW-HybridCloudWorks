@@ -317,6 +317,57 @@ This project has not cut a tagged release; entries are grouped under
   granting the Admin app role to a named user, which is a recurring operation
   with no other tool. None is spent.
 
+### Fixed
+
+- **Five education hubs and three detail pages were white text on a white
+  background in light mode, and had been since they were written.** Headings,
+  card titles and stat values used a bare `text-white` with no `dark:`
+  qualifier, while `src/index.css` sets `--background` and `--card` to pure
+  white in light. A learner on a default iPhone saw a hero and then blank
+  space where every section heading should be.
+
+  **The fix already existed in the repository and had never been
+  propagated.** `azure/EducationPage.jsx` pairs its headings as
+  `text-slate-950 dark:text-white` and reads correctly; the other five hubs
+  carried 15 bare instances each and zero dark variants. 102 sites changed,
+  read one at a time rather than swept: **25 were deliberately left**, every
+  one of them white-on-an-opaque-coloured-button, where white is correct.
+
+  Status chips had the same problem in a subtler form. `CertStatusBadge` used
+  `text-amber-300` and friends over `*-500/20` tints, roughly 1.5:1 against a
+  near-white surface. Each status now carries an `*-800` light foreground
+  with the original as its `dark:` variant, around 6:1.
+
+  **Why nothing caught it.** The only colour-contrast gate is a Playwright
+  spec covering one route, and it does not run in CI. It has now been widened
+  to all eight hubs and the three detail templates, but deliberately NOT wired
+  in as a required check: `/aws/education` was already in its route list while
+  that page was white-on-white, so the spec cannot have been passing, and
+  making a red gate required would block every PR. It wants a reading first.
+
+  **What replaces it in the meantime is a test that does run.**
+  `pages/education-a11y.test.js` reads the nine files and fails when a
+  `text-white` token has neither a `dark:` variant nor an opaque background,
+  when a status loses its light foreground, when a carousel dot loses its
+  label, or when a decorative icon loses `aria-hidden`. Verified to fail by
+  reverting one heading: it named the file, the line and the fix.
+
+- **The education carousels were silent to a screen reader, and their controls
+  were 10 pixels wide.** The pagination dots were `<button>` elements with no
+  children, no `aria-label` and no `aria-current`, announced as "button,
+  button, button" — and they are the only route to anything past the fourth
+  card, which on Azure means past the first four of 108. Each dot now sits in
+  a 24-pixel transparent hit area, meeting WCAG 2.5.8 without changing the
+  10-pixel dot itself, and carries its page number and current state.
+
+  168 decorative `material-symbols-outlined` spans gained `aria-hidden`.
+  Because the font renders a ligature, a screen reader had been reading
+  "workspace_premium", "arrow_forward" and "open_in_new" aloud as words —
+  and on a slow connection those words are briefly *visible* too, since the
+  font loads with `display=swap`. Every icon-only control was audited first:
+  the one without an accessible name, Azure's "open on Microsoft Learn" link,
+  got one rather than being hidden.
+
 ### Added
 
 - **`/education`, a front door to the Learn section that did not exist.**
