@@ -46,8 +46,8 @@ and several archived guides carried a contributor's local file paths.
 - **Source:** `docs/` in this repository, arranged as `decisions/` (ADRs, this
   register), `runbooks/`, `standards/`, `architecture/`, `content/` (the blog
   machine's own documentation), `history/` (the Azure migration record,
-  banner-marked as history) and `archive/` (the Firebase-era guides,
-  banner-marked and indexed from their own page). `wiki/` is deleted.
+  banner-marked as history). `wiki/` is deleted, and so is `archive/` — see
+  the amendment at the end of this record.
 - **Generator:** MkDocs with the Material theme, pinned in
   `scripts/docs/requirements.txt`, configured in `mkdocs.yml` at the root with
   `strict: true` and link, anchor and nav validation at warning level — which
@@ -91,9 +91,10 @@ and several archived guides carried a contributor's local file paths.
   twice before the numbering rule was written down); both records are kept
   and marked rather than renumbered, because renumbering would break every
   reference to either.
-- The archive is large (80 Firebase-era pages) and is not curated; it is
+- ~~The archive is large (80 Firebase-era pages) and is not curated; it is
   banner-marked as history and reachable only from its index. Pruning it is
-  a separate decision.
+  a separate decision.~~ **Pruned on 2026-09-11; that separate decision is
+  recorded below.**
 - The Pages site is public. That is the existing state of the repository and
   the Wiki, not a widening, but the redaction gate is what makes it safe to
   keep saying so.
@@ -120,10 +121,11 @@ and several archived guides carried a contributor's local file paths.
 - Validated 2026-09-06: `mkdocs build --strict` and the redaction gate pass
   on `main` (144 files, 0 findings); https://docs.hybridcloudworks.com/
   serves with HTTPS enforced; 141 Wiki pages point at their new URLs.
-- Revisit if the archive should be pruned or moved out of the site; if a
-  second documentation audience (for example, public how-to content for the
-  product) needs a different structure; or if GitHub Pages limits (1 GB site,
-  soft 100 GB/month bandwidth) are approached.
+- The archive-pruning trigger fired on 2026-09-11; the amendment at the end of
+  this record is the outcome. Revisit the rest if a second documentation
+  audience (for example, public how-to content for the product) needs a
+  different structure; or if GitHub Pages limits (1 GB site, soft 100 GB/month
+  bandwidth) are approached.
 
 ## Related decisions and references
 
@@ -133,3 +135,36 @@ and several archived guides carried a contributor's local file paths.
   in `scripts/validate-repository-structure.ps1`.
 - Issue #360 (the migration), PR #363 (the change), PR #364 (the Home-page
   stub fix), and the CHANGELOG entries for both.
+
+## Amendment, 2026-09-11: the Firebase-era archive is deleted
+
+This record originally kept 80 Firebase-era pages under `archive/`, banner-marked
+and reachable from their own index, and said in its consequences that pruning
+them was a separate decision. This is that decision.
+
+**What the measurement showed.** Of the 79 content pages, **78 were reachable
+from nothing**. No ADR, runbook, standard, architecture page or history page
+linked to any of them. The index's own justification — that "several ADRs are
+only legible next to them" — was not true when it was checked page by page; the
+single apparent match was an ADR quoting a former file path that happens to
+share a filename, not a link.
+
+They were also where every piece of noise on the site lived. Every mention of a
+password, and every contact address, was in `archive/` and nowhere else, all of
+it in templates and shell examples for a platform this workload stopped running
+on in August 2026.
+
+**The decision.** They are deleted rather than hidden. A page that is published,
+unmaintained, describes a retired platform and is linked from nothing is not
+history a reader benefits from — it is 54% of the site competing with the 68
+pages that describe the system as it is. Git history keeps every one of them,
+which is where evidence of a retired platform belongs.
+
+**What a reader loses.** Nothing they could previously find by following a link.
+The Firebase era is still described where it is load-bearing: ADR 0001 through
+ADR 0007 explain what was chosen and why, `history/` carries the migration
+record, and ADR 0023 records the retirement of the estate itself.
+
+**What would reverse this.** A specific page being wanted again — recoverable
+from git in one command. If that happens more than once, the pruning was wrong
+and the archive should come back curated rather than wholesale.

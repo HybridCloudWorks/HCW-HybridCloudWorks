@@ -17,6 +17,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Removed
+
+- **The 80-page Firebase-era archive is deleted from the documentation site
+  (#505).** It was 54% of the published corpus, it described a platform this
+  workload stopped running on in August 2026, and ADR 0027 had recorded that
+  pruning it was a separate decision. This is that decision.
+
+  **The measurement is what settled it.** Of the 79 content pages, **78 were
+  reachable from nothing** — no ADR, runbook, standard, architecture page or
+  history page linked to any of them. The archive index's own justification,
+  that "several ADRs are only legible next to them", was false when checked
+  page by page: the single apparent match was an ADR quoting a former file
+  path that happens to share a filename, not a link. `mkdocs build --strict`
+  fails on a broken internal link and passes after the deletion, which is the
+  same fact proved a second way.
+
+  It was also where every piece of noise lived. Every mention of a password
+  and every contact address on the whole site was in `archive/` and nowhere
+  else, all of it in templates and shell examples for the retired platform.
+  The redaction gate now reads 71 files instead of 151.
+
+  Deleted rather than hidden, because a page that is published, unmaintained,
+  describes a retired platform and is linked from nothing is not history a
+  reader benefits from — it is noise competing with the 68 pages that describe
+  the system as it is. Git history keeps every one of them, which is where
+  evidence of a retired platform belongs. What a reader loses is nothing they
+  could previously reach by following a link: the Firebase era is still
+  described where it is load-bearing, in ADRs 0001 to 0007, in `history/`, and
+  in ADR 0023 on the estate's retirement.
+
+  **The guard added hours earlier caught its own allowlist going stale**, which
+  is the clearest evidence it was worth writing. `docs/archive/` sat in
+  `no-wiki-pointers.test.mjs`'s exemption list; the assertion that fails when
+  an entry matches no tracked file fired the moment the folder went, so the
+  dead exemption was removed in the same change rather than left as a hole.
+
 ### Fixed
 
 - **Thirteen references still sent readers to `wiki/`, five days after it was

@@ -40,7 +40,10 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  */
 const HISTORY = [
   'CHANGELOG.md',
-  'docs/archive/',
+  // `docs/archive/` stood here until 2026-09-11, when the 80 Firebase-era
+  // pages were deleted (ADR 0027's amendment). The entry is gone rather than
+  // kept "just in case", because the assertion below exists to make exactly
+  // that kind of leftover fail — and it did, the moment the folder went.
   'docs/history/',
   // The ADR that performed the migration; it must describe what it replaced.
   'docs/decisions/0027-documentation-site.md',
