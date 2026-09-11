@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DATA_AS_OF, appliedSkills, certifications, timelineEvents } from './certifications';
-import { findStaleStatuses, todayIso } from '@/lib/certStatus';
+import { CERT_DATE_FIELDS, findStaleStatuses, todayIso } from '@/lib/certStatus';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -75,6 +75,26 @@ describe('Azure certification data', () => {
     }
     expect(byCode.get('AZ-802')).toBeDefined();
     expect(byCode.get('AZ-802').status).toBe('active');
+  });
+
+  it('leaves AZ-802 undated, so the successor to both cannot itself go stale (#494)', () => {
+    // Owner, 2026-09-11: AZ-802 becomes the single test for AZ-800 and AZ-801.
+    // That is what lets #494 close the Azure half without a vendor round-trip
+    // on 2026-10-01. The successor is not a third row to revisit later — it is
+    // `active` and carries no date at all, so `findStaleStatuses` can never
+    // name it. Both retiring rows already point at it, asserted above.
+    //
+    // The day Microsoft does put a date on AZ-802 this fails, which is the
+    // right moment to look: a dated successor is a new obligation, and the
+    // alternative is discovering it from a red build months later with no
+    // record of why anyone expected it to be undated.
+    const az802 = certifications.find((c) => c.code === 'AZ-802');
+    const dated = CERT_DATE_FIELDS.filter(
+      (field) => az802[field] !== undefined && az802[field] !== null
+    );
+
+    expect(dated, 'AZ-802 has grown a dated field — see the comment above').toEqual([]);
+    expect(findStaleStatuses([az802], '2027-12-31')).toEqual([]);
   });
 
   it('has unique ids, slugs and codes', () => {

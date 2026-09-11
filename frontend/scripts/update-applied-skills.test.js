@@ -201,6 +201,11 @@ describe('rule 3 — lifecycle only moves forward', () => {
  * reaches the report string, so a single case would exercise the same branches
  * — but #494's own table listed AZ-801 and missed AZ-800, and a test that says
  * "AZ-800/AZ-801" while checking one of them is how that happens again.
+ *
+ * That both rows really are this shape — `expiring`, 2026-09-30, `az-802` — is
+ * already asserted by `src/data/azure/certifications.test.js` ("marks AZ-800
+ * and AZ-801 as retiring on 2026-09-30 in favour of AZ-802"), which is where
+ * the catalogue's own facts belong. Not restated here.
  */
 describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#494)', (code) => {
   const FILE_ROW = { status: 'expiring', expiryDate: '2026-09-30' };
@@ -255,27 +260,6 @@ describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#4
       })
     ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
     expect(report).toEqual([]);
-  });
-});
-
-/**
- * And that both rows really are the identical shape the block above assumes.
- * If one of them ever grows a different `status` or `expiryDate`, the three
- * cases stop describing it and the parameterisation quietly becomes a lie.
- */
-describe('the two rows #494 is about (#494)', () => {
-  it('carries AZ-800 and AZ-801 with the same status and the same date', async () => {
-    const { certifications } = await import('../src/data/azure/certifications.js');
-    const rows = ['AZ-800', 'AZ-801'].map((code) => certifications.find((c) => c.code === code));
-
-    for (const row of rows) {
-      expect(row, 'both rows must still be in the catalogue').toBeDefined();
-      expect({
-        status: row.status,
-        expiryDate: row.expiryDate,
-        replacedBy: row.replacedBy,
-      }).toEqual({ status: 'expiring', expiryDate: '2026-09-30', replacedBy: 'az-802' });
-    }
   });
 });
 

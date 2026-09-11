@@ -54,6 +54,17 @@ This project has not cut a tagged release; entries are grouped under
   was covered: no test anywhere fed the reconciler a source saying `retired`,
   so the forward move the issue was waiting on had never been exercised.
 
+  **AZ-802 closes the Azure half outright** (owner, 2026-09-11): it becomes the
+  single test replacing both AZ-800 and AZ-801. That is what makes those two
+  rows need no vendor round-trip on 2026-10-01 — the successor is already known
+  and already in the file, which `certifications.test.js` has asserted since
+  #464. The gap was that nothing said the successor is itself undated: AZ-802
+  is `active` and carries no dated field at all, so `findStaleStatuses` can
+  never name it and it is not a third row to revisit later. Now pinned, and it
+  fails the day Microsoft puts a date on AZ-802 — which is the right moment to
+  look, rather than meeting a dated successor as a red build months later with
+  no record of why anyone expected otherwise.
+
   **MLA-C02 confirmed a false positive**, as #494 argued: `dateProblems` reads
   only `betaEndDate` and `gaDate` for a beta row, never `betaStartDate`. Pinned
   both ways — silent on 2026-10-01, and firing on 2027-01-15 once its `gaDate`
