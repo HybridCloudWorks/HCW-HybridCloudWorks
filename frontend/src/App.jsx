@@ -22,6 +22,7 @@ const lazyPage = (loader) => lazy(loader);
 const HomePage = lazyPage(() => import('@/pages/shared/HomePage'));
 const AboutPage = lazyPage(() => import('@/pages/shared/AboutPage'));
 const ContactPage = lazyPage(() => import('@/pages/shared/ContactPage'));
+const EducationIndexPage = lazyPage(() => import('@/pages/shared/EducationIndexPage'));
 const NewsPage = lazyPage(() => import('@/pages/shared/NewsPage'));
 const SharedPodcastPage = lazyPage(() => import('@/pages/shared/PodcastPage'));
 const NotFoundPage = lazyPage(() => import('@/pages/NotFoundPage'));
@@ -297,6 +298,10 @@ function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/contact" element={<ContactPage />} />
+              {/* Cross-provider Learn index. A static first segment outranks
+                  `/:provider` in route ranking, so this wins over the provider
+                  layout the same way `/preview/:id` and `/tools/*` do. */}
+              <Route path="/education" element={<EducationIndexPage />} />
               {/* --- Provider Routes (Wrapped in ProviderLayout) --- */}
               <Route path="/:provider" element={<ProviderLayout />}>
                 <Route index element={<ProviderLandingDispatcher />} />

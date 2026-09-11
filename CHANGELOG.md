@@ -317,6 +317,49 @@ This project has not cut a tagged release; entries are grouped under
   granting the Admin app role to a named user, which is a recurring operation
   with no other tool. None is spent.
 
+### Added
+
+- **`/education`, a front door to the Learn section that did not exist.**
+  `routes.education(provider)` appeared only inside a provider's own header,
+  so a learner had to have already chosen a cloud to find the section at all,
+  and the home page linked three of the eight — on hover. Two people were
+  served by nothing: the beginner who does not yet know which cloud to learn,
+  and the practitioner moving from one to another.
+
+  Eight provider tiles, each with the exams bookable today, the entry-level
+  one to start with, and that catalogue's own freshness line through the
+  existing `CatalogueFreshness`. Then a level table: rows are tiers, columns
+  are providers, so AZ-104 and SOA-C03 land in the same row and the reader
+  draws the line themselves. **No cert-to-cert mapping is asserted anywhere** —
+  the table folds each catalogue's own `level` field, and a test walks all
+  eight catalogues so a new level word fails the suite rather than silently
+  dropping a row.
+
+  Built entirely from data that already exists, and the page adds none of its
+  own. Prerendered like the other standalone routes. Its canonical comes from
+  `socialTags` in `prerender.mjs`, which derives one for every route and never
+  overwrites a page that sets its own — so this page sets a title and a
+  description and lets the prerenderer do the rest, exactly as `/about` does.
+  Confirmed in the built output rather than assumed.
+
+  **"Bookable" includes `expiring`, deliberately.** A published retirement
+  date does not close an exam, and excluding those would have hidden seven
+  sittable exams including AWS DVA-C02 and SAP-C02 from the one page meant to
+  help someone choose. Non-active rows carry a word — `retiring`, `beta` —
+  never a colour alone.
+
+  **Twelve vendor level words fold into four tiers**, which is the only
+  hand-written part and is tested. `Foundational`, `Fundamentals`,
+  `Foundations` and `Practitioner` all mean "start here" at AWS, Azure, GitHub
+  and the FinOps Foundation respectively. Two folds are lossy and are recorded
+  rather than hidden: VMware's `Professional` (VCP) and `Advanced` (VCAP) are
+  genuinely different rungs that share a cell, and AWS's `Business` is one
+  exam and a role cut rather than a tier.
+
+  The page surfaced two data problems it did not cause, both now filed: the
+  same GitHub exam is carried in two catalogues at contradicting levels, and
+  the Azure catalogue is the only one of eight with no `DATA_SOURCE`.
+
 ### Changed
 
 - **Every certification catalogue re-verified against its vendor, ahead of the
