@@ -196,8 +196,13 @@ describe('rule 3 — lifecycle only moves forward', () => {
  * rule 3 exists so a stale source cannot un-retire an exam — but it means the
  * row is only guaranteed to move when the source both retires it AND agrees
  * about the date. Worth knowing before trusting the Monday run to do it.
+ *
+ * Run over BOTH codes rather than one standing in for the pair. The label only
+ * reaches the report string, so a single case would exercise the same branches
+ * — but #494's own table listed AZ-801 and missed AZ-800, and a test that says
+ * "AZ-800/AZ-801" while checking one of them is how that happens again.
  */
-describe('AZ-800/AZ-801 on the first Monday after 2026-09-30 (#494)', () => {
+describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#494)', (code) => {
   const FILE_ROW = { status: 'expiring', expiryDate: '2026-09-30' };
 
   it('retires the row when Microsoft reports it retired on the same date', () => {
@@ -208,7 +213,7 @@ describe('AZ-800/AZ-801 on the first Monday after 2026-09-30 (#494)', () => {
       reconcileLifecycle({
         existing: { ...FILE_ROW },
         sourced: { status: 'retired', expiryDate: '2026-09-30' },
-        label: 'AZ-801',
+        label: code,
         report,
       })
     ).toEqual({ status: 'retired', expiryDate: '2026-09-30' });
@@ -218,38 +223,59 @@ describe('AZ-800/AZ-801 on the first Monday after 2026-09-30 (#494)', () => {
   it('does NOT retire it when Microsoft reports a different retirement date, and says so', () => {
     const report = [];
 
-    // Rank alone would move it (retired 3 > expiring 2), but the date conflict
-    // is caught first and the file wins. The row stays `expiring` past its own
-    // expiryDate, so the suite stays red and this line is the only clue why —
-    // which is why #499 wants the summary carried into the PR body.
+    // Rank alone would move it (retired 3 > expiring 2), but the date
+    // conflict is caught first and the file wins. The row stays `expiring`
+    // past its own expiryDate, so the suite stays red and this line is the
+    // only clue why — which is why #499 carries the summary into the PR body.
     expect(
       reconcileLifecycle({
         existing: { ...FILE_ROW },
         sourced: { status: 'retired', expiryDate: '2026-11-30' },
-        label: 'AZ-801',
+        label: code,
         report,
       })
     ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
     expect(report).toEqual([
-      "AZ-801: the source gives retirement date 2026-11-30 but the file has 2026-09-30; kept the file's value.",
+      `${code}: the source gives retirement date 2026-11-30 but the file has 2026-09-30; kept the file's value.`,
     ]);
   });
 
   it('does NOT retire it when Microsoft is slow and still reports it expiring, and stays silent', () => {
     const report = [];
 
-    // Correct — an exam Microsoft has not retired should not be retired here —
-    // but it reports nothing at all, so a row left stale this way is invisible
-    // in the run summary. Only the red suite catches it.
+    // Correct — an exam Microsoft has not retired should not be retired here
+    // — but it reports nothing at all, so a row left stale this way is
+    // invisible in the run summary. Only the red suite catches it.
     expect(
       reconcileLifecycle({
         existing: { ...FILE_ROW },
         sourced: { status: 'expiring', expiryDate: '2026-09-30' },
-        label: 'AZ-801',
+        label: code,
         report,
       })
     ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
     expect(report).toEqual([]);
+  });
+});
+
+/**
+ * And that both rows really are the identical shape the block above assumes.
+ * If one of them ever grows a different `status` or `expiryDate`, the three
+ * cases stop describing it and the parameterisation quietly becomes a lie.
+ */
+describe('the two rows #494 is about (#494)', () => {
+  it('carries AZ-800 and AZ-801 with the same status and the same date', async () => {
+    const { certifications } = await import('../src/data/azure/certifications.js');
+    const rows = ['AZ-800', 'AZ-801'].map((code) => certifications.find((c) => c.code === code));
+
+    for (const row of rows) {
+      expect(row, 'both rows must still be in the catalogue').toBeDefined();
+      expect({
+        status: row.status,
+        expiryDate: row.expiryDate,
+        replacedBy: row.replacedBy,
+      }).toEqual({ status: 'expiring', expiryDate: '2026-09-30', replacedBy: 'az-802' });
+    }
   });
 });
 
