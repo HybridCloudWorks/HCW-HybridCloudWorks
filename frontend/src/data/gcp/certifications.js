@@ -28,6 +28,20 @@
  * GA, extended the window, or withdrew it. No GA date is published yet, so
  * none is invented here.
  *
+ * PAA RE-READ 2026-09-11 (#494), and nothing had moved: the page still says
+ * "open until September 30", still three hours, ~80 questions, $120 against a
+ * $200 retail price, English, one-year validity, and still publishes no GA
+ * date. So the row below is right as it stands and there was nothing to
+ * change. `DATA_AS_OF` is deliberately NOT bumped — one row was re-read, not
+ * all fifteen credentials, and that field is a claim about the whole file.
+ *
+ * What #494 could not do, and no day before 2026-10-01 can: say what the
+ * credential becomes. The post-beta state does not exist yet. The alarm is
+ * what carries that obligation — on 2026-10-01 the suite fails naming PAA and
+ * pointing at `DATA_SOURCE`, which is the same instruction an open ticket
+ * would have carried, delivered on the day it becomes actionable instead of
+ * sitting on a board for three weeks.
+ *
  * Google does not publish exam codes; the `code` values here are the
  * community short forms this page has always used.
  *

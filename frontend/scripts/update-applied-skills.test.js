@@ -180,6 +180,89 @@ describe('rule 3 — lifecycle only moves forward', () => {
   });
 });
 
+/**
+ * #494: does the Monday run actually retire AZ-800 and AZ-801 on its own?
+ *
+ * Both carry `status: 'expiring'` and `expiryDate: '2026-09-30'`, and #494
+ * recorded the self-heal as "an expectation, not a guarantee — nobody has
+ * watched that workflow correct a row yet". Waiting for 2026-10-05 to find out
+ * is not the only option: `reconcileLifecycle` never reads the calendar, it
+ * compares the file's status against the source's by `LIFECYCLE_RANK`. So what
+ * the workflow will do on that Monday is decided entirely by what Microsoft
+ * reports, and every branch of it can be exercised today.
+ *
+ * The answer is that it self-heals in exactly one of the three cases below,
+ * and the other two are silent or near-silent. That is the design working —
+ * rule 3 exists so a stale source cannot un-retire an exam — but it means the
+ * row is only guaranteed to move when the source both retires it AND agrees
+ * about the date. Worth knowing before trusting the Monday run to do it.
+ *
+ * Run over BOTH codes rather than one standing in for the pair. The label only
+ * reaches the report string, so a single case would exercise the same branches
+ * — but #494's own table listed AZ-801 and missed AZ-800, and a test that says
+ * "AZ-800/AZ-801" while checking one of them is how that happens again.
+ *
+ * That both rows really are this shape — `expiring`, 2026-09-30, `az-802` — is
+ * already asserted by `src/data/azure/certifications.test.js` ("marks AZ-800
+ * and AZ-801 as retiring on 2026-09-30 in favour of AZ-802"), which is where
+ * the catalogue's own facts belong. Not restated here.
+ */
+describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#494)', (code) => {
+  const FILE_ROW = { status: 'expiring', expiryDate: '2026-09-30' };
+
+  it('retires the row when Microsoft reports it retired on the same date', () => {
+    const report = [];
+
+    // The expected case, and the only one that needs nobody.
+    expect(
+      reconcileLifecycle({
+        existing: { ...FILE_ROW },
+        sourced: { status: 'retired', expiryDate: '2026-09-30' },
+        label: code,
+        report,
+      })
+    ).toEqual({ status: 'retired', expiryDate: '2026-09-30' });
+    expect(report).toEqual([]);
+  });
+
+  it('does NOT retire it when Microsoft reports a different retirement date, and says so', () => {
+    const report = [];
+
+    // Rank alone would move it (retired 3 > expiring 2), but the date
+    // conflict is caught first and the file wins. The row stays `expiring`
+    // past its own expiryDate, so the suite stays red and this line is the
+    // only clue why — which is why #499 carries the summary into the PR body.
+    expect(
+      reconcileLifecycle({
+        existing: { ...FILE_ROW },
+        sourced: { status: 'retired', expiryDate: '2026-11-30' },
+        label: code,
+        report,
+      })
+    ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
+    expect(report).toEqual([
+      `${code}: the source gives retirement date 2026-11-30 but the file has 2026-09-30; kept the file's value.`,
+    ]);
+  });
+
+  it('does NOT retire it when Microsoft is slow and still reports it expiring, and stays silent', () => {
+    const report = [];
+
+    // Correct — an exam Microsoft has not retired should not be retired here
+    // — but it reports nothing at all, so a row left stale this way is
+    // invisible in the run summary. Only the red suite catches it.
+    expect(
+      reconcileLifecycle({
+        existing: { ...FILE_ROW },
+        sourced: { status: 'expiring', expiryDate: '2026-09-30' },
+        label: code,
+        report,
+      })
+    ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
+    expect(report).toEqual([]);
+  });
+});
+
 describe('buildCatalogue — the rules applied to the whole file', () => {
   const existingCertifications = [
     {

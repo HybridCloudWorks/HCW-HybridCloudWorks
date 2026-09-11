@@ -31,7 +31,13 @@
  * do not generalise, and duplicating the shared assertions costs nothing.
  */
 import { describe, it, expect } from 'vitest';
-import { CERT_DATE_FIELDS, findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
+import {
+  CERT_DATE_FIELDS,
+  deriveStatus,
+  findStaleStatuses,
+  isIsoDate,
+  todayIso,
+} from '@/lib/certStatus';
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
 import * as azure from '@/data/azure/certifications';
@@ -104,6 +110,78 @@ describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provide
         ).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * #494: the rows whose dates pass at the end of September 2026.
+ *
+ * The alarm above is deliberately tied to the real clock, so it says nothing
+ * about a date until that date arrives — which leaves the interesting question
+ * unanswerable on any day before it: when 2026-09-30 passes, does the site tell
+ * a reader something false, or does it merely stop being able to prove itself?
+ *
+ * These pin the answer at a fixed future day, so it is known now rather than
+ * discovered by a red build. Two facts, and they point opposite ways:
+ *
+ *   THE PAGES DO NOT LIE. `deriveStatus` reads the dates at render time, so on
+ *   2026-10-01 AZ-800 and AZ-801 render `retired` and PAA renders `active`
+ *   without anyone touching a file. Whatever the stored `status` says, no
+ *   visitor is shown a retired exam as testable or a closed beta as open.
+ *
+ *   THE CLAIMS GO UNPROVABLE ANYWAY, which is what the alarm is for. A stored
+ *   `status` that its own dates have overtaken is a claim nobody has rechecked
+ *   against the vendor, and the vendor is the only thing that can say what the
+ *   credential became. So the suite goes red and names the rows.
+ *
+ * #494's own table listed three rows and missed one: AZ-800 carries the same
+ * `expiryDate` 2026-09-30 and the same `replacedBy: 'az-802'` as AZ-801, so it
+ * trips in the same breath. The count below is the check on that — four rows
+ * across three catalogues, not the one the issue expected a person to fix.
+ */
+describe('the rows dated 2026-09-30 (#494)', () => {
+  const AFTER = '2026-10-01';
+
+  it('names exactly the four rows whose dates have been overtaken, across three catalogues', () => {
+    const named = Object.entries(CATALOGUES)
+      .flatMap(([provider, mod]) =>
+        findStaleStatuses(mod.certifications ?? [], AFTER).map((p) => `${provider}: ${p}`)
+      )
+      .sort();
+
+    // AZ-800 is the one #494 did not list. MLA-C01 (expiryDate 2026-09-28)
+    // fires two days earlier and belongs to the AWS rows #494 left for later.
+    expect(named).toEqual([
+      "aws: MLA-C01: status 'expiring' but expiryDate 2026-09-28 has passed",
+      "azure: AZ-800: status 'expiring' but expiryDate 2026-09-30 has passed",
+      "azure: AZ-801: status 'expiring' but expiryDate 2026-09-30 has passed",
+      "gcp: PAA: status 'beta' but betaEndDate 2026-09-30 has passed",
+    ]);
+  });
+
+  it('renders each of them correctly on that day regardless, so no page states something false', () => {
+    const rowFor = (mod, code) => mod.certifications.find((c) => c.code === code);
+
+    expect(deriveStatus(rowFor(azure, 'AZ-800'), AFTER)).toBe('retired');
+    expect(deriveStatus(rowFor(azure, 'AZ-801'), AFTER)).toBe('retired');
+    expect(deriveStatus(rowFor(gcp, 'PAA'), AFTER)).toBe('active');
+    expect(deriveStatus(rowFor(aws, 'MLA-C01'), AFTER)).toBe('retired');
+  });
+
+  it('leaves MLA-C02 alone, because betaStartDate is not a claim about today', () => {
+    // #494 called this a false positive: it looks urgent in a date sort
+    // (betaStartDate 2026-09-29) but `dateProblems` checks only betaEndDate and
+    // gaDate for a beta row, and MLA-C02's gaDate is 2027-01-14. Pinned so the
+    // reasoning is enforced rather than restated in prose the next time
+    // somebody sorts the catalogue by date and panics.
+    const mla = aws.certifications.find((c) => c.code === 'MLA-C02');
+
+    expect(mla.betaStartDate).toBe('2026-09-29');
+    expect(findStaleStatuses([mla], AFTER)).toEqual([]);
+    expect(deriveStatus(mla, AFTER)).toBe('beta');
+    expect(findStaleStatuses([mla], '2027-01-15')).toEqual([
+      "MLA-C02: status 'beta' but gaDate 2027-01-14 has been reached",
+    ]);
   });
 });
 

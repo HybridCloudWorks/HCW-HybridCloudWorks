@@ -17,6 +17,72 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Changed
+
+- **The three dated catalogue rows were settled without waiting three weeks
+  for them (#494).** #494 held four obligations that all read as "come back
+  after 2026-09-30". Three of them did not need the wait, and answering them
+  now turned up two things the issue had wrong.
+
+  **AZ-800 was missing from the issue's own table.** It carries the same
+  `expiryDate: '2026-09-30'` and the same `replacedBy: 'az-802'` as AZ-801, so
+  it trips in the same breath — four rows go stale on 2026-10-01 across three
+  catalogues, not the one the issue expected a person to fix. A test now pins
+  the exact list, so the next dated row is a named expectation rather than a
+  surprise.
+
+  **The pages were never going to lie, which changes what the alarm is for.**
+  `deriveStatus` reads the dates at render time, so on 2026-10-01 AZ-800 and
+  AZ-801 render `retired` and PAA renders `active` with nobody touching a file.
+  No visitor is shown a retired exam as testable. What goes wrong on that day
+  is narrower and worth stating precisely: a stored `status` its own dates have
+  overtaken is a claim nobody has rechecked against the vendor. Pinned at a
+  fixed future date so it is known rather than discovered.
+
+  **Whether the Monday run self-heals AZ-801 was answerable today, and the
+  answer is "in one of three cases".** #494 recorded it as "an expectation, not
+  a guarantee — nobody has watched that workflow correct a row yet", but
+  `reconcileLifecycle` never reads the calendar: it compares the file's status
+  against the source's by `LIFECYCLE_RANK`, so what the 2026-10-05 run will do
+  is decided entirely by what Microsoft reports, and every branch was
+  exercisable immediately. It retires the row when Microsoft reports `retired`
+  on the same date. It does **not** when Microsoft reports a different
+  retirement date — the date conflict is caught before rank and the file wins,
+  leaving the row stale with one report line as the only clue. It does **not**
+  when Microsoft is slow and still reports `expiring`, and that case reports
+  nothing at all. All three are rule 3 working as designed, and none of them
+  was covered: no test anywhere fed the reconciler a source saying `retired`,
+  so the forward move the issue was waiting on had never been exercised.
+
+  **AZ-802 closes the Azure half outright** (owner, 2026-09-11): it becomes the
+  single test replacing both AZ-800 and AZ-801. That is what makes those two
+  rows need no vendor round-trip on 2026-10-01 — the successor is already known
+  and already in the file, which `certifications.test.js` has asserted since
+  #464. The gap was that nothing said the successor is itself undated: AZ-802
+  is `active` and carries no dated field at all, so `findStaleStatuses` can
+  never name it and it is not a third row to revisit later. Now pinned, and it
+  fails the day Microsoft puts a date on AZ-802 — which is the right moment to
+  look, rather than meeting a dated successor as a red build months later with
+  no record of why anyone expected otherwise.
+
+  **MLA-C02 confirmed a false positive**, as #494 argued: `dateProblems` reads
+  only `betaEndDate` and `gaDate` for a beta row, never `betaStartDate`. Pinned
+  both ways — silent on 2026-10-01, and firing on 2027-01-15 once its `gaDate`
+  is reached — so the reasoning is enforced rather than restated in prose the
+  next time somebody sorts by date and panics.
+
+  **PAA was re-read against Google on 2026-09-11** and nothing had moved:
+  still "open until September 30", three hours, ~80 questions, $120 against
+  $200 retail, English, one-year validity, still no GA date. `DATA_AS_OF` is
+  deliberately not bumped — one row was re-read, not all fifteen credentials,
+  and that field is a claim about the whole file.
+
+  The one thing no day before 2026-10-01 can supply is what the credential
+  becomes, because the post-beta state does not exist yet. That obligation is
+  carried by the alarm rather than by the board: on 2026-10-01 the suite fails
+  naming PAA and pointing at `DATA_SOURCE`, which is the instruction the ticket
+  held, delivered on the day it becomes actionable.
+
 ### Fixed
 
 - **The same GitHub exam was rendering at two different levels on one screen,
