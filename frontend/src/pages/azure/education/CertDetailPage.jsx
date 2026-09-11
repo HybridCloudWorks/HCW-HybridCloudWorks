@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router';
 import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import ListenAndLearn from '@/components/education/ListenAndLearn';
+import EpisodePlaylist from '@/components/education/EpisodePlaylist';
+import { outlineFor, DATA_AS_OF as GUIDES_AS_OF } from '@/data/azure/study-guides';
 import { DATA_AS_OF, certifications } from '@/data/azure/certifications';
 import { deriveStatus, formatIsoDate, useToday } from '@/lib/certStatus';
 
@@ -149,6 +151,10 @@ export default function CertDetailPage() {
     ? certifications.find((c) => c.slug === cert.replacedBy) || null
     : null;
   const nextCerts = certifications.filter((c) => cert.nextCerts?.includes(c.slug));
+  // The official study guide's "Skills measured" outline, joined by the
+  // guide URL rather than the exam code — applied-skills entries share
+  // site-assigned codes, and a URL tail can only name one guide (#498).
+  const outline = outlineFor(cert.studyGuideUrl);
 
   return (
     <>
@@ -182,36 +188,54 @@ export default function CertDetailPage() {
             className="absolute -top-10 -right-10 w-64 h-64 rounded-full blur-3xl pointer-events-none"
             style={{ background: `radial-gradient(circle, ${meta.glow} 0%, transparent 70%)` }}
           />
-          <div className="relative z-10">
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <span className={`px-3 py-1 border text-xs font-bold rounded ${meta.badge}`}>
-                {cert.level}
-              </span>
-              <span className="text-sm font-mono text-foreground/60">{cert.code}</span>
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-slate-950 dark:text-white mb-3">
-              {cert.title}
-            </h1>
-            <StatusNotice status={status} cert={cert} replacement={replacement} />
-            <p className="text-foreground text-lg max-w-3xl mb-6">{cert.longDescription}</p>
-            <div className="flex flex-wrap gap-6 text-sm">
-              <div>
-                <div className="text-foreground/60 mb-0.5">Study Hours</div>
-                <div className="text-2xl font-bold text-primary">{cert.hours}h</div>
+          {/* Two columns on wide screens: the title block, and the study
+              podcast as a single player with its chapters (#498). The
+              playlist renders nothing when no episode has approved audio,
+              and then the title block simply takes the full width. */}
+          <div className="relative z-10 lg:flex lg:gap-8 lg:items-start">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <span className={`px-3 py-1 border text-xs font-bold rounded ${meta.badge}`}>
+                  {cert.level}
+                </span>
+                <span className="text-sm font-mono text-foreground/60">{cert.code}</span>
               </div>
-              <div>
-                <div className="text-foreground/60 mb-0.5">Prep Time</div>
-                <div className="text-2xl font-bold text-slate-950 dark:text-white">
-                  {cert.prepTime}
-                </div>
-              </div>
-              {cert.successRate && (
+              <h1 className="text-3xl sm:text-4xl font-bold text-slate-950 dark:text-white mb-3">
+                {cert.title}
+              </h1>
+              <StatusNotice status={status} cert={cert} replacement={replacement} />
+              <p className="text-foreground text-lg max-w-3xl mb-6">{cert.longDescription}</p>
+              <div className="flex flex-wrap gap-6 text-sm">
                 <div>
-                  <div className="text-foreground/60 mb-0.5">Avg. Pass Rate</div>
-                  <div className="text-2xl font-bold text-cyan-400">{cert.successRate}</div>
+                  <div className="text-foreground/60 mb-0.5">Study Hours</div>
+                  <div className="text-2xl font-bold text-primary">{cert.hours}h</div>
                 </div>
-              )}
+                <div>
+                  <div className="text-foreground/60 mb-0.5">Prep Time</div>
+                  <div className="text-2xl font-bold text-slate-950 dark:text-white">
+                    {cert.prepTime}
+                  </div>
+                </div>
+                {cert.successRate && (
+                  <div>
+                    <div className="text-foreground/60 mb-0.5">Avg. Pass Rate</div>
+                    <div className="text-2xl font-bold text-cyan-400">{cert.successRate}</div>
+                  </div>
+                )}
+              </div>
             </div>
+
+            <EpisodePlaylist
+              // Keyed by exam so a route change REMOUNTS it. React Router
+              // reuses this page's instance when only the slug changes, and a
+              // playlist that survived that would carry the previous exam's
+              // selected chapter — or an index past the new exam's last one —
+              // into a page it was never on (Copilot review of 05b35783).
+              key={`azure:${cert.code}`}
+              platform="azure"
+              examCode={cert.code}
+              className="mt-6 lg:mt-0 lg:w-80 lg:shrink-0"
+            />
           </div>
         </section>
 
@@ -252,6 +276,128 @@ export default function CertDetailPage() {
                 ))}
               </div>
             </section>
+
+            {/* Skills measured — the official study guide's outline, area by
+                area, each deep-linked to its heading on Microsoft Learn (#498).
+                Rendered only when an outline was parsed for this exam: the
+                data ships with the site (src/data/azure/study-guides.js), so
+                this is in the prerendered HTML, and an exam with no guide
+                shows nothing rather than an empty heading. */}
+            {outline && (
+              <section
+                className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6"
+                aria-labelledby="skills-measured-heading"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                  <h2
+                    id="skills-measured-heading"
+                    className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2"
+                  >
+                    <span
+                      className="text-primary material-symbols-outlined text-[20px]"
+                      aria-hidden="true"
+                    >
+                      format_list_numbered
+                    </span>
+                    Skills measured
+                  </h2>
+                  <a
+                    href={outline.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-foreground/60 hover:text-primary underline underline-offset-2"
+                  >
+                    Official study guide
+                  </a>
+                </div>
+                <p className="text-sm text-foreground/70 mb-4">
+                  Microsoft&apos;s own objectives, in the order the exam presents them. Each area
+                  links to its section on Microsoft Learn. Checked {GUIDES_AS_OF}.
+                </p>
+
+                <ol className="space-y-3">
+                  {outline.areas.map((area, i) => {
+                    const href = area.anchor
+                      ? `${outline.sourceUrl}#${area.anchor}`
+                      : outline.sourceUrl;
+                    const sections = area.sections.length
+                      ? area.sections
+                      : [{ title: null, objectives: area.objectives }];
+                    return (
+                      <li key={area.slug}>
+                        <details
+                          open={i === 0}
+                          className="group bg-card/40 border border-card/30 rounded-xl"
+                        >
+                          <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none select-none">
+                            <span
+                              className="shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center text-xs font-bold text-primary"
+                              aria-hidden="true"
+                            >
+                              {i + 1}
+                            </span>
+                            <span className="flex-1 min-w-0 text-sm font-semibold text-slate-950 dark:text-white">
+                              {area.name}
+                            </span>
+                            {area.weightLabel ? (
+                              <span
+                                className="shrink-0 px-2 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-[11px] font-semibold text-primary"
+                                title="Share of the exam this area is worth"
+                              >
+                                {area.weightLabel}
+                              </span>
+                            ) : null}
+                            <span
+                              className="material-symbols-outlined text-[18px] text-foreground/50 transition-transform group-open:rotate-180"
+                              aria-hidden="true"
+                            >
+                              expand_more
+                            </span>
+                          </summary>
+
+                          <div className="px-4 pb-4 pt-1 space-y-3">
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2"
+                            >
+                              <span
+                                className="material-symbols-outlined text-[14px]"
+                                aria-hidden="true"
+                              >
+                                open_in_new
+                              </span>
+                              {area.anchor ? 'This area on Microsoft Learn' : 'On Microsoft Learn'}
+                            </a>
+
+                            {sections.map((section, s) => (
+                              <div key={section.title || `flat-${s}`}>
+                                {section.title ? (
+                                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1.5">
+                                    {section.title}
+                                  </h3>
+                                ) : null}
+                                <ul className="space-y-1 pl-4 list-disc marker:text-primary/60">
+                                  {section.objectives.map((objective) => (
+                                    <li
+                                      key={objective}
+                                      className="text-sm text-foreground/80 leading-snug"
+                                    >
+                                      {objective}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            )}
 
             {/* Microsoft Learn Modules — only when the catalogue lists any; an
                 empty section under a heading reads as broken. */}
@@ -392,7 +538,7 @@ export default function CertDetailPage() {
                 href={cert.learnUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full h-11 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors"
+                className="flex items-center justify-start px-4 gap-2 w-full h-11 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors"
               >
                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                   open_in_new
@@ -404,7 +550,7 @@ export default function CertDetailPage() {
                   href={cert.studyGuideUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
+                  className="flex items-center justify-start px-4 gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
                 >
                   <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                     description
@@ -417,7 +563,7 @@ export default function CertDetailPage() {
                   href={cert.practiceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
+                  className="flex items-center justify-start px-4 gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
                 >
                   <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                     quiz

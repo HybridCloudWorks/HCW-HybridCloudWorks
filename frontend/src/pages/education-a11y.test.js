@@ -50,6 +50,9 @@ const EDUCATION_FILES = [
   'pages/azure/education/CertDetailPage.jsx',
   'pages/aws/education/MicrocredentialDetailPage.jsx',
   'components/education/CertStatusBadge.jsx',
+  // Rendered inside the Azure and AWS detail pages, and missed by the first
+  // sweep: its heading was the one bare `text-white` left on those routes.
+  'components/education/ListenAndLearn.jsx',
 ];
 
 const read = (rel) => readFileSync(resolve(SRC, rel), 'utf8');

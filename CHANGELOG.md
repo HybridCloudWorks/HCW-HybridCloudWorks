@@ -19,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Social Hub's "AI Caption" button reported "Failed to generate
+  caption" and nothing else, while the API had named the cause one field
+  away (#498).** `generateSocialCaption` answers
+  `{ error: 'Failed to generate caption', message: <why> }`, and
+  `lib/api.js` threw only `error`. So the toast showed the label and
+  discarded the sentence that said whether a provider had no key, a credential
+  was rejected, or the model returned nothing. The same shape that cost #358
+  two days on Publer — the status shown, the reason dropped — reproduced
+  inside this client. The thrown message now carries `message` after the
+  label, guarded so a message that merely restates the error is not repeated;
+  five cases hold it. The underlying cause of the owner's failure is not
+  known from here, and that is the point: the next press will say.
+
+- **Listen & Learn's heading was white on white in light mode.** The one bare
+  `text-white` the #497 sweep missed, because the component lives under
+  `components/education/` and the sweep's file list did not reach it. Fixed
+  the same way and the file added to the guard, so it cannot come back.
+
+- **The two secondary links in the Azure detail sidebar now line up with the
+  primary button.** They centred their content, so labels of different
+  lengths started at different x; all three are left-aligned with a shared
+  icon column, which is what the owner drew a line beside.
+
 - **The weekly Learn catalogue workflow ends quietly when nothing changed
   instead of failing at "Artifact not found" (#461 item 3).** The refresh job
   uploads the catalogue only when it changed, but the commit job downloaded it
@@ -369,6 +392,83 @@ This project has not cut a tagged release; entries are grouped under
   got one rather than being hidden.
 
 ### Added
+
+- **Every live Azure certification page now carries the official study
+  guide's "Skills measured" outline, area by area, each deep-linked to its
+  heading on Microsoft Learn (#498).** The owner's ask, from the AB-650 page:
+  "Topics Covered" named a handful of themes, and what a learner needs is the
+  table of contents Microsoft actually examines against, in Microsoft's own
+  words, linked to where it lives. Azure only, as asked.
+
+  **The data already existed in the pipeline and was being thrown away.**
+  `functions/src/lib/listen-and-learn/studyguide.js` parses these guides into
+  weighted areas, sub-headings and objectives to script Listen & Learn
+  episodes — and the generator used the outline to write a prompt and
+  discarded it. But the generator only runs when the owner generates an exam,
+  and on 2026-09-11 exactly one Azure certification had ever been generated.
+  An outline that existed only after a generation run would have been missing
+  from nearly every page. So the outline ships as data, like the catalogue:
+  `frontend/scripts/update-study-guides.mjs` reuses that parser across
+  packages, and `src/data/azure/study-guides.js` carries **56 of 56 eligible
+  guides, 234 areas, 961 sections, zero failures**, stamped `DATA_AS_OF`
+  and held by `study-guides.test.js` to the same rules as the catalogue:
+  every live exam with a guide has an outline, no outline is an orphan, the
+  join is the guide URL's tail because applied-skills entries share
+  site-assigned codes and a URL tail can only name one guide.
+
+  **Each area's anchor is read off the Learn page, never derived.** Learn
+  builds its ids from the whole heading — "(20–25%)" becomes "2025" — so the
+  parser's `slugify(name)` cannot reproduce them, and a guessed fragment would
+  scroll the reader to the top of the page while looking like a deep link.
+  The parser now captures the `<h3>`'s own `id`, `null` where the page
+  carries none, and the page renders a plain link in that case rather than a
+  broken one. Verified in the built output: the prerendered AZ-104 page
+  carries `#manage-azure-identities-and-governance-2025`.
+
+  **It is in the HTML.** Because the data ships with the site, the outline is
+  in every prerendered Azure detail page for crawlers and for readers with
+  JavaScript off; the average prerendered page grew from 27 kB to 32 kB.
+
+  **The cost, stated rather than hidden: 85 KB gzipped on every Azure detail
+  page**, against 3 KB for the AWS one, because the whole outline module is
+  bundled into the Azure detail chunk although each page needs one
+  fifty-sixth of it and already has that in its HTML. Not fixed here, on
+  purpose: splitting it per exam means a lazy import inside a Suspense
+  boundary so the hydrating render keeps the server HTML, which is a second
+  change to the hydration story `useToday` was built around and wants its own
+  review. Filed as a follow-up, with `import.meta.glob` — already used in
+  `provider-coverage.test.js` — as the pattern.
+
+  **Not on the Monday cron yet, and why.** `update-learn-catalogue.yml` is
+  deliberately scoped so its App token may touch one file; widening it to a
+  second output is its own reviewable change and is filed. Until then the
+  outlines refresh by `npm run data:update:study-guides`, which refuses to
+  write if nothing parses and keeps an exam's previous outline if its fetch
+  fails, so one bad page cannot erase a good outline.
+
+- **The Azure detail hero carries the study podcast as one player with a
+  chapter list (#498).** `ListenAndLearn` below the fold renders a full card
+  per episode; this is the "press play" surface, so a learner who has already
+  decided to listen does not scroll past the topics to find the button. One
+  native `<audio>` element and the chapters in study-guide order, switching
+  chapter by swapping `src` — one set of controls, one position, one thing a
+  screen reader announces. Renders nothing unless an approved episode has
+  audio: on 2026-09-11 that is AB-100 and no other Azure exam, so the slot is
+  present on every page and visible on one. Named "Study podcast", not
+  "Listen & Learn" again, because the full section already carries that
+  heading and a screen reader would announce the feature twice with nothing
+  to tell them apart; its `<audio>` is labelled "Play chapter:" for the same
+  reason.
+
+- **Real brand marks on the Social Hub account chips, and a Threads entry
+  that did not exist (#498).** lucide-react v1 dropped its brand icons and
+  the chips had been standing in with a chain link for LinkedIn, an @ for X,
+  two heads for Facebook and a camera for Instagram — and nothing at all for
+  Threads, which joined the workspace after the map was written. The owner's
+  own report from the live page: "I cannot tell which account is which."
+  `components/shared/BrandIcon.jsx` carries the networks' simple marks as
+  inline SVG, `currentColor` so each chip's colour token applies, and
+  `aria-hidden` because every chip renders the account name beside it.
 
 - **`/education`, a front door to the Learn section that did not exist.**
   `routes.education(provider)` appeared only inside a provider's own header,

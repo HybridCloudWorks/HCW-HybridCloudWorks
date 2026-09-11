@@ -38,14 +38,11 @@ import {
   ExternalLink,
   AlertCircle,
   Sparkles,
-  Link,
-  AtSign,
-  Users,
-  Camera,
   RefreshCw,
   Send,
   Trash2,
 } from 'lucide-react';
+import { brandIconFor } from '@/components/shared/BrandIcon';
 import { postJSON, getJSON, sendJSON } from '@/lib/api';
 import {
   describePublerFailure,
@@ -56,46 +53,50 @@ import {
 import { fetchPublicContentList } from '@/lib/publicApi';
 import { toMillis } from '@/lib/dateUtils';
 
-// ── YouTube brand icon (no lucide equivalent) ─────────────────────────────────
-
-const YoutubeIcon = ({ className }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-  </svg>
-);
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 // PUBLER_API_BASE removed — Publer calls now go through the publerProxy Cloud
 // Function, not directly from the client (FINDING-04).
 
+// Real brand marks, not stand-ins (#498). lucide-react v1 dropped its brand
+// icons and this map had been using a chain link, an @, two heads and a
+// camera in their place — and had no entry at all for Threads, which joined
+// the workspace after it was written. With three accounts of near-identical
+// names the owner could not tell which chip was which, which is the one job
+// an icon has here.
 const PLATFORM_META = {
   linkedin: {
     label: 'LinkedIn',
-    Icon: Link,
+    Icon: brandIconFor('linkedin'),
     color: 'text-[#0A66C2]',
     bg: 'bg-[#0A66C2]/10 border-[#0A66C2]/20',
   },
   twitter: {
     label: 'X / Twitter',
-    Icon: AtSign,
+    Icon: brandIconFor('twitter'),
     color: 'text-slate-900 dark:text-white',
     bg: 'bg-slate-900/10 border-slate-900/20 dark:bg-white/10 dark:border-white/20',
   },
   facebook: {
     label: 'Facebook',
-    Icon: Users,
+    Icon: brandIconFor('facebook'),
     color: 'text-[#1877F2]',
     bg: 'bg-[#1877F2]/10 border-[#1877F2]/20',
   },
   instagram: {
     label: 'Instagram',
-    Icon: Camera,
+    Icon: brandIconFor('instagram'),
     color: 'text-[#E1306C]',
     bg: 'bg-[#E1306C]/10 border-[#E1306C]/20',
   },
+  threads: {
+    label: 'Threads',
+    Icon: brandIconFor('threads'),
+    color: 'text-slate-900 dark:text-white',
+    bg: 'bg-slate-900/10 border-slate-900/20 dark:bg-white/10 dark:border-white/20',
+  },
   youtube: {
     label: 'YouTube',
-    Icon: YoutubeIcon,
+    Icon: brandIconFor('youtube'),
     color: 'text-[#FF0000]',
     bg: 'bg-[#FF0000]/10 border-[#FF0000]/20',
   },

@@ -74,6 +74,26 @@ describe('helpers', () => {
 });
 
 describe('Microsoft Learn', () => {
+  it('reads each area anchor off the heading rather than deriving it (#498)', () => {
+    // Learn builds anchors from the WHOLE heading text, so "(20–25%)" ends up
+    // as "2025" — `slugify(name)` cannot reproduce that, and a guessed
+    // fragment scrolls to the top while looking like a deep link.
+    const guide = parseLearn(`
+      <h2>Skills measured</h2>
+      <h3 id="manage-azure-identities-and-governance-2025">Manage Azure identities and governance (20–25%)</h3>
+      <ul><li>Create users and groups</li></ul>
+      <h3>Configure and manage storage (15–20%)</h3>
+      <ul><li>Configure Azure Storage firewalls</li></ul>
+      <h2>Study resources</h2>
+    `);
+    expect(guide.areas.map((a) => a.anchor)).toEqual([
+      'manage-azure-identities-and-governance-2025',
+      null,
+    ]);
+    // The document id is unchanged by the anchor: episodes still key off it.
+    expect(guide.areas[0].slug).toBe('manage-azure-identities-and-governance');
+  });
+
   it('extracts weighted areas with their sub-headings and objectives', () => {
     const guide = parseLearn(SKILLS);
 

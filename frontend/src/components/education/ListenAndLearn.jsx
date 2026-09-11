@@ -44,8 +44,10 @@ const formatBytes = (bytes) => (bytes > 0 ? `${(bytes / (1024 * 1024)).toFixed(1
 function SectionShell({ children, accent }) {
   return (
     <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-      <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-        <span className={`${accent.icon} material-symbols-outlined text-[20px]`}>headphones</span>
+      <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-1 flex items-center gap-2">
+        <span className={`${accent.icon} material-symbols-outlined text-[20px]`} aria-hidden="true">
+          headphones
+        </span>
         Listen &amp; Learn
       </h2>
       {children}
@@ -122,7 +124,10 @@ function Episode({ episode, accent }) {
                 rel="noopener noreferrer"
                 className={`flex items-center gap-2 group rounded-lg px-2 py-1.5 border border-transparent ${accent.hover} transition-all`}
               >
-                <span className="material-symbols-outlined text-[14px] text-foreground/40 shrink-0">
+                <span
+                  className="material-symbols-outlined text-[14px] text-foreground/40 shrink-0"
+                  aria-hidden="true"
+                >
                   play_circle
                 </span>
                 <span className="text-xs text-foreground/80 group-hover:text-foreground truncate flex-1">
@@ -143,7 +148,7 @@ function Episode({ episode, accent }) {
             aria-expanded={showTranscript}
             className="text-[11px] font-semibold text-foreground/60 hover:text-foreground flex items-center gap-1"
           >
-            <span className="material-symbols-outlined text-[14px]">
+            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
               {showTranscript ? 'expand_less' : 'expand_more'}
             </span>
             {showTranscript ? 'Hide transcript' : 'Read transcript'}

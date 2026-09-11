@@ -116,6 +116,13 @@ function parseMicrosoftLearn(html, { examCode, sourceUrl }) {
         current = {
           name: clean(name),
           slug: slugify(name),
+          // The heading's own `id`, read off the DOM rather than derived. Learn
+          // builds its anchors from the WHOLE heading — "(20–25%)" becomes
+          // "2025" — so `slugify(name)` cannot reproduce them, and a guessed
+          // fragment would scroll the reader to the top of the page while
+          // looking like a deep link. `null` when the page carries none; the
+          // caller renders a plain link rather than a broken one (#498).
+          anchor: $(node).attr('id') || null,
           weightLow: Number(low),
           weightHigh: high === undefined ? null : Number(high),
           subheadings: [],

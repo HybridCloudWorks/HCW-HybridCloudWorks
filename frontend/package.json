@@ -14,6 +14,7 @@
     "build:data": "node scripts/generate-public-data.cjs",
     "data:update:applied-skills": "node scripts/update-applied-skills.mjs",
     "data:update:credentials": "node scripts/update-applied-skills.mjs",
+    "data:update:study-guides": "node scripts/update-study-guides.mjs",
     "art:generate": "node scripts/generate-brand-art.mjs",
     "preview": "vite preview",
     "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
