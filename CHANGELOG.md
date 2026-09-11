@@ -369,7 +369,7 @@ This project has not cut a tagged release; entries are grouped under
   are different facts.
 
   **Confirmed live 2026-09-11**, deployed with `b70cd21f`. The panel renders
-  on the deployed site and the owner confirmed it working.
+  on the deployed site and the owner confirmed it was working.
 
   The deploy was also confirmed without a credential, by a second technique
   beside the route probe #489 recorded — one for Functions, one for the
