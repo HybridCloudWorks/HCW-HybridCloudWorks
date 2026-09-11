@@ -124,7 +124,7 @@ const detail = {
 };
 
 /** The routes the page reads on mount and on demand. */
-function routeGets({ items = transcripts, connected = true, stored = [] } = {}) {
+function routeGets({ items = transcripts, connected = true, stored = [], plaudRefresh = {} } = {}) {
   getJSON.mockImplementation(async (route) => {
     if (route === 'cms/podcast/transcripts') return { success: true, items, total: items.length };
     if (route.startsWith('cms/podcast/transcripts/')) return { success: true, item: detail };
@@ -137,7 +137,13 @@ function routeGets({ items = transcripts, connected = true, stored = [] } = {}) 
     if (route === 'cms/config/mcp-servers') {
       return {
         items: [
-          { id: 'plaud', status: connected ? 'connected' : 'untested', hasOauthToken: connected },
+          {
+            id: 'plaud',
+            status: connected ? 'connected' : 'untested',
+            hasOauthToken: connected,
+            hasOauthRefreshToken: connected,
+            ...plaudRefresh,
+          },
         ],
       };
     }
@@ -209,6 +215,143 @@ describe('Plaud connection check', () => {
     routeGets({ connected: false });
     renderPage();
     expect(await screen.findByText('Plaud disconnected')).toBeInTheDocument();
+  });
+
+  it('shows when the 12-hour refresh timer last ran (#358)', async () => {
+    // The rotation had no witness anywhere a person can reach: the timer
+    // writes lastTokenRefresh to the document and logs its success at
+    // Information, and T-719 cut host verbosity to Warning, so the trace is
+    // not ingested either. "Armed" and "has actually run" looked identical
+    // from every surface, which is the T-766 defect in a different timer.
+    routeGets({ connected: true, plaudRefresh: { lastTokenRefresh: '2026-09-10T12:00:00.000Z' } });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/Auto-refresh last ran/i)).toBeInTheDocument();
+  });
+
+  it('does not claim a rotation never happened before the read answers', async () => {
+    // Printing "never" for a read that has not landed would be a claim rather
+    // than a measurement - the same distinction `unknown` and `disconnected`
+    // draw above.
+    routeGets({ connected: true });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/not since this token was stored/i)).toBeInTheDocument();
+  });
+
+  it('clears the rotation panel when a later check throws, so one half is not confident', async () => {
+    // A thrown read sets the banner to unknown. Leaving refreshState behind
+    // would show the LAST successful rotation as though it were current,
+    // under a banner saying the connection is unknown - two panels
+    // disagreeing about the same read. Driven through an authReady flip,
+    // which is the real path a re-read takes after a first success: the
+    // "Check again" button only exists once the state is already unknown.
+    let calls = 0;
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/config/mcp-servers') {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            items: [
+              {
+                id: 'plaud',
+                status: 'connected',
+                hasOauthToken: true,
+                hasOauthRefreshToken: true,
+                lastTokenRefresh: '2026-09-10T12:00:00.000Z',
+              },
+            ],
+          };
+        }
+        throw new Error('Not authenticated. Please sign in.');
+      }
+      if (route === 'cms/podcast/transcripts') return { success: true, items: [], total: 0 };
+      if (route === 'public/podcasts?provider=main') return { items: [] };
+      if (route.startsWith('cms/recordings')) return { success: true, items: [] };
+      throw new Error(`unexpected GET ${route}`);
+    });
+
+    authReady = true;
+    const { rerender } = renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/Auto-refresh last ran/i)).toBeInTheDocument();
+
+    authReady = false;
+    rerender(
+      <MemoryRouter>
+        <RecordingHubPage />
+      </MemoryRouter>
+    );
+    authReady = true;
+    rerender(
+      <MemoryRouter>
+        <RecordingHubPage />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.queryByText(/Auto-refresh last ran/i)).toBeNull());
+  });
+
+  it('does not render a label with a blank value for an unreadable timestamp', async () => {
+    // `fmtWhen` returns '' for anything unparseable. Rendering the row anyway
+    // produces "Access token expires:" followed by nothing, which reads as a
+    // broken page rather than a missing value - and a present-but-unreadable
+    // lastTokenRefresh must not claim the timer never ran.
+    routeGets({
+      connected: true,
+      plaudRefresh: { lastTokenRefresh: 'not-a-date', oauthExpiresAt: 'not-a-date' },
+    });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/timestamp could not be read/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Access token expires:/i)).toBeNull();
+    expect(screen.queryByText(/not since this token was stored/i)).toBeNull();
+  });
+
+  it('hides the auto-refresh row when no refresh token is stored', async () => {
+    // The banner already says the access token expires on its own in that
+    // case. "Auto-refresh last ran: not since this token was stored" beside
+    // it implies a refresh token exists and simply has not fired yet.
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/config/mcp-servers') {
+        return {
+          items: [
+            {
+              id: 'plaud',
+              status: 'connected',
+              hasOauthToken: true,
+              hasOauthRefreshToken: false,
+              oauthExpiresAt: Date.parse('2026-09-11T12:00:00.000Z'),
+            },
+          ],
+        };
+      }
+      if (route === 'cms/podcast/transcripts') return { success: true, items: [], total: 0 };
+      if (route === 'public/podcasts?provider=main') return { items: [] };
+      if (route.startsWith('cms/recordings')) return { success: true, items: [] };
+      throw new Error(`unexpected GET ${route}`);
+    });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    // The expiry still shows, and matters more here than anywhere: it is when
+    // the connection stops working.
+    expect(await screen.findByText(/Access token expires:/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Auto-refresh last ran/i)).toBeNull();
+  });
+
+  it('surfaces a failed rotation, not just the connected banner', async () => {
+    routeGets({
+      connected: true,
+      plaudRefresh: { lastTokenRefreshError: 'refresh token revoked' },
+    });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/refresh token revoked/i)).toBeInTheDocument();
   });
 });
 
