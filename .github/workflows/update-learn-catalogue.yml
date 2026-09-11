@@ -324,7 +324,8 @@ jobs:
             echo
             echo "## Verification"
             echo
-            echo "- Checks run: \`node scripts/update-applied-skills.mjs\` and \`node scripts/update-study-guides.mjs\` against the live sources; \`npx vitest run src/data/azure/certifications.test.js src/data/azure/study-guides.test.js\` on the result (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "- Checks run: \`node scripts/update-applied-skills.mjs\` and \`node scripts/update-study-guides.mjs\` against the live sources; then on the result, \`npx vitest run src/data/azure/certifications.test.js src/data/education-catalogues.test.js\` and \`npx vitest run src/data/azure/study-guides.test.js\` (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "- \`education-catalogues.test.js\` is in that list because the Azure-only test cannot see a contradiction with another catalogue: it reads one file. That is how run 34627119281 re-added the six GitHub exams #507 had removed and still went green (#496)."
             echo "- Evidence level: [x] CI"
           } > "${RUNNER_TEMP}/pr-body.md"
           gh pr create \

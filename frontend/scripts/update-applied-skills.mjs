@@ -112,11 +112,12 @@ export const LIFECYCLE_RANK = Object.freeze({ beta: 0, active: 1, expiring: 2, r
  * disagreed about the level, and GH-200 rendered as Fundamentals under Azure
  * and Associate under GitHub on the same /education screen.
  *
- * #496 removed them by owner decision on 2026-09-11 and #507 landed it. The
- * first dispatch of the refreshed workflow (run 34627119281, the same day) put
- * all six straight back, because a decision recorded in a file header is
- * invisible to a script. THAT is what this constant is for: the Monday cron is
- * the thing that has to know, not the reader of the file it writes.
+ * The owner decided on 2026-09-11 that the GitHub catalogue owns them (issue
+ * #496); PR #507 implemented the removal. The first dispatch of the refreshed
+ * workflow (run 34627119281, the same day) put all six straight back, because
+ * a decision recorded in a file header is invisible to a script. THAT is what
+ * this constant is for: the Monday cron is the thing that has to know, not the
+ * reader of the file it writes.
  *
  * A PREFIX, not the six codes. GitHub adding a GH-700 would recreate the
  * duplication exactly, and it belongs to /github/education for the same
