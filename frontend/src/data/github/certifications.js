@@ -17,16 +17,38 @@
  *     recommended prep route.
  *     https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-developer/
  *
+ * RE-VERIFIED 2026-09-10 (#469) against the `DATA_SOURCE` browse listing and
+ * each certification's own Microsoft Learn page, re-reading the
+ * `examUid=exam.GH-xxx` in every "Schedule exam" link. All six codes still sit
+ * on the titles above, still SIX, and nothing is retired. Two things were
+ * checked because they looked like they might have moved, and had not:
+ *
+ *   GH-100 is NOT in beta. A stale cache of its Learn page still titles it
+ *     "GitHub Administration (beta)" and carries the eight-weeks-for-results
+ *     notice; the live page is titled "GitHub Administration", was last
+ *     updated 05/04/2026, and has no beta notice. It is English only, $99.
+ *     https://learn.microsoft.com/en-us/credentials/certifications/github-administration/
+ *   GH-500 is NOT retired. It is absent from the tile list at
+ *     `learn.github.com/credentials`, which shows only the other five — but
+ *     its Learn page is live (updated 05/04/2026, $99, five languages) and
+ *     its study guide took a significant objectives revision in July 2026.
+ *     An omission from a marketing page is not a retirement.
+ *     https://learn.microsoft.com/en-us/credentials/certifications/github-advanced-security/
+ *
+ * GH-600's numbers were re-read at the source and are unchanged: 120 minutes,
+ * $165 USD. Microsoft titles it "GitHub Certified: Agentic AI Developer"; the
+ * short form here is deliberate and `education-catalogues.test.js` pins it.
+ *
  * Worth knowing for the next pass: `docs.github.com`'s "About GitHub
  * Certifications" page still lists only five and does not mention GH-600, so
- * it is NOT a usable source for the set. `learn.github.com/credentials` and
- * the Microsoft Learn browse URL in `DATA_SOURCE` both carry it. Read the
- * source this file names, not the one that is easiest to find.
+ * it is NOT a usable source for the set. `learn.github.com/credentials` is
+ * not one either — as of this pass it drops GH-500. Read the source this file
+ * names, not the one that is easiest to find.
  *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-10';
 
 export const DATA_SOURCE = {
   label: 'Microsoft Learn GitHub certifications',

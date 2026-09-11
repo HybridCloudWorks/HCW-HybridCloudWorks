@@ -15,10 +15,49 @@
  *   VCTA-DCV is the Data Center Virtualization track named in Broadcom's
  *   VCTA FAQ; Broadcom publishes no per-track VCTA page today.
  *
+ * Re-verified 2026-09-10 (#469 item 1) against Broadcom's certification index,
+ * https://www.broadcom.com/support/education/vmware/certification, which today
+ * groups its career certifications as thirteen under VMware Cloud Foundation,
+ * one VCDX, two under Application Networking & Security, and two under
+ * "VMware Legacy Certifications" (VCP-DCV 2V0-21.23, VCP-NV 2V0-41.24). Every
+ * exam code this file carries still appears there, on the title it carries:
+ *   VCP-VVF Administrator 2V0-16.25, VCP-VCF Administrator 2V0-17.25,
+ *   VCP-VCF Architect 2V0-13.25, VCAP-VCF Administrator 3V0-11.26,
+ *   VCAP-VCF Architect 3V0-12.26 and VCAP-VCF Support 3V0-13.26.
+ * The three VCAP rows now link to their own Broadcom pages rather than the
+ * index — /vcap-vcf-administrator9, /vcap-vcf-architect9 and
+ * /vcap-vcf-support9, the URLs the index itself links them by. VCP-VVF's
+ * title gained the "VMware" that Broadcom puts in front of the product name.
+ *
+ * VCTA IS GONE, and that is the one substantive change. Broadcom's index
+ * lists no VMware Certified Technical Associate certification at any level —
+ * not under VCF, not under Legacy — and VCTA-DCV 2024 (1V0-21.20) appears in
+ * https://docs.broadcom.com/doc/vmware-retired-exams-certifications-and-badges
+ * under "Inactive or Retired Exams ... no longer attainable for new
+ * candidates". The row is therefore `retired` and points at that document.
+ * No `retiredDate`: Broadcom publishes the retirement in a list without a date
+ * against this entry, and a guessed date here would be worse than none.
+ * No `replacement` either — Broadcom names no associate-level successor, and
+ * VCP-VVF is a Professional credential rather than a like-for-like swap.
+ *
+ * KNOWN GAP, deliberately left for #469 rather than guessed at: Broadcom's
+ * thirteen VCF certifications include seven this file does not carry — VCP-VCF
+ * Support (2V0-15.25), VCP-VVF Support (2V0-18.25) and the five subject VCAPs,
+ * Automation (3V0-21.25), Operations (3V0-22.25), Storage (3V0-23.25), VKS
+ * (3V0-24.25) and Networking (3V0-25.25) — plus VCDX and the two ANS VCPs.
+ * Their titles and exam codes are on the index above, but `hours` and
+ * `prepTime` are this site's own study estimates and inventing fourteen of
+ * them is exactly the confidently-wrong entry this catalogue exists to avoid.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
+ *
+ * DATA_AS_OF is 2026-09-10 and not 2026-09-11 on purpose: the checks above ran
+ * at 2026-09-11T04:10Z, which is still 2026-09-10 on the local calendar that
+ * `todayIso()` — and therefore the "is DATA_AS_OF in the future" assertion —
+ * reads. The earlier of the two days is the one that is true for every viewer.
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-10';
 
 export const DATA_SOURCE = {
   label: 'Broadcom VMware certification',
@@ -55,21 +94,21 @@ export const certifications = [
     code: 'VCTA-DCV',
     title: 'VMware Certified Technical Associate – Data Center Virtualization',
     level: 'Foundational',
-    status: 'active',
+    status: 'retired',
     description:
-      'Demonstrate basic knowledge of virtualization concepts, vSphere navigation, basic VM administration, and troubleshooting.',
+      'The associate-level entry point to virtualization concepts, vSphere navigation, basic VM administration and troubleshooting. Broadcom lists no VCTA certification of any track on its certification index, and carries VCTA-DCV 2024 (exam 1V0-21.20) among the inactive exams no longer attainable for new candidates. No date is published against the entry and no associate-level successor is named.',
     topics: ['vSphere Basics', 'VM Management', 'Storage & Network Intro', 'Troubleshooting'],
     hours: 15,
     prepTime: '~4 weeks',
     featured: false,
-    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    learnUrl: 'https://docs.broadcom.com/doc/vmware-retired-exams-certifications-and-badges',
   },
   {
     id: 'vcp-vvf',
     slug: 'vcp-vvf',
     code: 'VCP-VVF',
     examCode: '2V0-16.25',
-    title: 'VMware Certified Professional – vSphere Foundation Administrator',
+    title: 'VMware Certified Professional – VMware vSphere Foundation Administrator',
     level: 'Professional',
     status: 'active',
     description:
@@ -128,7 +167,8 @@ export const certifications = [
     hours: 60,
     prepTime: '~6 months',
     featured: false,
-    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    learnUrl:
+      'https://www.broadcom.com/support/education/vmware/certification/vcap-vcf-administrator9',
   },
   {
     id: 'vcap-vcf-arch',
@@ -144,7 +184,7 @@ export const certifications = [
     hours: 60,
     prepTime: '~6 months',
     featured: false,
-    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification/vcap-vcf-architect9',
   },
   {
     id: 'vcap-vcf-support',
@@ -160,7 +200,7 @@ export const certifications = [
     hours: 60,
     prepTime: '~6 months',
     featured: false,
-    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    learnUrl: 'https://www.broadcom.com/support/education/vmware/certification/vcap-vcf-support9',
   },
 ];
 
@@ -179,7 +219,14 @@ export const learningPaths = [
       { title: 'Basic VM Management' },
       { title: 'Troubleshooting Common Issues' },
     ],
-    certUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    // The retired-exams document, not the certification index — the same URL
+    // the VCTA-DCV row carries, and for the same reason. This path's target
+    // certification is retired, and Broadcom's index does not list VCTA at
+    // any track, so a "View details" landing there cannot confirm the thing
+    // it was clicked to confirm. Sending a learner to a page that is silent
+    // about their certification is worse than sending them to the page that
+    // says it is gone (Copilot review of dc62998f).
+    certUrl: 'https://docs.broadcom.com/doc/vmware-retired-exams-certifications-and-badges',
   },
   {
     id: 1,
@@ -195,7 +242,8 @@ export const learningPaths = [
       { title: 'NSX-T Networking Foundations' },
       { title: 'SDDC Manager Lifecycle Operations' },
     ],
-    certUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    certUrl:
+      'https://www.broadcom.com/support/education/vmware/certification/vcp-vcf-administrator',
   },
   {
     id: 2,
@@ -211,7 +259,8 @@ export const learningPaths = [
       { title: 'NSX VPCs & Stateful Gateway Services' },
       { title: 'vSphere Supervisor & VKS at Scale' },
     ],
-    certUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    certUrl:
+      'https://www.broadcom.com/support/education/vmware/certification/vcap-vcf-administrator9',
   },
 ];
 

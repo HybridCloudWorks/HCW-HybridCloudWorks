@@ -78,10 +78,57 @@
  * for FOCUS Analyst (6) and not for AI Value or Technology Value, which it
  * sizes in modules; the card omits the badge rather than carrying a guess.
  *
+ * Re-verified 2026-09-10 (#469 item 2, second pass) against the Foundation's
+ * catalogue at https://learn.finops.org/, which still lists exactly these six
+ * certifications at exactly these prices — Practitioner $500 / exam-only $325,
+ * AI Value $500 over 5 modules, Technology Value $500 over 6 modules,
+ * Professional $500 over 4 modules, FOCUS Analyst $400, Engineer $500 /
+ * exam-only $325 — and still does not list "FinOps for Engineers" at all,
+ * which is what keeps that row `retired`. Pages read again the same day:
+ *
+ *   https://learn.finops.org/finops-certified-focus-analyst-certification —
+ *     "Exam Level: Intermediate", "Self-paced", "12 Month access to course
+ *     materials", "Duration 6 hours (approximately)", "$400", "Your
+ *     certification is valid for 24 months". Unchanged.
+ *   https://learn.finops.org/path/certified-finops-for-ai — "$500", five
+ *     modules, "Once you pass the FinOps Certified: AI Value exam: Valid for
+ *     24 months". Unchanged.
+ *   https://learn.finops.org/path/technology-value — "$500", six modules,
+ *     "Valid for 24 months". Unchanged.
+ *   https://learn.finops.org/path/finops-certified-practitioner-self-paced —
+ *     "$500", "Exam-only $325", "Valid for 24 months". Unchanged.
+ *   https://learn.finops.org/path/finops-certified-professional — "$500",
+ *     "Valid for 24 Months", and the one row that changed: see below.
+ *
+ * THE PROFESSIONAL EXAM NOW REQUIRES THREE CERTIFICATIONS, not two. The
+ * Professional path page lists, under "To access the FinOps Certified
+ * Professional exam, learners must", holding a FinOps Certified: AI Value
+ * certification, a FinOps Certified FOCUS Analyst certification and a FinOps
+ * Certified: Technology Value certification, then completing the Professional
+ * Contribution. The Foundation's own FAQ says the same in one sentence — "To
+ * sit for the exam, you must hold active FinOps Certified FOCUS Analyst,
+ * FinOps Certified: AI Value, and FinOps Certified: Technology Value
+ * certifications" (https://www.finops.org/training-certification/training-faqs/).
+ * FOCUS Analyst was not in that list on 2026-09-09 and the row said so; it is
+ * now, and the row says so.
+ *
+ * One inconsistency in the Foundation's own copy, recorded rather than
+ * resolved: FOCUS Analyst's certification page says the credential is valid
+ * for 24 months, while its recertification page
+ * (https://learn.finops.org/finops-certified-focus-analyst-recertification)
+ * says "The renewed certification is valid for 12 months from the date the
+ * recertification exam is passed". The row carries the 24 months the
+ * certification page states, because that is the figure for earning it.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
+ *
+ * DATA_AS_OF is 2026-09-10 and not 2026-09-11 on purpose: the checks above ran
+ * at 2026-09-11T04:10Z, which is still 2026-09-10 on the local calendar that
+ * `todayIso()` — and therefore the "is DATA_AS_OF in the future" assertion —
+ * reads. The earlier of the two days is the one that is true for every viewer.
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-10';
 
 export const DATA_SOURCE = {
   label: 'FinOps Foundation training catalogue',
@@ -128,7 +175,7 @@ export const certifications = [
     level: 'Professional',
     status: 'active',
     description:
-      'Lead FinOps strategy and governance across multi-cloud environments with benchmarking and executive-level reporting. Requires a Practitioner or Engineer certification and six months of FinOps experience, and the exam additionally requires the AI Value and Technology Value certifications plus a Professional Contribution. The Foundation rates it Advanced, prices it at $500, and the credential is valid for 24 months.',
+      'Lead FinOps strategy and governance across multi-cloud environments with benchmarking and executive-level reporting. Requires a Practitioner or Engineer certification and six months of FinOps experience, and the exam additionally requires active FOCUS Analyst, AI Value and Technology Value certifications plus a completed Professional Contribution. The Foundation rates it Advanced, prices it at $500, and the credential is valid for 24 months.',
     topics: ['Strategy', 'Governance', 'Multi-Cloud', 'Benchmarking'],
     hours: 40,
     prepTime: '~3 months',

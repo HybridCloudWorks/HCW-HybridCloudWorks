@@ -78,8 +78,8 @@ const CERTS = [
     skills: ['Multi-Region', 'Hybrid', 'Cost'],
   },
   {
-    slug: 'scs-c02',
-    code: 'SCS-C02',
+    slug: 'scs-c03',
+    code: 'SCS-C03',
     title: 'Security Specialty',
     difficulty: 'Specialty',
     duration: '4 months',
