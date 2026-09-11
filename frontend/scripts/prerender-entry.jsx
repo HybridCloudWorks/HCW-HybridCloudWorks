@@ -75,6 +75,9 @@ const PROVIDER_SECTIONS = [
  * and indexable whether or not anyone wants them to be.
  */
 const STANDALONE_ROUTES = [
+  // The cross-provider Learn index. Not `/:provider/education`, so the
+  // derivation below never produces it.
+  '/education',
   '/finops/tools',
   '/finops/focus',
   '/finops/architectures',
