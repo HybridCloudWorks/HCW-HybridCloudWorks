@@ -17,6 +17,44 @@
  *   ANS-C01 is being retired; last test day 2026-12-31, no successor.
  *   AWS Certified AI Business Strategist (AIB-C01) is a beta exam, open now.
  *
+ * Re-verified row by row on 2026-09-10 for #469, against the per-exam pages
+ * under aws.amazon.com/certification/<exam>/ (cloud-practitioner,
+ * ai-practitioner, ai-business-strategist, solutions-architect-associate,
+ * cloudops-engineer-associate, developer-associate, data-engineer-associate,
+ * machine-learning-engineer-associate, generative-ai-developer-professional,
+ * solutions-architect-professional, devops-engineer-professional,
+ * security-specialty, advanced-networking-specialty), the September 2026
+ * Training and Certification blog (/blogs/training-and-certification/
+ * september-2026-new-offerings/), and the SCS-C03 announcement blog
+ * (/blogs/training-and-certification/big-news-aws-expands-ai-certification-
+ * portfolio-and-updates-security-certification/). What that turned up:
+ *
+ *   SCS-C02 was not current and had not been for nine months. The last day
+ *     to take SCS-C02 was 2025-12-01 and SCS-C03 replaced it; the exam guide
+ *     this file already linked is titled "AWS Certified Security - Specialty
+ *     (SCS-C03)" and carries an appendix comparing SCS-C02 with SCS-C03.
+ *     The row now reads SCS-C03, with `previousSlugs` keeping /scs-c02 alive
+ *     the way SOA-C03 does for /soa-c02.
+ *   Every other code, title, level and date above re-confirmed unchanged.
+ *     AIB-C01 is still in beta (Business category, 85 questions / 170
+ *     minutes, USD 50 beta and USD 100 standard, Early Adopter badge for
+ *     passing by 2027-02-15) and AWS still publishes no beta end date, so
+ *     the row carries none. SAA-C03 is still current — no SAA-C04 exists;
+ *     only its Italian language version retires after 2026-12-31.
+ *
+ * One conflict, left unresolved on purpose. The SAP and DVA exam pages read
+ * "The last day to take the current exam (SAP-C02) is November 17, 2026" and
+ * "... (DVA-C02) is December 1, 2026" — each one day later than the same
+ * announcement's own Key dates block, which reads "November 16, 2026 – Last
+ * day to take SAP-C02 / November 17, 2026 – SAP-C03 GA delivery begins" and
+ * "November 30, 2026 – Last day to take DVA-C02 / December 1, 2026 – DVA-C03
+ * GA delivery begins". The blog's table is internally consistent and the
+ * marketing blurb is not, so the file keeps the blog's dates. Likewise
+ * MLA-C02's exam page now shows "TBD" for GA registration and GA delivery
+ * while the blog still names 2027-01-14; the specific date is kept until AWS
+ * contradicts it rather than merely stops repeating it. Both are worth a
+ * second look the next time this file is opened.
+ *
  * `status` and the dates are read through `@/lib/certStatus` at render time,
  * so a card says "Retired" the day after its last test date without anyone
  * editing this file; `src/data/education-catalogues.test.js` then fails until
@@ -26,7 +64,7 @@
  * `availableDate` the first GA day of a new version; `previousSlugs` keeps
  * old detail-page links resolving after a version bump.
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-10';
 
 export const DATA_SOURCE = {
   label: 'AWS Certification',
@@ -190,7 +228,7 @@ export const certifications = [
       },
     ],
     prerequisites: 'CLF-C02 recommended. 1+ year of hands-on AWS experience.',
-    nextCerts: ['sap-c02', 'sap-c03', 'dop-c02', 'scs-c02'],
+    nextCerts: ['sap-c02', 'sap-c03', 'dop-c02', 'scs-c03'],
   },
   {
     id: 'soa-c03',
@@ -606,16 +644,17 @@ export const certifications = [
     nextCerts: [],
   },
   {
-    id: 'scs-c02',
-    slug: 'scs-c02',
-    code: 'SCS-C02',
+    id: 'scs-c03',
+    slug: 'scs-c03',
+    previousSlugs: ['scs-c02'],
+    code: 'SCS-C03',
     title: 'AWS Certified Security – Specialty',
     level: 'Specialty',
     status: 'active',
     description:
       'Secure AWS workloads with advanced IAM, encryption, and threat detection services.',
     longDescription:
-      'Validate your expertise in securing AWS workloads and infrastructure. Covers advanced IAM strategies, data encryption, incident response, infrastructure security, and threat detection using GuardDuty, Macie, and Security Hub.',
+      'Validate your expertise in securing AWS workloads and infrastructure. Covers advanced IAM strategies, data encryption, incident response, infrastructure security, and threat detection using GuardDuty, Macie, and Security Hub. SCS-C03 replaced SCS-C02 as the current version: the last day to take SCS-C02 was December 1, 2025. The update adds a dedicated focus on generative AI and machine learning security and splits Detection and Incident Response into separate domains.',
     topics: [
       'IAM & Identity',
       'KMS & Encryption',
