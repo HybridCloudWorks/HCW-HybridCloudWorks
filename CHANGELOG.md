@@ -40,7 +40,6 @@ This project has not cut a tagged release; entries are grouped under
   firewall rule and an output. All thirteen now point at `docs/`, and the
   alert carries the published URL beside the path so it is reachable from a
   phone without a checkout.
-  beside the path so it is reachable from a phone without a checkout.
 
   **Nothing noticed because nothing could.** A comment is not compiled and a
   shell string inside a workflow is not linted, so a documentation move that

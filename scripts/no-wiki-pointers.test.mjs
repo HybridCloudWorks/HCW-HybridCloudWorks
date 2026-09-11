@@ -76,11 +76,64 @@ function trackedFiles() {
 const TEXT = /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|json|sh|tf|tfvars|hcl|txt|toml|env|bicep)$/i;
 
 /**
- * A reference to the retired folder. Matches `wiki/Page.md` and `` `wiki/` ``
- * but not `github.com/owner/repo/wiki`, which is a URL to the retired Wiki and
- * is caught separately where it matters, nor `wikipedia`.
+ * A reference to the retired folder.
+ *
+ * The lookbehind forbids only a WORD character, so `mediawiki/` is not a
+ * match while `./wiki/Page.md` and `../wiki/Page.md` are. An earlier version
+ * also forbade `.`, `-` and `/`, which excused every dot-relative form — the
+ * most natural way to write the pointer this test exists to forbid
+ * (Copilot review of 4f5b6ad3).
  */
-const POINTER = /(?<![\w.\-/])wiki\//i;
+const POINTER = /(?<!\w)wiki\//i;
+
+/**
+ * A link to the retired Wiki itself. This is a pointer too, and a worse one:
+ * it resolves to a redirect back to the repository root, so a reader who
+ * follows it is told nothing at all.
+ */
+const WIKI_URL = /github\.com\/[^\s)]+\/wiki\b/i;
+
+/**
+ * URLs that merely contain `/wiki/` and have nothing to do with this
+ * repository — Wikipedia above all. Stripped before the path check so they
+ * cannot raise a false positive; GitHub's own Wiki URLs are deliberately left
+ * in the line, because `WIKI_URL` must still see them.
+ */
+const FOREIGN_WIKI_URL = /https?:\/\/(?!\S*github\.com)\S*?\/wiki\/?\S*/gi;
+
+/** What the line-level check makes of one line. Mirrors the loop below. */
+function isOffending(line) {
+  const withoutForeign = line.replace(FOREIGN_WIKI_URL, '');
+  return POINTER.test(withoutForeign) || WIKI_URL.test(withoutForeign);
+}
+
+describe('what counts as a pointer', () => {
+  // Pinned directly, because the sweep below passing proves only that the
+  // repository is clean today — not that the patterns would catch a pointer
+  // reintroduced tomorrow. Two of these cases were holes until review.
+  it.each([
+    ['wiki/Blog-Machine.md'],
+    ['see `wiki/` for the runbook'],
+    ['./wiki/Alerting-And-Support.md'],
+    ['../wiki/Required-Inputs.md'],
+    ['docs at ../../wiki/Home.md'],
+    ['https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki'],
+    ['https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki/Home'],
+  ])('flags %j', (line) => {
+    expect(isOffending(line)).toBe(true);
+  });
+
+  it.each([
+    ['docs/content/blog-machine.md'],
+    ['https://docs.hybridcloudworks.com/runbooks/alerting-and-support/'],
+    ['https://en.wikipedia.org/wiki/Idempotence'],
+    ['the mediawiki/ export format'],
+    ['a wikipedia article'],
+    ['MediaWiki is not this'],
+  ])('leaves %j alone', (line) => {
+    expect(isOffending(line)).toBe(false);
+  });
+});
 
 describe('the retired Wiki has no live pointers', () => {
   it('no tracked file outside the historical record points at wiki/', () => {
@@ -97,10 +150,11 @@ describe('the retired Wiki has no live pointers', () => {
       }
 
       body.split('\n').forEach((line, i) => {
-        // A GitHub Wiki URL is a different thing from a `wiki/` path, and the
-        // changelog legitimately links to the retired Wiki's own URL.
-        const withoutUrls = line.replace(/https?:\/\/\S*?\/wiki\/?\S*/gi, '');
-        if (POINTER.test(withoutUrls)) {
+        // Wikipedia and friends are dropped first so they cannot raise a
+        // false positive. GitHub's own Wiki URLs stay, because linking the
+        // retired Wiki is as dead an instruction as naming the deleted folder.
+        const withoutForeign = line.replace(FOREIGN_WIKI_URL, '');
+        if (POINTER.test(withoutForeign) || WIKI_URL.test(withoutForeign)) {
           offenders.push(`${rel}:${i + 1} — ${line.trim().slice(0, 120)}`);
         }
       });
