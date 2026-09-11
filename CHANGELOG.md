@@ -392,8 +392,10 @@ This project has not cut a tagged release; entries are grouped under
   so both arrive through the same screen.
 
   Recorded as owner-reported rather than measured. The Connect tab is behind
-  admin auth, so no session read that timestamp; the issue comment says the
-  same thing in the same words. "Observed" and "reported as observed" are
+  admin sign-in, so no automated check could read that timestamp — not the
+  probes that verified these deploys, not a monitor, not an agent session. It
+  was read by the operator in their own browser, and the issue comment says
+  the same thing in the same words. "Observed" and "reported as observed" are
   different evidence, and an estate that has twice been misled by a confident
   report of something nobody measured should keep saying which one it has.
 
