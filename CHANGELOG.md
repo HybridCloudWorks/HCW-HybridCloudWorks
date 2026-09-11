@@ -372,6 +372,19 @@ This project has not cut a tagged release; entries are grouped under
   answered another way, and it would put a description of a secret on a page
   whose stated promise is that it never reads one back.
 
+  **Confirmed live 2026-09-10**, deployed with `5123493c`. Three malformed
+  values were pasted at the API-keys page and each was refused by name with
+  nothing written: a value prefixed with an auth scheme, a value still wearing
+  its quotes, and a value with a space in the middle.
+
+  The confirmation was run FROM A PHONE, which is the authentic instrument
+  rather than a convenience. The curly-quote case exists because a phone
+  keyboard substitutes them, so a desk browser can only simulate the error
+  this check was written for. The quoted value is refused either as wrapped in
+  quotes or as containing a curly quote depending on the keyboard, and both
+  are correct - which is worth writing down, because a reader expecting one
+  exact sentence would read the other as a failure.
+
 - **Telegram, RSS.com and YouTube can be tested from the Integrations page,
   without their credentials ever reaching a browser (#483).** The three held
   keys that are only ever read on the server, so their cards had a globe and
@@ -462,6 +475,36 @@ This project has not cut a tagged release; entries are grouped under
   last three, so that guard now fails for the right reason — which makes it
   the wrong guard. It is replaced by an assertion that the set is *empty*,
   which pins today's fact and hands the rule back the moment anything joins.
+
+  **Confirmed live 2026-09-10**, deployed with `5123493c`. All three beakers
+  were pressed: Telegram and YouTube reported connected, and RSS.com reported
+  that `RSSCOM_API_KEY` is not set.
+
+  **That third result is the feature working, not failing**, and the
+  distinction is the one this repository keeps paying for. RSS.com's key has
+  never been seeded, so "not configured" is the only honest answer a probe can
+  give - and it is a different answer from "the credential was rejected",
+  which is precisely the confusion #358 spent days inside. A card that said
+  "could not connect" for both would have been useless.
+
+  **The deployment itself was confirmed without a credential**, by a method
+  worth keeping: `POST /api/connectionProbe` answered 401 while an invented
+  route name answered 404, on a route that did not exist in the previous
+  package. A guard rejection proves the route is registered; the 404 control
+  proves the 401 was not the edge answering for everything.
+
+  **The `health` endpoint cannot answer this, and the reason is a trap worth
+  naming.** It does report a `generation`, so it looks like a deploy
+  identifier - but that value is `RUNTIME_CONFIG_GENERATION`, written by
+  `var.config_generation` on a **Terraform apply** (T-513). It answers "which
+  configuration generation is this worker consuming", which is a different
+  question, and it does not move when a Functions package is deployed: it read
+  `gate2-a8fd3c8` both before and after this deploy. Reading it as a build
+  stamp would report a stale package as a fresh one. Everything that would
+  identify the build - runtime version, site name, feature flags - was
+  stripped from that endpoint by T-402, because an unauthenticated inventory
+  is what host enumeration looks for. So the route probe with a control is the
+  available method, not a preference.
 
 - **The Azure Learn catalogue refreshes itself every Monday, and the Friday
   Skills Hub scrape finally has a reader (#461 items 3 and 4).**
