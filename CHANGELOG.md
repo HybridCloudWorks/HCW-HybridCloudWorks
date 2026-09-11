@@ -19,6 +19,62 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The same GitHub exam was rendering at two different levels on one screen,
+  and the Azure catalogue could not have been made right (#496).** GH-100,
+  GH-200, GH-300, GH-500, GH-600 and GH-900 were carried in both
+  `frontend/src/data/azure/certifications.js` and
+  `frontend/src/data/github/certifications.js`. `/education` renders every
+  catalogue side by side, so GH-200 appeared in the Foundational row under
+  Azure and the Associate row under GitHub simultaneously.
+
+  **Four of the six disagreed, not one.** The issue caught GH-200 because that
+  is what the index surfaced; GH-100 and GH-500 are `Professional` in the
+  GitHub catalogue against `Fundamentals` in Azure's, and GH-300 `Associate`
+  against `Fundamentals`. Five of the six sat at `Fundamentals` in Azure — a
+  batch default rather than a verified rung.
+
+  **The Azure copy was unfixable, which decided it.** That file's `LEVEL_META`
+  defines Fundamentals, Associate, Expert and Specialty, so `Professional` has
+  no rung there at all: GH-100 and GH-500 could not be stated truthfully in
+  that file whatever was typed into them. The GitHub catalogue, by contrast,
+  was verified per exam against each credential's own Microsoft Learn page
+  three times (#461, twice under #469) and its header records which vendor
+  pages are unreliable and why. Owner decision 2026-09-11: the six rows leave
+  Azure, and GitHub exams belong to `/github/education`. Booking on Microsoft
+  Learn is a real fact about these exams; it did not make a second copy of the
+  rows worth keeping.
+
+  The six now-unreachable `gh-*` study-guide outlines went with them —
+  `outlineFor` is consumed only by the Azure detail page, and
+  `study-guides.test.js` asserts no outline exists for an exam the catalogue
+  does not carry. `eligibleCerts` in `scripts/update-study-guides.mjs` reads
+  the catalogue, so the generator drops them on its own from here.
+
+  **Guarded, because nothing could have caught this.** Every assertion in
+  `education-catalogues.test.js` read one catalogue at a time, so a
+  contradiction between two of them was invisible by construction. A new test
+  fails when any exam code is carried by two providers — codes rather than
+  levels, since the vendors' own vocabularies do not reconcile (AWS
+  `Foundational`, Azure `Fundamentals`, GitHub `Foundations` are one rung) and
+  a mapping table would be another thing to keep correct. Verified against the
+  pre-fix file: it names all six exams and both levels for each.
+
+- **The largest catalogue had no `DATA_SOURCE`, and the test that asserts one
+  covered the other seven (#496).** `azure/certifications.js` exported none,
+  and it sat outside the `CATALOGUES` list in `education-catalogues.test.js`,
+  so it was the one catalogue that could omit it without failing a build — and
+  did, from #461 until now. `EducationIndexPage` carried a documented `??`
+  fallback so the freshness line would still name a vendor.
+
+  It matters most there of any catalogue: Azure is the largest, it is the one
+  refreshed automatically by `update-learn-catalogue.yml`, and so it is the one
+  whose freshness claim is most worth a reader being able to check. The export
+  now names the Microsoft Learn credentials browse page — the same URL the
+  fallback used, so the rendered page does not change — the fallback and its
+  constant are gone, and Azure joined `CATALOGUES`, which puts all eight under
+  the assertion. Verified by removing the export again: the suite goes red
+  naming `azure DATA_SOURCE.label`.
+
 - **A botched find-and-replace had been live on the docs site for two weeks
   (#506).** `docs/standards/required-inputs.md` opened by saying it had moved
   "from `TODO.md` on 2026-08-29, when that file was retired and its open work

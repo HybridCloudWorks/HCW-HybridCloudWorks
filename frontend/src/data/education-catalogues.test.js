@@ -22,18 +22,26 @@
  *
  * Azure's catalogue has the same check in `azure/certifications.test.js`
  * (#464); both run through the one `findStaleStatuses` in `@/lib/certStatus`.
+ *
+ * Azure joined `CATALOGUES` here with #496, which is what made the DATA_SOURCE
+ * assertion below cover all eight. Until then it was the one catalogue outside
+ * this list, so it was the one catalogue that could omit `DATA_SOURCE` without
+ * failing a build — and it did, from #461 until #496. Its own test file stayed:
+ * it carries the Azure-only rows (applied skills, retirement replacements) that
+ * do not generalise, and duplicating the shared assertions costs nothing.
  */
 import { describe, it, expect } from 'vitest';
 import { CERT_DATE_FIELDS, findStaleStatuses, isIsoDate, todayIso } from '@/lib/certStatus';
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
+import * as azure from '@/data/azure/certifications';
 import * as finops from '@/data/finops/education';
 import * as gcp from '@/data/gcp/certifications';
 import * as github from '@/data/github/certifications';
 import * as terraform from '@/data/terraform/certifications';
 import * as vmware from '@/data/vmware/education';
 
-const CATALOGUES = { ansible, aws, finops, gcp, github, terraform, vmware };
+const CATALOGUES = { ansible, aws, azure, finops, gcp, github, terraform, vmware };
 
 describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provider, mod) => {
   const { certifications, DATA_AS_OF, DATA_SOURCE } = mod;
@@ -96,6 +104,47 @@ describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provide
         ).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * #496: one exam, one catalogue.
+ *
+ * GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900 were carried in both the
+ * Azure and GitHub catalogues, and four of the six disagreed about the level —
+ * GH-200 rendered as Fundamentals under Azure and Associate under GitHub on the
+ * same /education screen. Nothing caught it for as long as it existed, because
+ * every assertion in this file reads one catalogue at a time; a contradiction
+ * between two of them was invisible by construction.
+ *
+ * Codes rather than levels, deliberately. The level vocabularies are the
+ * vendors' own and do not reconcile — AWS says Foundational, Azure Fundamentals,
+ * GitHub Foundations for the same rung — so comparing levels across catalogues
+ * would need a mapping table that is itself a thing to keep correct. Whereas an
+ * exam code is the vendor's identifier: if two catalogues both claim one, the
+ * duplication is the defect, whatever the levels happen to say. 122 codes across
+ * the eight catalogues when this was written.
+ */
+describe('one exam, one catalogue (#496)', () => {
+  it('has no exam code carried by two providers', () => {
+    const owners = new Map();
+
+    for (const [provider, mod] of Object.entries(CATALOGUES)) {
+      for (const cert of mod.certifications ?? []) {
+        if (!cert.code) continue;
+        if (!owners.has(cert.code)) owners.set(cert.code, []);
+        owners.get(cert.code).push(`${provider} (${cert.level})`);
+      }
+    }
+
+    const shared = [...owners.entries()]
+      .filter(([, where]) => where.length > 1)
+      .map(([code, where]) => `${code}: ${where.join(' and ')}`);
+
+    expect(
+      shared,
+      'each of these exams is carried by two catalogues — decide which one owns it, as #496 did for the GH-x exams'
+    ).toEqual([]);
   });
 });
 

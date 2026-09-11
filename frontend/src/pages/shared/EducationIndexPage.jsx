@@ -49,19 +49,6 @@ import * as terraform from '@/data/terraform/certifications';
 import * as vmware from '@/data/vmware/education';
 
 /**
- * `src/data/azure/certifications.js` is the one catalogue that exports no
- * `DATA_SOURCE` — the other seven do, and `education-catalogues.test.js`
- * asserts it for those seven only. Its file header names the page it is
- * hand-synced against, so that is what stands in here. `??` rather than a
- * replacement: the day the catalogue grows its own `DATA_SOURCE`, that one
- * wins and this constant stops being reached.
- */
-const AZURE_SOURCE_FALLBACK = Object.freeze({
-  label: 'Microsoft Learn credentials',
-  url: 'https://learn.microsoft.com/en-us/credentials/browse/?credential_types=certification',
-});
-
-/**
  * The eight catalogues, in the order `VALID_PROVIDERS` lists them so this page
  * and the router agree. `name` matches `displayName` in ProviderContext; it is
  * repeated rather than imported because `useProviderConfig` reads the provider
@@ -191,7 +178,7 @@ export function summarizeCatalogue({ provider, name, catalogue }, today) {
     name,
     hubPath: routes.education(provider),
     asOf: catalogue.DATA_AS_OF,
-    source: catalogue.DATA_SOURCE ?? (provider === 'azure' ? AZURE_SOURCE_FALLBACK : null),
+    source: catalogue.DATA_SOURCE ?? null,
     total: certifications.length,
     available,
     counts: countByStatus(certifications, today),
