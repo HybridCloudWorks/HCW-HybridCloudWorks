@@ -19,9 +19,12 @@ the agent drift, this page wins — update the agent.
 4. **Documentation has exactly three homes.** Narrative → the published
    documentation site, built from `docs/` in the repository
    ([ADR 0027](../decisions/0027-documentation-site.md); it replaced the GitHub
-   Wiki on 2026-09-06). Review state → the SOP root documents, which in this
-   repository are `README.md`, `CHANGELOG.md` and `TODO.md`. Tooling docs →
-   next to the tooling, allowlisted by the structure validator.
+   Wiki on 2026-09-06). Standing repository record → the SOP root documents
+   `README.md`, `CHANGELOG.md` and `TODO.md`: what the repository is, what
+   verifiably shipped, and the risks accepted rather than fixed. Open work is
+   not among them — it moved to GitHub issues on 2026-09-05, and `TODO.md` is
+   the index pointing there. Tooling docs → next to the tooling, allowlisted
+   by the structure validator.
 5. **Landing-zone absorbable.** Workload repos never create management
    groups, subscription-level policy, or deny assignments; they carry the
    tag contract and survive being moved under an ALZ.

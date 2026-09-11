@@ -50,7 +50,7 @@ Every ADR includes:
 > `T-519`, `T-706` and so on. These were the repository's own tracked-finding
 > identifiers, assigned in the root `TODO.md` and used by the
 > [2026-08 architecture review](../architecture/architecture-review-2026-08.md),
-> which states its own findings in full under their own headings. The scheme was retired on
+> which states each finding in full under its own heading. The scheme was retired on
 > 2026-09-05 when open work moved to GitHub issues; a `T-` number in an accepted
 > ADR is a historical citation, not a live ticket, and the sentence around it is
 > meant to carry the meaning on its own.

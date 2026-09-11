@@ -410,7 +410,7 @@ in `variables.tf`, the rest composed from the workload, environment, region and
 instance tokens — and the ones every runbook on this site uses. The rule the
 paragraph carried still
 stands and is the reason the scheme is written down at all: **a naming
-convention applies when a resource is created, not retroactively** — the next
+convention applies when a resource is created, not retroactively** — any
 live resource that predates this page is grandfathered, not renamed.
 
 ---
