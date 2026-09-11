@@ -5,7 +5,19 @@
     runbook for starting a new migration.
 
 
-**Status:** Architecture plan approved; Terraform generation not yet started
+**Status:** Historical. The status line here read "Architecture plan approved;
+Terraform generation not yet started" until 2026-09-11, which was true when the
+plan was written on 2026-07-22 and has been false since the platform went live
+on 2026-08-21.
+
+**What a reader gets from it.** The nine-phase sequence the migration was
+planned in, and — more usefully — the rule stated under every phase: *no phase
+authorizes a production apply, DNS change, external mutation, Firebase
+decommission, or repository archive by itself.* That separation of "work done"
+from "permission granted" is the part that outlived the plan.
+[Implementation TODO](implementation-todo.md) is the same nine phases as an
+execution checklist; where the two differ, neither is maintained and
+`CHANGELOG.md` records what actually shipped.
 
 **Production model:** One production workload state
 

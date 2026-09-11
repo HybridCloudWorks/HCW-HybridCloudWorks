@@ -2,22 +2,24 @@
 
 Every variable, secret and setting the workload needs, with live status.
 
-> **Moved here from `TODO.md` on 2026-08-29**, when that file was retired and
+> **Moved here from `REVIEW.md` on 2026-08-29**, when that file was retired and
 > its open work folded into [TODO.md](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/TODO.md).
-> TODO.md's own header explained why this inventory sat there rather than in
+> `REVIEW.md` was the root document that held the owner-gated open work and, in
+> its Part 4, this inventory; it no longer exists.
+> REVIEW.md's own header explained why this inventory sat there rather than in
 > the Wiki (now this docs site): the two procedures that write to it — a contributor recording a new
 > required input ([CONTRIBUTING](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/.github/CONTRIBUTING.md)),
 > an operator moving an entry from `SET` to `VERIFIED` after an apply
 > ([Deployment-Runbook](../runbooks/deployment-runbook.md)) — are gated on owner-level access.
 >
-> That argument stopped holding once TODO.md went away, and it was always
+> That argument stopped holding once REVIEW.md went away, and it was always
 > weaker than it looked: `docs/` (then `wiki/`) is reviewed through pull requests exactly as the
 > repository root is, so nothing about the write path changes by moving here.
 > What does change is that a 228-line reference inventory is no longer sitting
 > inside a document people opened to find out what to do next.
 >
 > **Section numbers are unchanged** (§4.1 … §4.10), because roughly sixteen code
-> comments cite them by number. A citation reading `Required-Inputs §4.5` now reads
+> comments cite them by number. A citation reading `REVIEW.md §4.5` now reads
 > `Required-Inputs §4.5` and lands in the same place.
 
 **Related:** [Variables and secrets](../standards/variables-and-secrets.md) carries the *rules* —

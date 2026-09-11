@@ -15,13 +15,25 @@ Two questions, in this order:
    Terraform, GitHub or an app setting cannot be changed without a coordinated
    change across every consumer.
 
-Required-Inputs is the *inventory* — what exists, who consumes it, whether it is
-provisioned. This page is the *rule* that decides where the next entry goes and
-what it is called. The two are meant to be read together: CHECKLIST records the
-fact, this page justifies it.
+[Required inputs](../standards/required-inputs.md) is the *inventory* — what
+exists, who consumes it, whether it is provisioned. This page is the *rule* that
+decides where the next entry goes and what it is called. The two are meant to be
+read together: the inventory records the fact, this page justifies it.
 
-> **This page contains no values, and must not acquire any.** It uses
-> CHECKLIST's placeholder format — `X` = letter, `0` = number, `!` = special
+> **"CHECKLIST §n" below is a citation to a document that no longer exists.**
+> `CHECKLIST.md` was the root required-input inventory until 2026-08-20, when it
+> was merged into `REVIEW.md`; `REVIEW.md`'s Part 4 then became
+> [Required inputs](../standards/required-inputs.md) on 2026-08-29, and
+> `REVIEW.md` was deleted. Every `CHECKLIST §n` on this page is therefore a
+> record of where a value was inventoried *at the time the placement was
+> decided*, and it is kept for that reason rather than rewritten. **The section
+> numbers do not carry across:** CHECKLIST was organised by consumer (§1
+> Functions identity, §4 AI providers, §7 CI inputs) and Required inputs is
+> organised by store (§4.1 the Terraform workspace, §4.2 GitHub variables, §4.6
+> Key Vault). To find a value today, search Required inputs for its name.
+
+> **This page contains no values, and must not acquire any.** It uses the
+> inventory's placeholder format — `X` = letter, `0` = number, `!` = special
 > character; GUIDs as `00000000-0000-0000-0000-000000000000`. That includes
 > subscription, tenant and client IDs, which are identifiers rather than
 > credentials but are still not published.

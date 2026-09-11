@@ -1,8 +1,11 @@
 # Template-LZDeployment — pre-flight risk assessment
 
-!!! note "Historical record"
-    Retained as evidence of how the Azure platform was built. Not an active
-    runbook for starting a new migration.
+!!! note "Dated record"
+    A one-off assessment of a *different* repository — an Azure Landing Zone
+    factory — asked whether it could be run against this platform's tenant. It
+    is filed under History because it is a point-in-time reading of two
+    codebases that have both moved since, not because it is part of the Azure
+    migration the rest of this section records. Nothing here was ever executed.
 
 
 **Date**: 2026-08-30 · **Status**: assessment only — no change was made to
@@ -31,6 +34,26 @@ a confidence marker:
 Sources read: `HCW-HybridCloudWorks@43baa46` · `Template-LZDeployment@main`
 (factory 0.11.0) · `Azure/Azure-Landing-Zones-Library@platform/alz/2026.04.2`
 (the ref the factory pins).
+
+> **Two notes for a reader following the citations.** This assessment was
+> written on 2026-08-30 and its paths are as they stood then.
+>
+> - **`wiki/<Page>.md` is now a page on this site.** The GitHub Wiki was retired
+>   on 2026-09-06 ([ADR 0027](../decisions/0027-documentation-site.md)) and the
+>   three pages cited below moved into `docs/`:
+>   `wiki/Naming-Convention.md` → [Naming convention](../standards/naming-convention.md),
+>   `wiki/Deployment-Runbook.md` → [Deployment runbook](../runbooks/deployment-runbook.md),
+>   `wiki/IaC-Repository-Standard.md` → [IaC repository standard](../standards/iac-repository-standard.md).
+>   The section numbers cited (`§7`, and the management-group scheme) are
+>   unchanged on those pages.
+> - **Paths under `docs/` and `factory/` belong to the *other* repository.**
+>   `docs/runbooks/go-live-opening.md`, `docs/USER-CHECKLIST.md`,
+>   `docs/decisions/0018-brownfield-exclude-and-create.md` and everything under
+>   `factory/` and `platform/` are in
+>   [Template-LZDeployment](https://github.com/HybridCloudWorks/Template-LZDeployment),
+>   the repository under assessment. They are not files in this one, and
+>   `docs/decisions/0018-…` there is a different document from
+>   [ADR 0018](../decisions/0018-as-built-plan-v02.md) here.
 
 ---
 

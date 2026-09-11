@@ -1,10 +1,26 @@
 # ADR 0021: Container Apps self-hosted CI runner failover
 
-!!! note "Number reused"
+!!! note "Number reused, and the estate it describes is gone"
     This record was deferred on 2026-08-18 and the number 0021 was later
     assigned to [Key Vault purge protection](0021-key-vault-purge-protection.md).
-    It is kept because the Container Apps resources it describes still exist in
-    `infra/ci-runner.tf`, gated off.
+
+    **Two things it asserts are no longer true, and it is left unedited below
+    because an accepted record is not rewritten.** It says the gated-off
+    Container Apps resources remain in `infra/ci-runner.tf`; that file,
+    `infra/runner-image/` and `.github/workflows/build-runner-image.yml` were
+    all deleted on 2026-08-24, so reviving this is no longer "one variable".
+    It also cites `REVIEW.md` and `CHECKLIST.md` by section; both root
+    documents were retired in August 2026 and the surviving inventory is
+    [Required inputs](../standards/required-inputs.md), organised differently,
+    so those section numbers do not resolve.
+
+    What the record is still for is its reasoning: why a self-hosted CI runner
+    inside the production subscription was rejected, and the correction that
+    killed it — a public repository already gets unlimited free GitHub-hosted
+    runners, so there was no cost to avoid and no saving to weigh the trust
+    surface against. [Variables and secrets](../standards/variables-and-secrets.md)
+    states the resulting posture: there is no fifth store, and no runner
+    credentials.
 
 
 **Status:** Superseded — deferred 2026-08-18 (see *Deferral* below). The resources remain in `infra/ci-runner.tf`, gated off by `ci_runner_enabled = false`.

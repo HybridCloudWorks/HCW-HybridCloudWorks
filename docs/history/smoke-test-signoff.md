@@ -5,6 +5,17 @@
     runbook for starting a new migration.
 
 
+**This is a blank form, and it was never filled in.** It is the sign-off sheet
+that accompanied [Live smoke test](smoke-test.md) — one row per section of that
+checklist, plus a GO / NO-GO decision — and no run of it was ever recorded here.
+It carries no evidence about the platform; what it shows is the shape of
+evidence the migration intended to collect.
+
+The verification that actually gated the cutover is elsewhere: the per-gate
+evidence in [Migration runbook](migration-runbook.md) and
+[Phase 4 — data migration](phase-4-data-migration.md), and the eight
+verification gates in [Migration plan](migration-plan.md) §7.
+
 ## Run Metadata
 
 | Field                         | Value                 |

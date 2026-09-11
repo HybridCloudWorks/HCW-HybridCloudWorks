@@ -36,6 +36,28 @@ release records; this site holds the longer narrative.
 - [Resource validation report](architecture/resource-validation-report.md)
 - [Cost analysis](architecture/cost-analysis.md)
 
+## Start here if you are not the owner
+
+Most of this site is an operating record for one estate. Four pages are written
+for a reader who has never seen it, use generic resource names throughout, and
+are the best place to start:
+
+- [A production Azure platform for $150 a month](content/blog-how-to-01-infrastructure.md)
+  — every resource, why it was chosen over the alternative, and the order to
+  deploy it in
+- [Deploying an app with no credentials anywhere](content/blog-how-to-02-application.md)
+  — locking an API origin to a CDN, and GitHub Actions by OIDC
+- [The region that took three tries](content/blog-build-log-01-infrastructure.md)
+  and [I locked the door and left the keys inside](content/blog-build-log-02-application.md)
+  — what actually went wrong building the two above
+- [Naming convention](standards/naming-convention.md) — a complete CAF scheme
+  for an Azure Landing Zone, including the constraints that override it
+
+The [runbooks](runbooks/deployment-runbook.md) name this estate's real
+resources, because an operator cannot use them otherwise. They are published
+for the same reason everything else here is — the reasoning is the point — but
+the procedures are specific to one tenant, not a template.
+
 ## Historical records
 
 The migration and cutover pages are retained as historical evidence for how the

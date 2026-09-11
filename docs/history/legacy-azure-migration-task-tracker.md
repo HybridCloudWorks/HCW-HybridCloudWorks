@@ -5,6 +5,19 @@
     runbook for starting a new migration.
 
 
+**What this is, and what the unticked boxes mean.** The earliest working list
+of the migration, written while it was still a two-repository job, before the
+plan and the ADRs existed. What a reader gets from it is the *shape* the work
+was first imagined in — frontend repo, platform repo, five workstreams — which
+is most useful read against how it actually turned out.
+
+**An unticked box here does not mean open work.** The migration completed on
+2026-08-21 and this list stopped being updated long before that; several items
+were done differently, several were abandoned deliberately, and the Azure
+OpenAI resource it asks for was retired on 2026-08-19. Current open work is in
+the repository's GitHub issues, and what was actually delivered is in
+`CHANGELOG.md`.
+
 ## Repo 1: Personal-Site_HCW (Frontend)
 
 ### Completed
