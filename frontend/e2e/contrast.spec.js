@@ -12,6 +12,22 @@ import { test, expect } from '@playwright/test';
 
 const PROVIDERS = ['aws', 'azure', 'gcp', 'github', 'terraform', 'finops'];
 
+// Every provider that `ProviderEducationDispatcher` in App.jsx routes to its
+// own hub. Covering one of them was not enough: `/aws/education` was the only
+// education route here while five sibling hubs carried bare `text-white`
+// headings — white on `--background: 0 0% 100%` — and the gate said nothing,
+// because the gate never opened those pages.
+const EDUCATION_PROVIDERS = [
+  'aws',
+  'azure',
+  'gcp',
+  'github',
+  'terraform',
+  'finops',
+  'vmware',
+  'ansible',
+];
+
 // Smaller route set than the full scan: covers each layout/template once.
 // The full scan runs separately as `npm run a11y:contrast`.
 const ROUTES = [
@@ -22,7 +38,12 @@ const ROUTES = [
   '/aws/blog',
   '/aws/architecture-designs',
   '/aws/frameworks',
-  '/aws/education',
+  ...EDUCATION_PROVIDERS.map((p) => `/${p}/education`),
+  // The detail templates behind those hubs — one certification page per
+  // provider that has one, plus the microcredential template.
+  '/aws/education/clf-c02',
+  '/azure/education/az-900',
+  '/aws/education/microcredentials/aws-serverless-demonstrated',
   '/aws/audio-architecture',
   '/github/news',
   '/github/code',

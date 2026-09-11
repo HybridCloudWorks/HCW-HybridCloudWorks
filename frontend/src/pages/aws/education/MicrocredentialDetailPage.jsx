@@ -165,10 +165,15 @@ export default function MicrocredentialDetailPage() {
     return (
       <main className="flex-grow pt-28 pb-20 px-4 md:px-8 max-w-[1440px] mx-auto w-full">
         <div className="text-center py-20">
-          <span className="text-amber-400 text-[64px] material-symbols-outlined mb-4 block">
+          <span
+            className="text-amber-400 text-[64px] material-symbols-outlined mb-4 block"
+            aria-hidden="true"
+          >
             search_off
           </span>
-          <h1 className="text-3xl font-bold text-white mb-4">Microcredential Not Found</h1>
+          <h1 className="text-3xl font-bold text-slate-950 dark:text-white mb-4">
+            Microcredential Not Found
+          </h1>
           <p className="text-foreground mb-8">
             The microcredential <code className="font-mono text-amber-400">{mcSlug}</code> was not
             found.
@@ -177,7 +182,9 @@ export default function MicrocredentialDetailPage() {
             to={routes.education('aws')}
             className="px-6 h-11 bg-amber-500 hover:bg-amber-400 text-white font-bold rounded-lg transition-colors inline-flex items-center gap-2"
           >
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+              arrow_back
+            </span>
             Back to AWS Education
           </Link>
         </div>
@@ -203,9 +210,13 @@ export default function MicrocredentialDetailPage() {
           <Link to={routes.education('aws')} className="hover:text-amber-400 transition-colors">
             AWS Education
           </Link>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+            chevron_right
+          </span>
           <span className="text-foreground/60">Microcredentials</span>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+            chevron_right
+          </span>
           <span className="text-foreground">{mc.code}</span>
         </nav>
 
@@ -230,19 +241,28 @@ export default function MicrocredentialDetailPage() {
               <div
                 className={`w-14 h-14 rounded-2xl bg-card/40 flex items-center justify-center shrink-0`}
               >
-                <span className={`material-symbols-outlined text-[32px] ${c.icon}`}>{mc.icon}</span>
+                <span
+                  className={`material-symbols-outlined text-[32px] ${c.icon}`}
+                  aria-hidden="true"
+                >
+                  {mc.icon}
+                </span>
               </div>
-              <h1 className="text-3xl sm:text-4xl font-bold text-white">{mc.title}</h1>
+              <h1 className="text-3xl sm:text-4xl font-bold text-slate-950 dark:text-white">
+                {mc.title}
+              </h1>
             </div>
             <p className="text-foreground text-lg max-w-3xl mb-6">{mc.longDescription}</p>
             <div className="flex flex-wrap gap-6 text-sm">
               <div>
                 <div className="text-foreground/60 mb-0.5">Duration</div>
-                <div className="text-2xl font-bold text-white">{mc.duration}</div>
+                <div className="text-2xl font-bold text-slate-950 dark:text-white">
+                  {mc.duration}
+                </div>
               </div>
               <div>
                 <div className="text-foreground/60 mb-0.5">Format</div>
-                <div className="text-2xl font-bold text-white">{mc.format}</div>
+                <div className="text-2xl font-bold text-slate-950 dark:text-white">{mc.format}</div>
               </div>
             </div>
           </div>
@@ -252,8 +272,11 @@ export default function MicrocredentialDetailPage() {
           <div className="space-y-8">
             {/* Skills Validated */}
             <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <span className={`material-symbols-outlined text-[20px] ${c.icon}`}>
+              <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                <span
+                  className={`material-symbols-outlined text-[20px] ${c.icon}`}
+                  aria-hidden="true"
+                >
                   check_circle
                 </span>
                 Skills Validated
@@ -264,7 +287,10 @@ export default function MicrocredentialDetailPage() {
                     key={i}
                     className="flex items-center gap-2 bg-card/50 rounded-xl px-3 py-2.5"
                   >
-                    <span className={`material-symbols-outlined text-[16px] ${c.icon}`}>
+                    <span
+                      className={`material-symbols-outlined text-[16px] ${c.icon}`}
+                      aria-hidden="true"
+                    >
                       verified
                     </span>
                     <span className="text-foreground text-sm">{topic}</span>
@@ -275,8 +301,13 @@ export default function MicrocredentialDetailPage() {
 
             {/* What to Expect */}
             <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <span className={`material-symbols-outlined text-[20px] ${c.icon}`}>menu_book</span>
+              <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                <span
+                  className={`material-symbols-outlined text-[20px] ${c.icon}`}
+                  aria-hidden="true"
+                >
+                  menu_book
+                </span>
                 What to Expect
               </h2>
               <div className="space-y-3">
@@ -312,7 +343,9 @@ export default function MicrocredentialDetailPage() {
                       {step}
                     </span>
                     <div>
-                      <div className="text-sm font-semibold text-white mb-0.5">{title}</div>
+                      <div className="text-sm font-semibold text-slate-950 dark:text-white mb-0.5">
+                        {title}
+                      </div>
                       <div className="text-xs text-foreground/70">{body}</div>
                     </div>
                   </div>
@@ -323,8 +356,11 @@ export default function MicrocredentialDetailPage() {
             {/* Related Certifications */}
             {relatedCerts.length > 0 && (
               <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <span className={`material-symbols-outlined text-[20px] ${c.icon}`}>
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                  <span
+                    className={`material-symbols-outlined text-[20px] ${c.icon}`}
+                    aria-hidden="true"
+                  >
                     trending_up
                   </span>
                   Related Certifications
@@ -350,7 +386,10 @@ export default function MicrocredentialDetailPage() {
                           {cert.title.replace(/AWS Certified\s+/i, '')}
                         </div>
                       </div>
-                      <span className="material-symbols-outlined text-[16px] text-foreground/40 ml-auto shrink-0">
+                      <span
+                        className="material-symbols-outlined text-[16px] text-foreground/40 ml-auto shrink-0"
+                        aria-hidden="true"
+                      >
                         arrow_forward
                       </span>
                     </Link>
@@ -370,7 +409,9 @@ export default function MicrocredentialDetailPage() {
                 rel="noopener noreferrer"
                 className={`flex items-center justify-center gap-2 w-full h-11 ${c.btn} text-white font-bold rounded-lg transition-colors`}
               >
-                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                  open_in_new
+                </span>
                 Earn on AWS Skill Builder
               </a>
               <a
@@ -379,38 +420,44 @@ export default function MicrocredentialDetailPage() {
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
               >
-                <span className="material-symbols-outlined text-[16px]">grid_view</span>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                  grid_view
+                </span>
                 Browse All Microcredentials
               </a>
             </div>
 
             {/* Quick Facts */}
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white">Quick Facts</h3>
+              <h3 className="text-base font-bold text-slate-950 dark:text-white">Quick Facts</h3>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Type</span>
-                  <span className="font-bold text-white">Microcredential</span>
+                  <span className="font-bold text-slate-950 dark:text-white">Microcredential</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Format</span>
-                  <span className="font-bold text-white">Hands-On Lab</span>
+                  <span className="font-bold text-slate-950 dark:text-white">Hands-On Lab</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Duration</span>
-                  <span className="font-bold text-white">{mc.duration}</span>
+                  <span className="font-bold text-slate-950 dark:text-white">{mc.duration}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Proctored</span>
-                  <span className="font-bold text-white">Yes</span>
+                  <span className="font-bold text-slate-950 dark:text-white">Yes</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Platform</span>
-                  <span className="font-bold text-white">AWS Skill Builder</span>
+                  <span className="font-bold text-slate-950 dark:text-white">
+                    AWS Skill Builder
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Badge</span>
-                  <span className="font-bold text-white">Digital (verifiable)</span>
+                  <span className="font-bold text-slate-950 dark:text-white">
+                    Digital (verifiable)
+                  </span>
                 </div>
               </div>
             </div>
@@ -419,7 +466,9 @@ export default function MicrocredentialDetailPage() {
               to={routes.education('aws')}
               className="flex items-center gap-2 text-sm text-foreground/60 hover:text-amber-400 transition-colors"
             >
-              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                arrow_back
+              </span>
               Back to AWS Education
             </Link>
           </aside>

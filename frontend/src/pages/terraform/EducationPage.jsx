@@ -222,13 +222,13 @@ export default function TerraformEducationPage() {
               className="group relative bg-gradient-to-br from-purple-900/40 to-card/40 backdrop-blur-md border border-purple-500/30 rounded-2xl p-6 hover:shadow-[0_0_30px_rgba(168,85,247,0.2)] hover:border-purple-400/60 transition-all duration-300 flex items-start gap-5"
             >
               <div className="w-14 h-14 shrink-0 bg-purple-500/20 rounded-xl flex items-center justify-center">
-                <span className="text-purple-400 text-[28px] material-symbols-outlined">
+                <span className="text-purple-400 text-[28px] material-symbols-outlined" aria-hidden="true">
                   workspace_premium
                 </span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h2 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors">
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white group-hover:text-purple-300 transition-colors">
                     HashiCorp Developer
                   </h2>
                   <span className="px-2 py-0.5 bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-bold rounded-full uppercase tracking-wider shrink-0">
@@ -240,7 +240,7 @@ export default function TerraformEducationPage() {
                   certification prep for Terraform, Vault, and every HashiCorp tool.
                 </p>
                 <div className="flex items-center gap-1.5 text-purple-400 text-sm font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">open_in_new</span>
                   developer.hashicorp.com
                 </div>
               </div>
@@ -253,13 +253,13 @@ export default function TerraformEducationPage() {
               className="group relative bg-gradient-to-br from-violet-900/40 to-card/40 backdrop-blur-md border border-violet-500/30 rounded-2xl p-6 hover:shadow-[0_0_30px_rgba(139,92,246,0.2)] hover:border-violet-400/60 transition-all duration-300 flex items-start gap-5"
             >
               <div className="w-14 h-14 shrink-0 bg-violet-500/20 rounded-xl flex items-center justify-center">
-                <span className="text-violet-400 text-[28px] material-symbols-outlined">
+                <span className="text-violet-400 text-[28px] material-symbols-outlined" aria-hidden="true">
                   construction
                 </span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h2 className="text-lg font-bold text-white group-hover:text-violet-300 transition-colors">
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white group-hover:text-violet-300 transition-colors">
                     HashiCorp Certification
                   </h2>
                   <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-500/30 text-violet-300 text-[10px] font-bold rounded-full uppercase tracking-wider shrink-0">
@@ -271,7 +271,7 @@ export default function TerraformEducationPage() {
                   and access study guides for the Terraform and Vault credentials.
                 </p>
                 <div className="flex items-center gap-1.5 text-violet-400 text-sm font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">open_in_new</span>
                   hashicorp.com/certification
                 </div>
               </div>
@@ -283,8 +283,8 @@ export default function TerraformEducationPage() {
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-                <span className="text-purple-400 text-[24px] material-symbols-outlined">school</span>
+              <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
+                <span className="text-purple-400 text-[24px] material-symbols-outlined" aria-hidden="true">school</span>
                 Browse Certifications
               </h3>
               <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
@@ -344,7 +344,7 @@ export default function TerraformEducationPage() {
                     </div>
                     <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
                     <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
-                    <h3 className="text-sm font-bold text-white mb-2 line-clamp-3 group-hover:text-purple-300 transition-colors flex-1">
+                    <h3 className="text-sm font-bold text-slate-950 dark:text-white mb-2 line-clamp-3 group-hover:text-purple-300 transition-colors flex-1">
                       {cert.title}
                     </h3>
                     <p className="text-xs text-foreground mb-4 line-clamp-2">{cert.description}</p>
@@ -366,7 +366,7 @@ export default function TerraformEducationPage() {
                         className="flex-1 h-9 bg-card/50 hover:bg-purple-500/20 hover:text-purple-300 text-foreground rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
                       >
                         View Details
-                        <span className="material-symbols-outlined text-[12px]">open_in_new</span>
+                        <span className="material-symbols-outlined text-[12px]" aria-hidden="true">open_in_new</span>
                       </a>
                     </div>
                   </article>
@@ -381,23 +381,32 @@ export default function TerraformEducationPage() {
               <button
                 onClick={() => setCarouselPage((p) => Math.max(0, p - 1))}
                 disabled={carouselPage === 0}
+                aria-label="Previous page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
-                <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_left</span>
               </button>
               {Array.from({ length: totalPages }).map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setCarouselPage(i)}
-                  className={`h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-purple-400 w-5' : 'w-2.5 bg-card/60 hover:bg-card/80'}`}
-                />
+                  aria-label={`Page ${i + 1} of ${totalPages}`}
+                  aria-current={i === carouselPage ? 'true' : undefined}
+                  className="group flex h-6 min-w-6 items-center justify-center rounded-full"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`block h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-purple-400 w-5' : 'w-2.5 bg-card/60 group-hover:bg-card/80'}`}
+                  />
+                </button>
               ))}
               <button
                 onClick={() => setCarouselPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={carouselPage === totalPages - 1}
+                aria-label="Next page"
                 className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
               >
-                <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">chevron_right</span>
               </button>
               <span className="text-xs text-foreground/50 ml-2">
                 {carouselPage * VISIBLE_COUNT + 1}–
@@ -423,7 +432,7 @@ export default function TerraformEducationPage() {
                         {featuredCert.level}
                       </span>
                     </div>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-white mb-1">
+                    <h2 className="text-2xl sm:text-3xl font-bold text-slate-950 dark:text-white mb-1">
                       {featuredCert.title}
                     </h2>
                     <div className="text-sm font-mono text-foreground/50 mb-3">
@@ -438,7 +447,7 @@ export default function TerraformEducationPage() {
                     <div className="grid grid-cols-2 gap-3 mb-8">
                       {featuredCert.topics.map((topic, i) => (
                         <div key={i} className="flex items-center gap-2">
-                          <span className="text-purple-400 material-symbols-outlined text-[16px]">
+                          <span className="text-purple-400 material-symbols-outlined text-[16px]" aria-hidden="true">
                             check_circle
                           </span>
                           <span className="text-foreground text-sm">{topic}</span>
@@ -465,7 +474,7 @@ export default function TerraformEducationPage() {
                     </div>
                     <div className="border-t border-slate-700 pt-6 text-center">
                       <div className="text-sm text-foreground mb-2">Estimated Preparation</div>
-                      <div className="text-2xl font-bold text-white">{featuredCert.prepTime}</div>
+                      <div className="text-2xl font-bold text-slate-950 dark:text-white">{featuredCert.prepTime}</div>
                     </div>
                   </div>
                   <div className="pt-6 border-t border-slate-700">
@@ -486,8 +495,8 @@ export default function TerraformEducationPage() {
           {/* Sidebar */}
           <aside className="h-fit sticky top-28 space-y-6">
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                <span className="text-purple-400 text-[20px] material-symbols-outlined">
+              <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                <span className="text-purple-400 text-[20px] material-symbols-outlined" aria-hidden="true">
                   emoji_events
                 </span>
                 All Certifications
@@ -519,8 +528,8 @@ export default function TerraformEducationPage() {
             </div>
 
             <div className="bg-gradient-to-br from-purple-500/20 to-violet-900/20 backdrop-blur-md border border-purple-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <span className="text-purple-400 text-[20px] material-symbols-outlined">
+              <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-2 flex items-center gap-2">
+                <span className="text-purple-400 text-[20px] material-symbols-outlined" aria-hidden="true">
                   rocket_launch
                 </span>
                 Getting Started
@@ -544,8 +553,8 @@ export default function TerraformEducationPage() {
         {/* ── Learning Paths ───────────────────────────────────────────── */}
         <section className="mb-16">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-purple-400 text-[24px] material-symbols-outlined">bookmark</span>
+            <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
+              <span className="text-purple-400 text-[24px] material-symbols-outlined" aria-hidden="true">bookmark</span>
               Learning Paths
             </h3>
             <div className="relative">
@@ -560,7 +569,7 @@ export default function TerraformEducationPage() {
                   </option>
                 ))}
               </select>
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-foreground pointer-events-none">
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] text-foreground pointer-events-none" aria-hidden="true">
                 expand_more
               </span>
             </div>
@@ -577,7 +586,7 @@ export default function TerraformEducationPage() {
                 </span>
                 <span className="text-sm text-foreground/60">{selectedPath.hours} hours</span>
               </div>
-              <h2 className="text-3xl font-bold text-white mb-2">{selectedPath.title}</h2>
+              <h2 className="text-3xl font-bold text-slate-950 dark:text-white mb-2">{selectedPath.title}</h2>
               <p className="text-foreground mb-6 text-lg">{selectedPath.description}</p>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
@@ -615,7 +624,7 @@ export default function TerraformEducationPage() {
                   rel="noopener noreferrer"
                   className="flex-1 h-11 px-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                 >
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">open_in_new</span>
                   View {selectedPath.certCode} on HashiCorp Developer
                 </a>
               </div>
@@ -625,8 +634,8 @@ export default function TerraformEducationPage() {
 
         {/* ── Learning Resources ───────────────────────────────────────── */}
         <section className="mb-16">
-          <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-            <span className="text-purple-400 text-[24px] material-symbols-outlined">
+          <h3 className="text-2xl font-bold text-slate-950 dark:text-white mb-6 flex items-center gap-2">
+            <span className="text-purple-400 text-[24px] material-symbols-outlined" aria-hidden="true">
               library_books
             </span>
             Learning Resources
@@ -641,20 +650,20 @@ export default function TerraformEducationPage() {
                 className="group bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6 flex flex-col hover:shadow-[0_0_25px_rgba(168,85,247,0.15)] hover:border-purple-400/50 transition-all duration-300"
               >
                 <div className="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <span className="material-symbols-outlined text-purple-400 text-[24px]">
+                  <span className="material-symbols-outlined text-purple-400 text-[24px]" aria-hidden="true">
                     {resource.icon}
                   </span>
                 </div>
                 <div className="text-xs font-bold text-purple-400/70 uppercase tracking-wider mb-1">
                   {resource.type}
                 </div>
-                <h4 className="font-bold text-white mb-2 group-hover:text-purple-300 transition-colors">
+                <h4 className="font-bold text-slate-950 dark:text-white mb-2 group-hover:text-purple-300 transition-colors">
                   {resource.title}
                 </h4>
                 <p className="text-xs text-foreground flex-1">{resource.description}</p>
                 <div className="mt-4 flex items-center gap-1 text-purple-400 text-xs font-semibold">
                   Explore{' '}
-                  <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[14px]" aria-hidden="true">open_in_new</span>
                 </div>
               </a>
             ))}

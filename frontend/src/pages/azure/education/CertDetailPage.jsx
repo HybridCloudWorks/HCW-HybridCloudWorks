@@ -62,9 +62,9 @@ const formatDate = formatIsoDate;
 function StatusNotice({ status, cert, replacement }) {
   if (status === 'active') return null;
   const styles = {
-    retired: 'bg-slate-500/15 border-slate-500/40 text-slate-200',
-    expiring: 'bg-rose-500/15 border-rose-500/40 text-rose-200',
-    beta: 'bg-amber-500/15 border-amber-500/40 text-amber-200',
+    retired: 'bg-slate-500/15 border-slate-500/40 text-slate-800 dark:text-slate-200',
+    expiring: 'bg-rose-500/15 border-rose-500/40 text-rose-900 dark:text-rose-200',
+    beta: 'bg-amber-500/15 border-amber-500/40 text-amber-900 dark:text-amber-200',
   };
   const icons = { retired: 'block', expiring: 'schedule', beta: 'science' };
   let text;
@@ -86,13 +86,15 @@ function StatusNotice({ status, cert, replacement }) {
       data-status={status}
       className={`mb-6 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-sm ${styles[status]}`}
     >
-      <span className="material-symbols-outlined text-[18px]">{icons[status]}</span>
+      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+        {icons[status]}
+      </span>
       <span className="font-semibold capitalize">{status}.</span>
       <span>{text}</span>
       {replacement && (
         <Link
           to={getProviderPath('azure', `education/${replacement.slug}`)}
-          className="font-semibold underline underline-offset-2 hover:text-white"
+          className="font-semibold underline underline-offset-2 hover:text-slate-950 dark:hover:text-white"
         >
           Replaced by {replacement.code}: {replacement.title.replace(/Microsoft\s+/i, '')}
         </Link>
@@ -114,10 +116,15 @@ export default function CertDetailPage() {
     return (
       <main className="grow pt-28 pb-20 px-4 md:px-8 max-w-360 mx-auto w-full">
         <div className="text-center py-20">
-          <span className="text-primary text-[64px] material-symbols-outlined mb-4 block">
+          <span
+            className="text-primary text-[64px] material-symbols-outlined mb-4 block"
+            aria-hidden="true"
+          >
             search_off
           </span>
-          <h1 className="text-3xl font-bold text-white mb-4">Certification Not Found</h1>
+          <h1 className="text-3xl font-bold text-slate-950 dark:text-white mb-4">
+            Certification Not Found
+          </h1>
           <p className="text-foreground mb-8">
             The certification <code className="font-mono text-primary">{certSlug}</code> was not
             found.
@@ -126,7 +133,9 @@ export default function CertDetailPage() {
             to={routes.education('azure')}
             className="px-6 h-11 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors inline-flex items-center gap-2"
           >
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+              arrow_back
+            </span>
             Back to Azure Education
           </Link>
         </div>
@@ -159,7 +168,9 @@ export default function CertDetailPage() {
           <Link to={routes.education('azure')} className="hover:text-primary transition-colors">
             Azure Education
           </Link>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+            chevron_right
+          </span>
           <span className="text-foreground">{cert.code}</span>
         </nav>
 
@@ -178,7 +189,9 @@ export default function CertDetailPage() {
               </span>
               <span className="text-sm font-mono text-foreground/60">{cert.code}</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">{cert.title}</h1>
+            <h1 className="text-3xl sm:text-4xl font-bold text-slate-950 dark:text-white mb-3">
+              {cert.title}
+            </h1>
             <StatusNotice status={status} cert={cert} replacement={replacement} />
             <p className="text-foreground text-lg max-w-3xl mb-6">{cert.longDescription}</p>
             <div className="flex flex-wrap gap-6 text-sm">
@@ -188,7 +201,9 @@ export default function CertDetailPage() {
               </div>
               <div>
                 <div className="text-foreground/60 mb-0.5">Prep Time</div>
-                <div className="text-2xl font-bold text-white">{cert.prepTime}</div>
+                <div className="text-2xl font-bold text-slate-950 dark:text-white">
+                  {cert.prepTime}
+                </div>
               </div>
               {cert.successRate && (
                 <div>
@@ -211,8 +226,13 @@ export default function CertDetailPage() {
 
             {/* Topics */}
             <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <span className="text-primary material-symbols-outlined text-[20px]">category</span>
+              <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                <span
+                  className="text-primary material-symbols-outlined text-[20px]"
+                  aria-hidden="true"
+                >
+                  category
+                </span>
                 Topics Covered
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -221,7 +241,10 @@ export default function CertDetailPage() {
                     key={i}
                     className="flex items-center gap-2 bg-card/50 rounded-xl px-3 py-2.5"
                   >
-                    <span className="text-primary material-symbols-outlined text-[16px]">
+                    <span
+                      className="text-primary material-symbols-outlined text-[16px]"
+                      aria-hidden="true"
+                    >
                       check_circle
                     </span>
                     <span className="text-foreground text-sm">{topic}</span>
@@ -234,8 +257,11 @@ export default function CertDetailPage() {
                 empty section under a heading reads as broken. */}
             {cert.modules?.length > 0 && (
               <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <span className="text-primary material-symbols-outlined text-[20px]">
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                  <span
+                    className="text-primary material-symbols-outlined text-[20px]"
+                    aria-hidden="true"
+                  >
                     menu_book
                   </span>
                   Microsoft Learn Modules
@@ -255,7 +281,10 @@ export default function CertDetailPage() {
                       <span className="text-sm text-foreground group-hover:text-primary transition-colors flex-1">
                         {mod.title}
                       </span>
-                      <span className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-primary transition-colors shrink-0">
+                      <span
+                        className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-primary transition-colors shrink-0"
+                        aria-hidden="true"
+                      >
                         open_in_new
                       </span>
                     </a>
@@ -267,8 +296,11 @@ export default function CertDetailPage() {
             {/* Applied Skills */}
             {cert.appliedSkills?.length > 0 && (
               <section className="bg-card/40 backdrop-blur-md border border-cyan-500/20 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                  <span className="text-cyan-400 material-symbols-outlined text-[20px]">
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-2 flex items-center gap-2">
+                  <span
+                    className="text-cyan-400 material-symbols-outlined text-[20px]"
+                    aria-hidden="true"
+                  >
                     construction
                   </span>
                   Associated Applied Skills
@@ -285,7 +317,10 @@ export default function CertDetailPage() {
                       rel="noopener noreferrer"
                       className="flex items-start gap-3 group bg-card/40 hover:bg-cyan-900/20 border border-card/30 hover:border-cyan-500/30 rounded-xl px-4 py-3 transition-all"
                     >
-                      <span className="text-cyan-400 material-symbols-outlined text-[18px] shrink-0 mt-0.5">
+                      <span
+                        className="text-cyan-400 material-symbols-outlined text-[18px] shrink-0 mt-0.5"
+                        aria-hidden="true"
+                      >
                         verified
                       </span>
                       <div className="min-w-0 flex-1">
@@ -296,7 +331,10 @@ export default function CertDetailPage() {
                           {skill.title}
                         </div>
                       </div>
-                      <span className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-cyan-300 transition-colors shrink-0 mt-1">
+                      <span
+                        className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-cyan-300 transition-colors shrink-0 mt-1"
+                        aria-hidden="true"
+                      >
                         open_in_new
                       </span>
                     </a>
@@ -308,8 +346,11 @@ export default function CertDetailPage() {
             {/* What's Next */}
             {nextCerts.length > 0 && (
               <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <span className="text-primary material-symbols-outlined text-[20px]">
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                  <span
+                    className="text-primary material-symbols-outlined text-[20px]"
+                    aria-hidden="true"
+                  >
                     trending_up
                   </span>
                   What to Study Next
@@ -330,7 +371,10 @@ export default function CertDetailPage() {
                           {next.title.replace(/Microsoft\s+/i, '')}
                         </div>
                       </div>
-                      <span className="material-symbols-outlined text-[16px] text-foreground/40 group-hover:text-primary transition-colors ml-auto shrink-0">
+                      <span
+                        className="material-symbols-outlined text-[16px] text-foreground/40 group-hover:text-primary transition-colors ml-auto shrink-0"
+                        aria-hidden="true"
+                      >
                         arrow_forward
                       </span>
                     </Link>
@@ -350,7 +394,9 @@ export default function CertDetailPage() {
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 w-full h-11 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors"
               >
-                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                  open_in_new
+                </span>
                 View on Microsoft Learn
               </a>
               {cert.studyGuideUrl && (
@@ -360,7 +406,9 @@ export default function CertDetailPage() {
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
                 >
-                  <span className="material-symbols-outlined text-[16px]">description</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    description
+                  </span>
                   Official Study Guide
                 </a>
               )}
@@ -371,7 +419,9 @@ export default function CertDetailPage() {
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
                 >
-                  <span className="material-symbols-outlined text-[16px]">quiz</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    quiz
+                  </span>
                   Free Practice Assessment
                 </a>
               )}
@@ -379,8 +429,13 @@ export default function CertDetailPage() {
 
             {/* Prerequisites */}
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                <span className="text-primary material-symbols-outlined text-[18px]">info</span>
+              <h3 className="text-base font-bold text-slate-950 dark:text-white mb-3 flex items-center gap-2">
+                <span
+                  className="text-primary material-symbols-outlined text-[18px]"
+                  aria-hidden="true"
+                >
+                  info
+                </span>
                 Prerequisites
               </h3>
               <p className="text-sm text-foreground">{cert.prerequisites}</p>
@@ -388,7 +443,7 @@ export default function CertDetailPage() {
 
             {/* Quick Stats */}
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white">Quick Stats</h3>
+              <h3 className="text-base font-bold text-slate-950 dark:text-white">Quick Stats</h3>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Exam Code</span>
@@ -404,11 +459,11 @@ export default function CertDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Study Hours</span>
-                  <span className="font-bold text-white">{cert.hours}h</span>
+                  <span className="font-bold text-slate-950 dark:text-white">{cert.hours}h</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Prep Time</span>
-                  <span className="font-bold text-white">{cert.prepTime}</span>
+                  <span className="font-bold text-slate-950 dark:text-white">{cert.prepTime}</span>
                 </div>
                 {cert.successRate && (
                   <div className="flex justify-between">
@@ -418,11 +473,13 @@ export default function CertDetailPage() {
                 )}
                 <div className="flex justify-between">
                   <span className="text-foreground/60">MS Learn Modules</span>
-                  <span className="font-bold text-white">{cert.modules?.length ?? 0}</span>
+                  <span className="font-bold text-slate-950 dark:text-white">
+                    {cert.modules?.length ?? 0}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Catalogue checked</span>
-                  <time dateTime={DATA_AS_OF} className="font-bold text-white">
+                  <time dateTime={DATA_AS_OF} className="font-bold text-slate-950 dark:text-white">
                     {formatDate(DATA_AS_OF)}
                   </time>
                 </div>
@@ -433,7 +490,9 @@ export default function CertDetailPage() {
               to={routes.education('azure')}
               className="flex items-center gap-2 text-sm text-foreground/60 hover:text-primary transition-colors"
             >
-              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                arrow_back
+              </span>
               Back to Azure Education
             </Link>
           </aside>

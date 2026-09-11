@@ -12,11 +12,16 @@
 import React from 'react';
 import { describeCertStatus } from '@/lib/certStatus';
 
+// Light mode is not a tint of dark mode. The `*-300` foregrounds below read
+// fine on the dark card, but a `*-500/20` tint over `--card: 0 0% 100%` is a
+// near-white surface, where `text-amber-300` lands around 1.5:1 — the badge
+// is there and unreadable. Each status therefore carries an `*-800` light
+// foreground (≈6:1 on that tint) with the original as the `dark:` variant.
 const STATUS_CLASS = {
-  expiring: 'bg-amber-500/20 border-amber-500/40 text-amber-300',
-  retired: 'bg-slate-500/20 border-slate-500/40 text-slate-300',
-  beta: 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-300',
-  upcoming: 'bg-sky-500/20 border-sky-500/40 text-sky-300',
+  expiring: 'bg-amber-500/20 border-amber-500/40 text-amber-800 dark:text-amber-300',
+  retired: 'bg-slate-500/20 border-slate-500/40 text-slate-800 dark:text-slate-300',
+  beta: 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-800 dark:text-fuchsia-300',
+  upcoming: 'bg-sky-500/20 border-sky-500/40 text-sky-800 dark:text-sky-300',
 };
 
 export default function CertStatusBadge({ cert, today, className = '' }) {

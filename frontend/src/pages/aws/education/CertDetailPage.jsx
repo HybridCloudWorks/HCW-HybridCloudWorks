@@ -57,10 +57,15 @@ export default function AWSCertDetailPage() {
     return (
       <main className="flex-grow pt-28 pb-20 px-4 md:px-8 max-w-[1440px] mx-auto w-full">
         <div className="text-center py-20">
-          <span className="text-amber-400 text-[64px] material-symbols-outlined mb-4 block">
+          <span
+            className="text-amber-400 text-[64px] material-symbols-outlined mb-4 block"
+            aria-hidden="true"
+          >
             search_off
           </span>
-          <h1 className="text-3xl font-bold text-white mb-4">Certification Not Found</h1>
+          <h1 className="text-3xl font-bold text-slate-950 dark:text-white mb-4">
+            Certification Not Found
+          </h1>
           <p className="text-foreground mb-8">
             The certification <code className="font-mono text-amber-400">{certSlug}</code> was not
             found.
@@ -69,7 +74,9 @@ export default function AWSCertDetailPage() {
             to={routes.education('aws')}
             className="px-6 h-11 bg-amber-500 hover:bg-amber-400 text-white font-bold rounded-lg transition-colors inline-flex items-center gap-2"
           >
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+              arrow_back
+            </span>
             Back to AWS Education
           </Link>
         </div>
@@ -95,7 +102,9 @@ export default function AWSCertDetailPage() {
           <Link to={routes.education('aws')} className="hover:text-amber-400 transition-colors">
             AWS Education
           </Link>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+            chevron_right
+          </span>
           <span className="text-foreground">{cert.code}</span>
         </nav>
 
@@ -115,7 +124,9 @@ export default function AWSCertDetailPage() {
               <span className="text-sm font-mono text-foreground/60">{cert.code}</span>
               <CertStatusBadge cert={cert} today={today} />
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">{cert.title}</h1>
+            <h1 className="text-3xl sm:text-4xl font-bold text-slate-950 dark:text-white mb-3">
+              {cert.title}
+            </h1>
             <p className="text-foreground text-lg max-w-3xl mb-6">{cert.longDescription}</p>
             <div className="flex flex-wrap gap-6 text-sm">
               <div>
@@ -124,7 +135,9 @@ export default function AWSCertDetailPage() {
               </div>
               <div>
                 <div className="text-foreground/60 mb-0.5">Prep Time</div>
-                <div className="text-2xl font-bold text-white">{cert.prepTime}</div>
+                <div className="text-2xl font-bold text-slate-950 dark:text-white">
+                  {cert.prepTime}
+                </div>
               </div>
               {cert.successRate && (
                 <div>
@@ -148,8 +161,11 @@ export default function AWSCertDetailPage() {
 
             {/* Topics */}
             <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <span className="text-amber-400 material-symbols-outlined text-[20px]">
+              <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                <span
+                  className="text-amber-400 material-symbols-outlined text-[20px]"
+                  aria-hidden="true"
+                >
                   category
                 </span>
                 Topics Covered
@@ -160,7 +176,10 @@ export default function AWSCertDetailPage() {
                     key={i}
                     className="flex items-center gap-2 bg-card/50 rounded-xl px-3 py-2.5"
                   >
-                    <span className="text-amber-400 material-symbols-outlined text-[16px]">
+                    <span
+                      className="text-amber-400 material-symbols-outlined text-[16px]"
+                      aria-hidden="true"
+                    >
                       check_circle
                     </span>
                     <span className="text-foreground text-sm">{topic}</span>
@@ -172,8 +191,11 @@ export default function AWSCertDetailPage() {
             {/* Skill Builder Modules — a newly announced exam version has none yet */}
             {cert.modules.length > 0 && (
               <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <span className="text-amber-400 material-symbols-outlined text-[20px]">
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                  <span
+                    className="text-amber-400 material-symbols-outlined text-[20px]"
+                    aria-hidden="true"
+                  >
                     menu_book
                   </span>
                   AWS Skill Builder Modules
@@ -193,7 +215,10 @@ export default function AWSCertDetailPage() {
                       <span className="text-sm text-foreground group-hover:text-amber-300 transition-colors flex-1">
                         {mod.title}
                       </span>
-                      <span className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-amber-400 transition-colors shrink-0">
+                      <span
+                        className="material-symbols-outlined text-[14px] text-foreground/40 group-hover:text-amber-400 transition-colors shrink-0"
+                        aria-hidden="true"
+                      >
                         open_in_new
                       </span>
                     </a>
@@ -205,8 +230,11 @@ export default function AWSCertDetailPage() {
             {/* Microcredentials */}
             {cert.microcredentialUrl && (
               <section className="bg-card/40 backdrop-blur-md border border-amber-500/20 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                  <span className="text-amber-400 material-symbols-outlined text-[20px]">
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-2 flex items-center gap-2">
+                  <span
+                    className="text-amber-400 material-symbols-outlined text-[20px]"
+                    aria-hidden="true"
+                  >
                     verified
                   </span>
                   AWS Microcredentials
@@ -221,7 +249,9 @@ export default function AWSCertDetailPage() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 h-10 px-5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 font-semibold rounded-lg transition-colors text-sm"
                 >
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    open_in_new
+                  </span>
                   Browse Related Microcredentials
                 </a>
               </section>
@@ -230,8 +260,11 @@ export default function AWSCertDetailPage() {
             {/* What's Next */}
             {nextCerts.length > 0 && (
               <section className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <span className="text-amber-400 material-symbols-outlined text-[20px]">
+                <h2 className="text-xl font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
+                  <span
+                    className="text-amber-400 material-symbols-outlined text-[20px]"
+                    aria-hidden="true"
+                  >
                     trending_up
                   </span>
                   What to Study Next
@@ -252,7 +285,10 @@ export default function AWSCertDetailPage() {
                           {next.title.replace(/AWS Certified\s+/i, '')}
                         </div>
                       </div>
-                      <span className="material-symbols-outlined text-[16px] text-foreground/40 group-hover:text-amber-400 transition-colors ml-auto shrink-0">
+                      <span
+                        className="material-symbols-outlined text-[16px] text-foreground/40 group-hover:text-amber-400 transition-colors ml-auto shrink-0"
+                        aria-hidden="true"
+                      >
                         arrow_forward
                       </span>
                     </Link>
@@ -272,7 +308,9 @@ export default function AWSCertDetailPage() {
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 w-full h-11 bg-amber-500 hover:bg-amber-400 text-white font-bold rounded-lg transition-colors"
               >
-                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                  open_in_new
+                </span>
                 View on AWS Certification
               </a>
               {cert.studyGuideUrl && (
@@ -282,7 +320,9 @@ export default function AWSCertDetailPage() {
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
                 >
-                  <span className="material-symbols-outlined text-[16px]">description</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    description
+                  </span>
                   Official Exam Guide
                 </a>
               )}
@@ -293,7 +333,9 @@ export default function AWSCertDetailPage() {
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 w-full h-11 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm"
                 >
-                  <span className="material-symbols-outlined text-[16px]">quiz</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    quiz
+                  </span>
                   Practice Questions
                 </a>
               )}
@@ -301,8 +343,13 @@ export default function AWSCertDetailPage() {
 
             {/* Prerequisites */}
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                <span className="text-amber-400 material-symbols-outlined text-[18px]">info</span>
+              <h3 className="text-base font-bold text-slate-950 dark:text-white mb-3 flex items-center gap-2">
+                <span
+                  className="text-amber-400 material-symbols-outlined text-[18px]"
+                  aria-hidden="true"
+                >
+                  info
+                </span>
                 Prerequisites
               </h3>
               <p className="text-sm text-foreground">{cert.prerequisites}</p>
@@ -310,7 +357,7 @@ export default function AWSCertDetailPage() {
 
             {/* Quick Stats */}
             <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white">Quick Stats</h3>
+              <h3 className="text-base font-bold text-slate-950 dark:text-white">Quick Stats</h3>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Exam Code</span>
@@ -326,11 +373,11 @@ export default function AWSCertDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Study Hours</span>
-                  <span className="font-bold text-white">{cert.hours}h</span>
+                  <span className="font-bold text-slate-950 dark:text-white">{cert.hours}h</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-foreground/60">Prep Time</span>
-                  <span className="font-bold text-white">{cert.prepTime}</span>
+                  <span className="font-bold text-slate-950 dark:text-white">{cert.prepTime}</span>
                 </div>
                 {cert.successRate && (
                   <div className="flex justify-between">
@@ -341,7 +388,9 @@ export default function AWSCertDetailPage() {
                 {cert.modules.length > 0 && (
                   <div className="flex justify-between">
                     <span className="text-foreground/60">Skill Builder Modules</span>
-                    <span className="font-bold text-white">{cert.modules.length}</span>
+                    <span className="font-bold text-slate-950 dark:text-white">
+                      {cert.modules.length}
+                    </span>
                   </div>
                 )}
               </div>
@@ -351,7 +400,9 @@ export default function AWSCertDetailPage() {
               to={routes.education('aws')}
               className="flex items-center gap-2 text-sm text-foreground/60 hover:text-amber-400 transition-colors"
             >
-              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                arrow_back
+              </span>
               Back to AWS Education
             </Link>
           </aside>
