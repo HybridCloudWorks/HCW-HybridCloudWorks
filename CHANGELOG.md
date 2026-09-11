@@ -17,6 +17,51 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **The Monday cron now refreshes the Azure study-guide outlines too, not just
+  the catalogue (#499).** The outlines shipped with #498 and refreshed only by
+  hand, so between hand runs the detail pages could show an outline older than
+  the exam list beside it.
+
+  This workflow was deliberately scoped to one file: its `git add`, its
+  artifact upload and its pull request body all named
+  `frontend/src/data/azure/certifications.js` alone, and **that scope is the
+  argument for what the App installation token is allowed to reach**. Widening
+  it to a second output was therefore its own reviewable change rather than a
+  line inside #498.
+
+  Six touch points, all shaped like the existing ones: the `update` job now
+  installs the functions tree as well — `update-study-guides.mjs` imports the
+  Listen & Learn parser from `functions/src/lib/listen-and-learn`, so node
+  resolves cheerio out of `functions/node_modules` and without it the import
+  fails at resolution before a guide is fetched; the study-guide script runs
+  **after** the catalogue script, because it reads `eligibleCerts()` out of
+  `certifications.js` and running it first would refresh the outlines against
+  last week's exam list; `study-guides.test.js` runs beside
+  `certifications.test.js`, separately because it asserts a different contract
+  (no outline is orphaned from a live exam); and the change check, artifact,
+  download, copy, `git add`, commit message and pull request body all gain the
+  second path.
+
+  **Two things #499 did not list.** `setup-node` was keying its cache on the
+  frontend lockfile alone while this job now installs two trees, so the cache
+  would have gone on reporting a hit while `functions/` was fetched from the
+  registry every Monday. And the staging guard went from "stages the catalogue"
+  to **"stages exactly these two paths and nothing else"** — the one-file scope
+  was the security argument, so widening it to two deserves an enumerated
+  boundary rather than a second presence check. A third output is now a
+  deliberate edit to that test.
+
+  **The failure policy is stated where it will be read.** A partial failure is
+  not a red run, and the script already implemented that: it refuses to write
+  only when *nothing* parses, and keeps an exam's previous outline when that
+  exam's own fetch fails. What was missing was visibility, so the pull request
+  body now carries the study-guide summary — which already names every failed
+  exam with its code, key and reason — plus a sentence explaining that a
+  non-zero "Failed" count means the page still renders an outline, but one
+  older than the date the file claims.
+
 ### Changed
 
 - **The three dated catalogue rows were settled without waiting three weeks
