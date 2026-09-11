@@ -16,7 +16,7 @@ import {
 } from './moduleParser.js';
 
 describe('module grammar contract', () => {
-  // The set documented in wiki/Blog-Machine.md. The backend twin of this test
+  // The set documented in docs/content/blog-machine.md. The backend twin of this test
   // lives in functions/src/lib/cms/content-modules.test.js — a type added on
   // one side must land on the other in the same change.
   it('the type lists match the documented grammar exactly', () => {

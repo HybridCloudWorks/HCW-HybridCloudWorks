@@ -53,7 +53,7 @@ const PROVIDERS = ['azure', 'aws', 'gcp', 'github', 'terraform', 'finops', 'vmwa
  * `0.0.0.0` sentinel open on the Cosmos firewall — the switch admitting any
  * workload in any Azure tenant at the network layer. Moving the query into the
  * app, which runs inside the subnet the firewall already admits, is what let
- * that close. See wiki/0025-cosmos-firewall-datacenter-sentinel.md.
+ * that close. See docs/decisions/0025-cosmos-firewall-datacenter-sentinel.md.
  *
  * THE ORIGIN HOSTNAME, NOT THE CLOUDFLARE ONE. A GitHub runner asking the
  * public host is served Cloudflare's Bot Fight Mode interstitial and a 403

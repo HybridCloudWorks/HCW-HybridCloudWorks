@@ -1,7 +1,7 @@
 /**
  * draft-from-url.js — one URL in, a publication-shaped draft (or a forge
  * source document) out. The shared half of `generateArticleDraft` and the
- * `forge-from-url` job (Blog Machine T-602, wiki/Blog-Machine.md).
+ * `forge-from-url` job (Blog Machine T-602, docs/content/blog-machine.md).
  *
  * Two consumers, one scrape:
  *   - The HTTP RPC scrapes and hands the result to `createDrafter` — whose
@@ -16,7 +16,7 @@
  *     `runForgePipeline` take it from there under the 28-minute job budget.
  *
  * `sourceUrl` is recorded on the document for admin provenance and is never
- * rendered publicly (owner decision, wiki/Blog-Machine.md).
+ * rendered publicly (owner decision, docs/content/blog-machine.md).
  */
 import { load as loadHtml } from 'cheerio';
 import { scrapeArticle } from './scrape.js';

@@ -310,7 +310,7 @@ jobs:
             else
               echo "**Investigate.** A function count below \`$MIN\`, or an \`AzureWebJobsStorage\` setting that exists, is the condition behind the 2026-08-20 and 2026-08-21 incidents: the host answers, the functions are not registered, and every route returns 404 — which no alert rule in \`observability.tf\` detects."
               echo
-              echo "The repair is to re-apply \`infra/\` so the azapi strip runs again. **Do not delete the setting by hand** — that hides the regression from the assertion in \`deploy-functions.yml\`, which is the only other automated detector this failure class has. See *The failure with no alert* in \`wiki/Alerting-And-Support.md\`."
+              echo "The repair is to re-apply \`infra/\` so the azapi strip runs again. **Do not delete the setting by hand** — that hides the regression from the assertion in \`deploy-functions.yml\`, which is the only other automated detector this failure class has. See *The failure with no alert* in \`docs/runbooks/alerting-and-support.md\` (https://docs.hybridcloudworks.com/runbooks/alerting-and-support/)."
               echo
               echo "A ⚠️ row means the check could not run, not that the platform is down. An authorization failure is not an outage."
             fi

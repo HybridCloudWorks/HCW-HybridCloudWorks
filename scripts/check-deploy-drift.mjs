@@ -33,7 +33,7 @@
  * ## Paths, not commits
  *
  * A service is only "behind" when something it ships has changed. Thirty commits
- * touching only `wiki/` leave the Function App exactly as correct as it was.
+ * touching only `docs/` leave the Function App exactly as correct as it was.
  * Each service therefore declares the paths it deploys, and drift is measured
  * over commits touching those.
  *

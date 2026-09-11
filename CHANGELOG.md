@@ -19,6 +19,49 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Nine references still sent readers to `wiki/`, five days after it was
+  deleted — including one inside a production alert (#502).** The Wiki was
+  retired on 2026-09-06 by ADR 0027 and `wiki/` was removed from the
+  repository, but the pointers into it were not, and none of them was a dead
+  link in prose. They were instructions:
+
+  `monitor-functions-registered.yml` told the owner, in the body of the alert
+  email that fires when the Function App loses registered functions, to read
+  *The failure with no alert* in `wiki/Alerting-And-Support.md`. The one
+  moment that path is read is the one moment it has to resolve, and for five
+  days it resolved to nothing. Four files across two packages cited
+  `wiki/Blog-Machine.md` as "the cross-package contract of record" — the
+  document a reader is sent to in order to keep the frontend and backend
+  module parsers in step. Two more cited
+  `wiki/0025-cosmos-firewall-datacenter-sentinel.md` for why the manifest job
+  opens a firewall window.
+
+  All nine now point at `docs/`, and the alert carries the published URL
+  beside the path so it is reachable from a phone without a checkout.
+
+  **Nothing noticed because nothing could.** A comment is not compiled and a
+  shell string inside a workflow is not linted, so a documentation move that
+  passed every check left live instructions aimed at a deleted folder.
+  `scripts/no-wiki-pointers.test.mjs` is the thing that notices: it walks
+  every tracked text file and fails on a `wiki/` pointer, with an allowlist
+  for the places history must still be able to say the word — the changelog,
+  ADR 0027 itself, the archived and historical snapshots, and the comments
+  that explain the migration. A second assertion fails when an allowlist entry
+  matches no tracked file, so the exemption list cannot quietly rot into a
+  hole. Verified by reintroducing the alert's pointer: it failed with the file
+  and line.
+
+  **The migration itself was complete, and that was checked rather than
+  assumed.** All 142 Wiki pages as they stood before retirement were matched
+  to a file under `docs/`: 137 by name, and the five that are Wiki furniture
+  rather than content — `Home`, `_Sidebar`, the ADR index, the ADR template
+  and the legacy documentation index — to `docs/index.md`, the MkDocs nav,
+  `docs/decisions/index.md`, `docs/decisions/template.md` and
+  `docs/archive/index.md`. Every page in the live Wiki is already a stub
+  pointing at the docs site, and the Wiki is disabled: a reader who follows
+  the old URL is redirected to the repository. The docs site serves all of it
+  at https://docs.hybridcloudworks.com/, over five spot-checked sections.
+
 - **The Social Hub's "AI Caption" button reported "Failed to generate
   caption" and nothing else, while the API had named the cause one field
   away (#498).** `generateSocialCaption` answers
