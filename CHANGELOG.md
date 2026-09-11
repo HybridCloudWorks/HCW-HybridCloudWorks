@@ -336,8 +336,11 @@ This project has not cut a tagged release; entries are grouped under
   dropping a row.
 
   Built entirely from data that already exists, and the page adds none of its
-  own. Prerendered like the other standalone routes, with its own title and
-  canonical.
+  own. Prerendered like the other standalone routes. Its canonical comes from
+  `socialTags` in `prerender.mjs`, which derives one for every route and never
+  overwrites a page that sets its own — so this page sets a title and a
+  description and lets the prerenderer do the rest, exactly as `/about` does.
+  Confirmed in the built output rather than assumed.
 
   **"Bookable" includes `expiring`, deliberately.** A published retirement
   date does not close an exam, and excluding those would have hidden seven

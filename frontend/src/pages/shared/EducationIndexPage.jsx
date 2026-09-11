@@ -245,7 +245,7 @@ export function earliestDataAsOf(catalogues = PROVIDER_CATALOGUES) {
     .sort()[0];
 }
 
-/** `{ retired: 3, upcoming: 1 }` -> "3 retired · 1 coming", or '' when empty. */
+/** `{ retired: 3, upcoming: 1 }` -> "1 coming · 3 retired", or '' when empty. */
 function describeRest(counts) {
   const parts = [];
   if (counts.upcoming) parts.push(`${counts.upcoming} coming`);
