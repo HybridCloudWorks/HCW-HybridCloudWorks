@@ -491,9 +491,20 @@ This project has not cut a tagged release; entries are grouped under
   worth keeping: `POST /api/connectionProbe` answered 401 while an invented
   route name answered 404, on a route that did not exist in the previous
   package. A guard rejection proves the route is registered; the 404 control
-  proves the 401 was not the edge answering for everything. The anonymous
-  `health` endpoint deliberately reports no version (T-402), so a route probe
-  with a control is how a session tells a deployed package from a stale one.
+  proves the 401 was not the edge answering for everything.
+
+  **The `health` endpoint cannot answer this, and the reason is a trap worth
+  naming.** It does report a `generation`, so it looks like a deploy
+  identifier - but that value is `RUNTIME_CONFIG_GENERATION`, written by
+  `var.config_generation` on a **Terraform apply** (T-513). It answers "which
+  configuration generation is this worker consuming", which is a different
+  question, and it does not move when a Functions package is deployed: it read
+  `gate2-a8fd3c8` both before and after this deploy. Reading it as a build
+  stamp would report a stale package as a fresh one. Everything that would
+  identify the build - runtime version, site name, feature flags - was
+  stripped from that endpoint by T-402, because an unauthenticated inventory
+  is what host enumeration looks for. So the route probe with a control is the
+  available method, not a preference.
 
 - **The Azure Learn catalogue refreshes itself every Monday, and the Friday
   Skills Hub scrape finally has a reader (#461 items 3 and 4).**
