@@ -144,6 +144,23 @@ function fmtWhen(value) {
   });
 }
 
+/**
+ * What to say about the last rotation, in the three states that genuinely differ.
+ *
+ * The middle case is the one worth the function. A field that is PRESENT but
+ * unparseable has to say something other than "not since this token was
+ * stored", because that sentence is a claim about the timer and the timer did
+ * run — we merely cannot read when. Collapsing the two would be the same
+ * defect this whole panel exists to remove, one level down (Copilot review of
+ * b5b4e304).
+ */
+function describeLastRefresh(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'not since this token was stored';
+  }
+  return fmtWhen(value) || 'recorded, but its timestamp could not be read';
+}
+
 /** A File as the base64 the upload route reads, without the data-URL prefix. */
 export function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -1079,13 +1096,13 @@ function ConnectTab({ isConnected, hasRefreshToken, refreshState, onConnected })
         <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
           <p>
             Auto-refresh last ran:{' '}
-            <strong>
-              {refreshState.lastTokenRefresh
-                ? fmtWhen(refreshState.lastTokenRefresh)
-                : 'not since this token was stored'}
-            </strong>
+            <strong>{describeLastRefresh(refreshState.lastTokenRefresh)}</strong>
           </p>
-          {refreshState.expiresAt ? (
+          {/* Gated on the FORMATTED string, not the raw field. An unparseable
+              value formats to '' and would otherwise render the label with a
+              blank after it, which reads as a broken page rather than as a
+              missing value (Copilot review of b5b4e304). */}
+          {fmtWhen(refreshState.expiresAt) ? (
             <p>
               Access token expires: <strong>{fmtWhen(refreshState.expiresAt)}</strong>
             </p>

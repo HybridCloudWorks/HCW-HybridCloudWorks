@@ -81,7 +81,14 @@ export default function RecordingHubPage() {
           error: plaud?.lastTokenRefreshError ?? null,
         });
       } catch {
-        if (!cancelled) setConnection(CONNECTION.unknown);
+        if (cancelled) return;
+        setConnection(CONNECTION.unknown);
+        // Cleared with the status, not left behind. A thrown read would
+        // otherwise leave the Connect tab showing the LAST successful
+        // rotation as though it were current, under a banner that says the
+        // connection is unknown — one panel confident and the other not, about
+        // the same read (Copilot review of b5b4e304).
+        setRefreshState(null);
       }
     }, 0);
     return () => {

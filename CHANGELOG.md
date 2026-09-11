@@ -356,6 +356,18 @@ This project has not cut a tagged release; entries are grouped under
   milliseconds. It returns empty for anything unparseable: a token page is the
   wrong place to make someone wonder whether the date or the token is broken.
 
+  Review caught two more places the panel would have claimed more than it
+  knew, which is the defect this whole change exists to remove. A thrown read
+  set the banner to unknown and left the rotation panel showing the last
+  successful timestamp as though it were current, so one half was confident
+  about a read the other half called unknown; `refreshState` is now cleared
+  with the status. And an unparseable value formatted to empty while its row
+  still rendered, producing a label followed by nothing - which reads as a
+  broken page rather than a missing value. The expiry row is gated on the
+  formatted string, and a `lastTokenRefresh` that is present but unreadable
+  now says so rather than reporting that the timer never ran, because those
+  are different facts.
+
 - **The API-keys page refuses a credential paste that carries an invisible
   character, a curly quote, or an Authorization header (#484).**
   `rejectSecretValue` already refused leading or trailing whitespace, which is
