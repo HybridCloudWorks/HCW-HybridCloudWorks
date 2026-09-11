@@ -20,7 +20,7 @@
  */
 
 // The type list and each JSON payload schema are specified in
-// wiki/Blog-Machine.md (the cross-package contract of record); the backend
+// docs/content/blog-machine.md (the cross-package contract of record); the backend
 // twin sets live in functions/src/lib/cms/content-modules.js, and each side
 // carries a test asserting its list matches the documented set.
 export const RAW_MODULE_TYPES = ['fact', 'recommendation', 'text', 'code', 'design'];

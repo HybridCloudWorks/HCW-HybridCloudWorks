@@ -90,7 +90,7 @@ resource "azurerm_cosmosdb_account" "hcw" {
   #     a GitHub-hosted runner. That query now runs in the Function App, which
   #     arrives over the virtual_network_rule below, so CI holds no Cosmos
   #     data-plane role at all and the sentinel had nothing left to serve.
-  #     wiki/0025-cosmos-firewall-datacenter-sentinel.md records the options and
+  #     docs/decisions/0025-cosmos-firewall-datacenter-sentinel.md records the options and
   #     why this one won;
   #   - any operator IPs in cosmos_admin_ip_rules (smoke tier 2), empty in
   #     steady state.

@@ -55,7 +55,7 @@ export const MODULE_TAG_REGEX =
   /<module\s+type="(\w+)"(?:\s+align="([^"]*)")?\s*>([\s\S]*?)<\/module>/g;
 
 // The type list and each JSON payload schema are specified in
-// wiki/Blog-Machine.md (the cross-package contract of record); the frontend
+// docs/content/blog-machine.md (the cross-package contract of record); the frontend
 // twin lists live in frontend/src/lib/moduleParser.js, and each side carries
 // a test asserting its list matches the documented set.
 export const KNOWN_MODULE_TYPES = new Set([

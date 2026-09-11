@@ -14,7 +14,7 @@
  * `Microsoft.DocumentDb/databaseAccounts/*​/write`, which also sets
  * `disableLocalAuth`, and a per-run window cannot be isolated from the read
  * because separate jobs get separate runner IPs. See
- * `wiki/0025-cosmos-firewall-datacenter-sentinel.md`.
+ * `docs/decisions/0025-cosmos-firewall-datacenter-sentinel.md`.
  *
  * So the query moves in here, where it runs from the integration subnet the
  * Cosmos firewall already admits, and the runner fetches the result over HTTP

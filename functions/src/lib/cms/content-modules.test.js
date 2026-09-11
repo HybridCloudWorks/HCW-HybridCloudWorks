@@ -173,7 +173,7 @@ describe('validateModules', () => {
 });
 
 describe('module grammar contract', () => {
-  // The set documented in wiki/Blog-Machine.md. The frontend twin of this test
+  // The set documented in docs/content/blog-machine.md. The frontend twin of this test
   // lives in frontend/src/lib/moduleParser.test.js — a type added on one side
   // must land on the other in the same change.
   it('KNOWN_MODULE_TYPES matches the documented grammar exactly', () => {
