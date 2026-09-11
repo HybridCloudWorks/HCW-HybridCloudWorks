@@ -131,9 +131,17 @@ jobs:
       # The data tests fail the day a stored status contradicts its dates; a
       # refresh that would open a pull request destined to go red stops here
       # instead, with the offending line in the log.
+      # `education-catalogues.test.js` as well as the Azure-only file, because
+      # the Azure-only file cannot see the defect that matters most here. The
+      # first dispatch of this workflow (run 34627119281) re-added all six GH
+      # exams that #496 had removed hours earlier — the poster and the browse
+      # API both carry them, so the script offered them and nothing in
+      # `certifications.test.js` looks at another catalogue. The cross-catalogue
+      # guard lives in the shared file, so this step is what makes the workflow
+      # refuse to open that pull request rather than leaving it to the reviewer.
       - name: Check the refreshed catalogue
         working-directory: frontend
-        run: npx vitest run src/data/azure/certifications.test.js
+        run: npx vitest run src/data/azure/certifications.test.js src/data/education-catalogues.test.js
 
       # Separately, because it asserts a different contract: every outline
       # belongs to a live catalogue exam and none is orphaned. That is the test
