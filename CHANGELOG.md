@@ -17,6 +17,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Monday refresh put the six GitHub exams straight back into the Azure
+  catalogue, hours after #507 removed them (#496).** Found by dispatching the
+  workflow #499 had just widened — run 34627119281 on 2026-09-11 opened a pull
+  request re-adding GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900, with
+  their six study-guide outlines behind them, +1167 lines of them.
+
+  **Nothing was broken; the decision was simply in a place no script reads.**
+  GitHub certification moved onto Microsoft Learn, so all six sit on the
+  Microsoft Certifications poster and in the credentials browse API — both of
+  which are this updater's sources. It had always been offering them, and
+  before #496 the catalogue accepted them. #496 recorded the removal in the
+  catalogue's file header and in a cross-catalogue test, and
+  `update-applied-skills.mjs` reads neither. So the rule now lives where the
+  automation meets it: the script refuses any exam another catalogue owns,
+  before building the row.
+
+  **A prefix, not the six codes.** GitHub adding a GH-700 would recreate the
+  duplication exactly, and it belongs to `/github/education` for the same
+  reason the six do — the Azure `LEVEL_META` has no Professional rung, so a
+  GitHub exam cannot be stated truthfully there whatever is typed. Refusals are
+  reported in the pull request body under their own heading rather than dropped
+  silently, and deliberately not in the "not added" bucket, which means "nobody
+  could confirm this exam" and would send a reviewer hunting a source problem
+  that does not exist.
+
+  **The workflow also checked the wrong thing.** Its test step ran
+  `azure/certifications.test.js` alone, which by construction cannot see a
+  contradiction with another catalogue — so the run went green and left the
+  defect for the pull request's CI to catch. It now runs
+  `education-catalogues.test.js` too, where the cross-catalogue guard lives,
+  so the workflow refuses to open that pull request itself.
+
+  Worth recording that the guard worked: `one exam, one catalogue (#496)` is
+  what failed on the bad pull request, on the same day it was written. The
+  regression was caught by CI, not by a reader — but by the pull request's CI
+  rather than the workflow's, which is the gap closed here.
+
 ### Added
 
 - **The Monday cron now refreshes the Azure study-guide outlines too, not just

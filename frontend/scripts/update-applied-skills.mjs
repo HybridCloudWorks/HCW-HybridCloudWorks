@@ -101,6 +101,40 @@ const browserHeaders = {
  */
 export const LIFECYCLE_RANK = Object.freeze({ beta: 0, active: 1, expiring: 2, retired: 3 });
 
+/**
+ * Exam codes this catalogue must not carry, because another one owns them.
+ *
+ * GitHub certification moved onto Microsoft Learn, so GH-100, GH-200, GH-300,
+ * GH-500, GH-600 and GH-900 are on the Microsoft Certifications poster and in
+ * the Learn browse API. Both are this script's sources, so it added all six to
+ * the Azure catalogue — where they duplicated
+ * `src/data/github/certifications.js` and contradicted it: four of the six
+ * disagreed about the level, and GH-200 rendered as Fundamentals under Azure
+ * and Associate under GitHub on the same /education screen.
+ *
+ * The owner decided on 2026-09-11 that the GitHub catalogue owns them (issue
+ * #496); PR #507 implemented the removal. The first dispatch of the refreshed
+ * workflow (run 34627119281, the same day) put all six straight back, because
+ * a decision recorded in a file header is invisible to a script. THAT is what
+ * this constant is for: the Monday cron is the thing that has to know, not the
+ * reader of the file it writes.
+ *
+ * A PREFIX, not the six codes. GitHub adding a GH-700 would recreate the
+ * duplication exactly, and it belongs to /github/education for the same
+ * reason the six do. The Azure `LEVEL_META` has no Professional rung, so a
+ * GitHub exam cannot even be stated truthfully here.
+ *
+ * Skipped entries are reported in the summary rather than dropped silently —
+ * a source offering something this catalogue refuses is worth a line in the
+ * pull request, or the next person wonders why the poster and the file differ.
+ */
+export const FOREIGN_CODE_PATTERN = /^GH-\d+$/;
+
+/** Which catalogue owns a code this one refuses, for the summary line. */
+export function foreignOwnerFor(code) {
+  return FOREIGN_CODE_PATTERN.test(String(code)) ? 'src/data/github/certifications.js' : null;
+}
+
 /** A source that cannot be read. Its message is the whole report. */
 export class SourceError extends Error {
   constructor(message) {
@@ -203,6 +237,7 @@ export function summarizeChanges({
   kept = [],
   disagreements = [],
   unverified = [],
+  foreign = [],
 }) {
   const lines = [];
   const section = (title, items) => {
@@ -250,6 +285,7 @@ export function summarizeChanges({
   section('Kept from the file (absent from the current sources)', kept);
   section('Source disagreed with the file (file kept)', disagreements);
   section('On the poster but in neither the Learn catalogue nor the file (not added)', unverified);
+  section('Refused because another catalogue owns the exam (#496)', foreign);
   return lines.join('\n').trimEnd() + '\n';
 }
 
@@ -825,6 +861,7 @@ export async function buildCatalogue({
   const kept = [];
   const disagreements = [];
   const unverified = [];
+  const foreign = [];
   const { bySlug, byTitle } = buildExistingIndexes(existingSkills);
   const usedCodes = new Set();
 
@@ -907,6 +944,12 @@ export async function buildCatalogue({
   const existingCertificationIndexes = buildCertificationIndexes(existingCertifications);
   const nextCertifications = [];
   for (const entry of sources.posterCertificationEntries) {
+    // Refused before it is built: another catalogue owns this exam (#496).
+    const owner = foreignOwnerFor(entry.code);
+    if (owner) {
+      foreign.push(`${entry.code} — ${entry.title} — carried by ${owner}`);
+      continue;
+    }
     const cert = buildCertificationFromSources(
       entry,
       apiCertificationIndexes,
@@ -929,7 +972,7 @@ export async function buildCatalogue({
   nextCertifications.sort((a, b) => a.code.localeCompare(b.code));
   assertUniqueCodes(nextCertifications, 'Certifications');
 
-  return { nextSkills, nextCertifications, kept, disagreements, unverified };
+  return { nextSkills, nextCertifications, kept, disagreements, unverified, foreign };
 }
 
 function parseArgs(argv) {
@@ -952,12 +995,13 @@ async function main(argv = process.argv.slice(2)) {
   );
 
   const sources = await collectSources({ fetchImpl: fetch });
-  const { nextSkills, nextCertifications, kept, disagreements, unverified } = await buildCatalogue({
-    existingSkills,
-    existingCertifications,
-    sources,
-    fetchImpl: fetch,
-  });
+  const { nextSkills, nextCertifications, kept, disagreements, unverified, foreign } =
+    await buildCatalogue({
+      existingSkills,
+      existingCertifications,
+      sources,
+      fetchImpl: fetch,
+    });
 
   const source = await fs.readFile(dataFile, 'utf8');
   const certificationStartMarker = "// status: 'active' | 'beta' | 'expiring' | 'retired'";
@@ -991,6 +1035,7 @@ async function main(argv = process.argv.slice(2)) {
     kept,
     disagreements,
     unverified,
+    foreign,
   });
   if (summaryPath) await fs.writeFile(summaryPath, summary);
 

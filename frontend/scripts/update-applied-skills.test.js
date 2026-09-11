@@ -11,6 +11,7 @@ import {
   assertSourceItems,
   buildCatalogue,
   collectSources,
+  foreignOwnerFor,
   reconcileLifecycle,
   stampSyncDate,
   summarizeChanges,
@@ -260,6 +261,84 @@ describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#4
       })
     ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
     expect(report).toEqual([]);
+  });
+});
+
+/**
+ * #496 in the one place that can enforce it: the script that writes the file.
+ *
+ * The GH exams are on the Microsoft Certifications poster and in the Learn
+ * browse API, because GitHub certification moved onto Microsoft Learn. Both
+ * are this script's sources, so it had always been offering them — and on
+ * 2026-09-11, hours after #507 removed all six from the Azure catalogue by
+ * owner decision, the first dispatch of the refreshed workflow (run
+ * 34627119281) put every one of them straight back, with their six study-guide
+ * outlines behind them.
+ *
+ * Nothing was broken. The decision was recorded in the catalogue's file header
+ * and in a cross-catalogue test, and a script reads neither. This is the rule
+ * moved to where the automation will meet it.
+ */
+describe('exams another catalogue owns are refused (#496)', () => {
+  it('recognises a GH code as GitHub’s, whatever the number', () => {
+    for (const code of ['GH-100', 'GH-200', 'GH-300', 'GH-500', 'GH-600', 'GH-900', 'GH-700']) {
+      expect(foreignOwnerFor(code), code).toBe('src/data/github/certifications.js');
+    }
+  });
+
+  it('does not refuse an Azure code, or something merely starting with the letters', () => {
+    for (const code of ['AZ-104', 'AI-102', 'AB-900', 'GHOST-1', 'GH', 'GH-', 'gh-200']) {
+      expect(foreignOwnerFor(code), code).toBeNull();
+    }
+  });
+
+  it('drops a GH entry the poster offers, and names it in the summary', async () => {
+    const out = await buildCatalogue({
+      existingSkills: [],
+      existingCertifications: [],
+      sources: {
+        certificationApiResults: [
+          {
+            title: 'Microsoft Certified: GitHub Actions',
+            url: '/credentials/certifications/github-actions/',
+            exams: [{ display_name: 'Exam GH-200' }],
+          },
+          {
+            title: 'Microsoft Certified: Azure Administrator Associate',
+            url: '/credentials/certifications/azure-administrator/',
+            exams: [{ display_name: 'Exam AZ-104' }],
+          },
+        ],
+        posterCertificationEntries: [
+          { code: 'GH-200', title: 'GitHub Actions' },
+          { code: 'AZ-104', title: 'Azure Administrator Associate' },
+        ],
+        browseResults: [],
+        appliedPosterText: 'Create an AI agent',
+      },
+      fetchImpl: async () => okHtml('<h2>Overview</h2><p>Text</p></section>'),
+    });
+
+    // The Azure exam is carried; the GitHub one is not, and is not silent.
+    expect(out.nextCertifications.map((c) => c.code)).toEqual(['AZ-104']);
+    expect(out.foreign).toEqual([
+      'GH-200 — GitHub Actions — carried by src/data/github/certifications.js',
+    ]);
+
+    // Refused, not "unverified" — the poster artefact bucket means "nobody
+    // could confirm this exam", which would send a reviewer looking for a
+    // source problem that does not exist.
+    expect(out.unverified).toEqual([]);
+
+    const summary = summarizeChanges({
+      before: { certifications: [], appliedSkills: [] },
+      after: { certifications: out.nextCertifications, appliedSkills: out.nextSkills },
+      today: '2026-09-11',
+      foreign: out.foreign,
+    });
+    expect(summary).toContain('### Refused because another catalogue owns the exam (#496)');
+    expect(summary).toContain('GH-200 — GitHub Actions — carried by');
+    expect(summary).not.toContain('Certifications added\n\n- GH-200');
   });
 });
 
