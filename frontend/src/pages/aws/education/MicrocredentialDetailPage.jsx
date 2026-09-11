@@ -70,7 +70,7 @@ const ALL_MICROCREDENTIALS = [
     ],
     duration: '90 minutes',
     format: 'Proctored hands-on lab',
-    relatedCerts: ['scs-c02'],
+    relatedCerts: ['scs-c03'],
     skillBuilderUrl:
       'https://skillbuilder.aws/learn/UQWKF19DT7/aws-incident-response-demonstrated/VH96JY5RJZ',
     icon: 'security',
@@ -106,7 +106,7 @@ const CERT_META = {
   'saa-c03': { code: 'SAA-C03', title: 'AWS Certified Solutions Architect – Associate' },
   'aip-c01': { code: 'AIP-C01', title: 'AWS Certified Generative AI Developer – Professional' },
   'aif-c01': { code: 'AIF-C01', title: 'AWS Certified AI Practitioner' },
-  'scs-c02': { code: 'SCS-C02', title: 'AWS Certified Security – Specialty' },
+  'scs-c03': { code: 'SCS-C03', title: 'AWS Certified Security – Specialty' },
   'ans-c01': { code: 'ANS-C01', title: 'AWS Certified Advanced Networking – Specialty' },
 };
 

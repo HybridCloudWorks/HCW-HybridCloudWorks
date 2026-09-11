@@ -317,6 +317,58 @@ This project has not cut a tagged release; entries are grouped under
   granting the Admin app role to a named user, which is a recurring operation
   with no other tool. None is spent.
 
+### Changed
+
+- **Every certification catalogue re-verified against its vendor, ahead of the
+  2026-09-29 deadline (#469).** Seven catalogues were checked row by row
+  against the official source and `DATA_AS_OF` moved to 2026-09-10. Azure is
+  excluded because `update-learn-catalogue.yml` refreshes it on a Monday cron,
+  which was confirmed sound rather than assumed.
+
+  **One real error, nine months old.** The AWS row called itself `SCS-C02`
+  while already linking `SCS-C03`'s exam guide, and nothing had ever compared
+  the two. `SCS-C02` stopped being the current exam on 2025-12-01. The row is
+  now `SCS-C03` with `previousSlugs: ['scs-c02']` so minted links still
+  resolve, following the `SOA-C02` precedent, and the three places that
+  hard-coded the old code outside the catalogue were updated with it —
+  `aws/LandingPage.jsx` and two entries in `MicrocredentialDetailPage.jsx`,
+  which would otherwise have displayed a superseded exam beside a corrected
+  one.
+
+  **Three more corrections, each from the vendor's own page.** VMware's VCTA
+  is gone from Broadcom's index entirely and is now `retired` — with no
+  `retiredDate` and no `replacement`, because Broadcom publishes neither and
+  inventing them is the failure this repository keeps legislating against.
+  Red Hat renamed RHCE to "Red Hat Certified Engineer in Ansible", and the
+  `ex374-` URL the file carried now 404s. The FinOps Professional exam
+  requires three prerequisite certifications rather than two, confirmed in
+  two places on the Foundation's own site.
+
+  **GCP, GitHub and HashiCorp needed no data changes at all**, and two
+  near-misses are worth more than the diff would suggest. A cached copy of
+  GH-100's page still says "(beta)"; the live page does not, so trusting the
+  cache would have flipped a good row to `beta`. And GH-500 is absent from
+  `learn.github.com/credentials` while its own page is live and its study
+  guide took a revision in July 2026 — an omission from a marketing page is
+  not a retirement. Both are now recorded in the file headers as sources NOT
+  to trust, which is the more durable half of the work.
+
+  **What was deliberately not done.** Broadcom lists thirteen VCF
+  certifications against the six this catalogue carries. The titles and exam
+  codes are recorded in the file header, but no rows were added: `hours` and
+  `prepTime` are this site's own study estimates, and fabricating fourteen of
+  them is exactly the confidently-wrong entry the rule exists to prevent.
+  AWS's `successRate` percentages have the same problem and are flagged for a
+  decision — every other field in these catalogues is sourced; that one never
+  was.
+
+  **A clock trap worth recording.** `todayIso()` builds its string from
+  `getFullYear`/`getMonth`/`getDate`, so the freshness check runs on the LOCAL
+  calendar. On a machine in CDT at 23:11, `DATA_AS_OF = '2026-09-11'` — the
+  correct UTC date — fails six tests as "in the future", while a UTC CI runner
+  would accept it. The date used is the one the repository's own clock agrees
+  with.
+
 ### Added
 
 - **The Plaud tab says when the 12-hour token refresh last ran, so the
