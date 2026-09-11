@@ -31,10 +31,32 @@
  * Google does not publish exam codes; the `code` values here are the
  * community short forms this page has always used.
  *
+ * RE-VERIFIED 2026-09-10 (#469) against the same index plus the two pages
+ * whose numbers this file quotes. Nothing changed — the index still lists
+ * FIFTEEN in the same three tiers (Foundational: Cloud Digital Leader,
+ * Generative AI Leader; Associate: Cloud Engineer, Google Workspace
+ * Administrator, Data Practitioner; Professional: the ten below), and every
+ * row here is one of them. The two dated or priced rows were re-read at the
+ * source rather than assumed:
+ *
+ *   Professional Agentic Architect — the banner still reads "The Professional
+ *     Agentic Architect beta certification is open until September 30", and
+ *     the beta exam details still say 3 hours, $120 (40% off a $200 retail
+ *     price), ~80 multiple choice questions. `betaEndDate` is unchanged.
+ *     https://cloud.google.com/learn/certification/agentic-architect
+ *   Professional Security Operations Engineer — still 2 hours, $200, English
+ *     and Japanese, 50-60 questions.
+ *     https://cloud.google.com/learn/certification/security-operations-engineer
+ *
+ * So the `betaEndDate` alarm described above still stands, unmoved and now
+ * close: it fires on 2026-10-01, and that row is the one the next pass is
+ * really for. Google has still published no GA date, so there is still none
+ * here.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-10';
 
 export const DATA_SOURCE = {
   label: 'Google Cloud certifications',

@@ -12,10 +12,27 @@
  * The `code` values (TA-004, TV-003, TA-ADV, TV-ADV) are this page's own
  * short labels — HashiCorp names exams by product and version, not by code.
  *
+ * RE-VERIFIED 2026-09-10 (#469) against https://developer.hashicorp.com/certifications
+ * and both product tracks under it. Nothing changed. The index still lists
+ * exactly the same four, and the two track pages still name the same exam
+ * versions — Terraform Associate (004) tests Terraform 1.12, Terraform
+ * Authoring and Operations Advanced tests 1.6, Vault Associate (003) tests
+ * Vault 1.19, Vault Operations Advanced tests Vault 1.16. All four are valid
+ * two years.
+ *   https://developer.hashicorp.com/certifications/infrastructure-automation
+ *   https://developer.hashicorp.com/certifications/security-automation
+ *
+ * The IBM acquisition has not consolidated or renamed anything visible here:
+ * HashiCorp's catalogue is still published under its own name at the URL
+ * above, and the only IBM branding found in this pass was on the HashiConf at
+ * IBM TechXchange 2026 onsite-testing notice, which is an exam venue rather
+ * than a change to the exams. Consul Associate's retirement still reads
+ * 2026-07-15 (last day to schedule 2026-07-13), and no successor has appeared.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-10';
 
 export const DATA_SOURCE = {
   label: 'HashiCorp certifications',
