@@ -17,7 +17,7 @@ roles table.
 | --- | --- |
 | Terraform source | `infra/` on `main` in HCW-HybridCloudWorks |
 | State and variables | HCP Terraform Cloud — org `hcw`, project `Site`, workspace `hcw-azure` |
-| Required inputs (names, formats, consumers — never values) | [Required-Inputs](../standards/required-inputs.md) in this Wiki (was `REVIEW.md` Part 4 at the root until 2026-08-29) |
+| Required inputs (names, formats, consumers — never values) | [Required inputs](../standards/required-inputs.md) on this site (it was `REVIEW.md` Part 4 at the repository root until 2026-08-29, and that file no longer exists) |
 | Terraform's own identity | `id-plat-terraform-prod-cus-01`, federated to `app.terraform.io` — created once by `scripts/bootstrap-terraform-oidc.ps1`, outside Terraform state (section 0) |
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
 | Working rules for the directory | `infra/README.md` |

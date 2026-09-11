@@ -400,11 +400,18 @@ The rule to carry forward: **never name a workload after an Azure service
 category.** A data-processing workload called `db`, or an event pipeline
 called `int`, breaks in exactly the same way.
 
-**These are not the live names.** Today's estate is `hcw-functions-prod`,
-`hcw-cosmos-prod`, `hcw-keyvault-prod`, `hcwstorageprod` in
-`rg-hybridcloudworks-prod`. Renaming them is destroy-and-recreate for every
-globally-unique resource in the list, which ADR 0018 already rejected. This
-column applies when a resource is created, not retroactively.
+**These became the live names on 2026-08-19.** This paragraph used to say the
+opposite — that the estate still ran as `hcw-functions-prod`, `hcw-cosmos-prod`,
+`hcw-keyvault-prod` and `hcwstorageprod` in `rg-hybridcloudworks-prod`, and that
+renaming them was a destroy-and-recreate ADR 0018 had rejected. The centralus
+consolidation rebuilt the estate from scratch, which made the rename free, so
+the names in the table above are the ones `infra/` declares — some as defaults
+in `variables.tf`, the rest composed from the workload, environment, region and
+instance tokens — and the ones every runbook on this site uses. The rule the
+paragraph carried still
+stands and is the reason the scheme is written down at all: **a naming
+convention applies when a resource is created, not retroactively** — any
+live resource that predates this page is grandfathered, not renamed.
 
 ---
 

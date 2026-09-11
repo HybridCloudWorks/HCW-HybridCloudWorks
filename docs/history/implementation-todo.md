@@ -13,9 +13,22 @@
 
 **Environment:** One production workload state
 
-This is the authoritative execution checklist for the approved Azure migration. Completing a checkbox
-does not authorize a production apply, DNS change, external mutation, Firebase/GCP decommission, or
-repository archival.
+This was the authoritative execution checklist for the approved Azure migration.
+Completing a checkbox does not authorize a production apply, DNS change,
+external mutation, Firebase/GCP decommission, or repository archival — that
+separation between finishing work and being permitted to act on production is
+the part of this document worth reading.
+
+**The unticked boxes are not open work.** The list was last updated on
+2026-07-22 and the migration it tracked completed on 2026-08-21; several items
+were done differently and several were abandoned deliberately. Two are worth
+naming because they read as instructions and are now wrong: "Move human-facing
+documentation to the GitHub Wiki" was reversed on 2026-09-06
+([ADR 0027](../decisions/0027-documentation-site.md)), which is why you are
+reading this on a documentation site rather than in a Wiki; and the Azure
+Verified Modules requirement in Phase 2 was superseded by
+[ADR 0020](../decisions/0020-native-terraform-root-module.md). Current open
+work is in the repository's GitHub issues.
 
 ## P0: Immediate security and governance
 

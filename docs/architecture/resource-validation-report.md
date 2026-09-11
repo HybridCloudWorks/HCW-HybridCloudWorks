@@ -25,8 +25,12 @@
 >   2026-08-24 found `az monitor metrics alert list`, `scheduledQueryRules`,
 >   `webtests` and `activity-log alert list` all empty in both subscriptions,
 >   while the workspace was simultaneously `OverQuota`. The first alert rules
->   are declared on `fix/go-live-remediation` and are not applied
+>   were written after this report and are now declared on `main` in
+>   `infra/observability.tf`; at least `alert-api-reachability-prod-cus` has
+>   been live since 2026-09-01
 >   ([ADR 0022](../decisions/0022-alerting-fabric.md), [Alerting and support](../runbooks/alerting-and-support.md)).
+>   This bullet read "declared on `fix/go-live-remediation` and are not
+>   applied" until 2026-09-11; that branch no longer exists.
 > - **T-506 "keyless OpenAI — Applied" is superseded by removal.** The Azure
 >   OpenAI account and its resource group were retired on 2026-08-19; model
 >   calls go to external provider APIs keyed from Key Vault

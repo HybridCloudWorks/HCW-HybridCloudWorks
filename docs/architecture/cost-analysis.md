@@ -8,8 +8,17 @@ used to carry described resources that were never created; see *Corrected
 **Currency:** USD
 
 **Budget ceilings:** two, both **subscription**-scoped — USD 150 on the
-application subscription (live) and USD 25 on Platform Management (declared in
-`fix/go-live-remediation`, **not applied**).
+application subscription (live) and USD 25 on Platform Management.
+
+> **The branch this page kept citing is gone.** Several lines here described a
+> control as "declared in `fix/go-live-remediation`, **not applied**" — the
+> ceiling above among them. That branch no
+> longer exists on `origin` and everything it declared is on `main` in
+> `infra/`; [Alerting and support](../runbooks/alerting-and-support.md) made the
+> same correction on 2026-09-07. Whether a given control has reached the live
+> tenant is a read against the tenant, not something this page can assert — the
+> commands are on that runbook — so the lines now say "declared on `main`" and
+> stop there.
 
 **Scope:** the HybridCloudWorks production workload across three subscriptions —
 application, Platform Management, Platform Connectivity. Cloudflare, Hostinger
@@ -29,7 +38,7 @@ about:
 | "Azure OpenAI — $0–40" | **No Azure OpenAI account exists.** `oai-site-prod-cus` and its resource group were retired on 2026-08-19 ([Naming-Convention](../standards/naming-convention.md)); the subscription holds zero model quota. Model calls go to external provider APIs keyed from Key Vault, so AI spend is on the provider's bill and no Azure budget sees it |
 | "Resource-group monthly budget: USD 150" | The budget is **subscription**-scoped and has been since the workload split into six resource groups. A resource-group budget would have watched one of the six and ignored the other five (`infra/main.tf`, the `azurerm_consumption_budget_subscription.hcw` header) |
 | "`enable_ai = false` until model/capacity approval" | There is no `enable_ai` variable. Provider availability is decided at runtime by key presence in Key Vault (`functions/src/lib/ai/router.js`), not by a Terraform switch |
-| "Service-specific alerts for Function execution, Cosmos RU/429, Storage, Log Analytics ingestion, AI tokens" | **Zero alert rules of any kind existed** in either subscription when the review ran on 2026-08-24. Five are added by `fix/go-live-remediation` and none is applied yet — see [Alerting and support](../runbooks/alerting-and-support.md) |
+| "Service-specific alerts for Function execution, Cosmos RU/429, Storage, Log Analytics ingestion, AI tokens" | **Zero alert rules of any kind existed** in either subscription when the review ran on 2026-08-24. Five were added and are now declared on `main` in `infra/observability.tf` — see [Alerting and support](../runbooks/alerting-and-support.md) |
 
 The tag table's example values were also wrong (`criticality: medium`,
 `dataClassification: public-internal`); the real values are below.
@@ -68,7 +77,7 @@ Cost Management, month-to-date, read 2026-08-24. Application subscription:
 | Resource | Month-to-date | Why it is what it is |
 | --- | ---: | --- |
 | Static Web Apps, Standard | $1.34 | The one fixed monthly line in the workload — it bills whether or not anyone visits. `infra/main.tf` records what Standard buys: managed SSL on a custom domain, the Front Door CDN backbone, SPA routing, PR staging environments, 100 GB bandwidth included |
-| Functions host storage (`stsitefuncprodcus01`) | $0.98 | Deployment packages and host state. 7-day blob and container soft delete is added by `fix/go-live-remediation` and will move this line slightly |
+| Functions host storage (`stsitefuncprodcus01`) | $0.98 | Deployment packages and host state. 7-day blob and container soft delete is declared on `main` and moves this line slightly |
 | Cosmos DB, serverless | $0.68 | No provisioned throughput to pay for while idle (ADR 0003). RU charges only when a request runs |
 | Functions, Flex Consumption | $0.14 | Zero always-ready instances, so nothing is billed while nothing executes |
 | Key Vault, Standard | $0.01 | Per-operation, and secrets are cached by the client |
@@ -94,7 +103,7 @@ first month after it clears is the first month the ladder means anything.
 
 **The largest controllable line is telemetry, and it bills somewhere else.** Log
 Analytics ingestion is charged in Platform Management, where there was **no
-budget at all** until `fix/go-live-remediation` adds one. The 0.25 GB/day cap
+budget at all** until the USD 25 ceiling above was declared. The 0.25 GB/day cap
 bounds it at about 7.5 GB a month, which at the USD 2.30–2.76/GB the
 configuration records is roughly **USD 17–21 a month** — five times the entire
 application-subscription workload. The workspace was found sitting *at* that cap

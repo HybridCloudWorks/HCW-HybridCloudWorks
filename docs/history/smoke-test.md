@@ -5,7 +5,21 @@
     runbook for starting a new migration.
 
 
-Run this after every production deploy. Use the live site — not localhost.
+**Read the date before running any of it.** This is the manual post-deploy
+checklist as it stood *before* the Azure migration: sections 14 to 16 verify
+Firestore rules, indexes and data, and the site has not run on Firestore since
+2026-08-21. It is kept because the other fifteen sections are the only written
+record of the editorial workflow the migration had to preserve end to end —
+queue, review, editor, publish, schedule, unpublish — which is what the cutover
+was measured against.
+
+The equivalents in use today are `node scripts/smoke-deployed.mjs` (see
+[Deployment runbook](../runbooks/deployment-runbook.md) §4) for the deployed
+surface and [Edge and DNS verification](../runbooks/edge-dns-verification.md)
+for the public path.
+
+What follows is the checklist as written. Its own instruction was: run this
+after every production deploy, against the live site — not localhost.
 
 **Setup before you start:**
 

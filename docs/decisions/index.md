@@ -46,6 +46,15 @@ Every ADR includes:
 
 ## Decision register
 
+> **Reading a `T-NNN` in these records.** Several ADRs cite findings as `T-503`,
+> `T-519`, `T-706` and so on. These were the repository's own tracked-finding
+> identifiers, assigned in the root `TODO.md` and used by the
+> [2026-08 architecture review](../architecture/architecture-review-2026-08.md),
+> which states each finding in full under its own heading. The scheme was retired on
+> 2026-09-05 when open work moved to GitHub issues; a `T-` number in an accepted
+> ADR is a historical citation, not a live ticket, and the sentence around it is
+> meant to carry the meaning on its own.
+
 | ADR | Decision | Status | Primary purpose |
 | --- | --- | --- | --- |
 | [0001](../decisions/0001-single-repository.md) | Consolidate HCW into one repository | Accepted | Prevent application/platform drift |
@@ -69,14 +78,14 @@ Every ADR includes:
 | [0019](../decisions/0019-single-function-app.md) | One Function App execution boundary | Accepted | Ratify least-privilege-by-contract over process separation |
 | [0020](../decisions/0020-native-terraform-root-module.md) | Flat native-provider Terraform root module (no AVM) | Accepted | Keep resource addresses stable on a live state |
 | [0021](../decisions/0021-key-vault-purge-protection.md) | Key Vault purge protection stays disabled | Accepted | Keep teardown-and-recreate available on a single-environment estate |
-| [0021 (number reused)](../decisions/0021-container-apps-ci-runner.md) | Container Apps self-hosted CI runner failover | Superseded — deferred 2026-08-18 before the number was reassigned to Key Vault purge protection | Kept because `infra/ci-runner.tf` still holds the gated-off resources it describes |
+| [0021 (number reused)](../decisions/0021-container-apps-ci-runner.md) | Container Apps self-hosted CI runner failover | Superseded — deferred 2026-08-18 before the number was reassigned to Key Vault purge protection | Kept as the record of why a self-hosted CI runner was rejected. Its own text says the gated-off resources remain in `infra/ci-runner.tf`; that file was deleted on 2026-08-24 and the record is now purely historical |
 | [0022](../decisions/0022-alerting-fabric.md) | The alerting fabric, and the signal it does not cover | Accepted | Make failure visible without competing with the telemetry that explains it |
 | [0023](../decisions/0023-migration-estate-retirement.md) | Retire the migration-era estate, grants and reverse path | Accepted | Close the decommission gate deliberately rather than by neglect |
-| [0024](../decisions/0024-edge-availability-probe.md) | Reachability probing from a Cloudflare Worker | Proposed | Give T-519's signal a path that runs on the current Cloudflare plan |
-| [0025](../decisions/0025-cosmos-firewall-datacenter-sentinel.md) | The Cosmos datacenter-IP sentinel — kept, then removed | Accepted; recommendation reversed by its own addendum | Weigh closing T-718 against its cost — then remove the sentinel once a cheaper route appeared |
+| [0024](../decisions/0024-edge-availability-probe.md) | Reachability probing from a Cloudflare Worker | Proposed (built and armed 2026-09-01 — see the note on the record) | Give the missing reachability alert a path that runs on the current Cloudflare plan, whose bot protection answers every datacenter-based monitoring client with a 403 |
+| [0025](../decisions/0025-cosmos-firewall-datacenter-sentinel.md) | The Cosmos datacenter-IP sentinel — kept, then removed | Accepted; recommendation reversed by its own addendum | Weigh the review finding that the Cosmos firewall admits any Azure datacenter address against the cost of closing it — then remove that allowance once a cheaper route appeared |
 | [0026](../decisions/0026-required-checks-filter-inside-the-job.md) | Required checks filter inside the job, not at the trigger | Accepted | Keep every merge gate while paying only for checks that can fail |
 | [0027](../decisions/0027-documentation-site.md) | Documentation is a MkDocs site under `docs/`, published to docs.hybridcloudworks.com | Accepted | One reviewed, validated, redaction-gated source for every page; the Wiki is retired |
-| [0028](../decisions/0028-cosmos-out-of-account-export.md) | Cosmos recovery is a weekly full export plus daily change-feed deltas, run by the Function App, kept on the RA-GRS content account | Proposed | Survive account or region loss for about $4 a month, proven by a timed restore; four points await the owner on #231 |
+| [0028](../decisions/0028-cosmos-out-of-account-export.md) | Cosmos recovery is a weekly full export plus daily change-feed deltas, run by the Function App, kept on the RA-GRS content account | Proposed | Survive account or region loss for about $4 a month, proven by a timed restore. Four points in the design still await the owner's approval on the issue that commissioned it |
 | [0029](../decisions/0029-podcast-hosting-and-audio-surface.md) | Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges | Accepted | Replace the retired host, put both audio systems on one seekable page, and unblock a self-hosted feed for later |
 
 ## Template

@@ -6,10 +6,12 @@ owner's voice comes out the other end — announced on Telegram with a staging
 link, approved with one reply, live a minute later. The manual editor path
 stays exactly as it is; the machine is an addition, not a replacement.
 
-This page is the program of record: the architecture, the phase plan the
-tracker entries (TODO.md **T-601…T-607**) point at, the module-grammar
-contract both packages must match, the decisions already made, and the
-backlog.
+This page is the program of record: the architecture, the seven-phase plan, the
+module-grammar contract both packages must match, the decisions already made,
+and the backlog. The `T-601…T-607` identifiers on the phases below were the
+repository's own tracked-item numbers in the root `TODO.md`; that scheme was
+retired on 2026-09-05 when open work moved to GitHub issues, and the issue
+number beside each phase in the status line is the live reference.
 
 **Status: engineering complete (2026-08-28).** All seven phases landed —
 Phase 0 + plan (#236), Phase 1 (#237), Phase 2 (#238), Phase 3 (#239),

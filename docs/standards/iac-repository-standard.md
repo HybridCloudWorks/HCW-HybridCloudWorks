@@ -16,9 +16,15 @@ the agent drift, this page wins — update the agent.
 3. **Additive over restructuring.** Against a live environment, structure
    follows state: no address renames without `moved` blocks, no plan with
    destroy/create pairs on stateful resources.
-4. **Documentation has exactly three homes.** Narrative → Wiki. Review state
-   → the four SOP root documents. Tooling docs → next to the tooling,
-   allowlisted by the structure validator.
+4. **Documentation has exactly three homes.** Narrative → the published
+   documentation site, built from `docs/` in the repository
+   ([ADR 0027](../decisions/0027-documentation-site.md); it replaced the GitHub
+   Wiki on 2026-09-06). Standing repository record → the SOP root documents
+   `README.md`, `CHANGELOG.md` and `TODO.md`: what the repository is, what
+   verifiably shipped, and the risks accepted rather than fixed. Open work is
+   not among them — it moved to GitHub issues on 2026-09-05, and `TODO.md` is
+   the index pointing there. Tooling docs → next to the tooling, allowlisted
+   by the structure validator.
 5. **Landing-zone absorbable.** Workload repos never create management
    groups, subscription-level policy, or deny assignments; they carry the
    tag contract and survive being moved under an ALZ.
@@ -39,7 +45,7 @@ the agent drift, this page wins — update the agent.
 | --- | --- |
 | `CODEOWNERS` | Infra and workflow paths require infra review |
 | `CONTRIBUTING.md`, `SECURITY.md` | Contribution rules; private vulnerability reporting |
-| PR template | Infrastructure section: plan linked, no unexpected destroys, no unmoved renames, no secrets, tags preserved, CHECKLIST updated |
+| PR template | Infrastructure section: plan linked, no unexpected destroys, no unmoved renames, no secrets, tags preserved, required-input inventory updated |
 | Issue templates | Bug report + infrastructure change request (blast radius, cost, rollback) |
 | `dependabot.yml` | `github-actions` + every package ecosystem present |
 | Workflows | Least-privilege `permissions:`; actions pinned (SHA preferred); credential-free CI + IaC validation on every PR; delivery gated by `workflow_dispatch` + protected Environment; never auto-apply on push |
@@ -56,14 +62,14 @@ the agent drift, this page wins — update the agent.
 | Naming | CAF-style prefixes for new resources; never rename live resources to chase convention |
 | State | Remote backend (HCP Terraform or locked+versioned azurerm backend), never Git |
 | Identity | OIDC-federated deployment identity, subject-scoped to repo + ref/environment |
-| Secrets | Values never transit Terraform state; seeded out-of-band, referenced in CHECKLIST |
+| Secrets | Values never transit Terraform state; seeded out-of-band, referenced in the required-input inventory |
 
-### Wiki
+### Documentation site (`docs/`)
 | Page | Holds |
 | --- | --- |
-| `Deployment-Runbook` | Validate → plan → apply → verify → rollback → day-2 → ALZ absorption |
-| `IaC-Repository-Standard` | This page |
-| ADR register | One ADR per irreversible or material decision, written before implementation |
+| [Deployment runbook](../runbooks/deployment-runbook.md) | Validate → plan → apply → verify → rollback → day-2 → ALZ absorption |
+| [IaC repository standard](../standards/iac-repository-standard.md) | This page |
+| [ADR register](../decisions/index.md) | One ADR per irreversible or material decision, written before implementation |
 
 ### Variable naming
 
@@ -147,7 +153,7 @@ makes the join a required artefact.
 | The provider block's *lack* of credentials carries a comment saying where they come from | Otherwise the next reader "fixes" it by adding a client secret |
 | The runbook's first section is bootstrap, and states plainly that nothing below it works until bootstrap is done | Ordering is the whole message |
 | Where two OIDC handshakes exist (runner→cloud and CI→cloud), the runbook tables them side by side | They are both called "the OIDC setup" and only one is in the repository; confusing them is the default failure |
-| The runner's own credentials are inventoried in CHECKLIST alongside application inputs | An unrecorded input is an input nobody provisions |
+| The runner's own credentials are inventoried alongside application inputs | An unrecorded input is an input nobody provisions |
 | Prefer federating a **user-assigned managed identity** over an app registration | App registrations need Entra directory roles; cloud-resource Owner does not grant them. Managed identities are ordinary resources and federate to arbitrary external issuers |
 
 The preflight is what makes the script worth writing. Assume the operator has
@@ -174,11 +180,13 @@ wrong fix.
 
 1. Branch with additive changes; `fmt`, `validate`, tflint, and the
    structure validator all green.
-2. SOP documents updated: CHANGELOG entry, TODO items for deferred work,
-   REVIEW items for human decisions.
+2. SOP documents updated: CHANGELOG entry, and a tracker item for deferred
+   work and for decisions only a human can make. (This repository moved that
+   tracker from `TODO.md` to GitHub issues on 2026-09-05; `TODO.md` now holds
+   accepted risks and the pointers to the board.)
 3. Draft PR listing what was added, what was deliberately left alone and
    why, and the remaining gaps ranked by deploy-readiness impact.
-4. Wiki pages created or updated to match.
+4. Documentation-site pages created or updated to match.
 
 ---
 
