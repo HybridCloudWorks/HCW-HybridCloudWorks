@@ -368,6 +368,13 @@ This project has not cut a tagged release; entries are grouped under
   now says so rather than reporting that the timer never ran, because those
   are different facts.
 
+  A third followed: the auto-refresh row rendered even with no refresh token
+  stored, where the banner already says the access token expires on its own.
+  "Last ran: not since this token was stored" beside that implies a refresh
+  token exists and has merely not fired yet. The row is now shown only where
+  auto-refresh can run. The expiry row is kept in that case and matters more
+  there than anywhere, because it is when the connection stops working.
+
 - **The API-keys page refuses a credential paste that carries an invisible
   character, a curly quote, or an Authorization header (#484).**
   `rejectSecretValue` already refused leading or trailing whitespace, which is

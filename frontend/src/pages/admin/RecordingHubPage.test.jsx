@@ -307,8 +307,40 @@ describe('Plaud connection check', () => {
     openPlaudTab();
     fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
     expect(await screen.findByText(/timestamp could not be read/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Access token expires/i)).toBeNull();
+    expect(screen.queryByText(/Access token expires:/i)).toBeNull();
     expect(screen.queryByText(/not since this token was stored/i)).toBeNull();
+  });
+
+  it('hides the auto-refresh row when no refresh token is stored', async () => {
+    // The banner already says the access token expires on its own in that
+    // case. "Auto-refresh last ran: not since this token was stored" beside
+    // it implies a refresh token exists and simply has not fired yet.
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/config/mcp-servers') {
+        return {
+          items: [
+            {
+              id: 'plaud',
+              status: 'connected',
+              hasOauthToken: true,
+              hasOauthRefreshToken: false,
+              oauthExpiresAt: Date.parse('2026-09-11T12:00:00.000Z'),
+            },
+          ],
+        };
+      }
+      if (route === 'cms/podcast/transcripts') return { success: true, items: [], total: 0 };
+      if (route === 'public/podcasts?provider=main') return { items: [] };
+      if (route.startsWith('cms/recordings')) return { success: true, items: [] };
+      throw new Error(`unexpected GET ${route}`);
+    });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    // The expiry still shows, and matters more here than anywhere: it is when
+    // the connection stops working.
+    expect(await screen.findByText(/Access token expires:/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Auto-refresh last ran/i)).toBeNull();
   });
 
   it('surfaces a failed rotation, not just the connected banner', async () => {

@@ -1094,10 +1094,19 @@ function ConnectTab({ isConnected, hasRefreshToken, refreshState, onConnected })
           measurement. */}
       {refreshState && (
         <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
-          <p>
-            Auto-refresh last ran:{' '}
-            <strong>{describeLastRefresh(refreshState.lastTokenRefresh)}</strong>
-          </p>
+          {/* Only where auto-refresh can actually run. With no refresh token
+              the banner above already says the access token expires on its
+              own, and "last ran: not since this token was stored" beside that
+              implies a refresh token exists and simply has not fired yet
+              (Copilot review of 522ee0a9). The expiry row below is kept in
+              that case, and matters more there than anywhere: it is when the
+              connection stops working. */}
+          {hasRefreshToken ? (
+            <p>
+              Auto-refresh last ran:{' '}
+              <strong>{describeLastRefresh(refreshState.lastTokenRefresh)}</strong>
+            </p>
+          ) : null}
           {/* Gated on the FORMATTED string, not the raw field. An unparseable
               value formats to '' and would otherwise render the label with a
               blank after it, which reads as a broken page rather than as a
