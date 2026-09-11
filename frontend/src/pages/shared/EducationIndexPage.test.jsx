@@ -16,8 +16,8 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
-import { describe, expect, it } from 'vitest';
-import { deriveStatus, isIsoDate } from '@/lib/certStatus';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { deriveStatus, isIsoDate, todayIso } from '@/lib/certStatus';
 import EducationIndexPage, {
   AVAILABLE_STATUS_WORD,
   LEVEL_TIERS,
@@ -36,11 +36,35 @@ import EducationIndexPage, {
  * the server snapshot and the viewer's date after hydration; jsdom's
  * `useSyncExternalStore` takes the client snapshot, so the rendered page is on
  * the real clock and every expectation here must be computed on it too.
+ *
+ * WHICH IS WHY THE CLOCK IS FROZEN. Reading `new Date()` here at module load
+ * while the component reads it again at render time is two reads of a moving
+ * value, and a suite that crosses midnight between them computes its
+ * expectations for one day and renders another. Rare, real, and exactly the
+ * kind of failure nobody can reproduce the next morning — this repository
+ * spent an evening on the same midnight boundary when `DATA_AS_OF` was
+ * written from the UTC date while `todayIso()` reads the local one.
+ *
+ * `vi.useFakeTimers` with `shouldAdvanceTime` keeps timers working for
+ * Testing Library while pinning the wall clock, so both reads land on the
+ * same day whatever the hour. The frozen instant is deliberately mid-morning
+ * rather than midnight, so a timezone offset cannot push it onto a
+ * neighbouring date either. (Copilot review of 033aaa85.)
  */
-const TODAY = new Date();
-const today = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, '0')}-${String(
-  TODAY.getDate()
-).padStart(2, '0')}`;
+const FROZEN_NOW = new Date('2026-09-10T12:00:00Z');
+
+beforeAll(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
+// Computed AFTER the clock is pinned, from the same helper the component uses,
+// so the test cannot drift from the page by construction.
+const today = todayIso();
 
 function renderPage() {
   return render(
