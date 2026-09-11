@@ -226,6 +226,12 @@ export default function CertDetailPage() {
             </div>
 
             <EpisodePlaylist
+              // Keyed by exam so a route change REMOUNTS it. React Router
+              // reuses this page's instance when only the slug changes, and a
+              // playlist that survived that would carry the previous exam's
+              // selected chapter — or an index past the new exam's last one —
+              // into a page it was never on (Copilot review of 05b35783).
+              key={`azure:${cert.code}`}
               platform="azure"
               examCode={cert.code}
               className="mt-6 lg:mt-0 lg:w-80 lg:shrink-0"

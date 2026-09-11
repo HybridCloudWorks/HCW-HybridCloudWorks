@@ -4,9 +4,9 @@
  * shows the Listen & Learn block only when published audio exists.
  */
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import CertDetailPage from './CertDetailPage';
 import { certifications } from '@/data/azure/certifications';
 import { deriveStatus, todayIso } from '@/lib/certStatus';
@@ -103,6 +103,74 @@ describe('CertDetailPage', () => {
     expect(buttons).toHaveLength(3);
     expect(buttons[0]).toHaveAttribute('aria-current', 'true');
     expect(buttons[1]).not.toHaveAttribute('aria-current');
+  });
+
+  it('starts the playlist at chapter 1 again when the route moves to another exam (#498)', async () => {
+    // The SPA case the review named: React Router keeps this page's instance
+    // when only the slug changes, so a playlist that survived the change would
+    // carry the first exam's selected chapter — or an index past the second
+    // exam's last one — into a page it was never on. The call site keys the
+    // playlist by exam so it remounts; this drives a real param change through
+    // one router rather than re-rendering a fresh tree, which would prove
+    // nothing about the key.
+    const AB_650_EPISODES = {
+      set: { id: 'azure_ab-650' },
+      episodes: [
+        { id: 'f1', title: 'Plan the tenant', areaName: 'Plan', audioUrl: '/api/public/media/9' },
+        {
+          id: 'f2',
+          title: 'Secure the tenant',
+          areaName: 'Secure',
+          audioUrl: '/api/public/media/8',
+        },
+      ],
+    };
+    // By argument, not by call order: the page has TWO consumers of this
+    // fetch (the hero playlist and the full Listen & Learn block), so two
+    // `mockResolvedValueOnce` fixtures were both eaten by the first page and
+    // the second page saw the default `null`. Keying on examCode holds
+    // however many components ask.
+    const FIXTURES = { 'AB-100': AB_100_EPISODES, 'AB-650': AB_650_EPISODES };
+    fetchPublishedEpisodes.mockImplementation(({ examCode }) =>
+      Promise.resolve(FIXTURES[examCode] ?? null)
+    );
+
+    function GoNext() {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate('/azure/education/ab-650')}>
+          go next
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/azure/education/ab-100']}>
+        <GoNext />
+        <Routes>
+          <Route path="/azure/education/:certSlug" element={<CertDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    const firstList = await screen.findByRole('list', { name: /chapters, in study-guide order/i });
+    const firstButtons = within(firstList).getAllByRole('button');
+    expect(firstButtons).toHaveLength(3);
+    fireEvent.click(firstButtons[1]);
+    expect(firstButtons[1]).toHaveAttribute('aria-current', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'go next' }));
+
+    // The new exam's chapters, not the old exam's, and chapter 1 selected.
+    // Queried by button role, not text: the area name also appears in the
+    // playlist's "Now:" line and in the full block below, so a bare text
+    // query finds several — which is the surfaces doing their jobs.
+    await screen.findByRole('button', { name: 'Secure' });
+    const secondList = screen.getByRole('list', { name: /chapters, in study-guide order/i });
+    const secondButtons = within(secondList).getAllByRole('button');
+    expect(secondButtons).toHaveLength(2);
+    expect(secondButtons[0]).toHaveAttribute('aria-current', 'true');
+    expect(secondButtons[1]).not.toHaveAttribute('aria-current');
+    expect(screen.queryByRole('button', { name: 'Build' })).toBeNull();
   });
 
   it('renders the study-guide outline from the shipped data, area by area (#498)', () => {

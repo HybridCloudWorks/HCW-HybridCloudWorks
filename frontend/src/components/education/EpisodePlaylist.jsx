@@ -14,6 +14,16 @@
  * 2026-09-11 exactly one Azure certification (AB-100) had approved audio —
  * this component is present on every Azure detail page and visible on one.
  *
+ * ONE INSTANCE PER EXAM — KEY IT AT THE CALL SITE. The selected chapter is
+ * component state, and this component does not reset it when `examCode`
+ * changes; it relies on the caller passing `key={examCode}` so a route
+ * change remounts it. That is React's own answer to "reset state on prop
+ * change" and it also resets the `<audio>` element and any playback in the
+ * same stroke, which an effect syncing `index` to props would not. Without
+ * the key, navigating between two exams with episodes would carry the first
+ * exam's selected chapter — or an index past the second exam's last chapter —
+ * into a page it was never on (Copilot review of 05b35783).
+ *
  * Native `<audio>`, not a custom player: keyboard, OS media keys and
  * playback-speed preferences work for free, and it is what the rest of the
  * site uses. Switching chapter swaps `src` on the same element, which is why
