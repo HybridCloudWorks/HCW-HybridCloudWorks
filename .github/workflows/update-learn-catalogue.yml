@@ -1,20 +1,7 @@
 name: Update Learn Catalogue
 
-# Refreshes frontend/src/data/azure/certifications.js and
-# frontend/src/data/azure/study-guides.js from Microsoft Learn and opens one
-# pull request when either changed (#461 item 3, #499).
-#
-# TWO FILES, ONE PULL REQUEST (#499). The outlines arrived with #498 and
-# refreshed only by hand; this workflow was scoped to a single file, and
-# widening it was deliberately left as its own reviewable change rather than
-# slipped into #498 — the one-file scope is the argument for what the App
-# token is allowed to reach, so growing it by one output is a boundary change.
-# It is still a boundary: `git add` names both paths and neither wildcard, and
-# scripts/learn-catalogue-workflow.test.mjs asserts that.
-#
-# THE ORDER MATTERS. update-study-guides.mjs reads eligibleCerts() out of
-# certifications.js, so it runs AFTER the catalogue script and refreshes the
-# outlines against the exam list that run just wrote, not last week's.
+# Refreshes frontend/src/data/azure/certifications.js from Microsoft Learn and
+# opens a pull request when it changed (#461 item 3).
 #
 # WHY A WORKFLOW. The updater, frontend/scripts/update-applied-skills.mjs, had
 # only ever been run by hand: the file said "Last manual sync: 2026-04-16"
@@ -84,27 +71,12 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          # Both lockfiles, because #499 made this job install both trees. A
-          # cache keyed on the frontend lockfile alone would go on being
-          # reported as a hit while functions/ was fetched from the registry
-          # every Monday.
-          cache-dependency-path: |
-            frontend/package-lock.json
-            functions/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       # `--ignore-scripts`: the updater needs pdf-parse and prettier, neither
       # of which has an install-time script; nothing else in the tree is used.
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci --ignore-scripts
-
-      # The study-guide script imports the Listen & Learn parser from
-      # functions/src/lib/listen-and-learn/studyguide.js, so `node` resolves
-      # cheerio out of functions/node_modules — without this the import fails
-      # at resolution, before a single guide is fetched. `--ignore-scripts`
-      # for the same reason as above.
-      - name: Install functions dependencies (the study-guide parser)
-        working-directory: functions
         run: npm ci --ignore-scripts
 
       # A source that cannot be fetched or parses to zero items ends this step
@@ -113,21 +85,6 @@ jobs:
         working-directory: frontend
         run: node scripts/update-applied-skills.mjs --summary "${RUNNER_TEMP}/learn-catalogue-summary.md"
 
-      # Second, and after the catalogue rather than beside it: the study-guide
-      # script reads eligibleCerts() out of certifications.js, so it must see
-      # the file the step above just wrote. Running it first would refresh the
-      # outlines against last week's exam list.
-      #
-      # FAILURE POLICY (#499 item 6). A partial failure is NOT a red run. The
-      # script refuses to write only when NOTHING parses; when one exam's fetch
-      # fails it keeps that exam's previous outline and names it in the summary.
-      # So a single retitled Learn page cannot block the catalogue refresh —
-      # but it must not vanish either, which is why the summary is carried into
-      # the pull request body below.
-      - name: Refresh the study-guide outlines
-        working-directory: frontend
-        run: node scripts/update-study-guides.mjs --summary "${RUNNER_TEMP}/study-guides-summary.md"
-
       # The data tests fail the day a stored status contradicts its dates; a
       # refresh that would open a pull request destined to go red stops here
       # instead, with the offending line in the log.
@@ -135,43 +92,27 @@ jobs:
         working-directory: frontend
         run: npx vitest run src/data/azure/certifications.test.js
 
-      # Separately, because it asserts a different contract: every outline
-      # belongs to a live catalogue exam and none is orphaned. That is the test
-      # that catches an outline left behind by a row leaving the catalogue.
-      - name: Check the refreshed outlines
-        working-directory: frontend
-        run: npx vitest run src/data/azure/study-guides.test.js
-
-      # EITHER file changing is a change. Both scripts stamp their own
-      # DATA_AS_OF on every successful run, so in practice both move every
-      # Monday and this is belt and braces — but the two are refreshed by
-      # separate scripts against separate pages, and a day when only one of
-      # them can be reached should still open the pull request for the other.
-      - name: Did the catalogue or the outlines change?
+      - name: Did the catalogue change?
         id: changed
         run: |
           set -euo pipefail
-          if git diff --quiet -- frontend/src/data/azure/certifications.js frontend/src/data/azure/study-guides.js; then
-            echo "Neither the catalogue nor the outlines changed."
+          if git diff --quiet -- frontend/src/data/azure/certifications.js; then
+            echo "The catalogue did not change."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
           cp "${RUNNER_TEMP}/learn-catalogue-summary.md" learn-catalogue-summary.md
-          cp "${RUNNER_TEMP}/study-guides-summary.md" study-guides-summary.md
           cat learn-catalogue-summary.md >> "$GITHUB_STEP_SUMMARY"
-          cat study-guides-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload the refreshed catalogue and outlines
+      - name: Upload the refreshed catalogue
         if: steps.changed.outputs.changed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: learn-catalogue
           path: |
             frontend/src/data/azure/certifications.js
-            frontend/src/data/azure/study-guides.js
             learn-catalogue-summary.md
-            study-guides-summary.md
           retention-days: 1
           if-no-files-found: error
 
@@ -205,14 +146,13 @@ jobs:
           name: learn-catalogue
           path: ${{ runner.temp }}/learn-catalogue
 
-      - name: Did the catalogue or the outlines change?
+      - name: Did the catalogue change?
         id: changed
         run: |
           set -euo pipefail
           cp "${RUNNER_TEMP}/learn-catalogue/frontend/src/data/azure/certifications.js" frontend/src/data/azure/certifications.js
-          cp "${RUNNER_TEMP}/learn-catalogue/frontend/src/data/azure/study-guides.js" frontend/src/data/azure/study-guides.js
-          if git diff --quiet -- frontend/src/data/azure/certifications.js frontend/src/data/azure/study-guides.js; then
-            echo "Neither the catalogue nor the outlines changed."
+          if git diff --quiet -- frontend/src/data/azure/certifications.js; then
+            echo "The catalogue did not change."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -275,8 +215,7 @@ jobs:
           git config user.email 'hcw-manifest[bot]@users.noreply.github.com'
           git checkout -b "${branch}"
           git add frontend/src/data/azure/certifications.js
-          git add frontend/src/data/azure/study-guides.js
-          git commit -m "chore: refresh the Azure Learn catalogue and study-guide outlines (checked ${AS_OF})"
+          git commit -m "chore: refresh the Azure Learn catalogue (checked ${AS_OF})"
           git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin "${branch}"
 
@@ -290,32 +229,27 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           AS_OF: ${{ steps.changed.outputs.as_of }}
           SUMMARY: ${{ runner.temp }}/learn-catalogue/learn-catalogue-summary.md
-          GUIDES_SUMMARY: ${{ runner.temp }}/learn-catalogue/study-guides-summary.md
         run: |
           set -euo pipefail
           {
             echo "## Summary"
             echo
-            echo "Weekly refresh of \`frontend/src/data/azure/certifications.js\` and \`frontend/src/data/azure/study-guides.js\` from Microsoft Learn by \`.github/workflows/update-learn-catalogue.yml\` (#461 item 3, #499). Opened by the App rather than pushed to \`main\`, so the required checks run on it. Those two files are the only ones it may touch."
+            echo "Weekly refresh of \`frontend/src/data/azure/certifications.js\` from Microsoft Learn by \`.github/workflows/update-learn-catalogue.yml\` (#461 item 3). Opened by the App rather than pushed to \`main\`, so the required checks run on it. The only file it may touch is the catalogue."
             echo
             cat "${SUMMARY}"
             echo
-            cat "${GUIDES_SUMMARY}"
-            echo
-            echo "A non-zero \"Failed\" count above is not a failed run: that exam kept the outline it already had, so the page still renders one. It does mean the outline is now older than the date this file claims, so check the named exams against Learn before merging."
-            echo
             echo "## Related issue or decision"
             echo
-            echo "Refs #461 (item 3) and #499."
+            echo "Refs #461 (item 3)."
             echo
             echo "## Verification"
             echo
-            echo "- Checks run: \`node scripts/update-applied-skills.mjs\` and \`node scripts/update-study-guides.mjs\` against the live sources; \`npx vitest run src/data/azure/certifications.test.js src/data/azure/study-guides.test.js\` on the result (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "- Checks run: \`node scripts/update-applied-skills.mjs\` against the live sources; \`npx vitest run src/data/azure/certifications.test.js\` on the result (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
             echo "- Evidence level: [x] CI"
           } > "${RUNNER_TEMP}/pr-body.md"
           gh pr create \
             --repo "${GITHUB_REPOSITORY}" \
             --base main \
             --head "${branch}" \
-            --title "chore: refresh the Azure Learn catalogue and study-guide outlines (checked ${AS_OF})" \
+            --title "chore: refresh the Azure Learn catalogue (checked ${AS_OF})" \
             --body-file "${RUNNER_TEMP}/pr-body.md"

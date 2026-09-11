@@ -22,7 +22,6 @@ const WORKFLOW = join(
 );
 
 const CATALOGUE_PATH = 'frontend/src/data/azure/certifications.js';
-const GUIDES_PATH = 'frontend/src/data/azure/study-guides.js';
 
 /** Non-comment lines only, so prose about `git add -A` cannot trip it. */
 function commandLines(source) {
@@ -42,26 +41,6 @@ describe('the Learn catalogue workflow', () => {
 
   it('stages the catalogue by path', () => {
     expect(lines.some((l) => l.includes(`git add ${CATALOGUE_PATH}`))).toBe(true);
-  });
-
-  it('stages the study-guide outlines by path too (#499)', () => {
-    expect(lines.some((l) => l.includes(`git add ${GUIDES_PATH}`))).toBe(true);
-  });
-
-  /**
-   * #499 widened this workflow from one output to two, and the one-file scope
-   * was the argument for what the App token is allowed to reach. So the guard
-   * is no longer "stages the catalogue" but "stages these two and nothing
-   * else": enumerating every `git add` argument makes a third output a
-   * deliberate edit here rather than a line that slips in with a feature.
-   */
-  it('stages exactly those two paths and nothing else', () => {
-    const staged = lines
-      .filter((l) => /\bgit add\b/.test(l))
-      .map((l) => l.replace(/^.*\bgit add\s+/, '').trim())
-      .sort();
-
-    expect(staged).toEqual([CATALOGUE_PATH, GUIDES_PATH].sort());
   });
 
   it('never stages with a wildcard', () => {
