@@ -368,6 +368,22 @@ This project has not cut a tagged release; entries are grouped under
   now says so rather than reporting that the timer never ran, because those
   are different facts.
 
+  **Confirmed live 2026-09-11**, deployed with `b70cd21f`. The panel renders
+  on the deployed site and the owner confirmed it working.
+
+  The deploy was also confirmed without a credential, by the method #489
+  recorded: the admin bundle is public even though the page behind it is not,
+  so `RecordingHubPage-C256BYlK.js` was fetched from the CDN and searched for
+  a string that exists only in this change. That reaches a page an
+  unauthenticated session cannot open, and it is a second technique beside the
+  route probe — one for Functions, one for the frontend.
+
+  **This confirms the witness, not the observation it exists for.** #358 asks
+  for the rotation observed through a full cycle, which means the timestamp
+  advancing after up to twelve hours. Seeing the panel is the precondition for
+  that read, not the read itself, and the two are easy to conflate precisely
+  because the panel is the only place the rotation was ever visible.
+
   A third followed: the auto-refresh row rendered even with no refresh token
   stored, where the banner already says the access token expires on its own.
   "Last ran: not since this token was stored" beside that implies a refresh
