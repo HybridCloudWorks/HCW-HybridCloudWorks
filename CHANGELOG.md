@@ -371,12 +371,18 @@ This project has not cut a tagged release; entries are grouped under
   **Confirmed live 2026-09-11**, deployed with `b70cd21f`. The panel renders
   on the deployed site and the owner confirmed it working.
 
-  The deploy was also confirmed without a credential, by the method #489
-  recorded: the admin bundle is public even though the page behind it is not,
-  so `RecordingHubPage-C256BYlK.js` was fetched from the CDN and searched for
-  a string that exists only in this change. That reaches a page an
-  unauthenticated session cannot open, and it is a second technique beside the
-  route probe — one for Functions, one for the frontend.
+  The deploy was also confirmed without a credential, by a second technique
+  beside the route probe #489 recorded — one for Functions, one for the
+  frontend. The admin BUNDLE is public even though the PAGE behind it is not,
+  so the chunk was fetched from the CDN and searched for a string that exists
+  only in this change. That reaches inside a page an unauthenticated session
+  cannot open.
+
+  The chunk is `RecordingHubPage-<hash>.js`, and the hash is written here as a
+  placeholder on purpose: it changes with every build, so quoting the one from
+  this deploy would hand the next reader a 404 and a reason to distrust the
+  method. Find the current name by fetching `/` for the entry chunk, then
+  reading the lazy-chunk filenames it references.
 
   **This confirms the witness, not the observation it exists for.** #358 asks
   for the rotation observed through a full cycle, which means the timestamp
