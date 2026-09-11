@@ -46,3 +46,7 @@ site/
 # tracked and every docs session had to check them out before committing.
 __pycache__/
 *.pyc
+
+# Agent worktrees: isolated checkouts created by Claude Code for parallel work.
+# They are real git worktrees, so staging one embeds a repository inside this one.
+.claude/worktrees/
