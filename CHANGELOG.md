@@ -384,11 +384,18 @@ This project has not cut a tagged release; entries are grouped under
   method. Find the current name by fetching `/` for the entry chunk, then
   reading the lazy-chunk filenames it references.
 
-  **This confirms the witness, not the observation it exists for.** #358 asks
-  for the rotation observed through a full cycle, which means the timestamp
-  advancing after up to twelve hours. Seeing the panel is the precondition for
-  that read, not the read itself, and the two are easy to conflate precisely
-  because the panel is the only place the rotation was ever visible.
+  **The observation followed on 2026-09-11: the timestamp advanced**, which is
+  the full cycle #358 asks for, and that row is now ticked. The two were kept
+  apart in this entry while they were apart, because seeing the panel is the
+  precondition for the read and not the read itself — easy to conflate
+  precisely because the panel is the only place the rotation was ever visible,
+  so both arrive through the same screen.
+
+  Recorded as owner-reported rather than measured. The Connect tab is behind
+  admin auth, so no session read that timestamp; the issue comment says the
+  same thing in the same words. "Observed" and "reported as observed" are
+  different evidence, and an estate that has twice been misled by a confident
+  report of something nobody measured should keep saying which one it has.
 
   A third followed: the auto-refresh row rendered even with no refresh token
   stored, where the banner already says the access token expires on its own.
