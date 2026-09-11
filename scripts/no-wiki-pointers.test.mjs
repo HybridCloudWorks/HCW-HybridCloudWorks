@@ -61,7 +61,19 @@ function trackedFiles() {
     .filter(Boolean);
 }
 
-const TEXT = /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|json|sh)$/i;
+/**
+ * Extensions worth reading. Deliberately broad, because the first version of
+ * this list omitted Terraform and four live pointers in `infra/` sat behind
+ * the gap — `cosmos.tf`, `outputs.tf` and two in `variables.tf`, each telling
+ * an operator which document records why a firewall rule or an output exists.
+ * The same blind spot was in the grep that found the original nine, which is
+ * how a guard written to catch this class shipped missing a sixth of it
+ * (Copilot review of cc34da78).
+ *
+ * Anything textual a person reads for instructions belongs here. If a file
+ * type is added to the repository, add it.
+ */
+const TEXT = /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|json|sh|tf|tfvars|hcl|txt|toml|env|bicep)$/i;
 
 /**
  * A reference to the retired folder. Matches `wiki/Page.md` and `` `wiki/` ``
@@ -100,6 +112,36 @@ describe('the retired Wiki has no live pointers', () => {
         'Point the reader at docs/ instead, or at https://docs.hybridcloudworks.com/.\n' +
         'If the reference is a historical record rather than an instruction, add its\n' +
         'path to HISTORY in this file and say why.'
+    ).toEqual([]);
+  });
+
+  it('reads the file types the repository actually contains', () => {
+    // The rule above is only as wide as TEXT, and a missing extension is an
+    // invisible hole rather than a failure — which is exactly how four live
+    // Terraform pointers survived the first version of this test. This fails
+    // when a tracked extension carrying more than a handful of files is not
+    // covered, so the next language added to the repository is a decision
+    // rather than an oversight.
+    const counts = new Map();
+    for (const rel of trackedFiles()) {
+      const ext = path.extname(rel).toLowerCase();
+      if (!ext) continue;
+      counts.set(ext, (counts.get(ext) ?? 0) + 1);
+    }
+    // Binary and asset types nobody writes instructions in.
+    const NOT_PROSE = new Set([
+      '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.avif',
+      '.woff', '.woff2', '.ttf', '.otf', '.eot', '.mp3', '.mp4', '.pdf', '.zip',
+      '.lock', '.map', '.css', '.html', '.snap', '.pyc', '.csv',
+    ]);
+    const uncovered = [...counts.entries()]
+      .filter(([ext, n]) => n >= 5 && !NOT_PROSE.has(ext) && !TEXT.test(`x${ext}`))
+      .map(([ext, n]) => `${ext} (${n} files)`);
+
+    expect(
+      uncovered,
+      'Tracked file types this guard never reads. Add them to TEXT, or to\n' +
+        'NOT_PROSE here if nobody writes instructions in them.'
     ).toEqual([]);
   });
 

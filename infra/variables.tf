@@ -331,7 +331,7 @@ variable "cosmos_allow_azure_datacenter_ips" {
     inspection uses.
 
     Turning this back on re-admits every Azure tenant at the network layer.
-    wiki/0025-cosmos-firewall-datacenter-sentinel.md is the record of why that
+    docs/decisions/0025-cosmos-firewall-datacenter-sentinel.md is the record of why that
     was worth removing and what it cost.
   EOT
   type        = bool
@@ -706,7 +706,7 @@ variable "availability_probe_alert_enabled" {
     Worker, a dead cron and an unreachable API are all the same incident. The
     corollary: arming it before the probe is deployed and observed writing
     success rows creates a rule that fires immediately and permanently. Flip
-    this only after the query in wiki/Availability-Probe.md shows
+    this only after the query in docs/runbooks/availability-probe.md shows
     success == 1 rows, per the same observed-behaviour rule as everything
     else armed from this workspace (Cutover-Runbook step 5).
   EOT

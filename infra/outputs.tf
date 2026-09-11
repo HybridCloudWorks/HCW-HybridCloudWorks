@@ -257,7 +257,7 @@ output "subnet_id" {
 #
 # The plan tier is a static fact that changes only when a human deliberately
 # changes it, so it belongs in documentation rather than in a data read on
-# every plan. wiki/Required-Inputs.md records where to read it.
+# every plan. docs/standards/required-inputs.md records where to read it.
 #
 # The data source went with it because this output was its only consumer.
 # -----------------------------------------------------------------------------

@@ -19,7 +19,7 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
-- **Nine references still sent readers to `wiki/`, five days after it was
+- **Thirteen references still sent readers to `wiki/`, five days after it was
   deleted — including one inside a production alert (#502).** The Wiki was
   retired on 2026-09-06 by ADR 0027 and `wiki/` was removed from the
   repository, but the pointers into it were not, and none of them was a dead
@@ -36,7 +36,10 @@ This project has not cut a tagged release; entries are grouped under
   `wiki/0025-cosmos-firewall-datacenter-sentinel.md` for why the manifest job
   opens a firewall window.
 
-  All nine now point at `docs/`, and the alert carries the published URL
+  Four more sat in Terraform comments in `infra/`, naming the record for a
+  firewall rule and an output. All thirteen now point at `docs/`, and the
+  alert carries the published URL beside the path so it is reachable from a
+  phone without a checkout.
   beside the path so it is reachable from a phone without a checkout.
 
   **Nothing noticed because nothing could.** A comment is not compiled and a
@@ -50,6 +53,17 @@ This project has not cut a tagged release; entries are grouped under
   matches no tracked file, so the exemption list cannot quietly rot into a
   hole. Verified by reintroducing the alert's pointer: it failed with the file
   and line.
+
+  **Review found the guard's own blind spot, which is the more useful half.**
+  The first version read Markdown, JavaScript, YAML and PowerShell — and not
+  Terraform, so four live pointers in `infra/` sat behind the gap:
+  `cosmos.tf`, `outputs.tf` and two in `variables.tf`, each telling an
+  operator which document records why a firewall rule or an output exists.
+  The same blind spot was in the grep that found the original nine, so a
+  guard written to catch this class shipped missing a third of it. The
+  extension list is now broad, and a third assertion fails when a tracked
+  file type carrying five or more files is never read at all — so the next
+  language added to the repository is a decision rather than an oversight.
 
   **The migration itself was complete, and that was checked rather than
   assumed.** All 142 Wiki pages as they stood before retirement were matched
