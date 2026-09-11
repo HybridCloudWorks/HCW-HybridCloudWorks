@@ -17,7 +17,86 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Fixed
+
+- **A botched find-and-replace had been live on the docs site for two weeks
+  (#506).** `docs/standards/required-inputs.md` opened by saying it had moved
+  "from `TODO.md` on 2026-08-29, when that file was retired and its open work
+  folded into TODO.md" — a sentence that says a file was folded into itself.
+  Later it offered the reassurance that "a citation reading
+  `Required-Inputs §4.5` now reads `Required-Inputs §4.5`".
+
+  The source was `REVIEW.md`. `git show e7271df9` records the rename as
+  `REVIEW.md => wiki/Required-Inputs.md`, and that commit's own message warns
+  **"THE BLANKET RENAME WAS THE WRONG TOOL AND I USED IT FIRST."** It caught
+  the validator and the casing guard; it did not catch the prose, and nothing
+  else could. Repaired from git history rather than guessed.
+
+- **The naming standard told readers the wrong live resource names.** It ended
+  with "**These are not the live names.** Today's estate is
+  `hcw-functions-prod`, `hcw-cosmos-prod`, `hcw-keyvault-prod`,
+  `hcwstorageprod` in `rg-hybridcloudworks-prod`" — contradicting its own
+  centralus section, every runbook, and `infra/variables.tf`, which declares
+  `func-site-prod-cus-01`, `cosmos-site-prod-cus`, `kv-site-prod-cus-01` and
+  `stsiteprodcus01`. Checked against the live estate, not just the code:
+  `func-site-prod-cus-01.azurewebsites.net` answers 403 (it exists, behind the
+  SCM lock) and `hcw-functions-prod.azurewebsites.net` does not resolve at
+  all. The grandfathering rule the paragraph existed to state is kept.
+
+- **About thirty citations pointed at two root documents that no longer
+  exist.** `CHECKLIST.md` merged into `REVIEW.md` on 2026-08-20 and `REVIEW.md`
+  was deleted on 2026-08-29; `variables-and-secrets.md` still uses
+  `CHECKLIST §n` as a table column roughly twenty times.
+
+  **The citations are kept and explained rather than rewritten**, because a
+  mechanical renumber would have been wrong: CHECKLIST was organised by
+  consumer (§1 Functions identity, §7 CI inputs) and Required-Inputs by store
+  (§4.1 workspace, §4.6 Key Vault), so `§7` does not become `§4.7`. A note now
+  says what CHECKLIST was and that its numbers do not carry across. The
+  citations remain the record of where each value was inventoried when its
+  placement was decided.
+
+- **Two decision records claimed a reason that no longer held.** The Container
+  Apps CI-runner ADR was kept on the ground that `infra/ci-runner.tf` "still
+  holds the gated-off resources"; that file, `infra/runner-image/` and
+  `build-runner-image.yml` were deleted on 2026-08-24. The cost analysis and
+  the resource-validation report cited `fix/go-live-remediation` as a pending
+  branch five times; it does not exist on `origin`. The ADR bodies are
+  untouched — the register's rule is that an accepted ADR is immutable — and
+  the notes above them now carry the correction.
+
+- **Opaque references now say what they mean.** Register rows reading "Give
+  T-519's signal a path" and "Weigh closing T-718 against its cost" state the
+  thing instead of the ticket, and one note explains that the `T-NNN` scheme
+  was retired on 2026-09-05 when work moved to issues — so every `T-` in an
+  accepted ADR is a citation, not something to look up.
+
+- **Five history pages were bare checklists.** Four presented unticked
+  July-2026 boxes that read as open work on a site whose front page says the
+  migration finished, including one instructing a move to the GitHub Wiki that
+  ADR 0027 reversed. Each now opens with what a reader learns from it.
+
+- **The front page linked ten operator pages and none of the five generic
+  walkthroughs**, which are the only pages written for a stranger and the only
+  ones carrying no estate names at all. It now opens with where to start if
+  you are not the owner.
+
 ### Removed
+
+- **Three history pages that showed a visitor nothing (#506).**
+  `smoke-test-signoff.md` was a blank form: 37 rows, every value column empty,
+  no run ever recorded. It is not evidence, it is the shape evidence would
+  have taken, and the real cutover evidence is in the migration runbook and
+  the phase-4 record. `implementation-plan.md` shared 10 of its 10 headings
+  with `implementation-todo.md`. `legacy-azure-migration-task-tracker.md` was
+  the earliest of the three checklists, superseded by both, still asking for
+  an Azure OpenAI resource retired on 2026-08-19.
+
+  **Runbooks were reviewed and all six are published unchanged**, with their
+  real resource names — owner decision, 2026-09-11. The names are public by
+  construction: the Function App answers on its `azurewebsites.net` hostname,
+  the repository is public, and `infra/variables.tf` carries the defaults. The
+  reasoning in those pages is also inseparable from the names.
 
 - **The 80-page Firebase-era archive is deleted from the documentation site
   (#505).** It was 54% of the published corpus, it described a platform this
