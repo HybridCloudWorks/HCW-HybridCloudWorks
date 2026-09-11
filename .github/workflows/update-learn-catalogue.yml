@@ -144,9 +144,15 @@ jobs:
 
       # EITHER file changing is a change. Both scripts stamp their own
       # DATA_AS_OF on every successful run, so in practice both move every
-      # Monday and this is belt and braces — but the two are refreshed by
-      # separate scripts against separate pages, and a day when only one of
-      # them can be reached should still open the pull request for the other.
+      # Monday and this is belt and braces — it is about what counts as a
+      # change, nothing more.
+      #
+      # It is NOT failure tolerance: a study-guide run where nothing parses
+      # raises SourceError, which exits the step non-zero and ends the job
+      # before this check is reached, so no pull request is opened for the
+      # catalogue either. Tolerance operates one level down, inside the script,
+      # where a single exam's failed fetch keeps that exam's previous outline
+      # and is named in the summary.
       - name: Did the catalogue or the outlines change?
         id: changed
         run: |

@@ -117,7 +117,25 @@ describe('the Learn catalogue workflow', () => {
     const commitJob = source.slice(source.indexOf('  commit:'));
     expect(updateJob).toContain('changed: ${{ steps.changed.outputs.changed }}');
     expect(commitJob).toContain("if: needs.update.outputs.changed == 'true'");
-    const uploadAt = source.indexOf('Upload the refreshed catalogue');
-    expect(source.slice(uploadAt, uploadAt + 200)).toContain("if: steps.changed.outputs.changed == 'true'");
+
+    // Anchored on the upload ACTION, not the step's prose name. This read
+    // `indexOf('Upload the refreshed catalogue')` until #499 renamed the step
+    // to "... and outlines" — which kept passing only because the new name
+    // happens to contain the old one as a prefix. The next rename would not be
+    // so lucky, and a locator that silently points at the wrong offset is
+    // worse than one that cannot be found: `indexOf` returning -1 feeds
+    // `slice(-1, …)` and the failure reads as an empty string not containing
+    // the gate, which says nothing about the real cause.
+    const uploadAt = updateJob.indexOf('uses: actions/upload-artifact');
+    expect(uploadAt, 'the upload step is gone or no longer uses upload-artifact').toBeGreaterThan(
+      -1
+    );
+
+    // Backwards from the action to its own `- name:`, so the window is exactly
+    // this step rather than a fixed byte count that a longer comment breaks.
+    const stepStart = updateJob.lastIndexOf('      - name:', uploadAt);
+    const nextStep = updateJob.indexOf('      - name:', uploadAt);
+    const uploadStep = updateJob.slice(stepStart, nextStep === -1 ? undefined : nextStep);
+    expect(uploadStep).toContain("if: steps.changed.outputs.changed == 'true'");
   });
 });
