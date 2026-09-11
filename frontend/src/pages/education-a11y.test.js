@@ -74,17 +74,28 @@ function classNames(source) {
 
 /**
  * An opaque background — the one place a bare `text-white` belongs. Matches
- * `bg-amber-700`, `bg-slate-600`, `bg-primary`, but not `bg-card/40` or
- * `bg-amber-500/20`, whose light-mode composite is near-white. A `${...}`
- * hole naming a button class (MicrocredentialDetailPage builds its CTA
- * colour that way) counts too.
+ * `bg-amber-700`, `bg-slate-600`, `bg-primary` and `bg-primary/90`, but not
+ * `bg-card/40` or `bg-amber-500/20`, whose light-mode composite is near-white.
+ * A `${...}` hole naming a button class (MicrocredentialDetailPage builds its
+ * CTA colour that way) counts too.
+ *
+ * ONLY A BASE TOKEN COUNTS — a variant prefix disqualifies it. The first
+ * version tested the whole class string with `\b`, which matches after a
+ * colon, so `hover:bg-amber-700 text-white` read as opaque while being white
+ * on white in the state a reader actually arrives in. `dark:bg-*` and
+ * `sm:bg-*` had the same hole: a background that exists only in dark mode, or
+ * only above a breakpoint, is no defence in light mode on a phone. A guard
+ * with a hole in it is worse than no guard, because it is trusted.
+ * (Copilot review of f05cf27d.)
+ *
+ * Opacity at or above 80% still counts — `bg-primary/90` is what Azure's
+ * timeline scroll buttons use, and it composites nowhere near white.
  */
+const OPAQUE_BG = /^bg-(?:[a-z]+-\d{2,3}|primary|secondary|accent)(?:\/(?:8\d|9\d|100))?$/;
+
 function hasOpaqueBackground(value) {
-  return (
-    /\bbg-[a-z]+-\d{2,3}(?![\d/])/.test(value) ||
-    /\bbg-primary(?![\w/-])/.test(value) ||
-    /\$\{[^}]*\bbtn\b[^}]*\}/.test(value)
-  );
+  const base = value.split(/\s+/).filter((token) => !token.includes(':'));
+  return base.some((token) => OPAQUE_BG.test(token)) || /\$\{[^}]*\bbtn\b[^}]*\}/.test(value);
 }
 
 /** Class tokens that end in `text-white`, keeping their variant chain. */
