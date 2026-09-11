@@ -219,7 +219,14 @@ export const learningPaths = [
       { title: 'Basic VM Management' },
       { title: 'Troubleshooting Common Issues' },
     ],
-    certUrl: 'https://www.broadcom.com/support/education/vmware/certification',
+    // The retired-exams document, not the certification index — the same URL
+    // the VCTA-DCV row carries, and for the same reason. This path's target
+    // certification is retired, and Broadcom's index does not list VCTA at
+    // any track, so a "View details" landing there cannot confirm the thing
+    // it was clicked to confirm. Sending a learner to a page that is silent
+    // about their certification is worse than sending them to the page that
+    // says it is gone (Copilot review of dc62998f).
+    certUrl: 'https://docs.broadcom.com/doc/vmware-retired-exams-certifications-and-badges',
   },
   {
     id: 1,
