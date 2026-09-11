@@ -45,6 +45,9 @@ export default function RecordingHubPage() {
   const [activeTab, setActiveTab] = useState('podcast');
   const [connection, setConnection] = useState(CONNECTION.checking);
   const [hasRefreshToken, setHasRefreshToken] = useState(false);
+  // null until the first read answers; the Connect tab renders nothing for it
+  // rather than claiming a rotation has never happened (#358).
+  const [refreshState, setRefreshState] = useState(null);
   const [checkNonce, setCheckNonce] = useState(0);
 
   // Check the Plaud connection once auth has resolved, and again whenever
@@ -65,6 +68,18 @@ export default function RecordingHubPage() {
         const ok = plaud?.status === 'connected' && plaud?.hasOauthToken === true;
         setConnection(ok ? CONNECTION.connected : CONNECTION.disconnected);
         setHasRefreshToken(plaud?.hasOauthRefreshToken === true);
+        // What the 12-hour refresh timer has actually done, which nothing on
+        // this page could say before (#358). The fields were already on the
+        // document and already survived `stripOAuthToken` — only the token
+        // values are write-only — so this is a rendering gap rather than an
+        // API one. Without it the rotation has no witness at all: the timer
+        // logs its success at Information, and host verbosity was cut to
+        // Warning by T-719, so the trace is not ingested either.
+        setRefreshState({
+          lastTokenRefresh: plaud?.lastTokenRefresh ?? null,
+          expiresAt: plaud?.oauthExpiresAt ?? null,
+          error: plaud?.lastTokenRefreshError ?? null,
+        });
       } catch {
         if (!cancelled) setConnection(CONNECTION.unknown);
       }
@@ -130,6 +145,7 @@ export default function RecordingHubPage() {
         <PlaudTab
           isConnected={isConnected}
           hasRefreshToken={hasRefreshToken}
+          refreshState={refreshState}
           checkingConn={checkingConn}
           onConnected={({ refreshSupplied } = {}) => {
             setConnection(CONNECTION.connected);

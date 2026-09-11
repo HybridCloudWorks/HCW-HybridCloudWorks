@@ -119,6 +119,31 @@ function fmtDate(isoStr) {
   });
 }
 
+/**
+ * A moment, from either shape the Plaud document stores it in (#358).
+ *
+ * `lastTokenRefresh` is an ISO string and `oauthExpiresAt` is epoch
+ * milliseconds, because the timer writes them from `now().toISOString()` and
+ * `now().getTime() + expiresInSec * 1000` respectively. One formatter takes
+ * both rather than making the caller remember which is which.
+ *
+ * Returns '' for anything unparseable, so a malformed field renders as absent
+ * rather than as "Invalid Date" — a token page is the wrong place to make
+ * someone wonder whether the date or the token is broken.
+ */
+function fmtWhen(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const d = new Date(typeof value === 'number' ? value : String(value));
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 /** A File as the base64 the upload route reads, without the data-URL prefix. */
 export function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -939,7 +964,7 @@ function UploadTab({ onStored }) {
 
 // ─── Connect sub-tab (OAuth setup) ───────────────────────────────────────────
 
-function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
+function ConnectTab({ isConnected, hasRefreshToken, refreshState, onConnected }) {
   const [token, setToken] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1037,6 +1062,41 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
           </Button>
         )}
       </div>
+
+      {/* What the 12-hour timer has actually done (#358).
+
+          The rotation had NO witness before this. It writes `lastTokenRefresh`
+          to the document and logs its success at Information, and T-719 cut
+          host verbosity to Warning — so the trace is not ingested and the
+          document was never rendered. "The timer is armed" and "the timer has
+          run" looked identical from every surface a person can reach, which is
+          the T-766 defect in a different timer.
+
+          Rendered only when the read has answered. `null` means not yet known,
+          and printing "never" for that would be a claim rather than a
+          measurement. */}
+      {refreshState && (
+        <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+          <p>
+            Auto-refresh last ran:{' '}
+            <strong>
+              {refreshState.lastTokenRefresh
+                ? fmtWhen(refreshState.lastTokenRefresh)
+                : 'not since this token was stored'}
+            </strong>
+          </p>
+          {refreshState.expiresAt ? (
+            <p>
+              Access token expires: <strong>{fmtWhen(refreshState.expiresAt)}</strong>
+            </p>
+          ) : null}
+          {refreshState.error ? (
+            <p className="text-amber-700 dark:text-amber-400">
+              Last refresh failed: {refreshState.error}
+            </p>
+          ) : null}
+        </div>
+      )}
 
       {/* Step-by-step setup */}
       <div className="space-y-4">
@@ -1212,7 +1272,13 @@ function ConnectTab({ isConnected, hasRefreshToken, onConnected }) {
 
 // ─── The tab ──────────────────────────────────────────────────────────────────
 
-export default function PlaudTab({ isConnected, hasRefreshToken, checkingConn, onConnected }) {
+export default function PlaudTab({
+  isConnected,
+  hasRefreshToken,
+  refreshState,
+  checkingConn,
+  onConnected,
+}) {
   const [subTab, setSubTab] = useState('library');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -1246,6 +1312,7 @@ export default function PlaudTab({ isConnected, hasRefreshToken, checkingConn, o
         <ConnectTab
           isConnected={isConnected}
           hasRefreshToken={hasRefreshToken}
+          refreshState={refreshState}
           onConnected={(info) => {
             onConnected(info);
             setSubTab('library');

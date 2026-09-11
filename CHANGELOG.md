@@ -319,6 +319,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The Plaud tab says when the 12-hour token refresh last ran, so the
+  rotation finally has a witness (#358).** `refreshPlaudToken` rotates the
+  Plaud MCP OAuth pair every 12 hours and writes `lastTokenRefresh`,
+  `oauthExpiresAt` and `lastTokenRefreshError` to `mcp_servers/plaud`. Nothing
+  rendered any of them, so from every surface a person can reach, "the timer
+  is armed" and "the timer has actually run" looked identical.
+
+  The log was no help either, and that is the part worth recording. The timer
+  reports success through `log.log?.()`, which is Information, and T-719 cut
+  `host.json`'s `Function` category to Warning — so the trace is not ingested.
+  This is the T-766 witness gap in a different timer, found the same way:
+  by asking what a person would actually read to confirm the thing happened.
+
+  **The fix was a rendering gap, not an API one.** `stripOAuthToken` replaces
+  only the two token VALUES with booleans and spreads the rest of the
+  document, so all three fields were already being returned. Recording Hub →
+  Plaud → Connect now shows when auto-refresh last ran, when the access token
+  expires, and the last failure if there was one.
+
+  Three distinctions the panel keeps, each of which would otherwise mislead:
+
+  - **Not yet read is not "never".** `refreshState` is `null` until the first
+    read answers, and the panel renders nothing for it. Printing "never" for
+    an unanswered read is a claim rather than a measurement — the same
+    distinction this page already draws between `unknown` and `disconnected`.
+  - **Connected is not refreshing.** A document can hold an access token and
+    no refresh token, which the banner already said; now it also says whether
+    anything has actually rotated since.
+  - **A failed rotation is shown, not swallowed.** `lastTokenRefreshError`
+    renders in its own line, so a revoked refresh token is legible before the
+    access token quietly expires.
+
+  `fmtWhen` takes both shapes the document stores, because the timer writes
+  `lastTokenRefresh` as an ISO string and `oauthExpiresAt` as epoch
+  milliseconds. It returns empty for anything unparseable: a token page is the
+  wrong place to make someone wonder whether the date or the token is broken.
+
 - **The API-keys page refuses a credential paste that carries an invisible
   character, a curly quote, or an Authorization header (#484).**
   `rejectSecretValue` already refused leading or trailing whitespace, which is

@@ -124,7 +124,7 @@ const detail = {
 };
 
 /** The routes the page reads on mount and on demand. */
-function routeGets({ items = transcripts, connected = true, stored = [] } = {}) {
+function routeGets({ items = transcripts, connected = true, stored = [], plaudRefresh = {} } = {}) {
   getJSON.mockImplementation(async (route) => {
     if (route === 'cms/podcast/transcripts') return { success: true, items, total: items.length };
     if (route.startsWith('cms/podcast/transcripts/')) return { success: true, item: detail };
@@ -137,7 +137,13 @@ function routeGets({ items = transcripts, connected = true, stored = [] } = {}) 
     if (route === 'cms/config/mcp-servers') {
       return {
         items: [
-          { id: 'plaud', status: connected ? 'connected' : 'untested', hasOauthToken: connected },
+          {
+            id: 'plaud',
+            status: connected ? 'connected' : 'untested',
+            hasOauthToken: connected,
+            hasOauthRefreshToken: connected,
+            ...plaudRefresh,
+          },
         ],
       };
     }
@@ -209,6 +215,41 @@ describe('Plaud connection check', () => {
     routeGets({ connected: false });
     renderPage();
     expect(await screen.findByText('Plaud disconnected')).toBeInTheDocument();
+  });
+
+  it('shows when the 12-hour refresh timer last ran (#358)', async () => {
+    // The rotation had no witness anywhere a person can reach: the timer
+    // writes lastTokenRefresh to the document and logs its success at
+    // Information, and T-719 cut host verbosity to Warning, so the trace is
+    // not ingested either. "Armed" and "has actually run" looked identical
+    // from every surface, which is the T-766 defect in a different timer.
+    routeGets({ connected: true, plaudRefresh: { lastTokenRefresh: '2026-09-10T12:00:00.000Z' } });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/Auto-refresh last ran/i)).toBeInTheDocument();
+  });
+
+  it('does not claim a rotation never happened before the read answers', async () => {
+    // Printing "never" for a read that has not landed would be a claim rather
+    // than a measurement - the same distinction `unknown` and `disconnected`
+    // draw above.
+    routeGets({ connected: true });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/not since this token was stored/i)).toBeInTheDocument();
+  });
+
+  it('surfaces a failed rotation, not just the connected banner', async () => {
+    routeGets({
+      connected: true,
+      plaudRefresh: { lastTokenRefreshError: 'refresh token revoked' },
+    });
+    renderPage();
+    openPlaudTab();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    expect(await screen.findByText(/refresh token revoked/i)).toBeInTheDocument();
   });
 });
 
