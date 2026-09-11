@@ -3,15 +3,6 @@
 // certifications.js, using the same parser Listen & Learn uses
 // (functions/src/lib/listen-and-learn/studyguide.js). Do not edit by hand: re-run the script.
 // Last manual sync: 2026-09-11
-//
-// ONE HAND EDIT, #496: the six gh-* outlines were deleted. They were generated
-// when certifications.js still carried the GitHub exams, and #496 removed those
-// rows — `eligibleCerts` reads the catalogue, so the next script run would drop
-// these six anyway, and study-guides.test.js ("has no outline for an exam the
-// catalogue does not carry") goes red until they are gone. Deleted rather than
-// regenerated to keep the diff to the six entries: a full re-run re-fetches all
-// ~50 guides and moves DATA_AS_OF, which would bury the change it is meant to
-// show. Nothing was added or reworded by hand.
 
 /**
  * The day these outlines were last read from Microsoft Learn. Rendered by the
