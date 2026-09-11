@@ -147,8 +147,21 @@ export async function authedFetch(fnName, { token: presetToken, ...options } = {
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     const detailText = errData?.details ? ` Details: ${JSON.stringify(errData.details)}` : '';
+    // `message` is where the API puts the actual cause. Several handlers
+    // answer `{ error: 'Failed to generate caption', message: <why> }`, and
+    // this used to throw only `error` — so the Social Hub toast read "Failed
+    // to generate caption" and nothing else while the sentence that named the
+    // real problem was discarded one line away. The same shape that cost
+    // #358 two days on Publer, reproduced inside this client (#498).
+    const cause =
+      typeof errData?.message === 'string' &&
+      errData.message.trim() &&
+      errData.message !== errData.error
+        ? ` — ${errData.message.trim()}`
+        : '';
     throw new Error(
       (errData.error || `${fnName} failed with HTTP ${res.status}. Try again or check the logs.`) +
+        cause +
         detailText
     );
   }

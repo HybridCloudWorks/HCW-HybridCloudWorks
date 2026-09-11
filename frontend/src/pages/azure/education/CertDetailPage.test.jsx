@@ -4,7 +4,7 @@
  * shows the Listen & Learn block only when published audio exists.
  */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import CertDetailPage from './CertDetailPage';
@@ -85,6 +85,41 @@ describe('CertDetailPage', () => {
     expect(fetchPublishedEpisodes).toHaveBeenCalledWith({ platform: 'azure', examCode: 'AB-100' });
     expect(await screen.findByText('Listen & Learn')).toBeInTheDocument();
     expect(screen.getAllByLabelText(/^Listen: /)).toHaveLength(3);
+  });
+
+  it('puts a single-player chapter playlist in the hero alongside the full block (#498)', async () => {
+    // Two surfaces for one feature, deliberately distinct: the hero says
+    // "Study podcast" and labels its one <audio> "Play chapter:", so a screen
+    // reader never hears "Listen & Learn" twice and the per-episode players
+    // below keep their own "Listen:" labels and count.
+    fetchPublishedEpisodes.mockResolvedValue(AB_100_EPISODES);
+    renderDetail('ab-100');
+    expect(await screen.findByText('Study podcast')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/^Play chapter: /)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/^Listen: /)).toHaveLength(3);
+
+    const chapters = screen.getByRole('list', { name: /chapters, in study-guide order/i });
+    const buttons = chapters.querySelectorAll('button');
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveAttribute('aria-current', 'true');
+    expect(buttons[1]).not.toHaveAttribute('aria-current');
+  });
+
+  it('renders the study-guide outline from the shipped data, area by area (#498)', () => {
+    // AZ-104 has an outline; every area links to its own heading on Learn.
+    fetchPublishedEpisodes.mockResolvedValue(null);
+    renderDetail('az-104');
+    // Scoped to the outline's own region: the catalogue's "Topics Covered"
+    // grid above it lists the same area names for AZ-104, so an unscoped
+    // text query finds two — which is the two sections doing their jobs.
+    const region = screen.getByRole('region', { name: /skills measured/i });
+    expect(within(region).getByText('Manage Azure identities and governance')).toBeInTheDocument();
+    const deepLinks = within(region)
+      .getAllByRole('link', { name: /this area on microsoft learn/i })
+      .map((a) => a.getAttribute('href'));
+    expect(deepLinks[0]).toBe(
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104#manage-azure-identities-and-governance-2025'
+    );
   });
 
   it('renders no audio control when nothing is published for the exam', async () => {
