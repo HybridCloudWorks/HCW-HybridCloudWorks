@@ -195,7 +195,12 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
     // end. After the split they differ, and if anyone ever points
     // VITE_ENTRA_CLIENT_ID back at the API's client id this goes red on a page
     // an admin already visits — instead of nothing happening at all.
-    clientIsSeparateFromApi: azp && audiences.length ? !audiences.includes(azp) : null,
+    clientIsSeparateFromApi:
+      azp && audiences.length
+        ? !audiences
+            .map((a) => (a.startsWith('api://') ? a.slice('api://'.length) : a))
+            .includes(azp)
+        : null,
     expiresLabel: expiry.label,
     expired: expiry.expired,
   };
@@ -824,8 +829,8 @@ export function TokenClaimsCard({ identity }) {
         <CardDescription>
           Decoded from the access token this app sends to the API, compared against what the API
           says it enforces. Values shown are configuration, not identity: <code>aud</code>,{' '}
-          <code>azp</code>, <code>roles</code>, <code>scp</code>, <code>ver</code>, <code>exp</code>
-          . Never <code>oid</code>, <code>email</code> or the token itself.
+          <code>azp</code>, <code>roles</code>, <code>scp</code>, <code>ver</code>,{' '}
+          <code>exp</code>. Never <code>oid</code>, <code>email</code> or the token itself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

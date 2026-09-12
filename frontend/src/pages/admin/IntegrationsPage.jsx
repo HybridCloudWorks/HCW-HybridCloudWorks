@@ -1068,8 +1068,10 @@ export default function IntegrationsPage() {
           setAuthExpectationsError(null);
         })
         .catch((err) => {
-          if (!cancelled)
+          if (!cancelled) {
+            setAuthExpectations(null);
             setAuthExpectationsError(err?.message ?? 'Could not read the API config.');
+          }
         });
 
       try {

@@ -152,6 +152,27 @@ describe('summarizeToken', () => {
     expect(summary.aud).toBe('api://api-app-id'); // the value is still shown
   });
 
+  it('clientIsSeparateFromApi — PASS when azp differs from aud (bare GUID)', () => {
+    // spa-client-id ≠ api-app-id → separate registrations
+    const summary = summarizeToken(CLAIMS, EXPECTATIONS, NOW_SECONDS * 1000);
+    expect(summary.clientIsSeparateFromApi).toBe(true);
+  });
+
+  it('clientIsSeparateFromApi — FAIL when azp matches aud GUID even with api:// prefix', () => {
+    // One registration serving both SPA and API: azp === api-app-id, aud === api://api-app-id
+    const same = summarizeToken(
+      { ...CLAIMS, azp: 'api-app-id', aud: 'api://api-app-id' },
+      EXPECTATIONS,
+      NOW_SECONDS * 1000
+    );
+    expect(same.clientIsSeparateFromApi).toBe(false);
+  });
+
+  it('clientIsSeparateFromApi — null when azp is absent', () => {
+    const noAzp = summarizeToken({ ...CLAIMS, azp: undefined }, EXPECTATIONS, NOW_SECONDS * 1000);
+    expect(noAzp.clientIsSeparateFromApi).toBeNull();
+  });
+
   it('is null without a payload', () => {
     expect(summarizeToken(null, EXPECTATIONS)).toBeNull();
   });
