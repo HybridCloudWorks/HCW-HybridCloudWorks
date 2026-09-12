@@ -46,6 +46,15 @@ const PUBLIC_ENTRIES = [
   // authed caller may be bundled with a public one; keeping it clean is what
   // makes the entries above stay clean.
   'lib/api.js',
+  // THE ROOT ITSELF (#531). `App.jsx` is on every route there is, so an auth
+  // import here is an auth import everywhere — which is exactly what
+  // `useAuthRedirectLanding` was, mounted unconditionally so a regex could
+  // watch for a fragment that appeared on one route in the application.
+  //
+  // It passes because every page is `lazyPage(() => import(...))` and this walk
+  // follows static imports only, which is the distinction that matters: a lazy
+  // admin page costs a public visitor nothing, a static one costs them 236 kB.
+  'App.jsx',
 ];
 
 /** Modules whose presence in a public graph is the failure. */

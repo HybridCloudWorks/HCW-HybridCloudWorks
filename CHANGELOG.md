@@ -4167,6 +4167,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Removed
 
+- **`useAuthRedirectLanding` is gone, and `App.jsx` is guarded against its
+  return (#531).** The hook was mounted on **every route in the application** —
+  including every anonymous visit to a provider news page — so that a regex
+  could watch `window.location.hash` for an auth fragment that appeared on one.
+
+  It existed because `redirectUri` was `window.location.origin`, so Entra
+  returned the browser to the public home page, which had never touched MSAL.
+  #520 gave sign-in its own route, and the API registration's bare-origin
+  redirect URIs were cleared on 2026-09-12 — so a fragment can no longer land on
+  `/` at all. It was deliberately kept for one release after #520 rather than
+  removed alongside it, because a browser mid-redirect at cutover still landed
+  there.
+
+  `App.jsx` joins the entry points in `msal-not-on-public-routes.test.js`. It is
+  on every route there is, so an auth import there is an auth import everywhere,
+  which is precisely what the hook was. It passes because every page is
+  `lazyPage(() => import(...))` and that walk follows static imports only — the
+  distinction that matters, since a lazy admin page costs a public visitor
+  nothing and a static one costs them 236 kB. Verified to have teeth by planting
+  a static `entraAuth` import and watching it fail.
+
+  The 2026-08-23 incident the hook documented lives on in `AuthCallbackPage.jsx`,
+  so nothing is lost with it.
+
 - **Three history pages that showed a visitor nothing (#506).**
   `smoke-test-signoff.md` was a blank form: 37 rows, every value column empty,
   no run ever recorded. It is not evidence, it is the shape evidence would
