@@ -43,6 +43,10 @@ function declaredAbsolutePaths() {
 const NEVER_PRERENDER = [
   { prefix: '/admin', why: 'private UI behind Entra sign-in' },
   { prefix: '/preview', why: 'signed staging view of an UNPUBLISHED draft (T-606)' },
+  {
+    prefix: '/auth',
+    why: 'an OAuth landing page; pre-rendering publishes a titled, indexable page whose only job is to consume a fragment (#520)',
+  },
 ];
 
 const isParameterised = (path) => path.includes(':') || path.includes('*');

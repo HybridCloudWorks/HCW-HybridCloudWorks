@@ -139,6 +139,10 @@ const RosettaStoneSubmissionPage = lazyPage(
 
 // Admin
 const AdminAuthGuard = lazyPage(() => import('@/pages/admin/AdminAuthGuard'));
+// The Entra redirect target (#520). Lazy like every other page, so the public
+// bundle does not carry it — and it is the only route that touches MSAL
+// outside /admin.
+const AuthCallbackPage = lazyPage(() => import('@/pages/AuthCallbackPage'));
 const AdminLayout = lazyPage(() => import('@/pages/admin/AdminLayout'));
 const AdminDashboardPage = lazyPage(() => import('@/pages/admin/DashboardPage'));
 const AdminQueuePage = lazyPage(() => import('@/pages/admin/QueuePage'));
@@ -381,6 +385,9 @@ function App() {
               <Route path="/templates/blog" element={<BlogSubmissionPage />} />
               <Route path="/templates/coder-corner" element={<CoderCornerSubmissionPage />} />
               <Route path="/templates/rosetta-stone" element={<RosettaStoneSubmissionPage />} />
+              {/* --- Entra sign-in redirect target (#520) --- */}
+              <Route path="/auth/callback" element={<AuthCallbackPage />} />
+
               {/* --- Admin CMS --- */}
               <Route
                 path="/admin"

@@ -1,3 +1,5 @@
+import { LogLevel } from '@azure/msal-browser';
+
 /**
  * MSAL configuration — values only, no instance and no window access at
  * module scope (the singleton lives in entraAuth.js so importing this file
@@ -36,13 +38,65 @@
  */
 const NO_TENANT_CONFIGURED = '00000000-0000-0000-0000-000000000000';
 
+/**
+ * The one path Entra is allowed to redirect back to (#520).
+ *
+ * Exported so the router and the test that pins them together read the same
+ * constant rather than two copies of a string.
+ */
+export const AUTH_REDIRECT_PATH = '/auth/callback';
+
 export const msalConfig = {
   auth: {
     clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || '',
     authority: `https://login.microsoftonline.com/${
       import.meta.env.VITE_ENTRA_TENANT_ID || NO_TENANT_CONFIGURED
     }`,
-    redirectUri: typeof window !== 'undefined' ? window.location.origin : '/',
+    // A DEDICATED CALLBACK ROUTE, NOT THE BARE ORIGIN (#520).
+    //
+    // This was `window.location.origin`, which sent Entra's response to the
+    // PUBLIC home page — a page that had never touched MSAL, because
+    // AdminAuthGuard is lazy and mounted only under /admin. Nothing consumed
+    // the authorization code, so `useAuthRedirectLanding` was mounted on every
+    // route in the application to watch for a fragment that appears on one.
+    //
+    // `/auth/callback` is a page whose only job is to consume it. MSAL's
+    // `navigateToLoginRequestUrl` defaults to true and returns the user to
+    // wherever sign-in started, which is the mechanism the bare origin was
+    // working around.
+    //
+    // THE PATH MUST BE A ROUTE THE ROUTER DECLARES AND A URI THE APP
+    // REGISTRATION LISTS. Neither is checkable at runtime — the first is
+    // pinned by msalConfig.test.js, the second breaks sign-in in production
+    // and nowhere else.
+    redirectUri:
+      typeof window !== 'undefined'
+        ? `${window.location.origin}${AUTH_REDIRECT_PATH}`
+        : AUTH_REDIRECT_PATH,
+  },
+  system: {
+    /**
+     * Production diagnostics, at Warning (#520).
+     *
+     * There were none at all. The three failures this codebase's comments are
+     * built around — `endpoints_resolution_error`, `interaction_in_progress`,
+     * `no_token_request_cache_error` — surface at Warning, so Error alone would
+     * have shown nothing new on any of the days they cost. Volume at Warning on
+     * an admin-only route is negligible.
+     *
+     * PII is dropped rather than trusted to a log level: `containsPii` is
+     * MSAL's own flag on messages carrying a username or a token, and this
+     * returns before any of them reach the console.
+     */
+    loggerOptions: {
+      logLevel: import.meta.env.DEV ? LogLevel.Verbose : LogLevel.Warning,
+      piiLoggingEnabled: false,
+      loggerCallback: (level, message, containsPii) => {
+        if (containsPii) return;
+        if (level === LogLevel.Error) console.error('[msal]', message);
+        else console.warn('[msal]', message);
+      },
+    },
   },
   cache: {
     // localStorage so redirect flows survive the round-trip in strict
