@@ -55,12 +55,19 @@ const CLAIMS = {
   preferred_username: EMAIL,
   name: 'The Owner',
   roles: ['Admin'],
+  // Since #515 a token that reaches this page necessarily carries both.
+  scp: 'access_as_admin',
+  ver: '2.0',
+  azp: 'spa-client-id',
   exp: NOW_SECONDS + 3600,
   iat: NOW_SECONDS,
 };
 const TOKEN = `${b64url({ alg: 'RS256', typ: 'JWT' })}.${b64url(CLAIMS)}.signature-bytes`;
 
 const EXPECTATIONS = {
+  requiredScope: 'access_as_admin',
+  requiredTokenVersion: '2.0',
+  labAgentAppRole: 'LabAgent',
   expectedAudience: 'api://api-app-id',
   tenantId: 'tenant-1',
   adminAppRole: 'Admin',
@@ -268,7 +275,9 @@ describe('the page', () => {
       token: TOKEN,
     });
 
-    seen(/aud, email, exp, iat, iss, name, oid, preferred_username, roles, sub, tid/);
+    seen(
+      /aud, azp, email, exp, iat, iss, name, oid, preferred_username, roles, scp, sub, tid, ver/
+    );
     expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText('FAIL')).toBeNull();
     expectNoSecrets(container.textContent);

@@ -7,6 +7,9 @@
  * a role write.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { ENTRA_ADMIN_APP_ROLE, ENTRA_API_DELEGATED_SCOPE } from './auth/roles.js';
+import { ENTRA_REQUIRED_TOKEN_VERSION } from './auth/verify-token.js';
+import { ENTRA_LAB_AGENT_APP_ROLE } from './auth/require-agent.js';
 import {
   createAdminIdentityHandlers,
   checkBootstrapAllowlist,
@@ -190,11 +193,17 @@ describe('getAuthExpectations', () => {
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, env, ...fixed });
     const res = await h.getAuthExpectations(getRequest(), context);
     expect(res.status).toBe(200);
+    // toEqual, not toMatchObject: this is a contract the configuration review
+    // page compares a live token against, so a field silently disappearing
+    // would turn a verdict into a blank rather than into a failure (#519).
     expect(JSON.parse(res.body)).toEqual({
       expectedAudience: 'api://api-app-id',
       tenantId: 'tenant-1',
       adminAppRole: 'Admin',
       registryContainer: 'admins',
+      requiredScope: 'access_as_admin',
+      requiredTokenVersion: '2.0',
+      labAgentAppRole: 'LabAgent',
     });
     expect(store.readDoc).not.toHaveBeenCalled();
   });
@@ -205,6 +214,19 @@ describe('getAuthExpectations', () => {
     await h.getAuthExpectations(getRequest(), context);
     expect(guard.requireUser).toHaveBeenCalled();
     expect(guard.requireRole).not.toHaveBeenCalled();
+  });
+
+  // The point of this endpoint is that the page compares against the API as
+  // deployed. Reporting its own literals rather than the guard's constants
+  // would let it agree with itself while the guard drifted.
+  it('reports the values the guard actually enforces, not copies of them', async () => {
+    const h = createAdminIdentityHandlers({ guard: guardWith(), store: makeStore(), env, ...fixed });
+    const body = JSON.parse((await h.getAuthExpectations(getRequest(), context)).body);
+
+    expect(body.adminAppRole).toBe(ENTRA_ADMIN_APP_ROLE);
+    expect(body.requiredScope).toBe(ENTRA_API_DELEGATED_SCOPE);
+    expect(body.requiredTokenVersion).toBe(ENTRA_REQUIRED_TOKEN_VERSION);
+    expect(body.labAgentAppRole).toBe(ENTRA_LAB_AGENT_APP_ROLE);
   });
 
   it('reports an unset audience as null rather than inventing one', async () => {

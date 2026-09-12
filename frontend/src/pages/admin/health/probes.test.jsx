@@ -41,6 +41,12 @@ const CLAIMS = {
   preferred_username: EMAIL,
   name: 'The Owner',
   roles: ['Admin'],
+  // A token that reaches this page has passed the guard, so since #515 it
+  // necessarily carries `scp` and `ver`. `azp` is the client that asked for it
+  // — here a SPA registration distinct from the API, which is where #522 lands.
+  scp: 'access_as_admin',
+  ver: '2.0',
+  azp: 'spa-client-id',
   exp: NOW_SECONDS + 3600,
   iat: NOW_SECONDS,
 };
@@ -51,6 +57,9 @@ const EXPECTATIONS = {
   tenantId: 'tenant-1',
   adminAppRole: 'Admin',
   registryContainer: 'admins',
+  requiredScope: 'access_as_admin',
+  requiredTokenVersion: '2.0',
+  labAgentAppRole: 'LabAgent',
 };
 
 const ADMIN_STATUS = {
@@ -289,7 +298,7 @@ describe('buildReport', () => {
     });
     expect(report).toContain('### Identity — token claims and admin registry');
     expect(report).toContain(
-      'Claims present (names only): aud, email, exp, iat, iss, name, oid, preferred_username, roles, sub, tid'
+      'Claims present (names only): aud, azp, email, exp, iat, iss, name, oid, preferred_username, roles, scp, sub, tid, ver'
     );
     expect(report).toContain("`aud` equals the API's ENTRA_API_AUDIENCE: PASS");
     expect(report).toContain('App Role `Admin` present in `roles`: PASS');
@@ -318,7 +327,7 @@ describe('buildReport', () => {
       adminHttp: 200,
     });
     expect(report).toContain(
-      '- Result: UNKNOWN (could not compare: aud matches the API audience; admin App Role present in roles)'
+      '- Result: UNKNOWN (could not compare: aud matches the API audience; admin App Role present in roles; delegated scope present in scp; token version matches)'
     );
     expect(report).not.toContain('- Result: PASS');
     expect(report).not.toContain('- Result: FAIL');
@@ -337,7 +346,7 @@ describe('buildReport', () => {
         summarizeToken(CLAIMS, EXPECTATIONS),
         summarizeAdminStatus(ADMIN_STATUS, OID)
       )
-    ).toEqual({ pass: true, reason: 'all four comparisons hold' });
+    ).toEqual({ pass: true, reason: 'every comparison holds' });
     expect(evaluateIdentity(null, null)).toEqual({
       pass: null,
       reason: 'token or registry not read',

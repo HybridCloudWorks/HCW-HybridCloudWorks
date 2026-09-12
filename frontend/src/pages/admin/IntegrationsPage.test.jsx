@@ -21,6 +21,7 @@ import IntegrationsPage, {
   STATE_PRESENTATION,
   SecretRow,
   buildIntegrationView,
+  EntraConfigurationCard,
 } from './IntegrationsPage';
 
 const getJSON = vi.fn();
@@ -782,5 +783,56 @@ describe('the service cards', () => {
     for (const service of SERVICES) {
       expect(ids, `${service.name} is in group '${service.group}'`).toContain(service.group);
     }
+  });
+});
+
+describe('the Entra configuration panel (#519)', () => {
+  const EXPECTATIONS = {
+    tenantId: 'tenant-guid',
+    expectedAudience: 'api-app-guid',
+    adminAppRole: 'Admin',
+    labAgentAppRole: 'LabAgent',
+    requiredScope: 'access_as_admin',
+    requiredTokenVersion: '2.0',
+    registryContainer: 'admins',
+  };
+
+  it('shows what the API enforces, so the page is not just agreeing with itself', () => {
+    render(<EntraConfigurationCard expectations={EXPECTATIONS} error={null} />);
+
+    expect(screen.getByText('tenant-guid')).toBeTruthy();
+    expect(screen.getByText('api-app-guid')).toBeTruthy();
+    expect(screen.getByText('access_as_admin')).toBeTruthy();
+    expect(screen.getByText('LabAgent')).toBeTruthy();
+  });
+
+  // The page's standing rule, applied to a panel that is all identifiers: no
+  // credential, and no token, has any business being rendered here.
+  it('renders no credential and no token', () => {
+    const { container } = render(
+      <EntraConfigurationCard expectations={EXPECTATIONS} error={null} />
+    );
+    const text = container.textContent;
+
+    expect(text).not.toMatch(/eyJ/); // a JWT
+    expect(text).not.toMatch(/secret|password|bearer/i);
+  });
+
+  // A refusal from getAuthExpectations is itself the audience-drift signal, so
+  // the panel must still render the browser half and say why the rest is blank.
+  it('still shows the browser half when the API does not answer', () => {
+    render(<EntraConfigurationCard expectations={null} error={'HTTP 401'} />);
+
+    expect(screen.getByText(/did not answer/i)).toBeTruthy();
+    expect(screen.getByText(/HTTP 401/)).toBeTruthy();
+    // Every API cell is an em dash rather than an invented value.
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+
+  it('says what breaking each value costs, which is the point of the group', () => {
+    render(<EntraConfigurationCard expectations={EXPECTATIONS} error={null} />);
+
+    expect(screen.getByText(/Every authenticated call returns 401/)).toBeTruthy();
+    expect(screen.getByText(/Labs VPS agent cannot authenticate/)).toBeTruthy();
   });
 });

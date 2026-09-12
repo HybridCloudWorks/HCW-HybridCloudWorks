@@ -72,6 +72,19 @@ const CLOCK_TOLERANCE_SECONDS = 60;
  * @param {string} [config.jwksUri] Override for tests.
  * @returns {{ verify: (token: string) => Promise<object> }}
  */
+/**
+ * The only access-token version this API accepts.
+ *
+ * Stated once and exported because `getAuthExpectations` reports it to the
+ * configuration review page (#519): a page that compares a live token against a
+ * frontend constant only proves the frontend agrees with itself.
+ *
+ * It is `2.0` because the app registration sets `requestedAccessTokenVersion =
+ * 2`, which is also why `ENTRA_API_AUDIENCE` is a bare GUID rather than the
+ * `api://` App ID URI. The two move together — see infra/variables.tf.
+ */
+export const ENTRA_REQUIRED_TOKEN_VERSION = '2.0';
+
 /** Entra tenant ids are GUIDs. Anything else did not come from a directory. */
 const TENANT_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -113,7 +126,7 @@ function assertEntraClaims(payload, tenantId) {
 
   // Made explicit rather than implied by the audience shape. See the issuer
   // comment in createTokenVerifier for why v1 is not accepted.
-  if (String(payload?.ver ?? '') !== '2.0') {
+  if (String(payload?.ver ?? '') !== ENTRA_REQUIRED_TOKEN_VERSION) {
     throw new Error('Token ver claim is not 2.0');
   }
 }
