@@ -1068,8 +1068,13 @@ export default function IntegrationsPage() {
           setAuthExpectationsError(null);
         })
         .catch((err) => {
-          if (!cancelled)
-            setAuthExpectationsError(err?.message ?? 'Could not read the API config.');
+          if (cancelled) return;
+          // Clear the values as well as setting the error. A refusal after a
+          // success would otherwise leave the previous answer on screen beside
+          // a banner saying the API did not answer — the panel contradicting
+          // itself, and showing configuration that may no longer be true.
+          setAuthExpectations(null);
+          setAuthExpectationsError(err?.message ?? 'Could not read the API config.');
         });
 
       try {

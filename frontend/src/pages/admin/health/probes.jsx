@@ -136,6 +136,23 @@ export function relativeExpiry(expSeconds, nowMs = Date.now()) {
 }
 
 /**
+ * Do an `aud` value and an `azp` value name the same app registration?
+ *
+ * A v2 access token puts the resource's bare client-id GUID in `aud`; a v1 one
+ * puts the App ID URI, `api://<guid>`. `azp` is always the bare GUID. Comparing
+ * them raw would call `api://X` and `X` different apps, and report the SPA and
+ * the API as separate registrations when they are in fact the one registration
+ * — a false PASS on the check that exists to catch exactly that.
+ */
+function sameApp(audience, azp) {
+  const bare = (value) =>
+    String(value)
+      .replace(/^api:\/\//i, '')
+      .toLowerCase();
+  return bare(audience) === bare(azp);
+}
+
+/**
  * Reduce a decoded token to what may be shown. Claim names, and the values of
  * `aud`, `roles`, `exp` and `tid` — nothing that identifies the person.
  *
@@ -195,7 +212,8 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
     // end. After the split they differ, and if anyone ever points
     // VITE_ENTRA_CLIENT_ID back at the API's client id this goes red on a page
     // an admin already visits — instead of nothing happening at all.
-    clientIsSeparateFromApi: azp && audiences.length ? !audiences.includes(azp) : null,
+    clientIsSeparateFromApi:
+      azp && audiences.length ? !audiences.some((value) => sameApp(value, azp)) : null,
     expiresLabel: expiry.label,
     expired: expiry.expired,
   };
