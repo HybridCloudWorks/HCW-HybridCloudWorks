@@ -200,18 +200,27 @@ set in the repository:
 ./scripts/cutover/02-entra-spa-client.ps1
 ```
 
-Adds the SPA redirect URIs and assigns the `Admin` app role. It uses a SPA
-platform on the existing registration rather than a second one, so the SPA
-requests a scope on its own app — that consents automatically and removes the
-client-id/audience mismatch TODO.md calls the highest-risk in the system.
+`01` asserts the API registration's preconditions and assigns the `Admin` app
+role on the API's service principal. `02` creates the SPA registration users
+sign in with and grants it the `access_as_admin` scope, then prints the
+`VITE_ENTRA_CLIENT_ID` to set.
+
+**Amended by #522.** This step used to add a SPA platform to the API's *existing*
+registration, so the SPA requested a scope on its own app — which consented
+automatically and removed the client-id/audience mismatch. That mismatch is now
+caught at build time instead (#516), and ADR 0006 had specified two
+registrations all along, so the two halves are separate. The struck-through
+rationale is preserved in `scripts/cutover/02-entra-spa-client.ps1`.
 
 **Then, gate 2.** The role is only half the guard. `admins/{oid}` must also hold
 a row. Set `CMS_BOOTSTRAP_ALLOWED_EMAILS` on the Function App, sign in, and call
 `POST /api/bootstrapCurrentUserAdmin` once. A token with the `Admin` role and no
 registry row is still a 403.
 
-**Verified when:** `az ad app show --id ac696e96-... --query spa.redirectUris`
-lists four URIs, and an admin sign-in reaches the UI without a 401 on every call.
+**Verified when:** the SPA registration lists its `/auth/callback` redirect URIs,
+an admin sign-in reaches the UI without a 401 on every call, and Admin → Health
+shows `azp` differing from `aud` — which is what says the two registrations are
+genuinely separate.
 
 ---
 

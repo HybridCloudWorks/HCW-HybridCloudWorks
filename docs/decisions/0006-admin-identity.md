@@ -50,9 +50,10 @@ disagree. That risk is now caught before it ships: `assertDeployConfig` refuses 
 Entra ids are not GUIDs (#516). The rationale is kept, struck through, in
 `scripts/cutover/02-entra-spa-client.ps1`.
 
-- **API (resource):** `ac696e96-e203-47be-ade8-c35ece8a6c4a` — exposes `access_as_admin`, defines the
-  `Admin` and `LabAgent` app roles, holds the role assignments, and is what `ENTRA_API_AUDIENCE`
-  names. **Unchanged by the split.**
+- **API (resource):** exposes `access_as_admin`, defines the `Admin` and `LabAgent` app roles, holds
+  the role assignments, and is what `ENTRA_API_AUDIENCE` names. **Unchanged by the split** — its app
+  id is the `$ApiAppId` default in `scripts/cutover/01-entra-api.ps1`, which is where identifiers
+  live; the docs redaction gate keeps them out of here.
 - **SPA (client):** a separate registration, public client only, whose app id is the
   `VITE_ENTRA_CLIENT_ID` repository variable. It exposes nothing and holds no credentials.
 - **Dev client:** a third registration carrying `http://localhost` redirect URIs, so the production

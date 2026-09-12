@@ -125,7 +125,21 @@ Write-Host "api          : $($api.displayName)"
 Write-Host "scope id     : $($scope.id)"
 
 Write-Step 'SPA registration'
-$spa = az ad app list --display-name $DisplayName -o json | ConvertFrom-Json | Select-Object -First 1
+$candidates = @(az ad app list --display-name $DisplayName -o json | ConvertFrom-Json)
+# Fail rather than guess. Display names are not unique in a directory, so
+# -First 1 would patch whichever registration Graph happened to return first —
+# silently, and with writes. An operator who is shown two can disambiguate; a
+# script that quietly picks one cannot be corrected after the fact.
+#
+# `$candidates`, not `$matches`: the latter is a PowerShell automatic variable
+# that `-match` overwrites, and a name collision there fails in a way nobody
+# reads the script for.
+if ($candidates.Count -gt 1) {
+    Write-Host 'More than one registration matches that display name:' -ForegroundColor Red
+    $candidates | ForEach-Object { Write-Host "  $($_.appId)  $($_.displayName)" }
+    throw "Ambiguous -DisplayName '$DisplayName'. Rename the duplicates, or pass an exact -DisplayName."
+}
+$spa = $candidates | Select-Object -First 1
 if ($spa) {
     Write-Host "found existing: $($spa.appId)"
 }
