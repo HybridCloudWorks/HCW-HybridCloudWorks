@@ -47,6 +47,7 @@ export const ACCESS_STATE = {
 export const UNKNOWN_REASON = {
   SIGNED_OUT: 'signed-out', // no session at all to renew
   SESSION: 'session', // token missing, unrenewable, or rejected by the API
+  CONFIGURATION: 'configuration', // the token is fine and will be refused again
   UNAVAILABLE: 'unavailable', // the API errored, timed out, or was unreachable
 };
 
@@ -62,8 +63,39 @@ export const UNKNOWN_REASON = {
 function classifyFailure(err) {
   if (err?.authRecovery === 'sign-in') return UNKNOWN_REASON.SIGNED_OUT;
   if (err?.authRecovery === 'reauthenticate') return UNKNOWN_REASON.SESSION;
-  if (err?.status === 401) return UNKNOWN_REASON.SESSION;
+
+  if (err?.status === 401) {
+    // The API now says why (#517), and the answer decides whether retrying is
+    // worth anything. `insufficient_scope` means the token verified and lacks
+    // a permission — re-acquiring it returns the same scopes and the same
+    // refusal, so an automatic retry is a wasted redirect at best and, without
+    // the once-per-tab guard below, a loop. Anything else on a 401 is a
+    // credential problem that signing in again genuinely fixes.
+    //
+    // This is the case #503's guard comment anticipated in so many words: "a
+    // misconfigured audience, say, where the new token is rejected exactly like
+    // the old one". That guard catches it after one wasted redirect. This
+    // catches it before.
+    const challenge = err?.wwwAuthenticate ?? {};
+    if (challenge.error && challenge.error !== 'invalid_token') {
+      return UNKNOWN_REASON.CONFIGURATION;
+    }
+    return UNKNOWN_REASON.SESSION;
+  }
+
   return UNKNOWN_REASON.UNAVAILABLE;
+}
+
+/**
+ * What the API said was wrong, when it said anything.
+ *
+ * Shown to the operator verbatim on the configuration card, because the whole
+ * point is that the person reading it has to go and change a setting and needs
+ * to know which.
+ */
+function failureDetail(err) {
+  const description = err?.wwwAuthenticate?.error_description;
+  return typeof description === 'string' && description.trim() ? description.trim() : null;
 }
 
 /**
@@ -89,7 +121,11 @@ async function fetchAdminStatusFromBackend() {
   } catch (err) {
     const reason = classifyFailure(err);
     console.warn(`Admin status check could not complete (${reason}):`, err?.message);
-    return { state: ACCESS_STATE.UNKNOWN, reason, message: err?.message || 'Unknown error' };
+    return {
+      state: ACCESS_STATE.UNKNOWN,
+      reason,
+      message: failureDetail(err) || err?.message || 'Unknown error',
+    };
   }
 }
 

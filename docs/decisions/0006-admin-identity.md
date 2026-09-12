@@ -37,6 +37,29 @@ remains anonymous. Every admin API route validates issuer, audience, expiry, and
 Validate admin, non-admin, expired, wrong-audience, and revoked-token paths. Revisit if the site later
 requires persistent public-user accounts.
 
+### Validated 2026-09-12 (#514)
+
+**MFA is enforced by security defaults, not Conditional Access.** Checked against the live tenant:
+security defaults are enabled in tenant properties, and Conditional Access is unavailable because the
+tenant is not licensed for Entra ID P1. Three files previously stated Conditional Access —
+`AdminAuthGuard.jsx`, `entraAuth.js` and this ADR — and all three were corrected.
+
+Two consequences worth writing down rather than rediscovering:
+
+- **Security defaults cannot be scoped or excepted.** There is no way to exempt a break-glass account,
+  so a break-glass path has to survive MFA rather than bypass it.
+- **Entra disables security defaults automatically the moment any Conditional Access policy is
+  created.** If this tenant is ever licensed for P1 and someone writes their first policy, MFA stops
+  being enforced everywhere it currently is unless that policy covers it. That is the revisit trigger:
+  licensing P1 is not a free upgrade here, it is a change that requires replacing the MFA control
+  before it takes effect.
+
+**Continuous Access Evaluation is not available to this API and must not be declared.** CAE requires
+that both the client and the resource be CAE-enabled, and CAE-enabled resources are Microsoft
+first-party services; a custom Azure Functions API cannot be one. The revocation SLA is therefore the
+60-second `admins/{oid}` cache in `lib/auth/roles.js`, which is tighter than CAE for the events this
+application actually cares about. See the citation in that file.
+
 ## Related decisions and references
 
 - [ADR 0004](../decisions/0004-functions-boundaries.md)

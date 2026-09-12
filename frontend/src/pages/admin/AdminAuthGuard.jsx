@@ -3,9 +3,21 @@
  *
  * The previous auth implementation carried ~200 lines of Google-popup fallback logic and
  * a hand-rolled phone-MFA + reCAPTCHA flow. None of that has an equivalent
- * here on purpose: MSAL owns popup-vs-redirect recovery, and MFA is an Entra
- * Conditional Access policy enforced inside the Microsoft sign-in — the SPA
- * never sees a second factor.
+ * here on purpose: MSAL owns popup-vs-redirect recovery, and MFA is enforced by
+ * the tenant rather than by this app.
+ *
+ * MFA IS SECURITY DEFAULTS, NOT CONDITIONAL ACCESS. Verified against the
+ * tenant on 2026-09-12: security defaults are enabled in tenant properties, and
+ * Conditional Access is unavailable because the tenant is not licensed for it
+ * (Entra ID P1). This comment used to say Conditional Access, which was wrong
+ * and would have sent anyone looking for a policy to an empty blade.
+ *
+ * The difference matters in one direction: security defaults cannot be scoped
+ * or excepted, and Entra DISABLES them automatically the moment any Conditional
+ * Access policy is created. So the day this tenant is licensed and someone
+ * writes their first policy, MFA silently stops being enforced everywhere it
+ * was — unless that policy covers it. Either way the SPA never sees a second
+ * factor; it is enforced inside the Microsoft sign-in.
  *
  * THREE OUTCOMES, THREE SCREENS (#503). `useAdminAuth` reports `authorized`,
  * `unauthorized` or `unknown`, and only the middle one is a refusal. An
@@ -134,21 +146,30 @@ export default function AdminAuthGuard({ children }) {
   // the time this renders, so the recovery here is a button.
   if (accessState === ACCESS_STATE.UNKNOWN) {
     const isSession = unknownReason === UNKNOWN_REASON.SESSION;
+    // A configuration problem is the one `unknown` that a retry cannot help:
+    // the token verified and was refused for what it lacks, so re-acquiring it
+    // returns the same token and the same refusal (#517). Offering a button
+    // that cannot work is worse than offering none.
+    const isConfiguration = unknownReason === UNKNOWN_REASON.CONFIGURATION;
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <ShieldQuestion className="h-12 w-12 mx-auto text-muted-foreground mb-2" />
-            <CardTitle>Could not verify your access</CardTitle>
+            <CardTitle>
+              {isConfiguration ? 'Admin access is misconfigured' : 'Could not verify your access'}
+            </CardTitle>
             <CardDescription>
-              {isSession
-                ? 'Your sign-in needs renewing before we can check your admin access.'
-                : 'The admin service did not answer, so your access could not be checked. This is not a refusal.'}
+              {isConfiguration
+                ? 'Your sign-in worked. The API refused the token for what it is missing, so signing in again would produce the same result — this needs a configuration change, not another attempt.'
+                : isSession
+                  ? 'Your sign-in needs renewing before we can check your admin access.'
+                  : 'The admin service did not answer, so your access could not be checked. This is not a refusal.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
-              {isSession ? (
+              {isConfiguration ? null : isSession ? (
                 <Button onClick={handleReauthenticate} className="gap-2">
                   <LogIn className="h-4 w-4" />
                   Sign in again

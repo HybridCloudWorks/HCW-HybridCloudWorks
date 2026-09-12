@@ -45,11 +45,15 @@ vi.mock('@/lib/entraAuth', () => ({
 /** What `authedFetch` resolves with on a 2xx: a Response-ish with .json(). */
 const answers = (body) => authedFetch.mockResolvedValue({ json: async () => body });
 
-/** What `authedFetch` throws on a non-2xx — an Error carrying the status. */
-const fails = (status, message) =>
+/**
+ * What `authedFetch` throws on a non-2xx — an Error carrying the status and,
+ * since #517, whatever the API said in `WWW-Authenticate`.
+ */
+const fails = (status, message, wwwAuthenticate = {}) =>
   authedFetch.mockImplementation(async () => {
     const err = new Error(message);
     err.status = status;
+    err.wwwAuthenticate = wwwAuthenticate;
     throw err;
   });
 
@@ -111,6 +115,64 @@ describe('a rejected or unobtainable token', () => {
 
     expect(await screen.findByText('Could not verify your access')).toBeTruthy();
     expect(screen.queryByText('Access Denied')).toBeNull();
+  });
+});
+
+describe('a 401 that says why (#517)', () => {
+  // The distinction the whole of #517 exists to make. `insufficient_scope`
+  // means the token verified and lacks a permission, so re-acquiring it returns
+  // the same token and the same refusal. Redirecting would be a wasted round
+  // trip that teaches the operator nothing.
+  it('does not re-authenticate on insufficient_scope — the same token would come back', async () => {
+    fails(401, 'Authentication required', {
+      error: 'insufficient_scope',
+      error_description: 'The access token is missing the access_as_admin scope.',
+    });
+    renderGuard();
+
+    expect(await screen.findByText('Admin access is misconfigured')).toBeTruthy();
+    expect(reauthenticateForApi).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /sign in again/i })).toBeNull();
+    expect(screen.queryByText('Access Denied')).toBeNull();
+  });
+
+  it('shows what the API said, because someone has to go and change it', async () => {
+    fails(401, 'Authentication required', {
+      error: 'insufficient_scope',
+      error_description: 'The access token is missing the access_as_admin scope.',
+    });
+    renderGuard();
+
+    expect(await screen.findByText(/missing the access_as_admin scope/i)).toBeTruthy();
+  });
+
+  // A configuration failure must not burn the one automatic recovery either —
+  // it is not a session problem, so the flag stays clean for a later expiry.
+  it('leaves the once-per-tab recovery unspent', async () => {
+    fails(401, 'Authentication required', { error: 'insufficient_scope' });
+    renderGuard();
+
+    await screen.findByText('Admin access is misconfigured');
+    expect(window.sessionStorage.getItem('hcw.admin.session-recovery-attempted')).toBeNull();
+  });
+
+  it('still re-authenticates on invalid_token, which signing in does fix', async () => {
+    fails(401, 'Authentication required', {
+      error: 'invalid_token',
+      error_description: 'jwt expired',
+    });
+    renderGuard();
+
+    await waitFor(() => expect(reauthenticateForApi).toHaveBeenCalledTimes(1));
+  });
+
+  // An older API, or a proxy that strips the header, must behave exactly as it
+  // did before #517 rather than falling into the new branch.
+  it('treats a 401 with no challenge as a session problem, as before', async () => {
+    fails(401, 'Authentication required');
+    renderGuard();
+
+    await waitFor(() => expect(reauthenticateForApi).toHaveBeenCalledTimes(1));
   });
 });
 

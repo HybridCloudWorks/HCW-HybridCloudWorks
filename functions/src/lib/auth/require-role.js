@@ -47,13 +47,68 @@ import {
 // authenticated request takes (TODO.md T-408).
 import { bearerTokenFrom } from './verify-token.js';
 
-/** Uniform JSON error. FIX (A10): the previous 401/403 paths set no
- *  Content-Type, so Azure served them as text/plain and a frontend calling
- *  `res.json()` on a 401 got a parse error instead of the message. */
-function deny(status, error) {
+/**
+ * Render a value as an RFC 7235 quoted-string body.
+ *
+ * This ESCAPES rather than strips. The earlier version deleted backslashes and
+ * quotes, which silently changed the text and was not what its own name said —
+ * and now that the client unescapes properly (`parseWwwAuthenticate` in
+ * lib/api.js), escaping is the half that makes the round trip lossless.
+ *
+ * CR/LF are normalised to a space rather than escaped, because a quoted-string
+ * cannot carry them and a newline in a header value is response splitting.
+ * Nothing reaching here is attacker-supplied today — every description is a
+ * literal — but that is a property of the current call sites, not of this
+ * function, so it is enforced where it cannot be forgotten.
+ */
+const quoteString = (value) =>
+  String(value)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/([\\"])/g, '\\$1');
+
+/**
+ * Uniform JSON error.
+ *
+ * FIX (A10): the previous 401/403 paths set no Content-Type, so Azure served
+ * them as text/plain and a frontend calling `res.json()` on a 401 got a parse
+ * error instead of the message.
+ *
+ * A 401 ALSO SAYS WHY (#517). Until now every 401 from this API was a bare
+ * status code, so the admin portal had to guess: an expired token, a rejected
+ * token and a token missing the delegated scope all looked identical, and all
+ * got the same interactive re-authentication — which recovers only the first.
+ *
+ * The RFC 6750 error codes happen to draw exactly the line the client needs:
+ *
+ *   invalid_token       the credential is bad. Signing in again fixes it.
+ *   insufficient_scope  the credential is fine and lacks a permission. Signing
+ *                       in again returns an identically-rejected token, so the
+ *                       client must NOT retry — it is a configuration problem.
+ *   (omitted)           no credential was presented at all. Sign in.
+ *
+ * `Access-Control-Expose-Headers` in cors.js is what lets the browser read this
+ * at all; without it the header is set and invisible.
+ *
+ * @param {number} status
+ * @param {string} error              Body message, unchanged.
+ * @param {{code?: string, description?: string}} [challenge]
+ *   RFC 6750 parameters for the WWW-Authenticate header. 401 only.
+ */
+function deny(status, error, challenge) {
+  const headers = { 'Content-Type': 'application/json' };
+
+  if (status === 401) {
+    const parts = ['realm=""'];
+    if (challenge?.code) parts.push(`error="${quoteString(challenge.code)}"`);
+    if (challenge?.description) {
+      parts.push(`error_description="${quoteString(challenge.description)}"`);
+    }
+    headers['WWW-Authenticate'] = `Bearer ${parts.join(', ')}`;
+  }
+
   return {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ ok: false, error }),
   };
 }
@@ -190,7 +245,13 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
     const token = bearerTokenFrom(request);
 
     if (!token) {
-      return { user: null, role: null, error: deny(401, 'Authentication required') };
+      // A BARE CHALLENGE. RFC 6750 §3: when the request includes no
+      // authentication credentials at all, the response "SHOULD NOT include an
+      // error code or other error information" — there is no failed attempt to
+      // describe, and saying so would only tell an unauthenticated caller how
+      // this endpoint behaves. The client reads the absent error code as
+      // "sign in", which is exactly right.
+      return { user: null, role: null, error: deny(401, 'Authentication required', {}) };
     }
 
     let user;
@@ -198,7 +259,26 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
       user = await verifier.verify(token);
     } catch (err) {
       audit({ outcome: 'denied', reason: 'invalid-token', detail: err.message });
-      return { user: null, role: null, error: deny(401, 'Authentication required') };
+      // A FIXED DESCRIPTION, NOT `err.message`.
+      //
+      // verify-token.js says of its own assertions that the detail "lands in
+      // admin_audit_logs and never reaches the client", and echoing it here
+      // would have broken that the moment the header became readable. The
+      // verifier's messages distinguish an expired token from a bad signature
+      // from a wrong tenant, which is a free oracle for anyone probing, and
+      // `jwt audience invalid. expected: …` names configuration outright.
+      //
+      // The client does not need the difference: every one of them means the
+      // same thing to it — sign in again. The audit row above keeps the reason
+      // for whoever is actually debugging.
+      return {
+        user: null,
+        role: null,
+        error: deny(401, 'Authentication required', {
+          code: 'invalid_token',
+          description: 'The access token could not be verified.',
+        }),
+      };
     }
 
     // THE SCOPE GATE. An ID token is not an access token (#515).
@@ -220,7 +300,17 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
         oid: user.oid ?? user.sub,
         required: ENTRA_API_DELEGATED_SCOPE,
       });
-      return { user: null, role: null, error: deny(401, 'Authentication required') };
+      // insufficient_scope, not invalid_token: the token verified. Re-acquiring
+      // it returns the same scopes and the same rejection, so the client must
+      // show this rather than silently retry.
+      return {
+        user: null,
+        role: null,
+        error: deny(401, 'Authentication required', {
+          code: 'insufficient_scope',
+          description: `The access token is missing the ${ENTRA_API_DELEGATED_SCOPE} scope.`,
+        }),
+      };
     }
 
     return { user, role: null, error: null };

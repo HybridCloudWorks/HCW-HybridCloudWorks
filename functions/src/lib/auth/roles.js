@@ -18,7 +18,22 @@
  * expires (up to an hour)".
  *
  * Entra offers no equivalent for a custom API. Access tokens stay valid until
- * expiry (60–90 min) and Continuous Access Evaluation does not cover us. Using
+ * expiry (60–90 min) and Continuous Access Evaluation does not cover us.
+ *
+ * THAT SENTENCE IS LOAD-BEARING, SO HERE IS THE CITATION. CAE requires that
+ * "both your app and the resource API it's accessing must be CAE-enabled"
+ * (learn.microsoft.com/entra/identity-platform/app-resilience-continuous-access-evaluation).
+ * CAE-enabled resources are Microsoft first-party services — Graph, Exchange,
+ * SharePoint, Teams. A custom Azure Functions API cannot be one, and this SPA's
+ * CSP allows exactly one non-self API origin, which is this API. So declaring
+ * `clientCapabilities: ['CP1']` would take on the obligation to handle claims
+ * challenges for every resource while no resource in the call graph can issue
+ * one — and Microsoft warns that mishandling it "might repeatedly retry an API
+ * call using a token that is technically valid but is revoked". Do not add it.
+ *
+ * The supported mechanism for a custom API, if step-up is ever wanted, is
+ * Conditional Access authentication context (`acrs`) — which needs Entra ID P1,
+ * and this tenant is not licensed for it (checked 2026-09-12). Using
  * App Roles alone would therefore port the model MINUS the mitigation its
  * author deliberately added — which is precisely the silent authorization loss
  * Migration-Plan §8 warns about.

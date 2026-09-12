@@ -19,6 +19,82 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A 401 from the API carried no reason, so the admin portal had to guess
+  (#517).** `deny(401, …)` set only `Content-Type` — no `WWW-Authenticate`,
+  contrary to RFC 6750 — so an expired token, a rejected token and a token
+  missing the delegated scope all reached the browser as the same bare status
+  code. `classifyFailure` inferred "expired session" from all three and offered
+  the same interactive re-authentication, which recovers only the first. For the
+  other two it is a wasted redirect that teaches the operator nothing.
+
+  This is the case #503's own guard comment anticipated in so many words: *"a
+  misconfigured audience, say, where the new token is rejected exactly like the
+  old one."* The once-per-tab flag caught it after one wasted redirect; this
+  catches it before.
+
+  **The RFC's error codes happen to draw exactly the line the client needs.**
+  `invalid_token` means the credential is bad and signing in again fixes it.
+  `insufficient_scope` means the credential verified and lacks a permission, so
+  re-acquiring it returns an identical token and an identical refusal. A 401
+  with no credential at all carries no error code, which RFC 6750 reserves for a
+  credential that was presented and refused. The client now keys on that: a new
+  `UNKNOWN_REASON.CONFIGURATION` renders "Admin access is misconfigured" with the
+  API's own description and **no retry button**, and it does not spend the one
+  automatic recovery either.
+
+  **One header made the difference between working and invisible.** The API is
+  cross-origin, and `WWW-Authenticate` is not CORS-safelisted, so
+  `res.headers.get('www-authenticate')` returned null in the browser however
+  carefully the API set it. `cors.js` now names it in
+  `Access-Control-Expose-Headers`, on the actual response rather than only the
+  preflight.
+
+  A 401 with no challenge — an older API, or a proxy that strips the header —
+  behaves exactly as it did before, and there is a test pinning that.
+
+  A 401 carrying **no credential at all** sends a bare `Bearer realm=""`. RFC
+  6750 §3 is explicit that such a response "SHOULD NOT include an error code or
+  other error information" — there is no failed attempt to describe, and
+  describing one would only tell an unauthenticated caller how the endpoint
+  behaves. The client reads the absent code as "sign in", which is right.
+
+  The header builder escapes rather than strips, so a description survives the
+  round trip to the client's parser intact; CR/LF are normalised to a space,
+  because a quoted-string cannot carry them and a newline in a header value is
+  response splitting.
+
+  The `invalid_token` description is a fixed sentence rather than the verifier's
+  own message. `verify-token.js` says its claim assertions "land in
+  `admin_audit_logs` and never reach the client", and the header becoming
+  readable is exactly when that promise needed enforcing: those messages
+  separate expired from bad-signature from wrong-tenant, and `jwt audience
+  invalid. expected: …` names configuration outright. The client cannot act on
+  the difference — all of them mean sign in again — so only the audit row keeps
+  it.
+
+### Changed
+
+- **MFA is enforced by security defaults, not Conditional Access (#514).**
+  Checked against the live tenant on 2026-09-12: security defaults are enabled
+  in tenant properties, and Conditional Access is unavailable because the tenant
+  is not licensed for Entra ID P1. `AdminAuthGuard.jsx`, `entraAuth.js` and ADR
+  0006 all stated Conditional Access, which would have sent anyone looking for a
+  policy to an empty blade.
+
+  Two consequences are now written down rather than left to be rediscovered:
+  security defaults cannot be scoped or excepted, so a break-glass path has to
+  survive MFA rather than bypass it; and Entra **disables security defaults
+  automatically** the moment any Conditional Access policy is created — so
+  licensing P1 later is not a free upgrade, it is a change that silently
+  replaces the MFA control.
+
+  `lib/auth/roles.js` has said since it was written that Continuous Access
+  Evaluation "does not cover us", and now carries the citation for it: CAE
+  requires that both the client and the resource be CAE-enabled, and CAE-enabled
+  resources are Microsoft first-party services. Declaring `CP1` would take on the
+  obligation to handle claims challenges while no resource in the call graph can
+  issue one.
+
 - **A deploy build with the Entra variables unset shipped a sign-in pointed at
   every tenant (#516).** `msalConfig.js` defaulted the authority to `common`
   when `VITE_ENTRA_TENANT_ID` was empty, and `vite.config.js` validated exactly

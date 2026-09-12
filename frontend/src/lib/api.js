@@ -87,6 +87,45 @@ async function fetchWithTimeout(url, options, timeoutMs, fnName) {
 }
 
 /**
+ * Pull the RFC 6750 parameters out of a `WWW-Authenticate` header.
+ *
+ * The API says why it refused a request (#517), and the reason is the
+ * difference between "sign in again" and "someone has to fix a setting".
+ * Exported so it can be tested without a network.
+ *
+ * Returns `{}` for a missing, non-Bearer or unparseable header — a caller that
+ * learns nothing should behave as it did before the header existed, not throw.
+ *
+ * @param {string|null|undefined} header
+ * @returns {{error?: string, error_description?: string, realm?: string, claims?: string}}
+ */
+export function parseWwwAuthenticate(header) {
+  const value = typeof header === 'string' ? header.trim() : '';
+  if (!/^Bearer\b/i.test(value)) return {};
+
+  const params = {};
+  // Quoted values only, escaped characters included — the RFC 7235
+  // quoted-string, which is what Entra and this API both emit.
+  //
+  // THIS IS ONE HALF OF A PAIR. `quoteString` in the API's require-role.js
+  // escapes `\` and `"` on the way out; this unescapes them on the way in, and
+  // the two must agree or a description arrives mangled. An earlier version of
+  // each stripped instead, and stripping is lossy in a way that looks like
+  // success.
+  //
+  // A token68 or unquoted parameter yields nothing rather than a half-guess:
+  // a parser that drops half a value is worse than one that drops all of it,
+  // because half a value still reads as complete.
+  const pattern = /([a-z_]+)="((?:[^"\\]|\\.)*)"/gi;
+  let match = pattern.exec(value);
+  while (match !== null) {
+    params[match[1].toLowerCase()] = match[2].replace(/\\(.)/g, '$1');
+    match = pattern.exec(value);
+  }
+  return params;
+}
+
+/**
  * Authenticated fetch wrapper.
  * Automatically injects an Entra Bearer token.
  * Admin status forces a token refresh so a newly granted role is visible immediately.
@@ -173,6 +212,13 @@ export async function authedFetch(fnName, { token: presetToken, ...options } = {
     // own-properties behaves exactly as before.
     error.status = res.status;
     error.fnName = fnName;
+    // The reason, when the API gave one (#517). `error.status` told a caller
+    // that the request failed; this tells them what would fix it — and the
+    // distinction matters most on a 401, where `invalid_token` means sign in
+    // again and `insufficient_scope` means signing in again changes nothing.
+    // Readable cross-origin only because cors.js names it in
+    // Access-Control-Expose-Headers.
+    error.wwwAuthenticate = parseWwwAuthenticate(res.headers?.get?.('www-authenticate'));
     throw error;
   }
 

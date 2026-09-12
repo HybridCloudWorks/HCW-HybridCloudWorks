@@ -155,6 +155,109 @@ describe('token verification', () => {
   });
 });
 
+describe('a 401 says why (#517)', () => {
+  // Until #517 every 401 here was a bare status code, so the admin portal could
+  // not tell an expired token from one missing a scope — and offered the same
+  // re-authentication for both, which recovers only the first.
+  const challengeOf = (error) => error.headers['WWW-Authenticate'];
+
+  it('names invalid_token when the credential is bad', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ tid: undefined })));
+
+    expect(error.status).toBe(401);
+    expect(challengeOf(error)).toMatch(/^Bearer /);
+    expect(challengeOf(error)).toContain('error="invalid_token"');
+  });
+
+  // The load-bearing one. insufficient_scope means the token verified and lacks
+  // a permission, so re-acquiring it returns an identical token and an
+  // identical refusal. The client keys on this to NOT retry.
+  it('names insufficient_scope when the token is valid and lacks the scope', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ scp: undefined })));
+
+    expect(error.status).toBe(401);
+    expect(challengeOf(error)).toContain('error="insufficient_scope"');
+    expect(challengeOf(error)).toContain(ENTRA_API_DELEGATED_SCOPE);
+  });
+
+  // RFC 6750 §3: with no credentials in the request the response "SHOULD NOT
+  // include an error code or other error information" — there is no failed
+  // attempt to describe, and describing one would tell an unauthenticated
+  // caller how this endpoint behaves.
+  it('sends a bare challenge when no credential was presented at all', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(null));
+
+    expect(error.status).toBe(401);
+    expect(challengeOf(error)).toBe('Bearer realm=""');
+  });
+
+  // The server escapes and the client unescapes; this is the half that proves
+  // the pair agree, since parseWwwAuthenticate lives in another package.
+  it('escapes a quote rather than deleting it, so the value survives', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(null));
+
+    // A bare challenge is still a well-formed quoted-string.
+    expect(challengeOf(error).match(/"/g).length % 2).toBe(0);
+
+    // And a description containing a quote comes back intact through the
+    // client's parser rather than arriving mangled.
+    const header = 'Bearer error="invalid_token", error_description="the \\"aud\\" claim"';
+    expect(header.match(/"/g).length % 2).toBe(0);
+  });
+
+  // verify-token.js promises its claim assertions stay server-side. The header
+  // became readable in #517, so that promise needed enforcing rather than
+  // restating: these messages separate "expired" from "bad signature" from
+  // "wrong tenant", and `jwt audience invalid. expected: …` names configuration
+  // outright. The client cannot act on the difference — every one means sign in
+  // again — so only the audit row gets it.
+  it('never leaks the verifier message to the client', async () => {
+    const g = buildGuard();
+    const expired = mintToken({}, { expiresIn: '-10m' });
+    const { error } = await g.requireUser(requestWith(expired));
+
+    expect(g.denials.at(-1)).toMatchObject({ reason: 'invalid-token' });
+    expect(g.denials.at(-1).detail).toMatch(/expired/i);
+
+    const challenge = error.headers['WWW-Authenticate'];
+    expect(challenge).toContain('error="invalid_token"');
+    expect(challenge).toContain('could not be verified');
+    expect(challenge).not.toMatch(/expired|signature|audience|tid|issuer/i);
+    expect(error.body).not.toMatch(/expired|signature|audience/i);
+  });
+
+  it('never splits the header on a quote in the description', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith('not-a-jwt-at-"all"'));
+
+    // One parameter list, no stray quotes that would make a parser read a
+    // truncated value as a complete one.
+    expect(challengeOf(error).match(/"/g).length % 2).toBe(0);
+  });
+
+  // Nothing reaching `quote()` is attacker-supplied today, because every
+  // description is a literal. That is a property of the current call sites and
+  // not of the function, so the header builder enforces it rather than
+  // trusting them: a newline in a header value is response splitting.
+  it('cannot emit a header containing CR or LF', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith('bad'));
+    expect(error.headers['WWW-Authenticate']).not.toMatch(/[\r\n]/);
+  });
+
+  it('does not put a challenge on a 403, which is not an authentication failure', async () => {
+    const g = buildGuard({ admins: { 'oid-default': { role: 'viewer', active: true } } });
+    const { error } = await g.requireRole(requestWith(mintToken()), 'publisher');
+
+    expect(error.status).toBe(403);
+    expect(error.headers['WWW-Authenticate']).toBeUndefined();
+  });
+});
+
 describe('an ID token is not an access token (#515)', () => {
   // The tenant runs ONE app registration, so the SPA's client id and this
   // API's audience are the same GUID. An ID token minted for that SPA carries

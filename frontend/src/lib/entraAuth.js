@@ -3,12 +3,25 @@
  *
  * One instance, one initialize, and three jobs:
  *   - session state: getCurrentUser / onAuthStateChanged (MSAL events)
- *   - interactive sign-in/out (popup with redirect fallback — Entra
- *     Conditional Access owns MFA, so the Firebase MFA/reCAPTCHA machinery
- *     has no equivalent here on purpose)
+ *   - interactive sign-in/out (popup with redirect fallback — the tenant owns
+ *     MFA, so the Firebase MFA/reCAPTCHA machinery has no equivalent here on
+ *     purpose; see the note below on which tenant mechanism)
  *   - API tokens: acquireApiToken() returns an access token whose audience
  *     is the backend's ENTRA_API_AUDIENCE (via VITE_ENTRA_API_SCOPE) —
  *     silent first, interactive only when MSAL says it must be.
+ *
+ * MFA IS SECURITY DEFAULTS, NOT CONDITIONAL ACCESS. Verified against the
+ * tenant on 2026-09-12: security defaults are enabled in tenant properties, and
+ * Conditional Access is unavailable because the tenant is not licensed for it
+ * (Entra ID P1). This comment used to say Conditional Access, which was wrong
+ * and would have sent anyone looking for a policy to an empty blade.
+ *
+ * The difference matters in one direction: security defaults cannot be scoped
+ * or excepted, and Entra DISABLES them automatically the moment any Conditional
+ * Access policy is created. So the day this tenant is licensed and someone
+ * writes their first policy, MFA silently stops being enforced everywhere it
+ * was — unless that policy covers it. Either way the SPA never sees a second
+ * factor; it is enforced inside the Microsoft sign-in.
  *
  * The user shape mirrors what the Firebase code exposed (uid/email/
  * displayName) so consumers don't churn: uid is the Entra object id, which

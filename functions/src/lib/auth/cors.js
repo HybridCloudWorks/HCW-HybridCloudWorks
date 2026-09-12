@@ -132,6 +132,19 @@ export function createCors({ environment = process.env.NODE_ENV, extraOrigins = 
         Vary: 'Origin',
         'Access-Control-Allow-Methods': ALLOW_METHODS,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        // WITHOUT THIS THE 401 REASON IS INVISIBLE (#517).
+        //
+        // The admin SPA is served from hybridcloudworks.com and this API from
+        // api-azure.hybridcloudworks.com, so every call is cross-origin — and a
+        // browser exposes only the handful of CORS-safelisted response headers
+        // to script unless the server names the rest here. `WWW-Authenticate`
+        // is not safelisted, so `res.headers.get('www-authenticate')` returned
+        // null in the browser however carefully the API set it.
+        //
+        // It belongs on the ACTUAL response, not just the preflight: the
+        // preflight governs what the request may send, this governs what the
+        // response may reveal.
+        'Access-Control-Expose-Headers': 'WWW-Authenticate',
         'Access-Control-Max-Age': '3600',
       };
 
