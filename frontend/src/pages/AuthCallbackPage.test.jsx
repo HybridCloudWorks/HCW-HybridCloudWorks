@@ -73,8 +73,13 @@ describe('a failed sign-in', () => {
     render(<AuthCallbackPage />);
 
     expect(await screen.findByText(/could not be completed/i)).toBeTruthy();
-    expect(screen.queryByText(/endpoints_resolution_error/)).toBeNull();
-    expect(screen.queryByText(/login\.microsoftonline\.com/)).toBeNull();
+
+    // Substring checks on the rendered text, not regexes. A bare host pattern
+    // is unanchored by nature and CodeQL flags it as one — correctly, since the
+    // same shape in non-test code would match `evil.com/login.microsoftonline.com`.
+    const rendered = document.body.textContent ?? '';
+    expect(rendered).not.toContain('endpoints_resolution_error');
+    expect(rendered).not.toContain('login.microsoftonline.com');
   });
 
   it('logs the detail for whoever is actually debugging', async () => {

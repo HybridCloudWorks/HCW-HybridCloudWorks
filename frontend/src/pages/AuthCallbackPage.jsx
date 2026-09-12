@@ -65,7 +65,11 @@ export default function AuthCallbackPage() {
      * whatever the user pastes when they ask someone what went wrong.
      */
     const clearFragment = () => {
-      if (!window.location.hash) return;
+      const hash = window.location.hash || '';
+      // Only an auth response, matching `clearAuthFragment()` in entraAuth.js.
+      // Stripping any hash would eat a legitimate in-page anchor if this route
+      // ever gains one, and the narrower rule is the one already established.
+      if (!/[#&](code|error|state|id_token|access_token)=/.test(hash)) return;
       try {
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
       } catch {
