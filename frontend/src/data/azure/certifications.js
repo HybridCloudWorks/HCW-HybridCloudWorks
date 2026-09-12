@@ -2,7 +2,7 @@
 // Verified by hand against the Learn credentials browse API
 // (https://learn.microsoft.com/api/contentbrowser/search/credentials) and the credential-retirement page
 // (https://learn.microsoft.com/en-us/credentials/support/credential-retirement) on the date below.
-// Last manual sync: 2026-09-09
+// Last manual sync: 2026-09-11
 //
 // THE GITHUB EXAMS ARE NOT CARRIED HERE (#496, owner decision 2026-09-11).
 // GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900 used to sit in this file as
@@ -29,7 +29,7 @@
  * derived from the dates at render time (src/lib/certStatus.js) so a date that
  * passes between syncs cannot keep showing "Expiring" or "Beta".
  */
-export const DATA_AS_OF = '2026-09-09';
+export const DATA_AS_OF = '2026-09-11';
 
 /**
  * The page a reader can check this catalogue's freshness claim against.
