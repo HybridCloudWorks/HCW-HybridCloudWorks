@@ -58,6 +58,11 @@ vi.mock('@azure/msal-browser', () => ({
     ACQUIRE_TOKEN_SUCCESS: 'msal:acquireTokenSuccess',
     LOGOUT_SUCCESS: 'msal:logoutSuccess',
   },
+  // msalConfig.js imports this for its logger (#520). Without it here, the
+  // whole module throws at import time and takes this file with it — the mock
+  // has to carry every export the module graph touches, not just the ones this
+  // file uses.
+  LogLevel: { Error: 0, Warning: 1, Info: 2, Verbose: 3, Trace: 4 },
 }));
 
 /** The module memoises MSAL state, so every test needs a clean copy. */

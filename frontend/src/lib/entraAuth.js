@@ -111,9 +111,8 @@ function clearAuthFragment() {
  * page they started from. The cost is losing in-page state across the
  * navigation, which for a sign-in on an admin route is nothing.
  */
-function prefersRedirect() {
-  return true;
-}
+// The predicate that used to sit here returned an unconditional `true`, so the
+// reasoning above now belongs to `signIn` itself (#520).
 
 /**
  * Idempotent: first caller initializes and drains any redirect response.
@@ -260,36 +259,23 @@ export function onAuthStateChanged(callback) {
 }
 
 /**
- * Redirect flow. The popup branch below is retained but unreachable while
- * `prefersRedirect()` returns true — see the reasoning there. It is kept rather
- * than deleted because the choice is a deployment observation, not a law, and
- * the fallback chain it contains is the thing that would have to be rebuilt.
+ * Sign in. Redirect only — see the block above for why, at length.
+ *
+ * A popup branch sat here until #520, unreachable behind a `prefersRedirect()`
+ * that returned an unconditional `true`. The reasoning was worth keeping and
+ * has been; the code was four MSAL calls and an error-code switch,
+ * reconstructible from that reasoning in minutes, and while it existed
+ * `entraAuth.test.js` had to mock `loginPopup` to reject in order to assert
+ * nothing called it. A test arranging behaviour for unreachable code is a trap
+ * for whoever reads it next.
+ *
+ * The `describe('no interactive flow anywhere uses a popup')` block in that
+ * file is now structurally guaranteed rather than asserted.
  */
 export async function signIn() {
   await initializeAuth();
-  const msal = getMsalInstance();
-
-  if (prefersRedirect()) {
-    await msal.loginRedirect(loginRequest);
-    return null; // page navigates away
-  }
-
-  try {
-    const result = await msal.loginPopup(loginRequest);
-    if (result?.account) msal.setActiveAccount(result.account);
-    return toUser(result?.account);
-  } catch (err) {
-    const code = err?.errorCode || '';
-    if (
-      code === 'popup_window_error' ||
-      code === 'empty_window_error' ||
-      code === 'user_cancelled'
-    ) {
-      await msal.loginRedirect(loginRequest);
-      return null; // page navigates away
-    }
-    throw err;
-  }
+  await getMsalInstance().loginRedirect(loginRequest);
+  return null; // the page navigates away
 }
 
 /**
@@ -372,7 +358,7 @@ export async function acquireApiToken({ forceRefresh = false } = {}) {
  * Re-acquire the API token interactively, for a session that could not be
  * verified silently.
  *
- * Redirect, not popup, for the reasons `prefersRedirect()` records — the
+ * Redirect, not popup, for the reasons recorded above `signIn` — the
  * browser decides what `window.open` produces, and a top-level window loses
  * the handshake. No `prompt` is passed on purpose: if the Entra session is
  * still good this completes without showing the user anything and returns them

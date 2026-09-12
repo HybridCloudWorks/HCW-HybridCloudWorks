@@ -19,6 +19,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Sign-in lands on a page built for it, not on the public home page (#520).**
+  `msalConfig.js` set `redirectUri: window.location.origin`, so Entra returned
+  the browser to `/` — a page that had never touched MSAL, because
+  `AdminAuthGuard` is lazy-loaded and mounted only under `/admin`. Nothing
+  consumed the authorization code. The fix at the time was
+  `useAuthRedirectLanding`, mounted from `App.jsx` on **every route in the
+  application** — including every anonymous visit to a provider news page — so
+  that a regex could watch `window.location.hash` for a fragment that appears on
+  one.
+
+  `/auth/callback` is that one page. `initializeAuth()` consumes the fragment
+  and MSAL's `navigateToLoginRequestUrl` — which defaults to true — returns the
+  user to wherever sign-in started, the mechanism the bare origin was working
+  around rather than using. The 2026-08-23 incident that prompted the hook is
+  carried into the new page's header so it is not lost with it.
+
+  **The hook stays for one more release, deliberately.** A browser mid-redirect
+  at cutover, or a bookmarked stale fragment, still lands on `/`; removing both
+  halves at once would turn those into a home page with a dead `#code=` in the
+  address bar that reproduces on every reload — the exact symptom the hook was
+  written for.
+
+  A test asserts the path inside `redirectUri` is a route `App.jsx` declares.
+  That agreement is between a config string and a route table, so nothing that
+  renders a component would notice it breaking — and when it breaks, sign-in
+  fails in production and nowhere else.
+
+  Also here: MSAL now has `loggerOptions` at Warning in production, dropping
+  anything MSAL flags as containing PII. There were none at all, and all three
+  failures this codebase's comments are built around surface at Warning, so
+  Error alone would have shown nothing new on any of the days they cost.
+  `/auth/*` is `noindex, nofollow` — an indexed callback page would appear in
+  search results holding somebody's authorization code.
+
+  And the unreachable popup branch in `entraAuth.js` is gone, along with the
+  `prefersRedirect()` that returned an unconditional `true`. The reasoning is
+  kept and moved onto `signIn`; the code was four MSAL calls, and while it
+  existed a test had to mock `loginPopup` to reject in order to assert nothing
+  called it. A test arranging behaviour for unreachable code is a trap for the
+  next reader.
+
 - **The Entra configuration is reviewable in the admin GUI (#519).** It was
   visible nowhere. The tenant, audience, App Roles, scope and token version are
   plain app settings rather than Key Vault references, so they never appeared in

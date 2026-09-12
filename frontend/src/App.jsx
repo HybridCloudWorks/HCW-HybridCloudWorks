@@ -13,6 +13,9 @@ import Footer from '@/components/shared/Footer';
 import { VALID_PROVIDERS, ProviderLayout } from '@/context/ProviderContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { useAuthRedirectLanding } from '@/hooks/useAuthRedirectLanding';
+// A bare string module, deliberately: importing this from msalConfig.js would
+// drag MSAL onto every public route (#520).
+import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
 
 const lazyPage = (loader) => lazy(loader);
 
@@ -139,6 +142,10 @@ const RosettaStoneSubmissionPage = lazyPage(
 
 // Admin
 const AdminAuthGuard = lazyPage(() => import('@/pages/admin/AdminAuthGuard'));
+// The Entra redirect target (#520). Lazy like every other page, so the public
+// bundle does not carry it — and it is the only route that touches MSAL
+// outside /admin.
+const AuthCallbackPage = lazyPage(() => import('@/pages/AuthCallbackPage'));
 const AdminLayout = lazyPage(() => import('@/pages/admin/AdminLayout'));
 const AdminDashboardPage = lazyPage(() => import('@/pages/admin/DashboardPage'));
 const AdminQueuePage = lazyPage(() => import('@/pages/admin/QueuePage'));
@@ -381,6 +388,9 @@ function App() {
               <Route path="/templates/blog" element={<BlogSubmissionPage />} />
               <Route path="/templates/coder-corner" element={<CoderCornerSubmissionPage />} />
               <Route path="/templates/rosetta-stone" element={<RosettaStoneSubmissionPage />} />
+              {/* --- Entra sign-in redirect target (#520) --- */}
+              <Route path={AUTH_REDIRECT_PATH} element={<AuthCallbackPage />} />
+
               {/* --- Admin CMS --- */}
               <Route
                 path="/admin"

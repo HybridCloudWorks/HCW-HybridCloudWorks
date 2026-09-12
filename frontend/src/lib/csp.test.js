@@ -133,16 +133,21 @@ describe('indexing headers', () => {
     const order = config.routes.map((entry) => entry.route);
     const htmlRule = order.indexOf('/*.html');
     expect(htmlRule).toBeGreaterThan(-1);
-    for (const route of ['/admin/*', '/preview/*']) {
+    for (const route of ['/admin/*', '/auth/*', '/preview/*']) {
       expect(order.indexOf(route)).toBeLessThan(htmlRule);
     }
   });
 
   it('does not mark any public route noindex', () => {
     // The failure that would matter more than the one being fixed.
+    //
+    // `/auth/*` joined the list with #520: it is the Entra redirect target, a
+    // page whose only job is to consume a fragment and navigate away. Indexing
+    // it would publish a titled, empty page — and one that appears in search
+    // results holding somebody's authorization code in the URL.
     const noindexed = config.routes
       .filter((entry) => entry.headers?.['X-Robots-Tag']?.includes('noindex'))
       .map((entry) => entry.route);
-    expect(noindexed.sort()).toEqual(['/admin/*', '/preview/*']);
+    expect(noindexed.sort()).toEqual(['/admin/*', '/auth/*', '/preview/*']);
   });
 });
