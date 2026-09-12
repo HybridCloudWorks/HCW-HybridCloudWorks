@@ -104,12 +104,18 @@ export function parseWwwAuthenticate(header) {
   if (!/^Bearer\b/i.test(value)) return {};
 
   const params = {};
-  // Quoted values only, which is what Entra and this API both emit. No
-  // RFC 7235 quoted-string, escaped characters included. This API strips
-  // quotes and backslashes before they reach a header, but a claims
-  // challenge from Entra is not ours to constrain, and a parser that drops
-  // half a value is worse than one that drops all of it.
-  // A token68 or unquoted parameter yields nothing rather than a half-guess.
+  // Quoted values only, escaped characters included — the RFC 7235
+  // quoted-string, which is what Entra and this API both emit.
+  //
+  // THIS IS ONE HALF OF A PAIR. `quoteString` in the API's require-role.js
+  // escapes `\` and `"` on the way out; this unescapes them on the way in, and
+  // the two must agree or a description arrives mangled. An earlier version of
+  // each stripped instead, and stripping is lossy in a way that looks like
+  // success.
+  //
+  // A token68 or unquoted parameter yields nothing rather than a half-guess:
+  // a parser that drops half a value is worse than one that drops all of it,
+  // because half a value still reads as complete.
   const pattern = /([a-z_]+)="((?:[^"\\]|\\.)*)"/gi;
   let match = pattern.exec(value);
   while (match !== null) {
