@@ -41,11 +41,27 @@
 const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridcloudworks.com'];
 
 /**
- * The Static Web App's own hostname — TEMPORARY, for Migration-Plan §6 step 2.
+ * The Static Web App's own hostname — RETAINED DELIBERATELY, not a leftover.
  *
- * REMOVE IT when DNS moves (§6 step 5) and the preview host stops serving
- * anyone. It is a real origin that can reach the API, so leaving it behind is
- * leaving a door open for no reason.
+ * This said "TEMPORARY, for Migration-Plan §6 step 2. REMOVE IT when DNS moves
+ * (§6 step 5)". DNS moved; hybridcloudworks.com has been live for weeks and the
+ * origin is still here — so the comment was describing an intention the code had
+ * stopped following, which is worse than either answer. Corrected by #521.
+ *
+ * It stays because `deploy-azure-frontend.yml` documents the production
+ * break-glass as re-pointing or disabling the custom domain, and exercising that
+ * escape hatch lands on exactly this hostname. Removing the origin would take
+ * the admin portal out of the only documented unserviceable-estate recovery
+ * path — and it would be discovered during the incident.
+ *
+ * It is also not the shape Zero Trust guidance warns about: not a wildcard, and
+ * not a dangling domain. The host is bound to a live Static Web App we own, and
+ * SWA default hostnames carry a random discriminator so they are not
+ * reallocated.
+ *
+ * REVISIT TRIGGER, a real one this time: remove it when the Static Web App is
+ * deleted, or when the break-glass procedure stops depending on the default
+ * hostname.
  *
  * It is compiled in rather than supplied through `EXTRA_ALLOWED_ORIGINS`, which
  * is what §6 step 2 was originally going to use. On 2026-08-22 that setting was

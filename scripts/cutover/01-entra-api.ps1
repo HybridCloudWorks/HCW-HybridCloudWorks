@@ -1,35 +1,31 @@
 <#
 .SYNOPSIS
-    Cutover step 1 — finish the Entra registration so an admin can sign in.
+    Entra, part 1 of 2 — the API registration, and who may reach it.
 
 .DESCRIPTION
-    Migration-Plan §6 / TODO.md. Most of §2.2 was already done before
-    this script existed — verified 2026-08-22 against the live tenant:
+    This is the RESOURCE half: the app registration the API validates tokens
+    against, and the `Admin` app-role assignment that is guard gate 1. The
+    CLIENT half — the SPA that signs users in — is 02-entra-spa-client.ps1.
+
+    Split out of the former 01-entra-spa.ps1 by #522. That script did both jobs
+    against one registration; see the "WHY THERE ARE TWO" note in
+    02-entra-spa-client.ps1 for what changed and why.
+
+    What this script assumes already exists, and asserts rather than creates:
 
         app registration  HCWSite API  ac696e96-e203-47be-ade8-c35ece8a6c4a
-        identifier URI    api://ac696e96-e203-47be-ade8-c35ece8a6c4a   [done]
-        exposed scope     access_as_admin                             [done]
-        app roles         Admin, LabAgent (both enabled)              [done]
-        SPA platform      -                                           [THIS SCRIPT]
-        Admin role assigned to a user                                 [THIS SCRIPT]
+        identifier URI    api://ac696e96-e203-47be-ade8-c35ece8a6c4a
+        exposed scope     access_as_admin
+        app roles         Admin, LabAgent (both enabled)
+        token version     requestedAccessTokenVersion = 2
 
-    So this adds the SPA redirect URIs and assigns the Admin app role. It uses
-    a SPA platform on the EXISTING registration rather than a second
-    registration — TODO.md allows either, and one registration means the
-    SPA requests a scope on its own app, which consents automatically and
-    removes the single highest-risk mismatch in the system (a SPA client id and
-    an API audience that disagree).
+    If any is missing the tenant is not in the state this was written against,
+    and guessing at the difference is worse than stopping.
 
-    The three build variables are already set in the GitHub repository:
-        VITE_ENTRA_CLIENT_ID  = ac696e96-e203-47be-ade8-c35ece8a6c4a
-        VITE_ENTRA_TENANT_ID  = 1a2fce27-b5f6-43c7-a86e-cf0bb74d4672
-        VITE_ENTRA_API_SCOPE  = api://ac696e96-.../access_as_admin
-
-    WHY THE REDIRECT URIs ARE WHAT THEY ARE. msalConfig.js sets
-    `redirectUri: window.location.origin`, so every origin the admin UI is
-    served from must be listed EXACTLY — no trailing slash, no path. The Static
-    Web App's own hostname is included because §6 step 2 runs the site there,
-    on that origin, before DNS moves.
+    THE APP ROLE IS ASSIGNED HERE, NOT ON THE SPA. Roles are defined and
+    assigned on the registration of the API being called, and the `roles` claim
+    rides in the access token regardless of which client asked for it. Splitting
+    the client out (#522) therefore does NOT require re-granting anything.
 
 .PARAMETER AdminUpn
     User principal name to grant the Admin app role. Defaults to the signed-in
@@ -40,9 +36,9 @@
     Print what would change and exit without writing.
 
 .EXAMPLE
-    ./01-entra-spa.ps1 -WhatIf
-    ./01-entra-spa.ps1
-    ./01-entra-spa.ps1 -AdminUpn someone@hybridcloudworks.com
+    ./01-entra-api.ps1 -WhatIf
+    ./01-entra-api.ps1
+    ./01-entra-api.ps1 -AdminUpn someone@hybridcloudworks.com
 
 .NOTES
     Requires: az CLI, signed in (`az login`) as someone who can update app
@@ -52,13 +48,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [string] $AdminUpn,
-    [string] $ApiAppId = 'ac696e96-e203-47be-ade8-c35ece8a6c4a',
-    [string[]] $RedirectUris = @(
-        'https://hybridcloudworks.com',
-        'https://www.hybridcloudworks.com',
-        'https://calm-ground-0d0e6a010.7.azurestaticapps.net',
-        'http://localhost:5173'
-    )
+    [string] $ApiAppId = 'ac696e96-e203-47be-ade8-c35ece8a6c4a'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,12 +62,8 @@ Write-Host "tenant       : $($account.tenant)"
 
 $app = az ad app show --id $ApiAppId -o json | ConvertFrom-Json
 if (-not $app) { throw "App registration $ApiAppId not found in this tenant." }
-$objectId = $app.id
-Write-Host "app          : $($app.displayName)  (object $objectId)"
+Write-Host "app          : $($app.displayName)  (object $($app.id))"
 
-# These are preconditions, not things this script creates. If any is missing the
-# tenant is not in the state this script was written against, and guessing at
-# the difference is worse than stopping.
 $scopes = @($app.api.oauth2PermissionScopes | ForEach-Object { $_.value })
 $roles = @($app.appRoles | Where-Object { $_.isEnabled } | ForEach-Object { $_.value })
 if ($scopes -notcontains 'access_as_admin') {
@@ -89,30 +75,29 @@ if ($roles -notcontains 'Admin') {
 Write-Host "scope        : access_as_admin  [ok]"
 Write-Host "app role     : Admin            [ok]"
 
-Write-Step 'SPA redirect URIs'
-$current = @($app.spa.redirectUris)
-Write-Host "current: $(if ($current) { $current -join ', ' } else { '(none)' })"
-Write-Host "desired: $($RedirectUris -join ', ')"
-
-$missing = @($RedirectUris | Where-Object { $current -notcontains $_ })
-if (-not $missing) {
-    Write-Host 'nothing to add' -ForegroundColor Green
+# The audience the API validates depends on this. With version 2 the token's
+# `aud` is the bare client-id GUID, which is what ENTRA_API_AUDIENCE is set to;
+# with 1 or null it becomes the api:// URI and every token is rejected. See the
+# comment on entra_api_audience in infra/variables.tf.
+$tokenVersion = $app.api.requestedAccessTokenVersion
+Write-Host "token version: $tokenVersion"
+if ($tokenVersion -ne 2) {
+    throw "requestedAccessTokenVersion is '$tokenVersion', expected 2. ENTRA_API_AUDIENCE is the bare GUID and only matches v2 tokens; changing one without the other rejects every token."
 }
-elseif ($PSCmdlet.ShouldProcess($app.displayName, "add SPA redirect URIs: $($missing -join ', ')")) {
-    # Union rather than replace: a redirect URI someone added by hand for a
-    # preview slot is not this script's to delete.
-    $union = @($current + $RedirectUris | Select-Object -Unique)
-    $body = @{ spa = @{ redirectUris = $union } } | ConvertTo-Json -Depth 5 -Compress
-    $tmp = New-TemporaryFile
-    try {
-        Set-Content -Path $tmp -Value $body -Encoding utf8
-        az rest --method PATCH `
-            --url "https://graph.microsoft.com/v1.0/applications/$objectId" `
-            --headers 'Content-Type=application/json' `
-            --body "@$tmp" | Out-Null
-    }
-    finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
-    Write-Host "added: $($missing -join ', ')" -ForegroundColor Green
+
+Write-Step 'The API must expose no client platform of its own'
+# After #522 the SPA has its own registration. A redirect URI left on the API
+# means the resource can still act as a public client, which is the coupling the
+# split removed — see 02-entra-spa-client.ps1.
+$strayRedirects = @($app.spa.redirectUris) + @($app.web.redirectUris) + @($app.publicClient.redirectUris) |
+    Where-Object { $_ }
+if ($strayRedirects) {
+    Write-Host "redirect URIs still on the API registration:" -ForegroundColor Yellow
+    $strayRedirects | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    Write-Host 'Remove them once the SPA registration is live and verified (#522).' -ForegroundColor Yellow
+}
+else {
+    Write-Host 'none  [ok]' -ForegroundColor Green
 }
 
 Write-Step 'Admin app-role assignment (guard gate 1)'
@@ -172,10 +157,9 @@ elseif ($PSCmdlet.ShouldProcess($AdminUpn, 'assign the Admin app role')) {
 }
 
 Write-Step 'Result'
-$after = az ad app show --id $ApiAppId -o json | ConvertFrom-Json
-Write-Host "SPA redirect URIs now: $(@($after.spa.redirectUris) -join ', ')"
-Write-Host ''
 Write-Host 'Gate 2 is separate and still open: the admins/{oid} registry.' -ForegroundColor Yellow
 Write-Host 'Seed it with CMS_BOOTSTRAP_ALLOWED_EMAILS (or _UIDS) on the Function App,'
 Write-Host 'then call POST /api/bootstrapCurrentUserAdmin once signed in. Both gates'
 Write-Host 'must pass — a token with the Admin role but no registry row is still 403.'
+Write-Host ''
+Write-Host 'Next: ./02-entra-spa-client.ps1 creates the SPA registration users sign in with.'

@@ -37,6 +37,37 @@ remains anonymous. Every admin API route validates issuer, audience, expiry, and
 Validate admin, non-admin, expired, wrong-audience, and revoked-token paths. Revisit if the site later
 requires persistent public-user accounts.
 
+### Validated 2026-09-12 (#522) — the tenant now matches this decision
+
+This ADR has specified "one Entra SPA registration, one API registration" since it was accepted.
+The tenant did not: the cutover put an SPA platform on the API's own registration, and three other
+places in the repository (`verify-token.js` DECISION 3, `infra/variables.tf`, and
+`scripts/lib/deploy-console.ps1`) described the two-registration model while the tenant ran one.
+
+The divergence was reasoned, not accidental — one registration means the SPA requests a scope on its
+own app, which consents automatically and removes the risk of a client id and an audience that
+disagree. That risk is now caught before it ships: `assertDeployConfig` refuses a deploy build whose
+Entra ids are not GUIDs (#516). The rationale is kept, struck through, in
+`scripts/cutover/02-entra-spa-client.ps1`.
+
+- **API (resource):** exposes `access_as_admin`, defines the `Admin` and `LabAgent` app roles, holds
+  the role assignments, and is what `ENTRA_API_AUDIENCE` names. **Unchanged by the split** — its app
+  id is the `$ApiAppId` default in `scripts/cutover/01-entra-api.ps1`, which is where identifiers
+  live; the docs redaction gate keeps them out of here.
+- **SPA (client):** a separate registration, public client only, whose app id is the
+  `VITE_ENTRA_CLIENT_ID` repository variable. It exposes nothing and holds no credentials.
+- **Dev client:** a third registration carrying `http://localhost` redirect URIs, so the production
+  one carries none (#521).
+
+Microsoft's stated reason for the separation is permission inheritance: *"if the web API has a higher
+set of permissions, then the client app doesn't inherit them."* One registration means one service
+principal, so any credential or Graph permission added for API use is simultaneously available to a
+browser-delivered public client.
+
+**Observable afterwards:** `azp` (the client that asked) differs from `aud` (the API it is for) in
+every access token. Admin → Health asserts it, so pointing `VITE_ENTRA_CLIENT_ID` back at the API
+turns a verdict red on a page an admin already visits, rather than silently reverting the decision.
+
 ### Validated 2026-09-12 (#514)
 
 **MFA is enforced by security defaults, not Conditional Access.** Checked against the live tenant:
