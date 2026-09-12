@@ -100,8 +100,8 @@ describe('the error names every problem at once', () => {
     let message = '';
     try {
       assertDeployConfig({ VITE_AZURE_FUNCTIONS_URL: '/api' });
-    } catch (err) {
-      message = err.message;
+    } catch ({ message: thrownMessage }) {
+      message = thrownMessage;
     }
     expect(message).toContain('VITE_ENTRA_CLIENT_ID');
     expect(message).toContain('VITE_ENTRA_TENANT_ID');
