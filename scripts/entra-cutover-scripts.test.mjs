@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (name) => readFileSync(join(here, 'cutover', name), 'utf8');
+const readRoot = (...parts) => readFileSync(join(here, ...parts), 'utf8');
 
 /** Scripts that write the registration real users sign in with. */
 const PRODUCTION_SCRIPTS = ['01-entra-api.ps1', '02-entra-spa-client.ps1'];
@@ -96,5 +97,46 @@ describe('the split into a client and a resource (#522)', () => {
     expect(api).toMatch(/assigned on the API app's SERVICE PRINCIPAL/);
     // And the client half must not try to define roles of its own.
     expect(read('02-entra-spa-client.ps1')).not.toMatch(/appRoles/);
+  });
+});
+
+describe('the break-glass rollback', () => {
+  const script = readRoot('rollback', 'restore-admin-signin.ps1');
+  const runbook = readRoot('..', 'docs', 'runbooks', 'admin-signin-rollback.md');
+  const workflow = readRoot('..', '.github', 'workflows', 'deploy-azure-frontend.yml');
+
+  // The runbook lives under docs/, where check_redaction.py rejects real GUIDs,
+  // and the working agreement rejects placeholders in a line meant to be
+  // pasted. The identifiers live in the script for that reason — so the runbook
+  // must not grow a copy of them, in either form.
+  it('keeps identifiers out of the runbook, in both directions', () => {
+    expect(runbook).not.toMatch(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i);
+    expect(runbook).not.toMatch(/REPLACE_ME|<your-|<the-|THEACCOUNTNAME/i);
+  });
+
+  it('points at the script that does hold them', () => {
+    expect(runbook).toContain('scripts/rollback/restore-admin-signin.ps1');
+    expect(script).toMatch(/\$ApiAppId\s*=\s*'[0-9a-f-]{36}'/i);
+  });
+
+  // A rollback that reports success and wrote nothing is worse than one that
+  // fails, because the next step then looks like the broken thing.
+  it('reads the registration back rather than trusting the PATCH', () => {
+    expect(script).toMatch(/Still missing/);
+    expect(script).toMatch(/az ad app show[\s\S]*?\$after/);
+  });
+
+  // The two halves of the rollback have to agree on the input name, and nothing
+  // at runtime would catch them drifting apart.
+  it('names the same workflow input the runbook tells you to set', () => {
+    expect(workflow).toContain('entra_client_id_override');
+    expect(runbook).toContain('entra_client_id_override');
+    expect(script).toContain('entra_client_id_override');
+  });
+
+  it('does not persist the override, and says so where it matters', () => {
+    // In the workflow log, because that is what an operator mid-incident reads.
+    expect(workflow).toMatch(/does NOT persist/i);
+    expect(runbook).toMatch(/does not persist/i);
   });
 });

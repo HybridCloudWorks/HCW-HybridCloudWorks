@@ -19,6 +19,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **A documented, mostly-automated rollback for admin sign-in.** The Entra split
+  left one recovery path — set `VITE_ENTRA_CLIENT_ID` back and redeploy — living
+  only in a pull request description and somebody's memory. It also stopped
+  working the moment the API registration's redirect URIs were cleared, because
+  a frontend pointed at a registration with no redirect URIs fails at the
+  redirect.
+
+  `docs/runbooks/admin-signin-rollback.md` now carries it, and **leads with how
+  to tell whether a rollback is even the right answer** — a table mapping what
+  Admin → Health shows to whether this page applies. A removed App Role and a
+  wrong audience look identical from outside the portal and want opposite
+  responses.
+
+  `deploy-azure-frontend.yml` takes an optional `entra_client_id_override`, so
+  the rollback deploy is one dispatch and needs no repository-variable write.
+  **Extending the real deploy rather than adding a second workflow** is the point:
+  an emergency path that has drifted from the path it is meant to replace is
+  worse than no emergency path, and a copy of 340 lines of build-and-upload would
+  drift. Blank is falsy in a GitHub expression, so an ordinary run is unchanged,
+  and the run logs which id it built with so the record is in the run rather than
+  in a memory.
+
+  **What stays manual, and why that is deliberate.** Restoring the redirect URIs
+  needs Entra directory rights, and the deploy identity has none — `infra/oidc.tf`
+  explains that Azure Owner does not grant them. Granting CI Application
+  Administrator so a rollback is one click would hand every future workflow run
+  the power to rewrite app registrations, permanently, against an incident that
+  may never happen. `scripts/rollback/restore-admin-signin.ps1` does that half,
+  reads the registration back rather than trusting the PATCH, and prints the
+  client id for the workflow input.
+
+  The identifiers live in the script because the two house rules meet here and
+  appear to conflict: the docs redaction gate rejects real GUIDs under `docs/`,
+  and the working agreement rejects placeholders in a line meant to be pasted. A
+  runbook full of `00000000-…` would satisfy the gate and fail the operator.
+  `scripts/` is not scanned, so the runbook says "run this" and the values it
+  needs are concrete. A test asserts the runbook contains neither a GUID nor a
+  placeholder, and that the runbook, the script and the workflow all name the
+  same input.
+
 - **Sign-in lands on a page built for it, not on the public home page (#520).**
   `msalConfig.js` set `redirectUri: window.location.origin`, so Entra returned
   the browser to `/` — a page that had never touched MSAL, because

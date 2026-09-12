@@ -52,6 +52,14 @@ name: Deploy Frontend
 #       - 'frontend/**'
 on:
   workflow_dispatch:
+    inputs:
+      entra_client_id_override:
+        description: >-
+          BREAK-GLASS ONLY. Build with this Entra application (client) id instead
+          of the VITE_ENTRA_CLIENT_ID repository variable. Leave blank for a
+          normal deploy. See docs/runbooks/admin-signin-rollback.md.
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -154,6 +162,24 @@ jobs:
           # secret), named per the variable standard: 2 words, no provider prefix.
           AZURE_FUNCTIONS_URL: ${{ vars.FUNCTIONS_URL }}
 
+      # An emergency deploy must say what it did, in the log, without anyone
+      # having to reconstruct it from the inputs afterwards.
+      - name: Note the break-glass override
+        if: inputs.entra_client_id_override != ''
+        run: |
+          echo "::warning title=Break-glass deploy::Building with an Entra client id from the workflow input, not the repository variable."
+          echo "  building with : ${{ inputs.entra_client_id_override }}"
+          echo "  variable holds: ${{ vars.VITE_ENTRA_CLIENT_ID }}"
+          echo ""
+          echo "This does NOT persist. The next deploy reads the variable again."
+          echo "To make it permanent, set the variable to the same value."
+          echo ""
+          echo "If you are rolling back to the API registration, its redirect"
+          echo "URIs must exist or sign-in fails at the redirect. This workflow"
+          echo "cannot add them — the deploy identity has no Entra directory"
+          echo "rights, by design (infra/oidc.tf). The command is in"
+          echo "docs/runbooks/admin-signin-rollback.md."
+
       - name: Build
         run: npm run build
         env:
@@ -163,7 +189,17 @@ jobs:
           # or "/api" when the SPA and the Function App share an origin.
           VITE_AZURE_FUNCTIONS_URL: ${{ vars.FUNCTIONS_URL }}
           # Entra ID — public client registration values (not secrets)
-          VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
+          # Normally the repository variable. The override exists so a broken
+          # admin sign-in can be rolled back in one dispatch, without first
+          # needing whatever permission writes repository variables — see
+          # docs/runbooks/admin-signin-rollback.md. Blank is falsy in a GitHub
+          # expression, so an ordinary run is unaffected.
+          #
+          # IT DOES NOT PERSIST. The next deploy reads the variable again, so
+          # the variable must still be corrected to make a rollback stick. The
+          # step below says so in the log, where an operator mid-incident will
+          # actually see it.
+          VITE_ENTRA_CLIENT_ID: ${{ inputs.entra_client_id_override || vars.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}
           # Without this the SPA requests a token the backend rejects on
           # audience: sign-in succeeds and every API call 401s (TODO.md).

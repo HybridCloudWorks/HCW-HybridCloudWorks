@@ -28,6 +28,9 @@ release records; this site holds the longer narrative.
   review of record: 62 findings with evidence, failure mode and
   recommendation, plus the areas that came back sound
 - [Deployment runbook](runbooks/deployment-runbook.md)
+- [Admin sign-in rollback](runbooks/admin-signin-rollback.md) — what to do when
+  nobody can sign in to `/admin`, and how to tell a configuration problem from
+  the other things that look like one
 - [Alerting and support](runbooks/alerting-and-support.md)
 - [Copilot code review MCP servers](runbooks/copilot-code-review-mcp.md)
 - [IaC repository standard](standards/iac-repository-standard.md)
