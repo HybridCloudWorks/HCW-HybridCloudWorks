@@ -123,6 +123,55 @@ describe('getCurrentAdminStatus', () => {
       false
     );
   });
+
+  // #503: the frontend used to offer "Bootstrap My Admin Access" to everyone it
+  // could not confirm, because it had no way to know the gate. Now it asks.
+  it('canBootstrap is true only with no record, no active admins, and an allowlist match', async () => {
+    const h = createAdminIdentityHandlers({
+      guard: guardWith(),
+      store: makeStore(),
+      env: { CMS_BOOTSTRAP_ALLOWED_UIDS: 'oid-1' },
+      ...fixed,
+    });
+    const body = JSON.parse((await h.getCurrentAdminStatus(makeRequest(), context)).body);
+    expect(body).toMatchObject({ isAdmin: false, canBootstrap: true });
+  });
+
+  it('canBootstrap is false when another admin is already active', async () => {
+    const store = makeStore({ queryDocs: vi.fn(async () => [{ id: 'someone-else' }]) });
+    const h = createAdminIdentityHandlers({
+      guard: guardWith(),
+      store,
+      env: { CMS_BOOTSTRAP_ALLOWED_UIDS: 'oid-1' },
+      ...fixed,
+    });
+    const body = JSON.parse((await h.getCurrentAdminStatus(makeRequest(), context)).body);
+    expect(body.canBootstrap).toBe(false);
+  });
+
+  it('canBootstrap is false without an allowlist match, and asks the registry nothing', async () => {
+    const store = makeStore();
+    const h = createAdminIdentityHandlers({ guard: guardWith(), store, env: {}, ...fixed });
+    const body = JSON.parse((await h.getCurrentAdminStatus(makeRequest(), context)).body);
+    expect(body.canBootstrap).toBe(false);
+    expect(store.queryDocs).not.toHaveBeenCalled();
+  });
+
+  // The owner's case in #503, with the deactivation twist: an account that
+  // already has a row must never be offered a self-promotion to super_admin.
+  it('canBootstrap is false for a deactivated account that still holds a record', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'oid-1', role: 'super_admin', active: false })),
+    });
+    const h = createAdminIdentityHandlers({
+      guard: guardWith(),
+      store,
+      env: { CMS_BOOTSTRAP_ALLOWED_UIDS: 'oid-1' },
+      ...fixed,
+    });
+    const body = JSON.parse((await h.getCurrentAdminStatus(makeRequest(), context)).body);
+    expect(body).toMatchObject({ isAdmin: false, canBootstrap: false });
+  });
 });
 
 describe('getAuthExpectations', () => {

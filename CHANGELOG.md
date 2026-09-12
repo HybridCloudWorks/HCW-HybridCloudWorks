@@ -19,6 +19,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **An expired token told the owner he was not authorized, and offered to
+  re-provision him (#503).** Opening `/admin/integrations` on 2026-09-11 showed
+  **Access Denied — spatino@hybridcloudworks.com is not authorized** with a
+  **Bootstrap My Admin Access** button. Signing out and back in "fixed" it,
+  which is the tell: the problem was never authorization. The `admins/{oid}`
+  record was correct the whole time.
+
+  **Three outcomes were returning one value.** `fetchAdminStatusFromBackend`
+  answered `{ isAdmin: false }` for a rejected token, for a call that never
+  completed, and for a server that genuinely said no. Only the third is an
+  authorization answer; the first two are a check that could not run, reported
+  as a check that ran and refused. The warning string it logged —
+  `'Not an admin or token expired'` — admitted on the line above that it could
+  not tell which. That is the same defect class as `unknown` versus
+  `disconnected` on the Recording Hub and the 401-versus-403 saga that cost
+  #358 two days.
+
+  The hook now returns a discriminated `accessState` — `authorized`,
+  `unauthorized`, `unknown` — and `unknown` is never cached, so a transient
+  failure does not sit in front of the portal for five minutes. `authedFetch`
+  keeps the HTTP status on the error it throws and `acquireApiToken` tags
+  every failure with the one action that recovers it, which is what makes the
+  three distinguishable at all: `requireUser` on the server denies only with
+  401, so a non-200 from this route is never a verdict about the caller.
+
+  **What the owner sees now.** An expired session redirects to Entra and comes
+  back signed in, without a denial and without anything to click — once per
+  tab, because a second automatic attempt against a genuinely broken
+  configuration is an infinite redirect loop with no screen to read. After
+  that it is an honest "Could not verify your access" card with a **Sign in
+  again** button; an unreachable API gets the same card with **Try again**.
+  Access Denied is now reached only by a real 200 saying so.
+
+  **And the bootstrap button is no longer guessed at.** `getCurrentAdminStatus`
+  returns `canBootstrap`, the server running the same three-way gate the POST
+  enforces, so the button appears only when pressing it would succeed — never
+  for an account that already holds a registry row, active or deactivated.
+  Offering a deactivated admin a self-promotion to `super_admin` is the
+  opposite of what the deactivation meant.
+
 - **The Monday refresh put the six GitHub exams straight back into the Azure
   catalogue, hours after #507 removed them (#496).** Found by dispatching the
   workflow #499 had just widened — run 34627119281 on 2026-09-11 opened a pull
