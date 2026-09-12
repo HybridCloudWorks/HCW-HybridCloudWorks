@@ -105,14 +105,15 @@ export function parseWwwAuthenticate(header) {
 
   const params = {};
   // Quoted values only, which is what Entra and this API both emit. No
-  // backslash-unescaping: `deny()` strips quotes and backslashes from the
-  // description before it ever reaches a header, so a quote inside a value
-  // cannot occur, and inventing a rule for it would be untested guesswork.
+  // RFC 7235 quoted-string, escaped characters included. This API strips
+  // quotes and backslashes before they reach a header, but a claims
+  // challenge from Entra is not ours to constrain, and a parser that drops
+  // half a value is worse than one that drops all of it.
   // A token68 or unquoted parameter yields nothing rather than a half-guess.
-  const pattern = /([a-z_]+)="([^"]*)"/gi;
+  const pattern = /([a-z_]+)="((?:[^"\\]|\\.)*)"/gi;
   let match = pattern.exec(value);
   while (match !== null) {
-    params[match[1].toLowerCase()] = match[2];
+    params[match[1].toLowerCase()] = match[2].replace(/\\(.)/g, '$1');
     match = pattern.exec(value);
   }
   return params;

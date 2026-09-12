@@ -54,7 +54,14 @@ import { bearerTokenFrom } from './verify-token.js';
  * the header into something a client parses wrongly rather than not at all —
  * the worse of the two failures.
  */
-const quote = (value) => String(value).replace(/[\\"]/g, '');
+const quote = (value) =>
+  String(value)
+    // CR/LF first: a newline in a header value is response splitting, and
+    // nothing here is attacker-supplied today only because every description
+    // is a literal. That is a property of the current call sites, not of this
+    // function, so it is enforced here where it cannot be forgotten.
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\\"]/g, '');
 
 /**
  * Uniform JSON error.

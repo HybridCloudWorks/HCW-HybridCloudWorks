@@ -90,6 +90,30 @@ describe('parseWwwAuthenticate (#517)', () => {
   it('ignores an unquoted parameter rather than half-parsing it', () => {
     expect(parseWwwAuthenticate('Bearer error=invalid_token')).toEqual({});
   });
+
+  // A quoted-string may contain an escaped quote. Stopping at the first one
+  // would return a truncated value that looks complete, which is worse than
+  // returning nothing.
+  it('unescapes a quoted-string rather than stopping at the first inner quote', () => {
+    expect(
+      parseWwwAuthenticate(
+        'Bearer error="invalid_token", error_description="the \\"aud\\" claim is wrong"'
+      )
+    ).toEqual({ error: 'invalid_token', error_description: 'the "aud" claim is wrong' });
+  });
+
+  // This API does not send claims challenges, but Entra's shape is the reason
+  // the parser is general: it is the seam a Conditional Access authentication
+  // context would arrive through.
+  it('reads an Entra-shaped claims challenge', () => {
+    const header =
+      'Bearer realm="", authorization_uri="https://login.microsoftonline.com/common/oauth2/authorize", ' +
+      'error="insufficient_claims", claims="eyJhY2Nlc3NfdG9rZW4iOnt9fQ=="';
+    expect(parseWwwAuthenticate(header)).toMatchObject({
+      error: 'insufficient_claims',
+      claims: 'eyJhY2Nlc3NfdG9rZW4iOnt9fQ==',
+    });
+  });
 });
 
 describe('a refusal carries the reason to the caller (#517)', () => {

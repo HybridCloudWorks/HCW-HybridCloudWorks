@@ -222,6 +222,16 @@ describe('a 401 says why (#517)', () => {
     expect(challengeOf(error).match(/"/g).length % 2).toBe(0);
   });
 
+  // Nothing reaching `quote()` is attacker-supplied today, because every
+  // description is a literal. That is a property of the current call sites and
+  // not of the function, so the header builder enforces it rather than
+  // trusting them: a newline in a header value is response splitting.
+  it('cannot emit a header containing CR or LF', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith('bad'));
+    expect(error.headers['WWW-Authenticate']).not.toMatch(/[\r\n]/);
+  });
+
   it('does not put a challenge on a 403, which is not an authentication failure', async () => {
     const g = buildGuard({ admins: { 'oid-default': { role: 'viewer', active: true } } });
     const { error } = await g.requireRole(requestWith(mintToken()), 'publisher');
