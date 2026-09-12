@@ -43,9 +43,12 @@ function normalizeCertification(rawData) {
       // The Firebase Storage bucket is gone (#518). This used to rewrite the
       // GCS form into the Firebase REST form "so storage rules apply"; both
       // point at the same decommissioned project, so the rewrite produced one
-      // dead URL from another. Undefined, so the caller's existing falsy
+      // dead URL from another. Undefined, so the caller’s existing falsy
       // branch omits the image rather than rendering a broken frame.
-      if (/^https:\/\/(storage|firebasestorage)\.googleapis\.com\//.test(key)) return undefined;
+      // `http` and case-insensitive, matching what blogUtils.js gets for free
+      // from `new URL().hostname` — the two must agree or one page renders a
+      // broken image the other has already learned to skip.
+      if (/^https?:\/\/(storage|firebasestorage)\.googleapis\.com\//i.test(key)) return undefined;
       return !key.startsWith('http') && !key.startsWith('/') && !key.startsWith('data:')
         ? `/${key}`
         : key;

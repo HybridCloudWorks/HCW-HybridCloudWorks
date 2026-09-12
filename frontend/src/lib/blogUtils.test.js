@@ -106,6 +106,11 @@ describe('normalizePublicImageUrl', () => {
   // rendered a broken frame with `og:image` pointing at a 404.
   it.each([
     'https://storage.googleapis.com/my-bucket/covers/hero.png',
+    // `http` and mixed case too: AboutPage.jsx matches by regex rather than by
+    // `new URL().hostname`, and the two must agree or one page renders a broken
+    // image the other has learned to skip.
+    'http://storage.googleapis.com/my-bucket/covers/hero.png',
+    'HTTPS://FirebaseStorage.GoogleAPIs.com/v0/b/my-bucket/o/covers%2Fhero.png?alt=media',
     'https://firebasestorage.googleapis.com/v0/b/my-bucket/o/covers%2Fhero.png?alt=media',
     // A real one, from frontend/data/content-manifest.json.
     'https://firebasestorage.googleapis.com/v0/b/hybridcloudworks-61e8d.appspot.com/o/covers%2F1775288380237-hero.png?alt=media',
