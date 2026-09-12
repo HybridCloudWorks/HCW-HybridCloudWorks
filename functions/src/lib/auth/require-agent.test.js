@@ -44,6 +44,33 @@ describe('construction', () => {
   });
 });
 
+describe('the guards stay disjoint (#515)', () => {
+  // The agent path is client-credentials: `roles`, and no `scp`. The admin
+  // path requires `scp`. Until #515 the only thing keeping a user's token off
+  // this path was the two role names being different, which would not have
+  // survived a principal assigned both.
+  it('an agent token carries roles and no scp, and still authenticates', async () => {
+    const { guard } = guardWith();
+    const res = await guard.requireAgent(request(), 'vps-1');
+
+    expect(res.error).toBeNull();
+    expect(res.identity.scp).toBeUndefined();
+  });
+
+  it('rejects a delegated token on the agent path, whatever roles it carries', async () => {
+    const { guard, lookupAgent, auditDenial } = guardWith({
+      claims: { scp: 'access_as_admin' },
+    });
+    const res = await guard.requireAgent(request(), 'vps-1');
+
+    expect(res.error.status).toBe(403);
+    expect(lookupAgent).not.toHaveBeenCalled();
+    expect(auditDenial).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'delegated-token-on-agent-path' })
+    );
+  });
+});
+
 describe('authentication', () => {
   it('401s with no bearer token, without reading the registry', async () => {
     const { guard, lookupAgent } = guardWith();

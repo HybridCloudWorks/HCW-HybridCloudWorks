@@ -107,6 +107,20 @@ export function createAgentGuard({ verifier, lookupAgent, auditDenial }) {
 
     const oid = identity.oid ?? identity.sub;
 
+    // An agent token is CLIENT-CREDENTIALS: it carries `roles` and, by
+    // construction, no `scp`. A token bearing a delegated scope is a user's
+    // token, and a user's token must never satisfy the agent path however many
+    // app roles it happens to carry (#515).
+    //
+    // The disjointness this file argues for below was, until now, enforced only
+    // by the two role names being different. This is the other half: the admin
+    // guard requires `scp` and this one refuses it, so neither token type can
+    // cross into the other's path even if a principal were assigned both roles.
+    if (typeof identity.scp === 'string' && identity.scp.trim()) {
+      audit({ outcome: 'denied', reason: 'delegated-token-on-agent-path', oid, agentId });
+      return { agent: null, identity: null, error: deny(403, 'Agent access required') };
+    }
+
     // Gate 1: the coarse App Role.
     const claimRoles = Array.isArray(identity.roles) ? identity.roles : [];
     if (!claimRoles.includes(ENTRA_LAB_AGENT_APP_ROLE)) {

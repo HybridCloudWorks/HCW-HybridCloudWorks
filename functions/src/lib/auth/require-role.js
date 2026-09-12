@@ -35,6 +35,7 @@
 
 import {
   ENTRA_ADMIN_APP_ROLE,
+  ENTRA_API_DELEGATED_SCOPE,
   ROLE_CACHE_MAX_ENTRIES,
   ROLE_CACHE_TTL_MS,
   satisfiesRole,
@@ -192,13 +193,37 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
       return { user: null, role: null, error: deny(401, 'Authentication required') };
     }
 
+    let user;
     try {
-      const user = await verifier.verify(token);
-      return { user, role: null, error: null };
+      user = await verifier.verify(token);
     } catch (err) {
       audit({ outcome: 'denied', reason: 'invalid-token', detail: err.message });
       return { user: null, role: null, error: deny(401, 'Authentication required') };
     }
+
+    // THE SCOPE GATE. An ID token is not an access token (#515).
+    //
+    // It lives here, in authenticate(), rather than in requireRole below, so
+    // that requireUser inherits it — getAuthExpectations and
+    // bootstrapCurrentUserAdmin are reached that way, and they are the thinnest
+    // surface in the system.
+    //
+    // See ENTRA_API_DELEGATED_SCOPE in roles.js for why `scp` is the claim that
+    // works and `roles` is not. Agent callers do not come through here at all:
+    // require-agent.js runs its own client-credentials path, which has `roles`
+    // and no `scp` by construction.
+    const scopes = typeof user.scp === 'string' ? user.scp.split(' ').filter(Boolean) : [];
+    if (!scopes.includes(ENTRA_API_DELEGATED_SCOPE)) {
+      audit({
+        outcome: 'denied',
+        reason: 'missing-scope',
+        oid: user.oid ?? user.sub,
+        required: ENTRA_API_DELEGATED_SCOPE,
+      });
+      return { user: null, role: null, error: deny(401, 'Authentication required') };
+    }
+
+    return { user, role: null, error: null };
   }
 
   return {

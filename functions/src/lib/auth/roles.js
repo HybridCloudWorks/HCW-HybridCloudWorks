@@ -70,6 +70,32 @@ export const ADMIN_ROLES = Object.freeze({
 export const ENTRA_ADMIN_APP_ROLE = 'Admin';
 
 /**
+ * The delegated scope a user-facing caller must hold, and the claim that
+ * separates an access token from an ID token (#515).
+ *
+ * DECISION 3 in verify-token.js explains why two app registrations make `aud`
+ * meaningful. The tenant is currently ONE registration, so the SPA's client id
+ * and this API's audience are the same GUID — and an ID token minted for that
+ * SPA carries the same `aud`, the same v2 issuer and the same signing key as an
+ * access token. `aud` cannot tell them apart.
+ *
+ * `scp` can. Entra puts it in delegated ACCESS tokens and never in ID tokens.
+ * That is the whole difference between a token minted for the browser and a
+ * token minted for this API, so requiring it is what makes the single-
+ * registration model survivable — and it keeps working after the split, which
+ * is why it is a gate rather than a stopgap.
+ *
+ * Note `roles` would NOT have worked here, though DECISION 3 originally
+ * proposed it: Entra emits assigned app roles in both token types, so an ID
+ * token for an `Admin`-assigned user carries `roles: ['Admin']` and would clear
+ * a roles-presence check unchanged.
+ *
+ * Case-sensitive and exact, for the same reason ENTRA_ADMIN_APP_ROLE is: a
+ * second spelling is a silent lockout or a silent bypass.
+ */
+export const ENTRA_API_DELEGATED_SCOPE = 'access_as_admin';
+
+/**
  * How long a resolved role may be cached, in milliseconds.
  *
  * This is the revocation SLA: a demoted or deactivated admin keeps their old
