@@ -52,6 +52,15 @@ This project has not cut a tagged release; entries are grouped under
   A 401 with no challenge — an older API, or a proxy that strips the header —
   behaves exactly as it did before, and there is a test pinning that.
 
+  The `invalid_token` description is a fixed sentence rather than the verifier's
+  own message. `verify-token.js` says its claim assertions "land in
+  `admin_audit_logs` and never reach the client", and the header becoming
+  readable is exactly when that promise needed enforcing: those messages
+  separate expired from bad-signature from wrong-tenant, and `jwt audience
+  invalid. expected: …` names configuration outright. The client cannot act on
+  the difference — all of them mean sign in again — so only the audit row keeps
+  it.
+
 ### Changed
 
 - **MFA is enforced by security defaults, not Conditional Access (#514).**

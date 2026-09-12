@@ -192,6 +192,27 @@ describe('a 401 says why (#517)', () => {
     expect(challengeOf(error)).not.toContain('error="');
   });
 
+  // verify-token.js promises its claim assertions stay server-side. The header
+  // became readable in #517, so that promise needed enforcing rather than
+  // restating: these messages separate "expired" from "bad signature" from
+  // "wrong tenant", and `jwt audience invalid. expected: …` names configuration
+  // outright. The client cannot act on the difference — every one means sign in
+  // again — so only the audit row gets it.
+  it('never leaks the verifier message to the client', async () => {
+    const g = buildGuard();
+    const expired = mintToken({}, { expiresIn: '-10m' });
+    const { error } = await g.requireUser(requestWith(expired));
+
+    expect(g.denials.at(-1)).toMatchObject({ reason: 'invalid-token' });
+    expect(g.denials.at(-1).detail).toMatch(/expired/i);
+
+    const challenge = error.headers['WWW-Authenticate'];
+    expect(challenge).toContain('error="invalid_token"');
+    expect(challenge).toContain('could not be verified');
+    expect(challenge).not.toMatch(/expired|signature|audience|tid|issuer/i);
+    expect(error.body).not.toMatch(/expired|signature|audience/i);
+  });
+
   it('never splits the header on a quote in the description', async () => {
     const g = buildGuard();
     const { error } = await g.requireUser(requestWith('not-a-jwt-at-"all"'));

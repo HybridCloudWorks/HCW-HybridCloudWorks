@@ -251,12 +251,24 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
       user = await verifier.verify(token);
     } catch (err) {
       audit({ outcome: 'denied', reason: 'invalid-token', detail: err.message });
+      // A FIXED DESCRIPTION, NOT `err.message`.
+      //
+      // verify-token.js says of its own assertions that the detail "lands in
+      // admin_audit_logs and never reaches the client", and echoing it here
+      // would have broken that the moment the header became readable. The
+      // verifier's messages distinguish an expired token from a bad signature
+      // from a wrong tenant, which is a free oracle for anyone probing, and
+      // `jwt audience invalid. expected: …` names configuration outright.
+      //
+      // The client does not need the difference: every one of them means the
+      // same thing to it — sign in again. The audit row above keeps the reason
+      // for whoever is actually debugging.
       return {
         user: null,
         role: null,
         error: deny(401, 'Authentication required', {
           code: 'invalid_token',
-          description: err.message,
+          description: 'The access token could not be verified.',
         }),
       };
     }
