@@ -42,6 +42,15 @@ describe('each variable is required', () => {
       /VITE_ENTRA_TENANT_ID/
     );
   });
+
+  // Every check here trims, and the API base was the one that did not — an
+  // all-whitespace value is how a variable set from a broken shell expansion
+  // arrives, and untrimmed it is truthy enough to be baked into the bundle.
+  it('refuses an all-whitespace API base, which is truthy but useless', () => {
+    expect(() => assertDeployConfig({ ...good(), VITE_AZURE_FUNCTIONS_URL: '   ' })).toThrow(
+      /VITE_AZURE_FUNCTIONS_URL/
+    );
+  });
 });
 
 // The regression. These are the values a reader of the old .env.example was
@@ -75,6 +84,14 @@ describe('the API scope', () => {
     expect(() =>
       assertDeployConfig({ ...good(), VITE_ENTRA_API_SCOPE: `api://${CLIENT}/.default` })
     ).not.toThrow();
+  });
+
+  // The prefix on its own names no resource and no permission. Well-formed and
+  // useless is still useless.
+  it('refuses a bare api:// with nothing after it', () => {
+    expect(() => assertDeployConfig({ ...good(), VITE_ENTRA_API_SCOPE: 'api://' })).toThrow(
+      /VITE_ENTRA_API_SCOPE/
+    );
   });
 });
 

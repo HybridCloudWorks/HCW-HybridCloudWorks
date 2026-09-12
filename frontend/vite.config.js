@@ -112,7 +112,10 @@ const ENTRA_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 export function assertDeployConfig(env = {}) {
   const problems = [];
 
-  if (!env.VITE_AZURE_FUNCTIONS_URL) {
+  // Trimmed like every other check here. An all-whitespace value is how a
+  // variable set from a broken shell expansion arrives, and untrimmed it is
+  // truthy — so it would pass this gate and be baked into the bundle.
+  if (!(env.VITE_AZURE_FUNCTIONS_URL || '').trim()) {
     problems.push(
       'VITE_AZURE_FUNCTIONS_URL is required for a deploy build. Set it to "/api" ' +
         'for a same-origin deployment, or to the Function App origin followed by ' +
@@ -135,8 +138,11 @@ export function assertDeployConfig(env = {}) {
   // Deliberately not rejecting `/.default`: it is a real, working delegated
   // request shape against Entra, just not the one this registration is built
   // around. The lever for that is the documentation, not the build.
+  // The prefix alone is not a scope: `api://` names no resource and no
+  // permission, so require something after it rather than accepting a value
+  // that is well-formed and useless.
   const scope = (env.VITE_ENTRA_API_SCOPE || '').trim();
-  if (!scope.startsWith('api://')) {
+  if (!/^api:\/\/.+/.test(scope)) {
     problems.push(
       `VITE_ENTRA_API_SCOPE must start with "api://" for a deploy build; got ${
         scope ? `"${scope}"` : '(empty)'
