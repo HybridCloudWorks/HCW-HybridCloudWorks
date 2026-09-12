@@ -19,13 +19,21 @@ const FRAGMENT = '#code=1.AUYA-secret-authorization-code&state=abc';
 
 let replaceState;
 let locationReplace;
+let originalLocation;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  window.location.hash = FRAGMENT;
   replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {});
   locationReplace = vi.fn();
-  // jsdom's location is not writable; only the one method is needed.
+
+  // THE DESCRIPTOR IS SAVED BECAUSE vi.restoreAllMocks() DOES NOT UNDO THIS.
+  //
+  // jsdom's `window.location` is not writable, so the only way to stub
+  // `replace` is to redefine the property — and a redefinition is not a mock.
+  // Leaving it in place leaked a crippled `location` into every later file in
+  // the same worker, which surfaced as an unrelated route test failing in the
+  // full run and passing on its own. Restore it explicitly, below.
+  originalLocation = Object.getOwnPropertyDescriptor(window, 'location');
   Object.defineProperty(window, 'location', {
     configurable: true,
     value: { ...window.location, hash: FRAGMENT, replace: locationReplace },
@@ -34,6 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (originalLocation) Object.defineProperty(window, 'location', originalLocation);
   vi.restoreAllMocks();
 });
 
