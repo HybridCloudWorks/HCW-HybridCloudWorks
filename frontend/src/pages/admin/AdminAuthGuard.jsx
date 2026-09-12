@@ -154,9 +154,13 @@ export default function AdminAuthGuard({ children }) {
                   Sign in again
                 </Button>
               ) : (
-                <Button onClick={recheck} disabled={adminStatusLoading} className="gap-2">
+                // No busy state on this button: the spinner branch above
+                // catches `adminStatusLoading` first, so this whole card is
+                // replaced by the spinner for the duration of the retry. A
+                // "Checking..." label here would never render.
+                <Button onClick={recheck} className="gap-2">
                   <RefreshCw className="h-4 w-4" />
-                  {adminStatusLoading ? 'Checking...' : 'Try again'}
+                  Try again
                 </Button>
               )}
               <Button variant="outline" onClick={handleSignOut}>
