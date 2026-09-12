@@ -155,6 +155,61 @@ describe('token verification', () => {
   });
 });
 
+describe('a 401 says why (#517)', () => {
+  // Until #517 every 401 here was a bare status code, so the admin portal could
+  // not tell an expired token from one missing a scope — and offered the same
+  // re-authentication for both, which recovers only the first.
+  const challengeOf = (error) => error.headers['WWW-Authenticate'];
+
+  it('names invalid_token when the credential is bad', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ tid: undefined })));
+
+    expect(error.status).toBe(401);
+    expect(challengeOf(error)).toMatch(/^Bearer /);
+    expect(challengeOf(error)).toContain('error="invalid_token"');
+  });
+
+  // The load-bearing one. insufficient_scope means the token verified and lacks
+  // a permission, so re-acquiring it returns an identical token and an
+  // identical refusal. The client keys on this to NOT retry.
+  it('names insufficient_scope when the token is valid and lacks the scope', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ scp: undefined })));
+
+    expect(error.status).toBe(401);
+    expect(challengeOf(error)).toContain('error="insufficient_scope"');
+    expect(challengeOf(error)).toContain(ENTRA_API_DELEGATED_SCOPE);
+  });
+
+  // RFC 6750 reserves `error` for a credential that was presented and refused.
+  it('omits the error code when no credential was presented at all', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(null));
+
+    expect(error.status).toBe(401);
+    expect(challengeOf(error)).toMatch(/^Bearer /);
+    expect(challengeOf(error)).not.toContain('error="');
+  });
+
+  it('never splits the header on a quote in the description', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith('not-a-jwt-at-"all"'));
+
+    // One parameter list, no stray quotes that would make a parser read a
+    // truncated value as a complete one.
+    expect(challengeOf(error).match(/"/g).length % 2).toBe(0);
+  });
+
+  it('does not put a challenge on a 403, which is not an authentication failure', async () => {
+    const g = buildGuard({ admins: { 'oid-default': { role: 'viewer', active: true } } });
+    const { error } = await g.requireRole(requestWith(mintToken()), 'publisher');
+
+    expect(error.status).toBe(403);
+    expect(error.headers['WWW-Authenticate']).toBeUndefined();
+  });
+});
+
 describe('an ID token is not an access token (#515)', () => {
   // The tenant runs ONE app registration, so the SPA's client id and this
   // API's audience are the same GUID. An ID token minted for that SPA carries

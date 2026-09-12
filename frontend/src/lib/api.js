@@ -87,6 +87,38 @@ async function fetchWithTimeout(url, options, timeoutMs, fnName) {
 }
 
 /**
+ * Pull the RFC 6750 parameters out of a `WWW-Authenticate` header.
+ *
+ * The API says why it refused a request (#517), and the reason is the
+ * difference between "sign in again" and "someone has to fix a setting".
+ * Exported so it can be tested without a network.
+ *
+ * Returns `{}` for a missing, non-Bearer or unparseable header — a caller that
+ * learns nothing should behave as it did before the header existed, not throw.
+ *
+ * @param {string|null|undefined} header
+ * @returns {{error?: string, error_description?: string, realm?: string, claims?: string}}
+ */
+export function parseWwwAuthenticate(header) {
+  const value = typeof header === 'string' ? header.trim() : '';
+  if (!/^Bearer\b/i.test(value)) return {};
+
+  const params = {};
+  // Quoted values only, which is what Entra and this API both emit. No
+  // backslash-unescaping: `deny()` strips quotes and backslashes from the
+  // description before it ever reaches a header, so a quote inside a value
+  // cannot occur, and inventing a rule for it would be untested guesswork.
+  // A token68 or unquoted parameter yields nothing rather than a half-guess.
+  const pattern = /([a-z_]+)="([^"]*)"/gi;
+  let match = pattern.exec(value);
+  while (match !== null) {
+    params[match[1].toLowerCase()] = match[2];
+    match = pattern.exec(value);
+  }
+  return params;
+}
+
+/**
  * Authenticated fetch wrapper.
  * Automatically injects an Entra Bearer token.
  * Admin status forces a token refresh so a newly granted role is visible immediately.
@@ -173,6 +205,13 @@ export async function authedFetch(fnName, { token: presetToken, ...options } = {
     // own-properties behaves exactly as before.
     error.status = res.status;
     error.fnName = fnName;
+    // The reason, when the API gave one (#517). `error.status` told a caller
+    // that the request failed; this tells them what would fix it — and the
+    // distinction matters most on a 401, where `invalid_token` means sign in
+    // again and `insufficient_scope` means signing in again changes nothing.
+    // Readable cross-origin only because cors.js names it in
+    // Access-Control-Expose-Headers.
+    error.wwwAuthenticate = parseWwwAuthenticate(res.headers?.get?.('www-authenticate'));
     throw error;
   }
 

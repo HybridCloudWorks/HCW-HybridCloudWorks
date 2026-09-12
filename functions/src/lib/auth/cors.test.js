@@ -52,6 +52,20 @@ describe('CORS evaluation', () => {
     headers: { get: (n) => headers[n.toLowerCase()] ?? null },
   });
 
+  // Without this the 401 reason from #517 is set by the API and unreadable by
+  // the SPA: WWW-Authenticate is not CORS-safelisted, so a cross-origin caller
+  // gets null from res.headers.get() unless the server names it here.
+  it('exposes WWW-Authenticate, so the browser can read why a 401 happened', () => {
+    const r = cors.evaluate(req({ origin: 'https://hybridcloudworks.com' }));
+    expect(r.headers['Access-Control-Expose-Headers']).toContain('WWW-Authenticate');
+  });
+
+  it('exposes it on the actual response, not only the preflight', () => {
+    const actual = cors.evaluate(req({ origin: 'https://hybridcloudworks.com' }, 'GET'));
+    expect(actual.preflight).toBe(false);
+    expect(actual.headers['Access-Control-Expose-Headers']).toContain('WWW-Authenticate');
+  });
+
   it('allows a request with no Origin — CORS is not an authorization control', () => {
     const r = cors.evaluate(req({}));
     expect(r.allowed).toBe(true);

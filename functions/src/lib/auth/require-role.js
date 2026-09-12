@@ -47,13 +47,58 @@ import {
 // authenticated request takes (TODO.md T-408).
 import { bearerTokenFrom } from './verify-token.js';
 
-/** Uniform JSON error. FIX (A10): the previous 401/403 paths set no
- *  Content-Type, so Azure served them as text/plain and a frontend calling
- *  `res.json()` on a 401 got a parse error instead of the message. */
-function deny(status, error) {
+/**
+ * Escape a value for an RFC 7235 quoted-string.
+ *
+ * These descriptions are ours, not a caller's, but a stray quote would split
+ * the header into something a client parses wrongly rather than not at all —
+ * the worse of the two failures.
+ */
+const quote = (value) => String(value).replace(/[\\"]/g, '');
+
+/**
+ * Uniform JSON error.
+ *
+ * FIX (A10): the previous 401/403 paths set no Content-Type, so Azure served
+ * them as text/plain and a frontend calling `res.json()` on a 401 got a parse
+ * error instead of the message.
+ *
+ * A 401 ALSO SAYS WHY (#517). Until now every 401 from this API was a bare
+ * status code, so the admin portal had to guess: an expired token, a rejected
+ * token and a token missing the delegated scope all looked identical, and all
+ * got the same interactive re-authentication — which recovers only the first.
+ *
+ * The RFC 6750 error codes happen to draw exactly the line the client needs:
+ *
+ *   invalid_token       the credential is bad. Signing in again fixes it.
+ *   insufficient_scope  the credential is fine and lacks a permission. Signing
+ *                       in again returns an identically-rejected token, so the
+ *                       client must NOT retry — it is a configuration problem.
+ *   (omitted)           no credential was presented at all. Sign in.
+ *
+ * `Access-Control-Expose-Headers` in cors.js is what lets the browser read this
+ * at all; without it the header is set and invisible.
+ *
+ * @param {number} status
+ * @param {string} error              Body message, unchanged.
+ * @param {{code?: string, description?: string}} [challenge]
+ *   RFC 6750 parameters for the WWW-Authenticate header. 401 only.
+ */
+function deny(status, error, challenge) {
+  const headers = { 'Content-Type': 'application/json' };
+
+  if (status === 401) {
+    const parts = ['realm=""'];
+    if (challenge?.code) parts.push(`error="${quote(challenge.code)}"`);
+    if (challenge?.description) {
+      parts.push(`error_description="${quote(challenge.description)}"`);
+    }
+    headers['WWW-Authenticate'] = `Bearer ${parts.join(', ')}`;
+  }
+
   return {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ ok: false, error }),
   };
 }
@@ -190,7 +235,15 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
     const token = bearerTokenFrom(request);
 
     if (!token) {
-      return { user: null, role: null, error: deny(401, 'Authentication required') };
+      // No `error` parameter: RFC 6750 reserves that for a credential that was
+      // presented and refused. Nothing was presented here.
+      return {
+        user: null,
+        role: null,
+        error: deny(401, 'Authentication required', {
+          description: 'No bearer token was presented.',
+        }),
+      };
     }
 
     let user;
@@ -198,7 +251,14 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
       user = await verifier.verify(token);
     } catch (err) {
       audit({ outcome: 'denied', reason: 'invalid-token', detail: err.message });
-      return { user: null, role: null, error: deny(401, 'Authentication required') };
+      return {
+        user: null,
+        role: null,
+        error: deny(401, 'Authentication required', {
+          code: 'invalid_token',
+          description: err.message,
+        }),
+      };
     }
 
     // THE SCOPE GATE. An ID token is not an access token (#515).
@@ -220,7 +280,17 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
         oid: user.oid ?? user.sub,
         required: ENTRA_API_DELEGATED_SCOPE,
       });
-      return { user: null, role: null, error: deny(401, 'Authentication required') };
+      // insufficient_scope, not invalid_token: the token verified. Re-acquiring
+      // it returns the same scopes and the same rejection, so the client must
+      // show this rather than silently retry.
+      return {
+        user: null,
+        role: null,
+        error: deny(401, 'Authentication required', {
+          code: 'insufficient_scope',
+          description: `The access token is missing the ${ENTRA_API_DELEGATED_SCOPE} scope.`,
+        }),
+      };
     }
 
     return { user, role: null, error: null };
