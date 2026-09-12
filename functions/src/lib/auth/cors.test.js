@@ -157,7 +157,7 @@ describe('anonymous caller identity', () => {
   });
 });
 
-describe('the Static Web App preview origin — TEMPORARY, remove when DNS moves', () => {
+describe('the Static Web App origin — retained as the break-glass path (#521)', () => {
   // Migration-Plan §6 step 2 serves the site from the SWA's own hostname
   // before DNS moves. Compiled in rather than supplied through
   // EXTRA_ALLOWED_ORIGINS, which did not take effect on the deployed app

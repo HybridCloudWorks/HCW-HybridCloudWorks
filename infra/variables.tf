@@ -802,6 +802,13 @@ variable "entra_tenant_id" {
 # aud = <client-id>, indistinguishable from an access token for the API — so a
 # token the browser was never meant to send to an API would be accepted by it.
 #
+# TRUE AGAIN SINCE 2026-09-12 (#522). The tenant ran a single registration until
+# then, so the hazard above was live rather than hypothetical. The split does
+# NOT change this variable: it changes the client, not the resource, so `aud` is
+# still the API's own client id. If you are reading this while changing
+# entra_api_audience because a new registration appeared, stop — the only value
+# that moved is VITE_ENTRA_CLIENT_ID.
+#
 # No default, and functions/src/lib/auth/verify-token.js refuses to start
 # without it. That is deliberate: jsonwebtoken only applies the audience check
 # when `audience` is truthy, so an unset value does not fail — it SKIPS audience

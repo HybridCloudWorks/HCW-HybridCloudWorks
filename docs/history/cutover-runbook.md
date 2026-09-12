@@ -193,8 +193,11 @@ set in the repository:
 **You run:**
 
 ```powershell
-./scripts/cutover/01-entra-spa.ps1 -WhatIf     # look first
-./scripts/cutover/01-entra-spa.ps1
+# Split in two by #522 — the resource half, then the client half.
+./scripts/cutover/01-entra-api.ps1 -WhatIf           # look first
+./scripts/cutover/01-entra-api.ps1
+./scripts/cutover/02-entra-spa-client.ps1 -WhatIf
+./scripts/cutover/02-entra-spa-client.ps1
 ```
 
 Adds the SPA redirect URIs and assigns the `Admin` app role. It uses a SPA

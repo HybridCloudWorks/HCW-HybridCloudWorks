@@ -1882,6 +1882,64 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The SPA and the API are two app registrations again, and localhost is off
+  the production one (#522, #521).** This ADR-0006 decision — "one Entra SPA
+  registration, one API registration" — was accepted, written into
+  `verify-token.js` DECISION 3 and `infra/variables.tf`, and then not what the
+  tenant did: the cutover put an SPA platform on the API's own registration. A
+  codebase describing a tenant it does not have is worse than either choice made
+  deliberately.
+
+  The divergence was reasoned, not accidental. One registration means the SPA
+  requests a scope on its own app, which consents automatically and removes the
+  risk of a client id and an audience that disagree — and this project has paid
+  for that class of failure twice. That risk is now caught before it ships:
+  `assertDeployConfig` refuses a deploy build whose Entra ids are not GUIDs
+  (#516), which is why this landed after it and not before. The rationale is
+  kept **struck through** in `02-entra-spa-client.ps1` rather than deleted,
+  because the argument was sound and somebody will otherwise re-derive it.
+
+  Microsoft's stated reason for separating them is permission inheritance: *"if
+  the web API has a higher set of permissions, then the client app doesn't
+  inherit them."* One registration is one service principal, so any credential
+  or Graph permission ever added for the API is simultaneously available to a
+  browser-delivered public client.
+
+  **Exactly one value changes: `VITE_ENTRA_CLIENT_ID`.** `ENTRA_API_AUDIENCE`
+  and `VITE_ENTRA_API_SCOPE` do not — the split changes the client, not the
+  resource. App-role assignments do not need redoing either: they live on the
+  API's service principal, and the `roles` claim rides in the access token
+  whichever client asked. Both facts are now stated in the places most likely to
+  be edited by someone assuming otherwise.
+
+  `01-entra-spa.ps1` is replaced by `01-entra-api.ps1` (the resource, its
+  preconditions, and the `Admin` assignment), `02-entra-spa-client.ps1` (the
+  client) and `03-entra-dev-client.ps1`. The client scripts take `-Prune`, which
+  replaces the redirect URI list rather than unioning it, and print removals as
+  loudly as additions — the unioning predecessor could do neither, which is how
+  `http://localhost:5173` survived unnoticed on a production registration.
+
+  **Localhost now lives on a dev-only registration.** `cors.js` already argued
+  this case for origins — *"any page running on a victim's machine … can make
+  cross-origin calls to production carrying the victim's token"* — and it
+  applies with more force to a redirect URI, where a process on 127.0.0.1 can
+  complete an authorization-code redirect for the production client id. CORS
+  gates its localhost entry on `NODE_ENV`; an app registration has no such gate,
+  so the only control is not listing it. The fix had been applied in one place
+  and left open in the other.
+
+  The Static Web App origin **stays**, and its comment now says why instead of
+  claiming to be temporary. It said "REMOVE IT when DNS moves"; DNS moved weeks
+  ago and it is still there, because `deploy-azure-frontend.yml` documents the
+  production break-glass as re-pointing the custom domain — which lands on
+  exactly that hostname. Removing it would take admin sign-in out of the only
+  documented recovery path, discovered during an incident. The revisit trigger
+  is now a real one: when the Static Web App is deleted.
+
+  A vitest file reads the PowerShell as text and asserts the production scripts
+  list no localhost and nothing plain-http. PowerShell is otherwise untested
+  here, and these are the files that rewrite the tenant.
+
 - **MFA is enforced by security defaults, not Conditional Access (#514).**
   Checked against the live tenant on 2026-09-12: security defaults are enabled
   in tenant properties, and Conditional Access is unavailable because the tenant

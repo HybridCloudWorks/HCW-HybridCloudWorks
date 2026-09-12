@@ -18,9 +18,11 @@
  *
  * `ENTRA_API_AUDIENCE` is therefore REQUIRED and has no default.
  *
- * AMENDED 2026-09-12 (#515). This paragraph described a topology the tenant
- * does not have: `scripts/cutover/01-entra-spa.ps1` put an SPA platform on the
- * API registration, so the hazard above has been live, not hypothetical.
+ * AMENDED 2026-09-12 (#515, then #522). This paragraph described a topology
+ * the tenant did not have: the former `scripts/cutover/01-entra-spa.ps1` put an
+ * SPA platform on the API registration, so the hazard above was live rather
+ * than hypothetical. #522 split them — `01-entra-api.ps1` owns the resource,
+ * `02-entra-spa-client.ps1` owns the client — so the text is true again.
  *
  * It was also wrong about the remedy. This text used to end "and let us
  * additionally reject anything without a `scp`/`roles` claim" — but Entra emits
@@ -30,9 +32,11 @@
  * the hazard independently of how many registrations exist and keeps working
  * after they are split (#522).
  *
- * So the topology is still worth fixing, for the reason Microsoft actually
- * gives — a public client should not share a service principal with the
- * resource it calls — rather than because the API cannot defend itself.
+ * The topology was worth fixing for the reason Microsoft actually gives — a
+ * public client should not share a service principal with the resource it
+ * calls — rather than because the API cannot defend itself. The scope check is
+ * what makes that a hygiene change rather than an emergency, and it stays: it
+ * costs nothing and it is what holds if the two are ever merged again.
  *
  * ===========================================================================
  * DECISION 5 — JWKS must be injectable
