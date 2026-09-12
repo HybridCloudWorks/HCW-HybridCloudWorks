@@ -35,11 +35,13 @@ This project has not cut a tagged release; entries are grouped under
   around rather than using. The 2026-08-23 incident that prompted the hook is
   carried into the new page's header so it is not lost with it.
 
-  **The hook stays for one more release, deliberately.** A browser mid-redirect
-  at cutover, or a bookmarked stale fragment, still lands on `/`; removing both
-  halves at once would turn those into a home page with a dead `#code=` in the
-  address bar that reproduces on every reload — the exact symptom the hook was
-  written for.
+  **The hook was kept for one more release, deliberately.** A browser
+  mid-redirect at cutover, or a bookmarked stale fragment, still landed on `/`;
+  removing both halves at once would have turned those into a home page with a
+  dead `#code=` in the address bar that reproduces on every reload — the exact
+  symptom the hook was written for. It was removed in #531 once the API
+  registration's bare-origin redirect URIs were cleared, which is what closed
+  that window; see the Removed section.
 
   A test asserts the path inside `redirectUri` is a route `App.jsx` declares.
   That agreement is between a config string and a route table, so nothing that

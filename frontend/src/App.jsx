@@ -230,7 +230,11 @@ class RouteErrorBoundary extends React.Component {
 
 function App() {
   const location = useLocation();
-  // NOTHING AUTH-RELATED RUNS HERE ANY MORE (#531).
+  // NOTHING REACHES MSAL FROM HERE ANY MORE (#531).
+  //
+  // Auth ROUTING still lives in this file — `/auth/callback` is declared below,
+  // from the shared AUTH_REDIRECT_PATH. What is gone is auth CODE running on
+  // every render of every route.
   //
   // `useAuthRedirectLanding()` used to sit on this line, mounted on every route
   // in the application — including every anonymous visit to a provider news
