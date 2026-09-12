@@ -27,10 +27,17 @@ import { normalizePublicImageUrl } from '@/lib/blogUtils';
 
 const manifest = readFileSync(join(process.cwd(), 'data', 'content-manifest.json'), 'utf8');
 
-/** Every distinct Google Storage URL the shipped manifest still references. */
-const deadUrls = [
-  ...new Set(manifest.match(/https?:\/\/[a-z0-9.-]*googleapis\.com\/[^"]+/gi) ?? []),
-];
+/**
+ * Every distinct URL into the retired bucket that the shipped manifest still
+ * references.
+ *
+ * The two storage hosts by name, not `*.googleapis.com`. A broader match would
+ * sweep in any other Google API that ever appears in content —
+ * `fonts.googleapis.com`, say — and then demand it normalize to absent, which
+ * is the opposite of correct for a URL that resolves perfectly well.
+ */
+const RETIRED_BUCKET_URL = /https?:\/\/(?:storage|firebasestorage)\.googleapis\.com\/[^"]+/gi;
+const deadUrls = [...new Set(manifest.match(RETIRED_BUCKET_URL) ?? [])];
 
 describe('the retired Firebase Storage bucket', () => {
   it('is still referenced by the manifest — this test exists because it is', () => {
@@ -47,5 +54,13 @@ describe('the retired Firebase Storage bucket', () => {
 
   it('names the bucket that is gone, so the next reader can check for themselves', () => {
     expect(manifest).toContain('hybridcloudworks-61e8d.appspot.com');
+  });
+
+  // The narrowing above is the point of this case: a Google API that is not the
+  // dead bucket must not be swept in and then required to normalize to absent.
+  it('does not claim an unrelated Google API URL is a dead image', () => {
+    const fonts = 'https://fonts.googleapis.com/css2?family=Roboto';
+    expect(fonts.match(RETIRED_BUCKET_URL)).toBeNull();
+    expect(normalizePublicImageUrl(fonts)).toBe(fonts);
   });
 });
