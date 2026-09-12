@@ -81,6 +81,18 @@ function pickChartsChunk(id) {
 const ENTRA_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * The nil UUID, which `msalConfig.js` uses as its "no tenant configured"
+ * sentinel — kept in step with `NO_TENANT_CONFIGURED` there.
+ *
+ * It has to be rejected explicitly, because it satisfies ENTRA_GUID: without
+ * this the validator would wave through the one value the runtime chose
+ * precisely because it can never authenticate anyone, and a deploy build would
+ * ship an authority guaranteed to fail. The two halves must agree, and this is
+ * the line that makes them.
+ */
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
+/**
  * Everything a deploy build must have before it is allowed to produce a bundle.
  *
  * WHY THIS EXISTS (#516). `msalConfig.js` used to default the authority to
@@ -125,7 +137,7 @@ export function assertDeployConfig(env = {}) {
 
   for (const key of ['VITE_ENTRA_CLIENT_ID', 'VITE_ENTRA_TENANT_ID']) {
     const value = (env[key] || '').trim();
-    if (!ENTRA_GUID.test(value)) {
+    if (!ENTRA_GUID.test(value) || value.toLowerCase() === NIL_UUID) {
       problems.push(
         `${key} must be a GUID for a deploy build; got ${value ? `"${value}"` : '(empty)'}. ` +
           'A multi-tenant authority such as "common", "organizations" or "consumers" is ' +

@@ -68,6 +68,19 @@ describe('a multi-tenant authority is not a tenant', () => {
       /VITE_ENTRA_CLIENT_ID/
     );
   });
+
+  // The nil UUID satisfies the GUID shape, so it slipped through the first
+  // version of this validator — while being the exact value msalConfig.js
+  // falls back to *because* it can never authenticate anyone. The build must
+  // not ship the sentinel the runtime uses to mean "misconfigured".
+  it.each(['VITE_ENTRA_TENANT_ID', 'VITE_ENTRA_CLIENT_ID'])(
+    'refuses the nil UUID as %s, though it is GUID-shaped',
+    (key) => {
+      expect(() =>
+        assertDeployConfig({ ...good(), [key]: '00000000-0000-0000-0000-000000000000' })
+      ).toThrow(key);
+    }
+  );
 });
 
 describe('the API scope', () => {
