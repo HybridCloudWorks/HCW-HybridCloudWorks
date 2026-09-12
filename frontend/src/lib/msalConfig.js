@@ -12,10 +12,36 @@
  *     a Graph scope like User.Read produces a token the backend rejects.
  */
 
+/**
+ * The authority when the tenant is missing — a GUID that is never a real
+ * tenant, so MSAL fails loudly at authority resolution (#516).
+ *
+ * This used to be `common`, which was worse than it looks. `common` was never a
+ * path to backend access: the API pins one tenant by issuer, so nothing from
+ * another directory could ever have been authorized. What it produced was a SPA
+ * that accepted a sign-in from ANY tenant or a personal Microsoft account,
+ * stored that identity in localStorage, rendered signed-in UI, and then 401'd on
+ * every call — a confusing partial success in place of an unambiguous failure.
+ *
+ * A throw here would be the obvious alternative and is the wrong shape: this
+ * module is imported at module scope by `entraAuth.js` and transitively by
+ * several test files that do not mock it, and it would turn a build-time
+ * configuration problem into a runtime crash on a path that already has a
+ * working failure mode. `initializeAuth()` does not list the resulting error in
+ * RECOVERABLE_INIT_ERRORS, so it rethrows, `onAuthStateChanged` reports null,
+ * and the sign-in card renders. That is the honest outcome.
+ *
+ * `vite.config.js` refuses to build a DEPLOY bundle that would need this, so in
+ * production it is unreachable by construction.
+ */
+const NO_TENANT_CONFIGURED = '00000000-0000-0000-0000-000000000000';
+
 export const msalConfig = {
   auth: {
     clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || '',
-    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_ENTRA_TENANT_ID || 'common'}`,
+    authority: `https://login.microsoftonline.com/${
+      import.meta.env.VITE_ENTRA_TENANT_ID || NO_TENANT_CONFIGURED
+    }`,
     redirectUri: typeof window !== 'undefined' ? window.location.origin : '/',
   },
   cache: {

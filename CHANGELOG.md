@@ -19,6 +19,52 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A deploy build with the Entra variables unset shipped a sign-in pointed at
+  every tenant (#516).** `msalConfig.js` defaulted the authority to `common`
+  when `VITE_ENTRA_TENANT_ID` was empty, and `vite.config.js` validated exactly
+  one variable — `VITE_AZURE_FUNCTIONS_URL` — so nothing stopped the build.
+  `deploy-azure-frontend.yml` even carried a comment acknowledging it.
+
+  **What that actually produced is worth stating, because it is not what it
+  sounds like.** `common` was never a route to backend access: the API pins one
+  tenant by issuer, so a token from another directory could never have been
+  authorized. What it produced was a SPA that accepted a sign-in from any Entra
+  tenant or personal Microsoft account, stored that identity in `localStorage`,
+  rendered signed-in UI, and then 401'd on every call — a confusing partial
+  success where an unambiguous failure belonged.
+
+  The backend has had this instinct since it was written: `verify-token.js`
+  refuses to start without its two settings, and `infra/variables.tf` rejects an
+  empty audience because an empty one silently disables audience validation. The
+  client half never got it, and now has it.
+
+  **Shape, not presence.** A presence check would have caught neither realistic
+  mistake, because `.env.example` recommended `common` for the tenant and
+  `/.default` for the scope — both non-empty, both wrong. A GUID test rejects
+  empty, `common`, `organizations` and `consumers` in one rule, and the error
+  lists every problem at once so three missing variables do not cost three
+  deploy attempts. `/.default` is deliberately still allowed: it is a real
+  delegated request shape, just not this registration's, and the lever for that
+  is documentation rather than the build.
+
+  `REQUIRE_API_BASE` keeps its name even though it now gates more than the API
+  base. Renaming it is fail-open — the deploy workflow is what sets it, so a
+  rename landing without the matching workflow edit would silently disable every
+  check with nothing going red.
+
+  `msalConfig.js` now falls back to an all-zero GUID rather than throwing. A
+  module-scope throw would take out the several test files that import it
+  transitively without mocking, and would convert a build-time problem into a
+  runtime crash on a path that already has a working failure mode: MSAL fails at
+  authority resolution, `onAuthStateChanged` reports null, and the sign-in card
+  renders.
+
+  Also corrected: `.env.example` no longer suggests `common` or `/.default`, and
+  `functions/local.settings.json.example` gained `ENTRA_TENANT_ID` and
+  `ENTRA_API_AUDIENCE` and lost `FIREBASE_PROJECT_ID` — without the two Entra
+  settings a local `func start` could not reach `getDefaultGuard()` at all,
+  because `createTokenVerifier` throws on both.
+
 - **The API accepted an ID token as an access token (#515).**
   `functions/src/lib/auth/verify-token.js` has always opened with DECISION 3,
   which names the hazard precisely: *"With a single registration, an ID token

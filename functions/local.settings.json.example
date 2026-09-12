@@ -9,6 +9,7 @@
     "STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
     "STORAGE_ACCOUNT_NAME": "devstoreaccount1",
     "KEY_VAULT_URI": "https://your-key-vault.vault.azure.net/",
-    "FIREBASE_PROJECT_ID": "hybridcloudworks-61e8d"
+    "ENTRA_TENANT_ID": "REPLACE_ME_WITH_TENANT_ID",
+    "ENTRA_API_AUDIENCE": "REPLACE_ME_WITH_API_CLIENT_ID"
   }
 }
