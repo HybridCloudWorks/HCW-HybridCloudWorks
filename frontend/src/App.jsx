@@ -12,7 +12,6 @@ import Header from '@/components/shared/Header';
 import Footer from '@/components/shared/Footer';
 import { VALID_PROVIDERS, ProviderLayout } from '@/context/ProviderContext';
 import { ThemeProvider } from '@/context/ThemeContext';
-import { useAuthRedirectLanding } from '@/hooks/useAuthRedirectLanding';
 // A bare string module, deliberately: importing this from msalConfig.js would
 // drag MSAL onto every public route (#520).
 import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
@@ -231,9 +230,23 @@ class RouteErrorBoundary extends React.Component {
 
 function App() {
   const location = useLocation();
-  // A sign-in that lands on `/` has to be finishable from `/`. The redirect URI
-  // is the origin, and nothing at the origin used to touch MSAL — see the hook.
-  useAuthRedirectLanding();
+  // NOTHING REACHES MSAL FROM HERE ANY MORE (#531).
+  //
+  // Auth ROUTING still lives in this file — `/auth/callback` is declared below,
+  // from the shared AUTH_REDIRECT_PATH. What is gone is auth CODE running on
+  // every render of every route.
+  //
+  // `useAuthRedirectLanding()` used to sit on this line, mounted on every route
+  // in the application — including every anonymous visit to a provider news
+  // page — so that a regex could watch `window.location.hash` for an auth
+  // fragment that only ever appeared on one. It existed because `redirectUri`
+  // was `window.location.origin`, so Entra returned the browser to the public
+  // home page, which had never touched MSAL.
+  //
+  // #520 gave sign-in its own route, and the API registration's bare-origin
+  // redirect URIs were cleared on 2026-09-12, so a fragment can no longer land
+  // on `/` at all. The 2026-08-23 incident the hook documented lives on in
+  // `pages/AuthCallbackPage.jsx`.
   const [, firstSegment] = location.pathname.split('/');
   const provider = VALID_PROVIDERS.includes(firstSegment) ? firstSegment : null;
   const isAdminRoute = firstSegment === 'admin';
