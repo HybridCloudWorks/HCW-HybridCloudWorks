@@ -49,22 +49,50 @@
 import React, { useEffect, useState } from 'react';
 
 export default function AuthCallbackPage() {
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+
+    /**
+     * Drop the auth fragment, whatever happened.
+     *
+     * `initializeAuth()` already does this for the errors it recognises as
+     * recoverable. This covers the rest: a fragment left in the address bar is
+     * re-processed on every reload, so the same failure reproduces forever and
+     * reads as permanent — the behaviour #196 and the 2026-08-23 incident both
+     * turned on. It is also an authorization code sitting in history, and in
+     * whatever the user pastes when they ask someone what went wrong.
+     */
+    const clearFragment = () => {
+      if (!window.location.hash) return;
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch {
+        // A browser that refuses replaceState is not worth failing sign-in over.
+      }
+    };
 
     import('@/lib/entraAuth')
       .then(({ initializeAuth }) => initializeAuth())
       .then(() => {
         if (cancelled) return;
+        clearFragment();
         // Reaching here in an ordinary tab means MSAL did not navigate away —
         // either the sign-in had no request URL to return to, or this page was
         // opened directly. Either way `/admin` is where the user was going.
         window.location.replace('/admin');
       })
       .catch((err) => {
-        if (!cancelled) setError(err?.message || 'Sign-in could not be completed.');
+        // The detail goes to the console, not to the page. MSAL's messages name
+        // the authority, the client id and the failure mode, and this page is
+        // reachable by anyone with the URL. The same reasoning as the 401
+        // descriptions in require-role.js (#517): the reader cannot act on the
+        // difference, and every one of them means the same thing here.
+        console.error('[auth-callback] sign-in could not be completed:', err);
+        if (cancelled) return;
+        clearFragment();
+        setError(true);
       });
 
     return () => {
@@ -77,7 +105,9 @@ export default function AuthCallbackPage() {
       {error ? (
         <>
           <h1 className="text-lg font-semibold">Sign-in could not be completed</h1>
-          <p className="max-w-md text-sm text-muted-foreground">{error}</p>
+          <p className="max-w-md text-sm text-muted-foreground">
+            Try signing in again. If it keeps happening, the browser console has the detail.
+          </p>
           <a href="/admin" className="text-sm underline underline-offset-2">
             Back to the admin portal
           </a>
