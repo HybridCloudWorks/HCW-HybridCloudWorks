@@ -5,7 +5,12 @@ import jwt from 'jsonwebtoken';
 
 import { createTokenVerifier, bearerTokenFrom } from './verify-token.js';
 import { createRoleGuard } from './require-role.js';
-import { ENTRA_ADMIN_APP_ROLE, ROLE_CACHE_MAX_ENTRIES, ROLE_CACHE_TTL_MS } from './roles.js';
+import {
+  ENTRA_ADMIN_APP_ROLE,
+  ENTRA_API_DELEGATED_SCOPE,
+  ROLE_CACHE_MAX_ENTRIES,
+  ROLE_CACHE_TTL_MS,
+} from './roles.js';
 
 /**
  * A real local JWKS endpoint, not a mocked verifier.
@@ -45,7 +50,14 @@ beforeAll(async () => {
 
 afterAll(() => new Promise((resolve) => server.close(resolve)));
 
-/** Mint a token the local JWKS can verify. */
+/**
+ * Mint a token the local JWKS can verify.
+ *
+ * `tid`, `ver` and `scp` joined the defaults with #515, when the verifier began
+ * asserting them. They are not decoration: a token without them is now rejected,
+ * so omitting them here would fail every test in this file including the happy
+ * path. Pass `{ tid: undefined }` and friends to exercise the absence.
+ */
 function mintToken(claims = {}, options = {}) {
   return jwt.sign(
     {
@@ -53,6 +65,9 @@ function mintToken(claims = {}, options = {}) {
       roles: [ENTRA_ADMIN_APP_ROLE],
       aud: AUDIENCE,
       iss: `https://login.microsoftonline.com/${TENANT}/v2.0`,
+      tid: TENANT,
+      ver: '2.0',
+      scp: ENTRA_API_DELEGATED_SCOPE,
       ...claims,
     },
     privateKey,
@@ -139,6 +154,81 @@ describe('token verification', () => {
     expect((await g.requireRole({ headers: { get: () => 'Bearer   ' } }, 'viewer')).error.status).toBe(401);
   });
 });
+
+describe('an ID token is not an access token (#515)', () => {
+  // The tenant runs ONE app registration, so the SPA's client id and this
+  // API's audience are the same GUID. An ID token minted for that SPA carries
+  // the same `aud`, the same v2 issuer and the same signing key as an access
+  // token — and, because Entra emits assigned app roles in both token types,
+  // `roles: ['Admin']` as well. Everything the guard checked before #515
+  // passed. `scp` is the one claim an ID token never has.
+  it('rejects an ID-token-shaped payload: right aud, right roles, no scp', async () => {
+    const g = buildGuard({ admins: { 'oid-default': { role: 'super_admin', active: true } } });
+    const idToken = mintToken({ scp: undefined, nonce: 'n-0S6_WzA2Mj' });
+
+    const { error } = await g.requireRole(requestWith(idToken), 'editor');
+
+    expect(error.status).toBe(401);
+    expect(g.denials.at(-1)).toMatchObject({ reason: 'missing-scope' });
+  });
+
+  it('rejects a token scoped to something else', async () => {
+    const g = buildGuard({ admins: { 'oid-default': { role: 'super_admin', active: true } } });
+    const { error } = await g.requireRole(requestWith(mintToken({ scp: 'openid profile' })), 'editor');
+    expect(error.status).toBe(401);
+  });
+
+  it('accepts the scope alongside others, space-separated', async () => {
+    const g = buildGuard({ admins: { 'oid-default': { role: 'editor', active: true } } });
+    const token = mintToken({ scp: `openid ${ENTRA_API_DELEGATED_SCOPE} profile` });
+    const { error } = await g.requireRole(requestWith(token), 'editor');
+    expect(error).toBeNull();
+  });
+
+  it('applies to requireUser too — bootstrap is reached that way', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ scp: undefined })));
+    expect(error.status).toBe(401);
+  });
+});
+
+describe('tenant and token version (#515)', () => {
+  it('rejects a token with no tid', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ tid: undefined })));
+    expect(error.status).toBe(401);
+  });
+
+  it('rejects a tid that is not a GUID', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ tid: 'contoso.onmicrosoft.com' })));
+    expect(error.status).toBe(401);
+  });
+
+  // The chain of trust: a token whose issuer says one tenant and whose tid says
+  // another is exactly what the iss/tid consistency check exists to catch, and
+  // what would matter again the moment the issuer list grew.
+  it('rejects a tid that disagrees with its own issuer', async () => {
+    const g = buildGuard();
+    const foreign = '99999999-9999-9999-9999-999999999999';
+    const { error } = await g.requireUser(requestWith(mintToken({ tid: foreign })));
+    expect(error.status).toBe(401);
+  });
+
+  it('rejects a v1 token version', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(mintToken({ ver: '1.0' })));
+    expect(error.status).toBe(401);
+  });
+
+  it('rejects the v1 issuer, which is no longer in the accepted list', async () => {
+    const g = buildGuard();
+    const v1 = mintToken({ iss: `https://sts.windows.net/${TENANT}/` });
+    const { error } = await g.requireUser(requestWith(v1));
+    expect(error.status).toBe(401);
+  });
+});
+
 
 describe('authorization', () => {
   it('rejects a token with no roles claim — the empty-array bypass (A2)', async () => {

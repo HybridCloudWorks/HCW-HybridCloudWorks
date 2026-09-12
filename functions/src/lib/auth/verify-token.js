@@ -14,10 +14,25 @@
  * With a single registration, an ID token minted for the SPA carries
  * `aud = <client-id>` — indistinguishable from an access token for the API. So
  * a token the browser was never meant to send to an API is accepted by it.
- * Two registrations make the audience meaningful, and let us additionally
- * reject anything without a `scp`/`roles` claim.
+ * Two registrations make the audience meaningful.
  *
  * `ENTRA_API_AUDIENCE` is therefore REQUIRED and has no default.
+ *
+ * AMENDED 2026-09-12 (#515). This paragraph described a topology the tenant
+ * does not have: `scripts/cutover/01-entra-spa.ps1` put an SPA platform on the
+ * API registration, so the hazard above has been live, not hypothetical.
+ *
+ * It was also wrong about the remedy. This text used to end "and let us
+ * additionally reject anything without a `scp`/`roles` claim" — but Entra emits
+ * assigned app roles in ID tokens too, so a `roles` check separates nothing.
+ * `scp` does, and only `scp`: it appears in delegated access tokens and never
+ * in ID tokens. `require-role.js` enforces it in `authenticate()`, which closes
+ * the hazard independently of how many registrations exist and keeps working
+ * after they are split (#522).
+ *
+ * So the topology is still worth fixing, for the reason Microsoft actually
+ * gives — a public client should not share a service principal with the
+ * resource it calls — rather than because the API cannot defend itself.
  *
  * ===========================================================================
  * DECISION 5 — JWKS must be injectable
@@ -57,6 +72,52 @@ const CLOCK_TOLERANCE_SECONDS = 60;
  * @param {string} [config.jwksUri] Override for tests.
  * @returns {{ verify: (token: string) => Promise<object> }}
  */
+/** Entra tenant ids are GUIDs. Anything else did not come from a directory. */
+const TENANT_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The claim checks jsonwebtoken does not make for us (#515).
+ *
+ * Throws a plain Error naming the claim. Both guards already wrap
+ * `verifier.verify()` in try/catch, audit `{reason:'invalid-token', detail:
+ * err.message}` and return a flat 401 — so the message lands in
+ * `admin_audit_logs` and never reaches the caller.
+ *
+ * @param {object} payload  A verified token payload.
+ * @param {string} tenantId The configured Entra tenant GUID.
+ */
+function assertEntraClaims(payload, tenantId) {
+  const tid = typeof payload?.tid === 'string' ? payload.tid : '';
+
+  // Microsoft's guidance makes the GUID SHAPE part of the check, not just
+  // equality — a `tid` that is not a GUID did not come from a directory at all.
+  if (!TENANT_GUID.test(tid)) {
+    throw new Error('Token tid claim is missing or not a GUID');
+  }
+
+  if (tid.toLowerCase() !== String(tenantId).toLowerCase()) {
+    throw new Error('Token tid claim does not match the configured tenant');
+  }
+
+  // A TAUTOLOGY TODAY, AND KEPT ANYWAY.
+  //
+  // With a single pinned issuer above and `tid === tenantId` asserted, this
+  // cannot fail independently. It is here so that re-adding an entry to the
+  // issuer list fails closed instead of silently reopening the cross-tenant
+  // path — which is the chain of trust Microsoft describes: tie the tenant back
+  // to the issuer, and the issuer back to the scope of the signing key.
+  const expectedIssuer = `https://login.microsoftonline.com/${tid}/v2.0`;
+  if (String(payload?.iss ?? '').toLowerCase() !== expectedIssuer.toLowerCase()) {
+    throw new Error('Token iss claim does not match its own tid claim');
+  }
+
+  // Made explicit rather than implied by the audience shape. See the issuer
+  // comment in createTokenVerifier for why v1 is not accepted.
+  if (String(payload?.ver ?? '') !== '2.0') {
+    throw new Error('Token ver claim is not 2.0');
+  }
+}
+
 export function createTokenVerifier({ tenantId, audience, jwksUri } = {}) {
   // FIX (A1): fail fast on missing configuration.
   //
@@ -76,10 +137,18 @@ export function createTokenVerifier({ tenantId, audience, jwksUri } = {}) {
   // only barrier to cross-tenant token acceptance. It also produced issuer
   // values no real token carries, so it failed closed into a total lockout that
   // reads as "auth is broken" — the state in which someone loosens the check.
-  const issuers = [
-    `https://login.microsoftonline.com/${tenantId}/v2.0`,
-    `https://sts.windows.net/${tenantId}/`,
-  ];
+  //
+  // ONE ISSUER, v2 ONLY (#515). The v1 form `https://sts.windows.net/{tid}/`
+  // used to sit beside this one and could never pass: the registration sets
+  // `requestedAccessTokenVersion = 2`, so `aud` is the bare client-id GUID,
+  // while a v1 token carries `api://<guid>` and fails the audience check first.
+  // It was dead, but latently dangerous — infra/variables.tf documents the
+  // `api://` audience as a supported alternative, and the day someone takes
+  // that option the v1 issuer would go live with no `ver` gate behind it.
+  // Microsoft's rule is that a v1 token is validated against v1 metadata and a
+  // v2 token against v2 metadata; one issuer list against one audience and one
+  // JWKS endpoint was not that. Restoring it requires a `ver` gate.
+  const issuer = `https://login.microsoftonline.com/${tenantId}/v2.0`;
 
   const client = jwksClient({
     jwksUri: jwksUri ?? `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`,
@@ -118,7 +187,7 @@ export function createTokenVerifier({ tenantId, audience, jwksUri } = {}) {
           getKey,
           {
             audience,
-            issuer: issuers,
+            issuer,
             // FIX (A3): pin the algorithm.
             //
             // The previous code omitted this and was safe only as a property of
@@ -129,7 +198,18 @@ export function createTokenVerifier({ tenantId, audience, jwksUri } = {}) {
             algorithms: ALLOWED_ALGORITHMS,
             clockTolerance: CLOCK_TOLERANCE_SECONDS, // FIX (A7)
           },
-          (err, decoded) => (err ? reject(err) : resolve(decoded))
+          (err, decoded) => {
+            if (err) return reject(err);
+            // Claim assertions run HERE, after the signature has been checked,
+            // never before. Every value read below is one Microsoft minted, so
+            // `tid` reaching an audit row is not attacker-controlled input.
+            try {
+              assertEntraClaims(decoded, tenantId);
+            } catch (claimError) {
+              return reject(claimError);
+            }
+            return resolve(decoded);
+          }
         );
       });
     },

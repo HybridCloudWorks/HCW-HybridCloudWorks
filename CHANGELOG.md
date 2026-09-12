@@ -19,6 +19,49 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The API accepted an ID token as an access token (#515).**
+  `functions/src/lib/auth/verify-token.js` has always opened with DECISION 3,
+  which names the hazard precisely: *"With a single registration, an ID token
+  minted for the SPA carries `aud = <client-id>` — indistinguishable from an
+  access token for the API."* The tenant runs one registration —
+  `scripts/cutover/01-entra-spa.ps1` put an SPA platform on the API's own
+  registration — so the hazard was live rather than hypothetical. An ID token
+  carried the same `aud`, the same v2 issuer and the same signing key as an
+  access token, and because Entra emits assigned app roles in **both** token
+  types it carried `roles: ['Admin']` too. Every check the guard made, it
+  passed.
+
+  **Defence in depth, not an escalation.** Both tokens sit in the same browser
+  cache for the same user, so holding one implies holding the other and there is
+  no cross-user path. But it was this codebase's own documented invariant,
+  violated in production, and the second half of DECISION 3 — "reject anything
+  without a `scp`/`roles` claim" — had never been implemented. `scp` appeared
+  exactly once in `functions/src`, in that sentence.
+
+  **That proposed remedy would not have worked either.** `roles` is in ID tokens,
+  so a roles-presence check separates nothing. `scp` is the claim Entra puts in
+  delegated access tokens and never in ID tokens, and it is now required in
+  `authenticate()` — so `requireUser` endpoints inherit it, which matters because
+  `bootstrapCurrentUserAdmin` is reached that way. Agents are unaffected:
+  `require-agent.js` runs its own client-credentials path, and now refuses a
+  token bearing `scp` so the two guards are disjoint by construction rather than
+  by the two role names happening to differ.
+
+  Alongside it, the verifier now asserts what Microsoft's API-protection
+  guidance asks for and jsonwebtoken does not check: `tid` is a GUID and matches
+  the configured tenant, `iss` agrees with that `tid`, and `ver` is `2.0`. The
+  v1 `sts.windows.net` issuer is gone — with a bare-GUID audience it could never
+  pass, but `infra/variables.tf` documents the `api://` audience as a supported
+  alternative, and the day someone took that option the v1 issuer would have
+  gone live with no version gate behind it. The assertions run *inside* the
+  `jwt.verify` callback, so every claim they read has already had its signature
+  checked and `tid` reaching an audit row is not attacker-controlled.
+
+  **Before deploying, confirm `scp` is in the live token.** Admin → Health lists
+  the claims present in the caller's own token; `scp` must be among them. If it
+  is not, every admin call returns 401 with a `missing-scope` row in
+  `admin_audit_logs` — a clean, attributable failure, and one revert away.
+
 - **An expired token told the owner he was not authorized, and offered to
   re-provision him (#503).** Opening `/admin/integrations` on 2026-09-11 showed
   **Access Denied — spatino@hybridcloudworks.com is not authorized** with a
