@@ -81,6 +81,32 @@ describe('a multi-tenant authority is not a tenant', () => {
       ).toThrow(key);
     }
   );
+
+  // The two ids share a rule and not a remedy. Nobody types "common" as a
+  // client id, so pointing a broken client id at multi-tenant guidance sends
+  // the reader after the wrong thing.
+  it('gives the tenant the multi-tenant advice, and the client id its own', () => {
+    const tenantMessage = (() => {
+      try {
+        assertDeployConfig({ ...good(), VITE_ENTRA_TENANT_ID: 'common' });
+        return '';
+      } catch ({ message }) {
+        return message;
+      }
+    })();
+    const clientMessage = (() => {
+      try {
+        assertDeployConfig({ ...good(), VITE_ENTRA_CLIENT_ID: 'HCWSite SPA' });
+        return '';
+      } catch ({ message }) {
+        return message;
+      }
+    })();
+
+    expect(tenantMessage).toContain('multi-tenant authority');
+    expect(clientMessage).not.toContain('multi-tenant authority');
+    expect(clientMessage).toContain('Application (client) ID');
+  });
 });
 
 describe('the API scope', () => {

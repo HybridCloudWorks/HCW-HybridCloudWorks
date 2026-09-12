@@ -135,14 +135,25 @@ export function assertDeployConfig(env = {}) {
     );
   }
 
+  // Same rule, different advice. The multi-tenant authorities are a tenant
+  // mistake and nobody ever types "common" as a client id, so sharing one
+  // message would send whoever broke the client id chasing the wrong thing.
+  const GUID_ADVICE = {
+    VITE_ENTRA_TENANT_ID:
+      'A multi-tenant authority such as "common", "organizations" or "consumers" is not ' +
+      'valid here: the API pins one tenant by issuer, so those only produce a sign-in ' +
+      'that succeeds and then 401s on every call.',
+    VITE_ENTRA_CLIENT_ID:
+      'Use the Application (client) ID of the SPA app registration, copied from the ' +
+      'Entra portal — not the display name, and not the API scope it requests.',
+  };
+
   for (const key of ['VITE_ENTRA_CLIENT_ID', 'VITE_ENTRA_TENANT_ID']) {
     const value = (env[key] || '').trim();
     if (!ENTRA_GUID.test(value) || value.toLowerCase() === NIL_UUID) {
       problems.push(
         `${key} must be a GUID for a deploy build; got ${value ? `"${value}"` : '(empty)'}. ` +
-          'A multi-tenant authority such as "common", "organizations" or "consumers" is ' +
-          'not valid here: the API pins one tenant by issuer, so those only produce a ' +
-          'sign-in that succeeds and then 401s on every call.'
+          GUID_ADVICE[key]
       );
     }
   }
