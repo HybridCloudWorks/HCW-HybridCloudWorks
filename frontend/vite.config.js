@@ -77,6 +77,22 @@ function pickChartsChunk(id) {
 
 // https://vitejs.dev/config/
 
+/**
+ * Read a browser variable the same way the bundle will receive it.
+ *
+ * The injection loop below accepts a non-`VITE_` spelling as a fallback, so
+ * `ENTRA_TENANT_ID` reaches `import.meta.env.VITE_ENTRA_TENANT_ID` exactly as
+ * `VITE_ENTRA_TENANT_ID` does. `assertDeployConfig` read only the prefixed
+ * spelling and would therefore have refused a deploy whose bundle was going to
+ * be correct.
+ *
+ * Both sides now call this, so the check and the injection cannot disagree —
+ * which is the actual fix. Two copies of one rule is what produced the bug.
+ */
+export function browserEnvValue(env = {}, key) {
+  return (env[key] || env[key.replace('VITE_', '')] || '').trim();
+}
+
 /** Entra client and tenant ids are GUIDs. `common` is not one, and that is the point. */
 const ENTRA_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -127,7 +143,7 @@ export function assertDeployConfig(env = {}) {
   // Trimmed like every other check here. An all-whitespace value is how a
   // variable set from a broken shell expansion arrives, and untrimmed it is
   // truthy — so it would pass this gate and be baked into the bundle.
-  if (!(env.VITE_AZURE_FUNCTIONS_URL || '').trim()) {
+  if (!browserEnvValue(env, 'VITE_AZURE_FUNCTIONS_URL')) {
     problems.push(
       'VITE_AZURE_FUNCTIONS_URL is required for a deploy build. Set it to "/api" ' +
         'for a same-origin deployment, or to the Function App origin followed by ' +
@@ -149,7 +165,7 @@ export function assertDeployConfig(env = {}) {
   };
 
   for (const key of ['VITE_ENTRA_CLIENT_ID', 'VITE_ENTRA_TENANT_ID']) {
-    const value = (env[key] || '').trim();
+    const value = browserEnvValue(env, key);
     if (!ENTRA_GUID.test(value) || value.toLowerCase() === NIL_UUID) {
       problems.push(
         `${key} must be a GUID for a deploy build; got ${value ? `"${value}"` : '(empty)'}. ` +
@@ -164,7 +180,7 @@ export function assertDeployConfig(env = {}) {
   // The prefix alone is not a scope: `api://` names no resource and no
   // permission, so require something after it rather than accepting a value
   // that is well-formed and useless.
-  const scope = (env.VITE_ENTRA_API_SCOPE || '').trim();
+  const scope = browserEnvValue(env, 'VITE_ENTRA_API_SCOPE');
   if (!/^api:\/\/.+/.test(scope)) {
     problems.push(
       `VITE_ENTRA_API_SCOPE must start with "api://" for a deploy build; got ${
@@ -220,10 +236,7 @@ export default defineConfig(({ mode }) => {
   const defineConf = {};
   browserEnvVars.forEach((key) => {
     // Try VITE_ prefixed first, then try same name without VITE_ prefix as fallback
-    const fallbackKey = key.replace('VITE_', '');
-    const value = env[key] || env[fallbackKey] || '';
-
-    defineConf[`import.meta.env.${key}`] = JSON.stringify(value);
+    defineConf[`import.meta.env.${key}`] = JSON.stringify(browserEnvValue(env, key));
   });
 
   // REQUIRE_API_BASE means "this is a deploy build". The name is now narrower

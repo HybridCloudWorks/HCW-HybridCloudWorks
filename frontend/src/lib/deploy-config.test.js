@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { assertDeployConfig } from '../../vite.config.js';
+import { assertDeployConfig, browserEnvValue } from '../../vite.config.js';
 
 const TENANT = '1a2fce27-b5f6-43c7-a86e-cf0bb74d4672';
 const CLIENT = 'ac696e96-e203-47be-ade8-c35ece8a6c4a';
@@ -24,6 +24,31 @@ const good = () => ({
 describe('a complete deploy configuration', () => {
   it('passes', () => {
     expect(() => assertDeployConfig(good())).not.toThrow();
+  });
+
+  // The injection loop accepts a non-VITE_ spelling as a fallback, so
+  // ENTRA_TENANT_ID reaches import.meta.env.VITE_ENTRA_TENANT_ID exactly as the
+  // prefixed name does. The validator read only the prefixed spelling and would
+  // have refused a deploy whose bundle was going to be correct. Both sides now
+  // call browserEnvValue, and this is what holds them together.
+  it('accepts the non-VITE_ spelling the injection loop also accepts', () => {
+    expect(() =>
+      assertDeployConfig({
+        VITE_AZURE_FUNCTIONS_URL: '/api',
+        ENTRA_CLIENT_ID: CLIENT,
+        ENTRA_TENANT_ID: TENANT,
+        ENTRA_API_SCOPE: `api://${CLIENT}/access_as_admin`,
+      })
+    ).not.toThrow();
+  });
+});
+
+describe('browserEnvValue', () => {
+  it('prefers the prefixed spelling, falls back to the bare one, and trims', () => {
+    expect(browserEnvValue({ VITE_X: 'a', X: 'b' }, 'VITE_X')).toBe('a');
+    expect(browserEnvValue({ X: 'b' }, 'VITE_X')).toBe('b');
+    expect(browserEnvValue({ VITE_X: '  a  ' }, 'VITE_X')).toBe('a');
+    expect(browserEnvValue({}, 'VITE_X')).toBe('');
   });
 });
 
