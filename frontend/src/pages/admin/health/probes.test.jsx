@@ -152,27 +152,6 @@ describe('summarizeToken', () => {
     expect(summary.aud).toBe('api://api-app-id'); // the value is still shown
   });
 
-  it('clientIsSeparateFromApi — PASS when azp differs from aud (bare GUID)', () => {
-    // spa-client-id ≠ api-app-id → separate registrations
-    const summary = summarizeToken(CLAIMS, EXPECTATIONS, NOW_SECONDS * 1000);
-    expect(summary.clientIsSeparateFromApi).toBe(true);
-  });
-
-  it('clientIsSeparateFromApi — FAIL when azp matches aud GUID even with api:// prefix', () => {
-    // One registration serving both SPA and API: azp === api-app-id, aud === api://api-app-id
-    const same = summarizeToken(
-      { ...CLAIMS, azp: 'api-app-id', aud: 'api://api-app-id' },
-      EXPECTATIONS,
-      NOW_SECONDS * 1000
-    );
-    expect(same.clientIsSeparateFromApi).toBe(false);
-  });
-
-  it('clientIsSeparateFromApi — null when azp is absent', () => {
-    const noAzp = summarizeToken({ ...CLAIMS, azp: undefined }, EXPECTATIONS, NOW_SECONDS * 1000);
-    expect(noAzp.clientIsSeparateFromApi).toBeNull();
-  });
-
   it('is null without a payload', () => {
     expect(summarizeToken(null, EXPECTATIONS)).toBeNull();
   });
@@ -298,6 +277,46 @@ describe('evaluateUnauthenticatedProbe', () => {
     expect(evaluateUnauthenticatedProbe({ httpStatus: 200 }).pass).toBe(false);
     expect(evaluateUnauthenticatedProbe({ httpStatus: null, error: 'network' }).pass).toBe(false);
     expect(evaluateUnauthenticatedProbe(null).pass).toBeNull();
+  });
+});
+
+describe('azp versus aud — the registration topology (#519)', () => {
+  // The check exists to catch one app registration serving both the SPA and the
+  // API. A v2 token puts the bare GUID in `aud`; a v1 token puts `api://<guid>`,
+  // while `azp` is always bare. Comparing raw would call those two different
+  // apps and report PASS — a false all-clear on the one check that would notice.
+  it('sees through the api:// form: same registration reads as not separate', () => {
+    const same = summarizeToken(
+      { ...CLAIMS, aud: 'api://api-app-id', azp: 'api-app-id' },
+      EXPECTATIONS
+    );
+    expect(same.clientIsSeparateFromApi).toBe(false);
+  });
+
+  it('reports the same thing for a bare v2 audience', () => {
+    const same = summarizeToken({ ...CLAIMS, aud: 'api-app-id', azp: 'api-app-id' }, EXPECTATIONS);
+    expect(same.clientIsSeparateFromApi).toBe(false);
+  });
+
+  it('passes only when the client really is a different app', () => {
+    const split = summarizeToken(
+      { ...CLAIMS, aud: 'api://api-app-id', azp: 'spa-client-id' },
+      EXPECTATIONS
+    );
+    expect(split.clientIsSeparateFromApi).toBe(true);
+  });
+
+  // A comparison that cannot be made is unknown, never a pass — the same rule
+  // every other verdict on this page follows.
+  it('is unknown, not a pass, when the token carries no azp', () => {
+    const noAzp = summarizeToken({ ...CLAIMS, azp: undefined }, EXPECTATIONS);
+    expect(noAzp.clientIsSeparateFromApi).toBeNull();
+  });
+
+  it('falls back to appid, which is where a v1 token puts the same thing', () => {
+    const v1 = summarizeToken({ ...CLAIMS, azp: undefined, appid: 'spa-client-id' }, EXPECTATIONS);
+    expect(v1.azp).toBe('spa-client-id');
+    expect(v1.clientIsSeparateFromApi).toBe(true);
   });
 });
 

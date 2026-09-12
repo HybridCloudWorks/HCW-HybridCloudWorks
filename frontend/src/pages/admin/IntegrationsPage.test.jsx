@@ -829,6 +829,17 @@ describe('the Entra configuration panel (#519)', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
+  // A refusal arriving after a success must not leave the previous answer on
+  // screen beside a banner saying the API did not answer. The panel would be
+  // contradicting itself, and showing configuration that may no longer hold.
+  it('shows no API values at all when the API did not answer', () => {
+    render(<EntraConfigurationCard expectations={null} error={'HTTP 401'} />);
+
+    expect(screen.queryByText('tenant-guid')).toBeNull();
+    expect(screen.queryByText('api-app-guid')).toBeNull();
+    expect(screen.queryByText('LabAgent')).toBeNull();
+  });
+
   it('says what breaking each value costs, which is the point of the group', () => {
     render(<EntraConfigurationCard expectations={EXPECTATIONS} error={null} />);
 

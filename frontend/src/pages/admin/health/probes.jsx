@@ -136,6 +136,23 @@ export function relativeExpiry(expSeconds, nowMs = Date.now()) {
 }
 
 /**
+ * Do an `aud` value and an `azp` value name the same app registration?
+ *
+ * A v2 access token puts the resource's bare client-id GUID in `aud`; a v1 one
+ * puts the App ID URI, `api://<guid>`. `azp` is always the bare GUID. Comparing
+ * them raw would call `api://X` and `X` different apps, and report the SPA and
+ * the API as separate registrations when they are in fact the one registration
+ * — a false PASS on the check that exists to catch exactly that.
+ */
+function sameApp(audience, azp) {
+  const bare = (value) =>
+    String(value)
+      .replace(/^api:\/\//i, '')
+      .toLowerCase();
+  return bare(audience) === bare(azp);
+}
+
+/**
  * Reduce a decoded token to what may be shown. Claim names, and the values of
  * `aud`, `roles`, `exp` and `tid` — nothing that identifies the person.
  *
@@ -196,11 +213,7 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
     // VITE_ENTRA_CLIENT_ID back at the API's client id this goes red on a page
     // an admin already visits — instead of nothing happening at all.
     clientIsSeparateFromApi:
-      azp && audiences.length
-        ? !audiences
-            .map((a) => (a.startsWith('api://') ? a.slice('api://'.length) : a))
-            .includes(azp)
-        : null,
+      azp && audiences.length ? !audiences.some((value) => sameApp(value, azp)) : null,
     expiresLabel: expiry.label,
     expired: expiry.expired,
   };
@@ -829,8 +842,8 @@ export function TokenClaimsCard({ identity }) {
         <CardDescription>
           Decoded from the access token this app sends to the API, compared against what the API
           says it enforces. Values shown are configuration, not identity: <code>aud</code>,{' '}
-          <code>azp</code>, <code>roles</code>, <code>scp</code>, <code>ver</code>,{' '}
-          <code>exp</code>. Never <code>oid</code>, <code>email</code> or the token itself.
+          <code>azp</code>, <code>roles</code>, <code>scp</code>, <code>ver</code>, <code>exp</code>
+          . Never <code>oid</code>, <code>email</code> or the token itself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
