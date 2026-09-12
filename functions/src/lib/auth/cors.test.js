@@ -158,11 +158,15 @@ describe('anonymous caller identity', () => {
 });
 
 describe('the Static Web App origin — retained as the break-glass path (#521)', () => {
-  // Migration-Plan §6 step 2 serves the site from the SWA's own hostname
-  // before DNS moves. Compiled in rather than supplied through
-  // EXTRA_ALLOWED_ORIGINS, which did not take effect on the deployed app
-  // (TODO.md T-513). These tests are the reason a security control belongs in
-  // code: an app setting has none.
+  // Added for Migration-Plan §6 step 2, which served the site from the SWA's own
+  // hostname before DNS moved. It outlived that: `deploy-azure-frontend.yml`
+  // documents the production break-glass as re-pointing the custom domain, and
+  // that lands here — so removing the origin would take the admin portal out of
+  // the only documented recovery path, discovered during the incident (#521).
+  //
+  // Compiled in rather than supplied through EXTRA_ALLOWED_ORIGINS, which did
+  // not take effect on the deployed app (TODO.md T-513). These tests are the
+  // reason a security control belongs in code: an app setting has none.
   it('is allowed by default, with no environment configuration at all', () => {
     const cors = createCors({});
     expect(cors.isAllowed('https://calm-ground-0d0e6a010.7.azurestaticapps.net')).toBe(true);

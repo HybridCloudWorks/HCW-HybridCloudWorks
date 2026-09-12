@@ -44,9 +44,18 @@ describe.each(PRODUCTION_SCRIPTS)('%s', (name) => {
     expect(source).not.toMatch(/https?:\/\/(localhost|127\.0\.0\.1)/i);
   });
 
-  it('lists no plain-http redirect URI', () => {
-    const httpUris = source.match(/'http:\/\/[^']+'/gi) ?? [];
-    expect(httpUris).toEqual([]);
+  it('lists no plain-http URI, in quotes of either kind', () => {
+    // Comments are stripped first rather than the quotes being matched: these
+    // files discuss `http://localhost` at length on purpose, and an assertion
+    // that only understood single quotes would wave through a double-quoted
+    // one. Strip what is explanation, then nothing plain-http may remain.
+    const code = source
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n')
+      .replace(/<#[\s\S]*?#>/g, '');
+
+    expect(code).not.toMatch(/http:\/\//i);
   });
 });
 

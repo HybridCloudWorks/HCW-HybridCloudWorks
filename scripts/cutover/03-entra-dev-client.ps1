@@ -107,6 +107,14 @@ else {
     return
 }
 
+# Asserted on an EXISTING registration too, not only a freshly created one. Some
+# az versions default `az ad app create` to AzureADandPersonalMicrosoftAccount,
+# and an app made by hand or by an older CLI can carry it — which publishes a
+# sign-in page to every Microsoft account. Cheap to check, invisible if not.
+if ($dev.signInAudience -ne 'AzureADMyOrg') {
+    throw "signInAudience is '$($dev.signInAudience)', expected AzureADMyOrg. Fix it before using this registration."
+}
+
 Write-Step 'Redirect URIs'
 $current = @($dev.spa.redirectUris)
 $target = if ($Prune) { @($RedirectUris) } else { @($current + $RedirectUris | Select-Object -Unique) }
